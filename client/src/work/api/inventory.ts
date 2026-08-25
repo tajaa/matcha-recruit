@@ -295,10 +295,24 @@ export interface SalesLine {
   mapping_id: string | null
   item_id: string | null
   quantity_per_sale?: number | null
-  components?: { item_id: string; quantity_per_sale: number; unit?: string | null }[]
+  components?: SalesMappingComponentInput[]
+  new_mapping?: SalesMappingInput | null
   status: 'mapped' | 'unmapped' | 'ignored'
   matched_name?: string | null
   auto_match?: { id: string; name: string } | null
+}
+
+export type SalesMappingComponentInput = {
+  item_id: string
+  quantity_per_sale: number
+  unit?: string | null
+}
+
+export type SalesMappingInput = {
+  sold_name: string
+  kind: 'direct' | 'recipe' | 'ignore'
+  location_id?: string | null
+  components: SalesMappingComponentInput[]
 }
 
 export interface SalesDraft {
@@ -373,7 +387,7 @@ export interface SalesMapping {
   normalized_name: string
   kind: 'direct' | 'recipe' | 'ignore'
   location_id: string | null
-  components: { id: string; item_id: string; quantity_per_sale: number; unit: string | null }[]
+  components: ({ id: string } & Required<SalesMappingComponentInput>)[]
 }
 
 export function listSalesMappings(locationId?: string) {
@@ -381,12 +395,7 @@ export function listSalesMappings(locationId?: string) {
   return api.get<{ mappings: SalesMapping[] }>(`/inventory/sales/mappings${qs}`)
 }
 
-export function upsertSalesMapping(body: {
-  sold_name: string
-  kind: SalesMapping['kind']
-  location_id?: string | null
-  components: { item_id: string; quantity_per_sale: number; unit?: string | null }[]
-}) {
+export function upsertSalesMapping(body: SalesMappingInput) {
   return api.post<SalesMapping>('/inventory/sales/mappings', body)
 }
 

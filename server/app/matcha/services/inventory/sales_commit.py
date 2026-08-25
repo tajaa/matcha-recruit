@@ -182,24 +182,24 @@ async def commit_sales_import(
                 raise ValueError("sold name is required")
             if not isinstance(quantity, (int, float)) or isinstance(quantity, bool) or quantity == 0:
                 raise ValueError("quantity must be a non-zero number")
-            components = await _components_for_line(conn, company_id, line)
-            if status == "ignored":
-                components = []
-            elif not components:
-                status = "unmapped"
-            else:
-                status = "mapped"
             mapping_id = line.get("mapping_id")
-            if line.get("new_mapping"):
-                mapping = line["new_mapping"]
-                saved = await sales_mappings.upsert_mapping(
+            new_mapping = line.get("new_mapping")
+            if new_mapping:
+                components = new_mapping.get("components", [])
+                await sales_mappings.validate_mapping(
                     conn, company_id=company_id, location_id=location_id,
-                    sold_name=sold_name, kind=mapping["kind"],
-                    components=mapping.get("components", []), created_by=user_id,
+                    kind=new_mapping["kind"], components=components,
                 )
-                mapping_id = saved["id"]
-                components = saved.get("components", [])
-                status = "ignored" if mapping["kind"] == "ignore" else "mapped"
+                mapping_id = None
+                status = "ignored" if new_mapping["kind"] == "ignore" else "mapped"
+            else:
+                components = await _components_for_line(conn, company_id, line)
+                if status == "ignored":
+                    components = []
+                elif not components:
+                    status = "unmapped"
+                else:
+                    status = "mapped"
             if status == "mapped":
                 mapped += 1
             elif status == "unmapped":
@@ -218,19 +218,18 @@ async def commit_sales_import(
                 "mapping_id": line.get("mapping_id"), "status": "unmapped", "components": [],
             })
 
-    for line in normalized_lines:
-        await conn.execute(
-            """
-            INSERT INTO inventory_sales_lines
-                (import_id, company_id, sold_name, normalized_name, quantity,
-                 gross_sales, mapping_id, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            """,
-            import_id, company_id, line["sold_name"], line["normalized_name"],
-            line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
-        )
-
     if unmapped or errors:
+        for line in normalized_lines:
+            await conn.execute(
+                """
+                INSERT INTO inventory_sales_lines
+                    (import_id, company_id, sold_name, normalized_name, quantity,
+                     gross_sales, mapping_id, status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                import_id, company_id, line["sold_name"], line["normalized_name"],
+                line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
+            )
         await conn.execute(
             "UPDATE inventory_sales_imports SET mapped_count=$2 WHERE id=$1",
             import_id, mapped,
@@ -255,6 +254,17 @@ async def commit_sales_import(
                 continue
             depletion[item_id] = depletion.get(item_id, 0) + float(line["quantity"]) * float(component["quantity_per_sale"])
     if errors:
+        for line in normalized_lines:
+            await conn.execute(
+                """
+                INSERT INTO inventory_sales_lines
+                    (import_id, company_id, sold_name, normalized_name, quantity,
+                     gross_sales, mapping_id, status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                import_id, company_id, line["sold_name"], line["normalized_name"],
+                line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
+            )
         await conn.execute(
             "UPDATE inventory_sales_imports SET mapped_count=$2 WHERE id=$1", import_id, mapped,
         )
@@ -262,6 +272,28 @@ async def commit_sales_import(
                 "unmapped": len(errors), "items_affected": 0, "errors": errors}
 
     async with conn.transaction():
+        for line in normalized_lines:
+            new_mapping = line.get("new_mapping")
+            if not new_mapping:
+                continue
+            saved = await sales_mappings.upsert_mapping(
+                conn, company_id=company_id, location_id=location_id,
+                sold_name=line["sold_name"], kind=new_mapping["kind"],
+                components=new_mapping.get("components", []), created_by=user_id,
+            )
+            line["mapping_id"] = saved["id"]
+            line["components"] = saved.get("components", [])
+        for line in normalized_lines:
+            await conn.execute(
+                """
+                INSERT INTO inventory_sales_lines
+                    (import_id, company_id, sold_name, normalized_name, quantity,
+                     gross_sales, mapping_id, status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                import_id, company_id, line["sold_name"], line["normalized_name"],
+                line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
+            )
         await movements_service.record_movements(
             conn, company_id=company_id, channel_id=None, source_message_id=None,
             recorded_by=user_id, kind="sale",

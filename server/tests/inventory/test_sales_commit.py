@@ -1,0 +1,145 @@
+"""Multi-component sales depletion stays atomic with reviewed mappings."""
+
+import asyncio
+
+from app.matcha.services.inventory import sales_commit
+from app.matcha.services.inventory import sales_mappings
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class _Transaction:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        self.conn.transaction_depth += 1
+
+    async def __aexit__(self, *_args):
+        self.conn.transaction_depth -= 1
+        return False
+
+
+class FakeConn:
+    def __init__(self):
+        self.executed = []
+        self.transaction_depth = 0
+
+    async def fetchrow(self, query, *_args):
+        if 'INSERT INTO inventory_sales_imports' in query:
+            return {'id': 'import-1'}
+        raise AssertionError(f'unexpected fetchrow: {query}')
+
+    async def fetchval(self, query, *_args):
+        if 'FROM inventory_sales_imports' in query:
+            return None
+        return True
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+    def transaction(self):
+        return _Transaction(self)
+
+
+def _recipe_line():
+    return {
+        'sold_name': 'Vanilla latte',
+        'quantity': 3,
+        'gross_sales': 18,
+        'status': 'mapped',
+        'components': [
+            {'item_id': 'cup', 'quantity_per_sale': 1},
+            {'item_id': 'milk', 'quantity_per_sale': 0.25},
+            {'item_id': 'coffee', 'quantity_per_sale': 0.04},
+            {'item_id': 'syrup', 'quantity_per_sale': 0.02},
+        ],
+        'new_mapping': {
+            'kind': 'recipe',
+            'components': [
+                {'item_id': 'cup', 'quantity_per_sale': 1},
+                {'item_id': 'milk', 'quantity_per_sale': 0.25},
+                {'item_id': 'coffee', 'quantity_per_sale': 0.04},
+                {'item_id': 'syrup', 'quantity_per_sale': 0.02},
+            ],
+        },
+    }
+
+
+def test_recipe_sales_deplete_each_component_and_save_mapping_in_commit_transaction(monkeypatch):
+    conn = FakeConn()
+    saved = []
+    movement_calls = []
+
+    async def validate_mapping(*_args, **_kwargs):
+        return None
+
+    async def upsert_mapping(conn, **kwargs):
+        assert conn.transaction_depth == 1
+        saved.append(kwargs)
+        return {'id': 'mapping-latte', 'components': kwargs['components']}
+
+    async def record_movements(_conn, **kwargs):
+        movement_calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(sales_commit.sales_mappings, 'validate_mapping', validate_mapping)
+    monkeypatch.setattr(sales_commit.sales_mappings, 'upsert_mapping', upsert_mapping)
+    monkeypatch.setattr(sales_commit.movements_service, 'record_movements', record_movements)
+
+    result = _run(sales_commit.commit_sales_import(
+        conn, company_id='company-1', user_id='user-1', location_id=None,
+        business_date='2026-08-25', source='upload', filename='sales.csv',
+        gmail_message_id=None, force=False, lines=[_recipe_line()],
+    ))
+
+    assert result['items_affected'] == 4
+    assert saved[0]['kind'] == 'recipe'
+    assert movement_calls[0]['lines'] == [
+        {'item_id': 'cup', 'quantity': 3.0, 'estimated': False},
+        {'item_id': 'milk', 'quantity': 0.75, 'estimated': False},
+        {'item_id': 'coffee', 'quantity': 0.12, 'estimated': False},
+        {'item_id': 'syrup', 'quantity': 0.06, 'estimated': False},
+    ]
+
+
+def test_unmapped_sibling_does_not_save_reviewed_recipe(monkeypatch):
+    conn = FakeConn()
+    saved = []
+
+    async def validate_mapping(*_args, **_kwargs):
+        return None
+
+    async def upsert_mapping(*_args, **_kwargs):
+        saved.append(True)
+        return {'id': 'mapping-latte', 'components': []}
+
+    monkeypatch.setattr(sales_commit.sales_mappings, 'validate_mapping', validate_mapping)
+    monkeypatch.setattr(sales_commit.sales_mappings, 'upsert_mapping', upsert_mapping)
+
+    result = _run(sales_commit.commit_sales_import(
+        conn, company_id='company-1', user_id='user-1', location_id=None,
+        business_date='2026-08-25', source='upload', filename='sales.csv',
+        gmail_message_id=None, force=False,
+        lines=[_recipe_line(), {'sold_name': 'Unknown drink', 'quantity': 1, 'status': 'unmapped'}],
+    ))
+
+    assert result['unmapped'] == 1
+    assert saved == []
+
+
+def test_recipe_mapping_rejects_duplicate_stock_components():
+    try:
+        _run(sales_mappings.validate_mapping(
+            None, company_id='company-1', location_id=None, kind='recipe',
+            components=[
+                {'item_id': 'milk', 'quantity_per_sale': 0.25},
+                {'item_id': 'milk', 'quantity_per_sale': 0.1},
+            ],
+        ))
+    except ValueError as exc:
+        assert str(exc) == 'mapping components must use distinct inventory items'
+    else:
+        raise AssertionError('duplicate recipe components must be rejected')

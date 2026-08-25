@@ -24,10 +24,10 @@ async def list_mappings(conn, company_id: UUID, location_id: Optional[UUID] = No
     return [dict(row) for row in rows]
 
 
-async def upsert_mapping(
-    conn, *, company_id: UUID, location_id: Optional[UUID], sold_name: str,
-    kind: str, components: list[dict], created_by: Optional[UUID],
-) -> dict:
+async def validate_mapping(
+    conn, *, company_id: UUID, location_id: Optional[UUID], kind: str, components: list[dict],
+) -> None:
+    """Validate a mapping without changing it, so import review can fail closed."""
     if location_id is not None:
         owned = await conn.fetchval(
             "SELECT 1 FROM business_locations WHERE id=$1 AND company_id=$2 "
@@ -43,7 +43,13 @@ async def upsert_mapping(
     if kind == "ignore" and components:
         raise ValueError("ignore mappings cannot have components")
 
+    item_ids = [component.get("item_id") for component in components]
+    if len(item_ids) != len(set(item_ids)):
+        raise ValueError("mapping components must use distinct inventory items")
     for component in components:
+        quantity = component.get("quantity_per_sale")
+        if not isinstance(quantity, (int, float)) or isinstance(quantity, bool) or quantity <= 0:
+            raise ValueError("mapping quantity must be a positive number")
         item_id = component.get("item_id")
         owned = await conn.fetchval(
             "SELECT 1 FROM inventory_items "
@@ -53,6 +59,15 @@ async def upsert_mapping(
         )
         if not owned:
             raise ValueError("mapping item not found or outside location")
+
+
+async def upsert_mapping(
+    conn, *, company_id: UUID, location_id: Optional[UUID], sold_name: str,
+    kind: str, components: list[dict], created_by: Optional[UUID],
+) -> dict:
+    await validate_mapping(
+        conn, company_id=company_id, location_id=location_id, kind=kind, components=components,
+    )
 
     normalized = normalize_name(sold_name)
     async with conn.transaction():

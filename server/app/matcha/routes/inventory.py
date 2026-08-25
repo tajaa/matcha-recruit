@@ -479,7 +479,20 @@ async def get_sales_import(
             "SELECT * FROM inventory_sales_imports WHERE id=$1 AND company_id=$2", import_id, company_id,
         )
         lines = await conn.fetch(
-            "SELECT * FROM inventory_sales_lines WHERE import_id=$1 ORDER BY id", import_id,
+            """
+            SELECT sl.*, m.kind AS mapping_kind,
+                   COALESCE(jsonb_agg(jsonb_build_object(
+                       'item_id', ml.item_id,
+                       'quantity_per_sale', ml.quantity_per_sale,
+                       'unit', ml.unit
+                   ) ORDER BY ml.created_at) FILTER (WHERE ml.id IS NOT NULL), '[]'::jsonb) AS components
+            FROM inventory_sales_lines sl
+            LEFT JOIN inventory_sales_mappings m ON m.id=sl.mapping_id
+            LEFT JOIN inventory_sales_mapping_lines ml ON ml.mapping_id=sl.mapping_id
+            WHERE sl.import_id=$1
+            GROUP BY sl.id, m.kind
+            ORDER BY sl.id
+            """, import_id,
         )
     if row is None:
         raise HTTPException(404, "Sales import not found.")

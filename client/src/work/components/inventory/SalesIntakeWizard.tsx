@@ -59,7 +59,7 @@ const GUIDE_STEPS: GuideStep[] = [
     key: 'mapping',
     label: 'Mappings',
     title: 'Map every sold name to stock units',
-    description: 'Mappings are remembered across imports. Direct mappings support pack conversion now; recipe mappings can be added later without changing the export format.',
+    description: 'Mappings are remembered across imports. Direct mappings support pack conversion, while recipe mappings can deplete every component of a sold item.',
     icon: <Map className="h-10 w-10 text-emerald-300" />,
     bullets: [
       'Cookie 6-pack → cookies at 6 stock units per sale.',

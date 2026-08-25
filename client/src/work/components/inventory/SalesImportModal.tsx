@@ -2,25 +2,45 @@ import { useEffect, useState } from 'react'
 import { ApiError } from '../../../api/client'
 import { Button, FileUpload, Modal, Select, useToast } from '../../../components/ui'
 import {
-  commitSales, createItem, parseSales, upsertSalesMapping,
-  type InventoryItem, type SalesDraft, type SalesLine,
+  commitSales, createItem, parseSales,
+  type InventoryItem, type SalesDraft, type SalesLine, type SalesMappingComponentInput,
   getSalesImport,
 } from '../../api/inventory'
 
-type DraftLine = SalesLine & {
-  selectedItemId: string
-  quantityPerSale: number
+export type DraftComponent = {
+  item_id: string
+  quantity_per_sale: string
+  unit?: string | null
+}
+
+export type DraftLine = Omit<SalesLine, 'components'> & {
+  components: DraftComponent[]
   ignored: boolean
+  mappingDirty: boolean
   commitError?: string
 }
 
-function toDraftLine(line: SalesLine): DraftLine {
-  const component = line.components?.[0]
+const emptyComponent = (): DraftComponent => ({ item_id: '', quantity_per_sale: '1', unit: null })
+
+export function toDraftLine(line: SalesLine): DraftLine {
+  const components = line.components?.length
+    ? line.components.map((component) => ({
+      item_id: component.item_id,
+      quantity_per_sale: String(component.quantity_per_sale),
+      unit: component.unit ?? null,
+    }))
+    : line.item_id || line.auto_match?.id
+      ? [{
+        item_id: line.item_id ?? line.auto_match?.id ?? '',
+        quantity_per_sale: String(line.quantity_per_sale ?? 1),
+        unit: null,
+      }]
+      : [emptyComponent()]
   return {
     ...line,
-    selectedItemId: component?.item_id ?? line.auto_match?.id ?? '',
-    quantityPerSale: component?.quantity_per_sale ?? line.quantity_per_sale ?? 1,
+    components: line.status === 'ignored' ? [] : components,
     ignored: line.status === 'ignored',
+    mappingDirty: false,
   }
 }
 
@@ -101,17 +121,41 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     setLines((prev) => prev.map((line, i) => i === index ? { ...line, ...patch } : line))
   }
 
-  async function markIgnored(index: number) {
-    const line = lines[index]
-    if (!line) return
-    try {
-      await upsertSalesMapping({ sold_name: line.sold_name, kind: 'ignore', location_id: locationId, components: [] })
-      updateLine(index, {
-        ignored: true, status: 'ignored', mapping_id: null, selectedItemId: '', commitError: undefined,
+  function updateComponent(lineIndex: number, componentIndex: number, patch: Partial<DraftComponent>) {
+    setLines((prev) => prev.map((line, index) => {
+      if (index !== lineIndex) return line
+      const components = line.components.map((component, i) => {
+        if (i !== componentIndex) return component
+        if (!('item_id' in patch)) return { ...component, ...patch }
+        const item = items.find((candidate) => candidate.id === patch.item_id)
+        return { ...component, ...patch, unit: item?.unit ?? component.unit }
       })
-    } catch {
-      toast('Failed to save the ignore mapping', 'error')
-    }
+      return { ...line, components, mapping_id: null, mappingDirty: true, ignored: false, status: 'mapped', commitError: undefined }
+    }))
+  }
+
+  function addComponent(lineIndex: number) {
+    setLines((prev) => prev.map((line, index) => index === lineIndex
+      ? { ...line, components: [...line.components, emptyComponent()], mapping_id: null, mappingDirty: true, ignored: false, status: 'mapped' }
+      : line))
+  }
+
+  function removeComponent(lineIndex: number, componentIndex: number) {
+    setLines((prev) => prev.map((line, index) => index === lineIndex
+      ? { ...line, components: line.components.filter((_, i) => i !== componentIndex), mapping_id: null, mappingDirty: true, status: 'mapped' }
+      : line))
+  }
+
+  function markIgnored(index: number) {
+    updateLine(index, {
+      ignored: true, status: 'ignored', mapping_id: null, components: [], mappingDirty: true, commitError: undefined,
+    })
+  }
+
+  function undoIgnore(index: number) {
+    updateLine(index, {
+      ignored: false, status: 'unmapped', mapping_id: null, components: [emptyComponent()], mappingDirty: true,
+    })
   }
 
   async function createAndMap(index: number) {
@@ -119,11 +163,10 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     if (!line) return
     try {
       const item = await createItem({ name: line.sold_name, location_id: locationId })
-      await upsertSalesMapping({
-        sold_name: line.sold_name, kind: 'direct', location_id: locationId,
-        components: [{ item_id: item.id, quantity_per_sale: line.quantityPerSale }],
+      updateLine(index, {
+        components: [{ item_id: item.id, quantity_per_sale: '1', unit: item.unit ?? null }],
+        mapping_id: null, mappingDirty: true, status: 'mapped', ignored: false, commitError: undefined,
       })
-      updateLine(index, { selectedItemId: item.id, status: 'mapped', ignored: false, commitError: undefined })
       onCommitted()
     } catch {
       toast('Could not create or map the item', 'error')
@@ -142,16 +185,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
         filename,
         gmail_message_id: gmailMessageId,
         force,
-        lines: lines.map((line) => ({
-          sold_name: line.sold_name,
-          quantity: line.quantity,
-          gross_sales: line.gross_sales,
-          mapping_id: line.mapping_id,
-          item_id: line.ignored ? null : line.selectedItemId || null,
-          quantity_per_sale: line.ignored ? null : line.quantityPerSale,
-          components: line.ignored ? [] : [{ item_id: line.selectedItemId, quantity_per_sale: line.quantityPerSale }],
-          status: line.ignored ? 'ignored' : line.selectedItemId ? 'mapped' : 'unmapped',
-        })),
+        lines: lines.map((line) => buildCommitLine(line, locationId)),
       })
       if (result.unmapped > 0) {
         toast('Map or ignore every sales line before committing.', 'error')
@@ -172,7 +206,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     }
   }
 
-  const canCommit = lines.length > 0 && lines.every((line) => line.ignored || line.selectedItemId)
+  const canCommit = lines.length > 0 && lines.every(isLineValid)
 
   return (
     <Modal open={open} onClose={close} title="Import sales" width="lg">
@@ -198,14 +232,24 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
                 {line.ignored ? (
                   <div className="flex items-center justify-between text-xs text-amber-400">
                     <span>Ignored by mapping</span>
-                    <button type="button" onClick={() => updateLine(index, { ignored: false, status: 'unmapped', mapping_id: null, selectedItemId: '' })} className="hover:underline">Undo</button>
+                    <button type="button" onClick={() => undoIgnore(index)} className="hover:underline">Undo</button>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <Select options={itemOptions} value={line.selectedItemId} onChange={(event) => updateLine(index, { selectedItemId: event.target.value, mapping_id: null, status: event.target.value ? 'mapped' : 'unmapped' })} placeholder="Map to stock item…" className="flex-1" />
-                    <input type="number" min={0.0001} step="any" value={line.quantityPerSale} onChange={(event) => updateLine(index, { quantityPerSale: Number(event.target.value), mapping_id: null })} className="w-20 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm" aria-label="Stock units per sale" />
-                    <button type="button" onClick={() => void markIgnored(index)} className="text-xs text-amber-400 hover:underline">Ignore</button>
-                    <button type="button" onClick={() => void createAndMap(index)} className="text-xs text-emerald-400 hover:underline">New item</button>
+                  <div className="space-y-2">
+                    {line.components.map((component, componentIndex) => {
+                      const selectedElsewhere = new Set(line.components.filter((_, i) => i !== componentIndex).map((entry) => entry.item_id))
+                      const options = itemOptions.filter((option) => !selectedElsewhere.has(option.value))
+                      return <div key={componentIndex} className="flex items-end gap-2">
+                        <Select label={`Stock component ${componentIndex + 1}`} options={options} value={component.item_id} onChange={(event) => updateComponent(index, componentIndex, { item_id: event.target.value })} placeholder="Map to stock item…" className="min-w-0 flex-1" />
+                        <label className="w-24 text-xs text-zinc-400">Units/sale<input type="number" min={0.0001} step="any" value={component.quantity_per_sale} onChange={(event) => updateComponent(index, componentIndex, { quantity_per_sale: event.target.value })} className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm" /></label>
+                        {line.components.length > 1 && <button type="button" onClick={() => removeComponent(index, componentIndex)} className="mb-1 text-xs text-zinc-400 hover:text-zinc-100">Remove</button>}
+                      </div>
+                    })}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                      <button type="button" onClick={() => addComponent(index)} className="text-blue-300 hover:underline">Add component</button>
+                      <button type="button" onClick={() => markIgnored(index)} className="text-amber-400 hover:underline">Ignore</button>
+                      <button type="button" onClick={() => void createAndMap(index)} className="text-emerald-400 hover:underline">New item</button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -227,4 +271,48 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
       )}
     </Modal>
   )
+}
+
+function validComponents(line: DraftLine): SalesMappingComponentInput[] {
+  return line.components.map((component) => ({
+    item_id: component.item_id,
+    quantity_per_sale: Number(component.quantity_per_sale),
+    unit: component.unit ?? null,
+  }))
+}
+
+export function isLineValid(line: DraftLine) {
+  if (line.ignored) return true
+  const components = validComponents(line)
+  return components.length > 0 && components.every((component) => component.item_id && Number.isFinite(component.quantity_per_sale) && component.quantity_per_sale > 0)
+    && new Set(components.map((component) => component.item_id)).size === components.length
+}
+
+export function buildCommitLine(line: DraftLine, locationId?: string): SalesLine {
+  if (line.ignored) {
+    return {
+      sold_name: line.sold_name, quantity: line.quantity, gross_sales: line.gross_sales,
+      mapping_id: line.mappingDirty ? null : line.mapping_id, item_id: null, quantity_per_sale: null,
+      components: [], status: 'ignored',
+      ...(line.mappingDirty ? { new_mapping: { sold_name: line.sold_name, kind: 'ignore', location_id: locationId ?? null, components: [] } } : {}),
+    }
+  }
+  const components = validComponents(line)
+  const needsMapping = line.mappingDirty || !line.mapping_id
+  return {
+    sold_name: line.sold_name, quantity: line.quantity, gross_sales: line.gross_sales,
+    mapping_id: needsMapping ? null : line.mapping_id,
+    item_id: components[0]?.item_id ?? null,
+    quantity_per_sale: components[0]?.quantity_per_sale ?? null,
+    components,
+    status: components.length ? 'mapped' : 'unmapped',
+    ...(needsMapping ? {
+      new_mapping: {
+        sold_name: line.sold_name,
+        kind: components.length === 1 ? 'direct' : 'recipe',
+        location_id: locationId ?? null,
+        components,
+      },
+    } : {}),
+  }
 }
