@@ -76,7 +76,14 @@ export function Select({
           disabled={disabled}
           autoFocus={autoFocus}
           onClick={() => !disabled && setOpen((v) => !v)}
-          onBlur={onBlur}
+          onBlur={() => {
+            // The options are rendered beside (rather than inside) the trigger
+            // button. Defer the blur check so clicking an option can move focus
+            // into the select before an owner tears the editor down.
+            window.setTimeout(() => {
+              if (!ref.current?.contains(document.activeElement)) onBlur?.()
+            }, 0)
+          }}
           className={`w-full flex items-center justify-between gap-2 bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-2 text-[12px] text-zinc-200 hover:border-white/15 hover:bg-zinc-800/60 transition-colors ${
             disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
           } ${open ? 'border-white/20' : ''}`}
