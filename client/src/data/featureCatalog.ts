@@ -116,8 +116,7 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   sales_intake: ['inventory'],
   inventory_forecasting: ['inventory', 'sales_intake'],
   inventory_waste: ['inventory'],
-  employee_schedule: ['matcha_ops'],
-  schedule_intelligence: ['matcha_ops', 'employee_schedule'],
+  schedule_intelligence: ['employee_schedule'],
   matcha_ops_calls_all_members: ['matcha_ops'],
   werk_lite: ['matcha_ops', 'matcha_work'],
   // osha_export/osha_auto_report/ir_magic_links/ir_copilot are deliberately

@@ -14,8 +14,8 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
     """Send each company reviewer one email after both employees confirm.
 
     The delivery row is claimed before sending. A failed provider call releases
-    the claim, making an explicit task retry safe; request state is never
-    changed by delivery success or failure.
+    the claim, while an interrupted worker's stale claim is reclaimed by the
+    recovery task. Request state is never changed by delivery success or failure.
     """
     request = await conn.fetchrow(
         """
@@ -53,7 +53,10 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
             INSERT INTO schedule_request_notification_deliveries
                 (company_id, request_id, recipient_user_id, event_type)
             VALUES ($1,$2,$3,'manager_ready')
-            ON CONFLICT (request_id, recipient_user_id, event_type) DO NOTHING
+            ON CONFLICT (request_id, recipient_user_id, event_type) DO UPDATE
+               SET created_at=NOW()
+             WHERE schedule_request_notification_deliveries.sent_at IS NULL
+               AND schedule_request_notification_deliveries.created_at < NOW() - INTERVAL '5 minutes'
             RETURNING id
             """,
             request["company_id"], request["id"], recipient["id"],

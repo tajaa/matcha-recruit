@@ -39,7 +39,7 @@ async def _dispatch() -> dict:
         recovered = 0
         for company in companies:
             features = await get_company_features(company["id"], conn=conn)
-            if not (features.get("matcha_ops") and features.get("employee_schedule")):
+            if not features.get("employee_schedule"):
                 continue
             # Warnings first, then expirations, on every run. A credential
             # already past its warning threshold on a PRIOR run may cross

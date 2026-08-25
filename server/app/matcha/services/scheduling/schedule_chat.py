@@ -702,7 +702,7 @@ async def build_proposal(
     template_rows = await conn.fetch(
         """
         SELECT id, name, role, location_id, start_time, end_time, break_minutes,
-               required_staff, days_of_week
+               required_staff, days_of_week, job_id
         FROM schedule_shift_templates
         WHERE company_id = $1
         """,
@@ -746,6 +746,7 @@ async def build_proposal(
             required_staff = template["required_staff"] or req["count"] or 1
             role = req.get("role") or template.get("role")
             template_id = template["id"]
+            job_id = template.get("job_id")
         elif req.get("start_time") and req.get("end_time"):
             spec = build_adhoc_spec(
                 req["label"], time.fromisoformat(req["start_time"]),
@@ -762,6 +763,7 @@ async def build_proposal(
             # column, `find_shift_coverage`'s role filter).
             role = spec["role"] or req["label"]
             template_id = None
+            job_id = None
         else:
             return await _clarify(f"What hours should the {req['label']} run?")
 
@@ -782,6 +784,7 @@ async def build_proposal(
             resolved_shifts.append({
                 "label": req["label"],
                 "template_id": str(template_id) if template_id else None,
+                "job_id": job_id,
                 "role": role, "starts_at": starts_at, "ends_at": ends_at,
                 "break_minutes": break_minutes, "required_staff": required_staff,
                 "employee_name_hints": req.get("employee_name_hints") or [],
@@ -964,7 +967,8 @@ async def build_proposal(
         "clarify_question": None, "clarify_options": [], "clarify_history": clarify_history,
         "shifts": [
             {
-                "label": s["label"], "template_id": s["template_id"], "role": s["role"],
+                "label": s["label"], "template_id": s["template_id"],
+                "job_id": str(s["job_id"]) if s.get("job_id") else None, "role": s["role"],
                 "starts_at": s["starts_at"].isoformat(), "ends_at": s["ends_at"].isoformat(),
                 "break_minutes": s["break_minutes"], "required_staff": s["required_staff"],
                 "location_id": str(location_id), "assignees": s["assignees"],
@@ -1910,6 +1914,7 @@ async def execute_proposal(
             ends_at = datetime.fromisoformat(shift["ends_at"])
             location_id = UUID(shift["location_id"]) if shift.get("location_id") else None
             template_id = UUID(shift["template_id"]) if shift.get("template_id") else None
+            job_id = UUID(shift["job_id"]) if shift.get("job_id") else None
 
             surviving_ids: list[UUID] = []
             assignee_names: list[str] = []
@@ -1918,7 +1923,7 @@ async def execute_proposal(
                 conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
                 avail = availability_violations(avail_map.get(eid, {}), starts_at, ends_at)
                 violations = await check_shift_compliance(
-                    conn, company_id, location_id=location_id, job_id=shift.get("job_id"),
+                    conn, company_id, location_id=location_id, job_id=job_id,
                     starts_at=starts_at, ends_at=ends_at,
                     break_minutes=shift["break_minutes"], employee_id=eid,
                     lapse_items=lapse_map.get(str(eid), []),
@@ -1945,6 +1950,7 @@ async def execute_proposal(
                 starts_at=starts_at, ends_at=ends_at,
                 break_minutes=shift["break_minutes"], required_staff=shift["required_staff"],
                 template_id=template_id,
+                job_id=job_id,
                 employee_ids=surviving_ids, created_by=confirmed_by,
                 status=create_status,
                 audit_details={

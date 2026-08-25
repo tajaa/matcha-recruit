@@ -933,6 +933,7 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
             </div>
             {r.status === 'awaiting_manager' && (
               <div className="flex items-center gap-1.5">
+                {r.counterparty_confirmed_at && <span className="text-xs text-sky-300">Both employees confirmed.</span>}
                 <button onClick={() => review(r.id, 'approved')} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-2.5 py-1.5"><Check className="h-3.5 w-3.5" /> Approve</button>
                 <button onClick={() => review(r.id, 'denied')} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700"><X className="h-3.5 w-3.5" /> Deny</button>
               </div>

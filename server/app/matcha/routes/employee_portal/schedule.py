@@ -258,6 +258,16 @@ async def accept_schedule_request(
                     status_code=409,
                     detail=same_day_conflict_detail(employee["id"], conflicts),
                 )
+            if request["request_type"] == "swap":
+                reverse_conflicts = await find_same_day_assignments(
+                    conn, company_id, request["employee_id"], counter["starts_at"],
+                    exclude_shift_ids=[request["shift_id"]],
+                )
+                if reverse_conflicts:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=same_day_conflict_detail(request["employee_id"], reverse_conflicts),
+                    )
 
             await conn.execute(
                 """UPDATE schedule_requests

@@ -126,7 +126,7 @@ def _employee_html(rows: list[dict], digest_date: date) -> str:
 
 async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUID, digest_date: date) -> dict:
     location = await conn.fetchrow(
-        "SELECT name FROM business_locations WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE",
+        "SELECT name, timezone FROM business_locations WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE",
         location_id, company_id,
     )
     if not location:
@@ -142,12 +142,13 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
         JOIN schedule_shifts s ON s.id=a.shift_id
         JOIN employees e ON e.id=a.employee_id
         LEFT JOIN users u ON u.id=e.user_id
-        WHERE s.company_id=$1 AND s.location_id=$2 AND s.starts_at::date=$3
+        WHERE s.company_id=$1 AND s.location_id=$2
+          AND (s.starts_at AT TIME ZONE $4)::date=$3
           AND s.status = 'published' AND a.status <> 'declined'
           AND COALESCE(e.employment_status,'active')='active'
         ORDER BY s.starts_at, e.first_name, e.last_name
         """,
-        company_id, location_id, digest_date,
+        company_id, location_id, digest_date, location["timezone"] or "UTC",
     )
     row_dicts = [dict(row) for row in rows]
     # Two distinct recipient populations, deliberately not unioned: an

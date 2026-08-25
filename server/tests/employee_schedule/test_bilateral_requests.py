@@ -66,6 +66,14 @@ def test_counterparty_confirmation_queues_notification_after_commit():
     assert commit_read_at < enqueue_at
 
 
+def test_swap_confirmation_checks_both_employees_for_same_day_conflicts():
+    portal = Path(__file__).parents[2] / "app/matcha/routes/employee_portal/schedule.py"
+    source = portal.read_text()
+    assert 'if request["request_type"] == "swap":' in source
+    assert "reverse_conflicts = await find_same_day_assignments(" in source
+    assert 'request["employee_id"], counter["starts_at"]' in source
+
+
 def test_notification_outbox_is_idempotent_and_migration_activates_digest():
     migration = Path(__file__).parents[2] / "alembic/versions/empsched13_schedule_round2_followups.py"
     source = migration.read_text()

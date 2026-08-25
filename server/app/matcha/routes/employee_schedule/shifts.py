@@ -461,7 +461,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         existing = await conn.fetchrow(
             """
             SELECT starts_at, ends_at, status, published_at, break_minutes, location_id,
-                   kind, training_requirement_id
+                   kind, training_requirement_id, job_id
             FROM schedule_shifts WHERE id = $1 AND company_id = $2
             """,
             shift_id, company_id,
@@ -499,7 +499,9 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         # double-book everyone already on it, so it takes the same guard + force.
         # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
-        compliance_relevant = retimed or "break_minutes" in patch or "location_id" in patch
+        compliance_relevant = (
+            retimed or "break_minutes" in patch or "location_id" in patch or "job_id" in patch
+        )
         # Fair Workweek notice/clopening obligations attach to a POSTED shift's
         # timing changing, not to break/location edits alone — only pass the
         # event when the shift's start/end actually moved.
@@ -507,9 +509,11 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         fw_shift_published = existing["published_at"] is not None
         forced: dict[str, list[dict]] = {}
         availability_overrides: dict[str, list[dict]] = {}
+        qualification_overrides: dict[str, dict] = {}
         if compliance_relevant and new_status != "cancelled":
             new_break = patch.get("break_minutes", existing["break_minutes"])
             new_location = patch.get("location_id", existing["location_id"])
+            new_job_id = patch.get("job_id", existing["job_id"])
             assignees = await conn.fetch(
                 "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
                 shift_id,
@@ -544,8 +548,13 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         raise_outside_availability(emp, avail)
                 if avail:
                     availability_overrides[str(emp)] = avail
+                unqualified = await check_job_qualification(conn, company_id, emp, new_job_id)
+                if unqualified and not force:
+                    raise_not_qualified(unqualified)
+                if unqualified:
+                    qualification_overrides[str(emp)] = unqualified
                 violations = await check_shift_compliance(
-                conn, company_id, location_id=new_location, job_id=patch.get("job_id", existing["job_id"]),
+                    conn, company_id, location_id=new_location, job_id=new_job_id,
                     starts_at=new_start, ends_at=new_end,
                     break_minutes=new_break or 0, employee_id=emp,
                     exclude_shift_id=shift_id,
@@ -562,7 +571,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 # escapes the meal-break/daily-OT advisories entirely.
                 raise_for_violations(
                     await check_shift_compliance(
-                        conn, company_id, location_id=new_location, job_id=patch.get("job_id", existing["job_id"]),
+                        conn, company_id, location_id=new_location, job_id=new_job_id,
                         starts_at=new_start, ends_at=new_end,
                         break_minutes=new_break or 0,
                         exclude_shift_id=shift_id,
@@ -639,6 +648,12 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 await log_availability_override(
                     conn, company_id, shift_id, current_user.id,
                     UUID(employee_id), avail,
+                )
+            for employee_id, detail in qualification_overrides.items():
+                await log_audit(
+                    conn, company_id, "assignment", shift_id, current_user.id,
+                    "assignment.qualification_override",
+                    {"employee_id": employee_id, **detail},
                 )
         await reconcile_warning_events(conn, company_id, [shift_id])
         return await fetch_shift_by_id(conn, company_id, shift_id)

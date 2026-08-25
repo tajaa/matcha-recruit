@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .schedule_break_rule_store import resolve_break_rules
 from .schedule_breaks import MealWaiverAttestation, evaluate_break_plan, guidance_payload
@@ -23,8 +24,17 @@ async def refresh_assignment_break_guidance(
     """Evaluate and store the break instructions shown for one assignment."""
     if location_id is None:
         return
+    timezone_name = await conn.fetchval(
+        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+        location_id, company_id,
+    )
+    try:
+        location_timezone = ZoneInfo(timezone_name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        return
+    shift_date = starts_at.astimezone(location_timezone).date()
     resolved = await resolve_break_rules(
-        conn, company_id=company_id, location_id=location_id, shift_date=starts_at.date(),
+        conn, company_id=company_id, location_id=location_id, shift_date=shift_date,
     )
     if resolved.timezone is None:
         return
@@ -38,7 +48,7 @@ async def refresh_assignment_break_guidance(
         ORDER BY effective_from DESC, confirmed_at DESC
         LIMIT 1
         """,
-        company_id, employee_id, starts_at.date(),
+        company_id, employee_id, starts_at.astimezone(resolved.timezone).date(),
     )
     waiver = None
     if waiver_row:

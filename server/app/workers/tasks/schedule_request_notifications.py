@@ -17,7 +17,7 @@ async def _send(request_id: UUID) -> dict[str, int]:
 
 
 async def _send_pending() -> dict[str, int]:
-    """Recover notifications if the broker was unavailable after commit."""
+    """Recover missed dispatches and stale delivery claims after commit."""
     conn = await get_db_connection()
     try:
         rows = await conn.fetch(
@@ -25,10 +25,6 @@ async def _send_pending() -> dict[str, int]:
             SELECT r.id
             FROM schedule_requests r
             WHERE r.status='awaiting_manager' AND r.counterparty_confirmed_at IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM schedule_request_notification_deliveries d
-                  WHERE d.request_id=r.id AND d.event_type='manager_ready'
-              )
             ORDER BY r.updated_at ASC
             LIMIT 500
             """

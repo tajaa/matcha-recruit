@@ -23,10 +23,10 @@ function OpsGate({ children }: { children: ReactNode }) {
 
 export default function OpsRoutes() {
   return (
-    <OpsGate>
-      <WorkSurfaceProvider value="matcha-ops">
-        <Routes>
-          <Route element={<WorkLayout />}>
+    <WorkSurfaceProvider value="matcha-ops">
+      <Routes>
+        <Route element={<WorkLayout />}>
+          <Route element={<OpsGate><Outlet /></OpsGate>}>
             <Route index element={<OpsHome />} />
             <Route path="channels" element={<ChannelBrowse />} />
             <Route path="channels/join/:code" element={<ChannelJoinByInvite />} />
@@ -55,24 +55,27 @@ export default function OpsRoutes() {
               <Route path="inventory/waste" element={<FeatureGate feature="inventory_waste" label="Inventory Waste" allowPlatformAdmin><InventoryWaste /></FeatureGate>} />
               <Route path="inventory/:itemId" element={<InventoryHub />} />
             </Route>
+            <Route path="access" element={<OpsAccess />} />
+          </Route>
+          <Route
+            element={
+              <FeatureGate feature="employee_schedule" label="Schedule" allowPlatformAdmin>
+                <Outlet />
+              </FeatureGate>
+            }
+          >
             <Route
-              element={
-                <FeatureGate feature="employee_schedule" label="Schedule" allowPlatformAdmin>
-                  <Outlet />
-                </FeatureGate>
-              }
-            >
-              <Route path="schedule" element={<EmployeeSchedule />} />
-              <Route path="schedule/editor" element={<ScheduleEditor />} />
-            </Route>
+              path="schedule"
+              element={<EmployeeSchedule />}
+            />
+            <Route path="schedule/editor" element={<ScheduleEditor />} />
             <Route
               path="schedule-intelligence"
               element={<Navigate to="/ops/schedule?tab=intelligence" replace />}
             />
-            <Route path="access" element={<OpsAccess />} />
           </Route>
-        </Routes>
-      </WorkSurfaceProvider>
-    </OpsGate>
+        </Route>
+      </Routes>
+    </WorkSurfaceProvider>
   )
 }

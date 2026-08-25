@@ -1,5 +1,6 @@
 """Location-picker access for the scheduling eligibility manager queue."""
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -70,3 +71,8 @@ def test_company_operator_keeps_full_location_list(monkeypatch):
     query, args = conn.calls[0]
     assert "e.user_id = $2" not in query
     assert args == (company_id,)
+
+
+def test_manager_queue_marks_two_party_confirmation_explicitly():
+    source = (Path(__file__).parents[3] / "client/src/pages/app/employees/EmployeeSchedule.tsx").read_text()
+    assert "Both employees confirmed." in source

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from app.matcha.services.scheduling.schedule_eligibility import (
@@ -96,6 +97,31 @@ def test_job_credential_does_not_block_an_unrelated_job():
         JobCredentialGraceConn(), uuid4(), employee_id=uuid4(), shift_date=date(2026, 8, 30),
     ))
     assert violations == []
+
+
+def test_chat_schedule_preserves_template_job_for_eligibility_enforcement():
+    chat = Path(__file__).parents[2] / "app/matcha/services/scheduling/schedule_chat.py"
+    source = chat.read_text()
+    assert "required_staff, days_of_week, job_id" in source
+    assert '"job_id": str(s["job_id"]) if s.get("job_id") else None' in source
+    assert "job_id=job_id," in source
+
+
+def test_shift_job_change_rechecks_existing_assignments():
+    shifts = Path(__file__).parents[2] / "app/matcha/routes/employee_schedule/shifts.py"
+    source = shifts.read_text()
+    assert "kind, training_requirement_id, job_id" in source
+    assert 'or "job_id" in patch' in source
+    assert "unqualified = await check_job_qualification(conn, company_id, emp, new_job_id)" in source
+
+
+def test_schedule_feature_no_longer_requires_matcha_ops():
+    flags = Path(__file__).parents[2] / "app/core/feature_flags.py"
+    routes = Path(__file__).parents[2] / "app/matcha/routes/__init__.py"
+    worker = Path(__file__).parents[2] / "app/workers/tasks/schedule_eligibility.py"
+    assert '"employee_schedule": ("matcha_ops",)' not in flags.read_text()
+    assert 'dependencies=[Depends(require_feature("employee_schedule"))]' in routes.read_text()
+    assert 'if not features.get("employee_schedule"):' in worker.read_text()
 
 
 class JobExpiryConn:

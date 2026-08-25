@@ -1,6 +1,7 @@
 """DB-free coverage for the scheduler wrapper around the daily digest."""
 
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -64,6 +65,11 @@ def test_location_date_falls_back_to_utc_for_bad_timezone():
     from app.workers.tasks import schedule_daily_digest as worker
 
     assert worker._location_date("not/a-real-timezone").__class__ is date
+
+
+def test_digest_queries_shifts_on_the_location_calendar_day():
+    source = (Path(__file__).parents[2] / "app/matcha/services/scheduling/daily_digest.py").read_text()
+    assert "s.starts_at AT TIME ZONE $4" in source
 
 
 async def _enabled():

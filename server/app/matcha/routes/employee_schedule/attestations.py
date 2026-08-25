@@ -1,7 +1,8 @@
 """Manager attestations that affect individualized schedule guidance."""
 
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -30,9 +31,11 @@ async def get_meal_break_waiver(
             """
             SELECT value, effective_from, confirmed_at, note
             FROM employee_compliance_attestations
+            JOIN employees e ON e.id = employee_compliance_attestations.employee_id
+            LEFT JOIN business_locations l ON l.id = e.work_location_id
             WHERE company_id = $1 AND employee_id = $2
               AND attestation_type = 'meal_break_waiver_on_file'
-              AND effective_from <= CURRENT_DATE
+              AND effective_from <= COALESCE((NOW() AT TIME ZONE l.timezone)::date, CURRENT_DATE)
             ORDER BY effective_from DESC, confirmed_at DESC
             LIMIT 1
             """,
@@ -62,9 +65,20 @@ async def attest_meal_break_waiver(
     legal applicability remains determined by the reviewed jurisdiction rule.
     """
     company_id = await require_company_id(current_user)
-    effective_from = body.effective_from or date.today()
     async with get_connection() as conn:
         await assert_employee_in_company(conn, company_id, employee_id)
+        effective_from = body.effective_from
+        if effective_from is None:
+            timezone_name = await conn.fetchval(
+                """SELECT l.timezone FROM employees e
+                   LEFT JOIN business_locations l ON l.id=e.work_location_id
+                   WHERE e.id=$1 AND e.org_id=$2""",
+                employee_id, company_id,
+            )
+            try:
+                effective_from = datetime.now(ZoneInfo(timezone_name or "UTC")).date()
+            except (ZoneInfoNotFoundError, ValueError):
+                effective_from = date.today()
         row = await conn.fetchrow(
             """
             INSERT INTO employee_compliance_attestations
@@ -81,9 +95,9 @@ async def attest_meal_break_waiver(
             FROM schedule_shift_assignments a
             JOIN schedule_shifts s ON s.id = a.shift_id
             WHERE a.company_id = $1 AND a.employee_id = $2
-              AND s.status <> 'cancelled' AND s.starts_at::date >= $3
+              AND s.status <> 'cancelled' AND s.starts_at >= NOW()
             """,
-            company_id, employee_id, effective_from,
+            company_id, employee_id,
         )
         for assignment in future_assignments:
             await refresh_assignment_break_guidance(

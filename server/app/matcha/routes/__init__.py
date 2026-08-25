@@ -231,12 +231,12 @@ matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["d
 # Employee scheduling — shift builder + templates over the roster (paid add-on).
 matcha_router.include_router(employee_schedule_router, prefix="/employee-schedule",
                               tags=["employee-schedule"],
-                              dependencies=[Depends(require_all_features("matcha_ops", "employee_schedule"))])
+                              dependencies=[Depends(require_feature("employee_schedule"))])
 # Schedule Intelligence — analytics over the schedule data (paid add-on). Each
 # endpoint checks `employee_schedule` itself rather than double-gating the mount.
 matcha_router.include_router(schedule_intelligence_router, prefix="/schedule-intelligence",
                               tags=["schedule-intelligence"],
-                              dependencies=[Depends(require_all_features("matcha_ops", "schedule_intelligence"))])
+                              dependencies=[Depends(require_all_features("employee_schedule", "schedule_intelligence"))])
 matcha_router.include_router(tcor_router, prefix="/tcor", tags=["tcor"],
                              dependencies=[Depends(require_feature("tcor"))])
 matcha_router.include_router(coi_router, prefix="/coi", tags=["coi"],

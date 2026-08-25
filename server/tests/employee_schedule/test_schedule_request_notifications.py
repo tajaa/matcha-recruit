@@ -1,6 +1,7 @@
 """Unit coverage for post-confirmation manager-request notification delivery."""
 
 from types import SimpleNamespace
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -71,3 +72,11 @@ async def test_notification_claims_then_marks_delivery_sent(monkeypatch):
     assert result == {"sent": 1, "recipients": 1}
     assert any("SET sent_at=NOW()" in query for query, _args in conn.executed)
     assert any("ON CONFLICT (request_id, recipient_user_id, event_type)" in query for query in conn.claims)
+
+
+def test_recovery_reclaims_only_stale_unsent_delivery_claims():
+    service = Path(__file__).parents[2] / "app/matcha/services/scheduling/schedule_request_notifications.py"
+    worker = Path(__file__).parents[2] / "app/workers/tasks/schedule_request_notifications.py"
+    assert "sent_at IS NULL" in service.read_text()
+    assert "INTERVAL '5 minutes'" in service.read_text()
+    assert "NOT EXISTS" not in worker.read_text()
