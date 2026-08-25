@@ -2526,6 +2526,7 @@ async def _bg_ems_draft_untargeted_reply(
                  WHERE channel_id = $1
                    AND status = 'pending'
                    AND confirmation_message_id IS NOT NULL
+                   AND created_at > NOW() - INTERVAL '15 minutes'
                  ORDER BY created_at DESC
                  LIMIT 1
                 """,
