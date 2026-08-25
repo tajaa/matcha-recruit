@@ -135,6 +135,41 @@ class TestBgEmsDispatch:
         )
         intake_mock.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_mention_decision_claims_before_intake(self, monkeypatch):
+        """"@huume confirm" against a live pill must resolve that pill, not
+        classify_intent's bias-to-LOG default (which would mint a second
+        draft titled "confirm" — the reported "seemed confused" bug)."""
+        untargeted_mock = AsyncMock(return_value=True)
+        intake_mock = AsyncMock(return_value=None)
+        monkeypatch.setattr(channels_ws, "_bg_ems_draft_untargeted_reply", untargeted_mock)
+        monkeypatch.setattr(channels_ws, "_bg_ems_intake", intake_mock)
+
+        await channels_ws._bg_ems_dispatch(
+            "channel-1", "msg-1", None, "user-1", "@huume confirm",
+            has_huume_mention=True,
+        )
+
+        untargeted_mock.assert_awaited_once_with("channel-1", "user-1", "@huume confirm")
+        intake_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_mention_decision_miss_still_falls_through_to_intake(self, monkeypatch):
+        """No live pill (fallback returns False) — a genuine "@huume ..."
+        report must still be logged normally."""
+        untargeted_mock = AsyncMock(return_value=False)
+        intake_mock = AsyncMock(return_value=None)
+        monkeypatch.setattr(channels_ws, "_bg_ems_draft_untargeted_reply", untargeted_mock)
+        monkeypatch.setattr(channels_ws, "_bg_ems_intake", intake_mock)
+
+        await channels_ws._bg_ems_dispatch(
+            "channel-1", "msg-1", None, "user-1", "@huume the freezer is leaking",
+            has_huume_mention=True,
+        )
+
+        untargeted_mock.assert_awaited_once()
+        intake_mock.assert_awaited_once()
+
 
 class TestInventoryWasteEventDualWrite:
     @pytest.mark.asyncio

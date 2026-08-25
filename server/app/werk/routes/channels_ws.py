@@ -125,6 +125,28 @@ def _channel_recently_clarified(channel_id_str: str) -> bool:
     return deadline is not None and deadline >= time.monotonic()
 
 
+# Channels that posted an event-draft pill recently (this process). Gates the
+# _bg_ems_draft_untargeted_reply spawn below, same reasoning as
+# _recent_schedule_clarifies: keep ordinary chat off the DB. A process
+# restart empties the dict and the fallback goes dormant until the next
+# pill — threaded replies (the primary path) are unaffected.
+_EMS_DRAFT_TTL_SECONDS = 15 * 60
+_recent_ems_drafts: Dict[str, float] = {}
+
+
+def _note_ems_draft(channel_id_str: str) -> None:
+    now = time.monotonic()
+    stale = [k for k, deadline in _recent_ems_drafts.items() if deadline < now]
+    for k in stale:
+        _recent_ems_drafts.pop(k, None)
+    _recent_ems_drafts[channel_id_str] = now + _EMS_DRAFT_TTL_SECONDS
+
+
+def _channel_recently_ems_drafted(channel_id_str: str) -> bool:
+    deadline = _recent_ems_drafts.get(channel_id_str)
+    return deadline is not None and deadline >= time.monotonic()
+
+
 async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
     """Mirror a message's attachments into the linked collab project's Files,
     on its own connection and off the send hot path. The reverse JSONB lookup
@@ -267,6 +289,28 @@ async def _bg_dispatch_huume_mention(
     )
 
 
+def _row_metadata(sys_row) -> dict:
+    """A system message's metadata, decoded.
+
+    asyncpg hands JSONB back as a str — no set_type_codec('jsonb', …) is
+    registered on the pool (app/database/pool.py:init_pool). The REST read
+    path decodes explicitly (routes/channels.py:155); this one did not, so a
+    live Huume pill reached the client with metadata as a raw JSON *string*,
+    `msg.metadata?.action` was undefined, and the Confirm/Reject card only
+    appeared after leaving and re-entering the channel (when the decoded REST
+    snapshot replaced it). Applies to every card kind, not just event_draft —
+    this is the shared payload builder for every broadcast_system_message
+    call site."""
+    raw = dict(sys_row).get("metadata")
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+        except ValueError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return raw or {}
+
+
 def _system_message_payload(channel_id_str: str, sys_row) -> dict:
     """Broadcast payload for a persisted EMS/Huume system message — shared by
     _bg_ems_intake and _bg_ems_clarify so the 17-key WS message shape (every
@@ -288,7 +332,7 @@ def _system_message_payload(channel_id_str: str, sys_row) -> dict:
         "mentioned_user_ids": [],
         "client_message_id": None,
         "message_type": sys_row["message_type"],
-        "metadata": dict(sys_row).get("metadata") or {},
+        "metadata": _row_metadata(sys_row),
     }
 
 
@@ -2038,6 +2082,7 @@ async def _bg_ems_intake(
                 await broadcast_system_message(
                     channel_id_str, _system_message_payload(channel_id_str, sys_row)
                 )
+                _note_ems_draft(channel_id_str)
                 return
 
             event_row, confirmation = await persist_event(
@@ -2393,6 +2438,7 @@ async def _bg_ems_draft_reply(
                 await broadcast_system_message(
                     channel_id_str, _system_message_payload(channel_id_str, sys_row)
                 )
+                _note_ems_draft(channel_id_str)
                 return True
             async with conn.transaction():
                 if decision == "confirm":
@@ -2437,6 +2483,64 @@ async def _bg_ems_draft_reply(
         # A probe failure must not swallow the existing clarify/schedule
         # reply dispatch paths. The source message is already durable; a
         # later retry can resolve the draft once the database is available.
+        return False
+
+
+async def _bg_ems_draft_untargeted_reply(
+    channel_id_str: str,
+    sender_user_id_str: str,
+    content: str,
+) -> bool:
+    """Narrow fallback for a decision typed as a plain new message rather
+    than a threaded reply to the pill — the event-draft twin of
+    _bg_schedule_untargeted_reply, for the same root cause: without a
+    reply_to or an @huume mention _ems_dispatch_decision spawns nothing, so
+    a bare "confirm" answering a live pill was never looked at. With a
+    mention it was worse — classify_intent has no confirm/reject case and
+    bias-to-LOG returned LOG, so "@huume confirm" minted a *second* event
+    draft titled "confirm" instead of resolving the first.
+
+    Claims only on _draft_reply_decision's exact literal set (checked BEFORE
+    any query, so ordinary chat costs nothing), and only when the channel
+    has a live pending draft. The mention is stripped before delegating:
+    _bg_ems_draft_reply deliberately refuses mention-bearing content whose
+    decision is None (see its "@huume new thing" guard above), so
+    "@huume confirm" must arrive there as "confirm".
+
+    Purely a targeting shim — resolution, permissions (may_decide_event_draft)
+    and idempotency stay in _bg_ems_draft_reply, reached through the SAME
+    confirmation_message_id a threaded reply would use, so this cannot race
+    or double-resolve against a genuine threaded answer to the same pill."""
+    try:
+        from app.matcha.services.ems.intent import strip_mention
+
+        text = strip_mention(content).strip()
+        if _draft_reply_decision(text) is None:
+            return False
+
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT confirmation_message_id
+                  FROM ems_event_drafts
+                 WHERE channel_id = $1
+                   AND status = 'pending'
+                   AND confirmation_message_id IS NOT NULL
+                 ORDER BY created_at DESC
+                 LIMIT 1
+                """,
+                UUID(channel_id_str),
+            )
+        if row is None:
+            return False
+
+        return await _bg_ems_draft_reply(
+            channel_id_str, str(row["confirmation_message_id"]), sender_user_id_str, text,
+        )
+    except Exception:
+        logger.exception(
+            "EMS event-draft untargeted-reply fallback failed for channel %s", channel_id_str,
+        )
         return False
 
 
@@ -2513,6 +2617,11 @@ async def _bg_ems_dispatch(
         if claimed:
             return
     if has_huume_mention:
+        # A bare decision word answering a live pill is never a new report,
+        # a receipt, or a question — claim it before classify_intent's
+        # bias-to-LOG default mints a duplicate draft titled "confirm".
+        if await _bg_ems_draft_untargeted_reply(channel_id_str, sender_user_id_str, content):
+            return
         from app.matcha.services.ems.intent import INVENTORY, LINK, LOG, SCHEDULE, classify_intent
 
         # A receipt-shaped attachment is tried before intent classification —
@@ -3712,6 +3821,22 @@ async def channel_websocket(
                                     str(user.id), row["content"],
                                     has_huume_mention="huume" in mention_handles,
                                     attachments=list(broadcast_attachments) if broadcast_attachments else None,
+                                ))
+                            elif (
+                                is_new_message and not row["reply_to_id"]
+                                and _channel_recently_ems_drafted(room_key)
+                                and _draft_reply_decision(row["content"]) is not None
+                            ):
+                                # A plain "confirm"/"not an event" answering a
+                                # live event-draft pill. _draft_reply_decision
+                                # is a pure set-membership test, so ordering
+                                # this arm ahead of the schedule one below
+                                # costs nothing and cannot steal from it: a
+                                # schedule answer ("Wilshire", a clock time)
+                                # fails this guard synchronously and falls
+                                # through.
+                                _spawn_bg(_bg_ems_draft_untargeted_reply(
+                                    str(ch_uuid), str(user.id), row["content"],
                                 ))
                             elif (
                                 is_new_message and not row["reply_to_id"]
