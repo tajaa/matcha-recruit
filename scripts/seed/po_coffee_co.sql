@@ -14,13 +14,21 @@
 -- Locations
 -- ---------------------------------------------------------------------------
 INSERT INTO business_locations
-  (id, company_id, name, address, city, state, zipcode, country_code, is_active, source)
+  (id, company_id, name, address, city, state, zipcode, country_code,
+   jurisdiction_id, timezone, is_active, source)
 VALUES
   ('c0ffeeee-0001-4001-8001-000000000001', 'c4c256c3-60ef-4cf5-8d4c-55e963c58416',
-   'Po Coffee Co — Downtown', '412 Market St', 'San Francisco', 'CA', '94103', 'US', TRUE, 'manual'),
+   'Po Coffee Co — Downtown', '412 Market St', 'San Francisco', 'CA', '94103', 'US',
+   (SELECT id FROM jurisdictions WHERE city = 'san francisco' AND state = 'CA' AND level = 'city'),
+   'America/Los_Angeles', TRUE, 'manual'),
   ('c0ffeeee-0001-4001-8001-000000000002', 'c4c256c3-60ef-4cf5-8d4c-55e963c58416',
-   'Po Coffee Co — Mission', '2288 Mission St', 'San Francisco', 'CA', '94110', 'US', TRUE, 'manual')
-ON CONFLICT (id) DO NOTHING;
+   'Po Coffee Co — Mission', '2288 Mission St', 'San Francisco', 'CA', '94110', 'US',
+   (SELECT id FROM jurisdictions WHERE city = 'san francisco' AND state = 'CA' AND level = 'city'),
+   'America/Los_Angeles', TRUE, 'manual')
+ON CONFLICT (id) DO UPDATE
+SET jurisdiction_id = COALESCE(business_locations.jurisdiction_id, EXCLUDED.jurisdiction_id),
+    timezone = COALESCE(business_locations.timezone, EXCLUDED.timezone)
+WHERE business_locations.jurisdiction_id IS NULL OR business_locations.timezone IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- Roster: 12 employees (store manager, 2 shift leads, 9 baristas) split

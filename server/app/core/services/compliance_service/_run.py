@@ -117,6 +117,18 @@ from app.core.services.compliance_service._locations import (
 )
 
 
+async def _embed_updated_requirements_bg(jurisdiction_id: UUID) -> None:
+    """Embed after the request connection has returned to the pool."""
+    from app.database import get_connection
+    from app.core.services.compliance_embedding_pipeline import embed_updated_requirements
+
+    try:
+        async with get_connection() as conn:
+            await embed_updated_requirements(conn, jurisdiction_id)
+    except Exception:
+        logger.exception("[Compliance] Embedding update error")
+
+
 
 
 async def run_compliance_check_stream(
@@ -967,11 +979,7 @@ async def run_compliance_check_stream(
                     logger.exception("[Compliance] Bulk alert email error")
 
             # Auto-embed new/updated jurisdiction requirements for RAG Q&A
-            try:
-                from app.core.services.compliance_embedding_pipeline import embed_updated_requirements
-                asyncio.create_task(embed_updated_requirements(conn, jurisdiction_id))
-            except Exception:
-                logger.exception("[Compliance] Embedding update error")
+            asyncio.create_task(_embed_updated_requirements_bg(jurisdiction_id))
 
             # Yield per-requirement status events
             new_keys = {_compute_requirement_key(r) for r in requirements}
@@ -2128,7 +2136,6 @@ async def run_compliance_check_background(
             logger.exception("[Compliance] Error notifying admins about compliance changes")
 
     return {"new": new_count, "updated": updated_count, "alerts": alert_count}
-
 
 
 
