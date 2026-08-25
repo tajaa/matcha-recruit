@@ -377,6 +377,9 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
       {(shift.role || shift.department) && (
         <div className="text-[11px] text-zinc-400 mt-0.5 truncate">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>
       )}
+      <div className="mt-1 text-[10px] text-zinc-500">
+        Planned break: {shift.break_minutes > 0 ? `${shift.break_minutes} min` : 'none'}
+      </div>
       <div className="mt-2 flex flex-wrap gap-1">
         {shift.assignments.map((a) => {
           const flags = rosterFlags?.[a.employee_id]
@@ -538,6 +541,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
   const [role, setRole] = useState(shift?.role ?? '')
   const [notes, setNotes] = useState(shift?.notes ?? '')
+  const [breakMinutes, setBreakMinutes] = useState(String(shift?.break_minutes ?? 0))
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
 
@@ -561,6 +565,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       notes: notes.trim() || null,
+      break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
       required_staff: Math.max(1, Math.round(Number(required) || 1)),
     }
     if (!editing && kind === 'training' && requirementId) {
@@ -635,6 +640,11 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
         <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
+      </label>
+      <label className="block">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
+        <input type="number" min="0" step="5" value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Used by scheduling-law checks when employees are assigned.</span>
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Notes <span className="text-zinc-600 normal-case">(optional)</span></span>
@@ -741,6 +751,7 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
               <span key={block.id} className="block">
                 {fmtTime(`2000-01-01T${block.start_time}Z`)}–{fmtTime(`2000-01-01T${block.end_time}Z`)}
                 {block.role ? ` · ${block.role}` : ''} · {block.required_staff} staff
+                {' · '}{block.break_minutes > 0 ? `${block.break_minutes} min break` : 'no break planned'}
                 {' · '}{block.days_of_week.length ? block.days_of_week.map((day) => WEEKDAY_LABELS[day]).join(' ') : 'no days set'}
               </span>
             ))}
@@ -765,6 +776,7 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
   const [role, setRole] = useState('')
   const [start, setStart] = useState('09:00')
   const [end, setEnd] = useState('17:00')
+  const [breakMinutes, setBreakMinutes] = useState('0')
   const [required, setRequired] = useState('1')
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [busy, setBusy] = useState(false)
@@ -783,6 +795,7 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
           name: name.trim(),
           role: role.trim() || null,
           start_time: `${start}:00`, end_time: `${end}:00`,
+          break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
           required_staff: Math.max(1, Math.round(Number(required) || 1)),
           days_of_week: days,
         }],
@@ -799,7 +812,10 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
         <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Start</span><input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-1`} /></label>
         <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-1`} /></label>
       </div>
-      <label className="block max-w-[120px]"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-1`} /></label>
+      <div className="grid max-w-sm grid-cols-2 gap-2">
+        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-1`} /></label>
+        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Planned break (minutes)</span><input type="number" min="0" step="5" value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-1`} /></label>
+      </div>
       <div>
         <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
         <div className="flex gap-1 mt-1">
