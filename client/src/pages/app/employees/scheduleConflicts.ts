@@ -37,9 +37,12 @@ export function conflictPrompt(err: unknown): string | null {
     const violations = (detail.violations ?? []) as unknown as ComplianceViolation[]
     const lines = violations.map((v) => `• ${v.message}${v.statute ? ` [${v.statute}]` : ''}`)
     const allFairWorkweek = violations.length > 0 && violations.every((v) => v.check?.startsWith('fair_workweek_'))
-    const lead = allFairWorkweek
-      ? 'This change may trigger Fair Workweek obligations:'
-      : 'This shift may not comply with scheduling law:'
+    const hasMealBreakViolation = violations.some((v) => v.check === 'meal_break')
+    const lead = hasMealBreakViolation
+      ? 'This shift needs a compliant break plan. Cancel, edit the shift, and set Planned break (minutes) before assigning:'
+      : allFairWorkweek
+        ? 'This change may trigger Fair Workweek obligations:'
+        : 'This shift may not comply with scheduling law:'
     return `${lead}\n${lines.join('\n')}\n\nSchedule anyway?`
   }
   if (detail?.code === 'outside_availability') {

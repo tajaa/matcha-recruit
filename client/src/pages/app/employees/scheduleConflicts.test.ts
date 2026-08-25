@@ -28,6 +28,8 @@ describe('conflictPrompt', () => {
       violations: [{ check: 'meal_break', severity: 'advisory', message: 'Missing meal break' }],
     }))
     expect(prompt).toContain('Missing meal break')
+    expect(prompt).toContain('edit the shift')
+    expect(prompt).toContain('Planned break (minutes)')
     expect(prompt).toContain('Schedule anyway?')
   })
 
