@@ -25,11 +25,44 @@ def _basis(value) -> dict:
 # needs no per-tenant setup. Either alone is sufficient. crt is a LEFT JOIN
 # so a requirement created with no template (credential_type_id is NOT NULL
 # on the table, so ct itself is always resolvable) still participates.
+#
+# The curated authority is a company-wide opt-OUT, not opt-in: a tenant that
+# doesn't want a curated type (e.g. food_handler_card) to hard-block
+# scheduling can create (or edit) any of their own approved templates for
+# that credential_type with schedule_blocking=false (no legal-basis citation
+# required to turn a block off — only to turn one on) via the existing
+# POST/PUT /templates routes. Its presence is treated as a deliberate,
+# reviewed decision and suppresses the curated fallback for that credential
+# type company-wide, independent of the state/role that template names.
 _BLOCKING_AUTHORITY_SQL = """
     AND (
         (crt.schedule_blocking = true AND crt.review_status IN ('approved', 'auto_approved'))
-        OR COALESCE(ct.schedule_blocking, false) = true
+        OR (
+            COALESCE(ct.schedule_blocking, false) = true
+            AND NOT EXISTS (
+                SELECT 1 FROM credential_requirement_templates opt_out
+                WHERE opt_out.company_id = e.org_id
+                  AND opt_out.credential_type_id = ct.id
+                  AND opt_out.is_active = true
+                  AND opt_out.review_status IN ('approved', 'auto_approved')
+                  AND opt_out.schedule_blocking = false
+            )
+        )
     )
+"""
+
+# credential_requirement_templates.warning_days is NOT NULL DEFAULT 14, so a
+# blind COALESCE(crt.warning_days, ct.warning_days, 14) always picks crt's
+# default the moment any template is joined — silently shadowing a curated
+# type's real warning_days (e.g. 30) even when that template isn't the
+# active blocking authority. Pick the value from whichever side actually
+# governs the block, matching _BLOCKING_AUTHORITY_SQL's precedence.
+_WARNING_DAYS_SQL = """
+    CASE
+        WHEN crt.schedule_blocking = true AND crt.review_status IN ('approved', 'auto_approved')
+            THEN crt.warning_days
+        ELSE COALESCE(ct.warning_days, 14)
+    END
 """
 
 
@@ -40,7 +73,7 @@ async def _schedule_blocking_requirements(conn, company_id: UUID, employee_ids: 
         f"""
         SELECT ecr.id, ecr.employee_id, ecr.status, ecr.expires_at,
                ct.label, ct.has_expiration,
-               COALESCE(crt.warning_days, ct.warning_days, 14) AS warning_days,
+               {_WARNING_DAYS_SQL} AS warning_days,
                crt.legal_basis
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id
@@ -171,7 +204,8 @@ async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: d
     rows = await conn.fetch(
         f"""
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.expires_at, crt.legal_basis,
-               COALESCE(crt.warning_days, ct.warning_days, 14) AS warning_days
+               e.work_location_id,
+               {_WARNING_DAYS_SQL} AS warning_days
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
@@ -187,10 +221,10 @@ async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: d
         case_id = await conn.fetchval(
             """
             INSERT INTO schedule_eligibility_cases
-                (company_id, employee_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
-            VALUES ($1,$2,'credential',$3,'credential_expiring','warning_open',$4,$5::jsonb)
+                (company_id, employee_id, location_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
+            VALUES ($1,$2,$3,'credential',$4,'credential_expiring','warning_open',$5,$6::jsonb)
             ON CONFLICT DO NOTHING RETURNING id
-            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+            """, company_id, row['employee_id'], row['work_location_id'], row['requirement_id'], row['expires_at'],
             json.dumps(_basis(row['legal_basis'])),
         )
         if case_id:
@@ -203,7 +237,7 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
     rows = await conn.fetch(
         f"""
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.status, ecr.expires_at, ct.label, ct.has_expiration,
-               crt.legal_basis
+               crt.legal_basis, e.work_location_id
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
@@ -228,30 +262,49 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
         for assignment in assignments:
             by_location.setdefault(assignment["location_id"], []).append(assignment)
 
-        # A warning_open case for this exact (employee, requirement, expiry)
-        # may already exist from open_expiring_eligibility_warnings — the
-        # unique partial index covers warning_open too, so a plain INSERT
-        # here would silently no-op via ON CONFLICT DO NOTHING and the
-        # removal case would never be created. Promote it instead.
+        if not by_location:
+            # Nothing upcoming to review — closing the stale warning (if any)
+            # beats opening a removal_requested case with zero assignments
+            # and no email that would otherwise sit open forever.
+            await conn.execute(
+                """UPDATE schedule_eligibility_cases
+                     SET status = 'resolved', resolution_reason = 'expired_no_assignments',
+                         resolved_at = NOW(), updated_at = NOW()
+                   WHERE company_id = $1 AND employee_id = $2 AND requirement_type = 'credential'
+                     AND requirement_id = $3 AND expires_at = $4 AND status = 'warning_open'""",
+                company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+            )
+            continue
+
+        primary_location = row["work_location_id"]
+
+        # A warning_open case for this exact (employee, requirement, expiry,
+        # location) may already exist from open_expiring_eligibility_warnings
+        # — the unique partial index covers warning_open too, so a plain
+        # INSERT here would silently no-op via ON CONFLICT DO NOTHING and the
+        # removal case would never be created. Promote it instead, then fall
+        # through to the per-location loop below for every OTHER location
+        # the employee is assigned at — an employee working two locations
+        # must produce two cases, one per location's manager.
         promoted_id = await conn.fetchval(
             """
             UPDATE schedule_eligibility_cases
-               SET status = 'removal_requested', blocking_reason_code = $5, updated_at = NOW()
+               SET status = 'removal_requested', blocking_reason_code = $6, updated_at = NOW()
              WHERE company_id = $1 AND employee_id = $2 AND requirement_type = 'credential'
-               AND requirement_id = $3 AND expires_at = $4 AND status = 'warning_open'
+               AND requirement_id = $3 AND expires_at = $4
+               AND location_id IS NOT DISTINCT FROM $5 AND status = 'warning_open'
             RETURNING id
-            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'], reason_code,
+            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+            primary_location, reason_code,
         )
         if promoted_id:
             opened.append(promoted_id)
-            for location_assignments in by_location.values():
-                for assignment in location_assignments:
-                    await conn.execute(
-                        """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
-                           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
-                        promoted_id, assignment["shift_id"], row["employee_id"], assignment["starts_at"],
-                    )
-            continue
+            for assignment in by_location.pop(primary_location, []):
+                await conn.execute(
+                    """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
+                       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
+                    promoted_id, assignment["shift_id"], row["employee_id"], assignment["starts_at"],
+                )
 
         for location_id, location_assignments in by_location.items():
             case_id = await conn.fetchval(

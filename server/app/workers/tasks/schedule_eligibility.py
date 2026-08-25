@@ -26,11 +26,14 @@ async def _dispatch() -> dict:
         opened = 0
         warned = 0
         for company in companies:
-            # Warnings first: a credential that crosses from "inside its
-            # warning window" to "expired" in the SAME run must still get
-            # its removal_requested case (open_expired_eligibility_cases
-            # promotes a same-run warning_open row rather than relying on
-            # ON CONFLICT DO NOTHING, which would otherwise no-op it).
+            # Warnings first, then expirations, on every run. A credential
+            # already past its warning threshold on a PRIOR run may cross
+            # into expired on this one — its warning_open row still needs
+            # promoting to removal_requested, which open_expired_eligibility_cases
+            # does explicitly (a plain INSERT would silently no-op via
+            # ON CONFLICT DO NOTHING). Same-run crossing is not possible:
+            # the warning query requires expires_at >= as_of and the expired
+            # path requires expires_at < as_of.
             warning_ids = await open_expiring_eligibility_warnings(conn, company["id"], as_of=date.today())
             warned += len(warning_ids)
             for case_id in warning_ids:
@@ -44,19 +47,51 @@ async def _dispatch() -> dict:
         await conn.close()
 
 
+async def _location_scoped_recipients(conn, *, company_id, location_id, exclude_email=None) -> list[dict]:
+    """Managers/supervisors at the case's location (plus its operational
+    mailboxes) when the case is location-scoped; whole-company managers for
+    an unscoped case — mirrors EligibilityManagerScope.permits(). Always
+    deduped by email so a manager who is also the subject employee, or who
+    appears in more than one source, gets exactly one email."""
+    if location_id is not None:
+        managers = await conn.fetch(
+            """SELECT DISTINCT email, first_name FROM employees
+               WHERE org_id=$1 AND work_location_id=$2
+                 AND COALESCE(employment_status, 'active')='active'
+                 AND (COALESCE(is_manager,false) OR COALESCE(is_supervisor,false))
+                 AND email IS NOT NULL""", company_id, location_id)
+        operational = await conn.fetch(
+            """SELECT email, display_name AS first_name FROM schedule_location_notification_recipients
+               WHERE company_id=$1 AND location_id=$2 AND is_active""", company_id, location_id)
+        candidates = list(managers) + list(operational)
+    else:
+        candidates = await conn.fetch(
+            """SELECT DISTINCT email, first_name FROM employees
+               WHERE org_id=$1 AND COALESCE(employment_status, 'active')='active'
+                 AND (COALESCE(is_manager,false) OR COALESCE(is_supervisor,false))
+                 AND email IS NOT NULL""", company_id)
+    exclude = (exclude_email or "").strip().lower()
+    seen: set[str] = set()
+    deduped = []
+    for row in candidates:
+        email = (row["email"] or "").strip().lower()
+        if not email or email == exclude or email in seen:
+            continue
+        seen.add(email)
+        deduped.append(row)
+    return deduped
+
+
 async def _send_removal_requested_email(conn, case_id) -> None:
-    """Notify company managers of a pending decision without claiming legal advice."""
+    """Notify the case's location managers of a pending decision without claiming legal advice."""
     case = await conn.fetchrow(
-        """SELECT c.employee_id, c.expires_at, e.first_name, e.last_name
+        """SELECT c.company_id, c.employee_id, c.location_id, c.expires_at, e.first_name, e.last_name
            FROM schedule_eligibility_cases c JOIN employees e ON e.id=c.employee_id WHERE c.id=$1""", case_id)
     if not case:
         return
-    recipients = await conn.fetch(
-        """SELECT DISTINCT email, first_name FROM employees
-           WHERE org_id=(SELECT company_id FROM schedule_eligibility_cases WHERE id=$1)
-             AND COALESCE(employment_status, 'active')='active'
-             AND (COALESCE(is_manager,false) OR COALESCE(is_supervisor,false))
-             AND email IS NOT NULL""", case_id)
+    recipients = await _location_scoped_recipients(
+        conn, company_id=case["company_id"], location_id=case["location_id"],
+    )
     if not recipients:
         return
     from app.core.services.email import get_email_service
@@ -74,19 +109,19 @@ async def _send_removal_requested_email(conn, case_id) -> None:
 
 async def _send_expiry_warning_email(conn, case_id) -> None:
     """Advance-warning notice for a credential entering its warning window —
-    goes to both the subject employee and company managers, unlike the
-    removal-requested email above (manager-only, fires only after expiry).
-    Skips any recipient with no email on file rather than raising."""
+    goes to both the subject employee and the case's location managers,
+    unlike the removal-requested email above (manager-only, fires only
+    after expiry). Skips any recipient with no email on file rather than
+    raising, and never double-sends to a manager who is also the subject."""
     case = await conn.fetchrow(
-        """SELECT c.company_id, c.employee_id, c.expires_at, e.first_name, e.last_name, e.email AS employee_email
+        """SELECT c.company_id, c.employee_id, c.location_id, c.expires_at, e.first_name, e.last_name, e.email AS employee_email
            FROM schedule_eligibility_cases c JOIN employees e ON e.id=c.employee_id WHERE c.id=$1""", case_id)
     if not case:
         return
-    managers = await conn.fetch(
-        """SELECT DISTINCT email, first_name FROM employees
-           WHERE org_id=$1 AND COALESCE(employment_status, 'active')='active'
-             AND (COALESCE(is_manager,false) OR COALESCE(is_supervisor,false))
-             AND email IS NOT NULL""", case["company_id"])
+    managers = await _location_scoped_recipients(
+        conn, company_id=case["company_id"], location_id=case["location_id"],
+        exclude_email=case["employee_email"],
+    )
     recipients = list(managers)
     if case["employee_email"]:
         recipients.append({"email": case["employee_email"], "first_name": case["first_name"]})
