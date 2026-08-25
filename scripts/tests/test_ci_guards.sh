@@ -84,7 +84,7 @@ run_build_version_case() {
     fi
 
     local out
-    out=$(cd "$tmp" && env -u CI -u GITHUB_ACTIONS ${run_number:+GITHUB_RUN_NUMBER="$run_number"} bash -c '
+    out=$(cd "$tmp" && env -u CI -u GITHUB_ACTIONS -u GITHUB_RUN_NUMBER ${run_number:+GITHUB_RUN_NUMBER="$run_number"} bash -c '
         source ./build-and-push.sh
         bump_landing_build_version
         echo "VERSION=${LANDING_BUILD_VERSION}"
