@@ -164,6 +164,8 @@ run_doctor() {
     check "aws sts get-caller-identity" exec_workspace aws sts get-caller-identity
 
     echo "Host local dev services:"
+    check "DATABASE_URL targets host gateway" exec_workspace bash -c 'case "${DATABASE_URL:-}" in postgresql://matcha:*@host.docker.internal:*/matcha) exit 0;; *) exit 1;; esac'
+    check "REDIS_URL targets host gateway" exec_workspace bash -c 'case "${REDIS_URL:-}" in redis://host.docker.internal:*/0) exit 0;; *) exit 1;; esac'
     check "matcha-postgres reachable" exec_workspace pg_isready -h host.docker.internal -p "$HOST_DB_PORT" -U matcha -d matcha
     check "matcha-redis reachable" exec_workspace redis-cli -h host.docker.internal -p "$HOST_REDIS_PORT" ping
 

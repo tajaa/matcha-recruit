@@ -18,6 +18,12 @@ services:
       AWS_REGION: ${AWS_REGION:-us-west-1}
       LOCAL_PORT: ${HOST_DB_PORT:-5432}
       REDIS_PORT: ${HOST_REDIS_PORT:-6380}
+      # Agent shells must not use the repo's host-oriented localhost URLs:
+      # inside this container, localhost is the workspace itself. Export the
+      # Docker Desktop gateway URLs so every CLI and subprocess sees the
+      # normal local dev services without needing sandbox-specific knowledge.
+      DATABASE_URL: postgresql://matcha:matcha_dev@host.docker.internal:${HOST_DB_PORT:-5432}/matcha
+      REDIS_URL: redis://host.docker.internal:${HOST_REDIS_PORT:-6380}/0
       BACKEND_PORT: ${BACKEND_PORT:-8001}
       FRONTEND_PORT: ${FRONTEND_PORT:-5174}
       TELLUS_PORT: ${TELLUS_PORT:-5191}

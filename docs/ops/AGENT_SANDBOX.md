@@ -103,6 +103,9 @@ Env vars: `AGENT_SANDBOX=1` (compose sets this automatically; `CODEX_SANDBOX=1`
 still works as an alias in `dev-remote.sh` and the two dev-DB scripts).
 `SANDBOX_UID`/`SANDBOX_GID` override the in-container user (default: your
 macOS uid/gid, so files the agent writes land owned by you, not root).
+Every sandbox shell also receives `DATABASE_URL` and `REDIS_URL` pointing at
+the normal local dev services through `host.docker.internal`; these override
+the repo `.env` files' host-only `localhost` addresses.
 `INSTALL_PLAYWRIGHT_BROWSERS=true` bakes in a Chromium for isolated Playwright
 runs. `SANDBOX_ALLOW_DEPLOY=1` permits `update-ec2.sh` from inside the sandbox.
 
