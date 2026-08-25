@@ -1,9 +1,12 @@
+import asyncio
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.matcha.services.inventory.reorder import suggest_order
 from app.matcha.services.inventory.sales_parse import parse_sales_csv_bytes
 from app.matcha.services.inventory.expected import variance_rollup
+from app.matcha.services.inventory import sales_mappings
 
 
 def test_parse_sales_csv_accepts_pos_aliases_money_and_refunds():
@@ -53,3 +56,44 @@ def test_reorder_counts_sale_movements_as_consumption():
     result = suggest_order(movements, now)
     assert result is not None
     assert result["daily_rate"] > 0
+
+
+class _FakeMappingConn:
+    """asyncpg returns jsonb_agg(...) as a raw JSON string (no jsonb codec
+    registered app-wide) — list_mappings/resolve_sold_lines must decode it,
+    not hand a string straight to the caller."""
+
+    def __init__(self, components):
+        self._components_json = json.dumps(components)
+
+    async def fetch(self, query, *_args):
+        if "inventory_sales_mappings" in query:
+            return [{
+                "id": "mapping-latte", "company_id": "co-1", "location_id": None,
+                "sold_name": "Vanilla latte", "normalized_name": "vanilla latte",
+                "kind": "recipe", "components": self._components_json,
+            }]
+        if "inventory_items" in query:
+            return []
+        raise AssertionError(f"unexpected fetch: {query}")
+
+
+def test_list_mappings_decodes_jsonb_string_components():
+    components = [{"item_id": "cup", "quantity_per_sale": 1, "unit": "each"}]
+    conn = _FakeMappingConn(components)
+    result = asyncio.run(sales_mappings.list_mappings(conn, "co-1"))
+    assert result[0]["components"] == components
+
+
+def test_resolve_sold_lines_does_not_choke_on_string_components():
+    components = [
+        {"item_id": "cup", "quantity_per_sale": 1, "unit": "each"},
+        {"item_id": "milk", "quantity_per_sale": 0.25, "unit": "l"},
+    ]
+    conn = _FakeMappingConn(components)
+    resolved = asyncio.run(sales_mappings.resolve_sold_lines(
+        conn, company_id="co-1", location_id=None,
+        lines=[{"item_name": "Vanilla latte", "quantity": 3, "gross_sales": 18}],
+    ))
+    assert resolved[0]["status"] == "mapped"
+    assert resolved[0]["components"] == components

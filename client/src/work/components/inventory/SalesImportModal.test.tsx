@@ -63,4 +63,35 @@ describe('SalesImportModal mapping payloads', () => {
     draft.components[2].quantity_per_sale = ''
     expect(isLineValid(draft)).toBe(false)
   })
+
+  it('does not throw when components arrives as an undecoded JSONB string', () => {
+    // Regression: asyncpg has no jsonb codec registered, so a caller that
+    // forgets to decode jsonb_agg(...) hands this component list back as a
+    // raw JSON string, not an array — toDraftLine must not crash on it.
+    const undecoded = { ...recipe, components: '[{"item_id":"cup","quantity_per_sale":1}]' as unknown as SalesLine['components'] }
+    const draft = toDraftLine(undecoded)
+    expect(draft.components).toEqual([{ item_id: '', quantity_per_sale: '1', unit: null }])
+  })
+
+  it('derives an explicit kind from the server mapping_kind, defaulting by component count', () => {
+    expect(toDraftLine(recipe).kind).toBe('recipe')
+    expect(toDraftLine({ ...recipe, components: [recipe.components![0]] }).kind).toBe('direct')
+    expect(toDraftLine({ ...recipe, mapping_kind: 'direct' }).kind).toBe('direct')
+  })
+
+  it('rejects a direct-kind line with more than one component', () => {
+    const draft = toDraftLine(recipe)
+    draft.kind = 'direct'
+    expect(isLineValid(draft)).toBe(false)
+  })
+
+  it('sends the line’s explicit kind, not a component-count guess', () => {
+    const draft = toDraftLine(recipe)
+    draft.mappingDirty = true
+    draft.mapping_id = null
+    draft.kind = 'direct'
+    draft.components = [draft.components[0]]
+    const payload = buildCommitLine(draft, 'loc-1')
+    expect(payload.new_mapping?.kind).toBe('direct')
+  })
 })

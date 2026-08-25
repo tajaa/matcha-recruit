@@ -8,6 +8,7 @@ from uuid import UUID
 from app.core.services.secret_crypto import decrypt_secret, encrypt_secret
 from app.matcha.services.inventory import sales_commit
 from app.matcha.services.inventory.sales_commit import DuplicateSalesPeriodError
+from app.matcha.services.inventory._codec import decode_jsonb
 from . import provider_for
 
 
@@ -79,7 +80,7 @@ async def _sync_one_connection(
         row["external_item_id"]: {
             "mapping_id": row["mapping_id"],
             "kind": row["kind"],
-            "components": row["components"] or [],
+            "components": decode_jsonb(row["components"], []) or [],
         }
         for row in mapping_rows
     }

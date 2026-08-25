@@ -13,8 +13,11 @@ export type DraftComponent = {
   unit?: string | null
 }
 
+export type MappingKind = 'direct' | 'recipe' | 'ignore'
+
 export type DraftLine = Omit<SalesLine, 'components'> & {
   components: DraftComponent[]
+  kind: MappingKind
   ignored: boolean
   mappingDirty: boolean
   commitError?: string
@@ -23,7 +26,7 @@ export type DraftLine = Omit<SalesLine, 'components'> & {
 const emptyComponent = (): DraftComponent => ({ item_id: '', quantity_per_sale: '1', unit: null })
 
 export function toDraftLine(line: SalesLine): DraftLine {
-  const components = line.components?.length
+  const components = Array.isArray(line.components) && line.components.length
     ? line.components.map((component) => ({
       item_id: component.item_id,
       quantity_per_sale: String(component.quantity_per_sale),
@@ -36,9 +39,15 @@ export function toDraftLine(line: SalesLine): DraftLine {
         unit: null,
       }]
       : [emptyComponent()]
+  const kind: MappingKind = line.status === 'ignored'
+    ? 'ignore'
+    : line.mapping_kind === 'direct' || line.mapping_kind === 'recipe'
+      ? line.mapping_kind
+      : components.length > 1 ? 'recipe' : 'direct'
   return {
     ...line,
     components: line.status === 'ignored' ? [] : components,
+    kind,
     ignored: line.status === 'ignored',
     mappingDirty: false,
   }
@@ -110,8 +119,8 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
       setDraft(result)
       setLines(result.lines.map(toDraftLine))
       if (!result.available) toast("Couldn't read any sales lines from that file.", 'error')
-    } catch {
-      toast('Failed to parse the sales export', 'error')
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : 'Failed to parse the sales export', 'error')
     } finally {
       setParsing(false)
     }
@@ -146,16 +155,17 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
       : line))
   }
 
-  function markIgnored(index: number) {
-    updateLine(index, {
-      ignored: true, status: 'ignored', mapping_id: null, components: [], mappingDirty: true, commitError: undefined,
-    })
-  }
-
-  function undoIgnore(index: number) {
-    updateLine(index, {
-      ignored: false, status: 'unmapped', mapping_id: null, components: [emptyComponent()], mappingDirty: true,
-    })
+  function setLineKind(lineIndex: number, kind: MappingKind) {
+    setLines((prev) => prev.map((line, index) => {
+      if (index !== lineIndex) return line
+      if (kind === 'ignore') {
+        return { ...line, kind, ignored: true, status: 'ignored', mapping_id: null, components: [], mappingDirty: true, commitError: undefined }
+      }
+      const components = kind === 'direct'
+        ? line.components.length ? [line.components[0]] : [emptyComponent()]
+        : line.components.length ? line.components : [emptyComponent()]
+      return { ...line, kind, ignored: false, status: 'mapped', mapping_id: null, components, mappingDirty: true, commitError: undefined }
+    }))
   }
 
   async function createAndMap(index: number) {
@@ -165,7 +175,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
       const item = await createItem({ name: line.sold_name, location_id: locationId })
       updateLine(index, {
         components: [{ item_id: item.id, quantity_per_sale: '1', unit: item.unit ?? null }],
-        mapping_id: null, mappingDirty: true, status: 'mapped', ignored: false, commitError: undefined,
+        kind: 'direct', mapping_id: null, mappingDirty: true, status: 'mapped', ignored: false, commitError: undefined,
       })
       onCommitted()
     } catch {
@@ -229,25 +239,29 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
                   <span className="text-zinc-500">{line.quantity} sold</span>
                 </div>
                 {line.commitError && <p className="text-xs text-red-400">{line.commitError}</p>}
+                <Select
+                  label="Mapping type"
+                  options={[{ value: 'direct', label: 'Direct item' }, { value: 'recipe', label: 'Recipe' }, { value: 'ignore', label: 'Ignore sale' }]}
+                  value={line.kind}
+                  onChange={(event) => setLineKind(index, event.target.value as MappingKind)}
+                  className="w-40"
+                />
                 {line.ignored ? (
-                  <div className="flex items-center justify-between text-xs text-amber-400">
-                    <span>Ignored by mapping</span>
-                    <button type="button" onClick={() => undoIgnore(index)} className="hover:underline">Undo</button>
-                  </div>
+                  <p className="text-xs text-amber-400">This sale will be ignored — no stock will be deducted.</p>
                 ) : (
                   <div className="space-y-2">
                     {line.components.map((component, componentIndex) => {
                       const selectedElsewhere = new Set(line.components.filter((_, i) => i !== componentIndex).map((entry) => entry.item_id))
                       const options = itemOptions.filter((option) => !selectedElsewhere.has(option.value))
                       return <div key={componentIndex} className="flex items-end gap-2">
-                        <Select label={`Stock component ${componentIndex + 1}`} options={options} value={component.item_id} onChange={(event) => updateComponent(index, componentIndex, { item_id: event.target.value })} placeholder="Map to stock item…" className="min-w-0 flex-1" />
+                        <Select label={line.kind === 'recipe' ? `Ingredient ${componentIndex + 1}` : 'Stock item'} options={options} value={component.item_id} onChange={(event) => updateComponent(index, componentIndex, { item_id: event.target.value })} placeholder="Map to stock item…" className="min-w-0 flex-1" />
                         <label className="w-24 text-xs text-zinc-400">Units/sale<input type="number" min={0.0001} step="any" value={component.quantity_per_sale} onChange={(event) => updateComponent(index, componentIndex, { quantity_per_sale: event.target.value })} className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm" /></label>
-                        {line.components.length > 1 && <button type="button" onClick={() => removeComponent(index, componentIndex)} className="mb-1 text-xs text-zinc-400 hover:text-zinc-100">Remove</button>}
+                        <label className="w-20 text-xs text-zinc-400">Unit<input value={component.unit ?? ''} onChange={(event) => updateComponent(index, componentIndex, { unit: event.target.value || null })} placeholder="Optional" className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm placeholder:text-zinc-600" /></label>
+                        {line.kind === 'recipe' && line.components.length > 1 && <button type="button" onClick={() => removeComponent(index, componentIndex)} className="mb-1 text-xs text-zinc-400 hover:text-zinc-100">Remove</button>}
                       </div>
                     })}
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                      <button type="button" onClick={() => addComponent(index)} className="text-blue-300 hover:underline">Add component</button>
-                      <button type="button" onClick={() => markIgnored(index)} className="text-amber-400 hover:underline">Ignore</button>
+                      {line.kind === 'recipe' && <button type="button" onClick={() => addComponent(index)} className="text-blue-300 hover:underline">Add ingredient</button>}
                       <button type="button" onClick={() => void createAndMap(index)} className="text-emerald-400 hover:underline">New item</button>
                     </div>
                   </div>
@@ -282,9 +296,10 @@ function validComponents(line: DraftLine): SalesMappingComponentInput[] {
 }
 
 export function isLineValid(line: DraftLine) {
-  if (line.ignored) return true
+  if (line.kind === 'ignore') return true
   const components = validComponents(line)
-  return components.length > 0 && components.every((component) => component.item_id && Number.isFinite(component.quantity_per_sale) && component.quantity_per_sale > 0)
+  const countOk = line.kind === 'direct' ? components.length === 1 : components.length > 0
+  return countOk && components.every((component) => component.item_id && Number.isFinite(component.quantity_per_sale) && component.quantity_per_sale > 0)
     && new Set(components.map((component) => component.item_id)).size === components.length
 }
 
@@ -309,7 +324,7 @@ export function buildCommitLine(line: DraftLine, locationId?: string): SalesLine
     ...(needsMapping ? {
       new_mapping: {
         sold_name: line.sold_name,
-        kind: components.length === 1 ? 'direct' : 'recipe',
+        kind: line.kind,
         location_id: locationId ?? null,
         components,
       },

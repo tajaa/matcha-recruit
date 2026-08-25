@@ -35,6 +35,7 @@ from app.matcha.services.inventory import expected as expected_service
 from app.matcha.services.inventory import voice_audit
 from app.matcha.services.inventory.matching import normalize_name
 from app.matcha.services.inventory.reorder import suggest_order
+from app.matcha.services.inventory._codec import decode_jsonb
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -511,7 +512,14 @@ async def get_sales_import(
         )
     if row is None:
         raise HTTPException(404, "Sales import not found.")
-    return {**dict(row), "lines": [dict(line) for line in lines]}
+    import_dict = dict(row)
+    import_dict["raw"] = decode_jsonb(import_dict.get("raw"), None)
+    decoded_lines = []
+    for line in lines:
+        line_dict = dict(line)
+        line_dict["components"] = decode_jsonb(line_dict.get("components"), []) or []
+        decoded_lines.append(line_dict)
+    return {**import_dict, "lines": decoded_lines}
 
 
 @router.delete("/sales/imports/{import_id}")

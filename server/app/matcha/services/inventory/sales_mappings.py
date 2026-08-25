@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.matcha.services.inventory.matching import best_match, normalize_name
 from app.matcha.services.inventory import movements as movements_service
+from app.matcha.services.inventory._codec import decode_jsonb
 
 
 async def list_mappings(conn, company_id: UUID, location_id: Optional[UUID] = None) -> list[dict]:
@@ -21,7 +22,12 @@ async def list_mappings(conn, company_id: UUID, location_id: Optional[UUID] = No
         """,
         company_id, location_id,
     )
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        mapping = dict(row)
+        mapping["components"] = decode_jsonb(mapping.get("components"), []) or []
+        result.append(mapping)
+    return result
 
 
 async def validate_mapping(

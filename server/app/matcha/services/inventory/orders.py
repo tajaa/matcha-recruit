@@ -1,22 +1,16 @@
 """DB service for the inventory order queue."""
 
-import json
 from datetime import date
 from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory import movements as movements_service
+from app.matcha.services.inventory._codec import decode_jsonb
 from app.matcha.services.inventory.waste import lots as lots_service
 
 
 def decode_suggestion(value):
-    """asyncpg returns JSONB as str (no jsonb codec registered app-wide)."""
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except ValueError:
-            return None
-    return value
+    return decode_jsonb(value, None)
 
 
 async def stage_order(

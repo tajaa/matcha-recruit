@@ -300,6 +300,7 @@ export interface SalesLine {
   status: 'mapped' | 'unmapped' | 'ignored'
   matched_name?: string | null
   auto_match?: { id: string; name: string } | null
+  mapping_kind?: 'direct' | 'recipe' | 'ignore' | null
 }
 
 export type SalesMappingComponentInput = {
