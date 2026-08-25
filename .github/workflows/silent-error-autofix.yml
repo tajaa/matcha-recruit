@@ -2,7 +2,7 @@ name: Silent error autofix
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 # This must run on Finch's Mac. It uses that user's authenticated OpenCode
@@ -65,6 +65,9 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
+          # 24 hours is the lookback, not the cadence. The workflow runs every
+          # 10 minutes; the wider window prevents runner downtime or a long
+          # investigation from making an unresolved incident disappear.
           if ./scripts/error-autofix/collect.sh --hours 24 --limit 25 > "$RUNNER_TEMP/incidents.json"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
@@ -143,24 +146,18 @@ jobs:
         run: |
           ./scripts/error-autofix/investigate.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/correlated-log.txt"
 
-      - name: No usable investigation — track as issue and stop
+      - name: Fail incomplete investigation
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          # investigate.sh can die AFTER the model has already edited files
-          # (report missing, or a required heading missing — checked only
-          # after the model run). Without discarding those partial edits
-          # first, publish.sh's `git add --all` would find a real diff and
-          # take the PR path instead of the issue path — shipping a
-          # possibly-broken, definitely-unreviewed fix under a body that
-          # says "Investigation failed."
+          # investigate.sh can die after the model edited files. Discard those
+          # unverified edits, fail the run visibly, and leave the incident
+          # eligible for a later retry. A harness/model failure is not a
+          # legitimate "no safe fix" conclusion and must not create a durable
+          # autofix-nofix issue that blocks the queue forever.
           git reset --hard HEAD
           git clean -fd
-          echo "Investigation failed or produced no report." > "$RUNNER_TEMP/report.md"
-          echo "### Verification" > "$RUNNER_TEMP/verification.md"
-          echo "_(not run — investigation did not complete)_" >> "$RUNNER_TEMP/verification.md"
-          ./scripts/error-autofix/publish.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
+          echo "Investigation failed before producing a valid report; this incident remains eligible for retry." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - name: Verify (baseline vs branch)
         id: verify

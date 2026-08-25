@@ -56,7 +56,7 @@ ATTACH_ARGS=(-f "$MODEL_INCIDENT")
 env -u GH_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
     opencode run --auto --model openai/gpt-5.6-luna \
     "${ATTACH_ARGS[@]}" \
-    "$(cat "$PROMPT_FILE")"
+    -- "$(cat "$PROMPT_FILE")"
 
 if [ ! -s "$REPORT_FILE" ]; then
     die "investigation produced no report at $REPORT_FILE"

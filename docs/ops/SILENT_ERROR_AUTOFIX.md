@@ -1,10 +1,15 @@
 # Silent Error Autofix
 
-`.github/workflows/silent-error-autofix.yml` runs hourly on this Mac's self-hosted
+`.github/workflows/silent-error-autofix.yml` runs every 10 minutes on this Mac's self-hosted
 GitHub Actions runner. The unit of work is **one row (grouped by stable key) in
 `server_error_reports`**, not a log window — that's the fix for the original problem,
 where five PRs (#242-#247) were opened for two bugs because the whole 20-minute log
 window was hashed as one "incident".
+
+The collector still looks back 24 hours. That is a recovery window, not the
+schedule: selection dedupes against GitHub and the local attempt cache, so a wide
+lookback catches incidents missed during runner downtime without reinvestigating
+handled incidents every 10 minutes.
 
 Pipeline (`scripts/error-autofix/`):
 
@@ -24,7 +29,8 @@ Pipeline (`scripts/error-autofix/`):
    interpolated into the prompt), that must produce a markdown report with four
    required headings (Root cause / Fix / Blast radius / Confidence). **The model never
    reports test results** — that's the next script's job, and anything it writes about
-   tests there is discarded.
+   tests there is discarded. `--` terminates the repeated `--file` option before the
+   prompt; without it OpenCode interprets the prompt itself as another attachment.
 4. **`verify.sh`** — runs the same checks against `main` and the branch and diffs
    *failing test node IDs* (not counts), so a pre-existing failure never counts against
    the PR. Uses the dev venv (`server/venv`) as the interpreter rather than building a
@@ -71,9 +77,10 @@ It never deploys or auto-merges. A human reads the PR body and decides.
   writer of `resolved_at` is a person clicking Resolve in `/admin/server-errors` —
   nothing in the deploy path resolves anything automatically.
 - Failures fail loud where it matters (SSH/DB unreachable, path guard tripped, PR push
-  failed) and degrade gracefully where it doesn't (no incidents found, verification
-  toolchain missing → PR still opens, labeled `needs-work`, with an explicit
-  "checks did not run" banner — never a silently blank table).
+  failed, or an incomplete model investigation) and degrade gracefully where it doesn't
+  (no incidents found, verification toolchain missing → PR still opens, labeled
+  `needs-work`, with an explicit "checks did not run" banner — never a silently blank
+  table).
 
 ## Known gap
 

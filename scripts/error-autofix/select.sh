@@ -62,7 +62,10 @@ already_handled() {
     [[ "$key" =~ ^[0-9a-f]{12}$ ]] || die "stable_key has unexpected shape: $key"
     local open_issue_hit
     open_issue_hit="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
-        --json title --jq "map(select(.title | contains(\"[$key]\"))) | length")"
+        --json title,body --jq "map(select(
+            (.title | contains(\"[$key]\")) and
+            ((.body // \"\") | contains(\"Investigation failed or produced no report.\") | not)
+        )) | length")"
     if [ "${open_issue_hit:-0}" -gt 0 ]; then
         echo skip
         return
