@@ -56,3 +56,19 @@ def test_bilateral_migration_removes_pickups_before_legacy_constraint():
     delete_at = source.index("DELETE FROM schedule_requests WHERE request_type = 'pickup'")
     constraint_at = source.rindex("schedule_requests_request_type_check\"")
     assert delete_at < constraint_at
+
+
+def test_counterparty_confirmation_queues_notification_after_commit():
+    portal = Path(__file__).parents[2] / "app/matcha/routes/employee_portal/schedule.py"
+    source = portal.read_text()
+    commit_read_at = source.index("row = await conn.fetchrow(f\"{REQUEST_SELECT} WHERE r.id = $1\", request_id)")
+    enqueue_at = source.index("send_schedule_request_notifications.delay(str(request_id))")
+    assert commit_read_at < enqueue_at
+
+
+def test_notification_outbox_is_idempotent_and_migration_activates_digest():
+    migration = Path(__file__).parents[2] / "alembic/versions/empsched13_schedule_round2_followups.py"
+    source = migration.read_text()
+    assert "UNIQUE (request_id, recipient_user_id, event_type)" in source
+    assert "UPDATE scheduler_settings SET enabled=true WHERE task_key='schedule_daily_digest'" in source
+    assert "'schedule_request_notifications'" in source

@@ -9,6 +9,7 @@ import { LeaveEligibilityPanel } from '../../../components/employees/LeaveEligib
 import SupervisorToggle from '../../../components/employees/SupervisorToggle'
 import { EmployeeTrainingPanel } from '../../../components/employees/EmployeeTrainingPanel'
 import { MinorCompliancePanel } from '../../../components/employees/MinorCompliancePanel'
+import { MealBreakWaiverPanel } from '../../../components/employees/MealBreakWaiverPanel'
 import { useEmployeeDetail } from '../../../hooks/employees/useEmployeeDetail'
 import { useMe } from '../../../hooks/useMe'
 import { typeLabel, statusLabel } from '../../../types/employee'
@@ -316,6 +317,8 @@ export default function EmployeeDetail() {
               />
             </dl>
           </Card>
+
+          {hasFeature('employee_schedule') && <MealBreakWaiverPanel employeeId={employeeId!} />}
 
           <div className="mt-4">
             <Button

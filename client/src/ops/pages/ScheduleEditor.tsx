@@ -203,6 +203,7 @@ export default function ScheduleEditor() {
                 onCreate={async (payload) => { const created = await editor.createDraft(payload); if (created) { setNewDefaults(null); setInspectorShiftId(created.id) } }}
                 onUpdate={async (payload) => { if (inspectorShift) await editor.updateShiftDraft(inspectorShift, payload) }}
                 onDelete={async () => { if (inspectorShift && await editor.removeShift(inspectorShift)) { setInspectorShiftId(null); setNewDefaults(null) } }}
+                onAssignmentUpdated={editor.reload}
                 onClose={() => { setInspectorShiftId(null); setNewDefaults(null) }}
               />
             )}

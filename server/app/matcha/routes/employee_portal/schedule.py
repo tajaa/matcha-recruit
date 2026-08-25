@@ -275,6 +275,16 @@ async def accept_schedule_request(
                  "counter_shift_id": str(counter_shift_id) if counter_shift_id else None},
             )
         row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1", request_id)
+    # Queue after the transaction commits: delivery can retry, but cannot
+    # produce a notification for a confirmation that later rolled back.
+    from app.workers.tasks.schedule_request_notifications import send_schedule_request_notifications
+    try:
+        send_schedule_request_notifications.delay(str(request_id))
+    except Exception:
+        # Confirmation is committed and must not be reported as failed merely
+        # because the broker is momentarily unavailable. The pool-free worker
+        # recovery sweep discovers the manager-ready request later.
+        pass
     return serialize_request(dict(row))
 
 

@@ -7,11 +7,47 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
-from ...models.scheduling.employee_schedule import MealWaiverAttestationUpdate
+from ...models.scheduling.employee_schedule import (
+    MealWaiverAttestationResponse,
+    MealWaiverAttestationUpdate,
+)
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ._shared import assert_employee_in_company, require_company_id
 
 router = APIRouter()
+
+
+@router.get("/employees/{employee_id}/meal-break-waiver", response_model=MealWaiverAttestationResponse)
+async def get_meal_break_waiver(
+    employee_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Return the waiver attestation effective today, without exposing history."""
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_employee_in_company(conn, company_id, employee_id)
+        row = await conn.fetchrow(
+            """
+            SELECT value, effective_from, confirmed_at, note
+            FROM employee_compliance_attestations
+            WHERE company_id = $1 AND employee_id = $2
+              AND attestation_type = 'meal_break_waiver_on_file'
+              AND effective_from <= CURRENT_DATE
+            ORDER BY effective_from DESC, confirmed_at DESC
+            LIMIT 1
+            """,
+            company_id, employee_id,
+        )
+    if not row:
+        return MealWaiverAttestationResponse(employee_id=employee_id, on_file=False, attested=False)
+    return MealWaiverAttestationResponse(
+        employee_id=employee_id,
+        on_file=bool(row["value"]),
+        attested=True,
+        effective_from=row["effective_from"],
+        confirmed_at=row["confirmed_at"],
+        note=row["note"],
+    )
 
 
 @router.put("/employees/{employee_id}/meal-break-waiver")
@@ -55,11 +91,11 @@ async def attest_meal_break_waiver(
                 location_id=assignment["location_id"], starts_at=assignment["starts_at"],
                 ends_at=assignment["ends_at"],
             )
-    return {
-        "id": str(row["id"]),
-        "employee_id": str(employee_id),
-        "on_file": row["value"],
-        "effective_from": row["effective_from"].isoformat(),
-        "confirmed_at": row["confirmed_at"].isoformat(),
-        "note": row["note"],
-    }
+    return MealWaiverAttestationResponse(
+        employee_id=employee_id,
+        on_file=bool(row["value"]),
+        attested=True,
+        effective_from=row["effective_from"],
+        confirmed_at=row["confirmed_at"],
+        note=row["note"],
+    )

@@ -30,7 +30,6 @@ async def _run() -> dict:
             JOIN companies c ON c.id = l.company_id
             WHERE l.is_active IS NOT FALSE
               AND COALESCE((c.enabled_features->>'employee_schedule')::boolean, false)
-              AND COALESCE((c.enabled_features->>'matcha_ops')::boolean, false)
             ORDER BY l.company_id, l.id
             LIMIT $1
             """,

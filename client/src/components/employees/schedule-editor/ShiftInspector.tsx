@@ -1,8 +1,9 @@
 import { Check, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { updateAssignmentNote } from '../../../api/employees/employeeSchedule'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import { Card } from '../../ui'
-import type { RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
+import type { AssignmentNotePayload, ShiftAssignment, RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
 import { addDays, fmtTime } from '../../../types/employeeSchedule'
 
 export type NewShiftDefaults = {
@@ -27,6 +28,7 @@ interface ShiftInspectorProps {
   onCreate(payload: ShiftPayload): Promise<void>
   onUpdate(payload: Partial<ShiftPayload>): Promise<void>
   onDelete(): Promise<void>
+  onAssignmentUpdated(): Promise<void>
   onClose(): void
 }
 
@@ -40,7 +42,7 @@ function minuteToTime(minute: number) {
   return `${twoDigits(Math.floor(minute / 60) % 24)}:${twoDigits(minute % 60)}`
 }
 
-export default function ShiftInspector({ shift, defaults, locationId, locationName, roster, jobs, trainingEnabled, readOnly, saving, onCreate, onUpdate, onDelete, onClose }: ShiftInspectorProps) {
+export default function ShiftInspector({ shift, defaults, locationId, locationName, roster, jobs, trainingEnabled, readOnly, saving, onCreate, onUpdate, onDelete, onAssignmentUpdated, onClose }: ShiftInspectorProps) {
   const editing = !!shift
   const defaultDate = defaults?.date ?? shift?.starts_at.slice(0, 10) ?? ''
   const [date, setDate] = useState(defaultDate)
@@ -120,7 +122,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         {!editing && trainingEnabled && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Kind<select value={kind} onChange={(event) => setKind(event.target.value as 'work' | 'training')} disabled={readOnly} className={input}><option value="work">Work</option><option value="training">Training</option></select></label>}
         {!editing && trainingEnabled && kind === 'training' && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Training requirement<select value={requirementId} onChange={(event) => setRequirementId(event.target.value)} disabled={readOnly} className={input}><option value="">Select requirement...</option>{requirements.map((requirement) => <option key={requirement.id} value={requirement.id}>{requirement.title}</option>)}</select></label>}
       </div>
-      {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-1 text-zinc-300">{assignments.map((assignment) => <span key={assignment.employee_id} className="flex items-center gap-1"><span>{assignment.name}</span>{assignment.availability_overridden && <span className="text-orange-400" title="Availability override">Availability override</span>}</span>)}</span>}</div>}
+      {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} onSaved={onAssignmentUpdated} />)}</span>}</div>}
       <div className="mt-4 flex items-center gap-2">
         {!readOnly && <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}{editing ? 'Save changes' : 'Create draft'}</button>}
         {editing && !readOnly && <button onClick={onDelete} disabled={saving} className="ml-auto rounded-lg p-2 text-zinc-600 hover:bg-red-500/10 hover:text-red-400" aria-label="Delete shift"><Trash2 className="h-4 w-4" /></button>}
@@ -129,4 +131,41 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       {defaults?.employeeIds?.length ? <p className="mt-3 text-[10px] text-emerald-400">{roster.filter((employee) => defaults.employeeIds?.includes(employee.id)).map((employee) => employee.name).join(', ')} will be assigned.</p> : null}
     </Card>
   )
+}
+
+function AssignmentSummary({ shiftId, assignment, onSaved }: { shiftId: string; assignment: ShiftAssignment; onSaved: () => Promise<void> }) {
+  const [note, setNote] = useState(assignment.manager_note ?? '')
+  const [visible, setVisible] = useState(assignment.manager_note_visible_to_employee ?? true)
+  const [includeDigest, setIncludeDigest] = useState(assignment.manager_note_include_in_location_digest ?? true)
+  const [sendNotice, setSendNotice] = useState(assignment.manager_note_send_employee_notice ?? true)
+  const [saving, setSaving] = useState(false)
+  const guidance = assignment.compliance_guidance
+
+  async function saveNote() {
+    setSaving(true)
+    try {
+      const payload: AssignmentNotePayload = {
+        note: note.trim() || null,
+        visible_to_employee: visible,
+        include_in_location_digest: includeDigest,
+        send_employee_notice: sendNotice,
+      }
+      await updateAssignmentNote(shiftId, assignment.employee_id, payload)
+      await onSaved()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <div className="rounded border border-zinc-800 p-2">
+    <div className="flex items-center gap-1 text-zinc-200"><span>{assignment.name}</span>{assignment.availability_overridden && <span className="text-orange-400" title="Availability override">Availability override</span>}</div>
+    {guidance?.summary && <p className={guidance.status === 'unmapped' || guidance.status === 'error' ? 'mt-1 text-amber-300' : 'mt-1 text-sky-300'}>{guidance.summary}</p>}
+    <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Shift note for this employee" className={`${input} mt-2`} />
+    <div className="mt-1.5 grid gap-1 text-[10px] text-zinc-400">
+      <label><input type="checkbox" checked={visible} onChange={(event) => setVisible(event.target.checked)} /> Visible to employee</label>
+      <label><input type="checkbox" checked={includeDigest} onChange={(event) => setIncludeDigest(event.target.checked)} /> Include in manager digest</label>
+      <label><input type="checkbox" checked={sendNotice} onChange={(event) => setSendNotice(event.target.checked)} /> Send in employee digest</label>
+    </div>
+    <button onClick={() => void saveNote()} disabled={saving} className="mt-2 text-[10px] text-emerald-300 hover:text-emerald-200 disabled:opacity-50">{saving ? 'Saving…' : 'Save assignment note'}</button>
+  </div>
 }

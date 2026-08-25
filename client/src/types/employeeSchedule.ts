@@ -6,6 +6,42 @@ export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
 export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable'
 export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
 
+export type BreakGuidanceRequirement = {
+  kind: 'meal' | 'rest'
+  ordinal: number
+  duration_minutes: number
+  paid: boolean
+  waived: boolean
+  earliest_local?: string | null
+  recommended_local?: string | null
+  deadline_local?: string | null
+  citation?: string | null
+}
+
+export type AssignmentComplianceGuidance = {
+  status: 'complete' | 'unmapped' | 'error'
+  summary?: string | null
+  requirements: BreakGuidanceRequirement[]
+  advisories: string[]
+  jurisdiction?: string | null
+}
+
+export type MealBreakWaiverAttestation = {
+  employee_id: string
+  on_file: boolean
+  attested: boolean
+  effective_from: string | null
+  confirmed_at: string | null
+  note: string | null
+}
+
+export type AssignmentNotePayload = {
+  note: string | null
+  visible_to_employee: boolean
+  include_in_location_digest: boolean
+  send_employee_notice: boolean
+}
+
 export interface ShiftAssignment {
   employee_id: string
   name: string
@@ -13,6 +49,11 @@ export interface ShiftAssignment {
   status: AssignmentStatus
   availability_overridden: boolean
   availability_override_at: string | null
+  manager_note?: string | null
+  manager_note_visible_to_employee?: boolean
+  manager_note_include_in_location_digest?: boolean
+  manager_note_send_employee_notice?: boolean
+  compliance_guidance?: AssignmentComplianceGuidance | null
 }
 
 export interface Shift {

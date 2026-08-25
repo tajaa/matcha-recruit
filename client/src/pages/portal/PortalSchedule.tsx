@@ -6,7 +6,7 @@ import {
   createMyRequest, cancelMyRequest, acceptMyRequest, withdrawMyRequest,
   fetchMyAvailability, saveMyAvailability, type AvailabilityWindow,
 } from '../../api/employees/employeeSchedule'
-import type { Shift, ScheduleRequest } from '../../types/employeeSchedule'
+import type { Shift, ScheduleRequest, ShiftAssignment } from '../../types/employeeSchedule'
 import {
   REQUEST_TONE, errorMessage, fmtTime, fmtDayLabel as fmtDay, addDays, toISODate, WEEKDAY_LABELS,
 } from '../../types/employeeSchedule'
@@ -25,20 +25,26 @@ export default function PortalSchedule() {
   const [coworkers, setCoworkers] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const start = todayISO()
-    const [sch, reqs, openOffers, roster] = await Promise.all([
-      fetchMySchedule(`${start}T00:00:00Z`, `${addDays(start, 28)}T00:00:00Z`),
+    const sch = await fetchMySchedule(`${start}T00:00:00Z`, `${addDays(start, 28)}T00:00:00Z`)
+    setShifts(sch.shifts)
+    setLoadError(null)
+    const [reqs, openOffers, roster] = await Promise.allSettled([
       fetchMyRequests(),
       fetchMyOffers(),
       fetchMyCoworkers(),
     ])
-    setShifts(sch.shifts)
-    setRequests(reqs.requests)
-    setOffers(openOffers.offers)
-    setCoworkers(roster.employees)
-    setLoadError(null)
+    const errors: string[] = []
+    if (reqs.status === 'fulfilled') setRequests(reqs.value.requests)
+    else errors.push('request history')
+    if (openOffers.status === 'fulfilled') setOffers(openOffers.value.offers)
+    else errors.push('available offers')
+    if (roster.status === 'fulfilled') setCoworkers(roster.value.employees)
+    else errors.push('coworkers')
+    setRequestError(errors.length ? `Could not load ${errors.join(', ')}. Your published shifts are still available.` : null)
   }, [])
 
   // Swallowing this would render "no published shifts" — a fake-legitimate empty
@@ -101,6 +107,8 @@ export default function PortalSchedule() {
           </div>
         ))}
       </section>
+
+      {requestError && <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">{requestError}</p>}
 
       <AvailabilityEditor />
 
@@ -182,6 +190,7 @@ function ShiftCard({ shift, coworkers, onChanged }: { shift: Shift; coworkers: {
             )}
           </div>
           {(shift.role || shift.department) && <div className="text-[11px] text-zinc-500 truncate">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>}
+          <AssignmentGuidance assignment={shift.assignments[0]} />
         </div>
         <button onClick={() => setMode(mode === 'swap' ? null : 'swap')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><Repeat className="h-3.5 w-3.5" /> Swap</button>
         <button onClick={() => setMode(mode === 'pickup' ? null : 'pickup')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><LogOut className="h-3.5 w-3.5" /> Offer pickup</button>
@@ -197,11 +206,33 @@ function ShiftCard({ shift, coworkers, onChanged }: { shift: Shift; coworkers: {
   )
 }
 
+function AssignmentGuidance({ assignment }: { assignment: ShiftAssignment | undefined }) {
+  if (!assignment) return null
+  const guidance = assignment.compliance_guidance
+  const summary = guidance?.summary
+  const requirements = guidance?.requirements ?? []
+  const active = requirements.filter((requirement) => !requirement.waived)
+  const waived = requirements.some((requirement) => requirement.waived && requirement.kind === 'meal')
+  return (
+    <div className="mt-1.5 space-y-1 text-[11px]">
+      {summary && <p className={guidance?.status === 'unmapped' || guidance?.status === 'error' ? 'text-amber-300' : 'text-sky-300'}>{summary}</p>}
+      {!summary && active.length > 0 && <p className="text-sky-300">{active.map((requirement) => `${requirement.duration_minutes}-minute ${requirement.paid ? 'paid' : 'unpaid'} ${requirement.kind} break`).join(' · ')}</p>}
+      {waived && <p className="text-emerald-300">Meal-break waiver applies to this shift.</p>}
+      {assignment.manager_note && <p className="text-zinc-400">Manager note: {assignment.manager_note}</p>}
+    </div>
+  )
+}
+
 function OfferCard({ request, shifts, onChanged }: { request: ScheduleRequest; shifts: Shift[]; onChanged: () => void }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [counterShiftId, setCounterShiftId] = useState('')
-  const tradeableShifts = shifts
+  // The API remains authoritative, but do not offer the other employee's
+  // shift or a same-day shift that can never pass the conflict check.
+  const offeredDay = request.shift_starts_at?.slice(0, 10)
+  const tradeableShifts = shifts.filter((shift) => (
+    shift.id !== request.shift_id && shift.starts_at.slice(0, 10) !== offeredDay
+  ))
   async function accept() {
     setBusy(true)
     try {

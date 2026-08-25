@@ -4,6 +4,7 @@ import type {
   WeekTemplate, WeekTemplatePayload, TemplateBlock, BlockPayload, ScheduleRequest,
   AssignmentMovePayload, AssignmentMoveResponse,
   ScheduleJob, JobPayload, JobCredentialRequirement, RosterEmployee,
+  AssignmentNotePayload, MealBreakWaiverAttestation,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -49,6 +50,21 @@ export function replaceJobCredentialRequirements(jobId: string, requirements: Jo
  *  location — resolves which location to scope the page to. */
 export function fetchShift(shiftId: string) {
   return api.get<Shift>(`/employee-schedule/shifts/${shiftId}`)
+}
+
+export function updateAssignmentNote(shiftId: string, employeeId: string, payload: AssignmentNotePayload) {
+  return api.put<Shift>(`/employee-schedule/shifts/${shiftId}/assignments/${employeeId}/note`, payload)
+}
+
+export function fetchMealBreakWaiver(employeeId: string) {
+  return api.get<MealBreakWaiverAttestation>(`/employee-schedule/employees/${employeeId}/meal-break-waiver`)
+}
+
+export function updateMealBreakWaiver(
+  employeeId: string,
+  payload: { on_file: boolean; effective_from?: string | null; note?: string | null },
+) {
+  return api.put<MealBreakWaiverAttestation>(`/employee-schedule/employees/${employeeId}/meal-break-waiver`, payload)
 }
 
 export function createShift(payload: ShiftPayload, force = false) {

@@ -209,6 +209,8 @@ async def fetch_shifts(
         """
         SELECT a.shift_id, a.employee_id, a.status,
                a.manager_note, a.manager_note_visible_to_employee,
+               a.manager_note_include_in_location_digest,
+               a.manager_note_send_employee_notice,
                a.compliance_guidance,
                e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
@@ -258,12 +260,17 @@ async def fetch_shifts(
                 ).get("at"),
             }
         # Portal calls pass employee_id, so never expose another employee's
-        # private note or individualized compliance guidance.
+        # private note or individualized compliance guidance. Admin responses
+        # include note delivery controls so the editor can update them.
         if employee_id is None or r["employee_id"] == employee_id:
             assignment["manager_note"] = (
                 r["manager_note"] if r["manager_note_visible_to_employee"] else None
             )
             assignment["compliance_guidance"] = r["compliance_guidance"]
+        if employee_id is None:
+            assignment["manager_note_visible_to_employee"] = r["manager_note_visible_to_employee"]
+            assignment["manager_note_include_in_location_digest"] = r["manager_note_include_in_location_digest"]
+            assignment["manager_note_send_employee_notice"] = r["manager_note_send_employee_notice"]
         by_shift.setdefault(str(r["shift_id"]), []).append(assignment)
     for s in shifts:
         s["assignments"] = by_shift.get(s["id"], [])

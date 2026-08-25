@@ -124,6 +124,17 @@ class MealWaiverAttestationUpdate(BaseModel):
     note: Optional[str] = Field(None, max_length=1000)
 
 
+class MealWaiverAttestationResponse(BaseModel):
+    """The current effective meal-break-waiver attestation for an employee."""
+
+    employee_id: UUID
+    on_file: bool
+    attested: bool
+    effective_from: Optional[date] = None
+    confirmed_at: Optional[datetime] = None
+    note: Optional[str] = None
+
+
 class EligibilityCaseDecision(BaseModel):
     decision: Literal["remove", "keep"]
     acknowledgement_confirmed: bool = False
