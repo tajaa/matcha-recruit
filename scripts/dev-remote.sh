@@ -21,7 +21,7 @@ CHAT_MODEL_PATH="$CHAT_MODEL_DIR/Qwen3VL-8B-Instruct-Q8_0.gguf"
 CHAT_MMPROJ_PATH="$CHAT_MODEL_DIR/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
 #
 # Optional overrides: LOCAL_PORT/LOCAL_DB_PORT, REDIS_PORT, FRONTEND_PORT,
-# DATABASE_URL, REDIS_URL, CHAT_PORT
+# BACKEND_PORT, DATABASE_URL, REDIS_URL, CHAT_PORT
 # Set AGENT_SANDBOX=1 when running from scripts/agent-sandbox.sh (CODEX_SANDBOX=1
 # is accepted as an alias). In that mode PostgreSQL and Redis remain the normal
 # host dev services, reached from Docker Desktop at host.docker.internal.
@@ -199,6 +199,22 @@ else
 
         echo -e "${YELLOW}Port $FRONTEND_PORT is in use; using $ALT_FRONTEND_PORT for the frontend instead.${NC}"
         FRONTEND_PORT="$ALT_FRONTEND_PORT"
+    fi
+
+    if [ "$START_SERVICES_ONLY" = false ] && is_port_in_use "$BACKEND_PORT"; then
+        if [ "$BACKEND_PORT_SOURCE" = "env" ]; then
+            echo -e "${RED}Error: BACKEND_PORT $BACKEND_PORT is already in use. Set BACKEND_PORT to a free port.${NC}"
+            exit 1
+        fi
+
+        ALT_BACKEND_PORT="$(pick_available_port 8002 8010)"
+        if [ -z "$ALT_BACKEND_PORT" ]; then
+            echo -e "${RED}Error: No free backend ports found in 8002-8010.${NC}"
+            exit 1
+        fi
+
+        echo -e "${YELLOW}Port $BACKEND_PORT is in use; using $ALT_BACKEND_PORT for the backend instead.${NC}"
+        BACKEND_PORT="$ALT_BACKEND_PORT"
     fi
 
     # Check/Start Redis (Local)
