@@ -51,8 +51,18 @@ services:
       - ALL
     # Required only for the root entrypoint to initialize named dependency
     # volumes, then gosu drops to the dedicated `agent` user before commands.
+    # DAC_OVERRIDE and FOWNER matter specifically because rsync -a's archive
+    # mode preserves the source's ownership+timestamps as it copies: it
+    # chowns each new file/dir to agent:agent (CHOWN) as it goes, then needs
+    # to keep writing into now-non-root-owned dirs (DAC_OVERRIDE) and set
+    # timestamps on now-non-root-owned files (FOWNER) to finish the copy.
+    # None of this widens the actual security boundary (no docker.sock, no
+    # host paths outside the repo) — it only affects permission checks on
+    # paths already inside the container.
     cap_add:
       - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
       - SETGID
       - SETUID
     security_opt:

@@ -1,0 +1,15 @@
+# BuildKit prefers "<dockerfile>.dockerignore" over the context-root
+# .dockerignore for a given Dockerfile. This image only ever COPYs 7 small
+# manifest/script files (see the Dockerfile) — everything else in the repo,
+# including 1.7GB of GGUF models under server/agent/models and every
+# node_modules/venv tree, is dead weight shipped across virtiofs on every
+# build. Allowlist instead of denylist since the needed set is so small.
+*
+!server/requirements.txt
+!client/package.json
+!client/package-lock.json
+!client/tellus/package.json
+!client/tellus/package-lock.json
+!client/oceanlab/package.json
+!client/oceanlab/package-lock.json
+!docker/agent-sandbox/entrypoint.sh

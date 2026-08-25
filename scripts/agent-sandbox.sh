@@ -62,7 +62,15 @@ start_services() {
 }
 
 exec_workspace() {
-    "${COMPOSE[@]}" exec workspace "$@"
+    # `docker compose exec` defaults to root regardless of the entrypoint's
+    # gosu drop (exec sessions bypass ENTRYPOINT) — force the unprivileged
+    # agent user explicitly so every interactive session actually gets the
+    # uid-aligned, non-root posture the image is built for.
+    "${COMPOSE[@]}" exec --user "${SANDBOX_UID:-501}:${SANDBOX_GID:-20}" workspace "$@"
+}
+
+exec_workspace_no_tty() {
+    "${COMPOSE[@]}" exec --no-TTY --user "${SANDBOX_UID:-501}:${SANDBOX_GID:-20}" workspace "$@"
 }
 
 login_agent() {
@@ -80,7 +88,7 @@ login_agent() {
             ;;
         gh)
             if [[ -n "${GH_TOKEN:-}" ]]; then
-                printf '%s' "$GH_TOKEN" | "${COMPOSE[@]}" exec --no-TTY workspace gh auth login --hostname github.com --with-token
+                printf '%s' "$GH_TOKEN" | exec_workspace_no_tty gh auth login --hostname github.com --with-token
             else
                 exec_workspace gh auth login --hostname github.com --git-protocol https
             fi
@@ -155,10 +163,10 @@ check() {
 
 run_doctor() {
     echo "Isolation:"
-    check "docker.sock absent" bash -c '! test -e /var/run/docker.sock'
+    check "docker.sock absent" exec_workspace test '!' -e /var/run/docker.sock
     check "host home dirs absent (/Users)" exec_workspace test '!' -d /Users
-    check "container runs as uid 501" bash -c "[ \"\$(${COMPOSE[*]} exec -T workspace id -u)\" = \"501\" ]"
-    check "git status is clean (no dubious-ownership warning)" exec_workspace git -C /workspace status --short
+    check "container runs as configured uid" bash -c "[ \"\$(${COMPOSE[*]} exec --user '${SANDBOX_UID:-501}:${SANDBOX_GID:-20}' -T workspace id -u)\" = \"${SANDBOX_UID:-501}\" ]"
+    check "git repository accessible (no dubious-ownership warning)" exec_workspace git -C /workspace status --short
 
     echo "Prod access:"
     check "ssh to app EC2" exec_workspace ssh -i secrets/roonMT-arm.pem -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new ec2-user@54.177.107.107 true
@@ -219,7 +227,11 @@ case "$command_name" in
         require_docker
         start_services
         if [[ $# -gt 0 ]]; then
-            exec_workspace bash -lc "$*"
+            # Not a login shell: Debian's /etc/profile resets PATH for login
+            # shells, dropping /opt/node/bin (where codex/claude/opencode
+            # live) and /usr/local/aws-cli — a plain -c preserves the image's
+            # PATH like every other exec_workspace call already does.
+            exec_workspace bash -c "$*"
         else
             exec_workspace bash
         fi

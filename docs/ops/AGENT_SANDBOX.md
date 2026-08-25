@@ -38,8 +38,9 @@ that's a design choice made in this plan, documented below rather than hidden.
 - host Docker daemon/socket (no `docker build`, no starting sibling containers)
 - any filesystem path outside this repo
 - root filesystem is read-only; all Linux capabilities dropped except
-  `CHOWN`/`SETGID`/`SETUID` (needed only for the entrypoint's one-time volume
-  setup before it drops to the unprivileged `agent` user); `no-new-privileges`
+  `CHOWN`/`DAC_OVERRIDE`/`FOWNER`/`SETGID`/`SETUID` (needed only for the
+  entrypoint's one-time volume setup before it drops to the unprivileged
+  `agent` user); `no-new-privileges`
 - published ports bind to `127.0.0.1` only
 
 **Deliberately reachable** (by design — see `docker-compose.sandbox.yml`):
@@ -110,7 +111,8 @@ sandbox.
 - `/var/run/docker.sock` absent inside the container
 - no `/Users` (host home) visible inside the container
 - container runs as your host uid (files land with correct ownership)
-- `git status` inside `/workspace` is clean — no "dubious ownership" warning
+- `git status` inside `/workspace` succeeds without a "dubious ownership"
+  warning
 - SSH to the app EC2 succeeds
 - `aws sts get-caller-identity` succeeds
 - sandbox Postgres/Redis are reachable

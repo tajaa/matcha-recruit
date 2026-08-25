@@ -3,6 +3,13 @@ set -euo pipefail
 
 template_version="$(cat /opt/bootstrap/.dependencies-sha)"
 
+# Numeric uid:gid, not "agent:agent" — SANDBOX_GID commonly collides with a
+# pre-existing Debian group (20 = dialout), in which case the Dockerfile
+# skips creating a literal "agent" group to avoid a duplicate-gid error, and
+# a name-based chown/install below would fail with "invalid group".
+AGENT_UID="$(id -u agent)"
+AGENT_GID="$(id -g agent)"
+
 sync_dependency_tree() {
     local source_dir=$1
     local destination_dir=$2
@@ -16,7 +23,7 @@ sync_dependency_tree() {
         mkdir -p "$destination_dir"
         rsync -a --delete "${source_dir}/" "${destination_dir}/"
         printf '%s\n' "$template_version" > "${destination_dir}/.agent-sandbox-template"
-        chown -R agent:agent "$destination_dir"
+        chown -R "${AGENT_UID}:${AGENT_GID}" "$destination_dir"
     fi
 }
 
@@ -36,7 +43,7 @@ done
 # State dirs for all three agents plus git/gh config, all inside the
 # sandbox_home named volume. /home/agent/.aws is a read-only bind mount from
 # the host and is deliberately excluded here.
-install -d -o agent -g agent \
+install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
     /home/agent \
     /home/agent/.codex \
     /home/agent/.claude \

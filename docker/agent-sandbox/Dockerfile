@@ -2,13 +2,16 @@
 # Isolated development image shared by Codex, Claude Code, and OpenCode. The
 # repository is bind-mounted at runtime; no host home directory, Docker
 # socket, or browser data is copied in.
-FROM python:3.12-slim-bookworm
+#
+# Multi-stage so BuildKit can run the independent installs (system apt deps,
+# Node + agent CLIs, each npm ci, python deps, AWS CLI) concurrently instead
+# of one long chain. `runtime` at the bottom assembles everything with COPY
+# --from=. See docker/agent-sandbox/Dockerfile.dockerignore for what build
+# context this actually receives — allowlisted to ~700KB of manifests, not
+# the whole repo.
+FROM python:3.12-slim-bookworm AS base
 
-ARG INSTALL_PLAYWRIGHT_BROWSERS=false
-
-ENV DEBIAN_FRONTEND=noninteractive \
-    PATH=/opt/node/bin:/usr/local/aws-cli/v2/current/bin:${PATH} \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+ENV DEBIAN_FRONTEND=noninteractive
 
 # The base debian image auto-purges downloaded .deb files after every
 # install (docker-clean) and disables its own apt cache — both defeat a
@@ -17,6 +20,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
+# ---------------------------------------------------------------------------
+# system: apt packages needed unconditionally (WeasyPrint/ffmpeg deps shared
+# with server/Dockerfile, plus the sandbox's own CLI tools). Chromium's own
+# libs are NOT here — see the `chromium-libs` stage, only pulled in when
+# INSTALL_PLAYWRIGHT_BROWSERS=true.
+# ---------------------------------------------------------------------------
+FROM base AS system
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -29,29 +39,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         gosu \
         jq \
         less \
-        libatk-bridge2.0-0 \
-        libatk1.0-0 \
         libcairo2 \
-        libdrm2 \
         libffi-dev \
-        libgbm1 \
         libgdk-pixbuf-2.0-0 \
         libgirepository1.0-dev \
         gir1.2-pango-1.0 \
-        libgtk-3-0 \
-        libnspr4 \
-        libnss3 \
         libpango-1.0-0 \
         libpangocairo-1.0-0 \
         libpq-dev \
-        libx11-6 \
-        libx11-xcb1 \
-        libxcb1 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxfixes3 \
-        libxkbcommon0 \
-        libxrandr2 \
         lsof \
         openssh-client \
         postgresql-client \
@@ -61,8 +56,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         rsync \
         tmux \
         unzip \
-        wget \
-        xdg-utils
+        wget
 
 # gh isn't in Debian bookworm main — pull from GitHub's own apt repo, pinned
 # by its published signing key, rather than a loose third-party add-apt-repo.
@@ -74,33 +68,111 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh
 
-# Node 20 is installed from the official tarball so this image can keep the
-# Python 3.12 base while avoiding a host Node installation.
+# ---------------------------------------------------------------------------
+# node: pinned Node tarball. Pinned exactly (not "latest-vNN.x") so a routine
+# Node patch release doesn't invalidate every downstream layer. Node 22, not
+# 20 — @anthropic-ai/claude-code requires Node >=22; vite 7/8 (client/tellus,
+# oceanlab) are fine on either, so there's no reason to split versions.
+# ---------------------------------------------------------------------------
+FROM base AS node
 ARG TARGETARCH
+ARG NODE_VERSION=22.23.2
+# curl/ca-certificates/xz-utils only (xz-utils for `tar -xJf` below, not in
+# the base image) — a `system`-sized install here would serialize this stage
+# behind it and defeat running them concurrently.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils
 RUN case "${TARGETARCH}" in \
         amd64) node_arch=x64 ;; \
         arm64) node_arch=arm64 ;; \
         *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && node_file="$(curl -fsSL https://nodejs.org/dist/latest-v20.x/SHASUMS256.txt | awk -v arch="$node_arch" '$2 ~ ("node-v.*-linux-" arch "\\.tar\\.xz$") {print $2; exit}')" \
-    && test -n "$node_file" \
-    && curl -fsSL "https://nodejs.org/dist/latest-v20.x/${node_file}" -o /tmp/node.tar.xz \
+    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -o /tmp/node.tar.xz \
     && mkdir -p /opt/node \
     && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1 \
     && rm /tmp/node.tar.xz
+ENV PATH=/opt/node/bin:${PATH}
 
-# All three agent CLIs, pinned so a rebuild is reproducible. Bump these when
-# intentionally upgrading, not silently on every image build.
+# ---------------------------------------------------------------------------
+# agents: all three agent CLIs, pinned so a rebuild is reproducible. Bump
+# these when intentionally upgrading, not silently on every image build.
+# Layered directly on `node` so `runtime` picks up Node + all three CLIs
+# with a single COPY --from=agents /opt/node /opt/node.
+# ---------------------------------------------------------------------------
+FROM node AS agents
 ARG CODEX_VERSION=0.149.1
 ARG CLAUDE_CODE_VERSION=2.1.243
 ARG OPENCODE_VERSION=1.18.22
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,target=/root/.npm,id=npm-agents \
     npm install --global \
         "@openai/codex@${CODEX_VERSION}" \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
         "opencode-ai@${OPENCODE_VERSION}"
 
-# AWS CLI v2, arch-mapped like the Node tarball above.
+# ---------------------------------------------------------------------------
+# npm-client: client/ Linux-native node_modules. No native/node-gyp deps in
+# this tree (verified against package-lock.json), so this needs Node only —
+# not `system`'s gcc/build tooling.
+#
+# --legacy-peer-deps everywhere below: client/package-lock.json locks
+# react@19 while react-simple-maps@3.0.0 peer-requires react<=18. A plain
+# `npm ci`/`npm install` on this lockfile fails from scratch on the host too
+# (verified) — the checked-in client/node_modules only works because it was
+# installed the same way. Pre-existing repo issue, not introduced here.
+# ---------------------------------------------------------------------------
+FROM node AS npm-client
+COPY client/package.json client/package-lock.json /tmp/client/
+RUN --mount=type=cache,target=/root/.npm,id=npm-client \
+    cd /tmp/client \
+    && npm ci --prefer-offline --no-audit --fund=false --legacy-peer-deps \
+    && mv node_modules /opt/client-node_modules
+
+# ---------------------------------------------------------------------------
+# npm-aux: Tell-Us + Oceanlab node_modules, bundled in one stage since both
+# are small relative to client/ and 8GB of builder RAM makes a fourth fully
+# concurrent npm/pip stage tight.
+# ---------------------------------------------------------------------------
+FROM node AS npm-aux
+COPY client/tellus/package.json client/tellus/package-lock.json /tmp/tellus/
+COPY client/oceanlab/package.json client/oceanlab/package-lock.json /tmp/oceanlab/
+RUN --mount=type=cache,target=/root/.npm,id=npm-aux \
+    cd /tmp/tellus && npm ci --prefer-offline --no-audit --fund=false --legacy-peer-deps \
+    && mv node_modules /opt/tellus-node_modules \
+    && cd /tmp/oceanlab && npm ci --prefer-offline --no-audit --fund=false --legacy-peer-deps \
+    && mv node_modules /opt/oceanlab-node_modules
+
+# ---------------------------------------------------------------------------
+# pydeps: the server's Python venv. FROM `system` (needs gcc/libpq-dev/
+# libffi-dev for any dependency without a prebuilt arm64 wheel) rather than
+# `base`. `uv` resolves/installs the 52-line requirements.txt considerably
+# faster than pip; the venv path below is load-bearing — entrypoint.sh sed's
+# this exact string when copying the venv into the runtime volume.
+# ---------------------------------------------------------------------------
+FROM system AS pydeps
+ARG INSTALL_PLAYWRIGHT_BROWSERS=false
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+COPY server/requirements.txt /tmp/server-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    pip install --no-cache-dir uv \
+    && uv venv /opt/bootstrap/server-venv \
+    && uv pip install --python /opt/bootstrap/server-venv/bin/python --upgrade pip \
+    && uv pip install --python /opt/bootstrap/server-venv/bin/python -r /tmp/server-requirements.txt \
+    && mkdir -p /opt/playwright \
+    && if [ "${INSTALL_PLAYWRIGHT_BROWSERS}" = "true" ]; then \
+        /opt/bootstrap/server-venv/bin/python -m playwright install chromium; \
+    fi
+
+# ---------------------------------------------------------------------------
+# awscli: AWS CLI v2, arch-mapped like the Node tarball above.
+# ---------------------------------------------------------------------------
+FROM base AS awscli
+ARG TARGETARCH
+# curl/unzip/ca-certificates only — see the same note in the `node` stage.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip
 RUN case "${TARGETARCH}" in \
         amd64) aws_arch=x86_64 ;; \
         arm64) aws_arch=aarch64 ;; \
@@ -110,6 +182,47 @@ RUN case "${TARGETARCH}" in \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# ---------------------------------------------------------------------------
+# runtime: assemble everything above. Only stage that actually needs the
+# uid/gid build args and does the final chown/config work.
+# ---------------------------------------------------------------------------
+FROM system AS runtime
+
+ENV PATH=/opt/node/bin:/usr/local/aws-cli/v2/current/bin:${PATH} \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+# Chromium's own libs (not shared with anything else in `system`), only when
+# Playwright's browser is actually wanted. Production's server/Dockerfile
+# lets `playwright install --with-deps` pull these; installed explicitly
+# here so the default build skips them and the ~150MB libgtk-3-0 pulls in.
+ARG INSTALL_PLAYWRIGHT_BROWSERS=false
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    if [ "${INSTALL_PLAYWRIGHT_BROWSERS}" = "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            libatk-bridge2.0-0 \
+            libatk1.0-0 \
+            libdrm2 \
+            libgbm1 \
+            libgtk-3-0 \
+            libnspr4 \
+            libnss3 \
+            libx11-6 \
+            libx11-xcb1 \
+            libxcb1 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxfixes3 \
+            libxkbcommon0 \
+            libxrandr2 \
+            xdg-utils; \
+    fi
+
+COPY --from=agents /opt/node /opt/node
+COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
+COPY --from=awscli /usr/local/bin/aws /usr/local/bin/aws
+COPY --from=awscli /usr/local/bin/aws_completer /usr/local/bin/aws_completer
 
 # uid/gid default to the host user (macOS finch:staff) so files the agent
 # writes through the bind mount, and 0400 secrets like the SSH key, keep
@@ -124,26 +237,17 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then groupadd --gid "${USER_GID}
 # Bake Linux-native dependency trees into the image, then copy them into named
 # volumes on first start. This prevents macOS node_modules and virtualenvs from
 # being reused by the container.
+COPY --from=pydeps /opt/bootstrap/server-venv /opt/bootstrap/server-venv
+COPY --from=pydeps /opt/playwright /opt/playwright
+COPY --from=npm-client /opt/client-node_modules /opt/bootstrap/client-node_modules
+COPY --from=npm-aux /opt/tellus-node_modules /opt/bootstrap/tellus-node_modules
+COPY --from=npm-aux /opt/oceanlab-node_modules /opt/bootstrap/oceanlab-node_modules
 COPY server/requirements.txt /tmp/server-requirements.txt
-COPY client/package.json client/package-lock.json /tmp/client/
-COPY client/tellus/package.json client/tellus/package-lock.json /tmp/tellus/
-COPY client/oceanlab/package.json client/oceanlab/package-lock.json /tmp/oceanlab/
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.npm \
-    python -m venv /opt/bootstrap/server-venv \
-    && /opt/bootstrap/server-venv/bin/pip install --upgrade pip \
-    && /opt/bootstrap/server-venv/bin/pip install -r /tmp/server-requirements.txt \
-    && cd /tmp/client && npm ci \
-    && mv /tmp/client/node_modules /opt/bootstrap/client-node_modules \
-    && cd /tmp/tellus && npm ci \
-    && mv /tmp/tellus/node_modules /opt/bootstrap/tellus-node_modules \
-    && cd /tmp/oceanlab && npm ci \
-    && mv /tmp/oceanlab/node_modules /opt/bootstrap/oceanlab-node_modules \
-    && sha256sum /tmp/server-requirements.txt /tmp/client/package-lock.json /tmp/tellus/package-lock.json /tmp/oceanlab/package-lock.json \
+COPY client/package-lock.json /tmp/client/package-lock.json
+COPY client/tellus/package-lock.json /tmp/tellus/package-lock.json
+COPY client/oceanlab/package-lock.json /tmp/oceanlab/package-lock.json
+RUN sha256sum /tmp/server-requirements.txt /tmp/client/package-lock.json /tmp/tellus/package-lock.json /tmp/oceanlab/package-lock.json \
         | sha256sum | awk '{print $1}' > /opt/bootstrap/.dependencies-sha \
-    && if [ "${INSTALL_PLAYWRIGHT_BROWSERS}" = "true" ]; then \
-        /opt/bootstrap/server-venv/bin/python -m playwright install chromium; \
-    fi \
     && chown -R "${USER_UID}:${USER_GID}" /opt/bootstrap
 
 COPY docker/agent-sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
