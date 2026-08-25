@@ -554,10 +554,11 @@ async def preview_requirements(
 async def get_employee_requirements(
     employee_id: UUID,
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
 ):
     """Get all credential requirements for an employee."""
     async with get_connection() as conn:
-        return await get_employee_credential_requirements(conn, employee_id)
+        return await get_employee_credential_requirements(conn, employee_id, company_id)
 
 
 @router.post("/employees/{employee_id}/requirements/{requirement_id}/waive")
@@ -566,12 +567,15 @@ async def waive_requirement(
     requirement_id: UUID,
     body: WaiveRequest,
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
 ):
     """Waive a credential requirement for an employee."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id FROM employee_credential_requirements WHERE id = $1 AND employee_id = $2",
-            requirement_id, employee_id,
+            """SELECT ecr.id FROM employee_credential_requirements ecr
+               JOIN employees e ON e.id=ecr.employee_id
+               WHERE ecr.id=$1 AND ecr.employee_id=$2 AND e.org_id=$3""",
+            requirement_id, employee_id, company_id,
         )
         if not row:
             raise HTTPException(404, "Requirement not found")

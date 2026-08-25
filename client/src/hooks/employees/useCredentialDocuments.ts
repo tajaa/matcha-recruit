@@ -57,6 +57,14 @@ export function useCredentialDocuments(employeeId: string) {
     setDocuments((prev) => prev.map((d) => d.id === docId ? { ...d, review_status: 'rejected' } : d))
   }, [employeeId])
 
+  const reclassify = useCallback(async (docId: string, documentType: string, expirationDate?: string) => {
+    await api.patch<CredentialDocument>(`/employees/${employeeId}/credential-documents/${docId}`, {
+      document_type: documentType,
+      expiration_date: expirationDate || undefined,
+    })
+    await fetchAll()
+  }, [employeeId, fetchAll])
+
   const remove = useCallback(async (docId: string) => {
     await api.delete(`/employees/${employeeId}/credential-documents/${docId}`)
     setDocuments((prev) => prev.filter((d) => d.id !== docId))
@@ -69,5 +77,5 @@ export function useCredentialDocuments(employeeId: string) {
     window.open(url, '_blank', 'noopener')
   }, [employeeId])
 
-  return { documents, credentials, loading, upload, approve, reject, remove, download, refetch: fetchAll }
+  return { documents, credentials, loading, upload, approve, reject, reclassify, remove, download, refetch: fetchAll }
 }

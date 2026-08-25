@@ -54,6 +54,7 @@ function DocumentCard({
   doc,
   onApprove,
   onReject,
+  onReclassify,
   onDownload,
   onDelete,
   requiresExpiration = false,
@@ -61,6 +62,7 @@ function DocumentCard({
   doc: CredentialDocument
   onApprove: (expirationDate?: string) => void
   onReject: () => void
+  onReclassify: (documentType: string, expirationDate?: string) => void
   onDownload: () => void
   onDelete: () => void
   requiresExpiration?: boolean
@@ -68,6 +70,8 @@ function DocumentCard({
   const [confirming, setConfirming] = useState(false)
   const [approving, setApproving] = useState(false)
   const [expirationDate, setExpirationDate] = useState('')
+  const [reclassifying, setReclassifying] = useState(false)
+  const [documentType, setDocumentType] = useState(doc.document_type)
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
@@ -94,6 +98,7 @@ function DocumentCard({
         </div>
         <div className="flex gap-1 shrink-0">
           <Button size="sm" variant="ghost" onClick={onDownload}>Download</Button>
+          <Button size="sm" variant="ghost" onClick={() => setReclassifying((value) => !value)}>Type</Button>
           {doc.review_status === 'pending' && (
             <>
               <Button size="sm" variant="primary" onClick={() => setApproving(true)}>Approve</Button>
@@ -121,6 +126,20 @@ function DocumentCard({
             <Button size="sm" variant="ghost" onClick={() => setApproving(false)}>Cancel</Button>
           </div>
           {requiresExpiration && <p className="mt-2 text-[10px] text-zinc-500">Confirm the expiry from the document; the scheduler will block work after this date.</p>}
+        </div>
+      )}
+      {reclassifying && (
+        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+          <label className="block text-xs text-zinc-400">Document type
+            <select value={documentType} onChange={(event) => setDocumentType(event.target.value)} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200">
+              {Object.entries(DOC_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          {documentType === 'food_handler_card' && <Input label="Card expiration (required for approved documents)" type="date" value={expirationDate} onChange={(event) => setExpirationDate(event.target.value)} />}
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" onClick={() => { onReclassify(documentType, expirationDate || undefined); setReclassifying(false) }} disabled={doc.review_status === 'approved' && documentType === 'food_handler_card' && !expirationDate}>Save type</Button>
+            <Button size="sm" variant="ghost" onClick={() => setReclassifying(false)}>Cancel</Button>
+          </div>
         </div>
       )}
       {doc.extraction_status === 'extracted' && (
@@ -253,7 +272,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
   const {
     credentials,
     loading,
-    approve, reject, remove, download,
+    approve, reject, reclassify, remove, download,
     requirements,
     reqLoading,
     editing, setEditing,
@@ -432,6 +451,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
                     doc={doc}
                     onApprove={(expirationDate) => approve(doc.id, expirationDate)}
                     onReject={() => reject(doc.id)}
+                    onReclassify={(documentType, expirationDate) => reclassify(doc.id, documentType, expirationDate)}
                     onDownload={() => download(doc.id)}
                     onDelete={() => remove(doc.id)}
                     requiresExpiration={req?.has_expiration ?? doc.document_type === 'food_handler_card'}

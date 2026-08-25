@@ -19,7 +19,7 @@ export const DOC_TYPE_LABELS: Record<string, string> = {
 export function useCredentialManager(employeeId: string) {
   const {
     documents, credentials, loading,
-    upload, approve, reject, remove, download, refetch,
+    upload, approve, reject, reclassify, remove, download, refetch,
   } = useCredentialDocuments(employeeId)
 
   const [requirements, setRequirements] = useState<EmployeeCredentialRequirement[]>([])
@@ -47,6 +47,11 @@ export function useCredentialManager(employeeId: string) {
 
   const approveDocument = async (documentId: string, expirationDate?: string) => {
     await approve(documentId, true, expirationDate)
+    await loadRequirements()
+  }
+
+  const reclassifyDocument = async (documentId: string, documentType: string, expirationDate?: string) => {
+    await reclassify(documentId, documentType, expirationDate)
     await loadRequirements()
   }
 
@@ -133,7 +138,7 @@ export function useCredentialManager(employeeId: string) {
   return {
     credentials,
     loading,
-    approve: approveDocument, reject, remove, download,
+    approve: approveDocument, reject, reclassify: reclassifyDocument, remove, download,
     requirements,
     reqLoading,
     editing, setEditing,

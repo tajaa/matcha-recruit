@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CompanyCreate(BaseModel):
@@ -47,6 +47,7 @@ class CompanyUpdate(BaseModel):
     executive_name: Optional[str] = None
     executive_title: Optional[str] = None
     executive_phone: Optional[str] = None
+    default_credential_grace_days: Optional[int] = Field(None, ge=0, le=365)
 
 
 class Company(BaseModel):
@@ -101,6 +102,7 @@ class CompanyResponse(BaseModel):
     executive_name: Optional[str] = None
     executive_title: Optional[str] = None
     executive_phone: Optional[str] = None
+    default_credential_grace_days: int = 7
     created_at: datetime
     culture_profile: Optional[dict[str, Any]] = None
     interview_count: int = 0

@@ -481,7 +481,7 @@ def serialize_week_template(r, blocks: list[dict]) -> dict:
     }
 
 
-def serialize_job(r, employee_ids: list[str]) -> dict:
+def serialize_job(r, employee_ids: list[str], credential_requirements: list[dict] | None = None) -> dict:
     return {
         "id": str(r["id"]),
         "name": r["name"],
@@ -489,6 +489,8 @@ def serialize_job(r, employee_ids: list[str]) -> dict:
         "color": r["color"],
         "notes": r["notes"],
         "employee_ids": employee_ids,
+        "credential_grace_days": r.get("credential_grace_days"),
+        "credential_requirements": credential_requirements or [],
     }
 
 

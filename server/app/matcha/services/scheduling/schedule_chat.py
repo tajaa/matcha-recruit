@@ -912,7 +912,7 @@ async def build_proposal(
             name = f"{r['first_name']} {r['last_name']}".strip()
             conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
             violations = await check_shift_compliance(
-                conn, company_id, location_id=location_id,
+                conn, company_id, location_id=location_id, job_id=shift.get("job_id"),
                 starts_at=starts_at, ends_at=ends_at,
                 break_minutes=shift["break_minutes"], employee_id=eid,
                 lapse_items=lapse_map.get(str(eid), []),
@@ -935,7 +935,7 @@ async def build_proposal(
         shift["open_slots"] = shift["required_staff"] - len(rank.chosen)
         shift["excluded"] = [{"name": c.name, "reason": reason} for c, reason in rank.excluded]
         shift["intrinsic_violations"] = await check_shift_compliance(
-            conn, company_id, location_id=location_id,
+            conn, company_id, location_id=location_id, job_id=shift.get("job_id"),
             starts_at=starts_at, ends_at=ends_at, break_minutes=shift["break_minutes"],
         )
 
@@ -1361,7 +1361,7 @@ async def build_edit_proposal(
         advisories: list[dict] = []
         if kind in ("reassign", "assign") and to_employee_id:
             advisories = await check_shift_compliance(
-                conn, company_id, location_id=shift["location_id"],
+                conn, company_id, location_id=shift["location_id"], job_id=shift.get("job_id"),
                 starts_at=shift["starts_at"], ends_at=shift["ends_at"],
                 break_minutes=shift["break_minutes"] or 0, employee_id=to_employee_id,
                 exclude_shift_id=shift["id"], fw_event="assign", fw_shift_published=True,
@@ -1369,7 +1369,7 @@ async def build_edit_proposal(
             )
         elif kind == "retime":
             advisories = await check_shift_compliance(
-                conn, company_id, location_id=shift["location_id"],
+                conn, company_id, location_id=shift["location_id"], job_id=shift.get("job_id"),
                 starts_at=new_starts_at, ends_at=new_ends_at,
                 break_minutes=shift["break_minutes"] or 0,
                 exclude_shift_id=shift["id"], fw_event="retime", fw_shift_published=True,
@@ -1918,7 +1918,7 @@ async def execute_proposal(
                 conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
                 avail = availability_violations(avail_map.get(eid, {}), starts_at, ends_at)
                 violations = await check_shift_compliance(
-                    conn, company_id, location_id=location_id,
+                    conn, company_id, location_id=location_id, job_id=shift.get("job_id"),
                     starts_at=starts_at, ends_at=ends_at,
                     break_minutes=shift["break_minutes"], employee_id=eid,
                     lapse_items=lapse_map.get(str(eid), []),
@@ -2204,7 +2204,7 @@ async def execute_edit_proposal(
                     conflicts = await find_conflicts(
                         conn, company_id, eid, new_starts_at, new_ends_at, exclude_shift_id=shift_id)
                     violations = await check_shift_compliance(
-                        conn, company_id, location_id=shift_row["location_id"],
+                        conn, company_id, location_id=shift_row["location_id"], job_id=shift_row.get("job_id"),
                         starts_at=new_starts_at, ends_at=new_ends_at,
                         break_minutes=shift_row["break_minutes"] or 0, employee_id=eid,
                         exclude_shift_id=shift_id, fw_event="retime",
@@ -2249,7 +2249,7 @@ async def execute_edit_proposal(
             avail_map = await fetch_availability(conn, company_id, [to_id])
             avail = availability_violations(avail_map.get(to_id, {}), shift_row["starts_at"], shift_row["ends_at"])
             violations = await check_shift_compliance(
-                conn, company_id, location_id=shift_row["location_id"],
+                conn, company_id, location_id=shift_row["location_id"], job_id=shift_row.get("job_id"),
                 starts_at=shift_row["starts_at"], ends_at=shift_row["ends_at"],
                 break_minutes=shift_row["break_minutes"] or 0, employee_id=to_id,
                 exclude_shift_id=shift_id, fw_event="assign",

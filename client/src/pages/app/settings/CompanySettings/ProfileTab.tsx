@@ -12,7 +12,7 @@ import type { CompanyData } from './types'
 type ProfileTabProps = {
   company: CompanyData
   setCompany: (company: CompanyData) => void
-  updateField: (field: string, value: string | string[]) => Promise<void>
+  updateField: (field: string, value: string | string[] | number) => Promise<void>
   showAddons: boolean
 }
 
@@ -70,6 +70,7 @@ export function ProfileTab({ company, setCompany, updateField, showAddons }: Pro
               <EditableField label="HQ State" value={company.headquarters_state} onSave={(v) => updateField('headquarters_state', v)} />
               <EditableSelect label="Work Arrangement" value={company.work_arrangement} options={ARRANGEMENT_OPTIONS} onSave={(v) => updateField('work_arrangement', v)} />
               <EditableSelect label="Default Employment Type" value={company.default_employment_type} options={EMPLOYMENT_TYPE_OPTIONS} onSave={(v) => updateField('default_employment_type', v)} />
+              <EditableField label="New-hire credential grace period (days)" value={company.default_credential_grace_days} type="number" onSave={(v) => updateField('default_credential_grace_days', Number(v))} />
             </dl>
           </div>
 

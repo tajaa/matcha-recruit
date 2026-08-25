@@ -52,13 +52,27 @@ export interface RosterEmployee {
   job_ids: string[]
 }
 
+export type JobCredentialRequirement = {
+  id?: string
+  credential_type_id: string
+  credential_type_key?: string
+  credential_type_label?: string
+  has_expiration?: boolean
+  is_required: boolean
+  schedule_blocking: boolean
+  effective_from?: string
+  notes?: string | null
+}
+
 export type ScheduleJob = {
   id: string
   name: string
   location_id: string | null
   color: string | null
   notes: string | null
+  credential_grace_days: number | null
   employee_ids: string[]
+  credential_requirements: JobCredentialRequirement[]
 }
 
 export type JobPayload = {
@@ -67,6 +81,8 @@ export type JobPayload = {
   color?: string | null
   notes?: string | null
   employee_ids?: string[]
+  credential_grace_days?: number | null
+  credential_requirements?: JobCredentialRequirement[]
 }
 
 export interface ScheduleLocation {

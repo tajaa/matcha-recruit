@@ -60,9 +60,9 @@ export default function CompanySettings() {
     }
   }, [tab, locations.length, loadLocations])
 
-  async function updateField(field: string, value: string | string[]) {
+  async function updateField(field: string, value: string | string[] | number) {
     if (!company) return
-    const updated = await api.patch<CompanyData>(`/companies/${company.id}`, { [field]: value || null })
+    const updated = await api.patch<CompanyData>(`/companies/${company.id}`, { [field]: value === '' ? null : value })
     setCompany(updated)
   }
 

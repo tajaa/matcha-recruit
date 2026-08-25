@@ -8,6 +8,8 @@ from app.matcha.services.scheduling import schedule_eligibility, shift_complianc
 def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
     company_id = uuid4()
     employee_id = uuid4()
+    job_id = uuid4()
+    observed_job_ids: list = []
     eligibility_violation = {
         "check": "schedule_eligibility",
         "severity": "block",
@@ -24,6 +26,7 @@ def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
         return "UTC"
 
     async def fake_eligibility(*_args, **_kwargs):
+        observed_job_ids.append(_kwargs["job_id"])
         return [eligibility_violation]
 
     async def fake_week_hours(*_args, **_kwargs):
@@ -50,10 +53,12 @@ def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
         ends_at=datetime(2026, 8, 21, 17, 30, tzinfo=timezone.utc),
         break_minutes=30,
         employee_id=employee_id,
+        job_id=job_id,
         lapse_items=[],
     ))
 
     assert eligibility_violation in result
+    assert observed_job_ids == [job_id]
 
 
 def test_eligibility_uses_the_shift_locations_calendar_day(monkeypatch):

@@ -561,7 +561,7 @@ async def generate_week_template_shifts(
         # advisories.
         compliance_warnings.extend(
             await check_shift_compliance(
-                conn, company_id, location_id=blk["location_id"],
+                conn, company_id, location_id=blk["location_id"], job_id=blk["job_id"],
                 starts_at=starts[0], ends_at=ends[0],
                 break_minutes=blk["break_minutes"] or 0, shift_kind="work",
             )

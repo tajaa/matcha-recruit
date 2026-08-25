@@ -179,7 +179,7 @@ async def move_employee_assignment(
                 source_violations = []
 
             target_violations = await check_shift_compliance(
-                conn, company_id, location_id=target["location_id"],
+                conn, company_id, location_id=target["location_id"], job_id=target["job_id"],
                 starts_at=target["starts_at"], ends_at=target["ends_at"],
                 break_minutes=target["break_minutes"] or 0,
                 employee_id=body.employee_id,
@@ -266,7 +266,7 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
         # Compliance runs regardless of force — a minor-hour BLOCK (422) can't be
         # overridden, advisories (409) can.
         violations = await check_shift_compliance(
-            conn, company_id, location_id=shift["location_id"],
+            conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"],
             starts_at=shift["starts_at"], ends_at=shift["ends_at"],
             break_minutes=shift["break_minutes"] or 0,
             employee_id=body.employee_id, exclude_shift_id=shift_id,

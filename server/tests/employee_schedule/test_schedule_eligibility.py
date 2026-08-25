@@ -6,6 +6,7 @@ from app.matcha.services.scheduling.schedule_eligibility import (
     _schedule_blocking_requirements,
     local_date_at,
     open_expired_eligibility_cases,
+    open_expired_job_credential_cases,
     open_expiring_eligibility_warnings,
     schedule_eligibility_roster_flags,
     schedule_eligibility_violations,
@@ -57,6 +58,91 @@ def test_missing_schedule_blocking_credential_blocks_immediately():
     ))
     assert violations[0]["code"] == "credential_missing"
     assert "approved credential document" in violations[0]["message"]
+
+
+class JobCredentialGraceConn:
+    async def fetch(self, query, *args):
+        if "schedule_job_credential_requirements" in query:
+            return [{
+                "job_requirement_id": uuid4(), "schedule_blocking": True, "is_required": True,
+                "effective_from": date(2026, 8, 1), "label": "Food Handler Card",
+                "has_expiration": True, "status": "pending", "expires_at": None,
+                "employee_start_date": date(2026, 8, 10), "employee_created_on": date(2026, 8, 10),
+                "grace_days": 7,
+            }]
+        if "employee_credential_requirements" in query:
+            return []
+        if "employee_work_permits" in query:
+            return []
+        raise AssertionError(query)
+
+
+def test_job_credential_missing_is_deferred_only_during_its_grace_period():
+    company_id, employee_id, job_id = uuid4(), uuid4(), uuid4()
+    in_grace = asyncio.run(schedule_eligibility_violations(
+        JobCredentialGraceConn(), company_id, employee_id=employee_id, job_id=job_id,
+        shift_date=date(2026, 8, 16),
+    ))
+    after_grace = asyncio.run(schedule_eligibility_violations(
+        JobCredentialGraceConn(), company_id, employee_id=employee_id, job_id=job_id,
+        shift_date=date(2026, 8, 17),
+    ))
+    assert in_grace == []
+    assert after_grace[0]["code"] == "credential_missing"
+
+
+def test_job_credential_does_not_block_an_unrelated_job():
+    violations = asyncio.run(schedule_eligibility_violations(
+        JobCredentialGraceConn(), uuid4(), employee_id=uuid4(), shift_date=date(2026, 8, 30),
+    ))
+    assert violations == []
+
+
+class JobExpiryConn:
+    def __init__(self):
+        self.company_id, self.job_id, self.employee_id = uuid4(), uuid4(), uuid4()
+        self.requirement_id, self.location_id, self.case_id = uuid4(), uuid4(), uuid4()
+        self.assigned = True
+        self.insert_calls = 0
+
+    async def fetch(self, query, *args):
+        if "FROM schedule_job_credential_requirements jr" in query:
+            return [{
+                "job_id": self.job_id, "requirement_id": self.requirement_id,
+                "employee_id": self.employee_id, "status": "verified",
+                "expires_at": date(2026, 8, 20), "label": "Food Handler Card",
+                "has_expiration": True, "auto_unassign_on_expiry": True,
+            }]
+        if "FROM schedule_shifts s" in query:
+            return ([{"shift_id": uuid4(), "location_id": self.location_id,
+                      "starts_at": None, "timezone": "UTC"}] if self.assigned else [])
+        raise AssertionError(query)
+
+    async def fetchval(self, query, *args):
+        if "INSERT INTO schedule_eligibility_cases" in query:
+            self.insert_calls += 1
+            return self.case_id if self.insert_calls == 1 else None
+        if "SELECT id FROM schedule_eligibility_cases" in query:
+            return self.case_id
+        raise AssertionError(query)
+
+    async def execute(self, _query, *_args):
+        return None
+
+
+def test_job_expiry_worker_only_opens_and_removes_once(monkeypatch):
+    conn = JobExpiryConn()
+
+    async def remove_once(*_args, **_kwargs):
+        conn.assigned = False
+        return True
+
+    monkeypatch.setattr("app.matcha.services.scheduling.schedule_eligibility.remove_assignment_core", remove_once)
+    first = asyncio.run(open_expired_job_credential_cases(conn, conn.company_id, as_of=date(2026, 8, 21)))
+    second = asyncio.run(open_expired_job_credential_cases(conn, conn.company_id, as_of=date(2026, 8, 21)))
+    assert first == [conn.case_id]
+    assert second == []
+    assert conn.insert_calls == 1
 
 
 class ValidCredentialConn:

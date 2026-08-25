@@ -204,6 +204,8 @@ class JobCreate(BaseModel):
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
     employee_ids: list[UUID] = Field(default_factory=list, max_length=500)
+    credential_grace_days: Optional[int] = Field(None, ge=0, le=365)
+    credential_requirements: list["JobCredentialRequirementInput"] = Field(default_factory=list, max_length=100)
 
 
 class JobUpdate(BaseModel):
@@ -214,6 +216,18 @@ class JobUpdate(BaseModel):
     location_id: Optional[UUID] = None
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
+    credential_grace_days: Optional[int] = Field(None, ge=0, le=365)
+
+
+class JobCredentialRequirementInput(BaseModel):
+    credential_type_id: UUID
+    is_required: bool = True
+    schedule_blocking: bool = True
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+class JobCredentialRequirementsReplace(BaseModel):
+    requirements: list[JobCredentialRequirementInput] = Field(default_factory=list, max_length=100)
 
 
 class JobEmployeesReplace(BaseModel):
@@ -221,6 +235,9 @@ class JobEmployeesReplace(BaseModel):
     add/remove pair would just re-derive this on the client anyway."""
 
     employee_ids: list[UUID] = Field(default_factory=list, max_length=500)
+
+
+JobCreate.model_rebuild()
 
 
 class WeekTemplateCreate(BaseModel):

@@ -9,6 +9,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from .shift_writes import remove_assignment_core
+from .job_credential_requirements import job_restriction_starts_on
 
 
 def _basis(value) -> dict:
@@ -85,7 +86,7 @@ async def _schedule_blocking_requirements(conn, company_id: UUID, employee_ids: 
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
-          AND ecr.is_required = true
+          AND ecr.is_required = true AND ecr.applies_company_wide = true
           {_BLOCKING_AUTHORITY_SQL}
         """,
         company_id, employee_ids,
@@ -104,6 +105,42 @@ def _credential_problem(row, *, as_of: date) -> tuple[str, str] | None:
     if row["expires_at"] is not None and row["expires_at"] < as_of:
         return "credential_expired", f"{label} expired {row['expires_at'].isoformat()} and blocks new scheduling."
     return None
+
+
+async def _job_credential_rows(
+    conn, *, company_id: UUID, employee_id: UUID, job_id: UUID,
+) -> list:
+    """Live job rules are authoritative; materialized ECR rows supply evidence."""
+    return await conn.fetch(
+        """SELECT jr.id AS job_requirement_id, jr.schedule_blocking, jr.is_required,
+                  jr.effective_from, ct.label, ct.has_expiration,
+                  COALESCE(ecr.status, 'pending') AS status, ecr.expires_at,
+                  e.start_date AS employee_start_date, e.created_at::date AS employee_created_on,
+                  COALESCE(j.credential_grace_days, c.default_credential_grace_days) AS grace_days
+             FROM schedule_job_credential_requirements jr
+             JOIN schedule_jobs j ON j.id=jr.job_id AND j.company_id=jr.company_id
+             JOIN companies c ON c.id=jr.company_id
+             JOIN employees e ON e.id=$2 AND e.org_id=jr.company_id
+             JOIN credential_types ct ON ct.id=jr.credential_type_id
+             LEFT JOIN employee_credential_requirements ecr
+               ON ecr.employee_id=e.id AND ecr.credential_type_id=jr.credential_type_id
+            WHERE jr.company_id=$1 AND jr.job_id=$3 AND jr.is_required AND jr.schedule_blocking""",
+        company_id, employee_id, job_id,
+    )
+
+
+def _job_credential_problem(row, *, as_of: date) -> tuple[str, str] | None:
+    problem = _credential_problem(row, as_of=as_of)
+    if problem is None:
+        return None
+    code, message = problem
+    # Grace only defers an absent/pending document. A known expired credential
+    # or an unconfirmed expiry is never made valid by a new-hire grace period.
+    if code == "credential_missing" and as_of < job_restriction_starts_on(
+        row, employee_start_date=row["employee_start_date"],
+    ):
+        return None
+    return code, message
 
 
 def local_date_at(instant: datetime, timezone_name: str | None) -> date:
@@ -156,6 +193,7 @@ async def schedule_eligibility_violations(
     employee_id: UUID,
     shift_date: date,
     location_id: UUID | None = None,
+    job_id: UUID | None = None,
     employee_age: int | None = None,
 ) -> list[dict]:
     """A blocking requirement — tenant-approved template OR curated system
@@ -168,7 +206,7 @@ async def schedule_eligibility_violations(
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.employee_id = $2
-          AND ecr.is_required = true
+          AND ecr.is_required = true AND ecr.applies_company_wide = true
           {_BLOCKING_AUTHORITY_SQL}
         """, company_id, employee_id,
     )
@@ -187,6 +225,15 @@ async def schedule_eligibility_violations(
             out.append({"check": "schedule_eligibility", "severity": "block", "code": code,
                         "message": message,
                         "statute": _basis(row['legal_basis']).get('citation'), "state": ""})
+    if job_id is not None:
+        for row in await _job_credential_rows(
+            conn, company_id=company_id, employee_id=employee_id, job_id=job_id,
+        ):
+            problem = _job_credential_problem(row, as_of=shift_date)
+            if problem:
+                code, message = problem
+                out.append({"check": "schedule_eligibility", "severity": "block", "code": code,
+                            "message": message, "statute": None, "state": ""})
     # Old direct callers do not provide an age. Preserve their expired-permit
     # behavior while write paths supply age and apply the rule only to minors.
     if employee_age is None:
@@ -273,7 +320,7 @@ async def open_expiring_eligibility_warnings(
         ) future ON true
         LEFT JOIN business_locations scope_location
           ON scope_location.id=COALESCE(future.location_id, e.work_location_id)
-        WHERE e.org_id = $1 AND ecr.is_required = true
+        WHERE e.org_id = $1 AND ecr.is_required = true AND ecr.applies_company_wide = true
           AND ecr.status = 'verified' AND ecr.expires_at IS NOT NULL
           {_BLOCKING_AUTHORITY_SQL}
         """, company_id,
@@ -316,7 +363,12 @@ async def resolve_recovered_eligibility_cases(
         SELECT c.id, ecr.id AS requirement_id, ecr.status, ecr.expires_at,
                ct.label, ct.has_expiration,
                COALESCE(case_location.timezone, primary_location.timezone) AS timezone,
-               {_BLOCKING_AUTHORITY_EXPR} AS is_schedule_blocking
+               CASE WHEN c.job_id IS NOT NULL THEN EXISTS (
+                   SELECT 1 FROM schedule_job_credential_requirements jr
+                    WHERE jr.company_id=c.company_id AND jr.job_id=c.job_id
+                      AND jr.credential_type_id=ecr.credential_type_id
+                      AND jr.is_required AND jr.schedule_blocking
+               ) ELSE {_BLOCKING_AUTHORITY_EXPR} END AS is_schedule_blocking
           FROM schedule_eligibility_cases c
           LEFT JOIN employees e ON e.id=c.employee_id AND e.org_id=c.company_id
           LEFT JOIN employee_credential_requirements ecr ON ecr.id = c.requirement_id
@@ -369,7 +421,7 @@ async def open_expired_eligibility_cases(
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
         LEFT JOIN business_locations primary_location ON primary_location.id=e.work_location_id
-        WHERE e.org_id = $1 AND ecr.is_required = true
+        WHERE e.org_id = $1 AND ecr.is_required = true AND ecr.applies_company_wide = true
           {_BLOCKING_AUTHORITY_SQL}
         """, company_id,
     )
@@ -475,5 +527,80 @@ async def open_expired_eligibility_cases(
                     conn, case_id=case_id, company_id=company_id,
                     employee_id=row["employee_id"], assignment=assignment,
                     auto_unassign=auto_unassign,
+                )
+    return opened
+
+
+async def open_expired_job_credential_cases(
+    conn, company_id: UUID, *, now: datetime | None = None, as_of: date | None = None,
+) -> list[UUID]:
+    """Remove only the affected job's future assignments after expiry.
+
+    The composite active-case index includes ``job_id``, so this can be run
+    repeatedly without duplicating cases, events, or unassignment audit rows.
+    """
+    instant = now or datetime.combine(as_of or date.today(), datetime.min.time(), tzinfo=timezone.utc)
+    rows = await conn.fetch(
+        """SELECT jr.job_id, ecr.id AS requirement_id, ecr.employee_id, ecr.status, ecr.expires_at,
+                  ct.label, ct.has_expiration, COALESCE(ct.auto_unassign_on_expiry,false) AS auto_unassign_on_expiry
+             FROM schedule_job_credential_requirements jr
+             JOIN employee_credential_requirements ecr ON ecr.credential_type_id=jr.credential_type_id
+             JOIN credential_types ct ON ct.id=jr.credential_type_id
+             JOIN employees e ON e.id=ecr.employee_id AND e.org_id=jr.company_id
+             JOIN schedule_job_employees sje
+               ON sje.job_id=jr.job_id AND sje.employee_id=ecr.employee_id AND sje.company_id=jr.company_id
+            WHERE jr.company_id=$1 AND jr.is_required AND jr.schedule_blocking""",
+        company_id,
+    )
+    opened: list[UUID] = []
+    for row in rows:
+        assignments = await conn.fetch(
+            """SELECT s.id AS shift_id, s.location_id, s.starts_at, s.ends_at, s.status, s.kind, location.timezone
+                 FROM schedule_shifts s
+                 JOIN schedule_shift_assignments a ON a.shift_id=s.id
+                 LEFT JOIN business_locations location ON location.id=s.location_id
+                WHERE s.company_id=$1 AND s.job_id=$2 AND a.employee_id=$3
+                  AND s.status <> 'cancelled' AND s.location_id IS NOT NULL AND s.starts_at > NOW()""",
+            company_id, row["job_id"], row["employee_id"],
+        )
+        by_location: dict[UUID, list] = {}
+        for assignment in assignments:
+            by_location.setdefault(assignment["location_id"], []).append(assignment)
+        for location_id, location_assignments in by_location.items():
+            problem = _credential_problem(
+                row, as_of=local_date_at(instant, location_assignments[0].get("timezone")),
+            )
+            if not problem:
+                continue
+            reason_code, _message = problem
+            auto_unassign = bool(row["auto_unassign_on_expiry"]) and reason_code == "credential_expired"
+            case_reason_code = f"{reason_code}_auto_unassigned" if auto_unassign else reason_code
+            case_id = await conn.fetchval(
+                """INSERT INTO schedule_eligibility_cases
+                       (company_id, employee_id, location_id, job_id, requirement_type, requirement_id,
+                        blocking_reason_code, status, expires_at, legal_basis)
+                   VALUES ($1,$2,$3,$4,'credential',$5,$6,'removal_requested',$7,'{}'::jsonb)
+                   ON CONFLICT DO NOTHING RETURNING id""",
+                company_id, row["employee_id"], location_id, row["job_id"], row["requirement_id"],
+                case_reason_code, row["expires_at"],
+            )
+            new_case = bool(case_id)
+            if not case_id:
+                case_id = await conn.fetchval(
+                    """SELECT id FROM schedule_eligibility_cases
+                         WHERE company_id=$1 AND employee_id=$2 AND location_id IS NOT DISTINCT FROM $3
+                           AND job_id=$4 AND requirement_type='credential' AND requirement_id=$5
+                           AND expires_at=$6 AND status IN ('warning_open','removal_requested',
+                               'removal_confirmed','keep_acknowledged')""",
+                    company_id, row["employee_id"], location_id, row["job_id"], row["requirement_id"], row["expires_at"],
+                )
+            if not case_id:
+                continue
+            if new_case:
+                opened.append(case_id)
+            for assignment in location_assignments:
+                await _attach_case_assignment(
+                    conn, case_id=case_id, company_id=company_id, employee_id=row["employee_id"],
+                    assignment=assignment, auto_unassign=auto_unassign,
                 )
     return opened

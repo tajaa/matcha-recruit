@@ -532,7 +532,7 @@ async def assign_credential_requirements_to_employee(
             await conn.execute(
                 """UPDATE employee_credential_requirements
                    SET template_id = $1, is_required = $2, priority = $3,
-                       notes = $4, updated_at = NOW()
+                       notes = $4, applies_company_wide = true, updated_at = NOW()
                    WHERE id = $5""",
                 req.template_id, req.is_required, req.priority, req.notes, existing_id,
             )
@@ -635,6 +635,7 @@ async def materialize_schedule_blocking_template(
                 template_id = EXCLUDED.template_id,
                 is_required = EXCLUDED.is_required,
                 priority = EXCLUDED.priority,
+                applies_company_wide = true,
                 updated_at = NOW()
             """,
             employee["id"], template["credential_type_id"], template["id"],
@@ -648,19 +649,32 @@ async def materialize_schedule_blocking_template(
 
 
 async def get_employee_credential_requirements(
-    conn, employee_id: UUID
+    conn, employee_id: UUID, company_id: UUID
 ) -> list[dict[str, Any]]:
-    """Fetch all credential requirements for an employee with type info."""
+    """Fetch one tenant's credential requirements for one employee."""
     rows = await conn.fetch(
         """
         SELECT ecr.*, ct.key AS credential_type_key, ct.label AS credential_type_label,
                ct.category AS credential_type_category, ct.has_expiration, ct.has_number, ct.has_state
         FROM employee_credential_requirements ecr
+        JOIN employees e ON e.id = ecr.employee_id AND e.org_id = $2
         JOIN credential_types ct ON ct.id = ecr.credential_type_id
         WHERE ecr.employee_id = $1
+          AND (
+              ecr.applies_company_wide = true
+              OR EXISTS (
+                  SELECT 1
+                  FROM schedule_job_employees sje
+                  JOIN schedule_job_credential_requirements jr
+                    ON jr.job_id=sje.job_id AND jr.company_id=sje.company_id
+                  WHERE sje.company_id=$2 AND sje.employee_id=ecr.employee_id
+                    AND jr.credential_type_id=ecr.credential_type_id
+                    AND jr.is_required
+              )
+          )
         ORDER BY ct.category, ct.label
         """,
-        employee_id,
+        employee_id, company_id,
     )
     return [dict(r) for r in rows]
 

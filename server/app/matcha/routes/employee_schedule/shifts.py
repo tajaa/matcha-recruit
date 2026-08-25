@@ -51,6 +51,7 @@ async def _duplicate_assignment_block(
     *,
     employee_id: UUID,
     location_id: UUID | None,
+    job_id: UUID | None,
     starts_at: datetime,
     ends_at: datetime,
     break_minutes: int,
@@ -59,7 +60,7 @@ async def _duplicate_assignment_block(
 ) -> dict | None:
     """Return the live hard block for one duplicated assignment, if any."""
     violations = await check_shift_compliance(
-        conn, company_id, location_id=location_id,
+        conn, company_id, location_id=location_id, job_id=job_id,
         starts_at=starts_at, ends_at=ends_at, break_minutes=break_minutes,
         employee_id=employee_id, shift_kind=shift_kind,
         training_requirement_id=training_requirement_id,
@@ -300,7 +301,7 @@ async def create_shift(body: ShiftCreate,
             if unqualified:
                 qualification_overrides[str(emp_id)] = unqualified
             violations = await check_shift_compliance(
-                conn, company_id, location_id=body.location_id,
+                conn, company_id, location_id=body.location_id, job_id=body.job_id,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=body.break_minutes or 0, employee_id=emp_id,
                 shift_kind=body.kind, training_requirement_id=body.training_requirement_id,
@@ -313,7 +314,7 @@ async def create_shift(body: ShiftCreate,
             # Open shift (no assignee yet): only shift-intrinsic checks run.
             raise_for_violations(
                 await check_shift_compliance(
-                    conn, company_id, location_id=body.location_id,
+                    conn, company_id, location_id=body.location_id, job_id=body.job_id,
                     starts_at=body.starts_at, ends_at=body.ends_at,
                     break_minutes=body.break_minutes or 0,
                 ),
@@ -397,7 +398,7 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
         first_start, first_end = shift_window_on_date(
             src["starts_at"], src["ends_at"], body.target_dates[0])
         compliance_warnings = await check_shift_compliance(
-            conn, company_id, location_id=src["location_id"],
+            conn, company_id, location_id=src["location_id"], job_id=src["job_id"],
             starts_at=first_start, ends_at=first_end,
             break_minutes=src["break_minutes"] or 0, shift_kind=src["kind"],
         )
@@ -413,7 +414,7 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                     avail = availability_violations(avail_map.get(eid, {}), new_start, new_end)
                     unqualified = await check_job_qualification(conn, company_id, eid, src["job_id"])
                     blocked = await _duplicate_assignment_block(
-                        conn, company_id, employee_id=eid, location_id=src["location_id"],
+                        conn, company_id, employee_id=eid, location_id=src["location_id"], job_id=src["job_id"],
                         starts_at=new_start, ends_at=new_end,
                         break_minutes=src["break_minutes"] or 0, shift_kind=src["kind"],
                         training_requirement_id=src["training_requirement_id"],
@@ -544,7 +545,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 if avail:
                     availability_overrides[str(emp)] = avail
                 violations = await check_shift_compliance(
-                    conn, company_id, location_id=new_location,
+                conn, company_id, location_id=new_location, job_id=patch.get("job_id", existing["job_id"]),
                     starts_at=new_start, ends_at=new_end,
                     break_minutes=new_break or 0, employee_id=emp,
                     exclude_shift_id=shift_id,
@@ -561,7 +562,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 # escapes the meal-break/daily-OT advisories entirely.
                 raise_for_violations(
                     await check_shift_compliance(
-                        conn, company_id, location_id=new_location,
+                        conn, company_id, location_id=new_location, job_id=patch.get("job_id", existing["job_id"]),
                         starts_at=new_start, ends_at=new_end,
                         break_minutes=new_break or 0,
                         exclude_shift_id=shift_id,
@@ -575,7 +576,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             # above (`new_status != "cancelled"`), but it's exactly the event
             # a Fair Workweek ordinance cares about — check it on its own.
             violations = await check_shift_compliance(
-                conn, company_id, location_id=existing["location_id"],
+                conn, company_id, location_id=existing["location_id"], job_id=existing["job_id"],
                 starts_at=existing["starts_at"], ends_at=existing["ends_at"],
                 break_minutes=existing["break_minutes"] or 0,
                 exclude_shift_id=shift_id,

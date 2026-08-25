@@ -4,13 +4,13 @@ import type { EditableFieldProps } from './types'
 
 export function EditableField({ label, value, onSave, type = 'text' }: EditableFieldProps) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value ?? '')
+  const [draft, setDraft] = useState(String(value ?? ''))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
   async function handleBlur() {
     const trimmed = draft.trim()
-    if (trimmed === (value ?? '')) {
+    if (trimmed === String(value ?? '')) {
       setEditing(false)
       return
     }
@@ -51,11 +51,11 @@ export function EditableField({ label, value, onSave, type = 'text' }: EditableF
   return (
     <div
       className="cursor-pointer group rounded-md px-2 py-1.5 -mx-2 hover:bg-white/[0.04] transition-colors"
-      onClick={() => { setDraft(value ?? ''); setEditing(true) }}
+      onClick={() => { setDraft(String(value ?? '')); setEditing(true) }}
     >
       <dt className="text-zinc-500 text-xs">{label}</dt>
       <dd className="text-zinc-200 text-sm mt-0.5 flex items-center justify-between gap-2">
-        <span>{value || <span className="text-zinc-600 italic">Not set</span>}</span>
+        <span>{value ?? <span className="text-zinc-600 italic">Not set</span>}</span>
         <svg className="w-3 h-3 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
         </svg>

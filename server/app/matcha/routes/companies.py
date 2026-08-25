@@ -36,6 +36,7 @@ PROFILE_FIELDS = [
     "executive_name",
     "executive_title",
     "executive_phone",
+    "default_credential_grace_days",
 ]
 
 ALL_RETURNING = (
@@ -44,7 +45,7 @@ ALL_RETURNING = (
     "default_employment_type, benefits_summary, pto_policy_summary, "
     "compensation_notes, company_values, ai_guidance_notes, "
     "healthcare_specialties, legal_name, ein, naics, address, zip, "
-    "executive_name, executive_title, executive_phone, created_at"
+    "executive_name, executive_title, executive_phone, default_credential_grace_days, created_at"
 )
 
 
@@ -74,6 +75,7 @@ def _row_to_response(row, *, culture_profile=None, interview_count=0):
         executive_name=row.get("executive_name"),
         executive_title=row.get("executive_title"),
         executive_phone=row.get("executive_phone"),
+        default_credential_grace_days=row.get("default_credential_grace_days", 7),
         created_at=row["created_at"],
         culture_profile=culture_profile,
         interview_count=interview_count,

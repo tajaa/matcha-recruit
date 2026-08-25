@@ -246,6 +246,7 @@ async def _fair_workweek_advisories(
     company_id: UUID,
     *,
     location_id: Optional[UUID],
+    job_id: Optional[UUID] = None,
     starts_at: datetime,
     ends_at: datetime,
     event: Optional[str],
@@ -373,6 +374,7 @@ async def check_shift_compliance(
     company_id: UUID,
     *,
     location_id: Optional[UUID],
+    job_id: Optional[UUID] = None,
     starts_at: datetime,
     ends_at: datetime,
     break_minutes: int,
@@ -422,6 +424,7 @@ async def check_shift_compliance(
             employee_id=employee_id,
             shift_date=shift_date,
             location_id=location_id,
+            job_id=job_id,
             employee_age=age,
         ))
         week_hours = await _week_hours(conn, company_id, employee_id, starts_at, worked, exclude_shift_id)

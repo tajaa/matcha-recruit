@@ -13,11 +13,15 @@ from ..utils import get_db_connection, scheduler_enabled
 from app.core.feature_flags import get_company_features
 from app.matcha.services.scheduling.schedule_eligibility import (
     open_expired_eligibility_cases,
+    open_expired_job_credential_cases,
     open_expiring_eligibility_warnings,
     resolve_recovered_eligibility_cases,
 )
 from app.matcha.services.scheduling.schedule_eligibility_events import (
     reconcile_schedule_eligibility_events,
+)
+from app.matcha.services.scheduling.job_credential_requirements import (
+    reconcile_company_job_requirements,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,8 +50,13 @@ async def _dispatch() -> dict:
             # the warning query requires expires_at >= as_of and the expired
             # path requires expires_at < as_of.
             async with conn.transaction():
+                # Workers use the direct Celery connection (never a request
+                # asyncpg pool). Materialize before evaluating expiry so a
+                # newly configured job rule is visible on this run.
+                await reconcile_company_job_requirements(conn, company_id=company["id"])
                 warning_ids = await open_expiring_eligibility_warnings(conn, company["id"], now=run_at)
                 case_ids = await open_expired_eligibility_cases(conn, company["id"], now=run_at)
+                case_ids.extend(await open_expired_job_credential_cases(conn, company["id"], now=run_at))
                 newly_recovered = await resolve_recovered_eligibility_cases(conn, company["id"], now=run_at)
                 await reconcile_schedule_eligibility_events(conn, company["id"])
             warned += len(warning_ids)

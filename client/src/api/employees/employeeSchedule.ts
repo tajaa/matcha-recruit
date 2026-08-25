@@ -3,7 +3,7 @@ import type {
   Shift, ShiftPayload, WeekResponse, ScheduleSummary,
   WeekTemplate, WeekTemplatePayload, TemplateBlock, BlockPayload, ScheduleRequest,
   AssignmentMovePayload, AssignmentMoveResponse,
-  ScheduleJob, JobPayload, RosterEmployee,
+  ScheduleJob, JobPayload, JobCredentialRequirement, RosterEmployee,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -36,6 +36,12 @@ export function deleteJob(id: string) {
 export function replaceJobEmployees(jobId: string, employeeIds: string[]) {
   return api.put<{ job_id: string; employee_ids: string[] }>(
     `/employee-schedule/jobs/${jobId}/employees`, { employee_ids: employeeIds },
+  )
+}
+
+export function replaceJobCredentialRequirements(jobId: string, requirements: JobCredentialRequirement[]) {
+  return api.put<{ job_id: string; credential_requirements: JobCredentialRequirement[] }>(
+    `/employee-schedule/jobs/${jobId}/credential-requirements`, { requirements },
   )
 }
 

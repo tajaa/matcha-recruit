@@ -10,6 +10,7 @@ export interface CompanyData {
   headquarters_city: string | null
   work_arrangement: string | null
   default_employment_type: string | null
+  default_credential_grace_days: number
   healthcare_specialties: string[] | null
   legal_name: string | null
   ein: string | null
@@ -24,7 +25,7 @@ export interface CompanyData {
 
 export type EditableFieldProps = {
   label: string
-  value: string | null
+  value: string | number | null
   onSave: (value: string) => Promise<void>
   type?: string
 }

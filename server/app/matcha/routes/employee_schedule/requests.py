@@ -75,7 +75,7 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     if unqualified and not force:
         raise_not_qualified(unqualified)
     violations = await check_shift_compliance(
-        conn, company_id, location_id=shift["location_id"], starts_at=shift["starts_at"],
+        conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"], starts_at=shift["starts_at"],
         ends_at=shift["ends_at"], break_minutes=shift["break_minutes"] or 0,
         employee_id=employee_id, exclude_shift_id=exclude_shift_id, fw_event="assign",
         fw_shift_published=(shift["status"] == "published"), shift_kind=shift["kind"],

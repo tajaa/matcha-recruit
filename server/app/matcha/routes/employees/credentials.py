@@ -35,6 +35,7 @@ from app.core.services.credential_crypto import (
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.services.scheduling.job_credential_requirements import materialize_job_requirements
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,53 @@ def _cred_doc_from_row(row) -> dict:
     }
 
 
+async def _requirement_for_document_type(
+    conn, *, company_id: UUID, employee_id: UUID, document_type: str, for_update: bool = False,
+):
+    """Return the tenant-owned evidence row for a credential type.
+
+    Job rules are materialized lazily here too. This makes a just-assigned
+    employee see the correct upload target without requiring a worker run.
+    """
+    lock = " FOR UPDATE" if for_update else ""
+    requirement = await conn.fetchrow(
+        f"""SELECT ecr.id, ct.has_expiration
+              FROM employee_credential_requirements ecr
+              JOIN employees e ON e.id=ecr.employee_id AND e.org_id=$3
+              JOIN credential_types ct ON ct.id=ecr.credential_type_id
+             WHERE ecr.employee_id=$1 AND ct.key=$2{lock}""",
+        employee_id, document_type, company_id,
+    )
+    if requirement:
+        return requirement
+
+    job_ids = await conn.fetch(
+        """SELECT DISTINCT jr.job_id
+              FROM schedule_job_credential_requirements jr
+              JOIN schedule_job_employees sje
+                ON sje.job_id=jr.job_id AND sje.company_id=jr.company_id
+             WHERE jr.company_id=$1 AND sje.employee_id=$2
+               AND jr.is_required AND jr.credential_type_id=(
+                   SELECT id FROM credential_types WHERE key=$3
+               )""",
+        company_id, employee_id, document_type,
+    )
+    for job in job_ids:
+        await materialize_job_requirements(
+            conn, company_id=company_id, job_id=job["job_id"], employee_ids=[employee_id],
+        )
+    if not job_ids:
+        return None
+    return await conn.fetchrow(
+        f"""SELECT ecr.id, ct.has_expiration
+              FROM employee_credential_requirements ecr
+              JOIN employees e ON e.id=ecr.employee_id AND e.org_id=$3
+              JOIN credential_types ct ON ct.id=ecr.credential_type_id
+             WHERE ecr.employee_id=$1 AND ct.key=$2{lock}""",
+        employee_id, document_type, company_id,
+    )
+
+
 async def _run_credential_extraction(document_id: UUID, file_bytes: bytes, mime_type: str, document_type: str):
     """Background task: run Gemini extraction and update the DB row."""
     try:
@@ -323,16 +371,10 @@ async def upload_credential_document(
         )
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
-        required_document_type = await conn.fetchval(
-            """
-            SELECT 1
-            FROM employee_credential_requirements ecr
-            JOIN credential_types ct ON ct.id = ecr.credential_type_id
-            WHERE ecr.employee_id = $1 AND ct.key = $2
-            """,
-            employee_id, document_type,
+        requirement = await _requirement_for_document_type(
+            conn, company_id=company_id, employee_id=employee_id, document_type=document_type,
         )
-        if document_type not in VALID_DOCUMENT_TYPES and not required_document_type:
+        if document_type not in VALID_DOCUMENT_TYPES and not requirement:
             raise HTTPException(
                 status_code=400,
                 detail="Document type is not recognized for this employee",
@@ -460,15 +502,12 @@ async def approve_credential_document(
             if not row:
                 raise HTTPException(status_code=404, detail="Document not found")
 
-            requirement = await conn.fetchrow(
-            """
-            SELECT ecr.id, ct.has_expiration
-            FROM employee_credential_requirements ecr
-            JOIN credential_types ct ON ct.id = ecr.credential_type_id
-            WHERE ecr.employee_id = $1 AND ct.key = $2
-            FOR UPDATE
-            """,
-            employee_id, row["document_type"],
+            requirement = await _requirement_for_document_type(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                document_type=row["document_type"],
+                for_update=True,
             )
             if requirement and requirement["has_expiration"] and body.expiration_date is None:
                 raise HTTPException(
@@ -573,6 +612,79 @@ async def approve_credential_document(
         "applied_to_credentials": body.apply_to_credentials,
         "expiration_date": body.expiration_date.isoformat() if body.expiration_date else None,
     }
+
+
+class ReclassifyCredentialDocumentRequest(BaseModel):
+    document_type: str
+    expiration_date: Optional[date] = None
+
+
+@router.patch("/{employee_id}/credential-documents/{document_id}", response_model=CredentialDocumentResponse)
+async def reclassify_credential_document(
+    employee_id: UUID,
+    document_id: UUID,
+    body: ReclassifyCredentialDocumentRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Correct a document's credential type and keep requirement evidence consistent."""
+    company_id = await get_client_company_id(current_user)
+    if body.document_type not in VALID_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail="Document type is not recognized")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """SELECT * FROM credential_documents
+                   WHERE id=$1 AND employee_id=$2 AND company_id=$3 FOR UPDATE""",
+                document_id, employee_id, company_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Document not found")
+
+            new_requirement = await _requirement_for_document_type(
+                conn,
+                company_id=company_id,
+                employee_id=employee_id,
+                document_type=body.document_type,
+                for_update=True,
+            )
+            if (
+                row["review_status"] == "approved"
+                and new_requirement
+                and new_requirement["has_expiration"]
+                and body.expiration_date is None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Confirm the credential expiration date before classifying this approved document",
+                )
+
+            # If this file substantiated its former credential, reverting that
+            # requirement is safer than leaving stale verification behind.
+            await conn.execute(
+                """UPDATE employee_credential_requirements
+                   SET status='pending', credential_document_id=NULL,
+                       verified_at=NULL, verified_by=NULL, expires_at=NULL, updated_at=NOW()
+                   WHERE employee_id=$1 AND credential_document_id=$2""",
+                employee_id, document_id,
+            )
+            row = await conn.fetchrow(
+                """UPDATE credential_documents
+                   SET document_type=$1, updated_at=NOW()
+                   WHERE id=$2
+                   RETURNING *""",
+                body.document_type, document_id,
+            )
+            if row["review_status"] == "approved" and new_requirement:
+                await conn.execute(
+                    """UPDATE employee_credential_requirements
+                       SET status='verified', credential_document_id=$1,
+                           verified_at=NOW(), verified_by=$2, expires_at=$3,
+                           waived_at=NULL, waived_by=NULL, waiver_reason=NULL, updated_at=NOW()
+                       WHERE id=$4""",
+                    document_id, current_user.id, body.expiration_date, new_requirement["id"],
+                )
+    return _cred_doc_from_row(row)
 
 
 class RejectRequest(BaseModel):
