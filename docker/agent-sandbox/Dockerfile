@@ -10,7 +10,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/node/bin:/usr/local/aws-cli/v2/current/bin:${PATH} \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# The base debian image auto-purges downloaded .deb files after every
+# install (docker-clean) and disables its own apt cache — both defeat a
+# BuildKit cache mount. Undo that once, up front, so apt-get below actually
+# reuses the mount across builds instead of re-downloading every time.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         ffmpeg \
@@ -53,17 +62,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tmux \
         unzip \
         wget \
-        xdg-utils \
-        && rm -rf /var/lib/apt/lists/*
+        xdg-utils
 
 # gh isn't in Debian bookworm main — pull from GitHub's own apt repo, pinned
 # by its published signing key, rather than a loose third-party add-apt-repo.
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get update && apt-get install -y --no-install-recommends gh
 
 # Node 20 is installed from the official tarball so this image can keep the
 # Python 3.12 base while avoiding a host Node installation.
@@ -85,7 +94,8 @@ RUN case "${TARGETARCH}" in \
 ARG CODEX_VERSION=0.149.1
 ARG CLAUDE_CODE_VERSION=2.1.243
 ARG OPENCODE_VERSION=1.18.22
-RUN npm install --global \
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --global \
         "@openai/codex@${CODEX_VERSION}" \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
         "opencode-ai@${OPENCODE_VERSION}"
@@ -118,9 +128,11 @@ COPY server/requirements.txt /tmp/server-requirements.txt
 COPY client/package.json client/package-lock.json /tmp/client/
 COPY client/tellus/package.json client/tellus/package-lock.json /tmp/tellus/
 COPY client/oceanlab/package.json client/oceanlab/package-lock.json /tmp/oceanlab/
-RUN python -m venv /opt/bootstrap/server-venv \
-    && /opt/bootstrap/server-venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/bootstrap/server-venv/bin/pip install --no-cache-dir -r /tmp/server-requirements.txt \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.npm \
+    python -m venv /opt/bootstrap/server-venv \
+    && /opt/bootstrap/server-venv/bin/pip install --upgrade pip \
+    && /opt/bootstrap/server-venv/bin/pip install -r /tmp/server-requirements.txt \
     && cd /tmp/client && npm ci \
     && mv /tmp/client/node_modules /opt/bootstrap/client-node_modules \
     && cd /tmp/tellus && npm ci \
