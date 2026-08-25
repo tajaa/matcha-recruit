@@ -2008,7 +2008,7 @@ async def _publish_research_to_requesters(jurisdiction_id: UUID) -> dict:
                     try:
                         result = await project_location_from_catalog(
                             conn, company_id, loc["id"],
-                            create_alerts=True, check_type="research_publish",
+                            create_alerts=True, check_type="proactive",
                         )
                         total_new += result.get("new", 0)
                         loc_name = loc["name"] or f"{loc['city']}, {loc['state']}"
