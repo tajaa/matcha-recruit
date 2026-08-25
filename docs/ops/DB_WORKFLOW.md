@@ -22,9 +22,10 @@ read-only and can be dispatched manually.
   AWS identity. It selects the newest S3 object by `LastModified`, requires it
   to be under 15 hours old and at least 1 MiB, downloads it to a restrictive
   temporary file on the app host, checks its byte count, and runs PG15
-  `pg_restore --list` in a network-disabled container. The archive is deleted
-  before the probe returns. This validates S3 availability and archive TOC
-  readability; it is not a full restore rehearsal.
+  `pg_restore --list` plus a full extraction to `/dev/null` in a network-disabled
+  container. The archive is deleted before the probe returns. This validates S3
+  availability and reads/decompresses every archive entry; it never connects to
+  a database and is not a full restore rehearsal.
 - **Schema drift** runs on Finch's self-hosted Mac because dev is the shared
   local `matcha-postgres` container. It never starts that container. It compares
   the exact sorted multi-row `public.alembic_version` sets from dev and live

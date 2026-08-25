@@ -39,6 +39,7 @@ def _probe(**overrides: object) -> dict:
         "s3_read_rc": 0,
         "downloaded_size_bytes": _backup()["size_bytes"],
         "restore_list_rc": 0,
+        "restore_scan_rc": 0,
         "toc_entries": 50,
         **overrides,
     }
@@ -83,6 +84,20 @@ def test_backup_flags_size_mismatch_and_unreadable_archive():
 def test_backup_probe_tool_failure_is_unknown_not_corruption():
     report = backup.evaluate_backup(backup.parse_inventory([_backup()]), _probe(restore_list_rc=125), NOW)
     assert report["status"] == "unknown"
+    killed = backup.evaluate_backup(backup.parse_inventory([_backup()]), _probe(restore_scan_rc=137), NOW)
+    assert killed["status"] == "unknown"
+
+
+def test_backup_requires_every_archive_entry_to_extract():
+    report = backup.evaluate_backup(backup.parse_inventory([_backup()]), _probe(restore_scan_rc=1), NOW)
+    assert report["status"] == "unhealthy"
+    assert any("every backup archive entry" in failure for failure in report["failures"])
+
+
+def test_backup_missing_full_scan_is_unknown_not_healthy():
+    probe = _probe()
+    del probe["restore_scan_rc"]
+    assert backup.evaluate_backup(backup.parse_inventory([_backup()]), probe, NOW)["status"] == "unknown"
 
 
 def test_backup_rejects_empty_inventory_future_timestamp_and_unsafe_key():
@@ -161,6 +176,14 @@ def test_schema_diff_is_capped_and_redacts_secrets():
     assert "diff truncated" in diff
     assert "password" not in diff
     assert "AKIA" not in diff
+
+
+def test_schema_issue_markdown_never_contains_raw_ddl_diff():
+    report = schema.compare_revision_sets({"revisions": ["dev_head"]}, {"revisions": ["prod_head"]})
+    report["schema"] = schema.compare_schemas(_dump("integer"), _dump("text DEFAULT 'sk_live_do_not_publish'"))
+    markdown = schema.render_schema_markdown(report, "https://example.test/workflow")
+    assert "sk_live_do_not_publish" not in markdown
+    assert "Raw DDL differences are withheld" in markdown
 
 
 def test_revision_drift_remains_actionable_when_normalized_schema_matches():

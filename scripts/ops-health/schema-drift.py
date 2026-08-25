@@ -155,7 +155,7 @@ def render_schema_markdown(report: dict, workflow_url: str) -> str:
             for value in schema[key][:50]:
                 lines.append(f"- {label}: `{value}`")
         if schema["diff"]:
-            lines.extend(["", "```diff", schema["diff"], "```"])
+            lines.extend(["", "Raw DDL differences are withheld from GitHub issues to prevent literals embedded in defaults or function bodies from leaking credentials."])
     for failure in report.get("failures", []):
         lines.append(f"- Failure: {failure}")
     lines.extend(["", "Alembic revision drift remains actionable even when DDL is equal: the migration may be data-only or bookkeeping may be stale.", f"Workflow: {workflow_url}"])

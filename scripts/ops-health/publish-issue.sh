@@ -12,8 +12,11 @@ REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 gh label create "$LABEL" --repo "$REPO" --color "B60205" \
     --description "Automated production monitoring" --force >/dev/null 2>&1 || true
 
-issue_number="$(gh issue list --repo "$REPO" --state open --limit 100 --json number,title \
-    --jq "map(select(.title | contains(\"[$MARKER]\"))) | .[0].number // empty")"
+issue_number="$(
+    gh api --paginate --slurp "repos/$REPO/issues?state=open&per_page=100" \
+        | jq -r --arg suffix "[$MARKER]" \
+            '[.[][] | select(.pull_request == null) | select(.title | endswith($suffix))][0].number // empty'
+)"
 
 if [ "$RECOVER" = "--recover" ]; then
     if [ -n "$issue_number" ]; then

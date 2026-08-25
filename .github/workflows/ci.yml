@@ -36,6 +36,7 @@ jobs:
           bash scripts/tests/test_ci_guards.sh
           bash scripts/tests/test_error_autofix.sh
           bash scripts/tests/test_operational_integrity.sh
+          bash scripts/tests/test_publish_issue.sh
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:

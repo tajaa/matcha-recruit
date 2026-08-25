@@ -57,35 +57,47 @@ if [ -f "\$dump_file" ]; then
     downloaded_size=\$(wc -c < "\$dump_file" | tr -d '[:space:]')
 fi
 
-restore_rc=-1
+restore_list_rc=-1
+restore_scan_rc=-1
 toc_entries=0
 if [ "\$s3_rc" -eq 0 ] && [ "\$downloaded_size" = "\$expected_size" ]; then
-    # A complete local download avoids pipe/SIGPIPE ambiguity. pg_restore only
-    # reads the archive TOC; network-disabled Docker prevents any DB connection.
+    # A complete local download avoids pipe/SIGPIPE ambiguity. First inspect the
+    # TOC, then extract every archive entry to /dev/null so corrupt data blocks
+    # cannot pass merely because the TOC is intact. Network-disabled Docker and
+    # no --dbname guarantee this never connects to or restores into any DB.
     set +e
     docker run --rm --pull=never --network none --read-only --cap-drop ALL \
       --security-opt no-new-privileges \
       -v "\$dump_file:/backup.dump:ro" \
       public.ecr.aws/docker/library/postgres:15-alpine \
       pg_restore --list /backup.dump > "\$toc_file" 2>/dev/null
-    restore_rc=\$?
+    restore_list_rc=\$?
     set -e
-    if [ "\$restore_rc" -eq 0 ]; then
+    if [ "\$restore_list_rc" -eq 0 ]; then
         toc_entries=\$(grep -cE '^[0-9]+;' "\$toc_file" || true)
+        set +e
+        docker run --rm --pull=never --network none --read-only --cap-drop ALL \
+          --security-opt no-new-privileges \
+          -v "\$dump_file:/backup.dump:ro" \
+          public.ecr.aws/docker/library/postgres:15-alpine \
+          pg_restore --exit-on-error --file=/dev/null /backup.dump >/dev/null 2>&1
+        restore_scan_rc=\$?
+        set -e
     fi
 fi
 
-python3 - "\$key" "\$expected_size" "\$downloaded_size" "\$s3_rc" "\$restore_rc" "\$toc_entries" <<'PY'
+python3 - "\$key" "\$expected_size" "\$downloaded_size" "\$s3_rc" "\$restore_list_rc" "\$restore_scan_rc" "\$toc_entries" <<'PY'
 import json
 import sys
 
-key, expected, downloaded, s3_rc, restore_rc, toc_entries = sys.argv[1:]
+key, expected, downloaded, s3_rc, restore_list_rc, restore_scan_rc, toc_entries = sys.argv[1:]
 print(json.dumps({
     "key": key,
     "expected_size_bytes": int(expected),
     "downloaded_size_bytes": int(downloaded),
     "s3_read_rc": int(s3_rc),
-    "restore_list_rc": int(restore_rc),
+    "restore_list_rc": int(restore_list_rc),
+    "restore_scan_rc": int(restore_scan_rc),
     "toc_entries": int(toc_entries),
 }))
 PY

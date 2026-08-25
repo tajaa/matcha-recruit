@@ -22,7 +22,7 @@ check() {
 check "backup probe validates keys before SSH" \
     $(grep -q 'unsafe backup key' "$BACKUP" && grep -q 'mktemp /tmp/matcha-backup-check' "$BACKUP" && echo 0 || echo 1)
 check "backup probe verifies complete download before pg_restore" \
-    $(grep -q 'downloaded_size.*expected_size' "$BACKUP" && grep -q 'pg_restore --list' "$BACKUP" && echo 0 || echo 1)
+    $(grep -q 'downloaded_size.*expected_size' "$BACKUP" && grep -q 'pg_restore --list' "$BACKUP" && grep -q 'pg_restore --exit-on-error --file=/dev/null' "$BACKUP" && echo 0 || echo 1)
 check "backup probe removes remote temporary archives" \
     $(grep -q "trap 'rm -f" "$BACKUP" && echo 0 || echo 1)
 check "schema probe never starts the shared dev container" \
@@ -35,6 +35,8 @@ check "schema dumps use deterministic read-only schema flags" \
     $(grep -q -- '--schema-only --quote-all-identifiers --no-owner --no-privileges' "$SCHEMA" && grep -q -- '--no-comments --no-security-labels --no-publications --no-subscriptions' "$SCHEMA" && echo 0 || echo 1)
 check "workflow guards dumps behind revision drift" \
     $(grep -q "if: steps.compare.outputs.status == 'drift'" "$WORKFLOW" && echo 0 || echo 1)
+check "workflow retains revision-only alert when schema diagnostics fail" \
+    $(grep -q 'schema-revision-report.md' "$WORKFLOW" && grep -q 'read-only schema diagnostics failed' "$WORKFLOW" && echo 0 || echo 1)
 check "workflow cleans SSH keys and raw schema dumps" \
     $(grep -q 'Delete backup probe files and SSH key' "$WORKFLOW" && grep -q 'Delete schema dumps and SSH key' "$WORKFLOW" && ! grep -q 'upload-artifact' "$WORKFLOW" && echo 0 || echo 1)
 

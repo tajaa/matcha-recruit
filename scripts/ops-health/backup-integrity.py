@@ -77,12 +77,20 @@ def evaluate_backup(objects: list[dict], probe: dict | None, now: datetime) -> d
     if probe.get("downloaded_size_bytes") != newest["size_bytes"]:
         failures.append("downloaded backup size does not match S3 metadata")
     restore_rc = probe.get("restore_list_rc")
-    if restore_rc in {125, 126, 127, -1}:
+    if not isinstance(restore_rc, int) or restore_rc < 0 or restore_rc >= 125:
         return {"status": "unknown", "failures": ["pg_restore probe could not run"], "backup": backup}
     if restore_rc != 0:
         failures.append("pg_restore could not read the backup archive")
     if not isinstance(probe.get("toc_entries"), int) or probe["toc_entries"] <= 0:
         failures.append("backup archive has no readable table-of-contents entries")
+    if restore_rc != 0:
+        backup["toc_entries"] = probe.get("toc_entries")
+        return {"status": "unhealthy", "failures": failures, "backup": backup}
+    scan_rc = probe.get("restore_scan_rc")
+    if not isinstance(scan_rc, int) or scan_rc < 0 or scan_rc >= 125:
+        return {"status": "unknown", "failures": ["full archive scan could not run"], "backup": backup}
+    if scan_rc != 0:
+        failures.append("pg_restore could not extract every backup archive entry")
     backup["toc_entries"] = probe.get("toc_entries")
     return {"status": "unhealthy" if failures else "healthy", "failures": failures, "backup": backup}
 

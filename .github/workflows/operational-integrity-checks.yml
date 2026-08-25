@@ -158,7 +158,7 @@ jobs:
             --dev-revisions "$RUNNER_TEMP/dev-revisions.json" \
             --prod-revisions "$RUNNER_TEMP/prod-revisions.json" \
             --output "$RUNNER_TEMP/schema-revision-report.json" \
-            --markdown "$RUNNER_TEMP/schema-report.md" \
+            --markdown "$RUNNER_TEMP/schema-revision-report.md" \
             --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           rc=$?
           set -e
@@ -207,12 +207,12 @@ jobs:
             printf 'The schema monitor could not collect an authoritative read-only revision comparison.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
             ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
           elif [ "${{ steps.compare.outputs.status }}" = drift ]; then
-            report="$RUNNER_TEMP/schema-report.md"
-            ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$report" ops-health
             if [ "${{ steps.dumps.outcome }}" != success ] || [ "${{ steps.schema.outcome }}" != success ]; then
+              ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-revision-report.md" ops-health
               printf 'Alembic revision drift was detected, but the read-only schema diagnostics failed.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
               ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
             else
+              ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-report.md" ops-health
               printf 'Schema monitor recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
               ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
             fi
