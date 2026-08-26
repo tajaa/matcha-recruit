@@ -113,7 +113,8 @@ jobs:
           for name in ("tls", "disks"):
               for item in report[name]:
                   if not item["ok"]:
-                      print(f"- `{item.get('host', item.get('mount'))}`: {item.get('reason', item.get('severity'))}")
+                      label = item.get("mount") and f"{item['host']}:{item['mount']}" or item.get("host")
+                      print(f"- `{label}`: {item.get('reason', item.get('severity'))}")
           for failure in report["worker"]["failures"]:
               print(f"- worker: {failure}")
           PY

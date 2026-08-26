@@ -132,6 +132,22 @@ backup_database() {
     fi
 }
 
+install_worker_timer() {
+    # The host's stale scripts/worker-cycle.sh STOPS the worker after 300s — it
+    # predates the continuous-worker design. Remove it so the unit can never
+    # drift back to it, then install the recycle timer that re-fires @worker_ready.
+    log_info "Installing worker recycle timer..."
+    if scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new \
+            deploy/matcha-worker.service deploy/matcha-worker.timer \
+            "$EC2_USER@$EC2_HOST:/tmp/" \
+        && ssh_cmd "sudo rm -f /home/ec2-user/matcha/scripts/worker-cycle.sh && sudo install -m 0644 /tmp/matcha-worker.service /etc/systemd/system/matcha-worker.service && sudo install -m 0644 /tmp/matcha-worker.timer /etc/systemd/system/matcha-worker.timer && sudo systemctl daemon-reload && sudo systemctl enable --now matcha-worker.timer"
+    then
+        log_success "Worker recycle timer installed"
+    else
+        log_warn "Could not install worker recycle timer — deploy continues"
+    fi
+}
+
 pre_cleanup() {
     if [ "$UPDATE_BACKEND" = true ]; then
         # Gracefully stop workers to let them finish current job.
@@ -363,6 +379,7 @@ ecr_login
 # (it's non-blocking anyway, but --hotfix means "nothing but the swap").
 if [ "$UPDATE_BACKEND" = true ] && [ "$HOTFIX" = false ]; then
     backup_database
+    install_worker_timer
 fi
 pre_cleanup
 

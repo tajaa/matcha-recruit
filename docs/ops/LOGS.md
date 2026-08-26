@@ -197,9 +197,11 @@ issue, since the current state is unknown.
 
 ## Known gaps
 
-- Worker scheduling configuration may still be broken: the checked-in
-  `matcha-worker.service` references `scripts/worker-cycle.sh`, but the active
-  scripts directory has no such file. The availability workflow reports this;
-  it does not repair it.
+- Worker scheduling is a systemd timer: `matcha-worker.service` runs
+  `docker restart matcha-worker` (re-firing `@worker_ready` so periodic tasks
+  re-dispatch), `matcha-worker.timer` fires it hourly, and
+  `install_worker_timer()` in `scripts/update-ec2.sh` reinstalls both units
+  (and removes the retired `scripts/worker-cycle.sh`) on every normal
+  (non-`--hotfix`) backend deploy.
 - `server/agent/` (the standalone ops agent on :9100) has none of this — no
   error reporter, its own logging config. Out of scope so far.

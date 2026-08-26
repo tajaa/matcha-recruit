@@ -66,7 +66,7 @@ if [ "\$s3_rc" -eq 0 ] && [ "\$downloaded_size" = "\$expected_size" ]; then
     # cannot pass merely because the TOC is intact. Network-disabled Docker and
     # no --dbname guarantee this never connects to or restores into any DB.
     set +e
-    docker run --rm --pull=never --network none --read-only --cap-drop ALL \
+    docker run --rm --pull=missing --network none --read-only --cap-drop ALL \
       --security-opt no-new-privileges \
       -v "\$dump_file:/backup.dump:ro" \
       public.ecr.aws/docker/library/postgres:15-alpine \
@@ -76,7 +76,7 @@ if [ "\$s3_rc" -eq 0 ] && [ "\$downloaded_size" = "\$expected_size" ]; then
     if [ "\$restore_list_rc" -eq 0 ]; then
         toc_entries=\$(grep -cE '^[0-9]+;' "\$toc_file" || true)
         set +e
-        docker run --rm --pull=never --network none --read-only --cap-drop ALL \
+        docker run --rm --pull=missing --network none --read-only --cap-drop ALL \
           --security-opt no-new-privileges \
           -v "\$dump_file:/backup.dump:ro" \
           public.ecr.aws/docker/library/postgres:15-alpine \

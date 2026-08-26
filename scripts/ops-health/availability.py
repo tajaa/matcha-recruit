@@ -10,10 +10,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 TLS_WARN_SECONDS = 21 * 24 * 60 * 60
-DISK_WARN_PERCENT = 80
-DISK_CRITICAL_PERCENT = 90
-DISK_WARN_BYTES = 8 * 1024**3
-DISK_CRITICAL_BYTES = 4 * 1024**3
+DISK_WARN_PERCENT = 80          # unchanged
+DISK_CRITICAL_PERCENT = 90      # unchanged
+# Absolute floors are a backstop for volumes small enough that a percentage is
+# meaningless, NOT a capacity target. App root is 16G and DB root is 8G, so an
+# 8 GiB "free" floor was permanently tripped at 56% used.
+DISK_WARN_BYTES = 1 * 1024**3
+DISK_CRITICAL_BYTES = 512 * 1024**2
 
 
 def probe_tls(host: str) -> dict:
@@ -94,7 +97,7 @@ def assess_worker(status: dict) -> dict:
         timer_age = -1
     if timer_age < 0:
         failures.append("matcha-worker.timer trigger age is unavailable")
-    elif timer_age > 35 * 60:
+    elif timer_age > 90 * 60:
         failures.append(f"matcha-worker.timer last triggered {timer_age // 60} minutes ago")
     return {"ok": not failures, "failures": failures}
 

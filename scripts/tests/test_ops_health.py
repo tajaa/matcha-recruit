@@ -27,6 +27,13 @@ def test_disk_warns_on_low_absolute_space_even_when_percent_is_low():
     assert result["severity"] == "warning"
 
 
+def test_disk_does_not_warn_for_current_production_volume_sizes():
+    app = availability.assess_disk({"mount": "/", "total_kb": str(16 * 1024**2), "available_kb": str(7 * 1024**2)})
+    db = availability.assess_disk({"mount": "/", "total_kb": str(8 * 1024**2), "available_kb": str(3 * 1024**2)})
+    assert app["ok"] is True
+    assert db["ok"] is True
+
+
 def test_disk_marks_missing_mount_critical():
     result = availability.assess_disk({"mount": "/mnt/encdb/pgdata", "total_kb": "0", "available_kb": "0"})
     assert result["ok"] is False
@@ -54,11 +61,11 @@ def test_worker_rejects_stale_timer_trigger():
         "timer_enabled": "enabled",
         "timer_active": "active",
         "timer_last": "Tue 2026-08-25 00:00:00 UTC",
-        "timer_age_seconds": "2101",
+        "timer_age_seconds": "5401",
         "timer_result": "success",
     })
     assert result["ok"] is False
-    assert "35 minutes ago" in result["failures"][0]
+    assert "90 minutes ago" in result["failures"][0]
 
 
 def _error(message: str, occurrences: int, *, level: str = "ERROR", error_id: str = "e1") -> dict:
@@ -103,3 +110,16 @@ def test_regression_redacts_message_pii_and_query_values():
     result = regression.evaluate([], [_error("Failed for jane@example.com at /x?token=secret", 1)])
     assert "jane@example.com" not in result["changes"][0]["message"]
     assert "token=secret" not in result["changes"][0]["message"]
+
+
+def test_regression_suppresses_redis_churn_but_keeps_real_errors():
+    churn = {
+        **_error("Connection closed by server", 2, error_id="churn"),
+        "exception_type": "ConnectionError",
+        "traceback": 'File "/app/app/core/services/subscriber.py", line 40, in _subscriber_loop\n  await redis.asyncio',
+    }
+    real_error = _error("duplicate key value violates unique constraint", 3, error_id="sql")
+    result = regression.evaluate([], [churn, real_error])
+    assert result["suppressed_deploy_churn"] == 1
+    assert [row["error_id"] for row in result["changes"]] == ["sql"]
+    assert result["alert"] is True

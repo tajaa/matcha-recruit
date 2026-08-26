@@ -116,8 +116,8 @@ jobs:
         if: always()
         run: |
           echo '## Post-deploy error regression' >> "$GITHUB_STEP_SUMMARY"
-          echo "- Deploy: \\`${{ inputs.deploy_id }}\\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Target: \\`${{ inputs.target }}\\`" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '- Deploy: `${{ inputs.deploy_id }}`' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '- Target: `${{ inputs.target }}`' >> "$GITHUB_STEP_SUMMARY"
           if [ -f "$RUNNER_TEMP/regression.json" ]; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
             cat "$RUNNER_TEMP/regression.json" >> "$GITHUB_STEP_SUMMARY"

@@ -305,7 +305,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 
 Celery worker container `matcha-worker` runs everything that can't run inline. Single concurrency, restarts after 5 tasks (`--max-tasks-per-child=5`) to recycle memory. `task_acks_late=True` + `max_retries=3` so OOM-killed tasks retry.
 
-Scheduling model: no celery-beat. Worker container runs continuously (`restart: unless-stopped`); an hourly host cron (`docker restart matcha-worker`) re-fires `@worker_ready` in `app/workers/celery_app.py`, which re-dispatches periodic tasks. Each is gated by a `scheduler_settings` row, default disabled.
+Scheduling model: no celery-beat. Worker container runs continuously (`restart: unless-stopped`); the `matcha-worker.timer` systemd unit runs `docker restart matcha-worker` hourly (installed/reinstalled by `install_worker_timer()` in `scripts/update-ec2.sh` on every normal backend deploy), which re-fires `@worker_ready` in `app/workers/celery_app.py` and re-dispatches periodic tasks. Each is gated by a `scheduler_settings` row, default disabled.
 
 **Periodic / scheduled** (`app/workers/tasks/`):
 - `compliance_checks` — per-location Gemini scans

@@ -40,6 +40,23 @@ def redact_message(message: str) -> str:
     return QUERY.sub("?[QUERY_REDACTED]", EMAIL.sub("[EMAIL]", message))
 
 
+# Blue/green swaps tear down every redis pubsub subscriber. The reconnect error
+# is deploy mechanics, not a code regression, and two of them are enough to trip
+# the alert threshold on an otherwise healthy rollout.
+CHURN_TYPES = {"ConnectionError", "gaierror"}
+CHURN_FRAME = re.compile(r"_subscriber_loop|redis/asyncio")
+CHURN_MESSAGE = re.compile(
+    r"Connection closed by server|Name or service not known|Connection reset by peer", re.I
+)
+
+
+def is_deploy_churn(row: dict) -> bool:
+    if (row.get("exception_type") or "") not in CHURN_TYPES:
+        return False
+    traceback = row.get("traceback") or ""
+    return bool(CHURN_FRAME.search(traceback) and CHURN_MESSAGE.search(row.get("message") or ""))
+
+
 def grouped(rows: list[dict]) -> dict[str, dict]:
     values: dict[str, dict] = {}
     for row in rows:
@@ -53,8 +70,9 @@ def grouped(rows: list[dict]) -> dict[str, dict]:
 
 
 def evaluate(baseline_rows: list[dict], final_rows: list[dict]) -> dict:
-    baseline = grouped(baseline_rows)
-    final = grouped(final_rows)
+    suppressed = sum(1 for row in final_rows if is_deploy_churn(row))
+    baseline = grouped([r for r in baseline_rows if not is_deploy_churn(r)])
+    final = grouped([r for r in final_rows if not is_deploy_churn(r)])
     changes = []
     for key, row in final.items():
         before = baseline.get(key, {}).get("occurrences", 0)
@@ -77,7 +95,12 @@ def evaluate(baseline_rows: list[dict], final_rows: list[dict]) -> dict:
     total_delta = sum(row["delta"] for row in changes)
     alert = any(row["level"] == "CRITICAL" and row["new"] for row in changes)
     alert = alert or len(new_keys) >= 2 or any(row["delta"] >= 3 for row in changes) or total_delta >= 5
-    return {"alert": alert, "total_delta": total_delta, "changes": sorted(changes, key=lambda row: row["delta"], reverse=True)}
+    return {
+        "alert": alert,
+        "total_delta": total_delta,
+        "suppressed_deploy_churn": suppressed,
+        "changes": sorted(changes, key=lambda row: row["delta"], reverse=True),
+    }
 
 
 def main() -> int:
