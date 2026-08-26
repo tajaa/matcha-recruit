@@ -29,14 +29,14 @@ async def get_meal_break_waiver(
         await assert_employee_in_company(conn, company_id, employee_id)
         row = await conn.fetchrow(
             """
-            SELECT value, effective_from, confirmed_at, note
-            FROM employee_compliance_attestations
-            JOIN employees e ON e.id = employee_compliance_attestations.employee_id
+            SELECT a.value, a.effective_from, a.confirmed_at, a.note
+            FROM employee_compliance_attestations a
+            JOIN employees e ON e.id = a.employee_id
             LEFT JOIN business_locations l ON l.id = e.work_location_id
-            WHERE company_id = $1 AND employee_id = $2
-              AND attestation_type = 'meal_break_waiver_on_file'
-              AND effective_from <= COALESCE((NOW() AT TIME ZONE l.timezone)::date, CURRENT_DATE)
-            ORDER BY effective_from DESC, confirmed_at DESC
+            WHERE a.company_id = $1 AND a.employee_id = $2
+              AND a.attestation_type = 'meal_break_waiver_on_file'
+              AND a.effective_from <= COALESCE((NOW() AT TIME ZONE l.timezone)::date, CURRENT_DATE)
+            ORDER BY a.effective_from DESC, a.confirmed_at DESC
             LIMIT 1
             """,
             company_id, employee_id,
