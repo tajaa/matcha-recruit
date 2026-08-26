@@ -1363,12 +1363,13 @@ async def build_edit_proposal(
                 )
 
         advisories: list[dict] = []
+        shift_was_published = shift["published_at"] is not None
         if kind in ("reassign", "assign") and to_employee_id:
             advisories = await check_shift_compliance(
                 conn, company_id, location_id=shift["location_id"], job_id=shift.get("job_id"),
                 starts_at=shift["starts_at"], ends_at=shift["ends_at"],
                 break_minutes=shift["break_minutes"] or 0, employee_id=to_employee_id,
-                exclude_shift_id=shift["id"], fw_event="assign", fw_shift_published=True,
+                exclude_shift_id=shift["id"], fw_event="assign", fw_shift_published=shift_was_published,
                 shift_kind=shift["kind"], training_requirement_id=shift["training_requirement_id"],
             )
         elif kind == "retime":
@@ -1376,20 +1377,20 @@ async def build_edit_proposal(
                 conn, company_id, location_id=shift["location_id"], job_id=shift.get("job_id"),
                 starts_at=new_starts_at, ends_at=new_ends_at,
                 break_minutes=shift["break_minutes"] or 0,
-                exclude_shift_id=shift["id"], fw_event="retime", fw_shift_published=True,
+                exclude_shift_id=shift["id"], fw_event="retime", fw_shift_published=shift_was_published,
                 shift_kind=shift["kind"], training_requirement_id=shift["training_requirement_id"],
             )
         elif kind == "cancel":
             advisories = await _fair_workweek_advisories(
                 conn, company_id, location_id=shift["location_id"],
                 starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-                event="cancel", shift_published=True, min_rest_gap_hours=None,
+                event="cancel", shift_published=shift_was_published, min_rest_gap_hours=None,
             )
         elif kind == "unassign":
             advisories = await _fair_workweek_advisories(
                 conn, company_id, location_id=shift["location_id"],
                 starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-                event="unassign", shift_published=True, min_rest_gap_hours=None,
+                event="unassign", shift_published=shift_was_published, min_rest_gap_hours=None,
             )
 
         ops.append({

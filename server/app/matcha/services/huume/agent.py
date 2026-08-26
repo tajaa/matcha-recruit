@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -194,6 +195,39 @@ def _is_confirming_schedule_call(args: dict[str, Any], pre_turn_action: Any) -> 
         and pre_turn_action.get("status") == "proposed"
         and bool(args.get("confirm_id"))
         and str(args.get("confirm_id")) == str(pre_turn_action.get("confirm_id") or "")
+    )
+
+
+_SCHEDULE_CONFIRM_WITH_CONTEXT_RE = re.compile(
+    r"^(?:(?:yes|yep|yeah|yea|sure|ok|okay)[,!\s]+)?"
+    r"(?:confirm(?:ed)?|approve(?:d)?|go ahead|do it|proceed|book it|ship it|lgtm|looks good|sounds good)"
+    r"(?:\s+(?:the|this|that|it|schedule|shift|proposal|change))*[\s!.]*$",
+    re.IGNORECASE,
+)
+
+
+def _has_explicit_schedule_confirmation(history: list[dict[str, Any]]) -> bool:
+    """True only when the latest user message explicitly accepts a schedule write.
+
+    A matching confirm_id identifies the proposal, but it does not itself prove
+    the user confirmed it: the model can see that id in the state block on any
+    later turn. Keep the channel parser's strict bare-reply vocabulary, while
+    accepting Huume's established contextual form ("yes, confirm the schedule
+    change") without accepting a request that adds or changes work.
+    """
+    latest_user_text = ""
+    for message in reversed(history):
+        if message.get("role") == "user":
+            latest_user_text = str(message.get("content") or "").strip()
+            break
+    if not latest_user_text:
+        return False
+
+    from app.matcha.services.scheduling.schedule_chat_rules import parse_confirm_reply
+
+    return (
+        parse_confirm_reply(latest_user_text) == "confirm"
+        or bool(_SCHEDULE_CONFIRM_WITH_CONTEXT_RE.fullmatch(latest_user_text))
     )
 
 
@@ -1370,6 +1404,20 @@ async def run_huume_turn(
                 # decision — one flow, table-driven (see _HR_OPS_TOOL_SPECS).
                 spec = _HR_OPS_TOOL_SPECS[name]
                 staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
+                if (
+                    name == "propose_schedule_change"
+                    and confirming
+                    and not _has_explicit_schedule_confirmation(history)
+                ):
+                    message = (
+                        "That schedule change is still waiting for your explicit confirmation. "
+                        "Reply \"confirm\" to apply it, or tell me what to change."
+                    )
+                    step = recorder.record(
+                        tool=name, kind="staged", label="Schedule confirmation required",
+                        status="rejected", detail=message,
+                    )
+                    return {"status": "refused", "message": message}, step
                 if not confirming:
                     deferred = _defer_staged_tool(name, spec["action_type"])
                     if deferred is not None:
