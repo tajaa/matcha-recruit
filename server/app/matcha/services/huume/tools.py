@@ -133,17 +133,20 @@ TOOLS: tuple[HuumeTool, ...] = (
         "confirm. Pass offer_id to revise an existing draft; omit it to "
         "create a new one. Existing drafts can revise reporting_to, the "
         "candidate's supervisor or manager. A new draft needs at minimum "
-        "candidate_name and position_title.",
+        "candidate_name and position_title. When those two fields are known, "
+        "create the draft now: candidate_email and reporting_to are optional "
+        "draft fields and must not block drafting. Unknown fields can be added "
+        "later; candidate_email becomes required only when sending.",
         properties={
             "offer_id": types.Schema(type=types.Type.STRING, description="UUID of an existing draft to revise. Omit to create a new offer."),
             "candidate_name": types.Schema(type=types.Type.STRING),
-            "candidate_email": types.Schema(type=types.Type.STRING),
+            "candidate_email": types.Schema(type=types.Type.STRING, description="Optional while drafting; required before send_offer can execute."),
             "position_title": types.Schema(type=types.Type.STRING),
             "salary": types.Schema(type=types.Type.STRING, description="Free-text salary, e.g. '$95,000/year'."),
             "start_date": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD."),
             "employment_type": types.Schema(type=types.Type.STRING, description="e.g. 'Full-Time Exempt', 'Part-Time', 'Contract'."),
             "location": types.Schema(type=types.Type.STRING, description="Work location or state, e.g. 'Remote' or 'CA'."),
-            "reporting_to": types.Schema(type=types.Type.STRING, description="Name of the candidate's supervisor or manager."),
+            "reporting_to": types.Schema(type=types.Type.STRING, description="Optional while drafting. Name of the candidate's supervisor or manager, if known."),
         },
     ),
     _tool(

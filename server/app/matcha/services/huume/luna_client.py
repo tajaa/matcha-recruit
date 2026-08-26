@@ -68,13 +68,24 @@ def _messages(contents: list[Any]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     for content in contents:
         role = "assistant" if getattr(content, "role", None) == "model" else "user"
+        text_type = "output_text" if role == "assistant" else "input_text"
         parts: list[dict[str, Any]] = []
         for part in getattr(content, "parts", None) or []:
             text = getattr(part, "text", None)
             if text is not None:
-                parts.append({"type": "input_text", "text": text})
+                # Responses input items use a different content-part type for
+                # prior assistant messages.  Sending assistant history as
+                # ``input_text`` is rejected with HTTP 400; it made a fresh
+                # Huume thread work once and every later turn fail before the
+                # model ran (schedule threads always have history).
+                parts.append({
+                    "type": text_type,
+                    "text": text,
+                })
             inline = getattr(part, "inline_data", None)
-            if inline is not None and getattr(inline, "data", None):
+            # Historical assistant images are not valid Responses input
+            # content. Huume only attaches images to the current user turn.
+            if role == "user" and inline is not None and getattr(inline, "data", None):
                 encoded = base64.b64encode(inline.data).decode("ascii")
                 mime = getattr(inline, "mime_type", None) or "application/octet-stream"
                 parts.append({"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"})
@@ -93,6 +104,25 @@ def _response_text(payload: dict[str, Any]) -> str:
         for content in output.get("content", [])
         if isinstance(content, dict) and content.get("type") == "output_text" and isinstance(content.get("text"), str)
     ).strip()
+
+
+def _http_error_detail(exc: httpx.HTTPError) -> str:
+    """Return the provider's bounded error detail for logs and usage audit."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return str(exc)
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            code = error.get("code") or error.get("type")
+            message = error.get("message")
+            detail = ": ".join(str(value) for value in (code, message) if value)
+            if detail:
+                return detail[:1000]
+    except (TypeError, ValueError):
+        pass
+    return f"HTTP {response.status_code}: {response.text[:1000]}"
 
 
 class _LunaModels:
@@ -146,10 +176,13 @@ class _LunaModels:
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
+            error_detail = _http_error_detail(exc)
             await record_openai_response(
-                model=model, latency_ms=int((time.monotonic() - started) * 1000), error=str(exc),
+                model=model,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=error_detail,
             )
-            raise
+            raise RuntimeError(f"OpenAI Responses request failed: {error_detail}") from exc
         data = response.json()
         self._previous_response_id = data.get("id") or self._previous_response_id
         calls = [output for output in data.get("output", []) if isinstance(output, dict) and output.get("type") == "function_call"]

@@ -60,6 +60,24 @@ async def test_insert_branch_stamps_source_thread_id():
 
 
 @pytest.mark.asyncio
+async def test_insert_does_not_invent_optional_draft_fields():
+    row = {"id": OFFER_ID, "status": "draft", "candidate_name": "Jane Doe",
+           "candidate_email": None, "position_title": "Dental Assistant",
+           "salary": None, "start_date": None, "employment_type": None,
+           "location": None, "manager_name": None}
+    conn = FakeConn(fetchval_result="Sunset Smile", fetchrow_result=row)
+
+    result = await _draft_offer_letter_impl(
+        conn, company_id=COMPANY_ID, thread_id=THREAD_ID,
+        candidate_name="Jane Doe", position_title="Dental Assistant",
+    )
+
+    assert result["status"] == "ok"
+    _insert_query, insert_args = conn.fetchrow_calls[0]
+    assert insert_args[6:10] == (None, None, None, None)
+
+
+@pytest.mark.asyncio
 async def test_update_branch_stamps_source_thread_id_via_coalesce():
     row = {"id": OFFER_ID, "status": "draft", "candidate_name": "Jane Doe",
            "candidate_email": None, "position_title": "Dental Assistant",

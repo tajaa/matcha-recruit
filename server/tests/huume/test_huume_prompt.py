@@ -177,6 +177,22 @@ class TestBuildSystemPrompt:
         assert "list_assets" in prompt
         assert "recipient_email" in prompt
 
+    def test_offer_prep_creates_partial_draft_instead_of_questionnaire(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "CREATE THE DRAFT IN THAT TURN" in prompt
+        assert "candidate_email and reporting_to" in prompt
+        assert "must never block draft creation" in prompt
+        assert "set employment_type='Full-Time Exempt'" in prompt
+
+    def test_conversation_contract_prefers_progress_and_human_language(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "capable coworker, not a form or schema validator" in prompt
+        assert "take every safe, reversible step" in prompt
+        assert "needed only for a later step" in prompt
+        assert "Ask one short, natural-language question" in prompt
+        assert "Never expose snake_case tool arguments" in prompt
+        assert "explain what you already accomplished first" in prompt
+
     def test_lists_propose_schedule_change_as_staged(self):
         # Previously omitted from the staged-tool list sentence entirely —
         # the model had no prompt guidance that this tool needs a confirm

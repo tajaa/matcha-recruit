@@ -800,8 +800,8 @@ async def _draft_offer_letter_impl(
             """,
             candidate_name, position_title, company_name, company_id,
             fields.get("salary"), start_date,
-            fields.get("employment_type") or "Full-Time Exempt",
-            fields.get("location") or "Remote",
+            fields.get("employment_type"),
+            fields.get("location"),
             fields.get("reporting_to"), fields.get("candidate_email"),
             thread_id,
         )
