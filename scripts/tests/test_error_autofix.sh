@@ -149,6 +149,18 @@ failure_block="$(sed -n '/Fail incomplete investigation/,/Verify (baseline vs br
 check "incomplete investigation fails without publishing a no-fix issue" \
     $([[ "$failure_block" == *'exit 1'* && "$failure_block" != *'publish.sh'* ]] && echo 0 || echo 1)
 
+check "investigate.sh uses Terra with high reasoning for code fixes" \
+    $(grep -qF 'openai/gpt-5.6-terra --variant high' "$AUTOFIX_DIR/investigate.sh" && echo 0 || echo 1)
+
+check "publish.sh permits guarded TypeScript/TSX client fixes" \
+    $(grep -qF 'client/src/.*\.(ts|tsx)' "$AUTOFIX_DIR/publish.sh" && echo 0 || echo 1)
+
+check "publish.sh forbids changing browser error reporting" \
+    $(grep -qF '^client/src/api/errorReporter\.ts$' "$AUTOFIX_DIR/publish.sh" && echo 0 || echo 1)
+
+check "workflow reconciles drafts before collecting production incidents" \
+    $([ "$(grep -n 'Reconcile superseded autofix drafts' "$workflow" | cut -d: -f1)" -lt "$(grep -n 'Collect actionable server and client errors' "$workflow" | cut -d: -f1)" ] && echo 0 || echo 1)
+
 ################################################################################
 # 6-9: select.sh dedup decisions, via a stubbed `gh` on PATH
 ################################################################################
@@ -212,6 +224,11 @@ echo '[{"state":"MERGED","mergedAt":"2026-08-20T00:00:00Z","closedAt":"2026-08-2
 out="$(run_select "$incident_file")"
 check "select.sh re-opens for a genuine recurrence after merge+grace" $([ -n "$out" ] && echo 0 || echo 1)
 
+make_incident "ddd444444444" "2026-08-19T00:00:00Z" "2026-08-20T01:00:00Z" > "$incident_file"
+echo '[{"state":"CLOSED","mergedAt":null,"closedAt":"2026-08-20T02:00:00Z","body":"<!-- autofix-superseded-by: 999 merged-at: 2026-08-20T00:00:00Z -->"}]' > "$GH_STUB_RESPONSE_FILE"
+run_select "$incident_file" > /dev/null 2>&1
+check "select.sh treats superseded drafts as merged fixes during deploy grace" $([ "$?" = "3" ] && echo 0 || echo 1)
+
 echo '[]' > "$GH_STUB_RESPONSE_FILE"
 out="$(run_select "$incident_file")"
 check "select.sh emits an incident with no prior PR at all" $([ -n "$out" ] && echo 0 || echo 1)
@@ -250,6 +267,39 @@ echo "docs change" >> "$FAKE_REPO/README.md"
     "$FAKE_REPO/scripts/error-autofix/publish.sh" /dev/null /dev/null /dev/null
 ) > "$TMP_DIR/publish_out2.txt" 2>&1
 check "publish.sh refuses a diff outside server/app or server/tests" $([ "$?" != "0" ] && echo 0 || echo 1)
+
+################################################################################
+# 11: a later valid no-fix report replaces the retry placeholder body.
+################################################################################
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_STUB_CALLS"
+case "$1 $2" in
+    "issue list") echo 91 ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+cat > "$TMP_DIR/publish-incident.json" <<'EOF'
+{"stable_key":"aaa111111111","surface":"server","error_id":"id","kind":"http_error","level":"ERROR","exception_type":"DataError","message":"boom","traceback":"trace","source":"api","request_method":"GET","request_path":"/x","occurrences":1,"first_seen":"2026-08-20T00:00:00Z","last_seen":"2026-08-20T00:00:00Z"}
+EOF
+cat > "$TMP_DIR/report.md" <<'EOF'
+### Root cause
+known schema mismatch
+### Fix
+no safe application-only fix
+### Blast radius
+one route
+### Confidence
+high
+EOF
+(
+    cd "$FAKE_REPO" && PATH="$TMP_DIR/bin:$PATH" GH_STUB_CALLS="$TMP_DIR/gh_calls.txt" \
+    GH_TOKEN=x GITHUB_REPOSITORY=x/x \
+    "$FAKE_REPO/scripts/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" "$TMP_DIR/report.md" /dev/null
+) > "$TMP_DIR/publish_out3.txt" 2>&1
+check "publish.sh replaces a placeholder no-fix issue body" \
+    $([ "$?" = "0" ] && grep -q '^issue edit 91 ' "$TMP_DIR/gh_calls.txt" && echo 0 || echo 1)
 
 ################################################################################
 # Summary

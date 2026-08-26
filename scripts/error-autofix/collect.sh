@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Collect unresolved backend errors from prod's server_error_reports table
-# (read-only, enforced at the connection level in _query.py) and emit them as
-# redacted JSON on stdout.
+# Collect actionable server and browser errors from prod's reporting tables
+# (read-only, enforced at the connection level in _query.py) and emit redacted
+# incident JSON on stdout.
 #
 # Usage: SSH_KEY=... ./collect.sh [--hours N] [--limit N] > incidents.json
 # Exits 0 with `[]` when nothing is found or the backend container can't be
@@ -50,13 +50,17 @@ if [ -z "$raw_json" ] || ! printf '%s' "$raw_json" | jq -e . >/dev/null 2>&1; th
 fi
 
 skipped_infra="$(printf '%s' "$raw_json" | jq -r '.skipped_infra // 0')"
-[ "$skipped_infra" -gt 0 ] && printf 'error-autofix: skipped %s infra-kind errors (not autofixable)\n' "$skipped_infra" >&2
+skipped_client="$(printf '%s' "$raw_json" | jq -r '.skipped_client // 0')"
+suppressed_correlated="$(printf '%s' "$raw_json" | jq -r '.suppressed_correlated // 0')"
+[ "$skipped_infra" -gt 0 ] && printf 'error-autofix: skipped %s infrastructure server errors\n' "$skipped_infra" >&2
+[ "$skipped_client" -gt 0 ] && printf 'error-autofix: skipped %s non-actionable client errors\n' "$skipped_client" >&2
+[ "$suppressed_correlated" -gt 0 ] && printf 'error-autofix: suppressed %s client API errors correlated to server incidents\n' "$suppressed_correlated" >&2
 
 raw_json="$(printf '%s' "$raw_json" | jq -c '.incidents // []')"
 
-# Redact free-text fields only (message, traceback, request_path). stable_key/
-# error_id/occurrences/timestamps are structural and must survive byte-for-
-# byte — redact_stream's UUID/digit rules would corrupt them.
+# Redact free-text fields only. stable_key/error_id/occurrences/timestamps are
+# structural and must survive byte-for-byte — redact_stream's UUID/digit rules
+# would corrupt them.
 count="$(printf '%s' "$raw_json" | jq 'length')"
 count="${count:-0}"
 out="[]"
@@ -67,15 +71,18 @@ for ((i = 0; i < count; i++)); do
     redacted_traceback="$(printf '%s' "$incident" | jq -r '.traceback // ""' | redact_stream)"
     redacted_path="$(printf '%s' "$incident" | jq -r '.request_path // ""' | redact_stream)"
     redacted_company="$(printf '%s' "$incident" | jq -r '.company_id // ""' | redact_stream)"
+    redacted_context="$(printf '%s' "$incident" | jq -r '.context_excerpt // ""' | redact_stream)"
 
     updated="$(printf '%s' "$incident" | jq -c \
         --arg message "$redacted_message" \
         --arg traceback "$redacted_traceback" \
         --arg request_path "$redacted_path" \
         --arg company_id "$redacted_company" \
+        --arg context_excerpt "$redacted_context" \
         '.message = $message | .traceback = $traceback |
          .request_path = $request_path |
          .company_id = (if $company_id == "" then null else $company_id end) |
+         .context_excerpt = (if $context_excerpt == "" then null else $context_excerpt end) |
          del(.user_email)')"
 
     out="$(printf '%s' "$out" | jq -c --argjson item "$updated" '. + [$item]')"

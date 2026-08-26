@@ -19,7 +19,7 @@ concurrency:
 jobs:
   investigate:
     runs-on: [self-hosted, macOS, opencode]
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -45,12 +45,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for l in "autofix|1D76DB|Opened by the silent-error autofix bot" \
+                   "autofix-superseded|6B7280|Draft superseded by a merged human PR" \
                    "needs-work|D93F0B|Verification found a new test failure" \
                    "autofix-nofix|CFD3D7|Investigated but no safe fix found" \
                    "sev:high|B60205|" "sev:med|D4C5F9|" "sev:low|0E8A16|"; do
             IFS='|' read -r name color desc <<< "$l"
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
           done
+
+      - name: Reconcile superseded autofix drafts
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/error-autofix/reconcile.sh
 
       - name: Write production SSH key
         env:
@@ -59,7 +66,7 @@ jobs:
           install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
           printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
 
-      - name: Collect unresolved errors from server_error_reports
+      - name: Collect actionable server and client errors
         id: collect
         timeout-minutes: 3
         env:

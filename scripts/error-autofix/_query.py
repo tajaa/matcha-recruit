@@ -1,18 +1,9 @@
-"""Read-only query of server_error_reports, run inside the live backend
-container via `docker exec -i <container> python -`. Emits one JSON array to
-stdout: unresolved ERROR/CRITICAL rows from the last AUTOFIX_HOURS hours,
-grouped by a date-and-value-free stable_key so the same bug — across UTC-day
-boundaries, and across occurrences carrying different interpolated ids —
-collapses into one incident.
+"""Read-only unified server/client error collection for silent autofix.
 
-Never writes. server_settings enforces read-only at the connection level, not
-by convention — any INSERT/UPDATE in this session is rejected by Postgres
-with 25006 read_only_sql_transaction.
-
-WHERE resolved_at IS NULL doubles as the human "stop bothering me" switch:
-the only writer of resolved_at is a person clicking Resolve in
-/admin/server-errors (server/app/core/routes/telemetry/server_errors.py) —
-nothing in the deploy path resolves anything automatically.
+Runs inside the live backend container and emits grouped incidents plus collection
+metadata. Server keys deliberately retain their original shape so existing bot
+branches, PRs, and no-fix issues remain valid. Client reports use a distinct
+``client|`` keyspace because they are raw rows rather than pre-aggregated rows.
 """
 import asyncio
 import hashlib
@@ -20,16 +11,11 @@ import json
 import os
 import re
 import sys
+from urllib.parse import urlsplit
 
 import asyncpg
 
-# kind is CHECK-constrained (server_error_reports migration) to these 8
-# values. startup/db_error are usually infra (pool exhaustion, RDS failover,
-# a bad deploy) rather than an app bug a code diff can fix — investigating
-# them burns a run on a PR that can't be right.
 AUTOFIXABLE_KINDS = {"exception", "unhandled", "celery_task", "background_task", "http_error"}
-
-# Exception types that are almost always infra/environment, not app code.
 INFRA_EXCEPTION_TYPES = {
     "ConnectionDoesNotExistError",
     "InterfaceError",
@@ -39,7 +25,8 @@ INFRA_EXCEPTION_TYPES = {
     "ConnectionResetError",
     "ClientDisconnect",
 }
-
+CLIENT_KINDS = {"js_error", "promise_rejection", "api_error", "react_error"}
+INFRA_CLIENT_STATUSES = {0, 502, 503, 504}
 _NORMALIZE = [
     (re.compile(r"[0-9a-f]{8}-[0-9a-f-]{27,}", re.I), "<uuid>"),
     (re.compile(r"0x[0-9a-f]+", re.I), "<hex>"),
@@ -48,34 +35,23 @@ _NORMALIZE = [
     (re.compile(r'"[^"]{0,120}"'), '"<s>"'),
     (re.compile(r"\b\d+\b"), "<n>"),
 ]
+_ASSET_HASH = re.compile(r"(-[0-9A-Za-z_-]{8,})(?=\.(?:js|mjs|css)(?:\?|:|$))")
+_LINE_COLUMN = re.compile(r":\d+(?::\d+)?(?=\)?$|\s|$)")
+_DYNAMIC_SEGMENT = re.compile(r"/(?:[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z0-9_-]{20,})(?=/|$)", re.I)
 
 
 def _normalize(text):
-    """Strip interpolated values (ids, counts, quoted strings) before
-    hashing. Without this, two occurrences of the SAME bug with different
-    bound values (an id, a malformed date literal) hash to different keys —
-    this is exactly how #242-#247 became five PRs for two bugs."""
     for pattern, repl in _NORMALIZE:
         text = pattern.sub(repl, text)
     return text
 
 
 def _ts(dt):
-    """Canonical UTC timestamp: no microseconds, always 'Z' suffix — never
-    isoformat()'s '+00:00'. select.sh compares these lexicographically
-    against gh's mergedAt/closedAt (which are 'Z'-suffixed) and against
-    _iso_plus_hours' own 'Z'-suffixed output; mixing '+00:00' and 'Z' breaks
-    that comparison ('.' sorts before 'Z', so a same-second '+00:00' value
-    can compare as "earlier" than a 'Z' value it's actually equal to)."""
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def stable_key(kind, exception_type, message, traceback_str):
-    """Deterministic incident identity, computed once, here. Does not need to
-    match error_reporter._fingerprint (server/app/core/services/
-    error_reporter.py:72-82) exactly — that fingerprint embeds a daily UTC
-    bucket and hashes the raw, unnormalized message, so it is unusable as a
-    durable cross-day, cross-occurrence identity."""
+    """The original server incident identity. Do not change its shape."""
     top_frame = ""
     for line in (traceback_str or "").splitlines():
         stripped = line.strip()
@@ -88,95 +64,219 @@ def stable_key(kind, exception_type, message, traceback_str):
     return hashlib.sha1(raw.encode()).hexdigest()[:12]
 
 
+def _path(value):
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+        path = parsed.path if parsed.scheme or parsed.netloc else value.split("?", 1)[0].split("#", 1)[0]
+    except ValueError:
+        path = value.split("?", 1)[0].split("#", 1)[0]
+    # Browser API helpers use paths relative to /api, while FastAPI request
+    # telemetry includes that mount prefix. Align only for correlation keys.
+    if path == "/api":
+        path = "/"
+    elif path.startswith("/api/"):
+        path = path[4:]
+    path = _DYNAMIC_SEGMENT.sub("/<dynamic>", path)
+    return _normalize(path)
+
+
+def _client_frame(stack):
+    for raw in (stack or "").splitlines():
+        line = raw.strip()
+        lower = line.lower()
+        if "chrome-extension://" in lower or "moz-extension://" in lower:
+            continue
+        if ".ts" in line or ".js" in line or ".jsx" in line or ".tsx" in line:
+            line = _ASSET_HASH.sub("-<asset>", line)
+            return _LINE_COLUMN.sub(":<line>", line)
+    return ""
+
+
+def stable_client_key(kind, message, stack, api_endpoint, url, component_stack=""):
+    """Stable browser incident identity without build hashes or dynamic values."""
+    raw = "|".join(
+        (
+            "client",
+            kind or "",
+            _normalize((message or "")[:200]),
+            _path(api_endpoint) or _path(url),
+            _normalize(_client_frame(stack)),
+            _normalize((component_stack or "")[:500]),
+        )
+    )
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def _context(value):
+    if not value:
+        return {}
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _client_actionable(row):
+    if row["kind"] not in CLIENT_KINDS:
+        return False
+    value = " ".join((row["message"] or "", row["stack"] or "", row["url"] or "")).lower()
+    if "localhost" in value or "127.0.0.1" in value:
+        return False
+    if "chrome-extension://" in value or "moz-extension://" in value:
+        return False
+    if "failed to fetch dynamically imported module" in value or "vite:preloaderror" in value:
+        return False
+    return not (row["kind"] == "api_error" and row["api_status_code"] in INFRA_CLIENT_STATUSES)
+
+
+def _excerpt(context):
+    component_stack = context.get("component_stack")
+    if isinstance(component_stack, str):
+        return component_stack[:1000]
+    body = context.get("body")
+    if isinstance(body, str):
+        return body[:1000]
+    return None
+
+
+async def _fetch_rows(conn, hours, limit):
+    server_rows = await conn.fetch(
+        """
+        SELECT id::text, kind, level, message, exception_type, traceback, source,
+               request_method, request_path, request_status, context::text AS context,
+               occurrences, first_seen, last_seen
+        FROM server_error_reports
+        WHERE resolved_at IS NULL
+          AND level IN ('ERROR', 'CRITICAL')
+          AND last_seen > NOW() - make_interval(hours => $1::int)
+        ORDER BY last_seen DESC
+        LIMIT $2::int
+        """,
+        hours,
+        limit,
+    )
+    client_rows = await conn.fetch(
+        """
+        SELECT id::text, kind, message, stack, url, api_endpoint, api_status_code,
+               context::text AS context, occurred_at
+        FROM client_error_reports
+        WHERE occurred_at > NOW() - make_interval(hours => $1::int)
+        ORDER BY occurred_at DESC
+        LIMIT $2::int
+        """,
+        hours,
+        limit * 20,
+    )
+    return server_rows, client_rows
+
+
+def _group_server(rows):
+    grouped = {}
+    request_pairs = set()
+    skipped = 0
+    for row in rows:
+        if row["kind"] not in AUTOFIXABLE_KINDS or (row["exception_type"] or "") in INFRA_EXCEPTION_TYPES:
+            skipped += 1
+            continue
+        key = stable_key(row["kind"], row["exception_type"], row["message"], row["traceback"])
+        context = _context(row["context"])
+        request_id = context.get("request_id")
+        request_path = row["request_path"] or ""
+        if request_id and request_path:
+            request_pairs.add((str(request_id), _path(request_path)))
+        group = grouped.get(key)
+        if group is None:
+            grouped[key] = {
+                "surface": "server", "stable_key": key, "error_id": row["id"],
+                "kind": row["kind"], "level": row["level"], "exception_type": row["exception_type"],
+                "message": row["message"] or "", "traceback": row["traceback"] or "",
+                "source": row["source"], "request_method": row["request_method"],
+                "request_path": request_path, "request_status": row["request_status"],
+                "occurrences": row["occurrences"] or 0, "days_seen": 1,
+                "first_seen": _ts(row["first_seen"]), "last_seen": _ts(row["last_seen"]),
+                "request_id": request_id, "company_id": context.get("company_id"), "context_excerpt": None,
+            }
+            continue
+        group["occurrences"] += row["occurrences"] or 0
+        group["days_seen"] += 1
+        group["first_seen"] = min(group["first_seen"], _ts(row["first_seen"]))
+        if _ts(row["last_seen"]) > group["last_seen"]:
+            group.update({
+                "last_seen": _ts(row["last_seen"]), "error_id": row["id"],
+                "traceback": row["traceback"] or group["traceback"], "request_id": request_id,
+            })
+    return grouped, request_pairs, skipped
+
+
+def _group_client(rows, server_request_pairs):
+    grouped = {}
+    skipped = 0
+    correlated = 0
+    for row in rows:
+        if not _client_actionable(row):
+            skipped += 1
+            continue
+        context = _context(row["context"])
+        request_id = context.get("request_id")
+        endpoint = _path(row["api_endpoint"])
+        if row["kind"] == "api_error" and request_id and endpoint and (str(request_id), endpoint) in server_request_pairs:
+            correlated += 1
+            continue
+        component_stack = context.get("component_stack") if isinstance(context.get("component_stack"), str) else ""
+        key = stable_client_key(row["kind"], row["message"], row["stack"], row["api_endpoint"], row["url"], component_stack)
+        occurred = _ts(row["occurred_at"])
+        group = grouped.get(key)
+        if group is None:
+            grouped[key] = {
+                "surface": "client", "stable_key": key, "error_id": row["id"],
+                "kind": row["kind"], "level": "ERROR", "exception_type": row["kind"],
+                "message": row["message"] or "", "traceback": row["stack"] or "",
+                "source": "browser", "request_method": None,
+                "request_path": row["api_endpoint"] or _path(row["url"]),
+                "request_status": row["api_status_code"], "occurrences": 1, "days_seen": 1,
+                "first_seen": occurred, "last_seen": occurred, "request_id": request_id,
+                "company_id": None, "context_excerpt": _excerpt(context), "_days": {occurred[:10]},
+            }
+            continue
+        group["occurrences"] += 1
+        group["_days"].add(occurred[:10])
+        group["days_seen"] = len(group["_days"])
+        group["first_seen"] = min(group["first_seen"], occurred)
+        if occurred > group["last_seen"]:
+            group.update({
+                "last_seen": occurred, "error_id": row["id"], "traceback": row["stack"] or group["traceback"],
+                "request_id": request_id, "context_excerpt": _excerpt(context),
+            })
+    for group in grouped.values():
+        group.pop("_days", None)
+    return grouped, skipped, correlated
+
+
 async def main():
     hours = int(os.environ.get("AUTOFIX_HOURS", "24"))
     limit = int(os.environ.get("AUTOFIX_LIMIT", "25"))
-
-    conn = await asyncpg.connect(
-        os.environ["DATABASE_URL"],
-        server_settings={"default_transaction_read_only": "on"},
-    )
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"], server_settings={"default_transaction_read_only": "on"})
     try:
         await conn.execute("SET statement_timeout = '15s'")
-        rows = await conn.fetch(
-            """
-            SELECT id::text, fingerprint, kind, level, logger_name, message,
-                   exception_type, traceback, source, hostname,
-                   request_method, request_path, request_status,
-                   context::text AS context,
-                   occurrences, first_seen, last_seen
-            FROM server_error_reports
-            WHERE resolved_at IS NULL
-              AND level IN ('ERROR', 'CRITICAL')
-              AND last_seen > NOW() - make_interval(hours => $1::int)
-            ORDER BY last_seen DESC
-            LIMIT $2::int
-            """,
-            hours,
-            limit,
-        )
+        server_rows, client_rows = await _fetch_rows(conn, hours, limit)
     finally:
         await conn.close()
 
-    grouped = {}
-    skipped_infra = 0
-    for r in rows:
-        if r["kind"] not in AUTOFIXABLE_KINDS:
-            skipped_infra += 1
-            continue
-        if (r["exception_type"] or "") in INFRA_EXCEPTION_TYPES:
-            skipped_infra += 1
-            continue
-
-        key = stable_key(r["kind"], r["exception_type"], r["message"], r["traceback"])
-        ctx = {}
-        if r["context"]:
-            try:
-                ctx = json.loads(r["context"])
-            except (json.JSONDecodeError, TypeError):
-                ctx = {}
-        g = grouped.get(key)
-        if g is None:
-            grouped[key] = {
-                "stable_key": key,
-                "error_id": r["id"],
-                "kind": r["kind"],
-                "level": r["level"],
-                "exception_type": r["exception_type"],
-                "message": r["message"] or "",
-                "traceback": r["traceback"] or "",
-                "source": r["source"],
-                "request_method": r["request_method"],
-                "request_path": r["request_path"],
-                "request_status": r["request_status"],
-                "occurrences": r["occurrences"] or 0,
-                "days_seen": 1,
-                "first_seen": _ts(r["first_seen"]),
-                "last_seen": _ts(r["last_seen"]),
-                "request_id": ctx.get("request_id"),
-                "company_id": ctx.get("company_id"),
-            }
-        else:
-            g["occurrences"] += r["occurrences"] or 0
-            g["days_seen"] += 1
-            if _ts(r["first_seen"]) < g["first_seen"]:
-                g["first_seen"] = _ts(r["first_seen"])
-            if _ts(r["last_seen"]) > g["last_seen"]:
-                # Keep the newest row as the exemplar: newest error_id (for
-                # the admin link) and newest traceback (most likely current).
-                g["last_seen"] = _ts(r["last_seen"])
-                g["error_id"] = r["id"]
-                g["traceback"] = r["traceback"] or g["traceback"]
-
-    # Persistence (seen across more days) is a better bug signal than a
-    # one-day spike, which is more often an outage than a bug an autofix
-    # can address.
-    out = sorted(
-        grouped.values(),
-        key=lambda g: (g["days_seen"], g["occurrences"]),
+    server, request_pairs, skipped_infra = _group_server(server_rows)
+    client, skipped_client, suppressed_correlated = _group_client(client_rows, request_pairs)
+    incidents = sorted(
+        [*server.values(), *client.values()],
+        key=lambda item: (item["days_seen"], item["occurrences"], item["last_seen"]),
         reverse=True,
-    )
-    json.dump({"incidents": out, "skipped_infra": skipped_infra}, sys.stdout)
+    )[:limit]
+    json.dump({
+        "incidents": incidents,
+        "skipped_infra": skipped_infra,
+        "skipped_client": skipped_client,
+        "suppressed_correlated": suppressed_correlated,
+    }, sys.stdout)
 
 
 if __name__ == "__main__":

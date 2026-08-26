@@ -73,7 +73,7 @@ already_handled() {
 
     local prs
     prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 100 \
-        --json state,mergedAt,closedAt,createdAt --jq 'sort_by(.createdAt) | reverse')"
+        --json state,mergedAt,closedAt,createdAt,body --jq 'sort_by(.createdAt) | reverse')"
 
     local n
     n="$(printf '%s' "$prs" | jq 'length')"
@@ -82,10 +82,11 @@ already_handled() {
     # Most recent PR for this branch decides. Sorted explicitly rather than
     # trusting gh's default ordering — .[0] on an unsorted list is only
     # "probably" the right one.
-    local state merged_at closed_at
+    local state merged_at closed_at body
     state="$(printf '%s' "$prs" | jq -r '.[0].state')"
     merged_at="$(printf '%s' "$prs" | jq -r '.[0].mergedAt')"
     closed_at="$(printf '%s' "$prs" | jq -r '.[0].closedAt')"
+    body="$(printf '%s' "$prs" | jq -r '.[0].body // ""')"
 
     # gh reports state as OPEN, CLOSED, or MERGED — three distinct values,
     # not "CLOSED with mergedAt set" for a merged PR.
@@ -110,6 +111,21 @@ already_handled() {
             fi
             ;;
         CLOSED)
+            # reconcile.sh closes drafts that a human PR already superseded.
+            # Treat that human merge exactly like a merged bot fix: only a
+            # post-deploy observation makes the incident eligible again.
+            local superseded_merged_at
+            superseded_merged_at="$(printf '%s' "$body" | jq -Rr 'try capture("<!-- autofix-superseded-by: [0-9]+ merged-at: (?<merged>[^ ]+) -->").merged catch ""')"
+            if [ -n "$superseded_merged_at" ]; then
+                local superseded_grace
+                superseded_grace="$(_iso_plus_hours "$superseded_merged_at" "$DEPLOY_GRACE_HOURS")"
+                if [[ "$last_seen" > "$superseded_grace" ]]; then
+                    echo investigate
+                else
+                    echo skip
+                fi
+                return
+            fi
             # A human rejected this investigation. Don't retry immediately,
             # but don't blind the system to it forever either — a wrong fix
             # today doesn't mean a wrong fix in 7 days, once more evidence

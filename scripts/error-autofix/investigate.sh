@@ -54,7 +54,7 @@ ATTACH_ARGS=(-f "$MODEL_INCIDENT")
 # Defense in depth: this step's workflow env should already omit these, but
 # strip them here too in case a future edit adds them back.
 env -u GH_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
-    opencode run --auto --model openai/gpt-5.6-luna \
+    opencode run --auto --model openai/gpt-5.6-terra --variant high \
     "${ATTACH_ARGS[@]}" \
     -- "$(cat "$PROMPT_FILE")"
 

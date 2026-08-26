@@ -86,9 +86,24 @@ fi
 TEST_DIRS=($(map_test_dirs "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"))
 
 CLIENT_CHANGED=false
+CLIENT_TESTS=()
 for f in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
-    [[ "$f" == client/* ]] && CLIENT_CHANGED=true && break
+    [[ "$f" == client/src/* ]] || continue
+    CLIENT_CHANGED=true
+    case "$f" in
+        *.test.ts|*.test.tsx|*.spec.ts|*.spec.tsx)
+            CLIENT_TESTS+=("${f#client/}")
+            ;;
+        *)
+            stem="${f%.*}"
+            for candidate in "$REPO_ROOT/${stem}".test.ts "$REPO_ROOT/${stem}".test.tsx \
+                             "$REPO_ROOT/${stem}".spec.ts "$REPO_ROOT/${stem}".spec.tsx; do
+                [ -f "$candidate" ] && CLIENT_TESTS+=("${candidate#"$REPO_ROOT/client/"}")
+            done
+            ;;
+    esac
 done
+CLIENT_TESTS=($(printf '%s\n' "${CLIENT_TESTS[@]+"${CLIENT_TESTS[@]}"}" | sort -u))
 
 # ---- interpreter selection ---------------------------------------------
 # Prefer the repo's own dev venv as an interpreter rather than building a
@@ -117,7 +132,12 @@ else
     fi
 fi
 
+PYTHON_UNAVAILABLE=false
 if [ "$BOOTSTRAP_OK" != true ]; then
+    PYTHON_UNAVAILABLE=true
+fi
+
+if [ "$PYTHON_UNAVAILABLE" = true ] && [ "$CLIENT_CHANGED" != true ]; then
     cat <<EOF
 ### Verification
 
@@ -139,6 +159,7 @@ fi
 # ---- run one suite in one tree, emit sorted failing node ids -----------
 run_suite() {
     local tree="$1" outfile="$2"
+    [ "$PYTHON_UNAVAILABLE" = true ] && { : > "$outfile"; return; }
     if [ "${#TEST_DIRS[@]}" -eq 0 ]; then
         : > "$outfile"
         return
@@ -151,6 +172,7 @@ run_suite() {
 
 compileall_check() {
     local tree="$1" changed_py=() f
+    [ "$PYTHON_UNAVAILABLE" = true ] && { echo unavailable; return; }
     for f in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
         [[ "$f" == *.py ]] && [ -f "$tree/$f" ] && changed_py+=("$tree/$f")
     done
@@ -171,6 +193,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The baseline worktree is outside the repository, so Node cannot discover the
+# checked-out client's dependency tree by walking parent directories. Sharing
+# the already-installed dependencies is read-only and avoids an unpinned npm
+# install inside the scheduled workflow.
+CLIENT_DEPS_READY=false
+if [ -x "$REPO_ROOT/client/node_modules/.bin/tsc" ] && [ -x "$REPO_ROOT/client/node_modules/.bin/vitest" ]; then
+    ln -s "$REPO_ROOT/client/node_modules" "$BASE_TREE/client/node_modules"
+    CLIENT_DEPS_READY=true
+fi
+
 BASE_FAILS="$(mktemp)"
 BRANCH_FAILS="$(mktemp)"
 run_suite "$BASE_TREE" "$BASE_FAILS"
@@ -179,6 +211,39 @@ run_suite "$REPO_ROOT" "$BRANCH_FAILS"
 REGRESSIONS="$(comm -13 "$BASE_FAILS" "$BRANCH_FAILS")"
 FIXED="$(comm -23 "$BASE_FAILS" "$BRANCH_FAILS")"
 NEW_FAILURES="$(printf '%s' "$REGRESSIONS" | grep -c . || true)"
+
+client_type_errors() {
+    local tree="$1" outfile="$2"
+    (
+        cd "$tree/client" && ./node_modules/.bin/tsc -p tsconfig.app.json --noEmit --pretty false
+    ) > "$outfile" 2>&1 || true
+    sed -E "s#${tree}#<tree>#g" "$outfile" | grep -E 'error TS[0-9]+:' | sort -u || true
+}
+
+client_test_failures() {
+    local tree="$1" outfile="$2"
+    [ "${#CLIENT_TESTS[@]}" -gt 0 ] || { : > "$outfile"; return; }
+    (
+        cd "$tree/client" && ./node_modules/.bin/vitest run --reporter=verbose "${CLIENT_TESTS[@]}"
+    ) > "$outfile" 2>&1 || true
+    grep -E '^[[:space:]]*(FAIL|×) ' "$outfile" | sed -E "s#${tree}#<tree>#g" | sort -u || true
+}
+
+CLIENT_TYPE_BASE="$(mktemp)"
+CLIENT_TYPE_BRANCH="$(mktemp)"
+CLIENT_TEST_BASE="$(mktemp)"
+CLIENT_TEST_BRANCH="$(mktemp)"
+CLIENT_TYPE_REGRESSIONS=""
+CLIENT_TEST_REGRESSIONS=""
+if [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" = true ]; then
+    client_type_errors "$BASE_TREE" "$CLIENT_TYPE_BASE" > "$CLIENT_TYPE_BASE.ids"
+    client_type_errors "$REPO_ROOT" "$CLIENT_TYPE_BRANCH" > "$CLIENT_TYPE_BRANCH.ids"
+    CLIENT_TYPE_REGRESSIONS="$(comm -13 "$CLIENT_TYPE_BASE.ids" "$CLIENT_TYPE_BRANCH.ids")"
+    client_test_failures "$BASE_TREE" "$CLIENT_TEST_BASE" > "$CLIENT_TEST_BASE.ids"
+    client_test_failures "$REPO_ROOT" "$CLIENT_TEST_BRANCH" > "$CLIENT_TEST_BRANCH.ids"
+    CLIENT_TEST_REGRESSIONS="$(comm -13 "$CLIENT_TEST_BASE.ids" "$CLIENT_TEST_BRANCH.ids")"
+fi
+CLIENT_NEW_FAILURES=$(( $(printf '%s' "$CLIENT_TYPE_REGRESSIONS" | grep -c . || true) + $(printf '%s' "$CLIENT_TEST_REGRESSIONS" | grep -c . || true) ))
 
 echo "### Verification"
 echo
@@ -201,10 +266,21 @@ else
     echo "| $label | $base_n failed | $branch_note |"
 fi
 
-if [ "$CLIENT_CHANGED" = true ]; then
-    echo "| npm run build | *(client changes — not verified by this pass; review manually)* | *(same)* |"
+if [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; then
+    echo "| TypeScript / Vitest | **unavailable** — client/node_modules is missing | **unavailable** |"
+elif [ "$CLIENT_CHANGED" = true ]; then
+    base_types="$(grep -c . "$CLIENT_TYPE_BASE.ids" || true)"
+    branch_types="$(grep -c . "$CLIENT_TYPE_BRANCH.ids" || true)"
+    base_tests="$(grep -c . "$CLIENT_TEST_BASE.ids" || true)"
+    branch_tests="$(grep -c . "$CLIENT_TEST_BRANCH.ids" || true)"
+    echo "| TypeScript | $base_types diagnostics | $branch_types diagnostics |"
+    if [ "${#CLIENT_TESTS[@]}" -eq 0 ]; then
+        echo "| Vitest | — | **no changed or colocated test file found** |"
+    else
+        echo "| Vitest ${CLIENT_TESTS[*]} | $base_tests failures | $branch_tests failures |"
+    fi
 else
-    echo "| npm run build | *skipped, client/ unchanged* | *skipped* |"
+    echo "| TypeScript / Vitest | *skipped, client/ unchanged* | *skipped* |"
 fi
 
 if [ -n "$REGRESSIONS" ]; then
@@ -220,4 +296,16 @@ if [ -n "$FIXED" ]; then
     echo "Also fixed (was failing on main): $(printf '%s' "$FIXED" | tr '\n' ' ')"
 fi
 
-echo "AUTOFIX_NEW_FAILURES=$NEW_FAILURES" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+if [ -n "$CLIENT_TYPE_REGRESSIONS" ] || [ -n "$CLIENT_TEST_REGRESSIONS" ]; then
+    echo
+    echo "**New frontend failures introduced by this branch:**"
+    echo '```'
+    printf '%s\n' "$CLIENT_TYPE_REGRESSIONS" "$CLIENT_TEST_REGRESSIONS" | grep -v '^$' || true
+    echo '```'
+fi
+
+if [ "$PYTHON_UNAVAILABLE" = true ] || { [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; }; then
+    echo "AUTOFIX_NEW_FAILURES=1" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+else
+    echo "AUTOFIX_NEW_FAILURES=$((NEW_FAILURES + CLIENT_NEW_FAILURES))" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+fi

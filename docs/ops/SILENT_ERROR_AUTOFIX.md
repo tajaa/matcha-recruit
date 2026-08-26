@@ -1,10 +1,10 @@
 # Silent Error Autofix
 
 `.github/workflows/silent-error-autofix.yml` runs every 10 minutes on this Mac's self-hosted
-GitHub Actions runner. The unit of work is **one row (grouped by stable key) in
-`server_error_reports`**, not a log window — that's the fix for the original problem,
-where five PRs (#242-#247) were opened for two bugs because the whole 20-minute log
-window was hashed as one "incident".
+GitHub Actions runner. The unit of work is one normalized incident from
+`server_error_reports` or `client_error_reports`, not a log window. Server rows retain
+their established stable keys; raw browser rows use a separate `client|` keyspace and
+group by normalized message, route, frame, and component context.
 
 The collector still looks back 24 hours. That is a recovery window, not the
 schedule: selection dedupes against GitHub and the local attempt cache, so a wide
@@ -13,33 +13,43 @@ handled incidents every 10 minutes.
 
 Pipeline (`scripts/error-autofix/`):
 
-1. **`collect.sh`** — SSHes to the app EC2, `docker exec`s into the live backend
-   container, and runs a read-only `SELECT` (enforced at the connection level, not by
-   convention) against `server_error_reports`. Groups rows by a date-and-value-free
-   `stable_key` (`_query.py:stable_key`) so the same bug spanning UTC-day boundaries, or
-   carrying different bound values, collapses into one incident. Redacts free-text
-   fields only (`message`, `traceback`, `request_path`) — structural fields
-   (`stable_key`, `error_id`, `occurrences`, timestamps) are left alone. Falls back to
-   the older `scripts/collect-silent-error-evidence.sh` log-grep if the DB path fails.
-2. **`select.sh`** — picks one incident GitHub hasn't already handled. Checks
+1. **`reconcile.sh`** — before collection, compares each open `bot/err-*` draft with
+   recent, later human-merged PRs that overlap its files. Terra high must return a
+   strict, high-confidence semantic-equivalence verdict before the bot labels and
+   closes a draft as superseded. It appends the human merge timestamp so a post-deploy
+   recurrence can re-enter the queue. This pass has no production credentials.
+2. **`collect.sh`** — SSHes to the app EC2, `docker exec`s into the live backend
+   container, and runs read-only `SELECT`s (enforced at the connection level, not by
+   convention) against both reporting tables. Server rows are grouped by the existing
+   date-and-value-free `stable_key`; client rows normalize asset hashes, line numbers,
+   dynamic paths, and values before grouping. It excludes browser-extension, local,
+   stale-chunk, and transport noise. A client API error is suppressed only when its
+   request ID and normalized endpoint match a collected server incident. Free-text
+   evidence is redacted after it leaves production; structural fields survive unchanged.
+   Falls back to `scripts/collect-silent-error-evidence.sh` if the DB path fails.
+3. **`select.sh`** — picks one incident GitHub hasn't already handled. Checks
    `gh pr list --head bot/err-<key> --state all`: open → skip; merged → skip unless a
    genuine recurrence is seen well after a deploy-grace window; closed-unmerged → skip
    for a 7-day cooldown, not forever. Also caps total open `autofix`-labeled PRs.
-3. **`investigate.sh`** — one `opencode run`, evidence attached as a file (not
+4. **`investigate.sh`** — one `opencode run` with `openai/gpt-5.6-terra --variant high`,
+   evidence attached as a file (not
    interpolated into the prompt), that must produce a markdown report with four
    required headings (Root cause / Fix / Blast radius / Confidence). **The model never
    reports test results** — that's the next script's job, and anything it writes about
    tests there is discarded. `--` terminates the repeated `--file` option before the
    prompt; without it OpenCode interprets the prompt itself as another attachment.
-4. **`verify.sh`** — runs the same checks against `main` and the branch and diffs
-   *failing test node IDs* (not counts), so a pre-existing failure never counts against
-   the PR. Uses the dev venv (`server/venv`) as the interpreter rather than building a
-   fresh one — `requirements.txt` pins with `>=`, so hashing it wouldn't actually pin
-   anything, and neither `pytest` nor `pytest-asyncio` are in it.
-5. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
+5. **`verify.sh`** — runs the same backend checks against `main` and the branch and
+   diffs *failing test node IDs* rather than counts. For client changes, it shares the
+   runner's existing `client/node_modules` with the baseline worktree, compares
+   TypeScript diagnostics, and runs changed or colocated Vitest files against both
+   trees. Missing verification dependencies label a draft `needs-work`; they never
+   trigger an unpinned install in the scheduled workflow.
+6. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
    report + verification table (endpoint, occurrence count, admin link, traceback,
-   correlated log lines). If the model made no diff, opens/updates a tracking issue
-   instead of silently doing nothing.
+   correlated log lines). If the model made no diff, opens or replaces a tracking issue
+   body instead of silently doing nothing. Replacing the original placeholder body is
+   essential: placeholders stay retryable after a failed run, while finalized no-fix
+   reports stop queue starvation. A successful draft closes its matching no-fix issue.
 
 It never deploys or auto-merges. A human reads the PR body and decides.
 
@@ -65,17 +75,18 @@ It never deploys or auto-merges. A human reads the PR body and decides.
   into the prompt string — and only the traceback frames under this app's own source
   tree, capped to 25 lines. The prod SSH key is deleted **before** the model step runs.
 - The model cannot change `.github/`, `deploy/`, `scripts/`, migrations, dependencies,
-  lockfiles, or env files (denylist, unchanged from the original workflow — this is
-  what stops the bot rewriting its own harness). `publish.sh` additionally **requires**
-  every staged path to match `server/(app|tests)/*.py` (allowlist) — strictly stronger,
-  and it closes paths the denylist never named (`CLAUDE.md`, `docs/`, `client/`,
-  `.claude/`, ...).
+  lockfiles, env files, generated client code, error reporters, error boundaries, or
+  telemetry/notifier code. `publish.sh` additionally requires every staged path to be
+  `server/app/**/*.py`, `server/tests/**/*.py`, or `client/src/**/*.ts(x)`. It rejects
+  changes to the browser report-status policy even though `client.ts` is otherwise in
+  the client allowlist.
 - `kind`/`exception_type` denylist in `_query.py` skips infra errors (connection resets,
   timeouts, pool exhaustion) that a code diff can't fix — investigating them just burns
   a run on a PR that can't be right.
-- `WHERE resolved_at IS NULL` doubles as the human "stop bothering me" switch: the only
-  writer of `resolved_at` is a person clicking Resolve in `/admin/server-errors` —
-  nothing in the deploy path resolves anything automatically.
+- `WHERE resolved_at IS NULL` doubles as the server-side human "stop bothering me"
+  switch. Client reports have no resolved column, so their stable key plus the GitHub
+  PR/no-fix lifecycle is the durable dedup ledger. Nothing in deployment resolves
+  telemetry automatically.
 - Failures fail loud where it matters (SSH/DB unreachable, path guard tripped, PR push
   failed, or an incomplete model investigation) and degrade gracefully where it doesn't
   (no incidents found, verification toolchain missing → PR still opens, labeled

@@ -23,6 +23,7 @@ METHOD="$(jq -r '.request_method // ""' "$INCIDENT_FILE")"
 OCC="$(jq -r '.occurrences // 0' "$INCIDENT_FILE")"
 LEVEL="$(jq -r '.level // "ERROR"' "$INCIDENT_FILE")"
 SOURCE="$(jq -r '.source // "api"' "$INCIDENT_FILE")"
+SURFACE="$(jq -r '.surface // "server"' "$INCIDENT_FILE")"
 FIRST_SEEN="$(jq -r '.first_seen // ""' "$INCIDENT_FILE")"
 LAST_SEEN="$(jq -r '.last_seen // ""' "$INCIDENT_FILE")"
 ERROR_ID="$(jq -r '.error_id // ""' "$INCIDENT_FILE")"
@@ -38,7 +39,7 @@ git add --all
 # this is what stops the bot rewriting its own harness. The allowlist is new
 # and strictly stronger: it closes every path the denylist didn't think to
 # name (CLAUDE.md, docs/, client/, opencode.jsonc, .claude/, ...).
-unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^deploy/|^scripts/|^server/alembic/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^deploy/|^scripts/|^server/alembic/|^client/src/generated/|^client/src/api/errorReporter\.ts$|^client/src/components/shared/ErrorBoundary\.tsx$|^server/app/core/routes/telemetry/|^server/app/core/services/error_reporter\.py$|^server/app/core/services/error_notifier\.py$|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
 if [ -n "$unsafe_paths" ]; then
     echo "Refusing unsafe automated change:" >&2
     printf '%s\n' "$unsafe_paths" >&2
@@ -46,10 +47,20 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-disallowed_paths="$(git diff --cached --no-renames --name-only | grep -vE '^server/(app|tests)/.*\.py$' || true)"
+disallowed_paths="$(git diff --cached --no-renames --name-only | grep -vE '^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx))$' || true)"
 if [ -n "$disallowed_paths" ]; then
-    echo "Refusing change outside server/app or server/tests:" >&2
+    echo "Refusing change outside server/app, server/tests, or client/src:" >&2
     printf '%s\n' "$disallowed_paths" >&2
+    git reset --hard >/dev/null 2>&1
+    exit 1
+fi
+
+# `client.ts` is generally safe to fix, but the report-status policy inside it
+# is a telemetry suppression boundary and must not be changed by this bot.
+unsafe_reporting_change="$(git diff --cached -U0 -- client/src/api/client.ts | grep -E '^[+-].*(_EXPECTED_STATUSES|_shouldReportStatus|reportApiError)' || true)"
+if [ -n "$unsafe_reporting_change" ]; then
+    echo "Refusing automated change to browser error-reporting policy:" >&2
+    printf '%s\n' "$unsafe_reporting_change" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
 fi
@@ -66,7 +77,13 @@ sev_for() {
 SEV="$(sev_for)"
 
 ADMIN_LINK=""
-[ -n "$ERROR_ID" ] && ADMIN_LINK="https://hey-matcha.com/admin/server-errors?search=$ERROR_ID"
+if [ -n "$ERROR_ID" ]; then
+    if [ "$SURFACE" = "client" ]; then
+        ADMIN_LINK="https://hey-matcha.com/admin/client-errors"
+    else
+        ADMIN_LINK="https://hey-matcha.com/admin/server-errors?search=$ERROR_ID"
+    fi
+fi
 
 # ---- no diff: track the incident as an issue instead of a silent no-op ----
 if git diff --cached --quiet; then
@@ -100,7 +117,10 @@ $TRACEBACK
     existing="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
         --json number,title --jq "map(select(.title | contains(\"[$KEY]\"))) | .[0].number // empty")"
     if [ -n "$existing" ]; then
-        gh issue comment "$existing" --repo "$REPO" --body "$body" >/dev/null
+        body_file="$(mktemp)"
+        printf '%s\n' "$body" > "$body_file"
+        gh issue edit "$existing" --repo "$REPO" --body-file "$body_file" >/dev/null
+        rm -f "$body_file"
     else
         gh issue create --repo "$REPO" --title "$title" --body "$body" --label autofix-nofix >/dev/null
     fi
@@ -128,6 +148,16 @@ BODY_FILE="$(mktemp)"
     [ -n "$ADMIN_LINK" ] && echo "**Admin** [$ERROR_ID]($ADMIN_LINK)"
     echo
     cat "$REPORT_FILE"
+    context_excerpt="$(jq -r '.context_excerpt // empty' "$INCIDENT_FILE")"
+    if [ -n "$context_excerpt" ]; then
+        echo
+        echo "<details><summary>Client context</summary>"
+        echo
+        echo '```'
+        printf '%s\n' "$context_excerpt"
+        echo '```'
+        echo "</details>"
+    fi
     echo
     cat "$VERIFICATION_FILE"
     echo
@@ -160,12 +190,23 @@ TITLE="fix: $EXC in $PATH_"
 existing_open_pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
 if [ -n "$existing_open_pr" ]; then
     gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE" --body-file "$BODY_FILE"
+    published_pr="$existing_open_pr"
 else
     gh pr create --repo "$REPO" --draft --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE"
+    published_pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
 fi
 
 gh pr edit "$BRANCH" --repo "$REPO" --add-label autofix >/dev/null 2>&1 || true
 gh pr edit "$BRANCH" --repo "$REPO" --add-label "sev:$SEV" >/dev/null 2>&1 || true
 if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
     gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true
+fi
+
+# A prior no-fix issue can be provisional (for example when the model process
+# crashed). Once a reviewable draft exists, the PR is the durable record.
+existing_nofix="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
+    --json number,title --jq "map(select(.title | contains(\"[$KEY]\"))) | .[0].number // empty")"
+if [ -n "$existing_nofix" ]; then
+    gh issue close "$existing_nofix" --repo "$REPO" \
+        --comment "Superseded by draft PR #${published_pr:-unknown} for incident [$KEY]." >/dev/null
 fi
