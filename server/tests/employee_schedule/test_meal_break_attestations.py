@@ -17,9 +17,16 @@ def test_waiver_endpoint_scopes_to_company_and_returns_only_effective_attestatio
     source = route.read_text()
     assert '@router.get("/employees/{employee_id}/meal-break-waiver"' in source
     assert "await assert_employee_in_company(conn, company_id, employee_id)" in source
-    assert "effective_from <= COALESCE((NOW() AT TIME ZONE l.timezone)::date, CURRENT_DATE)" in source
-    assert "ORDER BY effective_from DESC, confirmed_at DESC" in source
+    assert "a.effective_from <= COALESCE((NOW() AT TIME ZONE l.timezone)::date, CURRENT_DATE)" in source
+    assert "ORDER BY a.effective_from DESC, a.confirmed_at DESC" in source
     assert "s.starts_at >= NOW()" in source
+
+
+def test_waiver_lookup_qualifies_attestation_columns_across_joins():
+    route = Path(__file__).parents[2] / "app/matcha/routes/employee_schedule/attestations.py"
+    source = route.read_text()
+    assert "FROM employee_compliance_attestations a" in source
+    assert "WHERE a.company_id = $1 AND a.employee_id = $2" in source
 
 
 def test_guidance_evaluates_waivers_on_the_location_calendar_day():
