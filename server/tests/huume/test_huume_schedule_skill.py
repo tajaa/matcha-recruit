@@ -279,6 +279,91 @@ class TestProposeClarify(unittest.TestCase):
         assert [request["kind"] for request in captured["edit_requests"]] == ["assign", "retime"]
         assert captured["edit_requests"][0]["target_staffing_hint"] == "unstaffed"
 
+    def test_empty_changes_schema_default_falls_back_to_valid_flat_edit(self):
+        """Gemini's structured output emits optional arrays as ``[]``. Keep
+        accepting the populated legacy fields alongside that schema default."""
+        build = schedule_chat.ProposalBuild(
+            kind="edit", proposal_id=PROPOSAL_ID, pill_text="Schedule change pill",
+        )
+        captured = {}
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            captured.update(kwargs["parsed"])
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    "changes": [], "kind": "assign",
+                    "to_employee_name": "Bea Haddad",
+                    "target_employee_name": "Bea Haddad",
+                    "target_date": "2026-08-24", "target_time_hint": "9:00am",
+                    "target_staffing_hint": "unstaffed",
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 1
+        assert captured["edit_requests"][0]["kind"] == "assign"
+        assert captured["edit_requests"][0]["to_employee_name"] == "Bea Haddad"
+
+    def test_empty_changes_schema_default_falls_back_to_flat_create(self):
+        build = schedule_chat.ProposalBuild(
+            kind="create", proposal_id=PROPOSAL_ID, pill_text="Create shift pill",
+        )
+        captured = {}
+
+        async def fake_build_proposal(*args, **kwargs):
+            captured.update(kwargs["parsed"])
+            return build
+
+        with mock.patch.object(schedule_chat, "build_proposal", fake_build_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    "changes": [], "kind": "create", "label": "closer",
+                    "target_date": "2026-08-27", "start_time": "12:00",
+                    "end_time": "18:00", "count": 1,
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 1
+        assert captured["shift_requests"][0]["date"] == "2026-08-27"
+
+    def test_editor_resolution_includes_visible_draft_shifts(self):
+        """The schedule editor deliberately exposes draft shifts. Huume must
+        resolve the same rows it just showed the manager; published-only
+        lookup made an explicit assignment to an open draft shift impossible
+        in the live editor."""
+        build = schedule_chat.ProposalBuild(
+            kind="edit", proposal_id=PROPOSAL_ID, pill_text="Schedule change pill",
+        )
+        captured = {}
+
+        class Conn:
+            async def fetchval(self, *args):
+                return "Wilshire"
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=Conn(), company_id="c1", actor_user_id="u1", location_id="location-1",
+                args={
+                    "kind": "assign", "to_employee_name": "Bea Haddad",
+                    "target_date": "2026-08-24", "target_time_hint": "09:00",
+                    "target_staffing_hint": "unstaffed",
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert captured["surface"] == "editor"
+        assert captured["shift_statuses"] == ("draft", "published")
+
     def test_batch_over_four_is_rejected_before_builder(self):
         async def should_not_build(*args, **kwargs):
             raise AssertionError("oversized batch must not persist a proposal")

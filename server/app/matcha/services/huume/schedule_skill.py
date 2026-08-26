@@ -86,10 +86,15 @@ def _coerce_tool_edit_requests(schedule_chat, args: dict[str, Any]) -> tuple[lis
     partial write would make the confirmation pill differ from the ask.
     """
     raw_changes = args.get("changes")
-    is_batch = raw_changes is not None
+    # Structured-output providers materialize optional array fields as [] even
+    # when the model used the legacy flat fields. Treat only a non-empty array
+    # as a batch so a valid flat edit is not discarded by that schema default.
+    # An empty array with no usable flat edit still fails through the normal
+    # single-edit validation below.
+    is_batch = isinstance(raw_changes, list) and bool(raw_changes)
+    if raw_changes is not None and not isinstance(raw_changes, list):
+        return [], "Give me schedule changes as a list."
     if is_batch:
-        if not isinstance(raw_changes, list) or not raw_changes:
-            return [], "Give me at least one schedule change to stage."
         if len(raw_changes) > _MAX_SCHEDULE_EDIT_OPS:
             return [], (
                 f"I can stage up to {_MAX_SCHEDULE_EDIT_OPS} schedule edits in one confirmation. "
@@ -201,8 +206,15 @@ async def propose(
 
     kind = str(args.get("kind") or "").strip().lower()
     today = _date.today()
+    # The schedule assistant is embedded in the draft-capable editor. Its
+    # overview intentionally includes both draft and published shifts, so
+    # proposal resolution must use that same visibility or an open draft shift
+    # the manager can see cannot be assigned through Huume. Channel Huume
+    # keeps the conservative published-only lookup.
+    is_editor_surface = location_id is not None
+    surface = "editor" if is_editor_surface else "channel"
     try:
-        if kind == "create" and args.get("changes") is None:
+        if kind == "create" and args.get("changes") in (None, []):
             parsed = {
                 "ack": "Got it.", "action": "create",
                 "location_hint": args.get("location_name"),
@@ -213,7 +225,7 @@ async def propose(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,
                 original_content="[huume thread] shift create", week_start=week_start,
-                week_end=week_end,
+                week_end=week_end, surface=surface,
             )
             operation_count = 1
         else:
@@ -231,6 +243,8 @@ async def propose(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,
                 original_content=f"[huume thread] {kind} request",
+                surface=surface,
+                shift_statuses=("draft", "published") if is_editor_surface else ("published",),
                 editor_location_id=location_id,
                 editor_week_start=week_start, editor_week_end=week_end,
             )
