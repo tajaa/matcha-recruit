@@ -39,6 +39,15 @@ class TestBuildStateBlock:
         assert "ab12cd34" in block
         assert "propose_schedule_change" in block
 
+    def test_staged_schedule_batch_names_count_without_none(self):
+        state = {"huume_action": {
+            "type": "schedule_change", "operation_count": 3,
+            "confirm_id": "ab12cd34", "status": "proposed",
+        }}
+        block = build_state_block(state)
+        assert "3 edits" in block
+        assert "(None)" not in block
+
     def test_staged_send_offer_names_recipient_email(self):
         # "Send Maria's latest offer letter" — the admin must be told which
         # address the sign link goes to before they confirm, and the block
@@ -211,3 +220,8 @@ class TestBuildSystemPrompt:
         # retime a shift on the Schedule page just to disambiguate.
         prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
         assert "target_staffing_hint" in prompt
+
+    def test_schedule_section_teaches_batch_and_deferred_slot(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "`changes` array" in prompt
+        assert "server preserves the first and defers later attempts" in prompt

@@ -85,3 +85,16 @@ def test_assertion_raises_stable_http_error():
     assert exc.value.status_code == 422
     assert exc.value.detail["code"] == "schedule_location_not_ready"
     assert "address" in exc.value.detail["missing_fields"]
+    assert "address" in exc.value.detail["message"]
+
+
+def test_assertion_message_lists_multiple_missing_fields():
+    from fastapi import HTTPException
+
+    row = _location(address=None, timezone=None)
+    with pytest.raises(HTTPException) as exc:
+        _run(assert_schedule_location_ready_to_publish(FakeConn(row), uuid4(), row["id"]))
+    message = exc.value.detail["message"]
+    assert "an address" in message
+    assert "a timezone" in message
+    assert message.endswith("before its schedule can be published.")

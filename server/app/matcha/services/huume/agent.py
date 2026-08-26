@@ -467,7 +467,7 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         # reads is proposal_id, merged in below by schedule_skill.propose —
         # not reconstructed from these on the confirm turn.
         "fields": (
-            "kind", "location_name", "target_employee_name", "target_date", "target_time_hint",
+            "kind", "changes", "location_name", "target_employee_name", "target_date", "target_time_hint",
             "target_staffing_hint", "target_role_hint",
             "to_employee_name", "second_employee_name", "second_date", "second_time_hint", "second_role_hint",
             "new_date", "new_start_time", "new_end_time", "shift_by_minutes",
@@ -609,6 +609,12 @@ async def run_huume_turn(
     tool_rejections = 0
     stop_reason: Optional[str] = None
     terminal_message: Optional[str] = None
+    # Last refusal/error a tool call returned this turn — used only as a
+    # fallback final_message when the model's NEXT response has neither a
+    # tool call nor text (a reasoning-only response), which otherwise
+    # discarded the real reason and reported the generic "nothing was
+    # changed" string even though a tool actually explained what went wrong.
+    last_tool_issue: Optional[str] = None
 
     def elapsed() -> float:
         return time.monotonic() - started
@@ -634,6 +640,54 @@ async def run_huume_turn(
     pre_turn_action = current_state.get("huume_action")
     pre_turn_plans: dict[str, dict[str, Any]] = dict(current_state.get("huume_plans") or {})
     built_this_turn: set[str] = set()
+    # `huume_action` is one persisted slot. Before this guard, each staged
+    # branch could report success and overwrite state_updates in the same
+    # turn; the model truthfully saw several "staged" responses while only
+    # the last survived. The first newly staged action now owns the slot for
+    # the rest of this turn. Later staged tools are skipped with an explicit
+    # deferral; read tools and confirmations still proceed.
+    staged_action_this_turn: Optional[dict[str, Any]] = None
+
+    def _action_label(action_type: Any) -> str:
+        return {
+            "send_offer": "offer send",
+            "discipline_from_incident": "disciplinary action",
+            "discipline_draft": "discipline write-up",
+            "schedule_change": "schedule change",
+            "schedule_note": "assignment note",
+            "meal_break_waiver": "meal-break waiver",
+            "work_permit": "work permit",
+            "eligibility_case_decision": "eligibility decision",
+            "amend_handbook": "handbook amendment",
+        }.get(str(action_type or ""), str(action_type or "action").replace("_", " "))
+
+    def _defer_staged_tool(
+        tool_name: str, requested_action_type: Any,
+    ) -> Optional[tuple[dict[str, Any], dict[str, Any]]]:
+        if staged_action_this_turn is None:
+            return None
+        active = _action_label(staged_action_this_turn.get("type"))
+        requested = _action_label(requested_action_type)
+        message = (
+            f"I kept the {active} staged. I did not stage the {requested}; "
+            f"confirm or cancel the pending {active} first, then ask me to stage the {requested}."
+        )
+        step = recorder.record(
+            tool=tool_name, kind="staged", label=f"Deferred: {requested}",
+            status="skipped", detail=message,
+        )
+        return {"status": "deferred", "message": message}, step
+
+    def _claim_staged_action(
+        tool_name: str, staged: dict[str, Any],
+    ) -> Optional[tuple[dict[str, Any], dict[str, Any]]]:
+        nonlocal staged_action_this_turn
+        deferred = _defer_staged_tool(tool_name, staged.get("type"))
+        if deferred is not None:
+            return deferred
+        staged_action_this_turn = staged
+        state_updates["huume_action"] = staged
+        return None
 
     # Pilot-skill turn state: handbook drafts proposed THIS turn (the two-turn
     # promote guard, mirroring built_this_turn), plus the citation records the
@@ -854,6 +908,11 @@ async def run_huume_turn(
                     existing, offer_id=offer_id, candidate_name=candidate_name, recipient_override=recipient_override,
                 )
 
+                if not confirming:
+                    deferred = _defer_staged_tool(name, "send_offer")
+                    if deferred is not None:
+                        return deferred
+
                 if confirming:
                     staged = existing
                 elif not offer_id and not candidate_name:
@@ -885,7 +944,9 @@ async def run_huume_turn(
                     schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
-                    state_updates["huume_action"] = staged
+                    deferred = _claim_staged_action(name, staged)
+                    if deferred is not None:
+                        return deferred
                     msg = f"Sends the sign link to {staged['recipient_email']}. {verdict.message}"
                     step = recorder.record(
                         tool=name, kind="staged", label=f"Staged: send offer to {staged['recipient_email']}",
@@ -953,6 +1014,10 @@ async def run_huume_turn(
                     and existing.get("status") == "proposed"
                     and confirm_id is not None and existing.get("confirm_id") == confirm_id
                 )
+                if not confirming:
+                    deferred = _defer_staged_tool(name, "discipline_from_incident")
+                    if deferred is not None:
+                        return deferred
                 if confirming:
                     staged = existing
                 else:
@@ -978,7 +1043,9 @@ async def run_huume_turn(
                     schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
-                    state_updates["huume_action"] = staged
+                    deferred = _claim_staged_action(name, staged)
+                    if deferred is not None:
+                        return deferred
                     step = recorder.record(tool=name, kind="staged", label="Staged: disciplinary action from incident", status="ok", detail=verdict.message)
                     return {"status": "staged", "confirm_id": staged["confirm_id"], "message": verdict.message}, step
                 if not verdict.ok:
@@ -1014,6 +1081,10 @@ async def run_huume_turn(
                     and existing.get("status") == "proposed"
                     and confirm_id is not None and existing.get("confirm_id") == confirm_id
                 )
+                if not confirming:
+                    deferred = _defer_staged_tool(name, "discipline_draft")
+                    if deferred is not None:
+                        return deferred
                 if confirming:
                     staged = existing
                 else:
@@ -1029,7 +1100,9 @@ async def run_huume_turn(
                     schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
-                    state_updates["huume_action"] = staged
+                    deferred = _claim_staged_action(name, staged)
+                    if deferred is not None:
+                        return deferred
                     step = recorder.record(tool=name, kind="staged", label="Staged: discipline write-up", status="ok", detail=verdict.message)
                     return {"status": "staged", "confirm_id": staged["confirm_id"], "message": verdict.message}, step
                 if not verdict.ok:
@@ -1079,6 +1152,10 @@ async def run_huume_turn(
                     and confirm_id
                     and pre_turn_action.get("confirm_id") == confirm_id
                 )
+                if not confirming:
+                    deferred = _defer_staged_tool(name, action_type)
+                    if deferred is not None:
+                        return deferred
                 if confirming:
                     staged = pre_turn_action
                 else:
@@ -1092,6 +1169,7 @@ async def run_huume_turn(
                                 status="rejected", detail="The shift or employee identifier is invalid.",
                             )
                             return {"status": "refused", "message": "The shift or employee identifier is invalid."}, step
+                        from app.database import get_connection
                         async with get_connection() as _conn:
                             assignment_exists = await _conn.fetchval(
                                 """
@@ -1130,6 +1208,7 @@ async def run_huume_turn(
                                 status="rejected", detail="The employee identifier is invalid.",
                             )
                             return {"status": "refused", "message": "The employee identifier is invalid."}, step
+                        from app.database import get_connection
                         async with get_connection() as _conn:
                             employee_exists = await _conn.fetchval(
                                 """
@@ -1180,6 +1259,7 @@ async def run_huume_turn(
                             if args.get("decision") not in {"remove", "keep"}:
                                 step = recorder.record(tool=name, kind="staged", label="Eligibility decision refused", status="rejected")
                                 return {"status": "refused", "message": "Choose remove or keep for the eligibility case."}, step
+                            from app.database import get_connection
                             async with get_connection() as _conn:
                                 case = await _conn.fetchrow(
                                     """SELECT id, employee_id, requirement_type, status, expires_at, legal_basis
@@ -1212,7 +1292,9 @@ async def run_huume_turn(
                     schedule_surface=True,
                 )
                 if verdict.kind == "stage":
-                    state_updates["huume_action"] = staged
+                    deferred = _claim_staged_action(name, staged)
+                    if deferred is not None:
+                        return deferred
                     step = recorder.record(tool=name, kind="staged", label=f"Staged: {name.replace('_', ' ')}", status="ok", detail=verdict.message)
                     return {"status": "staged", "confirm_id": staged["confirm_id"], "message": verdict.message}, step
                 if not verdict.ok:
@@ -1288,6 +1370,10 @@ async def run_huume_turn(
                 # decision — one flow, table-driven (see _HR_OPS_TOOL_SPECS).
                 spec = _HR_OPS_TOOL_SPECS[name]
                 staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
+                if not confirming:
+                    deferred = _defer_staged_tool(name, spec["action_type"])
+                    if deferred is not None:
+                        return deferred
                 if name == "stage_receipt_from_attachment" and not confirming:
                     # Lines ride the staged dict itself, resolved server-side
                     # NOW so the confirm turn commits exactly what was parsed
@@ -1335,7 +1421,9 @@ async def run_huume_turn(
                     schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
-                    state_updates["huume_action"] = staged
+                    deferred = _claim_staged_action(name, staged)
+                    if deferred is not None:
+                        return deferred
                     step = recorder.record(tool=name, kind="staged", label=spec["staged_label"], status="ok", detail=verdict.message)
                     response = {"status": "staged", "message": verdict.message}
                     # Echo whichever id the confirm turn has to pass back.
@@ -1648,6 +1736,10 @@ async def run_huume_turn(
                         and existing.get("status") == "proposed"
                         and existing.get("target_handbook_id") == target_handbook_id
                     )
+                    if not confirming:
+                        deferred = _defer_staged_tool(name, "amend_handbook")
+                        if deferred is not None:
+                            return deferred
                     staged = existing if confirming else {
                         "type": "amend_handbook", "status": "proposed",
                         "target_handbook_id": target_handbook_id,
@@ -1660,7 +1752,9 @@ async def run_huume_turn(
                         schedule_surface=surface_context.is_schedule,
                     )
                     if verdict.kind == "stage":
-                        state_updates["huume_action"] = staged
+                        deferred = _claim_staged_action(name, staged)
+                        if deferred is not None:
+                            return deferred
                         step = recorder.record(tool=name, kind="staged", label="Staged: amend handbook", status="ok", detail=verdict.message)
                         return {"status": "staged", "message": verdict.message}, step
                     if not verdict.ok:
@@ -1786,7 +1880,11 @@ async def run_huume_turn(
             calls = [p.function_call for p in call_parts]
 
             if not calls:
-                final_message = (getattr(response, "text", None) or "").strip() or None
+                # A reasoning-only response (no function call, no text) used
+                # to silently fall through to the generic "nothing was
+                # changed" string even when a tool called earlier this turn
+                # already explained exactly why — surface that instead.
+                final_message = (getattr(response, "text", None) or "").strip() or last_tool_issue or None
                 break
 
             # ALL parts, not just the function-call ones — a response mixing
@@ -1812,14 +1910,14 @@ async def run_huume_turn(
                 # for direct callers, but an unlisted function must not be
                 # able to finish a turn or consume a schedule retry slot.
                 if allowed_tool_names is not None and name not in allowed_tool_names:
-                    recorder.record(
+                    step = recorder.record(
                         tool=name, kind="read", label=f"Tool unavailable: {name}",
                         status="rejected", detail="Tool is outside this Huume surface.", args=args,
                     )
-                    response_parts.append(types.Part.from_function_response(
-                        name=name,
-                        response={"status": "refused", "message": "That capability is not available in this assistant."},
-                    ))
+                    refusal = {"status": "refused", "message": "That capability is not available in this assistant."}
+                    last_tool_issue = refusal["message"]
+                    yield {"type": "step", "data": step}
+                    response_parts.append(types.Part.from_function_response(name=name, response=refusal))
                     continue
                 if name == "finish":
                     if not sole_finish_call:
@@ -1915,11 +2013,18 @@ async def run_huume_turn(
                         detail="Timed out waiting for a response.", args=args,
                     )
                     payload = {"error": "timed out"}
+                    last_tool_issue = f"{name.replace('_', ' ')} timed out."
                 else:
                     payload, step = task.result()
                     if step is not None:
                         step.setdefault("args", _cap_payload(args))
                         step.setdefault("result", _cap_payload(payload))
+                    if isinstance(payload, dict) and (
+                        payload.get("status") in {"refused", "error", "clarify", "deferred"} or payload.get("error")
+                    ):
+                        issue = payload.get("message") or payload.get("error")
+                        if issue:
+                            last_tool_issue = str(issue)
                 if step:
                     yield {"type": "step", "data": step}
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
@@ -1970,11 +2075,19 @@ async def run_huume_turn(
         )
     except Exception as exc:
         logger.warning("Huume agent turn failed: %s", exc, exc_info=True)
-        turn_error = "Huume hit a problem mid-turn — keeping what worked."
-        yield {"type": "error", "message": turn_error}
+        # User-facing text stays generic (no provider internals in the chat),
+        # but `turn_error` — persisted to `huume_runs.error` — keeps the real
+        # exception so a run can be diagnosed from the DB alone instead of
+        # cross-referencing `ai_usage_log` by timestamp (2026-08-26 incident:
+        # every failed run's `error` column read the same generic sentence
+        # while the actual cause, an OpenAI 400, sat only in usage logging).
+        yield {"type": "error", "message": "Huume hit a problem mid-turn — keeping what worked."}
+        turn_error = f"{type(exc).__name__}: {exc}"[:1000]
 
     if not final_message:
-        final_message = "I wasn't able to finish that — nothing was changed." if not recorder.steps else "Done for now — see the steps above."
+        final_message = last_tool_issue or (
+            "I wasn't able to finish that — nothing was changed." if not recorder.steps else "Done for now — see the steps above."
+        )
 
     total_usage["model"] = tier.planner_model
     total_usage["tier"] = tier_name

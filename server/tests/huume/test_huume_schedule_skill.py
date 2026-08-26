@@ -82,8 +82,23 @@ class TestRegistry:
         assert "target_staffing_hint" in props
         assert set(props["target_staffing_hint"].enum) == {"staffed", "unstaffed"}
 
+    def test_schema_declares_bounded_edit_batch(self):
+        tool = TOOLS_BY_NAME["propose_schedule_change"]
+        changes = tool.declaration.parameters.properties["changes"]
+        assert changes.min_items == 1
+        assert changes.max_items == 4
+        assert changes.items.required == ["kind"]
+        assert "create" not in changes.items.properties["kind"].enum
+
+    def test_confirm_call_does_not_require_irrelevant_kind(self):
+        tool = TOOLS_BY_NAME["propose_schedule_change"]
+        assert "kind" not in (tool.declaration.parameters.required or [])
+
     def test_spec_fields_forward_target_staffing_hint(self):
         assert "target_staffing_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
+
+    def test_spec_fields_forward_changes_batch(self):
+        assert "changes" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
 
     def test_spec_mints_a_confirm_id(self):
         spec = _HR_OPS_TOOL_SPECS["propose_schedule_change"]
@@ -229,7 +244,56 @@ class TestProposeClarify(unittest.TestCase):
 
         assert result == {
             "status": "ready", "proposal_id": PROPOSAL_ID, "pill_text": "Schedule change pill",
+            "operation_count": 1,
         }
+
+    def test_changes_batch_reaches_existing_multi_op_builder(self):
+        build = schedule_chat.ProposalBuild(
+            kind="edit", proposal_id=PROPOSAL_ID, pill_text="Two-change schedule pill",
+        )
+        captured = {}
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            captured.update(kwargs["parsed"])
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"changes": [
+                    {
+                        "kind": "assign", "to_employee_name": "Bea Haddad",
+                        "target_date": "2026-08-27", "target_time_hint": "17:00",
+                        "target_staffing_hint": "unstaffed",
+                    },
+                    {
+                        "kind": "retime", "target_employee_name": "Elena Iyer",
+                        "target_date": "2026-08-28", "target_time_hint": "08:00",
+                        "shift_by_minutes": 30,
+                    },
+                ]},
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 2
+        assert [request["kind"] for request in captured["edit_requests"]] == ["assign", "retime"]
+        assert captured["edit_requests"][0]["target_staffing_hint"] == "unstaffed"
+
+    def test_batch_over_four_is_rejected_before_builder(self):
+        async def should_not_build(*args, **kwargs):
+            raise AssertionError("oversized batch must not persist a proposal")
+
+        changes = [
+            {"kind": "cancel", "target_date": f"2026-08-{day:02d}"}
+            for day in range(20, 25)
+        ]
+        with mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1", args={"changes": changes},
+            ))
+
+        assert result["status"] == "clarify"
+        assert "up to 4" in result["message"]
 
     def test_named_people_swap_becomes_two_individual_reassignments(self):
         build = schedule_chat.ProposalBuild(

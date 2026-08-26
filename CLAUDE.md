@@ -364,6 +364,8 @@ Keep `LOG_LEVEL` at `INFO` or lower — some log calls sit at `WARNING` delibera
 
 **⚠️ `dev-remote.sh`'s frontend runs on `:5174` (tmux session `matcha-dev-remote`) — it is almost always already running.** If you spin up your own throwaway `npm run dev` (e.g. to screenshot-verify a change), do NOT clean it up with a port-pattern `pkill -f "vite --port ..."` — that regex also matches the user's real dev-remote.sh frontend process (same command line) and kills it. Track your own process by PID (`$!` / a pidfile) and `kill` that PID specifically instead.
 
+**Dev test account (full-featured Matcha-X)**: `maria.chen@example.com` / `devpass123` in the local dev DB — client role, company "Sunset Smile Dental Group" (`signup_source=matcha_x`), with `employee_schedule`/`huume`/`matcha_work`/`matcha_ops` all enabled. Locations include "Sunset Smile Dental — Downtown" (`e628e73e-1ee3-4b29-ba6d-a7e4cbc5e895`). Use it for matcha-work/Huume/schedule-editor testing instead of hunting for or creating a new company — verified working end-to-end against `/ops/schedule/editor` on 2026-08-26.
+
 **Alternative**: `./scripts/dev.sh` — references a discontinued sister product; do not use.
 
 **Agent sandbox**: `msandbox` (or `./scripts/agent-sandbox.sh`) runs Codex/Claude Code/OpenCode in an isolated

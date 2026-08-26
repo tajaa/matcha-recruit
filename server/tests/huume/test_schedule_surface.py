@@ -48,6 +48,10 @@ def test_schedule_prompt_is_conversational_and_does_not_expose_global_huume_tool
     assert "execute_approved_steps" not in prompt
     assert "get_schedule_overview" in prompt
     assert "propose_schedule_change" in prompt
+    assert "one staged action can occupy the pending slot" in prompt
+    assert "batch up to four" in prompt
+    assert "clearly list the others as deferred" in prompt
+    assert "Reuse employee and shift ids already returned by get_schedule_overview" in prompt
     assert "capable coworker, not a form or schema validator" in prompt
     assert "Ask one short, natural-language question" in prompt
     assert "Never expose snake_case tool arguments" in prompt

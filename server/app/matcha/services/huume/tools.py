@@ -66,6 +66,38 @@ def _tool(
     )
 
 
+_SCHEDULE_EDIT_PROPERTIES = {
+    "kind": types.Schema(
+        type=types.Type.STRING,
+        enum=["reassign", "assign", "unassign", "retime", "cancel", "swap"],
+    ),
+    "target_employee_name": types.Schema(type=types.Type.STRING),
+    "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
+    "target_time_hint": types.Schema(
+        type=types.Type.STRING,
+        description="Start time of the shift, e.g. '12:30pm', '8am', or '08:00'.",
+    ),
+    "target_role_hint": types.Schema(type=types.Type.STRING),
+    "target_staffing_hint": types.Schema(
+        type=types.Type.STRING,
+        enum=["staffed", "unstaffed"],
+        description="Use only to distinguish otherwise identical staffed and open shifts.",
+    ),
+    "to_employee_name": types.Schema(type=types.Type.STRING),
+    "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
+    "second_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='swap'."),
+    "second_time_hint": types.Schema(type=types.Type.STRING, description="Other shift's start time for kind='swap'."),
+    "second_role_hint": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
+    "new_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='retime'."),
+    "new_start_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
+    "new_end_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
+    "shift_by_minutes": types.Schema(
+        type=types.Type.INTEGER,
+        description="For a relative retime with no clock time given.",
+    ),
+}
+
+
 TOOLS: tuple[HuumeTool, ...] = (
     _tool(
         "lookup_context", "read",
@@ -835,8 +867,10 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "propose_schedule_change", "staged",
-        "Stage a schedule change or a brand new shift for the admin to "
-        "confirm — swap, reassign, unassign, retime, cancel, or create. "
+        "Stage one schedule proposal for the admin to confirm. Use `changes` "
+        "to batch up to four related edits (swap, reassign, assign, unassign, "
+        "retime, or cancel) into one confirmation; use the legacy flat `kind` "
+        "fields for one edit or a brand new shift. Do not mix creates and edits. "
         "Nothing happens until they confirm on a LATER turn by calling this "
         "again with EXACTLY the same confirm_id. Use real names/dates from "
         "lookup_context(topic='schedule') or find_shift_coverage — never "
@@ -846,42 +880,23 @@ TOOLS: tuple[HuumeTool, ...] = (
                 type=types.Type.STRING,
                 enum=["create", "reassign", "assign", "unassign", "retime", "cancel", "swap"],
             ),
+            "changes": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties=_SCHEDULE_EDIT_PROPERTIES,
+                    required=["kind"],
+                ),
+                min_items=1,
+                max_items=4,
+                description="One to four edit operations resolved and confirmed as one proposal. Creates are not allowed here.",
+            ),
             "location_name": types.Schema(
                 type=types.Type.STRING,
                 description="Store name if the company has more than one location — get exact "
                             "names from lookup_context(topic='locations'). Omit if there's only one.",
             ),
-            "target_employee_name": types.Schema(type=types.Type.STRING),
-            "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
-            "target_time_hint": types.Schema(
-                type=types.Type.STRING,
-                description="Start time of the shift you mean, when several shifts share target_date — "
-                            "e.g. '12:30pm', '8am', '08:00'. Get it from find_shift_coverage results "
-                            "or the admin's own words.",
-            ),
-            "target_role_hint": types.Schema(type=types.Type.STRING),
-            "target_staffing_hint": types.Schema(
-                type=types.Type.STRING,
-                enum=["staffed", "unstaffed"],
-                description="Only when two candidate shifts share the same date, time, AND role — "
-                            "'unstaffed' for 'the open one'/'the unstaffed one', 'staffed' for 'the "
-                            "one that already has someone on it'. Omit otherwise.",
-            ),
-            "to_employee_name": types.Schema(type=types.Type.STRING),
-            "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
-            "second_date": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
-            "second_time_hint": types.Schema(
-                type=types.Type.STRING,
-                description="For kind='swap', the other person's shift time when they have more than one shift that day.",
-            ),
-            "second_role_hint": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
-            "new_date": types.Schema(type=types.Type.STRING, description="For kind='retime'."),
-            "new_start_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
-            "new_end_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
-            "shift_by_minutes": types.Schema(
-                type=types.Type.INTEGER,
-                description="For a RELATIVE retime with no clock time given.",
-            ),
+            **{key: value for key, value in _SCHEDULE_EDIT_PROPERTIES.items() if key != "kind"},
             "label": types.Schema(type=types.Type.STRING, description="For kind='create'."),
             "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='create'."),
             "start_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
@@ -896,7 +911,10 @@ TOOLS: tuple[HuumeTool, ...] = (
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
             ),
         },
-        required=["kind"],
+        # A stage call needs either `changes` or flat `kind`; a confirm call
+        # needs only confirm_id, so enforcing `kind` in the provider schema
+        # made the model invent/repeat an irrelevant field on confirmation.
+        required=[],
         discovery=True,
         # Every hint here is deliberately multi-word — a bare "assign"
         # substring-matches "assign the food-safety training to Maria" and

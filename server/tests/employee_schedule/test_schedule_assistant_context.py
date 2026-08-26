@@ -46,7 +46,7 @@ async def test_overview_caps_complete_shifts_and_excludes_cancelled_rows(monkeyp
     shift_id = uuid4()
     employee_id = uuid4()
     conn = _Conn(
-        {"id": location_id, "name": "Wilshire", "address": None, "city": "LA", "state": "CA", "postal_code": None},
+        {"id": location_id, "name": "Wilshire", "address": None, "city": "LA", "state": "CA", "zipcode": None},
         [{
             "id": shift_id,
             "role": "opener",
@@ -80,3 +80,18 @@ async def test_overview_caps_complete_shifts_and_excludes_cancelled_rows(monkeyp
     assert "s.status <> 'cancelled'" in shift_query
     assert "json_agg" in shift_query
     assert "LIMIT 500" in shift_query
+
+
+@pytest.mark.asyncio
+async def test_overview_location_query_uses_real_business_locations_columns():
+    """`business_locations` has no `postal_code` column — it's `zipcode`. The
+    fake connection in the test above returns canned rows regardless of the
+    query text, so it can't catch a column rename; this pins the SQL itself
+    against the schema (see server/app/database/bootstrap/__init__.py) so a
+    future rename fails loudly instead of 500ing every schedule-assistant
+    overview call in production (2026-08-26 incident: exactly this)."""
+    import inspect
+
+    source = inspect.getsource(context.get_schedule_overview)
+    assert "zipcode" in source
+    assert "postal_code" not in source

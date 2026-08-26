@@ -30,6 +30,7 @@ from typing import Any, Literal, NotRequired, Optional, TypedDict
 from uuid import UUID
 
 _ALLOWED_ROLES = frozenset({"client", "admin"})
+_MAX_SCHEDULE_EDIT_OPS = 4
 
 
 class ScheduleProposalResult(TypedDict):
@@ -37,6 +38,7 @@ class ScheduleProposalResult(TypedDict):
     message: NotRequired[str]
     proposal_id: NotRequired[str]
     pill_text: NotRequired[str]
+    operation_count: NotRequired[int]
 
 
 def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
@@ -71,6 +73,79 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
         "new_end_time": args.get("new_end_time"),
         "shift_by_minutes": args.get("shift_by_minutes"),
     }
+
+
+def _coerce_tool_edit_requests(schedule_chat, args: dict[str, Any]) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """Normalize either one legacy flat edit or a bounded `changes` batch.
+
+    The schedule engine already executes ``parsed['edit_requests']`` as one
+    transactional proposal. This is the Huume-only adapter that used to
+    collapse the tool call to one request. A named-person swap expands to two
+    reassignments and therefore consumes two of the four concrete-op slots.
+    The whole batch is rejected if any item is unusable; silently staging a
+    partial write would make the confirmation pill differ from the ask.
+    """
+    raw_changes = args.get("changes")
+    is_batch = raw_changes is not None
+    if is_batch:
+        if not isinstance(raw_changes, list) or not raw_changes:
+            return [], "Give me at least one schedule change to stage."
+        if len(raw_changes) > _MAX_SCHEDULE_EDIT_OPS:
+            return [], (
+                f"I can stage up to {_MAX_SCHEDULE_EDIT_OPS} schedule edits in one confirmation. "
+                "Split the remaining edits into a later request."
+            )
+        if str(args.get("kind") or "").strip().lower() == "create":
+            return [], "New shifts and edits need separate schedule proposals."
+        changes = raw_changes
+    else:
+        changes = [args]
+
+    edit_requests: list[dict[str, Any]] = []
+    for index, change in enumerate(changes, start=1):
+        if not isinstance(change, dict):
+            return [], f"Schedule change {index} is not a usable edit."
+        kind = str(change.get("kind") or "").strip().lower()
+        if kind == "create":
+            return [], "New shifts and edits need separate schedule proposals."
+
+        # `schedule_chat` reserves kind='swap' for a roster-level swap: every
+        # assignee on one shift moves to the other. On this surface, a request
+        # naming two people means exchange only those assignment rows.
+        if kind == "swap" and change.get("target_employee_name") and change.get("second_employee_name"):
+            first = schedule_chat.coerce_edit_request({
+                "kind": "reassign",
+                "target_employee_name": change.get("target_employee_name"),
+                "to_employee_name": change.get("second_employee_name"),
+                "target_date": change.get("target_date"),
+                "target_time_hint": change.get("target_time_hint"),
+                "target_staffing_hint": change.get("target_staffing_hint"),
+                "target_role_hint": change.get("target_role_hint"),
+            })
+            second = schedule_chat.coerce_edit_request({
+                "kind": "reassign",
+                "target_employee_name": change.get("second_employee_name"),
+                "to_employee_name": change.get("target_employee_name"),
+                "target_date": change.get("second_date") or change.get("target_date"),
+                "target_time_hint": change.get("second_time_hint"),
+                "target_role_hint": change.get("second_role_hint"),
+            })
+            normalized = [request for request in (first, second) if request is not None]
+        else:
+            request = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, change))
+            normalized = [request] if request is not None else []
+
+        if not normalized:
+            prefix = f"Schedule change {index} " if is_batch else "That schedule change "
+            return [], prefix + "needs an employee and a specific shift before I can stage it."
+        if len(edit_requests) + len(normalized) > _MAX_SCHEDULE_EDIT_OPS:
+            return [], (
+                f"I can stage up to {_MAX_SCHEDULE_EDIT_OPS} concrete schedule edits in one confirmation. "
+                "A named-person swap counts as two edits."
+            )
+        edit_requests.extend(normalized)
+
+    return edit_requests, None
 
 
 async def find_coverage(
@@ -127,7 +202,7 @@ async def propose(
     kind = str(args.get("kind") or "").strip().lower()
     today = _date.today()
     try:
-        if kind == "create":
+        if kind == "create" and args.get("changes") is None:
             parsed = {
                 "ack": "Got it.", "action": "create",
                 "location_hint": args.get("location_name"),
@@ -140,34 +215,11 @@ async def propose(
                 original_content="[huume thread] shift create", week_start=week_start,
                 week_end=week_end,
             )
+            operation_count = 1
         else:
-            # `schedule_chat` reserves kind='swap' for a roster-level swap:
-            # every assignee on one shift moves to the other. On this surface,
-            # though, a request that names two people means exchange only
-            # those two assignment rows. Translate it into two reassign ops
-            # before the proposal is resolved so other assignees stay put.
-            if kind == "swap" and args.get("target_employee_name") and args.get("second_employee_name"):
-                first = schedule_chat.coerce_edit_request({
-                    "kind": "reassign",
-                    "target_employee_name": args.get("target_employee_name"),
-                    "to_employee_name": args.get("second_employee_name"),
-                    "target_date": args.get("target_date"),
-                    "target_time_hint": args.get("target_time_hint"),
-                    "target_staffing_hint": args.get("target_staffing_hint"),
-                    "target_role_hint": args.get("target_role_hint"),
-                })
-                second = schedule_chat.coerce_edit_request({
-                    "kind": "reassign",
-                    "target_employee_name": args.get("second_employee_name"),
-                    "to_employee_name": args.get("target_employee_name"),
-                    "target_date": args.get("second_date") or args.get("target_date"),
-                    "target_time_hint": args.get("second_time_hint"),
-                    "target_role_hint": args.get("second_role_hint"),
-                })
-                edit_requests = [request for request in (first, second) if request is not None]
-            else:
-                edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
-                edit_requests = [edit_req] if edit_req is not None else []
+            edit_requests, error = _coerce_tool_edit_requests(schedule_chat, args)
+            if error:
+                return {"status": "clarify", "message": error}
             if not edit_requests:
                 return {
                     "status": "clarify",
@@ -182,6 +234,7 @@ async def propose(
                 editor_location_id=location_id,
                 editor_week_start=week_start, editor_week_end=week_end,
             )
+            operation_count = len(edit_requests)
     except Exception:
         return {"status": "refused", "message": "That failed just now — try the Schedule page instead."}
 
@@ -205,6 +258,7 @@ async def propose(
         "status": "ready",
         "proposal_id": str(build.proposal_id),
         "pill_text": build.pill_text,
+        "operation_count": operation_count,
     }
 
 
