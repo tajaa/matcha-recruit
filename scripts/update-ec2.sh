@@ -134,13 +134,15 @@ backup_database() {
 
 install_worker_timer() {
     # The host's stale scripts/worker-cycle.sh STOPS the worker after 300s — it
-    # predates the continuous-worker design. Remove it so the unit can never
-    # drift back to it, then install the recycle timer that re-fires @worker_ready.
+    # predates the continuous-worker design. Remove that one known copy so it
+    # stops firing on this host, then install the recycle timer that re-fires
+    # @worker_ready. (This only deletes the hardcoded path below — it doesn't
+    # guarantee the script can't be reintroduced some other way.)
     log_info "Installing worker recycle timer..."
     if scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new \
             deploy/matcha-worker.service deploy/matcha-worker.timer \
             "$EC2_USER@$EC2_HOST:/tmp/" \
-        && ssh_cmd "sudo rm -f /home/ec2-user/matcha/scripts/worker-cycle.sh && sudo install -m 0644 /tmp/matcha-worker.service /etc/systemd/system/matcha-worker.service && sudo install -m 0644 /tmp/matcha-worker.timer /etc/systemd/system/matcha-worker.timer && sudo systemctl daemon-reload && sudo systemctl enable --now matcha-worker.timer"
+        && ssh_cmd "sudo rm -f /home/ec2-user/matcha/scripts/worker-cycle.sh && sudo install -m 0644 /tmp/matcha-worker.service /etc/systemd/system/matcha-worker.service && sudo install -m 0644 /tmp/matcha-worker.timer /etc/systemd/system/matcha-worker.timer && rm -f /tmp/matcha-worker.service /tmp/matcha-worker.timer && sudo systemctl daemon-reload && sudo systemctl enable --now matcha-worker.timer"
     then
         log_success "Worker recycle timer installed"
     else
@@ -379,7 +381,6 @@ ecr_login
 # (it's non-blocking anyway, but --hotfix means "nothing but the swap").
 if [ "$UPDATE_BACKEND" = true ] && [ "$HOTFIX" = false ]; then
     backup_database
-    install_worker_timer
 fi
 pre_cleanup
 
@@ -391,6 +392,13 @@ if [ "$UPDATE_MATCHA" = true ]; then
         sync_nginx
     fi
     update_matcha
+fi
+
+# Installed/enabled after the swap, not before pre_cleanup — enabling a
+# previously-inactive timer fires it immediately (elapsed OnBootSec), and
+# pre_cleanup is about to stop/rm the very container that would restart.
+if [ "$UPDATE_BACKEND" = true ] && [ "$HOTFIX" = false ]; then
+    install_worker_timer
 fi
 
 if [ "$UPDATE_AGENT" = true ]; then

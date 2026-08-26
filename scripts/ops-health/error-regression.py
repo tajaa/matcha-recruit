@@ -44,7 +44,7 @@ def redact_message(message: str) -> str:
 # is deploy mechanics, not a code regression, and two of them are enough to trip
 # the alert threshold on an otherwise healthy rollout.
 CHURN_TYPES = {"ConnectionError", "gaierror"}
-CHURN_FRAME = re.compile(r"_subscriber_loop|redis/asyncio")
+CHURN_FRAME = re.compile(r"_subscriber_loop")
 CHURN_MESSAGE = re.compile(
     r"Connection closed by server|Name or service not known|Connection reset by peer", re.I
 )
@@ -54,7 +54,7 @@ def is_deploy_churn(row: dict) -> bool:
     if (row.get("exception_type") or "") not in CHURN_TYPES:
         return False
     traceback = row.get("traceback") or ""
-    return bool(CHURN_FRAME.search(traceback) and CHURN_MESSAGE.search(row.get("message") or ""))
+    return bool(CHURN_FRAME.search(traceback) and CHURN_MESSAGE.search(traceback))
 
 
 def grouped(rows: list[dict]) -> dict[str, dict]:
@@ -67,6 +67,12 @@ def grouped(rows: list[dict]) -> dict[str, dict]:
         else:
             current["occurrences"] = max(current["occurrences"], row["occurrences"])
     return values
+
+
+# A real redis outage during the deploy window churns through this many
+# reconnect attempts; that many suppressed rows is no longer "two subscribers
+# reconnecting once" and should surface rather than be swallowed silently.
+ANOMALOUS_SUPPRESSED_THRESHOLD = 10
 
 
 def evaluate(baseline_rows: list[dict], final_rows: list[dict]) -> dict:
@@ -95,6 +101,7 @@ def evaluate(baseline_rows: list[dict], final_rows: list[dict]) -> dict:
     total_delta = sum(row["delta"] for row in changes)
     alert = any(row["level"] == "CRITICAL" and row["new"] for row in changes)
     alert = alert or len(new_keys) >= 2 or any(row["delta"] >= 3 for row in changes) or total_delta >= 5
+    alert = alert or suppressed >= ANOMALOUS_SUPPRESSED_THRESHOLD
     return {
         "alert": alert,
         "total_delta": total_delta,

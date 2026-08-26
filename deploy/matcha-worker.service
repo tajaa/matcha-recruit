@@ -5,7 +5,7 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/docker restart matcha-worker
+ExecStart=/bin/sh -c '/usr/bin/docker restart -t 60 matcha-worker || true'
 
 [Install]
 WantedBy=multi-user.target

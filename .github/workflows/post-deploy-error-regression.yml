@@ -57,8 +57,10 @@ jobs:
 
       - name: Wait for observation window
         if: steps.baseline.outcome == 'success'
+        env:
+          DEPLOYED_AT: ${{ inputs.deployed_at }}
         run: |
-          deployed_epoch="$(date -u -d '${{ inputs.deployed_at }}' +%s)"
+          deployed_epoch="$(date -u -d "$DEPLOYED_AT" +%s)"
           now_epoch="$(date -u +%s)"
           remaining=$(( deployed_epoch + 900 - now_epoch ))
           if [ "$remaining" -gt 0 ]; then
@@ -98,6 +100,7 @@ jobs:
         if: steps.regression.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
+          DEPLOY_ID: ${{ inputs.deploy_id }}
         run: |
           python3 - "$RUNNER_TEMP/regression.json" > "$RUNNER_TEMP/regression.md" <<'PY'
           import json, sys
@@ -109,15 +112,18 @@ jobs:
               print(f"| `{row['stable_key']}` | {row['exception_type']}: {row['message']} | {row['source']} | `{row['path']}` | {row['delta']} |")
           print("\nOnly normalized messages and query-free paths are included. Inspect the linked Admin Server Errors record for protected context.")
           PY
-          ./scripts/ops-health/publish-issue.sh "deploy-regression:${{ inputs.deploy_id }}" \
+          ./scripts/ops-health/publish-issue.sh "deploy-regression:$DEPLOY_ID" \
             'ops: post-deploy error regression' "$RUNNER_TEMP/regression.md" deploy-regression
 
       - name: Write summary
         if: always()
+        env:
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+          TARGET: ${{ inputs.target }}
         run: |
           echo '## Post-deploy error regression' >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' '- Deploy: `${{ inputs.deploy_id }}`' >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' '- Target: `${{ inputs.target }}`' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- Deploy: \`$DEPLOY_ID\`" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- Target: \`$TARGET\`" >> "$GITHUB_STEP_SUMMARY"
           if [ -f "$RUNNER_TEMP/regression.json" ]; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
             cat "$RUNNER_TEMP/regression.json" >> "$GITHUB_STEP_SUMMARY"

@@ -39,10 +39,17 @@ REMOTE
             echo "expected size must be an integer" >&2
             exit 2
         }
+        # Pinned by digest, not floating tag: cleanup() prunes all unused images
+        # every deploy, so --pull=missing re-fetches on essentially every run —
+        # a floating tag means the probe silently runs whatever content that
+        # tag points to at fetch time. Bump deliberately via:
+        #   crane digest public.ecr.aws/docker/library/postgres:15-alpine
+        PROBE_IMAGE='public.ecr.aws/docker/library/postgres@sha256:61fb6a038c515f2e2ed86cab0a683a1560ba08ad4c86d367cf98a279aa82a807'
         ssh_app <<REMOTE
 set -euo pipefail
 key='$KEY'
 expected_size='$EXPECTED_SIZE'
+probe_image='$PROBE_IMAGE'
 dump_file=\$(mktemp /tmp/matcha-backup-check.XXXXXX.dump)
 toc_file=\$(mktemp /tmp/matcha-backup-check.XXXXXX.toc)
 trap 'rm -f "\$dump_file" "\$toc_file"' EXIT
@@ -69,7 +76,7 @@ if [ "\$s3_rc" -eq 0 ] && [ "\$downloaded_size" = "\$expected_size" ]; then
     docker run --rm --pull=missing --network none --read-only --cap-drop ALL \
       --security-opt no-new-privileges \
       -v "\$dump_file:/backup.dump:ro" \
-      public.ecr.aws/docker/library/postgres:15-alpine \
+      "\$probe_image" \
       pg_restore --list /backup.dump > "\$toc_file" 2>/dev/null
     restore_list_rc=\$?
     set -e
@@ -79,7 +86,7 @@ if [ "\$s3_rc" -eq 0 ] && [ "\$downloaded_size" = "\$expected_size" ]; then
         docker run --rm --pull=missing --network none --read-only --cap-drop ALL \
           --security-opt no-new-privileges \
           -v "\$dump_file:/backup.dump:ro" \
-          public.ecr.aws/docker/library/postgres:15-alpine \
+          "\$probe_image" \
           pg_restore --exit-on-error --file=/dev/null /backup.dump >/dev/null 2>&1
         restore_scan_rc=\$?
         set -e

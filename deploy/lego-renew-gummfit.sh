@@ -4,7 +4,12 @@
 # zone updates during the ACME TXT dance have been observed to drop it
 # (2026-06-12), and a failed renew must not skip the daily self-heal.
 set -uo pipefail
+if [ ! -r /etc/lego/hostinger.env ]; then
+  echo "[$(date)] /etc/lego/hostinger.env missing or unreadable — aborting" >&2
+  exit 1
+fi
 set -a; source /etc/lego/hostinger.env; set +a
+: "${HOSTINGER_API_TOKEN:?HOSTINGER_API_TOKEN not set by hostinger.env}"
 export LEGO_PATH=/etc/lego
 # The Hostinger zone's wildcard `* CNAME -> dburfxi3p5e15.cloudfront.net` (added for
 # Cappe/CloudFront) also covers _acme-challenge.gummfit.com. lego follows that CNAME and
@@ -13,8 +18,13 @@ export LEGO_PATH=/etc/lego
 # daily since ~2026-08-11. Disabling CNAME support writes the TXT directly into the
 # gummfit.com zone, where an explicit record outranks the wildcard.
 export LEGO_DISABLE_CNAME_SUPPORT=true
-/usr/local/bin/lego run --accept-tos -m aaron@hey-matcha.com --dns hostinger \
+# `renew` (not `run`) — idempotent, no-ops while >30d of validity remain.
+# `run` re-issues a brand-new cert every invocation, which trips Let's
+# Encrypt's 5-duplicate-certs/week limit for this exact FQDN set within days
+# of a daily cron cadence.
+/usr/local/bin/lego renew --accept-tos -m aaron@hey-matcha.com --dns hostinger \
   --dns.propagation.wait 180s -d gummfit.com -d "*.gummfit.com" \
+  --days 30 \
   --deploy-hook "systemctl reload nginx"
 rc=$?
 # Re-assert wildcard A (idempotent; overwrite:false appends only if missing —

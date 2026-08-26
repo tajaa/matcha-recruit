@@ -114,12 +114,37 @@ def test_regression_redacts_message_pii_and_query_values():
 
 def test_regression_suppresses_redis_churn_but_keeps_real_errors():
     churn = {
-        **_error("Connection closed by server", 2, error_id="churn"),
+        **_error("[Channels WS] Subscriber loop error (messages); restarting in 2s", 2, error_id="churn"),
         "exception_type": "ConnectionError",
-        "traceback": 'File "/app/app/core/services/subscriber.py", line 40, in _subscriber_loop\n  await redis.asyncio',
+        "traceback": (
+            'File "/app/app/werk/routes/channels_ws.py", line 3082, in _subscriber_loop\n'
+            "ConnectionError: Connection closed by server"
+        ),
     }
     real_error = _error("duplicate key value violates unique constraint", 3, error_id="sql")
     result = regression.evaluate([], [churn, real_error])
     assert result["suppressed_deploy_churn"] == 1
     assert [row["error_id"] for row in result["changes"]] == ["sql"]
+    assert result["alert"] is True
+
+
+def test_regression_alerts_when_suppressed_churn_is_anomalous():
+    churn_rows = [
+        {
+            **_error(
+                "[Channels WS] Subscriber loop error (messages); restarting in 2s",
+                1,
+                error_id=f"churn-{i}",
+            ),
+            "exception_type": "gaierror",
+            "traceback": (
+                'File "/app/app/werk/routes/channels_ws.py", line 3082, in _subscriber_loop\n'
+                "gaierror: Name or service not known"
+            ),
+        }
+        for i in range(12)
+    ]
+    result = regression.evaluate([], churn_rows)
+    assert result["suppressed_deploy_churn"] == 12
+    assert result["changes"] == []
     assert result["alert"] is True
