@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the kanban-autopr service account: a `client`-role bot user plus a
+"""Create the kanban-autopr service account: an `individual`-role bot user plus a
 `mw_project_collaborators` row on each of the four projects the loop is
 scoped to (WerkWerk, Beetlejuse, Gummfit, MATCHA — spanning two different
 company_ids, so per-project collaborator rows are used rather than a single
@@ -23,7 +23,7 @@ import sys
 import bcrypt
 
 BOT_USER_ID = "a0700000-0000-4000-8000-000000000001"
-BOT_EMAIL = "autopr@matcha.invalid"  # RFC 2606 reserved domain — never a real mailbox.
+BOT_EMAIL = "support@hey-matcha.com"  # real inbox on our own domain — EmailStr rejects RFC 2606 reserved TLDs (.invalid/.test/.localhost) at login.
 
 # (project_id, project title — for the SQL comment only)
 PROJECTS = [
@@ -44,7 +44,12 @@ def upgrade_sql() -> str:
     lines = [
         "-- kanban-autopr bot account. Undo: scripts/seed-prod.sh scripts/seed/autopr_bot.py --undo",
         f"INSERT INTO users (id, email, password_hash, role, is_active, created_at)"
-        f" VALUES ('{BOT_USER_ID}', '{BOT_EMAIL}', '{password_hash}', 'client', true, NOW())"
+        # 'individual' (not 'client') — this is a no-company/collaborator-only
+        # account like a personal Espresso user, and require_feature("matcha_work")
+        # only bypasses its company_id check for role='individual'; 'client' 403s
+        # with "No company associated with this account" before the route body
+        # (and its mw_project_collaborators fallback) ever runs.
+        f" VALUES ('{BOT_USER_ID}', '{BOT_EMAIL}', '{password_hash}', 'individual', true, NOW())"
         f" ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash;",
     ]
     for project_id, title in PROJECTS:

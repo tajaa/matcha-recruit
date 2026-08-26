@@ -39,7 +39,7 @@ changes.
 2. Write `~/.config/matcha-autopr/env` (`chmod 600`), never committed:
    ```sh
    MATCHA_API_URL=https://hey-matcha.com/api
-   MATCHA_BOT_EMAIL=autopr@matcha.invalid
+   MATCHA_BOT_EMAIL=support@hey-matcha.com
    MATCHA_BOT_PASSWORD=<the same password from step 1>
    MATCHA_PROJECT_IDS=7f728636-3219-4d83-9df3-a4682e3242de,fade10b4-36ff-4c60-af59-5cc6058285ab,84823d21-c752-4abd-9696-4c93c8b3c21e,8b924347-d6e4-4000-8e7d-ca8f46f76fba
    MATCHA_ASSIGNEE_EMAIL=haley@oceaneca.com

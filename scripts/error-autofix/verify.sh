@@ -61,9 +61,17 @@ map_test_dirs() {
             [ -d "$REPO_ROOT/server/tests/$name" ] && dirs+=("server/tests/$name")
         done
         mod="$(echo "${f#server/}" | sed 's/\.py$//; s#/#.#g')"
+        # --exclude-dir=__pycache__: compiled bytecode caches can contain the
+        # module string too (import names get marshaled in), and dirname-ing
+        # a hit inside one yields a "test dir" like server/tests/x/__pycache__
+        # that doesn't exist in a fresh git worktree (git never tracks it).
+        # run_suite() then errors on that path in the baseline tree with zero
+        # "FAILED " lines printed, zeroing the baseline while the branch tree
+        # (which has real __pycache__ dirs lying around from local pytest
+        # runs) reports its real, pre-existing failures as false regressions.
         while IFS= read -r hit; do
             [ -n "$hit" ] && dirs+=("$(dirname "$hit")")
-        done < <(grep -rlF "$mod" "$REPO_ROOT/server/tests" 2>/dev/null | sed "s#^$REPO_ROOT/##")
+        done < <(grep -rlF --exclude-dir=__pycache__ "$mod" "$REPO_ROOT/server/tests" 2>/dev/null | sed "s#^$REPO_ROOT/##")
     done
     printf '%s\n' "${dirs[@]+"${dirs[@]}"}" | sort -u
 }
