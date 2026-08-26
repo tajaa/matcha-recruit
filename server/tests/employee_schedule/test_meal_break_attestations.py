@@ -18,7 +18,9 @@ def test_waiver_endpoint_scopes_to_company_and_returns_only_effective_attestatio
     assert '@router.get("/employees/{employee_id}/meal-break-waiver"' in source
     assert "await assert_employee_in_company(conn, company_id, employee_id)" in source
     assert "effective_from <= COALESCE((NOW() AT TIME ZONE l.timezone)::date, CURRENT_DATE)" in source
-    assert "ORDER BY effective_from DESC, confirmed_at DESC" in source
+    assert "FROM employee_compliance_attestations a" in source
+    assert "WHERE a.company_id = $1 AND a.employee_id = $2" in source
+    assert "ORDER BY a.effective_from DESC, a.confirmed_at DESC" in source
     assert "s.starts_at >= NOW()" in source
 
 
