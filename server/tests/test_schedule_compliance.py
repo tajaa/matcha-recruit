@@ -26,6 +26,20 @@ def test_meal_break_boundary():
     assert sc.check_meal_break(5.5, 30, r, "CA") == []          # adequate break → clear
 
 
+def test_meal_break_waiver_suppresses_first_meal_under_six_hours():
+    r = sc.rules_for_state("CA")
+    # <=6h + waiver on file → first meal is suppressed
+    assert sc.check_meal_break(5.5, 0, r, "CA", waiver_on_file=True) == []
+    # no waiver → still fires
+    assert len(sc.check_meal_break(5.5, 0, r, "CA", waiver_on_file=False)) == 1
+    # waiver doesn't apply past 6h
+    v = sc.check_meal_break(6.5, 0, r, "CA", waiver_on_file=True)
+    assert len(v) == 1 and v[0]["check"] == "meal_break"
+    # waiver never suppresses the second-meal requirement
+    v2 = sc.check_meal_break(10.5, 30, r, "CA", waiver_on_file=True)
+    assert len(v2) == 1 and "second meal" in v2[0]["message"]
+
+
 def test_daily_and_weekly_overtime_advisory():
     r = sc.rules_for_state("CA")
     assert sc.check_daily_overtime(8.0, r, "CA") == []

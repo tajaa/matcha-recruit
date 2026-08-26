@@ -29,6 +29,7 @@ from ...services.scheduling.shift_compliance import (  # noqa: F401 — re-expor
     _fair_workweek_advisories,
     _hours,
     _location_state,
+    _meal_break_waiver_on_file,
     _min_rest_gap,
     _training_lapse_advisories,
     _week_hours,

@@ -194,6 +194,25 @@ async def _employee_age(conn, company_id: UUID, employee_id: UUID, on: date) -> 
     return _age_on(dob, on), False
 
 
+async def _meal_break_waiver_on_file(
+    conn, company_id: UUID, employee_id: UUID, shift_date: date,
+) -> bool:
+    """Whether this employee has a signed meal-break waiver effective on
+    `shift_date`. Same query shape as `schedule_guidance.py`'s post-hoc
+    guidance lookup, but consulted at the 409-gate stage."""
+    value = await conn.fetchval(
+        """
+        SELECT value FROM employee_compliance_attestations
+        WHERE company_id = $1 AND employee_id = $2
+          AND attestation_type = 'meal_break_waiver_on_file'
+          AND effective_from <= $3
+        ORDER BY effective_from DESC, confirmed_at DESC LIMIT 1
+        """,
+        company_id, employee_id, shift_date,
+    )
+    return bool(value)
+
+
 async def _week_hours(conn, company_id: UUID, employee_id: UUID,
                       shift_start: datetime, this_shift_hours: float,
                       exclude_shift_id: Optional[UUID]) -> float:
@@ -438,6 +457,14 @@ async def check_shift_compliance(
     if state and not schedule_compliance.is_curated_state(state):
         db_rules, db_rules_fetch_failed = await _approved_db_rules(conn, state.strip().upper())
 
+    meal_waiver_on_file = False
+    if employee_id is not None and schedule_compliance.rules_for_state(
+        state, db_rules
+    ).get("meal_break_after_hours") is not None:
+        meal_waiver_on_file = await _meal_break_waiver_on_file(
+            conn, company_id, employee_id, shift_date,
+        )
+
     violations.extend(schedule_compliance.evaluate_shift_for_employee(
         state=state,
         shift_hours=worked,
@@ -446,6 +473,7 @@ async def check_shift_compliance(
         min_rest_gap_hours=min_rest,
         age=age,
         db_rules=db_rules,
+        meal_waiver_on_file=meal_waiver_on_file,
     ))
     if age_lookup_failed:
         # Fail visible, not open: the minor check couldn't run at all.

@@ -24,9 +24,7 @@ def upgrade():
 
 
 def downgrade():
-    op.execute(
-        """
-        ALTER TABLE onboarding_notification_settings
-        DROP COLUMN IF EXISTS auto_send_invitation
-        """
-    )
+    # No-op: this revision only repairs drift for a column owned by
+    # f1a2b3c4d5e_add_auto_send_invitation — dropping it here would leave
+    # the DB missing a column that revision still claims to have created.
+    pass

@@ -91,6 +91,20 @@ class EmployeeCreateRequest(BaseModel):
             raise ValueError("work_email (or legacy email) is required")
         return self
 
+    @model_validator(mode="after")
+    def validate_pay_fields(self):
+        if self.pay_rate is not None and self.pay_classification is None:
+            raise ValueError("pay_classification is required when pay_rate is provided")
+        if self.pay_classification is not None and self.pay_classification not in ("hourly", "exempt"):
+            raise ValueError("pay_classification must be 'hourly' or 'exempt'")
+        if self.pay_rate is not None and self.pay_rate < 0:
+            raise ValueError("pay_rate must be >= 0")
+        return self
+
+    def resolved_work_email(self) -> str:
+        value = self.work_email or self.email
+        return str(value).strip().lower() if value else ""
+
 
 async def _should_send_employee_invitation(
     conn,
@@ -113,20 +127,6 @@ async def _should_send_employee_invitation(
         company_id,
     )
     return bool(settings and settings["auto_send_invitation"])
-
-    @model_validator(mode="after")
-    def validate_pay_fields(self):
-        if self.pay_rate is not None and self.pay_classification is None:
-            raise ValueError("pay_classification is required when pay_rate is provided")
-        if self.pay_classification is not None and self.pay_classification not in ("hourly", "exempt"):
-            raise ValueError("pay_classification must be 'hourly' or 'exempt'")
-        if self.pay_rate is not None and self.pay_rate < 0:
-            raise ValueError("pay_rate must be >= 0")
-        return self
-
-    def resolved_work_email(self) -> str:
-        value = self.work_email or self.email
-        return str(value).strip().lower() if value else ""
 
 
 class EmployeeUpdateRequest(BaseModel):

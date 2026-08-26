@@ -1,9 +1,11 @@
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
+from pydantic import ValidationError
 
 from app.core.models.auth import CurrentUser
 from app.matcha.routes.employees import _shared as employees_shared
@@ -345,3 +347,21 @@ def test_create_employee_syncs_compliance_location(monkeypatch):
             "background_tasks": background_tasks,
         }
     ]
+
+
+def test_employee_create_request_keeps_validators_and_resolver():
+    assert hasattr(employees_crud.EmployeeCreateRequest, "resolved_work_email")
+    with pytest.raises(ValidationError):
+        employees_crud.EmployeeCreateRequest(
+            work_email="a@example.com", first_name="A", last_name="B",
+            pay_rate=Decimal("10"),
+        )
+    with pytest.raises(ValidationError):
+        employees_crud.EmployeeCreateRequest(
+            work_email="a@example.com", first_name="A", last_name="B",
+            pay_classification="banana",
+        )
+    request = employees_crud.EmployeeCreateRequest(
+        work_email="A@Example.com", first_name="A", last_name="B",
+    )
+    assert request.resolved_work_email() == "a@example.com"

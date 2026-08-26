@@ -38,12 +38,16 @@ def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
     async def fake_employee_age(*_args, **_kwargs):
         return None, False
 
+    async def fake_meal_break_waiver(*_args, **_kwargs):
+        return False
+
     monkeypatch.setattr(shift_compliance, "_location_state", fake_location_state)
     monkeypatch.setattr(shift_compliance, "_location_timezone", fake_location_timezone)
     monkeypatch.setattr(schedule_eligibility, "schedule_eligibility_violations", fake_eligibility)
     monkeypatch.setattr(shift_compliance, "_week_hours", fake_week_hours)
     monkeypatch.setattr(shift_compliance, "_min_rest_gap", fake_min_rest)
     monkeypatch.setattr(shift_compliance, "_employee_age", fake_employee_age)
+    monkeypatch.setattr(shift_compliance, "_meal_break_waiver_on_file", fake_meal_break_waiver)
 
     result = asyncio.run(shift_compliance.check_shift_compliance(
         object(),
@@ -83,12 +87,16 @@ def test_eligibility_uses_the_shift_locations_calendar_day(monkeypatch):
     async def fake_employee_age(*_args, **_kwargs):
         return None, False
 
+    async def fake_meal_break_waiver(*_args, **_kwargs):
+        return False
+
     monkeypatch.setattr(shift_compliance, "_location_state", fake_location_state)
     monkeypatch.setattr(shift_compliance, "_location_timezone", fake_location_timezone)
     monkeypatch.setattr(schedule_eligibility, "schedule_eligibility_violations", fake_eligibility)
     monkeypatch.setattr(shift_compliance, "_week_hours", fake_week_hours)
     monkeypatch.setattr(shift_compliance, "_min_rest_gap", fake_min_rest)
     monkeypatch.setattr(shift_compliance, "_employee_age", fake_employee_age)
+    monkeypatch.setattr(shift_compliance, "_meal_break_waiver_on_file", fake_meal_break_waiver)
 
     asyncio.run(shift_compliance.check_shift_compliance(
         object(), uuid4(), location_id=uuid4(), employee_id=uuid4(),

@@ -29,7 +29,8 @@ export function mealBreakConflictMessage(err: unknown): string | null {
   const violations = (detail.violations ?? []) as unknown as ComplianceViolation[]
   const mealBreaks = violations.filter((violation) => violation.check === 'meal_break')
   if (mealBreaks.length === 0) return null
-  return mealBreaks
+  const others = violations.filter((violation) => violation.check !== 'meal_break')
+  return [...mealBreaks, ...others]
     .map((violation) => `${violation.message}${violation.statute ? ` [${violation.statute}]` : ''}`)
     .join(' ')
 }
@@ -58,7 +59,7 @@ export function conflictPrompt(err: unknown): string | null {
     const allFairWorkweek = violations.length > 0 && violations.every((v) => v.check?.startsWith('fair_workweek_'))
     const hasMealBreakViolation = violations.some((v) => v.check === 'meal_break')
     const lead = hasMealBreakViolation
-      ? 'This shift needs a compliant break plan:'
+      ? 'This shift needs a compliant break plan. Cancel, edit the shift, and set Planned break (minutes) before assigning:'
       : allFairWorkweek
         ? 'This change may trigger Fair Workweek obligations:'
         : 'This shift may not comply with scheduling law:'

@@ -39,7 +39,9 @@ describe('conflictPrompt', () => {
         { check: 'daily_overtime', severity: 'advisory', message: 'Daily overtime applies' },
       ],
     })
-    expect(mealBreakConflictMessage(error)).toBe('Schedule a 30-minute break [Cal. Lab. Code § 512]')
+    expect(mealBreakConflictMessage(error)).toBe(
+      'Schedule a 30-minute break [Cal. Lab. Code § 512] Daily overtime applies',
+    )
   })
 
   it('does not treat other compliance advisories as missing break plans', () => {

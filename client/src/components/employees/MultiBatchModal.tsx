@@ -92,7 +92,7 @@ export function MultiBatchModal({ open, onClose, onSuccess, departments }: Multi
   function handleClose() {
     setRows([emptyRow()])
     setDone(false)
-    setSendInvitations(true)
+    setSendInvitations(false)
     onClose()
   }
 

@@ -74,6 +74,10 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "meal_break_after_hours": 5,           # Cal. Lab. Code § 512
         "meal_break_minutes": 30,
         "second_meal_after_hours": 10,
+        # First meal is waivable by mutual consent when the workday is <=6h
+        # (Cal. Lab. Code § 512(a)); the second-meal waiver has extra
+        # conditions this module doesn't model, so it's left un-suppressed.
+        "meal_waiver_max_hours": 6,
         "daily_ot_hours": 8,                   # Cal. Lab. Code § 510
         "daily_doubletime_hours": 12,
         "weekly_ot_hours": 40,
@@ -175,13 +179,20 @@ def _cite(rules: dict, key: str) -> Optional[str]:
 
 # ── Pure per-check evaluators ────────────────────────────────────────────
 
-def check_meal_break(shift_hours: float, break_minutes: int, rules: dict, state: str) -> list[dict]:
+def check_meal_break(
+    shift_hours: float, break_minutes: int, rules: dict, state: str,
+    *, waiver_on_file: bool = False,
+) -> list[dict]:
     after = rules.get("meal_break_after_hours")
     need = rules.get("meal_break_minutes")
     if after is None or need is None:
         return []
     out: list[dict] = []
-    if shift_hours > after and (break_minutes or 0) < need:
+    waiver_cap = rules.get("meal_waiver_max_hours")
+    first_meal_waived = (
+        waiver_on_file and waiver_cap is not None and shift_hours <= waiver_cap
+    )
+    if shift_hours > after and (break_minutes or 0) < need and not first_meal_waived:
         out.append(_violation(
             "meal_break", "advisory",
             f"Shift is {shift_hours:.1f}h but is scheduled with only "
@@ -317,6 +328,7 @@ def evaluate_shift_for_employee(
     min_rest_gap_hours: Optional[float] = None,
     age: Optional[int] = None,
     db_rules: Optional[dict[str, Any]] = None,
+    meal_waiver_on_file: bool = False,
 ) -> list[dict]:
     """Run every applicable check for one (shift, employee) pair.
 
@@ -324,13 +336,14 @@ def evaluate_shift_for_employee(
     are optional; a None simply skips that check (the route supplies what it has).
     `db_rules` is the caller's fetch of this state's APPROVED catalog-extraction
     thresholds (see `rules_for_state`); ignored for states `_SCHEDULING_RULES`
-    already curates.
+    already curates. `meal_waiver_on_file` is the caller's pre-fetched
+    `employee_compliance_attestations` lookup for this employee/date.
     """
     st = (state or "").strip().upper()
     rules = rules_for_state(st, db_rules)
     block_grade = rules.get("_minor_block_grade")
     out: list[dict] = []
-    out += check_meal_break(shift_hours, break_minutes, rules, st)
+    out += check_meal_break(shift_hours, break_minutes, rules, st, waiver_on_file=meal_waiver_on_file)
     out += check_daily_overtime(shift_hours, rules, st)
     out += check_weekly_hours(week_hours, rules, st)
     out += check_min_rest(min_rest_gap_hours, rules, st)
