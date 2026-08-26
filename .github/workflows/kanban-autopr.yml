@@ -94,8 +94,16 @@ jobs:
           git worktree prune
           branch="bot/task-$ID8"
           if [ "$MODE" = rework ]; then
+            # The runner's workspace persists between runs, so a local
+            # `$branch` may already exist from a prior investigation. Plain
+            # `git switch "$branch"` would check that stale local ref out
+            # unchanged (no fast-forward) — publish.sh's --force-with-lease
+            # then compares against the freshly fetched origin ref, the
+            # lease passes, and any reviewer commit pushed to the PR in the
+            # meantime gets silently force-pushed away. Force the local
+            # branch to match origin exactly instead.
             git fetch origin "$branch"
-            git switch "$branch"
+            git switch -C "$branch" "origin/$branch"
           else
             git switch -C "$branch" main
           fi

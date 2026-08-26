@@ -29,12 +29,10 @@ count="$(jq 'length' "$CARDS_FILE")"
 [ "$count" -gt 0 ] || exit "$NOTHING_TO_DO"
 
 # Backstop: never let a bad batch of cards produce an unbounded number of
-# open bot PRs.
+# NEW open bot PRs. Checked per-decision below, not here — rework pushes a
+# commit to a PR that's already open (it doesn't add to this count), so the
+# cap must never block rework just because 3 unrelated PRs are already open.
 open_autopr_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json number --jq 'length')"
-if [ "$open_autopr_prs" -ge "$MAX_OPEN_AUTOPR_PRS" ]; then
-    printf 'kanban-autopr: %s open autopr PRs already \342\200\224 skipping this run\n' "$open_autopr_prs" >&2
-    exit "$NOTHING_TO_DO"
-fi
 
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE
 # Echoes "skip", "investigate", or "rework" (rework = push to the existing
@@ -56,9 +54,15 @@ already_handled() {
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
     if [[ "$progress_note" == "[autopr:no-spec"* ]]; then
-        local marker_date marker_epoch
-        marker_date="$(printf '%s' "$progress_note" | sed -E 's/^\[autopr:no-spec ([0-9-]+)\].*/\1/')"
-        marker_epoch="$(date -u -j -f "%Y-%m-%d" "$marker_date" +%s 2>/dev/null || date -u -d "$marker_date" +%s 2>/dev/null || echo 0)"
+        # Full ISO timestamp, not just a date: BSD `date -j -f` fills any
+        # field the format string doesn't specify from the CURRENT time, not
+        # midnight — a date-only marker parsed on a later run would silently
+        # pick up that run's wall-clock time, making "moved after the
+        # marker" drift throughout the day instead of comparing two fixed
+        # instants.
+        local marker_ts marker_epoch
+        marker_ts="$(printf '%s' "$progress_note" | sed -E 's/^\[autopr:no-spec ([0-9TZ:-]+)\].*/\1/')"
+        marker_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$marker_ts" +%s 2>/dev/null || date -u -d "$marker_ts" +%s 2>/dev/null || echo 0)"
         local moved_epoch
         moved_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "${last_moved:0:19}" +%s 2>/dev/null || date -u -d "$last_moved" +%s 2>/dev/null || echo 0)"
         if [ "$moved_epoch" -le "$marker_epoch" ]; then
@@ -68,9 +72,18 @@ already_handled() {
     fi
 
     local prs n
-    prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 10 \
-        --json state,createdAt --jq 'sort_by(.createdAt) | reverse')"
-    n="$(printf '%s' "$prs" | jq 'length')"
+    if ! prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 10 \
+        --json state,createdAt --jq 'sort_by(.createdAt) | reverse')"; then
+        # A transient gh/API failure must fail CLOSED (skip this card) — the
+        # unhardened version let a malformed/empty $prs fall through `jq` and
+        # `[ -gt ]` as silent no-ops, which read as "no PR exists yet" and
+        # proceeded to `investigate`, risking a duplicate PR the failed call
+        # simply couldn't see.
+        echo skip
+        return
+    fi
+    n="$(printf '%s' "$prs" | jq 'length' 2>/dev/null)" || n=0
+    n="${n:-0}"
 
     if [ "$column" = "changes_requested" ]; then
         # This is the one place the logic inverts vs error-autofix: for
@@ -116,6 +129,13 @@ for ((i = 0; i < n; i++)); do
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note")"
+    if [ "$decision" = investigate ] && [ "$open_autopr_prs" -ge "$MAX_OPEN_AUTOPR_PRS" ]; then
+        # A NEW PR would push past the cap — this specific card can't go,
+        # but a later, lower-ranked card might be `rework` (no new PR) and
+        # still eligible, so skip this one and keep looking rather than
+        # bailing the whole run.
+        continue
+    fi
     if [ "$decision" = investigate ] || [ "$decision" = rework ]; then
         touch "$ATTEMPTS_DIR/$id8"
         printf '%s' "$card" | jq -c --arg mode "$decision" '. + {mode: $mode}'

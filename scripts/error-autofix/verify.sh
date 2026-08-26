@@ -70,18 +70,22 @@ map_test_dirs() {
 
 # investigate.sh commits nothing and stages nothing (it edits the working
 # tree only — see its own docstring), so at the point this runs (workflow
-# order is investigate -> verify -> publish, publish does the commit) BOTH
-# the committed-vs-base diff AND the staged diff are empty. Without the
-# plain worktree-diff fallback, this always fell through to "no changed
-# files" -> "no matching test directory" -> a green-looking table that
-# tested nothing, on every single PR.
-CHANGED_FILES=($(git -C "$REPO_ROOT" diff --name-only "$BASE_SHA"...HEAD 2>/dev/null || true))
-if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
-    CHANGED_FILES=($(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || true))
-fi
-if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
-    CHANGED_FILES=($(git -C "$REPO_ROOT" diff --name-only 2>/dev/null || true))
-fi
+# order is investigate -> verify -> publish, publish does the commit) the
+# committed-vs-base diff and the staged diff are normally both empty for a
+# freshly-branched-from-main run. But a kanban-autopr rework run reuses a
+# branch that already carries an EARLIER round's commits — committed-vs-base
+# is then non-empty from that prior round alone, and a plain fallback (try
+# the next source only if the previous one was empty) would stop right there
+# and never look at THIS round's uncommitted edits. Union all three sources
+# instead of cascading, so "committed earlier" and "edited just now" both
+# count.
+CHANGED_FILES=($(
+    {
+        git -C "$REPO_ROOT" diff --name-only "$BASE_SHA"...HEAD 2>/dev/null
+        git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null
+        git -C "$REPO_ROOT" diff --name-only 2>/dev/null
+    } | sort -u
+))
 
 TEST_DIRS=($(map_test_dirs "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"))
 

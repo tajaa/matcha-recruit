@@ -126,12 +126,26 @@ always `exit 0`s — it must never fail or slow down a checkout.
 ## `pull_request` webhook (`routes/matcha_work/github.py`)
 
 Same public, HMAC-verified endpoint the push handler already uses
-(`POST /matcha-work/public/github/webhook`). Task resolution, in order: the
-`<!-- matcha-task: <uuid> -->` trailer in the PR body (authoritative — an unguessable
-UUID, no repo/branch scoping needed); else the `bot/task-<id8>` head-branch prefix
-matched against `mw_tasks.id` with hyphens stripped. Every transition below is a no-op
-unless the card is currently in the listed source column, so redelivery is idempotent
-and a webhook replay can never drag a card backwards:
+(`POST /matcha-work/public/github/webhook`). `install_repo_webhook` is shared by every
+company that connects its own repo for commit-scanning — `GITHUB_WEBHOOK_SECRET` is one
+global value across all of them, and turning on `WEBHOOK_EVENTS` upgrades every one of
+those hooks to send `pull_request`, not just this repo's. Two independent boundaries
+close that off before resolution ever runs:
+
+- **Repo scope** — `payload.repository.full_name` must equal `_KANBAN_AUTOPR_REPO`
+  (`KANBAN_AUTOPR_REPO` env, defaults to `tajaa/matcha-recruit`). A PR opened against any
+  other connected customer repo is ignored outright.
+- **Project allowlist** — the resolved task's `project_id` must be one of
+  `_KANBAN_AUTOPR_PROJECT_IDS` (kept in sync with `scripts/seed/autopr_bot.py`'s
+  `PROJECTS` list). Even a legitimate PR in this repo can't move a card outside the four
+  target projects.
+
+Task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR body;
+else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
+`mw_tasks.id` with hyphens stripped (same regex the `post-checkout` hook uses — this is
+what lets a human's own hand-made branch work too, not just bot-authored PRs). Every
+transition below is a no-op unless the card is currently in the listed source column, so
+redelivery is idempotent and a webhook replay can never drag a card backwards:
 
 | action | from | to | also |
 |---|---|---|---|

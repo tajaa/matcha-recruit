@@ -4,6 +4,7 @@ sync/scan-commits, webhook install, and the public push-webhook handler.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
+import os
 import re
 from typing import Optional
 from uuid import UUID
@@ -290,30 +291,41 @@ async def install_github_webhook_endpoint(
     return {"repo": repo, **result}
 
 # kanban-autopr's PR-body trailer — the primary way a delivery resolves to a
-# card (authoritative: an unguessable UUID, no repo/branch scoping needed).
+# card. Fallback for a PR opened without one (e.g. a hand-made
+# task/<id8>-... branch a human pushed and opened themselves): match the
+# head branch's id8 against mw_tasks.id with hyphens stripped.
 _TASK_TRAILER_RE = re.compile(r"<!--\s*matcha-task:\s*([0-9a-fA-F-]{36})\s*-->")
-# Fallback for a PR opened without the trailer (e.g. a hand-pushed branch
-# matching the bot's naming convention): match the head branch's id8 against
-# mw_tasks.id with hyphens stripped.
-_TASK_BRANCH_RE = re.compile(r"^bot/task-([0-9a-f]{8})")
+_TASK_BRANCH_RE = re.compile(r"^(?:bot/task|task)-?/?([0-9a-f]{8})")
 
-# kanban-autopr.yml's publish step runs `gh pr create` with GH_TOKEN=
-# ${{ github.token }} (the Actions-minted GITHUB_TOKEN), which GitHub always
-# reports as this exact bot identity — an attacker opening their own PR
-# against this repo cannot make GitHub report it as authored by
-# github-actions[bot]. Without this check, either resolution path (the
-# trailer or the branch-name fallback) would let ANY PR opened against this
-# repo — by embedding the right HTML comment, or just naming its branch
-# bot/task-<id8> — move an arbitrary card in an arbitrary company's project,
-# since neither path otherwise verifies the PR's repo is even connected to
-# the resolved task's project.
-_TRUSTED_PR_AUTHOR = "github-actions[bot]"
+# install_repo_webhook is shared by every company that connects its own repo
+# for commit-scanning — GITHUB_WEBHOOK_SECRET is one global value across all
+# of them, and this feature's WEBHOOK_EVENTS upgrade turns on `pull_request`
+# for every one of those hooks, not just this repo's. Neither resolution
+# path above proves the delivery came from kanban-autopr's own repo, so
+# without this check a PR opened against ANY connected customer repo could
+# move a card here just by matching the trailer/branch pattern. kanban-autopr
+# only ever runs against this one repo, so gate on it explicitly.
+_KANBAN_AUTOPR_REPO = os.environ.get("KANBAN_AUTOPR_REPO", "tajaa/matcha-recruit")
+
+# Second boundary, independent of the repo check: only ever move a card that
+# belongs to one of the four projects kanban-autopr actually targets (kept
+# in sync with scripts/seed/autopr_bot.py's PROJECTS list). Even a PR that
+# legitimately lands in this repo — a human's own hand-made branch, not the
+# bot's — must not be able to move a card in an unrelated project.
+_KANBAN_AUTOPR_PROJECT_IDS = {
+    "7f728636-3219-4d83-9df3-a4682e3242de",  # WerkWerk
+    "fade10b4-36ff-4c60-af59-5cc6058285ab",  # Beetlejuse
+    "84823d21-c752-4abd-9696-4c93c8b3c21e",  # Gummfit
+    "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
+}
 
 
 async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
-    pr = payload.get("pull_request") or {}
-    if (pr.get("user") or {}).get("login") != _TRUSTED_PR_AUTHOR:
+    repo_full_name = (payload.get("repository") or {}).get("full_name") or ""
+    if repo_full_name != _KANBAN_AUTOPR_REPO:
         return None
+
+    pr = payload.get("pull_request") or {}
     body = pr.get("body") or ""
     head_ref = (pr.get("head") or {}).get("ref") or ""
 
@@ -335,10 +347,13 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
         return None
 
     async with get_connection() as conn:
-        return await conn.fetchrow(
+        task = await conn.fetchrow(
             "SELECT id, project_id, board_column FROM mw_tasks WHERE id = $1",
             UUID(task_id),
         )
+    if not task or str(task["project_id"]) not in _KANBAN_AUTOPR_PROJECT_IDS:
+        return None
+    return task
 
 
 async def _handle_pull_request_event(payload: dict) -> dict:

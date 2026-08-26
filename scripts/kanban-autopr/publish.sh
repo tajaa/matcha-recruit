@@ -75,7 +75,7 @@ if git diff --cached --quiet; then
     git reset --hard >/dev/null 2>&1
     reason="$(grep -A2 '### Confidence' "$REPORT_FILE" | tail -n +2 | head -1 | sed 's/^[[:space:]]*//' | cut -c1-200)"
     [ -n "$reason" ] || reason="no safe fix produced"
-    note="[autopr:no-spec $(date -u +%Y-%m-%d)] $reason"
+    note="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $reason"
     mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null
     echo "No diff produced; marked card $TASK_ID no-spec: $reason"
@@ -117,9 +117,15 @@ if [ -n "$existing_open_pr" ]; then
     gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"
     published_pr="$existing_open_pr"
 else
-    gh pr create --repo "$REPO" --draft --head "$BRANCH" --title "$TITLE_LINE" --body-file "$BODY_FILE"
-    published_pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
+    # Parse the number straight out of `gh pr create`'s own stdout URL
+    # rather than a follow-up `gh pr list` — that second call can race the
+    # first (list-consistency lag) and return empty, which previously
+    # produced a pr_url ending in "/pull/" (still http(s)-shaped, so it
+    # passed validation) and a null pr_number stored on the card.
+    created_url="$(gh pr create --repo "$REPO" --draft --head "$BRANCH" --title "$TITLE_LINE" --body-file "$BODY_FILE")"
+    published_pr="$(printf '%s' "$created_url" | grep -oE '[0-9]+$' || true)"
 fi
+[ -n "$published_pr" ] || die "could not determine the PR number for $BRANCH"
 
 gh pr edit "$BRANCH" --repo "$REPO" --add-label autopr >/dev/null 2>&1 || true
 if [ "$MODE" = rework ]; then

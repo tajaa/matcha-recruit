@@ -318,14 +318,20 @@ async def install_repo_webhook(repo: str, url: str, secret: str) -> dict:
             for h in existing.json():
                 if (h.get("config") or {}).get("url") == url:
                     hook_id = h.get("id")
+                    events_upgraded = True
                     if sorted(h.get("events") or []) != sorted(WEBHOOK_EVENTS):
+                        # Best-effort: this hook already exists and already
+                        # works for whatever events it has today. A missing
+                        # admin:repo_hook scope, an org policy, or a 404 on
+                        # this one customer's repo must not turn an otherwise
+                        # idempotent "yes it's installed" call into a 400 for
+                        # every existing connection.
                         patch = await client.patch(
                             f"{GITHUB_API}/repos/{repo}/hooks/{hook_id}", headers=_headers(),
                             json={"events": WEBHOOK_EVENTS},
                         )
-                        if patch.status_code not in (200,):
-                            raise GitHubError(f"Couldn't update webhook events ({patch.status_code}): {patch.text[:200]}")
-                    return {"installed": True, "id": hook_id, "existing": True}
+                        events_upgraded = patch.status_code == 200
+                    return {"installed": True, "id": hook_id, "existing": True, "events_upgraded": events_upgraded}
         r = await client.post(
             f"{GITHUB_API}/repos/{repo}/hooks", headers=_headers(),
             json={
