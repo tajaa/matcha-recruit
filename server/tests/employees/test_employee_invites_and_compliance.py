@@ -123,6 +123,56 @@ class _FakeEmailService:
         return self.sent
 
 
+class _InvitationPreferenceConn:
+    def __init__(self, *, enabled=False):
+        self.enabled = enabled
+        self.fetchrow_calls = 0
+
+    async def fetchrow(self, query, *args):
+        self.fetchrow_calls += 1
+        assert "SELECT auto_send_invitation" in query
+        return {"auto_send_invitation": self.enabled}
+
+
+@pytest.mark.parametrize(
+    ("send_invitation", "skip_invitation", "column_exists", "enabled", "expected", "settings_reads"),
+    [
+        (True, False, False, False, True, 0),
+        (False, True, True, True, False, 0),
+        (False, False, False, True, False, 0),
+        (False, False, True, True, True, 1),
+        (False, False, True, False, False, 1),
+    ],
+)
+def test_employee_invitation_intent_precedes_legacy_setting(
+    monkeypatch,
+    send_invitation,
+    skip_invitation,
+    column_exists,
+    enabled,
+    expected,
+    settings_reads,
+):
+    conn = _InvitationPreferenceConn(enabled=enabled)
+
+    async def _fake_column_exists(*args):
+        return column_exists
+
+    monkeypatch.setattr(employees_crud, "_column_exists", _fake_column_exists)
+
+    result = asyncio.run(
+        employees_crud._should_send_employee_invitation(
+            conn,
+            company_id=uuid4(),
+            send_invitation=send_invitation,
+            skip_invitation=skip_invitation,
+        )
+    )
+
+    assert result is expected
+    assert conn.fetchrow_calls == settings_reads
+
+
 def test_send_single_invitation_cancels_pending_invitation_when_email_send_fails(monkeypatch):
     conn = _InviteConn()
     company_id = uuid4()
@@ -222,11 +272,7 @@ def test_sync_employee_location_for_compliance_normalizes_location(monkeypatch):
         "(credential auto-tasks, training new-hire rule evaluation) that this "
         "test's minimal _CreateConn mock doesn't model, so it now 500s inside "
         "those code paths instead of exercising the compliance-location sync "
-        "this test targets. Also surfaced a live bug: crud.py:609 references "
-        "an undefined name `body` (should be `request`) inside the credential "
-        "auto-task except-block, currently swallowed because that block only "
-        "logs the exception. Needs its own investigation, out of scope for "
-        "this refactor."
+        "this test targets."
     ),
     strict=True,
 )

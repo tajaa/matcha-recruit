@@ -73,6 +73,9 @@ class EmployeeCreateRequest(BaseModel):
     is_supervisor: Optional[bool] = None
     skip_google_workspace_provisioning: bool = False
     skip_invitation: bool = False
+    # Explicit UI intent. Unlike the legacy auto-send preference, this does
+    # not depend on onboarding_notification_settings.
+    send_invitation: bool = False
     pay_classification: Optional[str] = None
     pay_rate: Optional[Decimal] = None
     work_city: Optional[str] = None
@@ -87,6 +90,29 @@ class EmployeeCreateRequest(BaseModel):
         if not self.work_email and not self.email:
             raise ValueError("work_email (or legacy email) is required")
         return self
+
+
+async def _should_send_employee_invitation(
+    conn,
+    *,
+    company_id: UUID,
+    send_invitation: bool,
+    skip_invitation: bool,
+) -> bool:
+    """Resolve explicit invite intent before the legacy tenant preference."""
+    if send_invitation:
+        return True
+    if skip_invitation:
+        return False
+    if not await _column_exists(
+        conn, "onboarding_notification_settings", "auto_send_invitation"
+    ):
+        return False
+    settings = await conn.fetchrow(
+        "SELECT auto_send_invitation FROM onboarding_notification_settings WHERE org_id = $1",
+        company_id,
+    )
+    return bool(settings and settings["auto_send_invitation"])
 
     @model_validator(mode="after")
     def validate_pay_fields(self):
@@ -687,7 +713,7 @@ async def create_employee(
             if org_fields_available:
                 job_title_val = row.get("job_title")
             if not job_title_val:
-                job_title_val = body.job_title
+                job_title_val = request.job_title
             work_state = row.get("work_state")
             work_city = row.get("work_city") if compensation_fields_available else None
             cred_reqs = await resolve_credential_requirements(
@@ -797,22 +823,27 @@ async def create_employee(
                 run_slack=run_slack,
             )
 
-        # Auto-send invitation if enabled in notification settings
-        if not request.skip_invitation:
-            try:
-                settings = await conn.fetchrow(
-                    "SELECT auto_send_invitation FROM onboarding_notification_settings WHERE org_id = $1",
-                    company_id,
-                )
-                if settings and settings["auto_send_invitation"]:
-                    background_tasks.add_task(
-                        _auto_send_invitation,
-                        employee_id=row["id"],
-                        org_id=company_id,
-                        invited_by=current_user.id,
-                    )
-            except Exception:
-                logger.exception("Auto-invite check failed for employee %s", row["id"])
+        # An explicit invite request takes precedence over the legacy tenant
+        # auto-send preference. OIG screening is independent and never
+        # suppresses portal access based on a possible name match.
+        try:
+            should_send_invitation = await _should_send_employee_invitation(
+                conn,
+                company_id=company_id,
+                send_invitation=request.send_invitation,
+                skip_invitation=request.skip_invitation,
+            )
+        except Exception:
+            should_send_invitation = False
+            logger.exception("Auto-invite check failed for employee %s", row["id"])
+
+        if should_send_invitation:
+            background_tasks.add_task(
+                _auto_send_invitation,
+                employee_id=row["id"],
+                org_id=company_id,
+                invited_by=current_user.id,
+            )
 
         # OIG exclusion screening (healthcare companies)
         background_tasks.add_task(

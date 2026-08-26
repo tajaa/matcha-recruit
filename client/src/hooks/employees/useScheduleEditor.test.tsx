@@ -1,8 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../../api/client'
 import { useScheduleEditor } from './useScheduleEditor'
 
-const { fetchWeekMock, fetchScheduleLocationsMock, updateShiftMock, moveAssignmentMock } = vi.hoisted(() => ({
+const { assignEmployeeMock, fetchWeekMock, fetchScheduleLocationsMock, updateShiftMock, moveAssignmentMock } = vi.hoisted(() => ({
+  assignEmployeeMock: vi.fn(),
   fetchWeekMock: vi.fn(),
   fetchScheduleLocationsMock: vi.fn(),
   updateShiftMock: vi.fn(),
@@ -17,7 +19,7 @@ vi.mock('../../api/employees/employeeSchedule', () => ({
   createShift: vi.fn(),
   deleteShift: vi.fn(),
   publishRange: vi.fn(),
-  assignEmployee: vi.fn(),
+  assignEmployee: assignEmployeeMock,
   unassignEmployee: vi.fn(),
 }))
 
@@ -40,6 +42,7 @@ describe('useScheduleEditor', () => {
     fetchScheduleLocationsMock.mockResolvedValue({ locations: [] })
     updateShiftMock.mockResolvedValue(shift('s1', ['e1']))
     moveAssignmentMock.mockResolvedValue({ source_shift: shift('s1'), target_shift: shift('s2', ['e1']) })
+    assignEmployeeMock.mockReset()
   })
 
   it('loads the week payload', async () => {
@@ -64,6 +67,51 @@ describe('useScheduleEditor', () => {
     await act(async () => { await result.current.moveEmployee('e1', 's1', 's2') })
     expect(moveAssignmentMock).toHaveBeenCalledWith({ employee_id: 'e1', from_shift_id: 's1', to_shift_id: 's2' }, false)
     await waitFor(() => expect(result.current.shifts.find((item) => item.id === 's2')?.assignments[0]?.employee_id).toBe('e1'))
+  })
+
+  it('opens break planning instead of offering a compliance override', async () => {
+    const onMealBreakRequired = vi.fn()
+    const confirm = vi.spyOn(window, 'confirm')
+    assignEmployeeMock.mockRejectedValue(new ApiError('compliance', 409, {
+      detail: {
+        code: 'schedule_compliance',
+        violations: [{ check: 'meal_break', severity: 'advisory', message: 'A 30-minute break is required' }],
+      },
+    }))
+    const { result } = renderHook(() => useScheduleEditor(
+      '2026-08-09', 'loc1', { onMealBreakRequired },
+    ))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => { await result.current.assignToShift(result.current.shifts[1], 'e1') })
+
+    expect(onMealBreakRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's2' }), 'e1', 'A 30-minute break is required',
+    )
+    expect(assignEmployeeMock).toHaveBeenCalledTimes(1)
+    expect(confirm).not.toHaveBeenCalled()
+    confirm.mockRestore()
+  })
+
+  it('opens the target shift break planner when moving an assignment', async () => {
+    const onMealBreakRequired = vi.fn()
+    moveAssignmentMock.mockRejectedValue(new ApiError('compliance', 409, {
+      detail: {
+        code: 'schedule_compliance',
+        violations: [{ check: 'meal_break', severity: 'advisory', message: 'A 30-minute break is required' }],
+      },
+    }))
+    const { result } = renderHook(() => useScheduleEditor(
+      '2026-08-09', 'loc1', { onMealBreakRequired },
+    ))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => { await result.current.moveEmployee('e1', 's1', 's2') })
+
+    expect(onMealBreakRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's2' }), 'e1', 'A 30-minute break is required',
+    )
+    expect(moveAssignmentMock).toHaveBeenCalledTimes(1)
   })
 
   it('serializes mutations that affect the same shift', async () => {

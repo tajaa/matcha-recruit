@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ApiError } from '../../../api/client'
-import { conflictPrompt } from './scheduleConflicts'
+import { conflictPrompt, mealBreakConflictMessage } from './scheduleConflicts'
 
 function err409(detail: unknown) {
   return new ApiError('conflict', 409, { detail })
@@ -28,9 +28,25 @@ describe('conflictPrompt', () => {
       violations: [{ check: 'meal_break', severity: 'advisory', message: 'Missing meal break' }],
     }))
     expect(prompt).toContain('Missing meal break')
-    expect(prompt).toContain('edit the shift')
-    expect(prompt).toContain('Planned break (minutes)')
     expect(prompt).toContain('Schedule anyway?')
+  })
+
+  it('extracts meal-break guidance for an inline planner', () => {
+    const error = err409({
+      code: 'schedule_compliance',
+      violations: [
+        { check: 'meal_break', severity: 'advisory', message: 'Schedule a 30-minute break', statute: 'Cal. Lab. Code § 512' },
+        { check: 'daily_overtime', severity: 'advisory', message: 'Daily overtime applies' },
+      ],
+    })
+    expect(mealBreakConflictMessage(error)).toBe('Schedule a 30-minute break [Cal. Lab. Code § 512]')
+  })
+
+  it('does not treat other compliance advisories as missing break plans', () => {
+    expect(mealBreakConflictMessage(err409({
+      code: 'schedule_compliance',
+      violations: [{ check: 'daily_overtime', severity: 'advisory', message: 'Daily overtime applies' }],
+    }))).toBeNull()
   })
 
   it('returns outside_availability copy', () => {

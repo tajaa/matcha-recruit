@@ -15,11 +15,30 @@ export interface ForceableDetail {
   violations?: { message: string; [k: string]: unknown }[]
 }
 
+function forceableDetail(err: unknown): ForceableDetail | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null
+  return (err.body as { detail?: ForceableDetail } | null)?.detail ?? null
+}
+
+/** Meal-break advisories need a plan, not the generic force-through prompt.
+ * Schedule-editor assignment flows use this to open the affected shift's
+ * break control while every other caller keeps the normal 409 behavior. */
+export function mealBreakConflictMessage(err: unknown): string | null {
+  const detail = forceableDetail(err)
+  if (detail?.code !== 'schedule_compliance') return null
+  const violations = (detail.violations ?? []) as unknown as ComplianceViolation[]
+  const mealBreaks = violations.filter((violation) => violation.check === 'meal_break')
+  if (mealBreaks.length === 0) return null
+  return mealBreaks
+    .map((violation) => `${violation.message}${violation.statute ? ` [${violation.statute}]` : ''}`)
+    .join(' ')
+}
+
 /** A 409 the admin can override → confirm() text. Anything else → null (it gets
  *  surfaced as an error instead of silently swallowed). */
 export function conflictPrompt(err: unknown): string | null {
-  if (!(err instanceof ApiError) || err.status !== 409) return null
-  const detail = (err.body as { detail?: ForceableDetail } | null)?.detail
+  const detail = forceableDetail(err)
+  if (!detail) return null
   if (detail?.code === 'schedule_conflict') {
     const lines = (detail.conflicts ?? []).map(
       (c) => `• ${fmtDayLabel(c.starts_at)} ${fmtTime(c.starts_at)}–${fmtTime(c.ends_at)}${c.role ? ` (${c.role})` : ''}`,
@@ -39,7 +58,7 @@ export function conflictPrompt(err: unknown): string | null {
     const allFairWorkweek = violations.length > 0 && violations.every((v) => v.check?.startsWith('fair_workweek_'))
     const hasMealBreakViolation = violations.some((v) => v.check === 'meal_break')
     const lead = hasMealBreakViolation
-      ? 'This shift needs a compliant break plan. Cancel, edit the shift, and set Planned break (minutes) before assigning:'
+      ? 'This shift needs a compliant break plan:'
       : allFairWorkweek
         ? 'This change may trigger Fair Workweek obligations:'
         : 'This shift may not comply with scheduling law:'

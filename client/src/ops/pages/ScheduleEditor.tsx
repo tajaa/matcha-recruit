@@ -40,7 +40,6 @@ export default function ScheduleEditor() {
   const { me, hasFeature } = useMe()
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
-  const editor = useScheduleEditor(weekStart, locationId)
   const [editPublished, setEditPublished] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [inspectorShiftId, setInspectorShiftId] = useState<string | null>(null)
@@ -51,6 +50,12 @@ export default function ScheduleEditor() {
   const [chatOpen, setChatOpen] = useState(false)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
+  const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
+    setNewDefaults(null)
+    setInspectorShiftId(shift.id)
+    toast(`Add planned break minutes, save the shift, then assign again. ${message}`, 'info')
+  }, [toast])
+  const editor = useScheduleEditor(weekStart, locationId, { onMealBreakRequired: openBreakPlanner })
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),

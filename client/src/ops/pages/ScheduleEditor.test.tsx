@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
@@ -86,6 +86,21 @@ describe('ScheduleEditor', () => {
     expect(screen.getByText('Week of 2026-08-09')).toBeInTheDocument()
     expect(screen.getAllByText(/8\/9|8\/10|8\/11|8\/12|8\/13|8\/14|8\/15/).length).toBeGreaterThanOrEqual(7)
     expect(screen.getByText('Opener')).toBeInTheDocument()
+  })
+
+  it('opens the shift break planner when assignment needs a compliant break', async () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    const options = useEditorMock.mock.calls[0]?.[2] as {
+      onMealBreakRequired: (affectedShift: typeof shift, employeeId: string, message: string) => void
+    }
+
+    act(() => options.onMealBreakRequired(shift, 'e1', 'A 30-minute meal break is required.'))
+
+    expect(await screen.findByLabelText('Planned break (minutes)')).toHaveValue(30)
   })
 
   it('keeps roster scrolling independent from the schedule grid', () => {

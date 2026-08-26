@@ -90,6 +90,10 @@ matcha_router.include_router(leave_admin_router, prefix="/employees/leave", tags
 - Absolute `from app.X import …` for app-level imports.
 - Relative `from ._shared import …` / `from .offboarding import …` for intra-package imports (matches IR convention).
 - Lazy imports inside function bodies are OK for circular-import avoidance — used for `assign_rtw_tasks`, service singletons (`get_leave_agent`, `get_oig_screening_service`, etc.), and the `_refresh_risk_assessment` consumers.
+- Employee creation treats `send_invitation=true` as explicit administrator intent.
+  The legacy tenant `auto_send_invitation` preference applies only when neither an
+  explicit send nor skip is requested. OIG screening is independent: a possible name
+  match alerts administrators to verify identity but does not suppress portal access.
 
 ## Tests
 
@@ -100,8 +104,8 @@ imports against the split submodules; only one is still genuinely broken:
 
 - `tests/employees/test_employee_invites_and_compliance.py` — **fixed**. 2 tests pass; a
   third, `test_create_employee_syncs_compliance_location`, is `xfail(strict=True)` — it
-  surfaced a real bug at `crud.py:609` (`body.job_title` references an undefined name,
-  swallowed by a bare `except`), out of scope for the refactor that found it.
+  does not model credential auto-tasks or new-hire training evaluation added after the
+  test was written.
 - `tests/employees/test_internal_mobility_routes.py` — **still broken**. Imports
   `app.matcha.routes.internal_mobility`, a module that does not exist (pre-existing on
   `main`, not something a package split could fix).

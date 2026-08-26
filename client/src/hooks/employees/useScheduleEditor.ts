@@ -4,7 +4,7 @@ import {
   publishRange, unassignEmployee, updateShift,
 } from '../../api/employees/employeeSchedule'
 import { useToast } from '../../components/ui'
-import { conflictPrompt } from '../../pages/app/employees/scheduleConflicts'
+import { conflictPrompt, mealBreakConflictMessage } from '../../pages/app/employees/scheduleConflicts'
 import { moveShiftWindow, resizeShiftWindow } from '../../components/employees/schedule-editor/calendarMath'
 import type {
   AssignmentMoveResponse, RosterEmployee, RosterFlags,
@@ -14,11 +14,16 @@ import { addDays, errorMessage } from '../../types/employeeSchedule'
 
 export type ScheduleSaveState = 'idle' | 'saving' | 'saved' | 'error'
 
+type ScheduleEditorOptions = {
+  onMealBreakRequired?: (shift: Shift, employeeId: string, message: string) => void
+}
+
 /** `locationId` is required to fetch a week's shifts (the server won't serve
  *  one without it) — pass `''` while the caller is still waiting on the user
  *  to pick a location, and the hook fetches nothing but the location list. */
-export function useScheduleEditor(weekStart: string, locationId: string) {
+export function useScheduleEditor(weekStart: string, locationId: string, options: ScheduleEditorOptions = {}) {
   const { toast } = useToast()
+  const onMealBreakRequired = options.onMealBreakRequired
   const [shifts, setShifts] = useState<Shift[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
   const [rosterFlags, setRosterFlags] = useState<RosterFlags | null>(null)
@@ -74,6 +79,7 @@ export function useScheduleEditor(weekStart: string, locationId: string) {
     keys: string | string[],
     operation: (force: boolean) => Promise<T>,
     onSuccess: (result: T) => void,
+    handleConflict?: (error: unknown) => boolean,
   ): Promise<T | null> => {
     const mutationKeys = [...new Set(Array.isArray(keys) ? keys : [keys])].sort()
     for (const key of mutationKeys) {
@@ -88,6 +94,10 @@ export function useScheduleEditor(weekStart: string, locationId: string) {
         try {
           result = await operation(false)
         } catch (error) {
+          if (handleConflict?.(error)) {
+            setSaveState('idle')
+            return null
+          }
           const prompt = conflictPrompt(error)
           if (!prompt || !window.confirm(prompt)) {
             if (prompt) setSaveState('idle')
@@ -168,17 +178,29 @@ export function useScheduleEditor(weekStart: string, locationId: string) {
     resizeShiftWindow(shift, endMinute),
   ), [updateShiftDraft])
 
+  const handleMealBreakConflict = useCallback((shift: Shift, employeeId: string, error: unknown) => {
+    const message = mealBreakConflictMessage(error)
+    if (!message || !onMealBreakRequired) return false
+    onMealBreakRequired(shift, employeeId, message)
+    return true
+  }, [onMealBreakRequired])
+
   const assignToShift = useCallback((shift: Shift, employeeId: string) => mutate(
     [`shift:${shift.id}`],
     (force) => assignEmployee(shift.id, employeeId, force),
     patchShift,
-  ), [mutate, patchShift])
+    (error) => handleMealBreakConflict(shift, employeeId, error),
+  ), [handleMealBreakConflict, mutate, patchShift])
 
-  const moveEmployee = useCallback((employeeId: string, fromShiftId: string, toShiftId: string) => mutate(
-    [`shift:${fromShiftId}`, `shift:${toShiftId}`],
-    (force) => moveAssignment({ employee_id: employeeId, from_shift_id: fromShiftId, to_shift_id: toShiftId }, force),
-    patchMove,
-  ), [mutate, patchMove])
+  const moveEmployee = useCallback((employeeId: string, fromShiftId: string, toShiftId: string) => {
+    const targetShift = shifts.find((shift) => shift.id === toShiftId)
+    return mutate(
+      [`shift:${fromShiftId}`, `shift:${toShiftId}`],
+      (force) => moveAssignment({ employee_id: employeeId, from_shift_id: fromShiftId, to_shift_id: toShiftId }, force),
+      patchMove,
+      (error) => !!targetShift && handleMealBreakConflict(targetShift, employeeId, error),
+    )
+  }, [handleMealBreakConflict, mutate, patchMove, shifts])
 
   const unassignFromShift = useCallback((shift: Shift, employeeId: string) => mutate(
     [`shift:${shift.id}`],

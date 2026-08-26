@@ -77,6 +77,7 @@ export function MultiBatchModal({ open, onClose, onSuccess, departments }: Multi
           start_date: r.start_date || undefined,
           work_state: r.work_state.trim().toUpperCase() || undefined,
           is_supervisor: r.is_supervisor || undefined,
+          send_invitation: sendInvitations,
           skip_invitation: !sendInvitations,
         })
         updateRow(i, { rowStatus: 'success' })

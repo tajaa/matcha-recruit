@@ -6,6 +6,7 @@ shared by multiple submodules in the employees package. Extracted from
 """
 import json
 import logging
+from html import escape
 from datetime import datetime, date, timezone
 from typing import Optional
 from uuid import UUID
@@ -302,6 +303,8 @@ async def _perform_oig_screening(
 
         if result.matched:
             name = f"{first_name} {last_name}".strip()
+            safe_name = escape(name)
+            safe_confidence = escape(str(result.confidence))
             logger.warning(
                 "OIG LEIE match for employee %s (%s): confidence=%s, %d matches",
                 employee_id, name, result.confidence, len(result.matches),
@@ -324,22 +327,28 @@ async def _perform_oig_screening(
                         await email_svc.send_email(
                             to_email=admin["email"],
                             to_name=admin["first_name"],
-                            subject=f"OIG Exclusion Alert: {name}",
+                            subject=f"Possible OIG exclusion match: {name}",
                             html_content=f"""
                             <div style="font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                                 <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; border-radius: 8px;">
-                                    <h2 style="color: #dc2626; margin-top: 0;">OIG Exclusion Match Detected</h2>
-                                    <p>Employee <strong>{name}</strong> has been flagged during OIG LEIE screening.</p>
-                                    <p><strong>Confidence:</strong> {result.confidence}</p>
+                                    <h2 style="color: #dc2626; margin-top: 0;">Possible OIG exclusion match</h2>
+                                    <p>The automated name screening for <strong>{safe_name}</strong> found a possible match. This is not a confirmed exclusion.</p>
+                                    <p><strong>Confidence:</strong> {safe_confidence}</p>
                                     <p><strong>Matches found:</strong> {len(result.matches)}</p>
                                     <p style="color: #6b7280; font-size: 14px;">
-                                        Please review this match immediately. Employing an excluded individual in a federal
-                                        healthcare program can result in Civil Monetary Penalties of $100,000 per item/service.
+                                        Verify the person's identity using the OIG Online Search and document the result before making an employment decision.
+                                        The employee portal invitation is handled separately and is not automatically blocked by this screening.
                                     </p>
+                                    <p><a href="https://exclusions.oig.hhs.gov/">Open OIG Online Search</a></p>
                                 </div>
                             </div>
                             """,
-                            text_content=f"OIG Exclusion Match: {name} — confidence: {result.confidence}, {len(result.matches)} match(es). Review immediately.",
+                            text_content=(
+                                f"Possible OIG exclusion match for {name} — confidence: {result.confidence}, "
+                                f"{len(result.matches)} match(es). This is not a confirmed exclusion. "
+                                "Verify identity using https://exclusions.oig.hhs.gov/ and document the result. "
+                                "The employee portal invitation is handled separately and is not automatically blocked."
+                            ),
                         )
             except Exception:
                 logger.exception("Failed to send OIG alert email for employee %s", employee_id)

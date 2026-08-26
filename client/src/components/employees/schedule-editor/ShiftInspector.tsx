@@ -115,7 +115,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Job<select value={jobId} onChange={(event) => setJobId(event.target.value)} disabled={readOnly} className={input}><option value="">No job — anyone can be assigned</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Location<div className={`${input} text-zinc-400`}>{locationName}</div></label>
         <div className="grid grid-cols-2 gap-2">
-          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Planned break<input type="number" min="0" step="5" value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>
+          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Planned break (minutes)<input type="number" min="0" step="5" value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>
           <label className="text-[10px] uppercase tracking-wide text-zinc-600">Staff needed<input type="number" min="1" value={requiredStaff} onChange={(event) => setRequiredStaff(event.target.value)} disabled={readOnly} className={input} /></label>
         </div>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Notes<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={readOnly} className={input} /></label>
