@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
+from app.core.feature_flags import get_company_features
 from app.matcha.dependencies import require_company_member, get_client_company_id
 from app.matcha.services.scheduling.schedule_assistant_session import (
     resolve_schedule_assistant_scope,
@@ -92,6 +93,17 @@ async def send_message_stream(
 
     if thread["status"] == "archived":
         raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
+
+    # The schedule router normally provides this gate before a session exists,
+    # but an existing session can outlive a feature revocation. Reject it before
+    # quota use and SSE headers so the client receives a real HTTP error.
+    if is_schedule_thread:
+        features = await get_company_features(company_id)
+        if not features.get("employee_schedule"):
+            raise HTTPException(
+                status_code=403,
+                detail="Scheduling isn't enabled for this company right now.",
+            )
 
     # Resolved HERE, before quota/rate-limit consumption and before the SSE
     # stream starts, so a de-authorized manager (or a stale link into someone
