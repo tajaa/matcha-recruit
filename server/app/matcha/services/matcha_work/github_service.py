@@ -301,9 +301,15 @@ def verify_webhook_signature(raw: bytes, header: Optional[str]) -> bool:
     return hmac.compare_digest(header[len("sha256="):], expected)
 
 
+WEBHOOK_EVENTS = ["push", "pull_request"]
+
+
 async def install_repo_webhook(repo: str, url: str, secret: str) -> dict:
-    """Create a push webhook on the repo (idempotent on url). Needs a token with
-    repo-admin/hook scope."""
+    """Create (or upgrade) the webhook on the repo — idempotent on url. Needs a
+    token with repo-admin/hook scope. Re-running against an existing hook
+    PATCHes its event list up to WEBHOOK_EVENTS rather than no-op'ing, so
+    adding a new event here (e.g. pull_request, for kanban-autopr) upgrades
+    every repo that already has the hook installed."""
     if not _token():
         raise GitHubError("GITHUB_TOKEN is not set on the server.")
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -311,11 +317,19 @@ async def install_repo_webhook(repo: str, url: str, secret: str) -> dict:
         if existing.status_code == 200:
             for h in existing.json():
                 if (h.get("config") or {}).get("url") == url:
-                    return {"installed": True, "id": h.get("id"), "existing": True}
+                    hook_id = h.get("id")
+                    if sorted(h.get("events") or []) != sorted(WEBHOOK_EVENTS):
+                        patch = await client.patch(
+                            f"{GITHUB_API}/repos/{repo}/hooks/{hook_id}", headers=_headers(),
+                            json={"events": WEBHOOK_EVENTS},
+                        )
+                        if patch.status_code not in (200,):
+                            raise GitHubError(f"Couldn't update webhook events ({patch.status_code}): {patch.text[:200]}")
+                    return {"installed": True, "id": hook_id, "existing": True}
         r = await client.post(
             f"{GITHUB_API}/repos/{repo}/hooks", headers=_headers(),
             json={
-                "name": "web", "active": True, "events": ["push"],
+                "name": "web", "active": True, "events": WEBHOOK_EVENTS,
                 "config": {"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"},
             },
         )

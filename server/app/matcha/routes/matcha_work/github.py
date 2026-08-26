@@ -4,6 +4,7 @@ sync/scan-commits, webhook install, and the public push-webhook handler.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
+import re
 from typing import Optional
 from uuid import UUID
 
@@ -288,11 +289,95 @@ async def install_github_webhook_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     return {"repo": repo, **result}
 
+# kanban-autopr's PR-body trailer — the primary way a delivery resolves to a
+# card (authoritative: an unguessable UUID, no repo/branch scoping needed).
+_TASK_TRAILER_RE = re.compile(r"<!--\s*matcha-task:\s*([0-9a-fA-F-]{36})\s*-->")
+# Fallback for a PR opened without the trailer (e.g. a hand-pushed branch
+# matching the bot's naming convention): match the head branch's id8 against
+# mw_tasks.id with hyphens stripped.
+_TASK_BRANCH_RE = re.compile(r"^bot/task-([0-9a-f]{8})")
+
+# kanban-autopr.yml's publish step runs `gh pr create` with GH_TOKEN=
+# ${{ github.token }} (the Actions-minted GITHUB_TOKEN), which GitHub always
+# reports as this exact bot identity — an attacker opening their own PR
+# against this repo cannot make GitHub report it as authored by
+# github-actions[bot]. Without this check, either resolution path (the
+# trailer or the branch-name fallback) would let ANY PR opened against this
+# repo — by embedding the right HTML comment, or just naming its branch
+# bot/task-<id8> — move an arbitrary card in an arbitrary company's project,
+# since neither path otherwise verifies the PR's repo is even connected to
+# the resolved task's project.
+_TRUSTED_PR_AUTHOR = "github-actions[bot]"
+
+
+async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
+    pr = payload.get("pull_request") or {}
+    if (pr.get("user") or {}).get("login") != _TRUSTED_PR_AUTHOR:
+        return None
+    body = pr.get("body") or ""
+    head_ref = (pr.get("head") or {}).get("ref") or ""
+
+    task_id: Optional[str] = None
+    m = _TASK_TRAILER_RE.search(body)
+    if m:
+        task_id = m.group(1)
+    else:
+        m2 = _TASK_BRANCH_RE.match(head_ref)
+        if m2:
+            async with get_connection() as conn:
+                row = await conn.fetchrow(
+                    "SELECT id::text AS id FROM mw_tasks WHERE replace(id::text, '-', '') LIKE $1",
+                    m2.group(1) + "%",
+                )
+            if row:
+                task_id = row["id"]
+    if not task_id:
+        return None
+
+    async with get_connection() as conn:
+        return await conn.fetchrow(
+            "SELECT id, project_id, board_column FROM mw_tasks WHERE id = $1",
+            UUID(task_id),
+        )
+
+
+async def _handle_pull_request_event(payload: dict) -> dict:
+    """Card <-> PR sync. Every transition is a no-op unless the card is
+    currently in the listed source column, so redelivery is idempotent and a
+    card can never be dragged backwards by a webhook replay."""
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    task = await _resolve_pull_request_task(payload)
+    if not task:
+        return {"ok": True, "task": None}
+
+    action = payload.get("action") or ""
+    pr = payload.get("pull_request") or {}
+    column = task["board_column"]
+
+    if action in ("opened", "reopened"):
+        if column == "todo":
+            await pt_svc.update_project_task(
+                task["project_id"], task["id"],
+                {"board_column": "in_progress", "pr_url": pr.get("html_url"), "pr_number": pr.get("number")},
+            )
+        return {"ok": True, "task": str(task["id"])}
+
+    if action == "closed":
+        merged = bool(pr.get("merged"))
+        if merged and column in ("todo", "in_progress", "changes_requested"):
+            await pt_svc.update_project_task(task["project_id"], task["id"], {"board_column": "review"})
+        return {"ok": True, "task": str(task["id"]), "merged": merged}
+
+    return {"ignored": action}
+
+
 @public_router.post("/github/webhook")
 async def github_push_webhook(request: Request):
-    """GitHub push webhook → scan the pushed commits for every project connected
-    to that repo+branch. Public (no JWT); authenticated by HMAC signature.
-    URL: /api/matcha-work/public/github/webhook"""
+    """GitHub push/pull_request webhook. Push scans commits for every project
+    connected to that repo+branch; pull_request syncs a kanban-autopr card's
+    column (see _handle_pull_request_event). Public (no JWT); authenticated by
+    HMAC signature. URL: /api/matcha-work/public/github/webhook"""
     from app.matcha.services.matcha_work import github_service as gh_svc
     raw = await request.body()
     if not gh_svc.verify_webhook_signature(raw, request.headers.get("X-Hub-Signature-256")):
@@ -300,11 +385,16 @@ async def github_push_webhook(request: Request):
     event = request.headers.get("X-GitHub-Event", "")
     if event == "ping":
         return {"ok": True, "pong": True}
-    if event != "push":
-        return {"ignored": event}
 
     import json as _json
     payload = _json.loads(raw or b"{}")
+
+    if event == "pull_request":
+        return await _handle_pull_request_event(payload)
+
+    if event != "push":
+        return {"ignored": event}
+
     ref = payload.get("ref", "") or ""
     if not ref.startswith("refs/heads/"):
         return {"ignored": "non-branch ref"}

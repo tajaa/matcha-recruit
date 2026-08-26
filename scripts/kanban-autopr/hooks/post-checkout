@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Checking out a bot task branch (or a hand-made task/<id8>-... branch) moves
+# its card todo -> in_progress. Installed via install-hooks.sh into
+# .git/hooks/post-checkout in the real clone — never runs in a CI workspace.
+#
+# git passes: $1=prev HEAD sha  $2=new HEAD sha  $3=1 for a branch checkout,
+# 0 for a file checkout. A hook must never fail or slow down a checkout, so
+# everything below is best-effort and backgrounded.
+set -uo pipefail
+
+[ "${3:-0}" = "1" ] || exit 0
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+[[ "$branch" =~ ^(bot/task|task)-?/?([0-9a-f]{8}) ]] || exit 0
+id8="${BASH_REMATCH[2]}"
+
+(
+    env_file="$HOME/.config/matcha-autopr/env"
+    [ -f "$env_file" ] || exit 0
+    set -a
+    # shellcheck disable=SC1090
+    source "$env_file"
+    set +a
+    [ -n "${MATCHA_API_URL:-}" ] && [ -n "${MATCHA_BOT_EMAIL:-}" ] && [ -n "${MATCHA_BOT_PASSWORD:-}" ] || exit 0
+    [ -n "${MATCHA_PROJECT_IDS:-}" ] || exit 0
+
+    token="$(curl -sS --max-time 5 -X POST "$MATCHA_API_URL/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "$(jq -n --arg email "$MATCHA_BOT_EMAIL" --arg password "$MATCHA_BOT_PASSWORD" \
+            '{email: $email, password: $password}')" | jq -r '.access_token // empty')"
+    [ -n "$token" ] || exit 0
+
+    IFS=',' read -ra project_ids <<< "$MATCHA_PROJECT_IDS"
+    for project_id in "${project_ids[@]}"; do
+        project_id="$(echo "$project_id" | xargs)"
+        [ -n "$project_id" ] || continue
+
+        bundle="$(curl -sS --max-time 5 "$MATCHA_API_URL/matcha-work/projects/$project_id/bundle" \
+            -H "Authorization: Bearer $token")"
+        task="$(printf '%s' "$bundle" | jq -c --arg id8 "$id8" \
+            '(.tasks // []) | map(select((.id | gsub("-"; "") | .[0:8]) == $id8)) | .[0] // empty')"
+        [ -n "$task" ] || continue
+
+        # Only PATCH if the card is still in `todo` — a card already in
+        # review/done never moves backwards just because someone checked out
+        # its branch (e.g. `gh pr checkout` on an old merged PR).
+        column="$(printf '%s' "$task" | jq -r '.board_column // empty')"
+        [ "$column" = "todo" ] || exit 0
+        task_id="$(printf '%s' "$task" | jq -r '.id')"
+
+        curl -sS --max-time 5 -X PATCH "$MATCHA_API_URL/matcha-work/projects/$project_id/tasks/$task_id" \
+            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            -d '{"board_column": "in_progress"}' >/dev/null
+        exit 0
+    done
+) >/dev/null 2>&1 &
+
+exit 0

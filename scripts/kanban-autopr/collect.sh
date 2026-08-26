@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Collect candidate kanban cards across every project in MATCHA_PROJECT_IDS
+# (comma-separated) assigned to MATCHA_ASSIGNEE_EMAIL and sitting in `todo`
+# or `changes_requested`. One bundle fetch per project (no company-wide list
+# endpoint — the bot's access is per-project mw_project_collaborators rows,
+# not a single company scope; see docs/ops/KANBAN_AUTOPR.md).
+#
+# Usage: ./collect.sh > cards.json
+# Always exits 0; emits `[]` if nothing matches.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+_kanban_autopr_load_env
+
+out="[]"
+IFS=',' read -ra PROJECT_IDS <<< "$MATCHA_PROJECT_IDS"
+for project_id in "${PROJECT_IDS[@]}"; do
+    project_id="$(echo "$project_id" | xargs)"
+    [ -n "$project_id" ] || continue
+
+    bundle="$(mw_api GET "/matcha-work/projects/$project_id/bundle")" || die "bundle fetch failed for $project_id"
+    project_title="$(printf '%s' "$bundle" | jq -r '.project.title // "untitled"')"
+
+    elements="$(printf '%s' "$bundle" | jq -c '.elements // []')"
+
+    candidates="$(printf '%s' "$bundle" | jq -c \
+        --arg email "$MATCHA_ASSIGNEE_EMAIL" \
+        --arg project_id "$project_id" \
+        --arg project_title "$project_title" \
+        --argjson elements "$elements" '
+        .tasks // []
+        | map(select(
+            .assigned_email == $email
+            and (.board_column == "todo" or .board_column == "changes_requested")
+            and .status != "cancelled"
+          ))
+        | map(
+            . as $t
+            | ($elements | map(select(.id == $t.element_id)) | .[0]) as $el
+            | {
+                task_id: $t.id,
+                id8: ($t.id | gsub("-"; "") | .[0:8]),
+                project_id: $project_id,
+                project_title: $project_title,
+                title: $t.title,
+                description: $t.description,
+                review_note: $t.review_note,
+                board_column: $t.board_column,
+                category: $t.category,
+                priority: $t.priority,
+                element_id: $t.element_id,
+                element_name: $t.element_name,
+                repo_paths: ($el.repo_paths // []),
+                subtask_total: $t.subtask_total,
+                subtask_done: $t.subtask_done,
+                last_moved_at: $t.last_moved_at,
+                created_at: $t.created_at,
+                review_cycle_count: $t.review_cycle_count,
+                pr_url: $t.pr_url,
+                pr_number: $t.pr_number,
+                progress_note: $t.progress_note
+              }
+          )
+    ')"
+
+    out="$(jq -c -n --argjson a "$out" --argjson b "$candidates" '$a + $b')"
+done
+
+printf '%s\n' "$out"

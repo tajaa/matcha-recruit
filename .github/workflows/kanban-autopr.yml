@@ -1,0 +1,144 @@
+name: Kanban autopr
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+# This must run on Finch's Mac. It uses that user's authenticated OpenCode
+# profile; the Matcha bot credential lives in ~/.config/matcha-autopr/env
+# (chmod 600, never committed, never a GitHub secret) — same design
+# constraint as silent-error-autofix.yml. This workflow never touches prod
+# Postgres; it reads/writes the board over HTTPS as the bot.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: kanban-autopr
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, opencode]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          # This self-hosted runner's client/node_modules is pre-installed
+          # and persists between runs — verify.sh symlinks it into the
+          # baseline worktree read-only rather than running `npm ci` here.
+          # The default `clean: true` runs `git clean -ffdx` before checkout,
+          # which wipes that gitignored directory every run and silently
+          # disables client verification (CLIENT_DEPS_READY always false).
+          clean: false
+
+      - name: Reset any stray bot branch from a prior interrupted run
+        run: |
+          git worktree list --porcelain | awk '/^branch refs\/heads\/bot\/task-/{print}' || true
+          git worktree prune
+          current="$(git branch --show-current)"
+          if [[ "$current" == bot/task-* ]]; then
+            git switch main
+          fi
+
+      - name: Configure GitHub CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh auth status
+
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for l in "autopr|1D76DB|Opened by the kanban-autopr bot" \
+                   "autopr-rework|8250DF|Pushed to address review feedback on an existing autopr PR" \
+                   "needs-work|D93F0B|Verification found a new test failure"; do
+            IFS='|' read -r name color desc <<< "$l"
+            gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
+          done
+
+      - name: Collect candidate cards
+        id: collect
+        timeout-minutes: 2
+        run: ./scripts/kanban-autopr/collect.sh > "$RUNNER_TEMP/cards.json"
+
+      - name: Select one card
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          ./scripts/kanban-autopr/select.sh "$RUNNER_TEMP/cards.json" > "$RUNNER_TEMP/card.json"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "Nothing to build this run." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "id8=$(jq -r '.id8' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
+            echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or check out task branch
+        id: branch
+        if: steps.select.outputs.skip == 'false'
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
+          ID8: ${{ steps.select.outputs.id8 }}
+        run: |
+          git worktree prune
+          branch="bot/task-$ID8"
+          if [ "$MODE" = rework ]; then
+            git fetch origin "$branch"
+            git switch "$branch"
+          else
+            git switch -C "$branch" main
+          fi
+          echo "sha=$(git merge-base HEAD main)" >> "$GITHUB_OUTPUT"
+
+      - name: Investigate
+        id: investigate
+        if: steps.select.outputs.skip == 'false'
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
+          ./scripts/kanban-autopr/investigate.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md"
+
+      - name: Fail incomplete investigation
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
+        run: |
+          # investigate.sh can die after the model edited files. Discard
+          # those unverified edits, fail the run visibly, and leave the card
+          # eligible for a later retry. A harness/model failure is not a
+          # legitimate "no safe fix" conclusion and must not write a
+          # no-spec marker that blocks the card forever.
+          git reset --hard HEAD
+          git clean -fd
+          echo "Investigation failed before producing a valid report; this card remains eligible for retry." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Verify (baseline vs branch)
+        id: verify
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        timeout-minutes: 8
+        run: |
+          ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
+        env:
+          AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
+
+      - name: Publish PR (or no-spec marker)
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/kanban-autopr/publish.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          git worktree prune

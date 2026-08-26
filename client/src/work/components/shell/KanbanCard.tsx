@@ -1,4 +1,4 @@
-import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock, MoreHorizontal } from 'lucide-react'
+import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock, MoreHorizontal, GitPullRequest } from 'lucide-react'
 import type { MWProjectTask } from '../../types'
 import Avatar from '../../../components/shared/Avatar'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
@@ -78,6 +78,12 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   const subtaskDone = task.subtask_done ?? 0
   const subtaskFrac = subtaskTotal > 0 ? subtaskDone / subtaskTotal : 0
   const subtasksComplete = subtaskTotal > 0 && subtaskDone >= subtaskTotal
+
+  // Defense in depth alongside the server-side scheme check (tasks.py PATCH):
+  // never render an href straight from stored data without re-validating it's
+  // http(s) here too — a javascript:/data: value must render as inert text,
+  // not a clickable link.
+  const safePrUrl = task.pr_url && /^https?:\/\//i.test(task.pr_url) ? task.pr_url : null
 
   const cycles = task.review_cycle_count ?? 0
   const attachments = task.attachments ?? []
@@ -173,12 +179,26 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       {/* Tag chip + churn. Priority is the left-edge accent above (critical/high
           only) — no dot/label here, it read as noise on every card since medium
           (the default) would otherwise tag along too. */}
-      {(cycles > 0 || tag || task.element_name) && (
+      {(cycles > 0 || tag || task.element_name || safePrUrl) && (
         <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 pl-6">
           {tag && (
             <span className={`rounded bg-current/10 px-1.5 py-0.5 text-[10px] font-semibold ${tag.colorClass}`}>
               {tag.label}
             </span>
+          )}
+
+          {safePrUrl && (
+            <a
+              href={safePrUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={task.pr_number ? `PR #${task.pr_number}` : 'Pull request'}
+              className="flex items-center gap-0.5 rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-bold text-purple-400 hover:bg-purple-500/25"
+            >
+              <GitPullRequest className="h-2.5 w-2.5" />
+              {task.pr_number ? `#${task.pr_number}` : 'PR'}
+            </a>
           )}
 
           {cycles > 0 && (

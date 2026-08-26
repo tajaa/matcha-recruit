@@ -320,7 +320,7 @@ async def list_project_tasks(
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
-                   t.element_id, t.review_note,
+                   t.element_id, t.review_note, t.pr_url, t.pr_number,
                    t.deal_value, t.probability, t.contact_name, t.contact_company,
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
@@ -759,6 +759,8 @@ async def update_project_task(
         next_action_at = patch.get("next_action_at")
         expected_close = patch.get("expected_close")
         pipeline_column = patch.get("pipeline_column")
+        pr_url = patch.get("pr_url")
+        pr_number = patch.get("pr_number")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
@@ -808,6 +810,8 @@ async def update_project_task(
                 next_action_at = CASE WHEN $34::boolean THEN $35::date ELSE next_action_at END,
                 expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
                 pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
+                pr_url = CASE WHEN $40::boolean THEN $41::text ELSE pr_url END,
+                pr_number = CASE WHEN $42::boolean THEN $43::integer ELSE pr_number END,
                 -- Clear the reviewer's "needs work" note once the task is
                 -- re-submitted to review or marked done — the bounce-back
                 -- banner only applies while it sits back in todo/in_progress.
@@ -821,7 +825,7 @@ async def update_project_task(
                       progress_note, category, element_id, review_note,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close, pr_url, pr_number
             """,
             new_column,                   # $1
             task_id,                      # $2
@@ -862,6 +866,10 @@ async def update_project_task(
             expected_close,               # $37
             "pipeline_column" in patch,   # $38
             pipeline_column,              # $39
+            "pr_url" in patch,            # $40
+            pr_url,                       # $41
+            "pr_number" in patch,         # $42
+            pr_number,                    # $43
         )
 
         if row and new_column != current["board_column"]:

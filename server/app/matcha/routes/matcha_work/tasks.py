@@ -7,6 +7,7 @@ tasks were split out into sibling modules on 2026-07-19 -- see
 matcha_work/CLAUDE.md.
 """
 import logging
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -199,6 +200,28 @@ async def update_project_task_endpoint(
     ):
         if key in body:
             patch[key] = body[key]
+
+    # The kanban card renders this as a clickable link — a non-http(s)
+    # scheme (javascript:, data:) would be stored PATCH-side and executed
+    # in a teammate's browser on click. Reject rather than sanitize.
+    if "pr_url" in body:
+        v = body["pr_url"]
+        if v is None or v == "":
+            patch["pr_url"] = None
+        elif isinstance(v, str) and re.match(r"^https?://", v, re.IGNORECASE):
+            patch["pr_url"] = v
+        else:
+            raise HTTPException(status_code=400, detail="pr_url must be an http(s) URL")
+
+    if "pr_number" in body:
+        v = body["pr_number"]
+        if v is None or v == "":
+            patch["pr_number"] = None
+        else:
+            try:
+                patch["pr_number"] = int(v)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Invalid pr_number")
 
     # Sales-pipeline numeric fields — coerce so the asyncpg numeric/smallint
     # casts never receive a JSON string. Empty / null clears the value.
