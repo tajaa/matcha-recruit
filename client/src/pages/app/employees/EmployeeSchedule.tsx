@@ -45,6 +45,7 @@ export default function EmployeeSchedule() {
   const highlightShiftId = searchParams.get('shift') ?? undefined
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
   const { me, hasFeature, loading: meLoading } = useMe()
+  const { toast } = useToast()
   const { locationId, setLocationId, locations, loading: locationsLoading } = useLocationScope()
   const [guideOpen, setGuideOpen] = useState(() => {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
@@ -95,6 +96,22 @@ export default function EmployeeSchedule() {
   function closeGuide() {
     try { window.localStorage.setItem(SCHEDULE_GUIDE_STORAGE_KEY, 'seen') } catch { /* best effort */ }
     setGuideOpen(false)
+  }
+
+  async function handlePublishWeek() {
+    try {
+      await publishWeek()
+    } catch (err) {
+      const detail = err instanceof ApiError
+        ? err.body as { detail?: { code?: string } }
+        : null
+      toast(
+        detail?.detail?.code === 'schedule_location_not_ready'
+          ? "Complete this location's scheduling prerequisites before publishing."
+          : errorMessage(err),
+        'error',
+      )
+    }
   }
 
   return (
@@ -148,7 +165,7 @@ export default function EmployeeSchedule() {
               <button onClick={() => setWeekStart((w) => addDays(w, 7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-white/[0.08]"><ChevronRight className="h-4 w-4" /></button>
               <span className="text-sm text-zinc-500 ml-1">Week of {fmtDayLabel(weekStart)}</span>
             </div>
-            <button onClick={publishWeek} disabled={publishing || !summary?.draft || !locationId} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-40">
+            <button onClick={handlePublishWeek} disabled={publishing || !summary?.draft || !locationId} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-40">
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish week{summary?.draft ? ` (${summary.draft})` : ''}
             </button>
           </div>
