@@ -57,7 +57,14 @@ fi
 
 # `client.ts` is generally safe to fix, but the report-status policy inside it
 # is a telemetry suppression boundary and must not be changed by this bot.
-unsafe_reporting_change="$(git diff --cached -U0 -- client/src/api/client.ts | grep -E '^[+-].*(_EXPECTED_STATUSES|_shouldReportStatus|reportApiError)' || true)"
+# Scoped to: touching the `_EXPECTED_STATUSES` set or the `_shouldReportStatus`
+# definition (its one-line body also references `_EXPECTED_STATUSES`, so that
+# half of the pattern already covers it), or deleting an existing
+# `reportApiError(` call site. Deliberately NOT matched: a call to
+# `_shouldReportStatus(...)` or a newly added `reportApiError(...)` call —
+# those are legitimate fix shapes (e.g. editing the retry block) and used to
+# trip this guard on any mention of the identifiers, discarding real work.
+unsafe_reporting_change="$(git diff --cached -U0 -- client/src/api/client.ts | grep -E '^[+-].*(_EXPECTED_STATUSES|function _shouldReportStatus)|^-.*reportApiError\(' || true)"
 if [ -n "$unsafe_reporting_change" ]; then
     echo "Refusing automated change to browser error-reporting policy:" >&2
     printf '%s\n' "$unsafe_reporting_change" >&2

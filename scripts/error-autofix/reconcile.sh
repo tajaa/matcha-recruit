@@ -91,7 +91,7 @@ while IFS= read -r draft_number; do
     gh pr close "$draft_number" --repo "$REPO" \
         --comment "Superseded by #$replacing_pr: $reason" >/dev/null
 
-    key="$(printf '%s' "$live_draft" | jq -r 'try capture("<!-- autofix-key: (?<key>[0-9a-f]{12}) -->").key catch ""')"
+    key="$(printf '%s' "$live_draft" | jq -r '.body // "" | try capture("<!-- autofix-key: (?<key>[0-9a-f]{12}) -->").key catch ""')"
     if [ -n "$key" ]; then
         nofix="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
             --json number,title --jq "map(select(.title | contains(\"[$key]\"))) | .[0].number // empty")"

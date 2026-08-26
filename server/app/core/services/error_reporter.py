@@ -92,7 +92,11 @@ INSERT INTO server_error_reports (
     user_id, user_email, context, occurrences, first_seen, last_seen
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9,
-    $10, $11, $12, $13, $14, $15::jsonb, 1, NOW(), NOW()
+    $10, $11, $12, $13, $14,
+    CASE WHEN $15::jsonb ? 'request_id'
+         THEN $15::jsonb || jsonb_build_object('request_ids', jsonb_build_array($15::jsonb ->> 'request_id'))
+         ELSE $15::jsonb END,
+    1, NOW(), NOW()
 )
 ON CONFLICT (fingerprint) WHERE resolved_at IS NULL
 DO UPDATE SET
@@ -100,7 +104,27 @@ DO UPDATE SET
     last_seen = NOW(),
     message = EXCLUDED.message,
     traceback = COALESCE(EXCLUDED.traceback, server_error_reports.traceback),
-    context = COALESCE(EXCLUDED.context, server_error_reports.context),
+    -- A blind overwrite of `context` on every occurrence loses every
+    -- request_id but the latest one, which is most of why the autofix
+    -- pipeline's client<->server correlation almost never matches (a client
+    -- error's request_id rarely lands on whichever occurrence happened to be
+    -- last). Keep the latest context (for company_id etc.) but fold the
+    -- request id into a bounded rolling list instead of dropping prior ones.
+    context = CASE
+        WHEN EXCLUDED.context IS NULL THEN server_error_reports.context
+        ELSE EXCLUDED.context || jsonb_build_object(
+            'request_ids',
+            (
+                SELECT jsonb_path_query_array(prior || newest, '$[last-19 to last]')
+                FROM (SELECT
+                    COALESCE(server_error_reports.context -> 'request_ids', '[]'::jsonb) AS prior,
+                    CASE WHEN EXCLUDED.context ? 'request_id'
+                         THEN jsonb_build_array(EXCLUDED.context ->> 'request_id')
+                         ELSE '[]'::jsonb END AS newest
+                ) _acc
+            )
+        )
+    END,
     request_path = COALESCE(EXCLUDED.request_path, server_error_reports.request_path),
     request_method = COALESCE(EXCLUDED.request_method, server_error_reports.request_method)
 RETURNING (xmax = 0) AS inserted

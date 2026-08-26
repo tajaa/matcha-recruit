@@ -24,6 +24,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          # This self-hosted runner's client/node_modules is pre-installed and
+          # persists between runs — verify.sh symlinks it into the baseline
+          # worktree read-only rather than running `npm ci` here. The default
+          # `clean: true` runs `git clean -ffdx` before checkout, which wipes
+          # that gitignored directory every run and silently disables client
+          # verification (CLIENT_DEPS_READY always false).
+          clean: false
 
       - name: Reset any stray bot branch from a prior interrupted run
         run: |
@@ -55,6 +62,7 @@ jobs:
 
       - name: Reconcile superseded autofix drafts
         continue-on-error: true
+        timeout-minutes: 15
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/error-autofix/reconcile.sh

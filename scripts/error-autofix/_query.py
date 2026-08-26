@@ -146,16 +146,20 @@ async def _fetch_rows(conn, hours, limit):
         """
         SELECT id::text, kind, level, message, exception_type, traceback, source,
                request_method, request_path, request_status, context::text AS context,
-               occurrences, first_seen, last_seen
+               occurrences, first_seen, last_seen, resolved_at IS NOT NULL AS resolved
         FROM server_error_reports
-        WHERE resolved_at IS NULL
-          AND level IN ('ERROR', 'CRITICAL')
+        WHERE level IN ('ERROR', 'CRITICAL')
           AND last_seen > NOW() - make_interval(hours => $1::int)
         ORDER BY last_seen DESC
         LIMIT $2::int
         """,
         hours,
-        limit,
+        # Over-fetch: a resolved row no longer yields an incident (still
+        # filtered out below) but its request_ids must stay in
+        # request_pairs, or clicking Resolve just makes the correlated
+        # client-side echo of the same failure reappear as a fresh incident.
+        # The final incident list is still capped to `limit` in main().
+        limit * 4,
     )
     client_rows = await conn.fetch(
         """
@@ -177,15 +181,33 @@ def _group_server(rows):
     request_pairs = set()
     skipped = 0
     for row in rows:
-        if row["kind"] not in AUTOFIXABLE_KINDS or (row["exception_type"] or "") in INFRA_EXCEPTION_TYPES:
+        # Collect correlation pairs from every row up front — before the
+        # actionable/infra/resolved filters below. The point of a pair is
+        # "the server already saw this exact request fail"; that's true
+        # whether or not the row is itself autofixable (e.g. a
+        # ConnectionResetError that surfaces to the browser as an HTTP 500)
+        # or has since been marked resolved by a human.
+        context = _context(row["context"])
+        request_path = row["request_path"] or ""
+        path = _path(request_path) if request_path else ""
+        if path:
+            request_ids = context.get("request_ids")
+            if not isinstance(request_ids, list):
+                single = context.get("request_id")
+                request_ids = [single] if single else []
+            for rid in request_ids:
+                if rid:
+                    request_pairs.add((str(rid), path))
+
+        if (
+            row["resolved"]
+            or row["kind"] not in AUTOFIXABLE_KINDS
+            or (row["exception_type"] or "") in INFRA_EXCEPTION_TYPES
+        ):
             skipped += 1
             continue
         key = stable_key(row["kind"], row["exception_type"], row["message"], row["traceback"])
-        context = _context(row["context"])
         request_id = context.get("request_id")
-        request_path = row["request_path"] or ""
-        if request_id and request_path:
-            request_pairs.add((str(request_id), _path(request_path)))
         group = grouped.get(key)
         if group is None:
             grouped[key] = {

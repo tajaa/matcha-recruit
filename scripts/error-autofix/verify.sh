@@ -226,7 +226,11 @@ client_test_failures() {
     (
         cd "$tree/client" && ./node_modules/.bin/vitest run --reporter=verbose "${CLIENT_TESTS[@]}"
     ) > "$outfile" 2>&1 || true
-    grep -E '^[[:space:]]*(FAIL|×) ' "$outfile" | sed -E "s#${tree}#<tree>#g" | sort -u || true
+    # Strip the trailing duration the verbose reporter appends past
+    # slowTestThreshold (e.g. "312ms") — it varies run to run, so leaving it
+    # in makes an unchanged pre-existing failure look like a new one once
+    # `comm -13` diffs against the baseline's differently-timed run.
+    grep -E '^[[:space:]]*(FAIL|×) ' "$outfile" | sed -E "s#${tree}#<tree>#g; s/[[:space:]]+[0-9]+(\.[0-9]+)?m?s\$//" | sort -u || true
 }
 
 CLIENT_TYPE_BASE="$(mktemp)"
@@ -251,7 +255,13 @@ echo "| Check | Baseline (main) | This branch |"
 echo "|---|---|---|"
 echo "| compileall (changed files) | $(compileall_check "$BASE_TREE") | $(compileall_check "$REPO_ROOT") |"
 
-if [ "${#TEST_DIRS[@]}" -eq 0 ]; then
+if [ "$PYTHON_UNAVAILABLE" = true ]; then
+    # The early-exit above only fires when CLIENT_CHANGED is false; when a
+    # client-touching PR also has no usable interpreter, run_suite() writes
+    # empty result files and this branch would otherwise print a false
+    # "0 failed | 0 failed" green row instead of surfacing the outage.
+    echo "| pytest | **unavailable** — no usable Python interpreter found | **unavailable** |"
+elif [ "${#TEST_DIRS[@]}" -eq 0 ]; then
     echo "| pytest | — | **no matching test directory found** |"
 else
     base_n="$(grep -c . "$BASE_FAILS" || true)"
