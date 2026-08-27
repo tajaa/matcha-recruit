@@ -40,9 +40,16 @@ render_launch_agent() {
     plutil -lint "$PLIST_DESTINATION" >/dev/null
 }
 
-bootstrap_launch_agent() {
+stop_launch_agent() {
     local domain="gui/$(id -u)"
+    # Stop the old timer before replacing its dashboard. Bootstrap happens
+    # only after the new session is ready; RunAtLoad can otherwise race the
+    # installer's own `--restart` and both processes call tmux new-session.
     "$LAUNCHCTL_BIN" bootout "$domain/$LABEL" >/dev/null 2>&1 || true
+}
+
+start_launch_agent() {
+    local domain="gui/$(id -u)"
     "$LAUNCHCTL_BIN" bootstrap "$domain" "$PLIST_DESTINATION"
     "$LAUNCHCTL_BIN" kickstart -k "$domain/$LABEL"
     "$LAUNCHCTL_BIN" print "$domain/$LABEL"
@@ -52,10 +59,11 @@ main() {
     validate_dependencies
     install_runtime
     render_launch_agent
-    bootstrap_launch_agent
+    stop_launch_agent
     # Recreate this one named observer session so an idempotent reinstall also
     # picks up newer pane scripts copied above.
     "$INSTALL_ROOT/ensure-dashboard.sh" --restart
+    start_launch_agent
     echo "Installed $LABEL; logs: $USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log"
     echo "Open dashboard: tmux attach -t matcha-autopr"
 }

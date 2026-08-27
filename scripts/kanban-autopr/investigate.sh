@@ -172,8 +172,15 @@ jq -n \
     '{card: $card[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
 
-# Put the structured brief first, then the locally downloaded evidence.
-ATTACH_ARGS=(-f "$CONTEXT_FILE" "${ATTACH_ARGS[@]}")
+# Put the structured brief first, then the locally downloaded evidence. macOS
+# still ships Bash 3.2, where expanding an empty array under `set -u` raises an
+# "unbound variable" error. Branch explicitly so cards without attachments
+# reach OpenCode instead of failing before the investigation starts.
+if [ "${#ATTACH_ARGS[@]}" -gt 0 ]; then
+    ATTACH_ARGS=(-f "$CONTEXT_FILE" "${ATTACH_ARGS[@]}")
+else
+    ATTACH_ARGS=(-f "$CONTEXT_FILE")
+fi
 
 if [ "$MODE" = rework ]; then
     PROMPT_FILE="$SCRIPT_DIR/_prompt_rework.txt"

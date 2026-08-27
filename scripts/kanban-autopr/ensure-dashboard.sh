@@ -6,8 +6,33 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 SESSION="${AUTOPR_TMUX_SESSION:-matcha-autopr}"
+LOCK_DIR="${AUTOPR_TMUX_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-autopr-tmux.lock}"
+
+acquire_session_lock() {
+    local attempt=0 lock_mtime=0 now=0
+    mkdir -p "$(dirname "$LOCK_DIR")"
+    while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+        # Reclaim only an abandoned lock. Normal dashboard creation takes a
+        # fraction of a second, while five seconds of bounded waiting covers a
+        # simultaneous installer/LaunchAgent start without hiding a deadlock.
+        lock_mtime="$(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+        now="$(date +%s)"
+        if [ $((now - lock_mtime)) -gt 60 ] 2>/dev/null; then
+            rmdir "$LOCK_DIR" 2>/dev/null || true
+            continue
+        fi
+        attempt=$((attempt + 1))
+        if [ "$attempt" -ge 50 ]; then
+            echo "timed out waiting for dashboard startup lock: $LOCK_DIR" >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+    trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+}
 
 [ -x "$TMUX_BIN" ] || { echo "tmux is not executable: $TMUX_BIN" >&2; exit 1; }
+acquire_session_lock
 if [ "${1:-}" = --restart ] && "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; then
     "$TMUX_BIN" kill-session -t "$SESSION"
 fi

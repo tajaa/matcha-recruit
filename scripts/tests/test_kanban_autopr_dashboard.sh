@@ -19,7 +19,10 @@ cat > "$TMP_DIR/tmux" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AUTOPR_TEST_TMUX_LOG"
 if [ "$1" = has-session ]; then [ -e "$AUTOPR_TEST_SESSION" ]; exit; fi
-if [ "$1" = new-session ]; then touch "$AUTOPR_TEST_SESSION"; exit 0; fi
+if [ "$1" = new-session ]; then
+  mkdir "$AUTOPR_TEST_SESSION" 2>/dev/null || { echo "duplicate session" >&2; exit 1; }
+  exit 0
+fi
 if [ "$1" = display-message ]; then printf '%%0\n'; exit 0; fi
 if [ "$1" = split-window ]; then
   count=0
@@ -44,6 +47,27 @@ check "tmux panes receive operator-facing titles" \
   $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
     && grep -q 'live PR-creation work' "$TMP_DIR/tmux.log" \
     && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+
+rm -rf "$TMP_DIR/session" "$TMP_DIR/ensure.lock"
+: > "$TMP_DIR/tmux.log"
+rm -f "$TMP_DIR/splits"
+AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TMUX_LOCK_DIR="$TMP_DIR/ensure.lock" \
+  AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" AUTOPR_TEST_SESSION="$TMP_DIR/session" \
+  AUTOPR_TEST_SPLITS="$TMP_DIR/splits" "$AUTOPR_DIR/ensure-dashboard.sh" >/dev/null &
+first_pid=$!
+AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TMUX_LOCK_DIR="$TMP_DIR/ensure.lock" \
+  AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" AUTOPR_TEST_SESSION="$TMP_DIR/session" \
+  AUTOPR_TEST_SPLITS="$TMP_DIR/splits" "$AUTOPR_DIR/ensure-dashboard.sh" >/dev/null &
+second_pid=$!
+set +e
+wait "$first_pid"
+first_rc=$?
+wait "$second_pid"
+second_rc=$?
+set -e
+check "simultaneous dashboard starts create exactly one tmux session" \
+  $([ "$first_rc" = 0 ] && [ "$second_rc" = 0 ] \
+    && [ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] && echo 0 || echo 1)
 
 VIEW_DIR="$TMP_DIR/view"
 mkdir "$VIEW_DIR"

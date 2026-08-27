@@ -158,7 +158,11 @@ case "$url" in
         printf '[{"id":"event-1","event_type":"activity","metadata":{"body":"The screenshot still says note","attachment_ids":["file-1"]},"created_at":"2026-08-27T00:00:00Z"},{"id":"event-2","event_type":"review_rejected","metadata":{},"created_at":"2026-08-27T00:01:00Z"}]' > "$output_file"
         ;;
     */files)
-        printf '[{"id":"file-1","filename":"screen.png","storage_url":"https://files.invalid/screen.png","content_type":"image/png","file_size":8,"round_index":6,"created_at":"2026-08-27T00:00:00Z"}]' > "$output_file"
+        if [ "${AUTOPR_TEST_NO_FILES:-0}" = 1 ]; then
+            printf '[]' > "$output_file"
+        else
+            printf '[{"id":"file-1","filename":"screen.png","storage_url":"https://files.invalid/screen.png","content_type":"image/png","file_size":8,"round_index":6,"created_at":"2026-08-27T00:00:00Z"}]' > "$output_file"
+        fi
         ;;
     https://files.invalid/screen.png)
         printf 'png-stub' > "$output_file"
@@ -246,6 +250,22 @@ check "investigation context reserves bounded production diagnostics" \
 
 check "investigation normalizes validated confidence and triage" \
     $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
+
+# The real failure that blocked the first LaunchAgent-dispatched run happened
+# before OpenCode: Bash 3.2 + `set -u` rejected an empty attachment array.
+jq '.mode = "investigate"' "$TMP_DIR/card.json" > "$TMP_DIR/card-no-files.json"
+AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode-no-files" \
+OPENCODE_STUB_CONTEXT="$TMP_DIR/context-no-files.json" OPENCODE_STUB_REPORT="$TMP_DIR/report-no-files.md" \
+OPENCODE_STUB_DECISION="$TMP_DIR/decision-no-files.json" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
+    "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
+no_files_rc=$?
+check "investigation accepts a card with no attachments on macOS Bash" \
+    $([ "$no_files_rc" = 0 ] \
+      && [ "$(wc -l < "$TMP_DIR/opencode-no-files" | tr -d '[:space:]')" = 1 ] \
+      && jq -e '.downloaded_attachments == []' "$TMP_DIR/context-no-files.json" >/dev/null \
+      && echo 0 || echo 1)
 
 cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"
 jq '.outcome = "questions_only" | .questions = [] | .safe_changes_present = false' \
