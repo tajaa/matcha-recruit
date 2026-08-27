@@ -101,7 +101,7 @@ ENV PATH=/opt/node/bin:${PATH}
 # with a single COPY --from=agents /opt/node /opt/node.
 # ---------------------------------------------------------------------------
 FROM node AS agents
-ARG CODEX_VERSION=0.149.1
+ARG CODEX_VERSION=0.150.1
 ARG CLAUDE_CODE_VERSION=2.1.243
 ARG OPENCODE_VERSION=1.18.22
 RUN --mount=type=cache,target=/root/.npm,id=npm-agents \
