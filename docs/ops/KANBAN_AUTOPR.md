@@ -112,7 +112,8 @@ changes.
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
 6. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
-   restricted to `server/(app|tests)/*.py` and `client/src/*.{ts,tsx}`, plus the
+   restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
+   `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
    fix is. A card that genuinely needs a migration or infra change cannot be auto-PR'd —

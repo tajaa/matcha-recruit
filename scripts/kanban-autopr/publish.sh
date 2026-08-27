@@ -73,9 +73,9 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-disallowed_paths="$(git diff --cached --no-renames --name-only | grep -vE '^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx))$' || true)"
+disallowed_paths="$(git diff --cached --no-renames --name-only | grep -vE '^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$' || true)"
 if [ -n "$disallowed_paths" ]; then
-    echo "Refusing change outside server/app, server/tests, or client/src:" >&2
+    echo "Refusing change outside server/app, server/tests, client/src, or Espresso source:" >&2
     printf '%s\n' "$disallowed_paths" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
