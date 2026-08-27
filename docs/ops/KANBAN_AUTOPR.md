@@ -85,16 +85,22 @@ main-left layout:
   next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs
   from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
   refresh cannot create a cooldown marker or consume a card.
+- **active PR + live diff** — the active `bot/task-*` branch and cached card title before
+  publication, followed by its PR number, draft state, labels, checks, URL, changed files,
+  and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
+  runner worktree and never displays the ticket prompt or credential-bearing process
+  arguments.
 - **live PR-creation work** — current Actions job/step state from `gh run view`, plus only
   the local worker process names and elapsed times. It never prints command arguments,
   ticket prompts, or credentials.
 - **timer + runner health** — LaunchAgent state, self-hosted runner presence, and recent
   structured dispatch/skip/error events.
 
-The summary pane refreshes every 60 seconds, the work pane every 10 seconds, and health
-every 15 seconds. Override those intervals with `AUTOPR_DASHBOARD_REFRESH_SECONDS`,
+The summary pane refreshes every 60 seconds, the PR and work panes every 10 seconds, and
+health every 15 seconds. Override those intervals with
+`AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,
 `AUTOPR_WORK_REFRESH_SECONDS`, and `AUTOPR_HEALTH_REFRESH_SECONDS` before creating the
-session if needed.
+session if needed. Override `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 

@@ -40,13 +40,14 @@ AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
   AUTOPR_TEST_SESSION="$TMP_DIR/session" AUTOPR_TEST_SPLITS="$TMP_DIR/splits" \
   "$AUTOPR_DIR/ensure-dashboard.sh" >/dev/null
 
-check "tmux observer creates one session with three panes" \
+check "tmux observer creates one session with four panes" \
   $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] \
-    && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 2 ] && echo 0 || echo 1)
+    && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 3 ] && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
   $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
     && grep -q 'live PR-creation work' "$TMP_DIR/tmux.log" \
-    && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+    && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
+    && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
 
 rm -rf "$TMP_DIR/session" "$TMP_DIR/ensure.lock"
 : > "$TMP_DIR/tmux.log"
@@ -94,14 +95,49 @@ fi
 EOF
 chmod +x "$TMP_DIR/gh"
 
-AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
 check "24-hour dashboard shows now, next, queue, open PRs, and history" \
   $(grep -q 'WORKFLOW NOW' "$TMP_DIR/dashboard.out" \
     && grep -q 'UP NEXT' "$TMP_DIR/dashboard.out" \
     && grep -q 'BOARD QUEUE' "$TMP_DIR/dashboard.out" \
     && grep -q 'OPEN AUTO PRS' "$TMP_DIR/dashboard.out" \
     && grep -q 'MERGED AUTO PRS · LAST 24 HOURS' "$TMP_DIR/dashboard.out" \
-    && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" && echo 0 || echo 1)
+    && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
+    && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/git-pr" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = -C ] && shift 2
+case "$1 $2" in
+  "rev-parse --is-inside-work-tree") printf 'true\n' ;;
+  "branch --show-current") printf 'bot/task-80fa1e82\n' ;;
+  "rev-parse --verify") exit 0 ;;
+  "status --short") printf ' M client/src/ComplianceLocationModal.tsx\n' ;;
+  "diff --shortstat") printf ' 4 files changed, 26 insertions(+), 2 deletions(-)\n' ;;
+  "diff --name-status") printf 'M\tclient/src/ComplianceLocationModal.tsx\nM\tserver/app/compliance.py\n' ;;
+  "diff --no-ext-diff") printf 'diff --git a/client/src/ComplianceLocationModal.tsx b/client/src/ComplianceLocationModal.tsx\n+require manager approval\n' ;;
+esac
+EOF
+cat > "$TMP_DIR/gh-pr" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "pr list" ]; then
+  if [[ "$*" == *"--json number"* ]]; then printf '310\n';
+  else printf '[{"headRefName":"bot/task-80fa1e82","updatedAt":"2099-08-27T01:00:00Z"}]\n'; fi
+elif [ "$1 $2" = "pr view" ]; then
+  printf '%s\n' '{"number":310,"title":"🟡 [C93] Prevent double-booking","isDraft":true,"state":"OPEN","url":"https://example.invalid/pr/310","labels":[{"name":"autopr"},{"name":"needs-work"}],"headRefName":"bot/task-80fa1e82","updatedAt":"2099-08-27T01:00:00Z","reviewDecision":null,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}],"files":[{"path":"client/src/ComplianceLocationModal.tsx","additions":20,"deletions":2}],"additions":26,"deletions":2}'
+fi
+EOF
+chmod +x "$TMP_DIR/git-pr" "$TMP_DIR/gh-pr"
+
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-pr" AUTOPR_GIT_BIN="$TMP_DIR/git-pr" \
+  AUTOPR_RUNNER_WORKTREE="$TMP_DIR/runner-worktree" "$AUTOPR_DIR/watch-pr.sh" > "$TMP_DIR/pr-pane.out"
+check "PR pane shows real metadata, labels, worktree files, and live diff" \
+  $(grep -q 'PR #310  DRAFT' "$TMP_DIR/pr-pane.out" \
+    && grep -q 'needs-work' "$TMP_DIR/pr-pane.out" \
+    && grep -q '4 files changed' "$TMP_DIR/pr-pane.out" \
+    && grep -q 'CHANGED FILES · LIVE RUNNER WORKTREE' "$TMP_DIR/pr-pane.out" \
+    && grep -q 'ComplianceLocationModal' "$TMP_DIR/pr-pane.out" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"
