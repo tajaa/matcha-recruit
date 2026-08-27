@@ -20,6 +20,16 @@ def test_local_date_uses_location_timezone_and_falls_back_to_utc():
     assert local_date_at(instant, "not/a-real-timezone") == date(2026, 8, 26)
 
 
+def test_food_handler_tracking_migration_backfills_orphan_documents():
+    migration = Path(__file__).parents[2] / "alembic/versions/empsched14_food_handler_document_tracking.py"
+    source = migration.read_text()
+
+    assert "ADD COLUMN IF NOT EXISTS expires_at DATE" in source
+    assert "document_type='food_handler_card'" in source
+    assert "INSERT INTO employee_credential_requirements" in source
+    assert "applies_company_wide" in source
+
+
 class FakeConn:
     async def fetch(self, query, *args):
         if "employee_credential_requirements" in query:
@@ -330,9 +340,11 @@ class WarningWindowConn:
     def __init__(self, rows):
         self.rows = rows
         self.inserted: list[tuple] = []
+        self.query = ""
 
     async def fetch(self, query, *args):
         assert "employee_credential_requirements" in query
+        self.query = query
         return self.rows
 
     async def fetchval(self, query, *args):
@@ -349,6 +361,18 @@ def test_credential_inside_warning_window_opens_a_case():
         WarningWindowConn([row]), uuid4(), as_of=date(2026, 8, 21),
     ))
     assert len(opened) == 1
+
+
+def test_pending_renewal_with_known_expiry_still_participates_in_warning_sweep():
+    row = {"requirement_id": uuid4(), "employee_id": uuid4(),
+           "expires_at": date(2026, 8, 31), "legal_basis": None, "warning_days": 14,
+           "work_location_id": uuid4()}
+    conn = WarningWindowConn([row])
+
+    asyncio.run(open_expiring_eligibility_warnings(conn, uuid4(), as_of=date(2026, 8, 21)))
+
+    assert "ecr.status <> 'waived'" in conn.query
+    assert len(conn.inserted) == 1
 
 
 def test_expiring_credential_case_is_scoped_to_the_employees_assigned_location():
@@ -508,6 +532,22 @@ def test_expired_food_handler_card_removes_future_assignments_automatically():
     assert conn.deleted is True
     assert any("INSERT INTO schedule_eligibility_case_assignments" in query for query in conn.executed)
     assert any("action_status=$1" in query for query in conn.executed)
+
+
+class RemovedExpiredCardConn(AutoUnassignConn):
+    async def fetch(self, query, *args):
+        rows = await super().fetch(query, *args)
+        if "employee_credential_requirements" in query:
+            rows[0]["status"] = "pending"
+        return rows
+
+
+def test_removed_card_keeps_known_expiry_for_automatic_unassignment():
+    conn = RemovedExpiredCardConn()
+
+    asyncio.run(open_expired_eligibility_cases(conn, conn.company_id, as_of=date(2026, 8, 21)))
+
+    assert conn.deleted is True
 
 
 def test_auto_enforcement_removes_shifts_for_an_already_open_case():

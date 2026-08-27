@@ -107,6 +107,20 @@ def _credential_problem(row, *, as_of: date) -> tuple[str, str] | None:
     return None
 
 
+def _requires_automatic_expiry_unassignment(row, *, as_of: date) -> bool:
+    """A removed/rejected document must not erase a known enforcement date.
+
+    Pending renewal evidence still blocks as ``credential_missing`` for new
+    writes, but a curated auto-unassign policy uses the last confirmed expiry
+    to remove future assignments when that date passes.
+    """
+    return bool(row.get("auto_unassign_on_expiry", False)) and (
+        row.get("expires_at") is not None
+        and row["expires_at"] < as_of
+        and row.get("status") != "waived"
+    )
+
+
 async def _job_credential_rows(
     conn, *, company_id: UUID, employee_id: UUID, job_id: UUID,
 ) -> list:
@@ -321,7 +335,7 @@ async def open_expiring_eligibility_warnings(
         LEFT JOIN business_locations scope_location
           ON scope_location.id=COALESCE(future.location_id, e.work_location_id)
         WHERE e.org_id = $1 AND ecr.is_required = true AND ecr.applies_company_wide = true
-          AND ecr.status = 'verified' AND ecr.expires_at IS NOT NULL
+          AND ecr.status <> 'waived' AND ecr.expires_at IS NOT NULL
           {_BLOCKING_AUTHORITY_SQL}
         """, company_id,
     )
@@ -448,7 +462,9 @@ async def open_expired_eligibility_cases(
             if not primary_problem:
                 continue
             reason_code, _message = primary_problem
-            auto_unassign = bool(row.get("auto_unassign_on_expiry", False)) and reason_code == "credential_expired"
+            auto_unassign = _requires_automatic_expiry_unassignment(
+                row, as_of=local_date_at(instant, row.get("primary_timezone")),
+            )
             if not auto_unassign:
                 # Nothing upcoming to review — closing the stale warning beats
                 # opening a manager case with zero assignments.
@@ -470,8 +486,9 @@ async def open_expired_eligibility_cases(
             if not problem:
                 continue
             reason_code, _message = problem
-            auto_unassign = bool(row.get("auto_unassign_on_expiry", False)) and reason_code == "credential_expired"
-            case_reason_code = f"{reason_code}_auto_unassigned" if auto_unassign else reason_code
+            local_as_of = local_date_at(instant, timezone_name)
+            auto_unassign = _requires_automatic_expiry_unassignment(row, as_of=local_as_of)
+            case_reason_code = "credential_expired_auto_unassigned" if auto_unassign else reason_code
 
             # A prior warning (or legacy acknowledgement) occupies the active
             # case key.  Expiry must always turn it into the enforceable case.
@@ -573,8 +590,9 @@ async def open_expired_job_credential_cases(
             if not problem:
                 continue
             reason_code, _message = problem
-            auto_unassign = bool(row["auto_unassign_on_expiry"]) and reason_code == "credential_expired"
-            case_reason_code = f"{reason_code}_auto_unassigned" if auto_unassign else reason_code
+            local_as_of = local_date_at(instant, location_assignments[0].get("timezone"))
+            auto_unassign = _requires_automatic_expiry_unassignment(row, as_of=local_as_of)
+            case_reason_code = "credential_expired_auto_unassigned" if auto_unassign else reason_code
             case_id = await conn.fetchval(
                 """INSERT INTO schedule_eligibility_cases
                        (company_id, employee_id, location_id, job_id, requirement_type, requirement_id,

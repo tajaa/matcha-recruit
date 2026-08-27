@@ -4,6 +4,9 @@ import json
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 
 from app.database import get_connection
+from app.core.services.credential_template_service import (
+    materialize_uploaded_schedule_blocking_requirement,
+)
 from app.matcha.dependencies import require_employee_record
 
 router = APIRouter()
@@ -29,6 +32,7 @@ def _cred_doc_response(row) -> dict:
         "review_status": row.get("review_status", "pending"),
         "uploaded_via": row.get("uploaded_via", "portal"),
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+        "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
     }
 
 
@@ -64,6 +68,12 @@ async def portal_upload_credential_document(
     )
 
     async with get_connection() as conn:
+        await materialize_uploaded_schedule_blocking_requirement(
+            conn,
+            company_id=company_id,
+            employee_id=employee_id,
+            credential_type_key=document_type,
+        )
         row = await conn.fetchrow(
             """INSERT INTO credential_documents
                (company_id, employee_id, document_type, filename, file_path, mime_type, file_size, uploaded_by, uploaded_via)
