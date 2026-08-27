@@ -50,8 +50,10 @@ _kanban_autopr_validate_ci_scope() {
 mw_login() {
     _kanban_autopr_load_env
     local cache_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-    local token_file="$cache_dir/matcha-autopr-token"
-    if [ -s "$token_file" ]; then
+    local cache_identity token_file refresh="${1:-}"
+    cache_identity="$(printf '%s' "$MATCHA_BOT_EMAIL" | tr -c '[:alnum:].@_-' '_')"
+    token_file="$cache_dir/matcha-autopr-token-$cache_identity"
+    if [ "$refresh" != "--refresh" ] && [ -s "$token_file" ]; then
         cat "$token_file"
         return
     fi
@@ -62,8 +64,17 @@ mw_login() {
             '{email: $email, password: $password}')")"
     token="$(printf '%s' "$resp" | jq -r '.access_token // empty')"
     [ -n "$token" ] || die "login failed: $(printf '%s' "$resp" | jq -c '.detail // .' 2>/dev/null || echo "$resp")"
-    printf '%s' "$token" > "$token_file"
+    (umask 077; printf '%s' "$token" > "$token_file")
+    chmod 600 "$token_file"
     printf '%s' "$token"
+}
+
+_mw_api_request() {
+    local method="$1" path="$2" body="$3" token="$4" body_file="$5"
+    local -a args=(-sS -o "$body_file" -w '%{http_code}' -X "$method" "$MATCHA_API_URL$path"
+        -H "Authorization: Bearer $token" -H 'Content-Type: application/json')
+    [ -z "$body" ] || args+=(-d "$body")
+    curl "${args[@]}"
 }
 
 # mw_api METHOD PATH [JSON_BODY]
@@ -80,13 +91,13 @@ mw_api() {
     _kanban_autopr_validate_ci_scope
     token="$(mw_login)"
     body_file="$(mktemp)"
-    if [ -n "$body" ]; then
-        status="$(curl -sS -o "$body_file" -w '%{http_code}' -X "$method" "$MATCHA_API_URL$path" \
-            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-            -d "$body")"
-    else
-        status="$(curl -sS -o "$body_file" -w '%{http_code}' -X "$method" "$MATCHA_API_URL$path" \
-            -H "Authorization: Bearer $token")"
+    status="$(_mw_api_request "$method" "$path" "$body" "$token" "$body_file")"
+    if [ "$status" = "401" ]; then
+        # Tokens can expire between scheduled runs, and the configured API
+        # identity can change. Re-authenticate once and retry the request;
+        # a 401 means the server rejected it before applying any mutation.
+        token="$(mw_login --refresh)"
+        status="$(_mw_api_request "$method" "$path" "$body" "$token" "$body_file")"
     fi
     if [[ "$status" != 2* ]]; then
         die "$method $path -> HTTP $status: $(cat "$body_file")"
