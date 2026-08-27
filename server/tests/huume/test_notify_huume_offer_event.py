@@ -13,6 +13,8 @@ Prior bugs pinned here:
   navigates to a thread literally named "threads") instead of "/work/{id}".
 - thread_id was only bound partway through the try body, so a failure
   before that point raised NameError out of a "never raises" helper.
+- project collaborators and cross-tenant thread collaborators were omitted
+  or persisted under a company their notification bell did not poll.
 
     cd server && ./venv/bin/python -m pytest tests/huume/test_notify_huume_offer_event.py -q
 """
@@ -35,6 +37,8 @@ CREATOR_ID = uuid4()
 APPROVER_ID = uuid4()
 SENDER_ID = uuid4()
 COLLABORATOR_ID = uuid4()
+PROJECT_COLLABORATOR_ID = uuid4()
+CROSS_TENANT_COMPANY_ID = uuid4()
 
 
 def _conn_ctx(conn):
@@ -66,13 +70,18 @@ def _patch_side_effects(monkeypatch):
     return bulk
 
 
-def _thread_conn(*, thread=None, collaborators=None, approvers=None, sender_id=None):
+def _thread_conn(
+    *, thread=None, collaborators=None, approvers=None, sender_id=None,
+    recipient_companies=None,
+):
     conn = MagicMock()
     conn.fetchrow = AsyncMock(return_value=thread or {"id": THREAD_ID, "created_by": CREATOR_ID})
 
     async def fetch(query, *args):
         if "mw_thread_collaborators" in query:
             return collaborators or []
+        if "notification_company_id" in query:
+            return recipient_companies or []
         return approvers or []
 
     conn.fetch = AsyncMock(side_effect=fetch)
@@ -208,7 +217,11 @@ class TestNotificationShape:
     @pytest.mark.asyncio
     async def test_recipients_include_thread_collaborators_and_hr_approvers_deduped(self, monkeypatch):
         conn = _thread_conn(
-            collaborators=[{"user_id": CREATOR_ID}, {"user_id": COLLABORATOR_ID}],
+            collaborators=[
+                {"user_id": CREATOR_ID},
+                {"user_id": COLLABORATOR_ID},
+                {"user_id": PROJECT_COLLABORATOR_ID},
+            ],
             approvers=[{"id": CREATOR_ID}, {"id": APPROVER_ID}],
         )
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
@@ -219,8 +232,36 @@ class TestNotificationShape:
         )
 
         sent_ids = set(bulk.call_args.kwargs["user_ids"])
-        assert sent_ids == {CREATOR_ID, COLLABORATOR_ID, APPROVER_ID}
-        assert "mw_thread_collaborators" in conn.fetch.call_args_list[0].args[0]
+        assert sent_ids == {CREATOR_ID, COLLABORATOR_ID, PROJECT_COLLABORATOR_ID, APPROVER_ID}
+        collaborator_query = conn.fetch.call_args_list[0].args[0]
+        assert "mw_thread_collaborators" in collaborator_query
+        assert "mw_project_collaborators" in collaborator_query
+        assert "pc.status = 'active'" in collaborator_query
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_collaborator_uses_their_own_notification_company(self, monkeypatch):
+        conn = _thread_conn(
+            collaborators=[{"user_id": COLLABORATOR_ID}],
+            recipient_companies=[
+                {"user_id": CREATOR_ID, "notification_company_id": COMPANY_ID},
+                {"user_id": COLLABORATOR_ID, "notification_company_id": CROSS_TENANT_COMPANY_ID},
+            ],
+        )
+        monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        bulk = _patch_side_effects(monkeypatch)
+
+        await offer_letters_mod._notify_huume_thread_of_offer_event(
+            _base_offer(source_thread_id=THREAD_ID), event="accepted", detail="signed",
+        )
+
+        targets = dict(zip(
+            bulk.call_args.kwargs["user_ids"],
+            bulk.call_args.kwargs["company_ids"],
+        ))
+        assert targets == {
+            CREATOR_ID: COMPANY_ID,
+            COLLABORATOR_ID: CROSS_TENANT_COMPANY_ID,
+        }
 
     @pytest.mark.asyncio
     async def test_no_recipients_skips_notification_call_but_still_posts_message(self, monkeypatch):

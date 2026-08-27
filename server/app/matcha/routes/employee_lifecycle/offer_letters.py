@@ -712,8 +712,8 @@ async def _resolve_huume_offer_thread(offer: dict) -> dict | None:
         return None
 
 
-async def _resolve_huume_offer_recipients(offer: dict, thread: dict) -> set[UUID]:
-    """Return durable recipients; asset lookup is optional sender enrichment."""
+async def _resolve_huume_offer_recipients(offer: dict, thread: dict) -> dict[UUID, UUID]:
+    """Return each durable recipient keyed to the company their bell polls."""
     recipients: set[UUID] = set()
     if thread.get("created_by"):
         recipients.add(thread["created_by"])
@@ -721,7 +721,14 @@ async def _resolve_huume_offer_recipients(offer: dict, thread: dict) -> set[UUID
     try:
         async with get_connection() as conn:
             collaborator_rows = await conn.fetch(
-                "SELECT user_id FROM mw_thread_collaborators WHERE thread_id = $1",
+                """
+                SELECT user_id FROM mw_thread_collaborators WHERE thread_id = $1
+                UNION
+                SELECT pc.user_id
+                FROM mw_project_collaborators pc
+                JOIN mw_threads t ON t.project_id = pc.project_id
+                WHERE t.id = $1 AND pc.status = 'active'
+                """,
                 thread["id"],
             )
         recipients.update(row["user_id"] for row in collaborator_rows)
@@ -768,7 +775,42 @@ async def _resolve_huume_offer_recipients(offer: dict, thread: dict) -> set[UUID
             offer.get("id"), thread.get("id"),
         )
 
-    return recipients
+    # Notification reads are scoped to the recipient's current company. That
+    # may differ from the offer's company for accepted cross-tenant thread or
+    # project collaborators, so preserve recipient-specific company ids just
+    # like the channel-message fan-out does. Fall back to the offer company so
+    # a lookup failure cannot suppress otherwise valid notifications.
+    recipient_companies = {user_id: offer["company_id"] for user_id in recipients}
+    if recipients:
+        try:
+            async with get_connection() as conn:
+                company_rows = await conn.fetch(
+                    """
+                    SELECT u.id AS user_id,
+                           CASE
+                               WHEN u.role IN ('client', 'individual') THEN c.company_id
+                               WHEN u.role = 'employee' THEN e.org_id
+                               WHEN u.role = 'admin' THEN (
+                                   SELECT id FROM companies ORDER BY created_at, id LIMIT 1
+                               )
+                           END AS notification_company_id
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    WHERE u.id = ANY($1::uuid[])
+                    """,
+                    list(recipients),
+                )
+            for row in company_rows:
+                if row["notification_company_id"]:
+                    recipient_companies[row["user_id"]] = row["notification_company_id"]
+        except Exception:
+            logger.exception(
+                "[Huume] offer recipient company lookup failed offer=%s thread=%s",
+                offer.get("id"), thread.get("id"),
+            )
+
+    return recipient_companies
 
 
 async def _notify_huume_thread_of_offer_event(
@@ -790,7 +832,7 @@ async def _notify_huume_thread_of_offer_event(
         return
 
     thread_id = thread["id"]
-    recipient_ids = await _resolve_huume_offer_recipients(offer, thread)
+    recipient_companies = await _resolve_huume_offer_recipients(offer, thread)
 
     try:
         from app.matcha.services.matcha_work.matcha_work_document import apply_update
@@ -837,13 +879,13 @@ async def _notify_huume_thread_of_offer_event(
                 offer.get("id"), thread_id, event,
             )
 
-    if recipient_ids:
+    if recipient_companies:
         try:
             from app.matcha.services.notification_service import create_notifications_bulk
-            recipient_list = list(recipient_ids)
+            recipient_list = list(recipient_companies)
             await create_notifications_bulk(
                 user_ids=recipient_list,
-                company_ids=[offer["company_id"]] * len(recipient_list),
+                company_ids=[recipient_companies[user_id] for user_id in recipient_list],
                 type="huume_offer",
                 title=f"Offer {event}",
                 body=detail,
