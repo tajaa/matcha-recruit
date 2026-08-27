@@ -132,6 +132,7 @@ class BusinessLocation(BaseModel):
     naics: Optional[str] = None
     max_employees: Optional[int] = None
     annual_avg_employees: Optional[int] = None
+    timezone: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
