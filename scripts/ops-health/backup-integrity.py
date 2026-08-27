@@ -76,6 +76,9 @@ def evaluate_backup(objects: list[dict], probe: dict | None, now: datetime) -> d
         return {"status": "unknown", "failures": ["could not read newest backup from S3"], "backup": backup}
     if probe.get("downloaded_size_bytes") != newest["size_bytes"]:
         failures.append("downloaded backup size does not match S3 metadata")
+    pull_rc = probe.get("image_pull_rc")
+    if pull_rc not in (0, None):
+        return {"status": "unknown", "failures": ["backup probe image could not be pulled"], "backup": backup}
     restore_rc = probe.get("restore_list_rc")
     if not isinstance(restore_rc, int) or restore_rc < 0 or restore_rc >= 125:
         return {"status": "unknown", "failures": ["pg_restore probe could not run"], "backup": backup}

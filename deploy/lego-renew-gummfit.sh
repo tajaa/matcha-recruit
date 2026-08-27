@@ -29,9 +29,15 @@ export LEGO_DISABLE_CNAME_SUPPORT=true
 rc=$?
 # Re-assert wildcard A (idempotent; overwrite:false appends only if missing —
 # NEVER set true: true replaces the whole zone including the Google MX records)
-curl -s -X PUT https://developers.hostinger.com/api/dns/v1/zones/gummfit.com \
+# Status captured (not >/dev/null'd) because this call silently no-op'd for
+# weeks behind a dead HOSTINGER_API_TOKEN (2026-08 401 Unauthenticated) with
+# no visible signal in the journal.
+dns_http_code="$(curl -s -o /dev/null -w '%{http_code}' -X PUT https://developers.hostinger.com/api/dns/v1/zones/gummfit.com \
   -H "Authorization: Bearer ${HOSTINGER_API_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"overwrite\": false, \"zone\": [{\"name\": \"*\", \"records\": [{\"content\": \"54.177.107.107\"}], \"ttl\": 300, \"type\": \"A\"}]}" >/dev/null
-echo "[$(date)] gummfit renew cycle done (lego rc=$rc)"
+  -d "{\"overwrite\": false, \"zone\": [{\"name\": \"*\", \"records\": [{\"content\": \"54.177.107.107\"}], \"ttl\": 300, \"type\": \"A\"}]}")"
+if [ "$dns_http_code" != "200" ] && [ "$dns_http_code" != "201" ]; then
+  echo "[$(date)] WARNING: wildcard A re-assert failed, http=$dns_http_code" >&2
+fi
+echo "[$(date)] gummfit renew cycle done (lego rc=$rc, dns http=$dns_http_code)"
 exit $rc

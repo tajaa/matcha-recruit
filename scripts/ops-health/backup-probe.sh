@@ -44,7 +44,11 @@ REMOTE
         # a floating tag means the probe silently runs whatever content that
         # tag points to at fetch time. Bump deliberately via:
         #   crane digest public.ecr.aws/docker/library/postgres:15-alpine
-        PROBE_IMAGE='public.ecr.aws/docker/library/postgres@sha256:61fb6a038c515f2e2ed86cab0a683a1560ba08ad4c86d367cf98a279aa82a807'
+        # then VERIFY the new digest actually resolves before committing it —
+        # the previous pin (61fb6a03...) was never a real manifest on this
+        # registry or on docker.io and silently broke every run for weeks
+        # (image_pull_rc added below specifically to surface this class of bug).
+        PROBE_IMAGE='public.ecr.aws/docker/library/postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b'
         ssh_app <<REMOTE
 set -euo pipefail
 key='$KEY'
@@ -64,45 +68,58 @@ if [ -f "\$dump_file" ]; then
     downloaded_size=\$(wc -c < "\$dump_file" | tr -d '[:space:]')
 fi
 
+image_pull_rc=-1
 restore_list_rc=-1
 restore_scan_rc=-1
 toc_entries=0
 if [ "\$s3_rc" -eq 0 ] && [ "\$downloaded_size" = "\$expected_size" ]; then
-    # A complete local download avoids pipe/SIGPIPE ambiguity. First inspect the
-    # TOC, then extract every archive entry to /dev/null so corrupt data blocks
-    # cannot pass merely because the TOC is intact. Network-disabled Docker and
-    # no --dbname guarantee this never connects to or restores into any DB.
+    # Pull explicitly first so a bad/missing digest is its own distinguishable
+    # failure (image_pull_rc) instead of collapsing into the pg_restore rc,
+    # which previously made "image doesn't exist" look identical to
+    # "pg_restore couldn't run" in the report.
     set +e
-    docker run --rm --pull=missing --network none --read-only --cap-drop ALL \
-      --security-opt no-new-privileges \
-      -v "\$dump_file:/backup.dump:ro" \
-      "\$probe_image" \
-      pg_restore --list /backup.dump > "\$toc_file" 2>/dev/null
-    restore_list_rc=\$?
+    docker pull --quiet "\$probe_image" >/dev/null 2>&1
+    image_pull_rc=\$?
     set -e
-    if [ "\$restore_list_rc" -eq 0 ]; then
-        toc_entries=\$(grep -cE '^[0-9]+;' "\$toc_file" || true)
+    if [ "\$image_pull_rc" -eq 0 ]; then
+        # A complete local download avoids pipe/SIGPIPE ambiguity. First inspect
+        # the TOC, then extract every archive entry to /dev/null so corrupt data
+        # blocks cannot pass merely because the TOC is intact. Network-disabled
+        # Docker and no --dbname guarantee this never connects to or restores
+        # into any DB.
         set +e
-        docker run --rm --pull=missing --network none --read-only --cap-drop ALL \
+        docker run --rm --pull=never --network none --read-only --cap-drop ALL \
           --security-opt no-new-privileges \
           -v "\$dump_file:/backup.dump:ro" \
           "\$probe_image" \
-          pg_restore --exit-on-error --file=/dev/null /backup.dump >/dev/null 2>&1
-        restore_scan_rc=\$?
+          pg_restore --list /backup.dump > "\$toc_file" 2>/dev/null
+        restore_list_rc=\$?
         set -e
+        if [ "\$restore_list_rc" -eq 0 ]; then
+            toc_entries=\$(grep -cE '^[0-9]+;' "\$toc_file" || true)
+            set +e
+            docker run --rm --pull=never --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -v "\$dump_file:/backup.dump:ro" \
+              "\$probe_image" \
+              pg_restore --exit-on-error --file=/dev/null /backup.dump >/dev/null 2>&1
+            restore_scan_rc=\$?
+            set -e
+        fi
     fi
 fi
 
-python3 - "\$key" "\$expected_size" "\$downloaded_size" "\$s3_rc" "\$restore_list_rc" "\$restore_scan_rc" "\$toc_entries" <<'PY'
+python3 - "\$key" "\$expected_size" "\$downloaded_size" "\$s3_rc" "\$image_pull_rc" "\$restore_list_rc" "\$restore_scan_rc" "\$toc_entries" <<'PY'
 import json
 import sys
 
-key, expected, downloaded, s3_rc, restore_list_rc, restore_scan_rc, toc_entries = sys.argv[1:]
+key, expected, downloaded, s3_rc, image_pull_rc, restore_list_rc, restore_scan_rc, toc_entries = sys.argv[1:]
 print(json.dumps({
     "key": key,
     "expected_size_bytes": int(expected),
     "downloaded_size_bytes": int(downloaded),
     "s3_read_rc": int(s3_rc),
+    "image_pull_rc": int(image_pull_rc),
     "restore_list_rc": int(restore_list_rc),
     "restore_scan_rc": int(restore_scan_rc),
     "toc_entries": int(toc_entries),

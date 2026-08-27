@@ -99,6 +99,15 @@ def assess_worker(status: dict) -> dict:
         failures.append("matcha-worker.timer trigger age is unavailable")
     elif timer_age > 90 * 60:
         failures.append(f"matcha-worker.timer last triggered {timer_age // 60} minutes ago")
+    # lego-gummfit.service renews the *.gummfit.com wildcard cert daily. A
+    # broken renewal (e.g. a dead Hostinger DNS API token) is otherwise
+    # invisible until the 21-day TLS_WARN_SECONDS threshold trips — this adds
+    # ~75 days of earlier warning by watching the renewal service directly.
+    if status.get("lego_failed") == "failed":
+        failures.append("lego-gummfit.service (cert renewal) is in a failed state")
+    lego_result = status.get("lego_result", "missing")
+    if lego_result not in {"success", "", "missing"}:
+        failures.append(f"lego-gummfit.service last result is {lego_result}")
     return {"ok": not failures, "failures": failures}
 
 

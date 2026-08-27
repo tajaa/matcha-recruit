@@ -14,22 +14,27 @@ Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/
 
 ## Automated integrity checks
 
-`.github/workflows/operational-integrity-checks.yml` runs at 09:17 and 21:17
-UTC, three hours and seventeen minutes after each scheduled backup. It is
-read-only and can be dispatched manually.
+Two read-only workflows, split (2026-08-26) because they have unrelated
+scheduling constraints and previously shared one file:
 
-- **Backup integrity** runs from a hosted runner through the app EC2's existing
-  AWS identity. It selects the newest S3 object by `LastModified`, requires it
-  to be under 15 hours old and at least 1 MiB, downloads it to a restrictive
-  temporary file on the app host, checks its byte count, and runs PG15
-  `pg_restore --list` plus a full extraction to `/dev/null` in a network-disabled
-  container. The archive is deleted before the probe returns. This validates S3
-  availability and reads/decompresses every archive entry; it never connects to
-  a database and is not a full restore rehearsal.
-- **Schema drift** runs on Finch's self-hosted Mac because dev is the shared
-  local `matcha-postgres` container. It never starts that container. It compares
-  the exact sorted multi-row `public.alembic_version` sets from dev and live
-  `matcha-postgres-prod`, then only on a mismatch captures read-only,
+- **`.github/workflows/operational-integrity-checks.yml`** — **backup
+  integrity** only. Runs at 09:17 and 21:17 UTC, three hours and seventeen
+  minutes after each scheduled backup, from a hosted runner through the app
+  EC2's existing AWS identity. It selects the newest S3 object by
+  `LastModified`, requires it to be under 15 hours old and at least 1 MiB,
+  downloads it to a restrictive temporary file on the app host, checks its
+  byte count, and runs PG15 `pg_restore --list` plus a full extraction to
+  `/dev/null` in a network-disabled container. The archive is deleted before
+  the probe returns. This validates S3 availability and reads/decompresses
+  every archive entry; it never connects to a database and is not a full
+  restore rehearsal.
+- **`.github/workflows/schema-drift-checks.yml`** — **schema drift**. Runs at
+  17:17 UTC (10:17 PDT) on Finch's self-hosted Mac because dev is the shared
+  local `matcha-postgres` container; that cron deliberately targets a time the
+  Mac is normally awake — the old shared 09:17/21:17 cron sat the job queued
+  for hours against a sleeping runner. It never starts the shared container. It
+  compares the exact sorted multi-row `public.alembic_version` sets from dev
+  and live `matcha-postgres-prod`, then only on a mismatch captures read-only,
   schema-only PG15 dumps and compares normalized object sections. It does not
   import application startup, `init_db()`, or the partial ORM metadata.
 

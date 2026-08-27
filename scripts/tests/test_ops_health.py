@@ -68,6 +68,35 @@ def test_worker_rejects_stale_timer_trigger():
     assert "90 minutes ago" in result["failures"][0]
 
 
+def test_worker_ignores_lego_status_when_absent_for_backward_compatibility():
+    result = availability.assess_worker({
+        "worker": "running",
+        "celery_ping": "ok",
+        "timer_enabled": "enabled",
+        "timer_active": "active",
+        "timer_last": "Tue 2026-08-25 00:00:00 UTC",
+        "timer_age_seconds": "60",
+        "timer_result": "success",
+    })
+    assert result["ok"] is True
+
+
+def test_worker_flags_failed_cert_renewal_service():
+    result = availability.assess_worker({
+        "worker": "running",
+        "celery_ping": "ok",
+        "timer_enabled": "enabled",
+        "timer_active": "active",
+        "timer_last": "Tue 2026-08-25 00:00:00 UTC",
+        "timer_age_seconds": "60",
+        "timer_result": "success",
+        "lego_result": "exit-code",
+        "lego_failed": "failed",
+    })
+    assert result["ok"] is False
+    assert any("lego-gummfit" in f for f in result["failures"])
+
+
 def _error(message: str, occurrences: int, *, level: str = "ERROR", error_id: str = "e1") -> dict:
     return {
         "id": error_id,

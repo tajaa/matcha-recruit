@@ -67,6 +67,8 @@ jobs:
             printf 'TIMER_AGE_SECONDS|-1\n'
           fi
           printf 'TIMER_RESULT|'; systemctl show matcha-worker.service -p Result --value 2>/dev/null || true; printf '\n'
+          printf 'LEGO_RESULT|'; systemctl show lego-gummfit.service -p Result --value 2>/dev/null || printf 'missing'; printf '\n'
+          printf 'LEGO_FAILED|'; systemctl is-failed lego-gummfit.service 2>/dev/null || true; printf '\n'
           REMOTE
 
       - name: Collect database-host status
