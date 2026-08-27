@@ -14,6 +14,16 @@ is listed in `files` but absent from `downloaded_attachments`, say that the
 missing evidence prevents a safe conclusion instead of guessing from its
 filename.
 
+The trusted harness also supplies production evidence. `production` identifies
+the exact live frontend build, backend/frontend image SHAs, and production
+Alembic revisions; `changes_since_production` lists code already merged after
+the live images; `production_recent_errors` and `production_log_signals` are
+bounded and redacted. Use them to distinguish a current code bug from an
+already-merged-but-not-deployed fix or an unapplied migration. Recent errors
+may be unrelated to this card: only use one when its route, exception, or
+failure signature actually correlates with the ticket evidence. Never infer
+that the database has a missing column merely because a migration exists.
+
 If the card's `repo_paths` field is non-empty, stay inside those glob
 patterns — that is the part of the repo this card's element is scoped to.
 If it is empty, use your judgment from the card title/description/category.
@@ -43,8 +53,10 @@ there will be discarded and treated as untrustworthy if left in.
 If the card is too vague, too broad, or requires a database migration/schema
 change to implement safely, write the report anyway (Confidence: none, and
 say specifically what's missing or why it needs a human) and make NO code
-changes. A migration is always a "make no changes" case — schema changes are
-human-reviewed only, never auto-applied.
+changes. If the repository already contains the fix after the production SHA,
+make no duplicate change and say that deployment is the remaining action. A
+migration is always a "make no changes" case — schema changes are human-reviewed
+only, never auto-applied.
 
 Hard limits, no exceptions:
 - Do not access production, environment variables, credentials, network

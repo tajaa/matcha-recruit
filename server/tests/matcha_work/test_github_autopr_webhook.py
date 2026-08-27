@@ -12,6 +12,27 @@ def test_autopr_marker_preserves_existing_progress_and_is_idempotent():
     assert github._with_autopr_progress_note(marked) == marked
 
 
+def test_autopr_marker_recovers_production_build_from_pr_trailers():
+    body = """<!-- matcha-production-build: 550 -->
+<!-- matcha-production-backend-sha: c5d3a49 -->
+<!-- matcha-production-frontend-sha: c5d3a49 -->"""
+
+    marked = github._with_autopr_progress_note(
+        "Waiting on QA",
+        pr_body=body,
+        pr_number=295,
+    )
+
+    assert marked == "from auto setup · build 550 · prod c5d3a49 · PR #295 · Waiting on QA"
+
+    reworked = github._with_autopr_progress_note(
+        "from auto setup · build 549 · prod abc1234 · PR #294 · Waiting on QA",
+        pr_body=body,
+        pr_number=295,
+    )
+    assert reworked == marked
+
+
 @pytest.mark.asyncio
 async def test_merged_autopr_moves_card_to_review_and_marks_its_origin(monkeypatch):
     task_id, project_id = uuid4(), uuid4()
