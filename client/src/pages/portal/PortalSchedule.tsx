@@ -198,7 +198,6 @@ function ShiftCard({ shift, coworkers, teamShifts, onChanged }: { shift: Shift; 
   const [busy, setBusy] = useState(false)
   const targetShifts = teamShifts.filter((candidate) => (
     candidate.id !== shift.id
-    && candidate.starts_at.slice(0, 10) !== shift.starts_at.slice(0, 10)
     && candidate.assignments.some((assignment) => assignment.employee_id === targetEmployeeId)
   ))
 
