@@ -89,8 +89,7 @@ export function Hero() {
           className="tracking-[-0.02em] text-[clamp(2.4rem,5.6vw,5rem)] max-w-[19ch] sm:max-w-none"
           style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.02 }}
         >
-          We run the whole <span style={{ fontStyle: "italic" }}>risk</span> &amp;{" "}
-          <span style={{ fontStyle: "italic" }}>people</span> function.
+          The operating system for every <span style={{ fontStyle: "italic" }}>location</span>.
         </h1>
 
         {/* Deck row — subhead left, conversion right. `md:` is the band the
@@ -108,10 +107,10 @@ export function Hero() {
             }}
           >
             <span style={{ color: "#FFFFFF" }}>
-              Managing your risk before your risk manages you.
+              Keep every location current and every shift on track.
             </span>{" "}
             <span style={{ color: ASH, fontStyle: "italic" }}>
-              Workplace safety, compliance, and risk analysis.
+              Location-aware compliance, labor-law and break guidance, inventory and cost analysis, and one place for shift notes and completed work.
             </span>
           </p>
 
