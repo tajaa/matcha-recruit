@@ -675,7 +675,7 @@ async def ensure_location_for_employee(
                 )
                 try:
                     await run_compliance_check_background(
-                        lid, cid, check_type="auto_derive", allow_live_research=True,
+                        lid, cid, check_type="proactive", allow_live_research=True,
                     )
                 except Exception:
                     logger.exception("[Compliance] Background compliance check failed for location %s", lid)
