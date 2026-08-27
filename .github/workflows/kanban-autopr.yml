@@ -2,14 +2,16 @@ name: Kanban autopr
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 # This must run on Finch's Mac. It uses that user's authenticated OpenCode
 # profile; the Matcha bot credential lives in ~/.config/matcha-autopr/env
 # (chmod 600, never committed, never a GitHub secret) — same design
 # constraint as silent-error-autofix.yml. This workflow never touches prod
-# Postgres; it reads/writes the board over HTTPS as the bot.
+# Postgres; it reads/writes the production board over HTTPS as the bot. The
+# concurrency group collapses queued ticks while the one-slot Mac runner is
+# busy, so a five-minute schedule does not create overlapping coding jobs.
 permissions:
   contents: write
   pull-requests: write

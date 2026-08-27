@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 _kanban_autopr_load_env
+_kanban_autopr_validate_ci_scope
 
 out="[]"
 IFS=',' read -ra PROJECT_IDS <<< "$MATCHA_PROJECT_IDS"
@@ -61,7 +62,10 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 review_cycle_count: $t.review_cycle_count,
                 pr_url: $t.pr_url,
                 pr_number: $t.pr_number,
-                progress_note: $t.progress_note
+                progress_note: $t.progress_note,
+                # Keep attachment metadata available for ranking/debugging,
+                # but never put short-lived signed storage URLs in card.json.
+                attachments: (($t.attachments // []) | map(del(.storage_url)))
               }
           )
     ')"

@@ -1,8 +1,9 @@
 # Kanban Autopr
 
-`.github/workflows/kanban-autopr.yml` runs every 30 minutes on the same self-hosted Mac
-runner as `silent-error-autofix.yml` (they share the runner's one job slot, hence the
-30-minute cadence rather than 10). The unit of work is one kanban card assigned to
+`.github/workflows/kanban-autopr.yml` is scheduled every 5 minutes on the same
+self-hosted Mac runner as `silent-error-autofix.yml`. The runner has one job slot, so a
+long coding job can delay the next start; the workflow concurrency group collapses
+queued ticks and prevents overlap. The unit of work is one kanban card assigned to
 `haley@oceaneca.com` sitting in `todo` or `changes_requested`, across four fixed
 Espresso projects — WerkWerk, Beetlejuse, Gummfit, and MATCHA. It never scans the whole
 board or every user's cards.
@@ -44,6 +45,9 @@ changes.
    MATCHA_PROJECT_IDS=7f728636-3219-4d83-9df3-a4682e3242de,fade10b4-36ff-4c60-af59-5cc6058285ab,84823d21-c752-4abd-9696-4c93c8b3c21e,8b924347-d6e4-4000-8e7d-ca8f46f76fba
    MATCHA_ASSIGNEE_EMAIL=haley@oceaneca.com
    ```
+   Scheduled GitHub runs fail closed if `MATCHA_API_URL` points at localhost or
+   if any of the four project ids is missing. This prevents a production PR from
+   being linked to a dev-only card.
 3. Install the checkout hook in the real clone: `./scripts/kanban-autopr/install-hooks.sh`.
 4. Upgrade the repo's GitHub webhook to also deliver `pull_request` (idempotent — safe to
    re-run against an already-installed hook): call the existing
@@ -70,11 +74,18 @@ changes.
    it there by hand, so it's treated like a fresh `todo` card. A durable no-spec ledger
    lives on the card itself (`progress_note` prefixed `[autopr:no-spec <date>]`) rather
    than a GitHub issue — it's the thing that stops an unscopable card being re-run every
-   30 minutes forever, it's visible to the human who owns the card, and it clears itself
-   the moment `last_moved_at` advances past the marker date. Caps at 3 open `autopr` PRs.
-3. **`investigate.sh`** — `todo` mode implements the card (evidence: the card + its
-   subtasks); `rework` mode addresses `review_note` plus the existing PR's unresolved
-   review comments, without re-litigating what the diff already does. Both require a
+   five minutes forever, it's visible to the human who owns the card, and it clears itself
+   the moment `last_moved_at` advances past the marker date. A failed attempt cools down
+   for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
+   starving the queue on one broken task. Caps at 3 open `autopr` PRs.
+3. **`investigate.sh`** — both modes receive a single context bundle containing the card,
+   every checklist round, full task history/discussion, and task-file metadata. Up to 12
+   attachments (25 MB total), prioritized to the current round, are downloaded by the
+   trusted harness and attached locally; the model never needs board or storage network
+   access. `todo` mode implements the card; `rework` mode additionally receives the
+   existing PR's reviews/comments and addresses the latest `review_note`, rejection
+   events, discussion, and screenshots without re-litigating accepted earlier rounds.
+   Both require a
    report with `### Summary` / `### Changes` / `### Blast radius` / `### Confidence`.
    Bails to the no-spec path on `Confidence: none`, no diff, or more than 25 changed
    files — a card that sprawls needed a human to scope it.

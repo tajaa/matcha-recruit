@@ -2,6 +2,9 @@
 # Shared helpers for scripts/kanban-autopr/*.sh. Source, don't execute.
 set -uo pipefail
 
+KANBAN_AUTOPR_PROD_API_URL="https://hey-matcha.com/api"
+KANBAN_AUTOPR_PROJECT_IDS="7f728636-3219-4d83-9df3-a4682e3242de,fade10b4-36ff-4c60-af59-5cc6058285ab,84823d21-c752-4abd-9696-4c93c8b3c21e,8b924347-d6e4-4000-8e7d-ca8f46f76fba"
+
 die() {
     printf 'kanban-autopr: %s\n' "$1" >&2
     exit 1
@@ -21,6 +24,24 @@ _kanban_autopr_load_env() {
     for key in MATCHA_API_URL MATCHA_BOT_EMAIL MATCHA_BOT_PASSWORD MATCHA_PROJECT_IDS MATCHA_ASSIGNEE_EMAIL; do
         [ -n "${!key:-}" ] || die "missing config key: $key (in $env_file)"
     done
+}
+
+# A scheduled GitHub job must never silently build PRs from a developer's
+# localhost clone of the board. Local/manual script runs may still point at a
+# dev API, but Actions is the production automation and therefore fails closed
+# unless both its API and fixed project allowlist match the documented setup.
+_kanban_autopr_validate_ci_scope() {
+    [ "${GITHUB_ACTIONS:-}" = "true" ] || return 0
+
+    local api_url="${MATCHA_API_URL%/}"
+    [ "$api_url" = "$KANBAN_AUTOPR_PROD_API_URL" ] \
+        || die "GitHub Actions must use $KANBAN_AUTOPR_PROD_API_URL (got $api_url)"
+
+    local actual expected
+    actual="$(printf '%s' "$MATCHA_PROJECT_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort | paste -sd, -)"
+    expected="$(printf '%s' "$KANBAN_AUTOPR_PROJECT_IDS" | tr ',' '\n' | sort | paste -sd, -)"
+    [ "$actual" = "$expected" ] \
+        || die "GitHub Actions MATCHA_PROJECT_IDS must contain all four configured Espresso projects"
 }
 
 # Logs in once per job and caches the access token in $RUNNER_TEMP (falls
@@ -50,6 +71,13 @@ mw_login() {
 mw_api() {
     local method="$1" path="$2" body="${3:-}"
     local token status body_file
+
+    # `token="$(mw_login)"` executes mw_login in a subshell. Environment
+    # variables sourced only inside that command substitution disappear before
+    # the curl below runs, which previously made publish.sh die with
+    # `MATCHA_API_URL: unbound variable` after it had already opened the PR.
+    _kanban_autopr_load_env
+    _kanban_autopr_validate_ci_scope
     token="$(mw_login)"
     body_file="$(mktemp)"
     if [ -n "$body" ]; then

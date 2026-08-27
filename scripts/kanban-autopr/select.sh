@@ -23,7 +23,7 @@ mkdir -p "$ATTEMPTS_DIR"
 
 NOTHING_TO_DO=3
 MAX_OPEN_AUTOPR_PRS=3
-ATTEMPT_COOLDOWN_HOURS=2
+ATTEMPT_COOLDOWN_MINUTES="${AUTOPR_ATTEMPT_COOLDOWN_MINUTES:-15}"
 
 count="$(jq 'length' "$CARDS_FILE")"
 [ "$count" -gt 0 ] || exit "$NOTHING_TO_DO"
@@ -42,9 +42,9 @@ already_handled() {
 
     local attempt_marker="$ATTEMPTS_DIR/$id8"
     if [ -f "$attempt_marker" ]; then
-        local age_h
-        age_h=$(( ( $(date +%s) - $(date -r "$attempt_marker" +%s 2>/dev/null || echo 0) ) / 3600 ))
-        if [ "$age_h" -lt "$ATTEMPT_COOLDOWN_HOURS" ]; then
+        local age_s
+        age_s=$(( $(date +%s) - $(date -r "$attempt_marker" +%s 2>/dev/null || echo 0) ))
+        if [ "$age_s" -lt $((ATTEMPT_COOLDOWN_MINUTES * 60)) ]; then
             echo skip
             return
         fi

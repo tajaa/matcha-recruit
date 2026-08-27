@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Exercises the kanban-autopr harness without touching Matcha, GitHub, or a
+# real model. All network/model commands are stubbed on PATH.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+AUTOPR_DIR="$REPO_ROOT/scripts/kanban-autopr"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+PASS=0
+FAIL=0
+check() {
+    local desc="$1" ok="$2"
+    if [ "$ok" = "0" ]; then
+        echo "PASS: $desc"; PASS=$((PASS + 1))
+    else
+        echo "FAIL: $desc"; FAIL=$((FAIL + 1))
+    fi
+}
+
+workflow="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
+check "workflow checks the card queue every five minutes" \
+    $(grep -qF "cron: '*/5 * * * *'" "$workflow" && echo 0 || echo 1)
+
+################################################################################
+# mw_api must load config in its own shell, not only mw_login's command
+# substitution (the bug that opened a PR and then failed to patch its card).
+################################################################################
+env_file="$TMP_DIR/env"
+printf '%s\n' \
+    'MATCHA_API_URL=https://example.invalid/api' \
+    'MATCHA_BOT_EMAIL=bot@example.com' \
+    'MATCHA_BOT_PASSWORD=secret' \
+    'MATCHA_PROJECT_IDS=one' \
+    'MATCHA_ASSIGNEE_EMAIL=owner@example.com' > "$env_file"
+
+source "$AUTOPR_DIR/lib.sh"
+mw_login() {
+    _kanban_autopr_load_env
+    printf token
+}
+curl() {
+    local output_file="" arg
+    printf '%s\n' "$*" > "$TMP_DIR/curl_args"
+    while [ "$#" -gt 0 ]; do
+        arg="$1"; shift
+        if [ "$arg" = "-o" ]; then output_file="$1"; shift; fi
+    done
+    [ -z "$output_file" ] || printf '{"ok":true}' > "$output_file"
+    printf 200
+}
+unset MATCHA_API_URL MATCHA_BOT_EMAIL MATCHA_BOT_PASSWORD MATCHA_PROJECT_IDS MATCHA_ASSIGNEE_EMAIL
+MATCHA_AUTOPR_ENV="$env_file" mw_api GET /probe > "$TMP_DIR/api_result" 2>/dev/null
+api_rc=$?
+check "mw_api keeps MATCHA_API_URL available after login" \
+    $([ "$api_rc" = "0" ] && grep -qF 'https://example.invalid/api/probe' "$TMP_DIR/curl_args" && echo 0 || echo 1)
+
+set -a
+source "$env_file"
+set +a
+( GITHUB_ACTIONS=true _kanban_autopr_validate_ci_scope ) > /dev/null 2>&1
+check "scheduled runs reject a localhost/non-production board target" \
+    $([ "$?" != "0" ] && echo 0 || echo 1)
+unset GITHUB_ACTIONS
+unset -f curl mw_login
+
+################################################################################
+# investigate.sh packages checklist, history/discussion, GitHub feedback, and
+# downloaded card files into one context passed to the model.
+################################################################################
+mkdir -p "$TMP_DIR/bin" "$TMP_DIR/runner"
+cat > "$TMP_DIR/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+output_file=""
+write_status=0
+url=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output_file="$2"; shift 2 ;;
+        -w) write_status=1; shift 2 ;;
+        http://*|https://*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+if [[ "$url" == */auth/login ]]; then
+    printf '{"access_token":"stub-token"}'
+    exit 0
+fi
+case "$url" in
+    */subtasks)
+        printf '[{"id":"sub-1","title":"Fix current label","is_done":false,"position":0,"round_index":6}]' > "$output_file"
+        ;;
+    */history)
+        printf '[{"id":"event-1","event_type":"activity","metadata":{"body":"The screenshot still says note","attachment_ids":["file-1"]},"created_at":"2026-08-27T00:00:00Z"},{"id":"event-2","event_type":"review_rejected","metadata":{},"created_at":"2026-08-27T00:01:00Z"}]' > "$output_file"
+        ;;
+    */files)
+        printf '[{"id":"file-1","filename":"screen.png","storage_url":"https://files.invalid/screen.png","content_type":"image/png","file_size":8,"round_index":6,"created_at":"2026-08-27T00:00:00Z"}]' > "$output_file"
+        ;;
+    https://files.invalid/screen.png)
+        printf 'png-stub' > "$output_file"
+        ;;
+    *)
+        printf '{}' > "$output_file"
+        ;;
+esac
+[ "$write_status" = "0" ] || printf 200
+EOF
+chmod +x "$TMP_DIR/bin/curl"
+
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+    "pr list") printf '44\n' ;;
+    "pr view") printf '{"reviews":[{"body":"Use Journal everywhere"}],"comments":[]}' ;;
+esac
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+
+cat > "$TMP_DIR/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-f" ]; then
+        printf '%s\n' "$2" >> "$OPENCODE_STUB_FILES"
+        [ "$(basename "$2")" != "context.json" ] || cp "$2" "$OPENCODE_STUB_CONTEXT"
+        shift 2
+    else
+        shift
+    fi
+done
+cat > "$OPENCODE_STUB_REPORT" <<'REPORT'
+### Summary
+stub
+### Changes
+stub
+### Blast radius
+stub
+### Confidence
+high
+REPORT
+EOF
+chmod +x "$TMP_DIR/bin/opencode"
+
+cat > "$TMP_DIR/card.json" <<'EOF'
+{"task_id":"f296d090-0000-4000-8000-000000000001","id8":"f296d090","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Standardize terminology","mode":"rework","review_note":"No change, including screenshot"}
+EOF
+
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/runner" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode_files" \
+OPENCODE_STUB_CONTEXT="$TMP_DIR/context.json" OPENCODE_STUB_REPORT="$TMP_DIR/report.md" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" > /dev/null 2>&1
+investigate_rc=$?
+
+context_ok=1
+if [ "$investigate_rc" = "0" ] \
+    && jq -e '.subtasks[0].round_index == 6 and .history[0].metadata.body == "The screenshot still says note" and .downloaded_attachments[0].id == "file-1" and (.files[0] | has("storage_url") | not)' "$TMP_DIR/context.json" > /dev/null \
+    && grep -q '/attachments/01-screen.png' "$TMP_DIR/opencode_files" \
+    && grep -q '/feedback.json' "$TMP_DIR/opencode_files"; then
+    context_ok=0
+fi
+check "rework investigation receives discussion, checklist, PR feedback, and screenshot" "$context_ok"
+
+check "collector preserves task attachment metadata" \
+    $(grep -qF 'attachments: (($t.attachments // []) | map(del(.storage_url)))' "$AUTOPR_DIR/collect.sh" && echo 0 || echo 1)
+
+################################################################################
+# Changes Requested wins over Todo, and a just-attempted card cools down while
+# the next five-minute tick advances to another eligible card.
+################################################################################
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--label autopr"* ]]; then
+    printf '0\n'
+else
+    printf '[]\n'
+fi
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+
+cat > "$TMP_DIR/cards.json" <<'EOF'
+[
+  {"task_id":"11111111-0000-4000-8000-000000000001","id8":"11111111","project_id":"p","title":"Older todo","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"},
+  {"task_id":"22222222-0000-4000-8000-000000000002","id8":"22222222","project_id":"p","title":"Review feedback","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+
+select_cache="$TMP_DIR/select-cache"
+first_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$select_cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json")"
+check "selector prioritizes Changes Requested over Todo" \
+    $([ "$(printf '%s' "$first_selected" | jq -r '.id8')" = "22222222" ] && echo 0 || echo 1)
+
+second_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$select_cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json")"
+check "cooldown lets the next tick advance to another card" \
+    $([ "$(printf '%s' "$second_selected" | jq -r '.id8')" = "11111111" ] && echo 0 || echo 1)
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
