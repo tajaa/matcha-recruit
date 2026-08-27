@@ -300,6 +300,7 @@ class ScheduleRequestCreate(BaseModel):
     request_type: RequestType
     shift_id: Optional[UUID] = None
     target_employee_id: Optional[UUID] = None
+    counter_shift_id: Optional[UUID] = None
     unavailable_start: Optional[date] = None
     unavailable_end: Optional[date] = None
     reason: Optional[str] = Field(None, max_length=2000)
@@ -310,6 +311,12 @@ class ScheduleRequestCreate(BaseModel):
             raise ValueError("shift_id is required for swap/drop/pickup requests")
         if self.request_type == "swap" and self.target_employee_id is None:
             raise ValueError("target_employee_id is required for swap requests")
+        if self.request_type == "swap" and self.counter_shift_id is None:
+            raise ValueError("counter_shift_id is required for swap requests")
+        if self.request_type == "swap" and self.counter_shift_id == self.shift_id:
+            raise ValueError("a swap needs two different shifts")
+        if self.request_type != "swap" and self.counter_shift_id is not None:
+            raise ValueError("counter_shift_id is only valid for swap requests")
         if self.request_type == "unavailable":
             if self.unavailable_start is None or self.unavailable_end is None:
                 raise ValueError("unavailable_start and unavailable_end are required")

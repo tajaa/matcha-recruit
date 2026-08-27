@@ -192,6 +192,15 @@ def test_swap_and_drop_require_a_shift():
             ScheduleRequestCreate(request_type=request_type, reason="cover me")
 
 
+def test_swap_requires_a_specific_counter_shift():
+    with pytest.raises(ValidationError, match="counter_shift_id is required"):
+        ScheduleRequestCreate(
+            request_type="swap",
+            shift_id="11111111-1111-1111-1111-111111111111",
+            target_employee_id="22222222-2222-2222-2222-222222222222",
+        )
+
+
 def test_unavailable_requires_a_date_range():
     with pytest.raises(ValidationError):
         ScheduleRequestCreate(request_type="unavailable", reason="vacation")

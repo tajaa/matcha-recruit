@@ -239,12 +239,16 @@ export interface ScheduleRequest {
   shift_id: string | null
   shift_starts_at: string | null
   shift_ends_at: string | null
+  shift_role?: string | null
+  shift_department?: string | null
   target_employee_id: string | null
   target_employee_name?: string | null
   counter_shift_id: string | null
   counterparty_confirmed_at: string | null
   counter_shift_starts_at: string | null
   counter_shift_ends_at: string | null
+  counter_shift_role?: string | null
+  counter_shift_department?: string | null
   unavailable_start: string | null
   unavailable_end: string | null
   reason: string | null
