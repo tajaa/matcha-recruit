@@ -3,7 +3,18 @@ from datetime import date
 from unittest import mock
 from uuid import uuid4
 
+from app.workers import celery_app
 from app.workers.tasks import schedule_eligibility
+
+
+def test_schedule_eligibility_task_is_registered():
+    assert "app.workers.tasks.schedule_eligibility" in celery_app.celery_app.conf.include
+    assert (
+        "schedule_eligibility",
+        "app.workers.tasks.schedule_eligibility",
+        "run_schedule_eligibility",
+    ) in celery_app._SCHEDULED_TASKS
+    assert schedule_eligibility.run_schedule_eligibility.name == "schedule_eligibility.run"
 
 
 class WarningRecipientConn:
