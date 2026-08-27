@@ -55,9 +55,11 @@ One of: high, medium, low, none — plus what would raise it.
 Do NOT write anything about tests, test results, or verification in the
 report — a separate process runs and reports tests.
 
-If the feedback cannot be safely addressed from the evidence given, write the
-report anyway (Confidence: none, and say what's missing) and make NO code
-changes.
+If the feedback cannot be safely addressed because product intent or evidence
+is missing, write the report and make no code changes; the decision JSON must
+use `questions_only` with concrete choices. Use `no_safe_action` only when the
+reason is already_fixed, migration_required, policy_blocked, or
+external_dependency.
 
 Hard limits, no exceptions:
 - Do not access production, environment variables, credentials, network
@@ -68,3 +70,40 @@ Hard limits, no exceptions:
   manifests, or server/alembic/.
 - Do not touch more than 25 files total (including what the existing diff
   already touched).
+
+In addition to REPORT_PATH, write a JSON object to DECISION_PATH. This is a
+machine-readable decision used by a trusted shell; it must be valid JSON and
+contain no markdown fences. Use this exact shape:
+
+{
+  "schema_version": 1,
+  "outcome": "implementation|partial_implementation|questions_only|no_safe_action",
+  "confidence": {
+    "requirements_clarity": {"score": 0, "reason": "..."},
+    "evidence_quality": {"score": 0, "reason": "..."},
+    "code_localization": {"score": 0, "reason": "..."},
+    "verification_strength": {"score": 0, "reason": "..."},
+    "production_alignment": {"score": 0, "reason": "..."}
+  },
+  "criticality": {"level": "red|orange|yellow", "reasons": ["..."]},
+  "questions": [{"id":"q1", "question":"...", "why_blocking":"...", "options":[{"key":"a","label":"...","impact":"..."},{"key":"b","label":"...","impact":"..."}], "default_assumption":"..."}],
+  "safe_changes_present": true,
+  "no_safe_action_reason": null
+}
+
+Score maxima are requirements_clarity 30, evidence_quality 20,
+code_localization 20, verification_strength 15, and production_alignment 15.
+Use implementation only when the total is at least 75, there are no blocking
+questions, and a safe code diff exists. Use partial_implementation only when
+the total is at least 45, independently correct safe code exists, and the
+questions explain what must be answered before the rest can be done. Use
+questions_only whenever a human answer could unblock the review: make no code
+changes and provide one or more concrete questions with at least two options.
+Use no_safe_action only for already_fixed, migration_required, policy_blocked,
+or external_dependency; it has no questions and no code diff. Missing evidence
+or ambiguous product intent is questions_only, not no_safe_action.
+
+Criticality is independent of confidence: red is security/privacy, data loss,
+production outage, compliance/payroll, or a blocked core workflow; orange is a
+material regression or broad workflow impact without a reasonable workaround;
+yellow is scoped feature, UX, wording, or workaround-available work.

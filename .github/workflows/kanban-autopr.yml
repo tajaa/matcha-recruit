@@ -57,6 +57,13 @@ jobs:
         run: |
           for l in "autopr|1D76DB|Opened by the kanban-autopr bot" \
                    "autopr-rework|8250DF|Pushed to address review feedback on an existing autopr PR" \
+                   "autopr-awaiting-input|5319E7|Draft needs a human answer before automation can continue" \
+                   "criticality:red|B60205|Production, safety, security, data, or compliance critical" \
+                   "criticality:orange|D93F0B|Material regression or broad workflow impact" \
+                   "criticality:yellow|FBCA04|Scoped feature, UX, or workaround-available work" \
+                   "confidence:high|0E8A16|Autopr confidence 75-100" \
+                   "confidence:medium|FBCA04|Autopr confidence 45-74" \
+                   "confidence:low|D93F0B|Autopr confidence 0-44" \
                    "needs-work|D93F0B|Verification found a new test failure"; do
             IFS='|' read -r name color desc <<< "$l"
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
@@ -142,7 +149,7 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
-          ./scripts/kanban-autopr/investigate.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md"
+          ./scripts/kanban-autopr/investigate.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
 
       - name: Fail incomplete investigation
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
@@ -157,21 +164,36 @@ jobs:
           echo "Investigation failed before producing a valid report; this card remains eligible for retry." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
+      - name: Read validated triage decision
+        id: triage
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        run: |
+          outcome="$(jq -r '.outcome' "$RUNNER_TEMP/decision.json")"
+          safe_changes="$(jq -r '.safe_changes_present' "$RUNNER_TEMP/decision.json")"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          echo "safe_changes=$safe_changes" >> "$GITHUB_OUTPUT"
+          jq '{outcome, confidence_score, confidence_band, criticality, awaiting_human}' "$RUNNER_TEMP/decision.json" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true'
         timeout-minutes: 8
         run: |
           ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
         env:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
-      - name: Publish PR (or no-spec marker)
+      - name: Record verification deferred for questions or no-safe-action
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true'
+        run: |
+          printf '%s\n' '## Verification' '' 'Not run: this result contains no product diff and is awaiting requirements or a human-only action.' > "$RUNNER_TEMP/verification.md"
+
+      - name: Publish PR, question draft, or no-spec marker
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/kanban-autopr/publish.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
+          ./scripts/kanban-autopr/publish.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
 
       - name: Cleanup
         if: always()

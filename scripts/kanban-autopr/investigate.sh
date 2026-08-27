@@ -3,15 +3,16 @@
 # kanban card, and write a structured report. Leaves any fix unstaged in the
 # working tree; never commits.
 #
-# Usage: ./investigate.sh card.json report.md
+# Usage: ./investigate.sh card.json report.md raw-decision.json
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-CARD_FILE="${1:?usage: investigate.sh card.json report.md}"
-REPORT_FILE="${2:?usage: investigate.sh card.json report.md}"
+CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
+REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"
+RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
@@ -21,10 +22,12 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 # publish.sh would otherwise stage a file the model wrote under its own
 # control, and it would ship inside the PR diff rather than becoming the PR
 # body.
-case "$(cd "$(dirname "$REPORT_FILE")" 2>/dev/null && pwd)/$(basename "$REPORT_FILE")" in
-    "$REPO_ROOT"/*) die "REPORT_FILE must be outside the repo (got $REPORT_FILE)" ;;
-esac
-rm -f "$REPORT_FILE"
+for output_file in "$REPORT_FILE" "$RAW_DECISION_FILE"; do
+    case "$(cd "$(dirname "$output_file")" 2>/dev/null && pwd)/$(basename "$output_file")" in
+        "$REPO_ROOT"/*) die "model output must be outside the repo (got $output_file)" ;;
+    esac
+    rm -f "$output_file"
+done
 
 MODE="$(jq -r '.mode' "$CARD_FILE")"
 PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
@@ -186,7 +189,7 @@ else
     PROMPT_FILE="$SCRIPT_DIR/_prompt_todo.txt"
 fi
 
-PROMPT_TEXT="$(sed "s#REPORT_PATH#$REPORT_FILE#g" "$PROMPT_FILE")"
+PROMPT_TEXT="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" -e "s#DECISION_PATH#$RAW_DECISION_FILE#g" "$PROMPT_FILE")"
 
 # Defense in depth: this step's workflow env should already omit these, but
 # strip them here too in case a future edit adds them back.
@@ -204,3 +207,9 @@ for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; 
         die "report is missing required heading: $heading"
     fi
 done
+
+# OpenCode's JSON is data, not authority. Keep the normalized result outside
+# the repository too: publish.sh is the only script permitted to decide what
+# reaches GitHub or the board.
+"$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized"
+mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
