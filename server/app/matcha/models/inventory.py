@@ -291,6 +291,71 @@ class ForecastAIDraftRequest(BaseModel):
     manager_context: str = Field(min_length=1, max_length=4000)
 
 
+class ForecastNetworkSummaryOut(BaseModel):
+    location_count: int
+    matched_item_groups: int
+    transfer_count: int
+    shortages_fully_covered: int
+    remaining_reorder_count: int
+    attention_count: int
+    inventory_value_moved: Optional[Decimal] = None
+
+
+class ForecastNetworkTransferOut(BaseModel):
+    item_name: str
+    unit: Optional[str] = None
+    quantity: Decimal
+    from_item_id: UUID
+    from_location_id: UUID
+    from_location_name: str
+    from_current_quantity: Decimal
+    from_target_quantity: Decimal
+    from_post_transfer_quantity: Decimal
+    to_item_id: UUID
+    to_location_id: UUID
+    to_location_name: str
+    to_current_quantity: Decimal
+    to_target_quantity: Decimal
+    to_post_transfer_quantity: Decimal
+    receiver_remaining_shortage: Decimal
+    runout_date: Optional[date] = None
+    order_by_date: Optional[date] = None
+    days_of_cover_added: Optional[Decimal] = None
+    inventory_value: Optional[Decimal] = None
+    coverage: Literal["full", "partial"]
+    confidence: Literal["low", "medium", "high"]
+    rationale: str
+
+
+class ForecastNetworkShortageOut(BaseModel):
+    item_id: UUID
+    item_name: str
+    unit: Optional[str] = None
+    location_id: UUID
+    location_name: str
+    shortage_quantity: Decimal
+    suggested_order_quantity: Decimal
+    runout_date: Optional[date] = None
+    order_by_date: Optional[date] = None
+    confidence: Literal["low", "medium", "high"]
+
+
+class ForecastNetworkAttentionOut(BaseModel):
+    item_id: UUID
+    item_name: str
+    location_id: UUID
+    location_name: str
+    status: Literal["count_required", "insufficient_history"]
+
+
+class ForecastNetworkPlanOut(BaseModel):
+    forecast_start: date
+    summary: ForecastNetworkSummaryOut
+    transfers: list[ForecastNetworkTransferOut]
+    remaining_shortages: list[ForecastNetworkShortageOut]
+    attention: list[ForecastNetworkAttentionOut]
+
+
 class POSLocationBindingUpsert(BaseModel):
     external_location_id: str = Field(min_length=1, max_length=120)
     name: str = Field(min_length=1, max_length=200)

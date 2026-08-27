@@ -1,4 +1,5 @@
 import { api } from '../../api/client'
+import type { InventoryNetworkPlan } from '../types'
 
 // ── Types ──
 
@@ -635,6 +636,11 @@ export function getLatestForecastRun(locationId?: string) {
 
 export function getForecastRun(runId: string) {
   return api.get<ForecastRun>(`/inventory/forecast/runs/${runId}`)
+}
+
+export function getInventoryNetworkPlan(forecastStart?: string) {
+  const qs = forecastStart ? `?forecast_start=${forecastStart}` : ''
+  return api.get<InventoryNetworkPlan>(`/inventory/forecast/network${qs}`)
 }
 
 export function applyForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) {
