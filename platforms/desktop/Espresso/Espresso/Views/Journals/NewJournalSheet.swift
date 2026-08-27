@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Create-journal sheet. The Type picker chooses a create-time template
-/// (note/blog/todo/novel/screenplay) that seeds a starter entry on the backend
+/// (journal/blog/todo/novel/screenplay) that seeds a starter entry on the backend
 /// and sets a default icon. Color + icon stay constrained to small pickers so
 /// the backend `color VARCHAR(20)` / `icon VARCHAR(64)` columns don't drift to
 /// free-form values across clients.
@@ -58,7 +58,7 @@ struct NewJournalSheet: View {
                     field(label: "Type") {
                         VStack(alignment: .leading, spacing: 8) {
                             LazyVGrid(columns: kindColumns, spacing: 8) {
-                                // Diary `.journal` kind retired — single-doc notes only.
+                                // Diary `.journal` kind retired — single-document journals only.
                                 ForEach(JournalKind.allCases.filter { $0 != .journal }) { k in
                                     kindChip(k)
                                 }
@@ -152,7 +152,7 @@ struct NewJournalSheet: View {
         .background(appState.themeBg)
     }
 
-    /// Lite+ journal kinds — basic note/todo/journal stay free. Mirrors the
+    /// Lite+ journal kinds — basic journals and to-dos stay free. Mirrors the
     /// server's PREMIUM_JOURNAL_KINDS gate on POST /journals.
     private func isPremiumKind(_ k: JournalKind) -> Bool {
         ["novel", "screenplay", "blog"].contains(k.rawValue)
