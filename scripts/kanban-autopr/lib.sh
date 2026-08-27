@@ -26,7 +26,7 @@ _kanban_autopr_load_env() {
     done
 }
 
-# A scheduled GitHub job must never silently build PRs from a developer's
+# A GitHub Actions job must never silently build PRs from a developer's
 # localhost clone of the board. Local/manual script runs may still point at a
 # dev API, but Actions is the production automation and therefore fails closed
 # unless both its API and fixed project allowlist match the documented setup.

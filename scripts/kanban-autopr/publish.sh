@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Stage the investigation's diff, guard it, and either open/update a draft PR
-# or, if there is no diff, write a no-spec marker onto the card instead of
-# opening a GitHub issue — the board is where this user works, not GitHub
-# Issues.
+# or publish a question draft when the card needs a human answer. The board is
+# where this user works, not GitHub Issues.
 #
-# Usage: ./publish.sh card.json report.md verification.md
+# Usage: ./publish.sh card.json decision.json report.md verification.md
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
+# shellcheck source=./decision.sh
+source "$SCRIPT_DIR/decision.sh"
 
-CARD_FILE="${1:?usage: publish.sh card.json report.md verification.md}"
-REPORT_FILE="${2:?usage: publish.sh card.json report.md verification.md}"
-VERIFICATION_FILE="${3:?usage: publish.sh card.json report.md verification.md}"
+CARD_FILE="${1:?usage: publish.sh card.json decision.json report.md verification.md}"
+DECISION_FILE="${2:?usage: publish.sh card.json decision.json report.md verification.md}"
+REPORT_FILE="${3:?usage: publish.sh card.json decision.json report.md verification.md}"
+VERIFICATION_FILE="${4:?usage: publish.sh card.json decision.json report.md verification.md}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
@@ -29,6 +31,23 @@ PROD_BUILD_NUMBER="$(jq -r '.production.build_number // empty' "$CARD_FILE")"
 PROD_BACKEND_SHA="$(jq -r '.production.containers.backend.git_sha // empty' "$CARD_FILE")"
 PROD_FRONTEND_SHA="$(jq -r '.production.containers.frontend.git_sha // empty' "$CARD_FILE")"
 EXISTING_PROGRESS_NOTE="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
+CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
+CONFIDENCE_BAND="$(jq -r '.confidence_band' "$DECISION_FILE")"
+CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
+CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
+AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
+NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
+NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
+NOTE_STATE="ready_for_review"
+NOTE_STATE_LABEL="ready for review"
+if [ "$AWAITING_HUMAN" = true ]; then
+    NOTE_STATE="awaiting_answers"
+    NOTE_STATE_LABEL="awaiting answers"
+elif [ "$OUTCOME" = no_safe_action ]; then
+    NOTE_STATE="no_safe_action"
+    NOTE_STATE_LABEL="no safe action"
+fi
 
 [ -n "$PROD_BUILD_NUMBER" ] || die "card context is missing the production build number"
 [ -n "$PROD_BACKEND_SHA" ] || die "card context is missing the production backend SHA"
@@ -45,7 +64,7 @@ progress_note_with_origin() {
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
     remainder="$(printf '%s' "$existing" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · )?//')"
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$existing" ] && [[ "$existing" != "from auto setup"* ]]; then
@@ -56,6 +75,72 @@ progress_note_with_origin() {
 }
 
 BRANCH="bot/task-$ID8"
+
+existing_feedback_checkpoint() {
+    local body="$1" kind="$2"
+    printf '%s' "$body" | sed -nE "s/.*<!-- matcha-feedback-${kind}-id: ([^ ]+) -->.*/\\1/p" | tail -1
+}
+
+render_body() {
+    local output_file="$1" comment_id="$2" review_id="$3"
+    {
+        echo "<!-- matcha-task: $TASK_ID -->"
+        echo "<!-- matcha-project: $PROJECT_ID -->"
+        echo "<!-- matcha-production-build: $PROD_BUILD_NUMBER -->"
+        echo "<!-- matcha-production-backend-sha: $PROD_BACKEND_SHA -->"
+        echo "<!-- matcha-production-frontend-sha: $PROD_FRONTEND_SHA -->"
+        echo "<!-- matcha-autopr-outcome: $OUTCOME -->"
+        echo "<!-- matcha-autopr-criticality: $CRITICALITY -->"
+        echo "<!-- matcha-autopr-confidence-score: $CONFIDENCE_SCORE -->"
+        echo "<!-- matcha-autopr-note-state: $NOTE_STATE -->"
+        [ -z "$NO_SAFE_ACTION_REASON" ] || echo "<!-- matcha-autopr-no-safe-action-reason: $NO_SAFE_ACTION_REASON -->"
+        echo "<!-- matcha-feedback-comment-id: ${comment_id:-none} -->"
+        echo "<!-- matcha-feedback-review-id: ${review_id:-none} -->"
+        echo
+        echo "## $TITLE"
+        [ -n "$PROJECT_TITLE" ] && echo "**Board** $PROJECT_TITLE"
+        echo "**Production baseline** build $PROD_BUILD_NUMBER · $PROD_LABEL"
+        echo "**Triage** $CRITICALITY_EMOJI $CRITICALITY · confidence $CONFIDENCE_SCORE/100 ($CONFIDENCE_BAND)"
+        echo
+        if [ "$AWAITING_HUMAN" = true ]; then
+            autopr_render_questions "$DECISION_FILE"
+            echo
+        fi
+        if [ -n "$DESCRIPTION" ]; then
+            echo "$DESCRIPTION"
+            echo
+        fi
+        cat "$REPORT_FILE"
+        echo
+        cat "$VERIFICATION_FILE"
+        echo
+        echo "_Built by [this workflow run]($RUN_URL)._"
+    } > "$output_file"
+}
+
+replace_triage_labels() {
+    local target="$1"
+    local labels old desired_criticality="criticality:$CRITICALITY" desired_confidence="confidence:$CONFIDENCE_BAND"
+    local -a args=(pr edit "$target" --repo "$REPO")
+    labels="$(gh pr view "$target" --repo "$REPO" --json labels --jq '.labels[].name')"
+    for old in criticality:red criticality:orange criticality:yellow confidence:high confidence:medium confidence:low autopr-awaiting-input; do
+        if printf '%s\n' "$labels" | grep -qx "$old" \
+            && [ "$old" != "$desired_criticality" ] \
+            && [ "$old" != "$desired_confidence" ] \
+            && { [ "$old" != autopr-awaiting-input ] || [ "$AWAITING_HUMAN" != true ]; }; then
+            args+=(--remove-label "$old")
+        fi
+    done
+    args+=(--add-label autopr --add-label "$desired_criticality" --add-label "$desired_confidence")
+    [ "$MODE" != rework ] || args+=(--add-label autopr-rework)
+    [ "$AWAITING_HUMAN" != true ] || args+=(--add-label autopr-awaiting-input)
+    if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
+        args+=(--add-label needs-work)
+    elif printf '%s\n' "$labels" | grep -qx needs-work; then
+        args+=(--remove-label needs-work)
+    fi
+    gh "${args[@]}" >/dev/null
+}
 
 cd "$REPO_ROOT"
 git add --all
@@ -99,53 +184,97 @@ case "$CATEGORY" in
     *) PREFIX="chore" ;;
 esac
 
-# ---- no diff: mark the card no-spec instead of opening a PR ----
-if git diff --cached --quiet; then
+# The decision must agree with the actual working tree. Do not turn a model
+# mismatch into a permanent no-spec marker, and never publish product changes
+# beside a questions-only draft.
+has_diff=false
+git diff --cached --quiet || has_diff=true
+case "$OUTCOME" in
+    implementation|partial_implementation)
+        [ "$has_diff" = true ] || die "decision says safe changes exist but the worktree is empty"
+        ;;
+    questions_only|no_safe_action)
+        if [ "$has_diff" = true ]; then
+            git reset --hard >/dev/null 2>&1
+            die "decision forbids product changes but the worktree contains a diff"
+        fi
+        ;;
+    *) die "unknown triage outcome: $OUTCOME" ;;
+esac
+
+existing_open_json='[]'
+if [ "$OUTCOME" != no_safe_action ] || [ "$MODE" = rework ]; then
+    git config user.name "matcha-kanban-autopr"
+    git config user.email "matcha-kanban-autopr@users.noreply.github.com"
+    existing_open_json="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number,body)"
+fi
+existing_open_pr="$(printf '%s' "$existing_open_json" | jq -r '.[0].number // empty')"
+existing_body="$(printf '%s' "$existing_open_json" | jq -r '.[0].body // ""')"
+old_comment_id="$(existing_feedback_checkpoint "$existing_body" comment)"
+old_review_id="$(existing_feedback_checkpoint "$existing_body" review)"
+if jq -e '.feedback_checkpoint | type == "object"' "$DECISION_FILE" >/dev/null; then
+    consumed_comment_id="$(jq -r '.feedback_checkpoint.comment_id // ""' "$DECISION_FILE")"
+    consumed_review_id="$(jq -r '.feedback_checkpoint.review_id // ""' "$DECISION_FILE")"
+else
+    consumed_comment_id="$old_comment_id"
+    consumed_review_id="$old_review_id"
+fi
+
+RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/$REPO/actions/runs/${GITHUB_RUN_ID:-}"
+TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
+
+# ---- unautomatable: mark the card and reconcile an existing rework PR ----
+if [ "$OUTCOME" = no_safe_action ]; then
     git reset --hard >/dev/null 2>&1
-    reason="$(grep -A2 '### Confidence' "$REPORT_FILE" | tail -n +2 | head -1 | sed 's/^[[:space:]]*//' | cut -c1-200)"
-    [ -n "$reason" ] || reason="no safe fix produced"
-    note="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · [autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $reason"
-    mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-        "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null
-    echo "No diff produced; marked card $TASK_ID no-spec: $reason"
+    no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
+    note_prefix="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL"
+    if [ "$MODE" = rework ]; then
+        [ -n "$existing_open_pr" ] || die "rework no-safe-action has no open PR for $BRANCH"
+        BODY_FILE="$(mktemp)"
+        render_body "$BODY_FILE" "$consumed_comment_id" "$consumed_review_id"
+        gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"
+        replace_triage_labels "$existing_open_pr"
+        pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$existing_open_pr"
+        origin_note="$(progress_note_with_origin \
+            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$EXISTING_PROGRESS_NOTE")"
+        mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+            "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
+                '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
+        echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
+    else
+        origin_note="$(progress_note_with_origin \
+            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$EXISTING_PROGRESS_NOTE")"
+        mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+            "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
+        echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
+    fi
     exit 0
 fi
 
-# ---- diff exists: open (or update) the PR ----
-git config user.name "matcha-kanban-autopr"
-git config user.email "matcha-kanban-autopr@users.noreply.github.com"
-git commit -m "$PREFIX: $TITLE" >/dev/null
-git push --force-with-lease --set-upstream origin "$BRANCH"
+# ---- code diff or an explicit questions-only draft: open/update the PR ----
 
-NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
-RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/$REPO/actions/runs/${GITHUB_RUN_ID:-}"
+if [ "$AWAITING_HUMAN" = true ] && [ -z "$existing_open_pr" ]; then
+    max_awaiting="${MAX_OPEN_AWAITING_INPUT_PRS:-10}"
+    open_awaiting="$(gh pr list --repo "$REPO" --state open --label autopr-awaiting-input --limit 100 --json number --jq 'length')"
+    [ "$open_awaiting" -lt "$max_awaiting" ] \
+        || die "awaiting-input draft cap reached ($open_awaiting/$max_awaiting)"
+fi
+
+if [ "$has_diff" = true ]; then
+    git commit -m "$PREFIX: $TITLE" >/dev/null
+    git push --force-with-lease --set-upstream origin "$BRANCH"
+elif [ -z "$existing_open_pr" ]; then
+    # GitHub needs a head commit to host a draft with questions, but this empty
+    # commit deliberately changes no product files.
+    git commit --allow-empty -m "$PREFIX: $TITLE (questions)" >/dev/null
+    git push --force-with-lease --set-upstream origin "$BRANCH"
+fi
 
 BODY_FILE="$(mktemp)"
-{
-    echo "<!-- matcha-task: $TASK_ID -->"
-    echo "<!-- matcha-project: $PROJECT_ID -->"
-    echo "<!-- matcha-production-build: $PROD_BUILD_NUMBER -->"
-    echo "<!-- matcha-production-backend-sha: $PROD_BACKEND_SHA -->"
-    echo "<!-- matcha-production-frontend-sha: $PROD_FRONTEND_SHA -->"
-    echo
-    echo "## $TITLE"
-    [ -n "$PROJECT_TITLE" ] && echo "**Board** $PROJECT_TITLE"
-    echo "**Production baseline** build $PROD_BUILD_NUMBER · $PROD_LABEL"
-    echo
-    if [ -n "$DESCRIPTION" ]; then
-        echo "$DESCRIPTION"
-        echo
-    fi
-    cat "$REPORT_FILE"
-    echo
-    cat "$VERIFICATION_FILE"
-    echo
-    echo "_Built by [this workflow run]($RUN_URL)._"
-} > "$BODY_FILE"
+render_body "$BODY_FILE" "$consumed_comment_id" "$consumed_review_id"
 
-TITLE_LINE="$PREFIX: $TITLE"
-
-existing_open_pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
 if [ -n "$existing_open_pr" ]; then
     gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"
     published_pr="$existing_open_pr"
@@ -160,21 +289,16 @@ else
 fi
 [ -n "$published_pr" ] || die "could not determine the PR number for $BRANCH"
 
-gh pr edit "$BRANCH" --repo "$REPO" --add-label autopr >/dev/null 2>&1 || true
-if [ "$MODE" = rework ]; then
-    gh pr edit "$BRANCH" --repo "$REPO" --add-label autopr-rework >/dev/null 2>&1 || true
-fi
-if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
-    gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true
-fi
-
 pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
+card_column=in_progress
+[ "$AWAITING_HUMAN" != true ] || card_column=changes_requested
 origin_note="$(progress_note_with_origin \
-    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr" \
+    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL" \
     "$EXISTING_PROGRESS_NOTE")"
+replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-    "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "in_progress" \
+    "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \
         --arg note "$origin_note" \
         '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
 
-echo "Published PR #$published_pr for task $TASK_ID ($MODE)"
+echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"

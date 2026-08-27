@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Pick the first card from cards.json that isn't already handled by an open
-# PR, isn't durably marked unscopable, and isn't mid-cooldown from a just-
-# crashed attempt. GitHub is the durable dedup ledger for PRs; the card's own
+# PR, isn't durably marked unscopable, isn't waiting for a human answer, and
+# isn't mid-cooldown from a just-crashed attempt. GitHub is the durable dedup
+# ledger for PRs; the card's own
 # progress_note is the durable ledger for "can't be scoped, don't retry
 # forever" (unlike error-autofix, this lives on the card, visible to the
 # human who owns it — not a GitHub issue nobody on the board sees).
@@ -22,7 +23,7 @@ ATTEMPTS_DIR="$CACHE_DIR/attempts"
 mkdir -p "$ATTEMPTS_DIR"
 
 NOTHING_TO_DO=3
-MAX_OPEN_AUTOPR_PRS=3
+MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-3}"
 ATTEMPT_COOLDOWN_MINUTES="${AUTOPR_ATTEMPT_COOLDOWN_MINUTES:-15}"
 
 count="$(jq 'length' "$CARDS_FILE")"
@@ -32,7 +33,36 @@ count="$(jq 'length' "$CARDS_FILE")"
 # NEW open bot PRs. Checked per-decision below, not here — rework pushes a
 # commit to a PR that's already open (it doesn't add to this count), so the
 # cap must never block rework just because 3 unrelated PRs are already open.
-open_autopr_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json number --jq 'length')"
+# Question drafts are intentionally excluded from this cap: unanswered work
+# should not prevent a well-specified card from being investigated. A fresh
+# implementation is still bounded to keep human review manageable.
+open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')"
+
+feedback_snapshot() {
+    local pr_number="$1"
+    # `gh pr view` returns GraphQL ids for both comments and reviews. Store the
+    # latest human id of each kind rather than a timestamp so an edited PR body
+    # can never masquerade as human feedback.
+    gh pr view "$pr_number" --repo "$REPO" --json comments,reviews 2>/dev/null | jq -c '
+      def human:
+        ((.author.login // "") | test("\\[bot\\]$"; "i") | not)
+        and ((.author.login // "") != "matcha-kanban-autopr");
+      {
+        comment_id: ([.comments[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // ""),
+        review_id: ([.reviews[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // "")
+      }
+    '
+}
+
+awaiting_input_has_new_feedback() {
+    local body="$1" snapshot="$2" old_comment old_review new_comment new_review
+    old_comment="$(printf '%s' "$body" | sed -nE 's/.*<!-- matcha-feedback-comment-id: ([^ ]+) -->.*/\1/p' | tail -1)"
+    old_review="$(printf '%s' "$body" | sed -nE 's/.*<!-- matcha-feedback-review-id: ([^ ]+) -->.*/\1/p' | tail -1)"
+    new_comment="$(printf '%s' "$snapshot" | jq -r '.comment_id // ""')"
+    new_review="$(printf '%s' "$snapshot" | jq -r '.review_id // ""')"
+    { [ -n "$new_comment" ] && [ "$new_comment" != "$old_comment" ]; } \
+        || { [ -n "$new_review" ] && [ "$new_review" != "$old_review" ]; }
+}
 
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE
 # Echoes "skip", "investigate", or "rework" (rework = push to the existing
@@ -73,7 +103,7 @@ already_handled() {
 
     local prs n
     if ! prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 10 \
-        --json state,createdAt --jq 'sort_by(.createdAt) | reverse')"; then
+        --json state,createdAt,number,labels,body --jq 'sort_by(.createdAt) | reverse')"; then
         # A transient gh/API failure must fail CLOSED (skip this card) — the
         # unhardened version let a malformed/empty $prs fall through `jq` and
         # `[ -gt ]` as silent no-ops, which read as "no PR exists yet" and
@@ -91,10 +121,25 @@ already_handled() {
         # reason to skip. No open PR means the card was moved to
         # changes_requested by hand (never had a bot PR) — treat it like a
         # fresh todo card instead.
-        local state
+        local state labels body pr_number snapshot
         state="$(printf '%s' "$prs" | jq -r '.[0].state // empty')"
         if [ "$state" = "OPEN" ]; then
-            echo rework
+            labels="$(printf '%s' "$prs" | jq -r '.[0].labels[]?.name')"
+            if printf '%s\n' "$labels" | grep -qx 'autopr-awaiting-input'; then
+                body="$(printf '%s' "$prs" | jq -r '.[0].body // ""')"
+                pr_number="$(printf '%s' "$prs" | jq -r '.[0].number // empty')"
+                if ! snapshot="$(feedback_snapshot "$pr_number")"; then
+                    # If GitHub feedback cannot be read, do not treat the
+                    # waiting card as eligible; a blind rework would spin.
+                    echo skip
+                elif awaiting_input_has_new_feedback "$body" "$snapshot"; then
+                    echo rework
+                else
+                    echo skip
+                fi
+            else
+                echo rework
+            fi
         else
             echo investigate
         fi
@@ -129,7 +174,7 @@ for ((i = 0; i < n; i++)); do
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note")"
-    if [ "$decision" = investigate ] && [ "$open_autopr_prs" -ge "$MAX_OPEN_AUTOPR_PRS" ]; then
+    if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and
         # still eligible, so skip this one and keep looking rather than

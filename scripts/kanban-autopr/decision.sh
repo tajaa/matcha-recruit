@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Validates the model's untrusted triage decision before it can drive a PR,
+# labels, or a card update. Source this file for the helpers or run
+# `decision.sh normalize raw.json decision.json`.
+set -euo pipefail
+
+_autopr_decision_schema_ok() {
+    local file="$1"
+    jq -e '
+      def bounded($key; $max):
+        (.confidence[$key].score | type == "number" and floor == . and . >= 0 and . <= $max)
+        and (.confidence[$key].reason | type == "string" and length > 0);
+      def total:
+        [.confidence.requirements_clarity.score,
+         .confidence.evidence_quality.score,
+         .confidence.code_localization.score,
+         .confidence.verification_strength.score,
+         .confidence.production_alignment.score] | add;
+      def valid_question:
+        (.id | type == "string" and length > 0)
+        and (.question | type == "string" and length > 0)
+        and (.why_blocking | type == "string" and length > 0)
+        and (.default_assumption | type == "string" and length > 0)
+        and (.options | type == "array" and length >= 2
+             and all(.[]; (.key | type == "string" and length > 0)
+                         and (.label | type == "string" and length > 0)
+                         and (.impact | type == "string" and length > 0)));
+      type == "object"
+      and .schema_version == 1
+      and (.outcome | IN("implementation", "partial_implementation", "questions_only", "no_safe_action"))
+      and (.safe_changes_present | type == "boolean")
+      and (.questions | type == "array" and all(.[]; valid_question))
+      and ([.questions[].id] | length == ([.[]] | unique | length))
+      and (.criticality | type == "object")
+      and (.criticality.level | IN("red", "orange", "yellow"))
+      and (.criticality.reasons | type == "array" and length > 0 and all(.[]; type == "string" and length > 0))
+      and bounded("requirements_clarity"; 30)
+      and bounded("evidence_quality"; 20)
+      and bounded("code_localization"; 20)
+      and bounded("verification_strength"; 15)
+      and bounded("production_alignment"; 15)
+      and (
+        if .outcome == "implementation" then
+          total >= 75 and .safe_changes_present and (.questions | length == 0) and .no_safe_action_reason == null
+        elif .outcome == "partial_implementation" then
+          total >= 45 and .safe_changes_present and (.questions | length > 0) and .no_safe_action_reason == null
+        elif .outcome == "questions_only" then
+          (.safe_changes_present | not) and (.questions | length > 0) and .no_safe_action_reason == null
+        else
+          (.safe_changes_present | not) and (.questions | length == 0)
+          and (.no_safe_action_reason | IN("already_fixed", "migration_required", "policy_blocked", "external_dependency"))
+        end
+      )
+    ' "$file" >/dev/null
+}
+
+autopr_normalize_decision() {
+    local raw_file="$1" normalized_file="$2"
+    [ -s "$raw_file" ] || die "investigation produced no triage decision at $raw_file"
+    _autopr_decision_schema_ok "$raw_file" || die "triage decision failed schema or safety validation"
+    jq '
+      def total:
+        [.confidence.requirements_clarity.score,
+         .confidence.evidence_quality.score,
+         .confidence.code_localization.score,
+         .confidence.verification_strength.score,
+         .confidence.production_alignment.score] | add;
+      . + {
+        confidence_score: total,
+        confidence_band: (if total >= 75 then "high" elif total >= 45 then "medium" else "low" end),
+        awaiting_human: (.outcome == "partial_implementation" or .outcome == "questions_only")
+      }
+    ' "$raw_file" > "$normalized_file"
+}
+
+autopr_feedback_snapshot_file() {
+    local feedback_file="$1"
+    jq -c '
+      def human:
+        ((.author.login // "") | test("\\[bot\\]$"; "i") | not)
+        and ((.author.login // "") != "matcha-kanban-autopr");
+      {
+        comment_id: ([.comments[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // ""),
+        review_id: ([.reviews[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // "")
+      }
+    ' "$feedback_file"
+}
+
+autopr_criticality_emoji() {
+    case "$1" in
+        red) printf '🔴' ;;
+        orange) printf '🟠' ;;
+        yellow) printf '🟡' ;;
+        *) die "unknown criticality: $1" ;;
+    esac
+}
+
+autopr_title_marker() {
+    local decision_file="$1" outcome level score emoji mode_marker=""
+    outcome="$(jq -r '.outcome' "$decision_file")"
+    level="$(jq -r '.criticality.level' "$decision_file")"
+    score="$(jq -r '.confidence_score' "$decision_file")"
+    emoji="$(autopr_criticality_emoji "$level")"
+    case "$outcome" in
+        questions_only) mode_marker=' [QUESTIONS]' ;;
+        partial_implementation) mode_marker=' [PARTIAL]' ;;
+        no_safe_action) mode_marker=' [NO SAFE ACTION]' ;;
+    esac
+    printf '%s [C%s]%s' "$emoji" "$score" "$mode_marker"
+}
+
+autopr_render_questions() {
+    local decision_file="$1"
+    jq -r '
+      if (.questions | length) == 0 then empty else
+        "## Answers needed\n\n" +
+        ([.questions[] |
+          "1. " + .question + "\n" +
+          (.options | map("   - " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
+          "   - Suggested default: " + .default_assumption + "\n" +
+          "   - Why this blocks implementation: " + .why_blocking
+        ] | join("\n\n")) +
+        "\n\nReply on this PR. The next local cycle will ingest a new human comment or review and update this same draft."
+      end
+    ' "$decision_file"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        normalize)
+            [ "$#" -eq 3 ] || die "usage: decision.sh normalize raw-decision.json decision.json"
+            autopr_normalize_decision "$2" "$3"
+            ;;
+        feedback-snapshot)
+            [ "$#" -eq 2 ] || die "usage: decision.sh feedback-snapshot feedback.json"
+            autopr_feedback_snapshot_file "$2"
+            ;;
+        *)
+            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh feedback-snapshot feedback.json"
+            ;;
+    esac
+fi

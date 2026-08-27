@@ -20,8 +20,8 @@ check() {
 }
 
 workflow="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
-check "workflow checks the card queue every five minutes" \
-    $(grep -qF "cron: '*/5 * * * *'" "$workflow" && echo 0 || echo 1)
+check "local dispatcher is the workflow's only automatic clock" \
+    $(! grep -qF 'schedule:' "$workflow" && grep -qF 'workflow_dispatch:' "$workflow" && echo 0 || echo 1)
 
 check "workflow resolves the active production build before collecting cards" \
     $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" && echo 0 || echo 1)
@@ -123,7 +123,7 @@ set -a
 source "$env_file"
 set +a
 ( GITHUB_ACTIONS=true _kanban_autopr_validate_ci_scope ) > /dev/null 2>&1
-check "scheduled runs reject a localhost/non-production board target" \
+check "Actions runs reject a localhost/non-production board target" \
     $([ "$?" != "0" ] && echo 0 || echo 1)
 unset GITHUB_ACTIONS
 unset -f curl mw_login
@@ -175,7 +175,7 @@ cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
     "pr list") printf '44\n' ;;
-    "pr view") printf '{"reviews":[{"body":"Use Journal everywhere"}],"comments":[]}' ;;
+    "pr view") printf '{"reviews":[{"id":"review-44","body":"Use Journal everywhere","author":{"login":"haley"}}],"comments":[]}' ;;
 esac
 EOF
 chmod +x "$TMP_DIR/bin/gh"
@@ -201,6 +201,23 @@ stub
 ### Confidence
 high
 REPORT
+cat > "$OPENCODE_STUB_DECISION" <<'DECISION'
+{
+  "schema_version": 1,
+  "outcome": "implementation",
+  "confidence": {
+    "requirements_clarity": {"score": 30, "reason": "clear card"},
+    "evidence_quality": {"score": 20, "reason": "evidence attached"},
+    "code_localization": {"score": 20, "reason": "known files"},
+    "verification_strength": {"score": 15, "reason": "existing checks"},
+    "production_alignment": {"score": 15, "reason": "baseline known"}
+  },
+  "criticality": {"level": "yellow", "reasons": ["scoped terminology"]},
+  "questions": [],
+  "safe_changes_present": true,
+  "no_safe_action_reason": null
+}
+DECISION
 EOF
 chmod +x "$TMP_DIR/bin/opencode"
 
@@ -211,7 +228,8 @@ EOF
 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/runner" \
 GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode_files" \
 OPENCODE_STUB_CONTEXT="$TMP_DIR/context.json" OPENCODE_STUB_REPORT="$TMP_DIR/report.md" \
-    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" > /dev/null 2>&1
+OPENCODE_STUB_DECISION="$TMP_DIR/decision.json" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > /dev/null 2>&1
 investigate_rc=$?
 
 context_ok=1
@@ -226,6 +244,18 @@ check "rework investigation receives discussion, checklist, PR feedback, and scr
 check "investigation context reserves bounded production diagnostics" \
     $(jq -e '.production == null and .production_recent_errors == [] and .production_log_signals == "" and .changes_since_production == []' "$TMP_DIR/context.json" >/dev/null && echo 0 || echo 1)
 
+check "investigation normalizes validated confidence and triage" \
+    $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
+
+cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"
+jq '.outcome = "questions_only" | .questions = [] | .safe_changes_present = false' \
+    "$TMP_DIR/invalid-decision.json" > "$TMP_DIR/invalid-decision.next.json"
+mv "$TMP_DIR/invalid-decision.next.json" "$TMP_DIR/invalid-decision.json"
+"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/invalid-decision.json" "$TMP_DIR/invalid-decision.normalized.json" >/dev/null 2>&1
+invalid_decision_rc=$?
+check "questions-only decisions require actionable questions" \
+    $([ "$invalid_decision_rc" != 0 ] && echo 0 || echo 1)
+
 check "collector preserves task attachment metadata" \
     $(grep -qF 'attachments: (($t.attachments // []) | map(del(.storage_url)))' "$AUTOPR_DIR/collect.sh" && echo 0 || echo 1)
 
@@ -235,8 +265,10 @@ check "collector preserves task attachment metadata" \
 ################################################################################
 cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
-if [[ "$*" == *"--label autopr"* ]]; then
+if [[ "$*" == *"--label autopr"* && "$*" == *"--json labels"* ]]; then
     printf '0\n'
+elif [[ "$*" == *"--label autopr"* ]]; then
+    printf '[]\n'
 else
     printf '[]\n'
 fi
@@ -275,6 +307,42 @@ PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 no_spec_rc=$?
 check "visible origin note still durably suppresses an unchanged no-spec card" \
     $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
+
+################################################################################
+# A questions draft remains in Changes Requested but cannot spin every five
+# minutes. Only a new human PR comment makes it eligible for rework.
+################################################################################
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "pr list" ]; then
+    if [[ "$*" == *"--label autopr"* ]]; then
+        printf '0\n'
+    elif [[ "$*" == *"--head bot/task-44444444"* ]]; then
+        printf '%s\n' '[{"state":"OPEN","createdAt":"2026-08-27T00:00:00Z","number":44,"labels":[{"name":"autopr-awaiting-input"}],"body":"<!-- matcha-feedback-comment-id: comment-1 -->\n<!-- matcha-feedback-review-id: none -->"}]'
+    else
+        printf '[]\n'
+    fi
+elif [ "$1 $2" = "pr view" ]; then
+    comment_id="comment-1"
+    [ "${AUTOPR_TEST_NEW_FEEDBACK:-0}" = 0 ] || comment_id="comment-2"
+    printf '{"comments":[{"id":"%s","body":"please use journal","author":{"login":"haley"}}],"reviews":[]}' "$comment_id"
+fi
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+
+cat > "$TMP_DIR/questions-card.json" <<'EOF'
+[{"task_id":"44444444-0000-4000-8000-000000000004","id8":"44444444","project_id":"p","title":"Needs answer","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"}]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_CACHE_DIR="$TMP_DIR/questions-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json" >/dev/null 2>&1
+waiting_rc=$?
+check "unanswered question draft is skipped" \
+    $([ "$waiting_rc" = "3" ] && echo 0 || echo 1)
+
+answered_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_CACHE_DIR="$TMP_DIR/questions-cache" AUTOPR_TEST_NEW_FEEDBACK=1 \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json")"
+check "new human feedback reselects the same draft for rework" \
+    $([ "$(printf '%s' "$answered_selected" | jq -r '.mode')" = "rework" ] && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

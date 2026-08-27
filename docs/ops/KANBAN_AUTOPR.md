@@ -1,9 +1,12 @@
 # Kanban Autopr
 
-`.github/workflows/kanban-autopr.yml` is scheduled every 5 minutes on the same
-self-hosted Mac runner as `silent-error-autofix.yml`. The runner has one job slot, so a
-long coding job can delay the next start; the workflow concurrency group collapses
-queued ticks and prevents overlap. The unit of work is one kanban card assigned to
+`.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
+`silent-error-autofix.yml`. A local macOS LaunchAgent is the sole automatic five-minute
+clock and dispatches only when no Kanban autopr run is queued or active; GitHub's manual
+workflow dispatch remains the recovery path. There is deliberately no second GitHub cron:
+a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
+run. The runner has one job slot, and the workflow concurrency group remains the final
+overlap guard. The unit of work is one kanban card assigned to
 `haley@oceaneca.com` sitting in `todo` or `changes_requested`, across four fixed
 Espresso projects — WerkWerk, Beetlejuse, Gummfit, and MATCHA. It never scans the whole
 board or every user's cards.
@@ -64,7 +67,10 @@ changes.
    `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
-5. `gh workflow run kanban-autopr.yml` once by hand before relying on the cron schedule.
+5. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
+   JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. Do not add a GitHub
+   cron alongside it; use manual `workflow_dispatch` if the local timer needs recovery.
+6. `gh workflow run kanban-autopr.yml` once by hand before relying on the local timer.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 
@@ -103,10 +109,12 @@ changes.
    access. `todo` mode implements the card; `rework` mode additionally receives the
    existing PR's reviews/comments and addresses the latest `review_note`, rejection
    events, discussion, and screenshots without re-litigating accepted earlier rounds.
-   Both require a
-   report with `### Summary` / `### Changes` / `### Blast radius` / `### Confidence`.
-   Bails to the no-spec path on `Confidence: none`, no diff, or more than 25 changed
-   files — a card that sprawls needed a human to scope it.
+   Both require a report with `### Summary` / `### Changes` / `### Blast radius` /
+   `### Confidence` plus a shell-validated JSON triage decision. Missing product intent
+   or evidence produces a question-only draft PR, not a no-spec marker. The card remains
+   in `changes_requested` until a new human comment or review arrives on that PR; the
+   next local cycle then updates the same draft. No-spec is reserved for already-fixed
+   work, migrations, policy boundaries, and external dependencies.
 5. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
@@ -117,8 +125,10 @@ changes.
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
    fix is. A card that genuinely needs a migration or infra change cannot be auto-PR'd —
-   that's the intended outcome; it takes the no-spec path and says why. PR title is
-   prefixed from the card's `category` (`feat:`/`fix:`/else `chore:`). PR body carries
+   that's the intended outcome; it takes the no-spec path and says why. PR titles begin
+   with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`
+   is triaged visually. Question drafts also carry `autopr-awaiting-input`; those drafts
+   do not consume the three-PR implementation cap. PR body carries
    production baseline trailers as well as the task/project linkage:
    ```html
    <!-- matcha-task: <full task uuid> -->
@@ -126,16 +136,23 @@ changes.
    <!-- matcha-production-build: <frontend build number> -->
    <!-- matcha-production-backend-sha: <active backend image SHA> -->
    <!-- matcha-production-frontend-sha: <active frontend image SHA> -->
+   <!-- matcha-autopr-criticality: red|orange|yellow -->
+   <!-- matcha-autopr-confidence-score: 0-100 -->
+   <!-- matcha-autopr-note-state: awaiting_answers|ready_for_review|no_safe_action -->
    ```
-   `todo` → `gh pr create --draft`, label `autopr` (+ `needs-work` on new failures), then
-   PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`. `rework` → push to
-   the existing branch, `gh pr edit` to refresh the body + add `autopr-rework`, then PATCH
-   to `in_progress` and write a visible progress note such as
-   `from auto setup · build 550 · prod c5d3a49 · PR #295` (this is the one
+   `implementation` → `gh pr create --draft`, label `autopr` (+ `needs-work` on new
+   failures), then PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`.
+   `questions_only` creates a no-product-change draft PR, applies
+   `autopr-awaiting-input`, and leaves the card in `changes_requested` with a visible
+   note such as `from auto setup · build 550 · prod c5d3a49 · PR #295 · 🟡 C42 ·
+   awaiting answers`. `rework` updates the existing branch and PR; once there are no
+   remaining blocking questions it returns the card to `in_progress` (this is the one
    transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not
-   a fresh start). No diff → PATCH `progress_note` to the no-spec marker; no branch, no
-   PR, no GitHub issue.
+   a fresh start). A fresh `no_safe_action` PATCHes `progress_note` to the no-spec marker
+   without creating a branch, PR, or GitHub issue. During rework it updates the existing
+   PR's title, body, and triage labels before writing the durable no-spec card note, so the
+   prior round cannot remain visible as the current decision.
 
 ## Card ↔ PR linkage (`mw_tasks.pr_url` / `pr_number`)
 
@@ -186,7 +203,7 @@ can never drag a card backwards:
 | action | from | to | also |
 |---|---|---|---|
 | `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
-| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | preserve the visible `from auto setup · build … · prod … · PR #…` note; reconstruct it from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
+| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | preserve the visible `from auto setup · build … · prod … · PR #…` note; reconstruct production plus current criticality/confidence/state from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
 | `closed` with `merged == true` | `review` | `review` | add/recover the same origin/build note and PR link; never move the card backwards |
 | `closed` with `merged == false` | — | — | no move |
 | anything else | — | — | ignore |

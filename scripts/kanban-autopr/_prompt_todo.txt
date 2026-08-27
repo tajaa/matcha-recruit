@@ -50,13 +50,12 @@ Do NOT write anything about tests, test results, or verification in the
 report — a separate process runs and reports tests, and any claim you make
 there will be discarded and treated as untrustworthy if left in.
 
-If the card is too vague, too broad, or requires a database migration/schema
-change to implement safely, write the report anyway (Confidence: none, and
-say specifically what's missing or why it needs a human) and make NO code
-changes. If the repository already contains the fix after the production SHA,
-make no duplicate change and say that deployment is the remaining action. A
-migration is always a "make no changes" case — schema changes are human-reviewed
-only, never auto-applied.
+If the card is too vague or too broad, write the report and make no code
+changes; the decision JSON must use `questions_only` with concrete choices.
+If it requires a database migration/schema change, use `no_safe_action` with
+`migration_required`. If the repository already contains the fix after the
+production SHA, make no duplicate change and use `no_safe_action` with
+`already_fixed`. Schema changes are human-reviewed only, never auto-applied.
 
 Hard limits, no exceptions:
 - Do not access production, environment variables, credentials, network
@@ -67,3 +66,40 @@ Hard limits, no exceptions:
   manifests, or server/alembic/.
 - Do not touch more than 25 files. If the card needs more than that to
   implement, it needed a human to scope it — write Confidence: none instead.
+
+In addition to REPORT_PATH, write a JSON object to DECISION_PATH. This is a
+machine-readable decision used by a trusted shell; it must be valid JSON and
+contain no markdown fences. Use this exact shape:
+
+{
+  "schema_version": 1,
+  "outcome": "implementation|partial_implementation|questions_only|no_safe_action",
+  "confidence": {
+    "requirements_clarity": {"score": 0, "reason": "..."},
+    "evidence_quality": {"score": 0, "reason": "..."},
+    "code_localization": {"score": 0, "reason": "..."},
+    "verification_strength": {"score": 0, "reason": "..."},
+    "production_alignment": {"score": 0, "reason": "..."}
+  },
+  "criticality": {"level": "red|orange|yellow", "reasons": ["..."]},
+  "questions": [{"id":"q1", "question":"...", "why_blocking":"...", "options":[{"key":"a","label":"...","impact":"..."},{"key":"b","label":"...","impact":"..."}], "default_assumption":"..."}],
+  "safe_changes_present": true,
+  "no_safe_action_reason": null
+}
+
+Score maxima are requirements_clarity 30, evidence_quality 20,
+code_localization 20, verification_strength 15, and production_alignment 15.
+Use implementation only when the total is at least 75, there are no blocking
+questions, and a safe code diff exists. Use partial_implementation only when
+the total is at least 45, independently correct safe code exists, and the
+questions explain what must be answered before the rest can be done. Use
+questions_only whenever a human answer could unblock the card: make no code
+changes and provide one or more concrete questions with at least two options.
+Use no_safe_action only for already_fixed, migration_required, policy_blocked,
+or external_dependency; it has no questions and no code diff. Missing evidence
+or ambiguous product intent is questions_only, not no_safe_action.
+
+Criticality is independent of confidence: red is security/privacy, data loss,
+production outage, compliance/payroll, or a blocked core workflow; orange is a
+material regression or broad workflow impact without a reasonable workaround;
+yellow is scoped feature, UX, wording, or workaround-available work.
