@@ -14,8 +14,19 @@ type Props = {
 
 const EMPTY = {
   name: '', address: '', city: '', state: '', county: '', zipcode: '',
-  ein: '', naics: '', max_employees: '', annual_avg_employees: '',
+  ein: '', naics: '', max_employees: '', annual_avg_employees: '', timezone: '',
 }
+
+const TIMEZONE_OPTIONS = [
+  { value: '', label: 'Select a time zone' },
+  { value: 'America/New_York', label: 'US Eastern (New York)' },
+  { value: 'America/Chicago', label: 'US Central (Chicago)' },
+  { value: 'America/Denver', label: 'US Mountain (Denver)' },
+  { value: 'America/Phoenix', label: 'US Mountain, no DST (Phoenix)' },
+  { value: 'America/Los_Angeles', label: 'US Pacific (Los Angeles)' },
+  { value: 'America/Anchorage', label: 'US Alaska (Anchorage)' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
+]
 
 export function ComplianceLocationModal({ open, onClose, editingLocation, jurisdictions, onSubmit, saving }: Props) {
   const [form, setForm] = useState(EMPTY)
@@ -36,6 +47,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
         naics: editingLocation.naics || '',
         max_employees: editingLocation.max_employees != null ? String(editingLocation.max_employees) : '',
         annual_avg_employees: editingLocation.annual_avg_employees != null ? String(editingLocation.annual_avg_employees) : '',
+        timezone: editingLocation.timezone || '',
       })
       setUseManual(true)
     } else {
@@ -60,6 +72,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
       naics: form.naics || undefined,
       max_employees: form.max_employees.trim() === '' ? undefined : Number(form.max_employees),
       annual_avg_employees: form.annual_avg_employees.trim() === '' ? undefined : Number(form.annual_avg_employees),
+      timezone: form.timezone,
     }
     onSubmit(data, editingLocation?.id)
   }
@@ -148,6 +161,9 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
           </>
         )}
 
+        <Select label="Time zone" required options={TIMEZONE_OPTIONS} value={form.timezone}
+          onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
+
         <div className="border-t border-zinc-800 pt-3 space-y-3">
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">OSHA / ITA Filing (optional)</p>
           <p className="text-[11px] text-zinc-600">
@@ -169,7 +185,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving || (!form.city || !form.state)}>
+          <Button type="submit" disabled={saving || (!form.city || !form.state || !form.timezone)}>
             {saving ? 'Saving...' : editingLocation ? 'Update Location' : 'Add Location'}
           </Button>
         </div>

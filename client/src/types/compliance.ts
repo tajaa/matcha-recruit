@@ -146,6 +146,7 @@ export interface LocationCreate {
   naics?: string
   max_employees?: number
   annual_avg_employees?: number
+  timezone?: string
 }
 
 export interface LocationUpdate {
@@ -160,6 +161,7 @@ export interface LocationUpdate {
   naics?: string
   max_employees?: number
   annual_avg_employees?: number
+  timezone?: string
 }
 
 export interface BusinessLocation {
@@ -189,6 +191,7 @@ export interface BusinessLocation {
   naics: string | null
   max_employees: number | null
   annual_avg_employees: number | null
+  timezone: string | null
   created_at: string
 }
 
