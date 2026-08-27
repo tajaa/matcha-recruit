@@ -10,6 +10,10 @@ import re
 from pathlib import Path
 
 REVISION_RE = re.compile(r"^[A-Za-z0-9_]+$")
+VERSIONS_DIR = Path(__file__).resolve().parents[2] / "server" / "alembic" / "versions"
+REVISION_LINE_RE = re.compile(r"^revision(?:\s*:\s*[^=]+)?\s*=\s*")
+DOWN_REVISION_LINE_RE = re.compile(r"^down_revision(?:\s*:\s*[^=]+)?\s*=\s*")
+QUOTED_RE = re.compile(r"[\"']([A-Za-z0-9_]+)[\"']")
 HEADER_RE = re.compile(r"^-- Name: (?P<name>.*); Type: (?P<type>.*); Schema: (?P<schema>.*); Owner: (?P<owner>.*)$")
 DOLLAR_TAG_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -30,18 +34,129 @@ def canonical_revision_set(payload: object) -> tuple[str, ...]:
     return tuple(sorted(revisions))
 
 
-def compare_revision_sets(dev_payload: object, prod_payload: object) -> dict:
+def load_revision_graph(versions_dir: Path = VERSIONS_DIR) -> dict[str, set[str]]:
+    """Map each Alembic revision id to its direct down_revision parent(s).
+
+    Parses `revision = ...` / `down_revision = ...` out of every migration
+    file rather than importing them (no need to construct a real DB session,
+    and importing 500+ migration modules for a read-only comparison would be
+    needlessly heavy). Handles single string, `None`, single-line tuple, and
+    multi-line tuple (merge migration) down_revision forms by paren-balance
+    scanning rather than a single-line regex.
+    """
+    graph: dict[str, set[str]] = {}
+    if not versions_dir.is_dir():
+        return graph
+    for path in sorted(versions_dir.glob("*.py")):
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        revision_id: str | None = None
+        parents: set[str] = set()
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if revision_id is None and REVISION_LINE_RE.match(line):
+                ids = QUOTED_RE.findall(line)
+                if ids:
+                    revision_id = ids[0]
+            elif DOWN_REVISION_LINE_RE.match(line):
+                buf = line
+                while buf.count("(") > buf.count(")") and i + 1 < len(lines):
+                    i += 1
+                    buf += "\n" + lines[i]
+                parents = set(QUOTED_RE.findall(buf))
+            i += 1
+        if revision_id:
+            graph[revision_id] = parents
+    return graph
+
+
+def ancestors_of(revision: str, graph: dict[str, set[str]]) -> set[str]:
+    """Every revision transitively reachable via down_revision from `revision` (strict ancestors)."""
+    seen: set[str] = set()
+    stack = list(graph.get(revision, ()))
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(graph.get(node, ()))
+    return seen
+
+
+def explain_head_diff(
+    dev_only: list[str], prod_only: list[str], dev_all: tuple[str, ...], prod_all: tuple[str, ...],
+    graph: dict[str, set[str]],
+) -> tuple[list[str], list[str], list[dict]]:
+    """Split raw dev_only/prod_only into genuine drift vs. "one side hasn't caught up yet".
+
+    A dev-only head that descends (via down_revision) from a revision prod
+    already has isn't independent drift — it's the normal, expected state
+    between `migrate-dev.sh` and `migrate-prod.sh` on that branch. Same in
+    the other direction. Anything left over — no ancestor relationship
+    found, or the revision id isn't in the parsed migration graph at all —
+    is genuine, unexplained divergence.
+    """
+    true_dev_only: list[str] = []
+    true_prod_only: list[str] = []
+    behind: list[dict] = []
+    consumed_prod: set[str] = set()
+    for rev in dev_only:
+        # Case A — dev ahead: rev descends from a revision prod already has.
+        match = next((p for p in prod_all if p in ancestors_of(rev, graph)), None)
+        if match:
+            behind.append({"side_ahead": "dev", "ahead_revision": rev, "behind_revision": match})
+            consumed_prod.add(match)
+            continue
+        # Case B — dev behind: some prod-only head already descends from rev,
+        # meaning prod moved past rev and this is the SAME gap the prod_only
+        # loop below will explain from the other direction — not a second,
+        # independent piece of drift on top of it.
+        if any(rev in ancestors_of(p, graph) for p in prod_only):
+            continue
+        true_dev_only.append(rev)
+    for rev in prod_only:
+        # Already accounted for as the parent half of a dev-ahead pair above
+        # (e.g. dev has taskpr0001, prod has its parent sales02).
+        if rev in consumed_prod:
+            continue
+        match = next((d for d in dev_all if d in ancestors_of(rev, graph)), None)
+        if match:
+            behind.append({"side_ahead": "prod", "ahead_revision": rev, "behind_revision": match})
+        else:
+            true_prod_only.append(rev)
+    return true_dev_only, true_prod_only, behind
+
+
+def compare_revision_sets(dev_payload: object, prod_payload: object, graph: dict[str, set[str]] | None = None) -> dict:
     dev = canonical_revision_set(dev_payload)
     prod = canonical_revision_set(prod_payload)
     dev_only = sorted(set(dev) - set(prod))
     prod_only = sorted(set(prod) - set(dev))
+    if not dev_only and not prod_only:
+        return {
+            "status": "equal",
+            "dev_revisions": list(dev),
+            "prod_revisions": list(prod),
+            "dev_only": dev_only,
+            "prod_only": prod_only,
+            "true_dev_only": [],
+            "true_prod_only": [],
+            "behind": [],
+            "needs_schema_diff": False,
+        }
+    true_dev_only, true_prod_only, behind = explain_head_diff(
+        dev_only, prod_only, dev, prod, graph if graph is not None else load_revision_graph(),
+    )
     return {
-        "status": "equal" if not dev_only and not prod_only else "drift",
+        "status": "drift" if (true_dev_only or true_prod_only) else "behind",
         "dev_revisions": list(dev),
         "prod_revisions": list(prod),
         "dev_only": dev_only,
         "prod_only": prod_only,
-        "needs_schema_diff": bool(dev_only or prod_only),
+        "true_dev_only": true_dev_only,
+        "true_prod_only": true_prod_only,
+        "behind": behind,
+        "needs_schema_diff": True,
     }
 
 
@@ -145,7 +260,13 @@ def render_schema_markdown(report: dict, workflow_url: str) -> str:
     lines = ["Production schema drift check.", ""]
     lines.append(f"- Dev Alembic revisions: `{', '.join(report.get('dev_revisions', [])) or 'unavailable'}`")
     lines.append(f"- Prod Alembic revisions: `{', '.join(report.get('prod_revisions', [])) or 'unavailable'}`")
-    for key, label in (("dev_only", "Only in dev"), ("prod_only", "Only in prod")):
+    for pair in report.get("behind", []):
+        ahead, behind_side = pair["side_ahead"], ("prod" if pair["side_ahead"] == "dev" else "dev")
+        lines.append(
+            f"- {ahead} leads {behind_side} by an unmigrated revision: `{pair['ahead_revision']}` "
+            f"(expected — {behind_side} is still at the parent `{pair['behind_revision']}`)"
+        )
+    for key, label in (("true_dev_only", "Only in dev, unexplained by ancestry"), ("true_prod_only", "Only in prod, unexplained by ancestry")):
         for revision in report.get(key, []):
             lines.append(f"- {label}: `{revision}`")
     schema = report.get("schema")
@@ -182,7 +303,11 @@ def main() -> int:
         report = {"status": "unknown", "failures": [f"invalid schema check input: {exc}"], "needs_schema_diff": False}
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     args.markdown.write_text(render_schema_markdown(report, args.workflow_url))
-    return 0 if report["status"] == "equal" else 1
+    # "behind" (one side hasn't run migrate-{dev,prod}.sh yet on a branch the
+    # other side already advanced) is an expected transient state, not an
+    # incident — only "drift" (genuinely unexplained divergence) should fail
+    # the workflow. See explain_head_diff().
+    return 0 if report["status"] in ("equal", "behind") else 1
 
 
 if __name__ == "__main__":

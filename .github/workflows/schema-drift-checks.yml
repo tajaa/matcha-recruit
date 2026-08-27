@@ -135,7 +135,12 @@ jobs:
           fi
 
       - name: Mark schema failure
-        if: always() && (steps.revisions.outcome != 'success' || steps.compare.outcome != 'success' || steps.compare.outputs.status != 'equal' || steps.dumps.outcome == 'failure' || steps.schema.outcome == 'failure')
+        # "behind" (one side hasn't run migrate-{dev,prod}.sh yet for a
+        # revision the other side already applied on that branch) is the
+        # normal, expected state between a dev apply and a prod apply — not
+        # a failure. Only 'drift' (genuinely unexplained divergence) and
+        # collection/comparison failures should redden the workflow.
+        if: always() && (steps.revisions.outcome != 'success' || steps.compare.outcome != 'success' || (steps.compare.outputs.status != 'equal' && steps.compare.outputs.status != 'behind') || steps.dumps.outcome == 'failure' || steps.schema.outcome == 'failure')
         run: exit 1
 
       - name: Delete schema dumps and SSH key
