@@ -143,14 +143,16 @@ close that off before resolution ever runs:
 Task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR body;
 else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
 `mw_tasks.id` with hyphens stripped (same regex the `post-checkout` hook uses — this is
-what lets a human's own hand-made branch work too, not just bot-authored PRs). Every
-transition below is a no-op unless the card is currently in the listed source column, so
-redelivery is idempotent and a webhook replay can never drag a card backwards:
+what lets a human's own hand-made branch work too, not just bot-authored PRs). Column
+moves are a no-op unless the card is currently in the listed source column; metadata is
+written only when it changed. Redelivery is therefore idempotent, and a webhook replay
+can never drag a card backwards:
 
 | action | from | to | also |
 |---|---|---|---|
 | `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
-| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | — |
+| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | prepend `from auto setup` without discarding an existing note; refresh `pr_url`/`pr_number` |
+| `closed` with `merged == true` | `review` | `review` | add the same origin note and PR link; never move the card backwards |
 | `closed` with `merged == false` | — | — | no move |
 | anything else | — | — | ignore |
 

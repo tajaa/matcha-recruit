@@ -1,0 +1,129 @@
+from uuid import uuid4
+
+import pytest
+
+from app.matcha.routes.matcha_work import github
+from app.matcha.services.matcha_work import project_task_service
+
+
+def test_autopr_marker_preserves_existing_progress_and_is_idempotent():
+    marked = github._with_autopr_progress_note("Waiting on QA")
+    assert marked == "from auto setup · Waiting on QA"
+    assert github._with_autopr_progress_note(marked) == marked
+
+
+@pytest.mark.asyncio
+async def test_merged_autopr_moves_card_to_review_and_marks_its_origin(monkeypatch):
+    task_id, project_id = uuid4(), uuid4()
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "Tests are green",
+        "pr_url": None,
+        "pr_number": None,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return task
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    result = await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {
+            "merged": True,
+            "html_url": "https://github.com/tajaa/matcha-recruit/pull/42",
+            "number": 42,
+        },
+    })
+
+    assert result == {"ok": True, "task": str(task_id), "merged": True}
+    assert updates == [(
+        project_id,
+        task_id,
+        {
+            "board_column": "review",
+            "progress_note": "from auto setup · Tests are green",
+            "pr_url": "https://github.com/tajaa/matcha-recruit/pull/42",
+            "pr_number": 42,
+        },
+    )]
+
+
+@pytest.mark.asyncio
+async def test_merged_autopr_marks_a_card_already_in_review_without_moving_it(monkeypatch):
+    task_id, project_id = uuid4(), uuid4()
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "review",
+        "progress_note": None,
+        "pr_url": None,
+        "pr_number": None,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return task
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {
+            "merged": True,
+            "html_url": "https://github.com/tajaa/matcha-recruit/pull/43",
+            "number": 43,
+        },
+    })
+
+    assert updates == [(
+        project_id,
+        task_id,
+        {
+            "progress_note": "from auto setup",
+            "pr_url": "https://github.com/tajaa/matcha-recruit/pull/43",
+            "pr_number": 43,
+        },
+    )]
+
+
+@pytest.mark.asyncio
+async def test_merged_autopr_redelivery_is_a_true_noop(monkeypatch):
+    task_id, project_id = uuid4(), uuid4()
+    pr_url = "https://github.com/tajaa/matcha-recruit/pull/44"
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "review",
+        "progress_note": "from auto setup · Tests are green",
+        "pr_url": pr_url,
+        "pr_number": 44,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return task
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {"merged": True, "html_url": pr_url, "number": 44},
+    })
+
+    assert updates == []

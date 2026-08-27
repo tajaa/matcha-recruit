@@ -319,6 +319,18 @@ _KANBAN_AUTOPR_PROJECT_IDS = {
     "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
 }
 
+_AUTOPR_PROGRESS_NOTE = "from auto setup"
+
+
+def _with_autopr_progress_note(existing: Optional[str]) -> str:
+    """Mark an auto-setup card without discarding its current progress note."""
+    current = (existing or "").strip()
+    if not current:
+        return _AUTOPR_PROGRESS_NOTE
+    if current.casefold().startswith(_AUTOPR_PROGRESS_NOTE.casefold()):
+        return current
+    return f"{_AUTOPR_PROGRESS_NOTE} · {current}"
+
 
 async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
     repo_full_name = (payload.get("repository") or {}).get("full_name") or ""
@@ -348,7 +360,8 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
 
     async with get_connection() as conn:
         task = await conn.fetchrow(
-            "SELECT id, project_id, board_column FROM mw_tasks WHERE id = $1",
+            """SELECT id, project_id, board_column, progress_note, pr_url, pr_number
+               FROM mw_tasks WHERE id = $1""",
             UUID(task_id),
         )
     if not task or str(task["project_id"]) not in _KANBAN_AUTOPR_PROJECT_IDS:
@@ -380,8 +393,19 @@ async def _handle_pull_request_event(payload: dict) -> dict:
 
     if action == "closed":
         merged = bool(pr.get("merged"))
-        if merged and column in ("todo", "in_progress", "changes_requested"):
-            await pt_svc.update_project_task(task["project_id"], task["id"], {"board_column": "review"})
+        if merged and column != "done":
+            patch = {}
+            progress_note = _with_autopr_progress_note(task["progress_note"])
+            if progress_note != task["progress_note"]:
+                patch["progress_note"] = progress_note
+            if pr.get("html_url") and pr["html_url"] != task["pr_url"]:
+                patch["pr_url"] = pr["html_url"]
+            if pr.get("number") is not None and pr["number"] != task["pr_number"]:
+                patch["pr_number"] = pr["number"]
+            if column in ("todo", "in_progress", "changes_requested"):
+                patch["board_column"] = "review"
+            if patch:
+                await pt_svc.update_project_task(task["project_id"], task["id"], patch)
         return {"ok": True, "task": str(task["id"]), "merged": merged}
 
     return {"ignored": action}
