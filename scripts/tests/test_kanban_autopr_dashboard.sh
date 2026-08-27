@@ -42,10 +42,13 @@ AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
 
 check "tmux observer creates one session with four panes" \
   $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] \
-    && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 3 ] && echo 0 || echo 1)
+    && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 3 ] \
+    && grep -q '^split-window -h -p 50 ' "$TMP_DIR/tmux.log" \
+    && [ "$(grep -c '^split-window -v -p 50 ' "$TMP_DIR/tmux.log")" = 2 ] \
+    && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
   $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
-    && grep -q 'live PR-creation work' "$TMP_DIR/tmux.log" \
+    && grep -q 'live OpenCode / OpenAI work' "$TMP_DIR/tmux.log" \
     && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
     && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
 
@@ -138,6 +141,39 @@ check "PR pane shows real metadata, labels, worktree files, and live diff" \
     && grep -q '4 files changed' "$TMP_DIR/pr-pane.out" \
     && grep -q 'CHANGED FILES · LIVE RUNNER WORKTREE' "$TMP_DIR/pr-pane.out" \
     && grep -q 'ComplianceLocationModal' "$TMP_DIR/pr-pane.out" && echo 0 || echo 1)
+
+cat > "$TMP_DIR/gh-work" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "run list" ]; then
+  printf '%s\n' '[{"databaseId":900,"status":"in_progress","createdAt":"2099-08-27T01:00:00Z"}]'
+elif [ "$1 $2" = "run view" ]; then
+  printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
+fi
+EOF
+chmod +x "$TMP_DIR/gh-work"
+cat > "$TMP_DIR/live-work.log" <<'EOF'
+MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM
+OpenCode: reading project files
+OpenCode: editing the scheduling guard
+Bearer this-token-must-not-render
+sk-abcdefghijklmnopqrstuvwxyz123456
+-----BEGIN TEST PRIVATE KEY-----
+private-key-body-must-not-render
+-----END TEST PRIVATE KEY-----
+OpenCode: running focused tests
+EOF
+
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
+check "live-work pane shows model activity and redacts common credentials" \
+  $(grep -q 'LIVE OPENCODE / OPENAI WORK' "$TMP_DIR/work-pane.out" \
+    && grep -q 'STEP build · Investigate' "$TMP_DIR/work-pane.out" \
+    && grep -q 'editing the scheduling guard' "$TMP_DIR/work-pane.out" \
+    && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-pane.out" \
+    && grep -q '\[REDACTED PRIVATE KEY\]' "$TMP_DIR/work-pane.out" \
+    && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-pane.out" \
+    && ! grep -q 'this-token-must-not-render' "$TMP_DIR/work-pane.out" \
+    && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

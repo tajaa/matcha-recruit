@@ -11,7 +11,7 @@ REFRESH_SECONDS="${AUTOPR_HEALTH_REFRESH_SECONDS:-15}"
 render_health() {
     local launch_state runner_pids
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'LOCAL TIMER + RUNNER HEALTH\nUpdated %s\n\n' "$(date '+%H:%M:%S %Z')"
+    printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(date '+%H:%M:%S %Z')"
 
     launch_state="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null \
         | sed -nE '/state =|runs =|last exit code =/p' | sed 's/^[[:space:]]*/  /')"
@@ -21,22 +21,22 @@ render_health() {
         printf 'LAUNCHAGENT\n  not loaded\n'
     fi
 
-    printf '\nSELF-HOSTED RUNNER\n'
-    runner_pids="$(pgrep -f 'Runner.Listener' | paste -sd, - 2>/dev/null || true)"
+    printf '\nSELF-HOSTED RUNNER · '
+    runner_pids="$(pgrep -f 'Runner.Listener' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
     if [ -n "$runner_pids" ]; then
-        ps -p "$runner_pids" -o pid=,etime=,comm= 2>/dev/null || true
+        ps -p "$runner_pids" -o pid=,etime=,comm= 2>/dev/null | sed 's/^[[:space:]]*//' || true
     else
         printf '  Runner.Listener not found\n'
     fi
 
     printf '\nRECENT TIMER EVENTS\n'
     if [ -s "$LOG_FILE" ]; then
-        tail -n 14 "$LOG_FILE" | jq -r '
+        # Active-workflow snapshots can contain dozens of prior runs. The
+        # health pane needs the timer decision, not a wrapped dump of that
+        # snapshot; the 24-hour dashboard owns workflow history.
+        tail -n 8 "$LOG_FILE" | jq -r '
           "  " + (.timestamp // "?") + "  " + (.action // "?") + "  " + (.reason // "?")
-          + (if ((.runs // []) | length) > 0 then
-               "  [" + ([.runs[] | "#" + (.databaseId | tostring) + ":" + .status] | join(", ")) + "]"
-             else "" end)
-        ' 2>/dev/null || tail -n 14 "$LOG_FILE"
+        ' 2>/dev/null || tail -n 8 "$LOG_FILE"
     else
         printf '  no timer events yet\n'
     fi

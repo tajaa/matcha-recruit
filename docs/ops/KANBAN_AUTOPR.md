@@ -78,8 +78,8 @@ changes.
 
 The LaunchAgent recreates the read-only `matcha-autopr` session on its next five-minute
 tick if the session is missing. Closing the dashboard never stops or duplicates the
-workflow; GitHub Actions remains the only coding execution path. The window uses a
-main-left layout:
+workflow; GitHub Actions remains the only coding execution path. The window uses a 2x2
+grid: dashboard/work above PR/health.
 
 - **24h queue + PR dashboard** — active workflow, the exact card `select.sh` would choose
   next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs
@@ -90,17 +90,21 @@ main-left layout:
   and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
   runner worktree and never displays the ticket prompt or credential-bearing process
   arguments.
-- **live PR-creation work** — current Actions job/step state from `gh run view`, plus only
-  the local worker process names and elapsed times. It never prints command arguments,
-  ticket prompts, or credentials.
+- **live OpenCode/OpenAI work** — current Actions run/step plus the real model terminal
+  stream while it investigates, reads files, edits code, and verifies the task. The
+  trusted harness tees that output to the mode-600 local file
+  `~/Library/Logs/matcha-kanban-autopr-live.log`; GitHub does not expose live step stdout.
+  Model credentials remain stripped, and the display adds common token and PEM redaction.
 - **timer + runner health** — LaunchAgent state, self-hosted runner presence, and recent
   structured dispatch/skip/error events.
 
-The summary pane refreshes every 60 seconds, the PR and work panes every 10 seconds, and
-health every 15 seconds. Override those intervals with
+The summary pane refreshes every 60 seconds, the PR pane every 10 seconds, the local model
+stream every 2 seconds (with GitHub status refreshed every 10), and health every 15
+seconds. Override those intervals with
 `AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,
-`AUTOPR_WORK_REFRESH_SECONDS`, and `AUTOPR_HEALTH_REFRESH_SECONDS` before creating the
-session if needed. Override `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
+`AUTOPR_WORK_REFRESH_SECONDS`, `AUTOPR_WORK_STATUS_REFRESH_SECONDS`, and
+`AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. Override
+`AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 

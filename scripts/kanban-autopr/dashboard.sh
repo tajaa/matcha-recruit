@@ -52,58 +52,57 @@ render_dashboard() {
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     printf 'MATCHA KANBAN AUTOPR · 24 HOUR VIEW\n'
-    printf 'Updated %s · refresh %ss · repo %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$REFRESH_SECONDS" "$REPO"
+    printf 'Updated %s · refresh %ss\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$REFRESH_SECONDS"
 
-    printf 'WORKFLOW NOW\n'
+    printf 'WORKFLOW NOW · '
     if ! printf '%s' "$runs" | jq -r '
       [.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))]
-      | if length == 0 then "  idle" else .[] | "  #\(.databaseId)  \(.status)  \(.displayTitle // "Kanban autopr")" end
+      | if length == 0 then "idle" else .[0] | "#\(.databaseId)  \(.status)" end
     '; then
-        printf '  GitHub status unavailable\n'
+        printf 'GitHub unavailable\n'
     fi
 
-    printf '\nUP NEXT\n'
+    printf 'UP NEXT · '
     if [ -n "$selected" ]; then
-        printf '%s' "$selected" | jq -r '"  [\(.board_column)] \(.project_title) · \(.title)\n  task \(.id8) · mode \(.mode)"'
+        printf '%s' "$selected" | jq -r '"[\(.board_column)] \(.project_title) · \(.title[0:45]) · \(.id8)"'
     else
-        printf '  No immediately eligible card (queue may be waiting on answers, cooldown, or PR caps).\n'
+        printf 'none immediately eligible\n'
     fi
 
-    printf '\nBOARD QUEUE\n'
+    printf '\nBOARD QUEUE · '
     printf '%s' "$cards" | jq -r '
-      if length == 0 then "  empty or board API unavailable" else
-        ("  " + ((map(select(.board_column == "changes_requested")) | length) | tostring) + " changes requested · "
-          + ((map(select(.board_column == "todo")) | length) | tostring) + " todo"),
-        (sort_by((if .board_column == "changes_requested" then 0 else 1 end), (.last_moved_at // .created_at))[:12][] |
+      if length == 0 then "empty or API unavailable" else
+        (((map(select(.board_column == "changes_requested")) | length) | tostring) + " CR · "
+          + ((map(select(.board_column == "todo")) | length) | tostring) + " TODO"),
+        (sort_by((if .board_column == "changes_requested" then 0 else 1 end), (.last_moved_at // .created_at))[:4][] |
           "  " + (if .board_column == "changes_requested" then "CR  " else "TODO" end)
-          + "  " + (.project_title // "?") + " · " + (.title[0:72])
+          + " " + (.project_title // "?") + " · " + (.title[0:50])
           + (if (.progress_note // "") | contains("awaiting answers") then "  [WAITING]" else "" end))
       end
     '
 
     printf '\nOPEN AUTO PRS\n'
     printf '%s' "$open_prs" | jq -r '
-      if length == 0 then "  none" else .[] |
-        "  #\(.number)  " + (if .isDraft then "DRAFT" else "OPEN " end) + "  " + (.title[0:82])
+      if length == 0 then "  none" else .[:3][] |
+        "  #\(.number) " + (if .isDraft then "DRAFT" else "OPEN " end) + " " + (.title[0:50])
         + (if ([.labels[].name] | index("autopr-awaiting-input")) then "  [WAITING]" else "" end)
       end
     '
 
-    printf '\nMERGED AUTO PRS · LAST 24 HOURS\n'
+    printf 'MERGED AUTO PRS · LAST 24 HOURS · '
     printf '%s' "$merged_prs" | jq -r --arg cutoff "$cutoff" '
       [.[] | select((.mergedAt // "") >= $cutoff)]
-      | if length == 0 then "  none" else .[] | "  #\(.number)  \(.mergedAt[11:16])Z  \(.title[0:84])" end
+      | if length == 0 then "none" else [.[0:4][] | "#" + (.number | tostring)] | join(", ") end
     '
 
     printf '\nWORKFLOW RUNS · LAST 24 HOURS\n'
     printf '%s' "$runs" | jq -r --arg cutoff "$cutoff" '
-      [.[] | select((.createdAt // "") >= $cutoff)][:15]
+      [.[] | select((.createdAt // "") >= $cutoff)][:4]
       | if length == 0 then "  none" else .[] |
         "  #\(.databaseId)  \(.createdAt[11:16])Z  " +
         (if .status == "completed" then (.conclusion // "completed") else .status end) + "  " + .event
       end
     '
-    printf '\nAttach: tmux attach -t matcha-autopr · detach: Ctrl-b d\n'
 }
 
 while :; do
