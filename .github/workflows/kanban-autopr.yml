@@ -3,8 +3,10 @@ name: Kanban autopr
 on:
   workflow_dispatch:
 
-# This must run on Finch's Mac. It uses that user's authenticated OpenCode
-# profile; the Matcha bot credential lives in ~/.config/matcha-autopr/env
+# This must run on Finch's Mac. The trusted job owns board/prod/GitHub access,
+# while OpenCode runs with broad permissions only inside a dedicated msandbox
+# containing a clean tracked-files-only clone. The Matcha bot credential lives
+# in ~/.config/matcha-autopr/env
 # (chmod 600, never committed, never a GitHub secret) — same design
 # constraint as silent-error-autofix.yml. The trusted harness reads the active
 # production image identities, migration revisions, and redacted error evidence;
@@ -148,6 +150,11 @@ jobs:
         continue-on-error: true
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+          # Fail closed into the dedicated container/volume namespace. The
+          # helper also mounts an empty AWS directory and never passes this
+          # step's GitHub, Matcha, or production credentials through.
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
         run: |
           ./scripts/kanban-autopr/investigate.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
 

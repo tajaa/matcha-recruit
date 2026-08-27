@@ -19,8 +19,10 @@ outside the container instead:
 ```bash
 msandbox build --playwright   # rebuild with Chromium, or after Dockerfile changes
 msandbox login codex          # or: login claude / login opencode / login gh
+msandbox autopr-login         # isolated OpenCode login for the Kanban worker
 msandbox dev                  # backend/worker/frontend/Tell-Us/Oceanlab in tmux
 msandbox codex                # in another terminal — or `claude` / `opencode`
+msandbox exec command args    # exact-argv, non-TTY automation path
 msandbox doctor               # isolation + capability self-check
 ```
 
@@ -93,9 +95,11 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | `build [--playwright]` | Build the workspace image |
 | `start` / `stop` / `status` | Workspace lifecycle; `start` also ensures the normal local dev DB/Redis are running |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
+| `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |
 | `dev [args]` | `AGENT_SANDBOX=1 ./scripts/dev-remote.sh` inside the container |
 | `doctor` | Runs the isolation/capability checklist below |
 | `login <codex\|claude\|opencode\|gh>` | Authenticate one agent (own state volume) |
+| `autopr-login` | Authenticate OpenCode in the dedicated AutoPR project with empty workspace/AWS mounts |
 | `run <codex\|claude\|opencode> [args]` | Start that agent with full execution |
 | `codex` / `claude` / `opencode` | Shorthand for `run <agent>` |
 
@@ -108,6 +112,38 @@ the normal local dev services through `host.docker.internal`; these override
 the repo `.env` files' host-only `localhost` addresses.
 `INSTALL_PLAYWRIGHT_BROWSERS=true` bakes in a Chromium for isolated Playwright
 runs. `SANDBOX_ALLOW_DEPLOY=1` permits `update-ec2.sh` from inside the sandbox.
+
+`AGENT_SANDBOX_PROJECT_NAME`, `SANDBOX_WORKSPACE_DIR`, and `SANDBOX_AWS_DIR`
+let a trusted wrapper create a separate container/volume namespace and narrow
+the two host mounts. Kanban AutoPR uses all three: its project is
+`matcha-kanban-autopr-sandbox`, its workspace is a clean disposable clone, and
+its AWS mount is an empty directory. These are host-controlled containment
+inputs, not options exposed to the model.
+
+## Kanban AutoPR lane
+
+The Kanban worker does not run OpenCode in the normal interactive workspace.
+`scripts/kanban-autopr/run-opencode-sandboxed.sh` creates a tracked-files-only
+clone of the selected task branch, removes its remote, and mounts that clone in
+a dedicated msandbox project. Untracked `.env` files, PEM files, the Actions
+checkout, host home, Docker socket, GitHub token, Matcha bot password,
+production SSH key, and AWS credentials are absent. The model has broad
+edit/bash/web access inside the clone and can reach the normal local dev
+Postgres/Redis services. When it exits successfully, the trusted host copies
+out the report/decision and applies one binary patch to the task branch; the
+normal verifier and publisher remain outside the container. The bridge rejects
+more than 25 changed files, patches larger than 5 MB, oversized reports or
+decisions, and any symlink/submodule change before applying the patch.
+
+The dedicated project has its own persistent OpenCode account state. Log in
+once before enabling the timer:
+
+```bash
+msandbox autopr-login
+```
+
+The next AutoPR investigation recreates that project's container with the
+sanitized workspace and empty AWS mount while preserving its named auth volume.
 
 ## Validation checklist
 

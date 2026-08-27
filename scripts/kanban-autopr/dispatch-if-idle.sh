@@ -8,6 +8,8 @@ WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
+MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
+SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispatch.lock}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,6 +58,7 @@ dispatch_workflow() {
 
 main() {
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
+    [ -x "$MSANDBOX_BIN" ] || { log_event error "msandbox-not-executable"; exit 1; }
     if [ "${AUTOPR_TMUX_DASHBOARD:-1}" != 0 ] && [ -x "$DASHBOARD_ENSURE" ]; then
         # Observability must not become a scheduling dependency. Record a pane
         # startup failure, then continue the authoritative dispatch check.
@@ -64,6 +67,16 @@ main() {
     if ! acquire_dispatch_lock; then
         log_event skip local-lock
         exit 0
+    fi
+
+    # Do not create a GitHub run every five minutes when the required local
+    # containment boundary cannot start. `status` is read-only and succeeds
+    # whether the dedicated container is running or merely idle; it fails when
+    # Docker/msandbox itself is unavailable.
+    if ! env AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+        "$MSANDBOX_BIN" status >/dev/null 2>&1; then
+        log_event error sandbox-unavailable
+        exit 1
     fi
 
     local runs

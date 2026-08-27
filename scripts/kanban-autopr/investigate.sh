@@ -205,30 +205,45 @@ else
     PROMPT_FILE="$SCRIPT_DIR/_prompt_todo.txt"
 fi
 
-PROMPT_TEXT="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" -e "s#DECISION_PATH#$RAW_DECISION_FILE#g" "$PROMPT_FILE")"
-
 # Defense in depth: this step's workflow env should already omit these, but
-# strip them here too in case a future edit adds them back. Mirror the model's
-# terminal output to one local, mode-600 observer log: GitHub does not expose
-# an in-progress step's stdout, while the operator explicitly needs to see
-# OpenCode/OpenAI investigate and edit the task live in tmux.
+# strip them here too in case a future edit adds them back. The production path
+# invokes a dedicated msandbox bridge; direct host execution exists only as an
+# explicit local test seam and is rejected inside GitHub Actions. Mirror the
+# sandboxed model's terminal output to one local, mode-600 observer log: GitHub
+# does not expose an in-progress step's stdout, while the operator explicitly
+# needs to see OpenCode/OpenAI investigate and edit the task live in tmux.
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$SCRIPT_DIR/run-opencode-sandboxed.sh}"
+TEST_DIRECT="${AUTOPR_SANDBOX_TEST_DIRECT:-0}"
+[ "$TEST_DIRECT" != 1 ] || [ "${GITHUB_ACTIONS:-}" != true ] \
+    || die "direct OpenCode execution is forbidden in GitHub Actions"
 live_log_ready=false
 if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
     if (umask 077; {
         printf 'MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM\n'
-        printf 'run %s · task %s · mode %s · started %s\n\n' \
-            "${GITHUB_RUN_ID:-local}" "$ID8" "$MODE" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+        printf 'run %s · task %s · mode %s · execution %s · started %s\n\n' \
+            "${GITHUB_RUN_ID:-local}" "$ID8" "$MODE" \
+            "$([ "$TEST_DIRECT" = 1 ] && printf test-direct || printf msandbox)" \
+            "$(date '+%Y-%m-%d %H:%M:%S %Z')"
     } > "$LIVE_LOG") 2>/dev/null; then
         live_log_ready=true
     fi
 fi
 
 run_opencode() {
-    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        opencode run --auto --model openai/gpt-5.6-terra --variant high \
-        "${ATTACH_ARGS[@]}" \
-        -- "$PROMPT_TEXT"
+    if [ "$TEST_DIRECT" = 1 ]; then
+        local prompt_text
+        prompt_text="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" \
+            -e "s#DECISION_PATH#$RAW_DECISION_FILE#g" "$PROMPT_FILE")"
+        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+            opencode run --auto --model openai/gpt-5.6-terra --variant high \
+            "${ATTACH_ARGS[@]}" -- "$prompt_text"
+    else
+        [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
+        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+            "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
+            "${ATTACH_ARGS[@]}"
+    fi
 }
 
 if [ "$live_log_ready" = true ]; then

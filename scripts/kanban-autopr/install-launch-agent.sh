@@ -19,6 +19,8 @@ validate_dependencies() {
     command -v jq >/dev/null || { echo "missing jq" >&2; exit 1; }
     [ -x "$TMUX_BIN" ] || { echo "missing tmux: $TMUX_BIN" >&2; exit 1; }
     [ -x "$LAUNCHCTL_BIN" ] || { echo "missing launchctl: $LAUNCHCTL_BIN" >&2; exit 1; }
+    [ -x "$USER_HOME/.local/bin/msandbox" ] \
+        || { echo "missing $USER_HOME/.local/bin/msandbox" >&2; exit 1; }
     /opt/homebrew/bin/gh auth status >/dev/null
 }
 

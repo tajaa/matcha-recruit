@@ -13,7 +13,23 @@ while [[ -L "$SCRIPT_SOURCE" ]]; do
 done
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.sandbox.yml"
-COMPOSE=(docker compose --project-name matcha-agent-sandbox --file "$COMPOSE_FILE")
+# Callers that need a separate trust boundary (Kanban AutoPR, for example)
+# get their own container and named volumes without duplicating this launcher.
+# The workspace and AWS mounts are explicit inputs so a trusted host wrapper
+# can mount a sanitized clone and an empty credentials directory.
+SANDBOX_PROJECT_NAME="${AGENT_SANDBOX_PROJECT_NAME:-matcha-agent-sandbox}"
+export SANDBOX_WORKSPACE_DIR="${SANDBOX_WORKSPACE_DIR:-$PROJECT_ROOT}"
+export SANDBOX_AWS_DIR="${SANDBOX_AWS_DIR:-$HOME/.aws}"
+COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
+
+configure_autopr_lane() {
+    local bootstrap_root="${AUTOPR_SANDBOX_BOOTSTRAP_ROOT:-$PROJECT_ROOT/.git/matcha-autopr-sandbox/bootstrap}"
+    SANDBOX_PROJECT_NAME="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+    export SANDBOX_WORKSPACE_DIR="$bootstrap_root/workspace"
+    export SANDBOX_AWS_DIR="$bootstrap_root/empty-aws"
+    mkdir -p "$SANDBOX_WORKSPACE_DIR" "$SANDBOX_AWS_DIR"
+    COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
+}
 
 usage() {
     cat <<'EOF'
@@ -28,9 +44,11 @@ Commands:
   stop                        Stop sandbox services without deleting their volumes.
   status                      Show sandbox service status and published localhost ports.
   shell [cmd...]               Open a workspace shell (or run one command).
+  exec <cmd> [args...]         Run one non-interactive command with exact argv.
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
   doctor                       Check the isolation + capability checklist.
   login <codex|claude|opencode|gh>   Authenticate one agent (or GitHub) in its own state volume.
+  autopr-login                 Authenticate OpenCode in the dedicated credential-minimized AutoPR lane.
   run <codex|claude|opencode> [args] Start that agent with full execution inside the container boundary.
   codex [args]                       Shorthand for `run codex`.
   claude [args]                      Shorthand for `run claude`.
@@ -192,6 +210,15 @@ case "$command_name" in
         start_services
         login_agent "${1:?usage: login <codex|claude|opencode|gh>}"
         ;;
+    autopr-login)
+        # Use a deliberately empty bootstrap workspace/AWS mount even for the
+        # one-time interactive auth flow. The real task clone is mounted only
+        # later by run-opencode-sandboxed.sh.
+        configure_autopr_lane
+        require_docker
+        start_services
+        login_agent opencode
+        ;;
     git-login)
         require_docker
         start_services
@@ -228,6 +255,15 @@ case "$command_name" in
         else
             exec_workspace bash
         fi
+        ;;
+    exec)
+        require_docker
+        [[ $# -gt 0 ]] || { echo "usage: msandbox exec <cmd> [args...]" >&2; exit 1; }
+        start_services
+        # This path is intended for automation. Keep argv boundaries intact
+        # and disable TTY allocation so prompts/files never pass through a
+        # shell string or fail on a headless GitHub Actions runner.
+        exec_workspace_no_tty "$@"
         ;;
     status)
         require_docker

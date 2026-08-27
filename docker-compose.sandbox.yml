@@ -2,6 +2,11 @@ name: matcha-agent-sandbox
 
 services:
   workspace:
+    # Project namespaces isolate containers and state volumes, but both the
+    # interactive and AutoPR lanes reuse this large, pinned toolchain image.
+    # Without an explicit name Compose would build a duplicate 7+ GB image for
+    # every dedicated project name.
+    image: matcha-agent-sandbox-workspace:latest
     build:
       context: .
       dockerfile: docker/agent-sandbox/Dockerfile
@@ -30,12 +35,16 @@ services:
       OCEANLAB_PORT: ${OCEANLAB_PORT:-5201}
       CHAT_PORT: ${CHAT_PORT:-8080}
     volumes:
-      - .:/workspace
+      # AutoPR overrides this with a clean tracked-files-only clone. Ordinary
+      # interactive msandbox sessions still default to the repository root.
+      - ${SANDBOX_WORKSPACE_DIR:-.}:/workspace
       - sandbox_home:/home/agent
       - sandbox_npm_cache:/home/agent/.npm
       # AWS static credentials, read-only. See docs/ops/AGENT_SANDBOX.md's
       # threat model — this is deliberately reachable, not an oversight.
-      - ${HOME}/.aws:/home/agent/.aws:ro
+      # AutoPR points this at an empty directory. Interactive sessions retain
+      # the documented read-only host AWS mount by default.
+      - ${SANDBOX_AWS_DIR:-${HOME}/.aws}:/home/agent/.aws:ro
       - sandbox_server_venv:/workspace/server/venv
       - sandbox_client_node_modules:/workspace/client/node_modules
       - sandbox_tellus_node_modules:/workspace/client/tellus/node_modules

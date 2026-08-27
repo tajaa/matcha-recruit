@@ -32,12 +32,25 @@ exit 1
 EOF
 chmod +x "$TMP_DIR/gh"
 
+cat > "$TMP_DIR/msandbox" <<'EOF'
+#!/usr/bin/env bash
+[ "${AUTOPR_TEST_SANDBOX_FAIL:-0}" = 0 ] || exit 1
+[ "$1" = status ]
+EOF
+chmod +x "$TMP_DIR/msandbox"
+
 run_dispatcher() {
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
+    AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
     AUTOPR_TMUX_DASHBOARD=0 \
     "$DISPATCHER" >/dev/null 2>&1
 }
+
+AUTOPR_TEST_SANDBOX_FAIL=1 run_dispatcher || sandbox_rc=$?
+check "unavailable msandbox fails closed before dispatch" \
+  $([ "${sandbox_rc:-0}" != 0 ] && grep -q 'sandbox-unavailable' "$TMP_DIR/log.jsonl" \
+    && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
 AUTOPR_TEST_RUNS='[]' run_dispatcher
 check "idle workflow dispatches once" \

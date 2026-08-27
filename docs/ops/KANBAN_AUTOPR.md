@@ -16,8 +16,9 @@ a card back. The bot never merges and never approves.
 
 **Design constraint carried over from silent-error-autofix**: no model credential and no
 Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as Finch's
-user; OpenCode uses that user's profile, and the Matcha bot credential lives in
-`~/.config/matcha-autopr/env` (`chmod 600`, never committed).
+user; OpenCode uses the dedicated `matcha-kanban-autopr-sandbox` account-state volume,
+and the Matcha bot credential lives in `~/.config/matcha-autopr/env` (`chmod 600`, never
+committed). OpenCode itself never receives that file or credential.
 
 The existing `EC2_SSH_KEY` Actions secret is used only by the trusted harness. Before
 each queue scan, `resolve-production-context.sh` resolves the active blue/green
@@ -67,12 +68,16 @@ changes.
    `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
-5. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
+5. Authenticate OpenCode once in the dedicated containment lane:
+   `msandbox autopr-login`.
+   This state persists in that Docker project's named home volume and is not copied into
+   GitHub secrets.
+6. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
    JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. The installer also
    creates the `matcha-autopr` tmux dashboard; open it with
    `tmux attach -t matcha-autopr` and detach with `Ctrl-b d`. Do not add a GitHub cron
    alongside it; use manual `workflow_dispatch` if the local timer needs recovery.
-6. `gh workflow run kanban-autopr.yml` once by hand before relying on the local timer.
+7. `gh workflow run kanban-autopr.yml` once by hand before relying on the local timer.
 
 ## Local tmux dashboard
 
@@ -90,7 +95,8 @@ grid: dashboard/work above PR/health.
   and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
   runner worktree and never displays the ticket prompt or credential-bearing process
   arguments.
-- **live OpenCode/OpenAI work** — current Actions run/step plus the real model terminal
+- **live OpenCode/OpenAI work** — current Actions run/step, dedicated msandbox identity,
+  plus the real model terminal
   stream while it investigates, reads files, edits code, and verifies the task. The
   trusted harness tees that output to the mode-600 local file
   `~/Library/Logs/matcha-kanban-autopr-live.log`; GitHub does not expose live step stdout.
@@ -136,14 +142,18 @@ seconds. Override those intervals with
    the moment `last_moved_at` advances past the marker date. A failed attempt cools down
    for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 3 open `autopr` PRs.
-4. **`investigate.sh`** — both modes receive a single context bundle containing the card,
+4. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
    trusted harness and attached locally; the model never needs board or storage network
    access. `todo` mode implements the card; `rework` mode additionally receives the
    existing PR's reviews/comments and addresses the latest `review_note`, rejection
    events, discussion, and screenshots without re-litigating accepted earlier rounds.
-   Both require a report with `### Summary` / `### Changes` / `### Blast radius` /
+   It then calls `run-opencode-sandboxed.sh`, which clones only tracked files into a
+   dedicated msandbox workspace, removes the clone's remote, mounts an empty AWS
+   directory, and strips GitHub/Matcha/SSH credentials. OpenCode gets broad permissions
+   inside that disposable clone, while the trusted harness copies back only its patch,
+   report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
    `### Confidence` plus a shell-validated JSON triage decision. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the

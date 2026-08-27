@@ -46,6 +46,23 @@ check "future frontend images expose a small stable build manifest" \
 check "model process is stripped of production SSH credentials" \
     $(grep -qF 'env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
 
+check "workflow forces OpenCode through the dedicated AutoPR msandbox" \
+    $(grep -qF 'AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh' "$workflow" \
+      && grep -qF 'AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox' "$workflow" \
+      && grep -qF 'run-opencode-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+check "msandbox exposes a credential-minimized one-command AutoPR login" \
+    $(grep -qF 'autopr-login)' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && grep -qF 'configure_autopr_lane' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && echo 0 || echo 1)
+
+check "sandbox bridge uses a clean clone and empty AWS mount" \
+    $(grep -qF 'git clone --quiet --no-hardlinks --no-checkout' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
+      && grep -qF 'SANDBOX_AWS_DIR="$EMPTY_AWS_DIR"' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
+      && grep -qF 'git -C "$REPO_ROOT" apply --check --binary' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
+      && echo 0 || echo 1)
+
 check "published PR and card carry production build provenance" \
     $(grep -qF '<!-- matcha-production-build: $PROD_BUILD_NUMBER -->' "$AUTOPR_DIR/publish.sh" \
       && grep -qF 'from auto setup · build $PROD_BUILD_NUMBER' "$AUTOPR_DIR/publish.sh" \
@@ -238,6 +255,7 @@ PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/ru
 GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode_files" \
 OPENCODE_STUB_CONTEXT="$TMP_DIR/context.json" OPENCODE_STUB_REPORT="$TMP_DIR/report.md" \
 OPENCODE_STUB_DECISION="$TMP_DIR/decision.json" AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > /dev/null 2>&1
 investigate_rc=$?
 
@@ -268,6 +286,7 @@ AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
 GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode-no-files" \
 OPENCODE_STUB_CONTEXT="$TMP_DIR/context-no-files.json" OPENCODE_STUB_REPORT="$TMP_DIR/report-no-files.md" \
 OPENCODE_STUB_DECISION="$TMP_DIR/decision-no-files.json" AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
     "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
 no_files_rc=$?
@@ -282,12 +301,98 @@ MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 OPENCODE_STUB_FILES="$TMP_DIR/opencode-failed-files" OPENCODE_STUB_CONTEXT="$TMP_DIR/context-failed.json" \
 OPENCODE_STUB_REPORT="$TMP_DIR/report-failed.md" OPENCODE_STUB_DECISION="$TMP_DIR/decision-failed.json" \
 AUTOPR_LIVE_LOG="$TMP_DIR/live-failed.log" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-failed.md" \
     "$TMP_DIR/decision-failed.json" > /dev/null 2>&1
 failed_opencode_rc=$?
 check "live tee preserves a failing OpenCode exit status" \
     $([ "$failed_opencode_rc" != 0 ] \
       && grep -q '\[FAILED\] OpenCode exited 17' "$TMP_DIR/live-failed.log" \
+      && echo 0 || echo 1)
+
+################################################################################
+# The msandbox bridge operates on a tracked-only clone and returns one patch.
+# The direct seam below substitutes only for Docker/OpenCode; clone/input/
+# output/patch behavior is the same path production uses.
+################################################################################
+SANDBOX_TEST_REPO="$TMP_DIR/sandbox-source"
+mkdir -p "$SANDBOX_TEST_REPO/client/src" "$SANDBOX_TEST_REPO/secrets"
+git -C "$SANDBOX_TEST_REPO" init --initial-branch=main --quiet
+git -C "$SANDBOX_TEST_REPO" config user.name test
+git -C "$SANDBOX_TEST_REPO" config user.email test@example.com
+printf 'export const existing = true;\n' > "$SANDBOX_TEST_REPO/client/src/existing.ts"
+git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts
+git -C "$SANDBOX_TEST_REPO" commit --quiet -m base
+printf 'host-only-secret\n' > "$SANDBOX_TEST_REPO/secrets/private.pem"
+
+cat > "$TMP_DIR/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | sed -n 's/^REPORT=//p')"
+decision_path="$(printf '%s\n' "$prompt" | sed -n 's/^DECISION=//p')"
+first_input=""
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = -f ]; then
+        [ -n "$first_input" ] || first_input="$2"
+        shift 2
+    else
+        shift
+    fi
+done
+[ ! -e secrets/private.pem ] || exit 31
+[ -z "$(git remote)" ] || exit 32
+cp "$first_input" "$AUTOPR_SANDBOX_CAPTURE_CONTEXT"
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")" client/src
+printf '%s\n' '### Summary' sandbox '### Changes' sandbox '### Blast radius' none '### Confidence' high > "$report_path"
+printf '%s\n' '{"schema_version":1,"outcome":"implementation"}' > "$decision_path"
+printf 'export const sandboxProbe = true;\n' > client/src/sandbox-probe.ts
+EOF
+chmod +x "$TMP_DIR/bin/opencode"
+
+printf '%s\n' 'REPORT=REPORT_PATH' 'DECISION=DECISION_PATH' > "$TMP_DIR/sandbox-prompt.txt"
+printf 'attachment\n' > "$TMP_DIR/sandbox-attachment.txt"
+jq -n --arg path "$TMP_DIR/sandbox-attachment.txt" \
+  '{downloaded_attachments:[{id:"attachment-1",local_path:$path}]}' > "$TMP_DIR/sandbox-context.json"
+
+PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
+  "$AUTOPR_DIR/run-opencode-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report.md" "$TMP_DIR/sandbox-decision.json" \
+  -f "$TMP_DIR/sandbox-context.json" -f "$TMP_DIR/sandbox-attachment.txt" \
+  >"$TMP_DIR/sandbox-bridge.log" 2>&1
+sandbox_bridge_rc=$?
+[ "$sandbox_bridge_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/sandbox-bridge.log"
+
+check "msandbox bridge excludes untracked secrets and applies the model patch" \
+    $([ "$sandbox_bridge_rc" = 0 ] \
+      && grep -q 'sandboxProbe' "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" \
+      && [ -s "$TMP_DIR/sandbox-report.md" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/.autopr-io" ] \
+      && echo 0 || echo 1)
+
+mapped_attachment="$(jq -r '.downloaded_attachments[0].local_path' "$TMP_DIR/sandbox-captured-context.json" 2>/dev/null)"
+check "msandbox bridge rewrites attachment paths into the isolated workspace" \
+    $([ -n "$mapped_attachment" ] \
+      && [ "$mapped_attachment" != "$TMP_DIR/sandbox-attachment.txt" ] \
+      && [[ "$mapped_attachment" == "$TMP_DIR/sandbox-runtime/workspace/"* ]] \
+      && echo 0 || echo 1)
+
+rm -f "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts"
+PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_SANDBOX_MAX_CHANGED_FILES=0 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
+  "$AUTOPR_DIR/run-opencode-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-capped.md" "$TMP_DIR/sandbox-decision-capped.json" \
+  -f "$TMP_DIR/sandbox-context.json" -f "$TMP_DIR/sandbox-attachment.txt" \
+  >/dev/null 2>&1
+sandbox_cap_rc=$?
+check "msandbox bridge enforces the mechanical changed-file cap before apply" \
+    $([ "$sandbox_cap_rc" != 0 ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" ] \
       && echo 0 || echo 1)
 
 cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"

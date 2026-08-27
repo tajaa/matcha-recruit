@@ -69,6 +69,8 @@ render_work() {
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     printf 'LIVE OPENCODE / OPENAI WORK · %s\n' "$(date '+%H:%M:%S %Z')"
+    printf 'EXECUTION msandbox · %s\n' \
+        "${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
     if [ -n "$RUN_ID" ]; then
         printf 'RUN #%s · %s\n' "$RUN_ID" "$RUN_STATUS"
         [ -z "$STEP_LINE" ] || printf 'STEP %s\n' "$STEP_LINE"
