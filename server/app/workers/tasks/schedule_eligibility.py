@@ -148,7 +148,8 @@ async def _send_expiry_warning_email(conn, case_id) -> None:
     after expiry). Skips any recipient with no email on file rather than
     raising, and never double-sends to a manager who is also the subject."""
     case = await conn.fetchrow(
-        """SELECT c.company_id, c.employee_id, c.location_id, c.expires_at, e.first_name, e.last_name, e.email AS employee_email
+        """SELECT c.company_id, c.employee_id, c.location_id, c.requirement_id,
+                  c.expires_at, e.first_name, e.last_name, e.email AS employee_email
            FROM schedule_eligibility_cases c JOIN employees e ON e.id=c.employee_id WHERE c.id=$1""", case_id)
     if not case:
         return
@@ -156,9 +157,17 @@ async def _send_expiry_warning_email(conn, case_id) -> None:
         conn, company_id=case["company_id"], location_id=case["location_id"],
         exclude_email=case["employee_email"],
     )
-    recipients = list(managers)
+    location_scope = f"location:{case['location_id'] or 'company'}"
+    recipients = [
+        {**dict(manager), "recipient_scope": location_scope}
+        for manager in managers
+    ]
     if case["employee_email"]:
-        recipients.append({"email": case["employee_email"], "first_name": case["first_name"]})
+        recipients.append({
+            "email": case["employee_email"],
+            "first_name": case["first_name"],
+            "recipient_scope": f"employee:{case['employee_id']}",
+        })
     if not recipients:
         return
     from app.core.services.email import get_email_service
@@ -166,12 +175,42 @@ async def _send_expiry_warning_email(conn, case_id) -> None:
     name = f"{case['first_name']} {case['last_name']}".strip()
     expires = case['expires_at'].isoformat() if case['expires_at'] else "soon"
     for recipient in recipients:
-        await service.send_email(
-            to_email=recipient['email'], to_name=recipient['first_name'],
-            subject=f"Credential expiring soon: {name}",
-            html_content=(f"<p>{name}'s schedule-blocking credential expires {expires}.</p>"
-                          "<p>A renewed credential must be on file by that date, or scheduling for "
-                          "upcoming shifts will be blocked.</p>"),
+        delivery_id = await conn.fetchval(
+            """
+            INSERT INTO schedule_eligibility_notification_deliveries
+                (company_id, case_id, requirement_id, expires_at, notification_kind,
+                 recipient_scope, recipient_email)
+            VALUES ($1,$2,$3,$4,'expiry_warning',$5,LOWER($6))
+            ON CONFLICT (
+                company_id, requirement_id, expires_at, notification_kind,
+                recipient_scope, recipient_email
+            ) DO NOTHING
+            RETURNING id
+            """,
+            case["company_id"], case_id, case["requirement_id"], case["expires_at"],
+            recipient["recipient_scope"], recipient["email"],
+        )
+        if delivery_id is None:
+            continue
+        try:
+            await service.send_email(
+                to_email=recipient['email'], to_name=recipient['first_name'],
+                subject=f"Credential expiring soon: {name}",
+                html_content=(f"<p>{name}'s schedule-blocking credential expires {expires}.</p>"
+                              "<p>A renewed credential must be on file by that date, or scheduling for "
+                              "upcoming shifts will be blocked.</p>"),
+            )
+        except Exception:
+            # Let the Celery retry claim this delivery again rather than
+            # treating an unsent row as a successful notification.
+            await conn.execute(
+                "DELETE FROM schedule_eligibility_notification_deliveries WHERE id=$1 AND sent_at IS NULL",
+                delivery_id,
+            )
+            raise
+        await conn.execute(
+            "UPDATE schedule_eligibility_notification_deliveries SET sent_at=NOW() WHERE id=$1",
+            delivery_id,
         )
 
 

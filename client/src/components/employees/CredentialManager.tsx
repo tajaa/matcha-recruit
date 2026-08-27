@@ -72,6 +72,8 @@ function DocumentCard({
   const [expirationDate, setExpirationDate] = useState('')
   const [reclassifying, setReclassifying] = useState(false)
   const [documentType, setDocumentType] = useState(doc.document_type)
+  const needsExpirationConfirmation = requiresExpiration && !doc.expires_at
+  const canApprove = doc.review_status === 'pending' || (doc.review_status === 'approved' && needsExpirationConfirmation)
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
@@ -82,6 +84,7 @@ function DocumentCard({
             <Badge variant={REVIEW_VARIANT[doc.review_status] ?? 'neutral'}>
               {doc.review_status}
             </Badge>
+            {doc.expires_at && <ExpirationBadge date={doc.expires_at} />}
           </div>
           <p className="text-[11px] text-zinc-500">
             {DOC_TYPE_LABELS[doc.document_type] ?? doc.document_type}
@@ -99,10 +102,12 @@ function DocumentCard({
         <div className="flex gap-1 shrink-0">
           <Button size="sm" variant="ghost" onClick={onDownload}>Download</Button>
           <Button size="sm" variant="ghost" onClick={() => setReclassifying((value) => !value)}>Type</Button>
-          {doc.review_status === 'pending' && (
+          {canApprove && (
             <>
-              <Button size="sm" variant="primary" onClick={() => setApproving(true)}>Approve</Button>
-              <Button size="sm" variant="ghost" onClick={onReject}>Reject</Button>
+              <Button size="sm" variant="primary" onClick={() => setApproving(true)}>
+                {doc.review_status === 'approved' ? 'Confirm expiry' : 'Approve'}
+              </Button>
+              {doc.review_status === 'pending' && <Button size="sm" variant="ghost" onClick={onReject}>Reject</Button>}
             </>
           )}
           {confirming ? (

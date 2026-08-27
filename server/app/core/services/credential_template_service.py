@@ -499,6 +499,48 @@ Do NOT fabricate requirements — if unsure, omit."""
 # ── Employee assignment ───────────────────────────────────────────────
 
 
+async def materialize_uploaded_schedule_blocking_requirement(
+    conn,
+    *,
+    company_id: UUID,
+    employee_id: UUID,
+    credential_type_key: str,
+):
+    """Create the evidence row implied by an uploaded blocking credential.
+
+    Food-service employees do not necessarily pass through the clinical-role
+    template resolver or a configured schedule job. An explicit upload of a
+    curated schedule-blocking credential is therefore its own materialization
+    signal. Preserve any existing verification evidence while making the
+    requirement company-wide so scheduling cannot fail open.
+    """
+    return await conn.fetchrow(
+        """
+        WITH blocking_type AS (
+            SELECT id, has_expiration
+              FROM credential_types
+             WHERE key = $3 AND COALESCE(schedule_blocking, false) = true
+        ), upserted AS (
+            INSERT INTO employee_credential_requirements
+                (employee_id, credential_type_id, status, is_required,
+                 priority, applies_company_wide)
+            SELECT e.id, bt.id, 'pending', true, 'blocking', true
+              FROM employees e CROSS JOIN blocking_type bt
+             WHERE e.id = $1 AND e.org_id = $2
+            ON CONFLICT (employee_id, credential_type_id) DO UPDATE SET
+                is_required = true,
+                priority = 'blocking',
+                applies_company_wide = true,
+                updated_at = NOW()
+            RETURNING id, credential_type_id
+        )
+        SELECT u.id, bt.has_expiration
+          FROM upserted u JOIN blocking_type bt ON bt.id=u.credential_type_id
+        """,
+        employee_id, company_id, credential_type_key,
+    )
+
+
 async def assign_credential_requirements_to_employee(
     conn,
     employee_id: UUID,

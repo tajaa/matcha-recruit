@@ -35,6 +35,9 @@ from app.core.services.credential_crypto import (
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.core.services.credential_template_service import (
+    materialize_uploaded_schedule_blocking_requirement,
+)
 from app.matcha.services.scheduling.job_credential_requirements import materialize_job_requirements
 
 logger = logging.getLogger(__name__)
@@ -248,6 +251,7 @@ class CredentialDocumentResponse(BaseModel):
     uploaded_via: str = "admin"
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
 def _cred_doc_from_row(row) -> dict:
@@ -270,6 +274,7 @@ def _cred_doc_from_row(row) -> dict:
         "uploaded_via": row.get("uploaded_via", "admin"),
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
+        "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
     }
 
 
@@ -308,15 +313,23 @@ async def _requirement_for_document_type(
         await materialize_job_requirements(
             conn, company_id=company_id, job_id=job["job_id"], employee_ids=[employee_id],
         )
-    if not job_ids:
-        return None
-    return await conn.fetchrow(
-        f"""SELECT ecr.id, ct.has_expiration
-              FROM employee_credential_requirements ecr
-              JOIN employees e ON e.id=ecr.employee_id AND e.org_id=$3
-              JOIN credential_types ct ON ct.id=ecr.credential_type_id
-             WHERE ecr.employee_id=$1 AND ct.key=$2{lock}""",
-        employee_id, document_type, company_id,
+    if job_ids:
+        requirement = await conn.fetchrow(
+            f"""SELECT ecr.id, ct.has_expiration
+                  FROM employee_credential_requirements ecr
+                  JOIN employees e ON e.id=ecr.employee_id AND e.org_id=$3
+                  JOIN credential_types ct ON ct.id=ecr.credential_type_id
+                 WHERE ecr.employee_id=$1 AND ct.key=$2{lock}""",
+            employee_id, document_type, company_id,
+        )
+        if requirement:
+            return requirement
+
+    return await materialize_uploaded_schedule_blocking_requirement(
+        conn,
+        company_id=company_id,
+        employee_id=employee_id,
+        credential_type_key=document_type,
     )
 
 
@@ -461,7 +474,7 @@ async def delete_credential_document(
             await conn.execute(
                 """UPDATE employee_credential_requirements
                    SET status = 'pending', credential_document_id = NULL,
-                       verified_at = NULL, verified_by = NULL, expires_at = NULL,
+                       verified_at = NULL, verified_by = NULL,
                        updated_at = NOW()
                    WHERE credential_document_id = $1""",
                 document_id,
@@ -518,9 +531,9 @@ async def approve_credential_document(
             await conn.execute(
                 """UPDATE credential_documents
                    SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(),
-                       review_notes = $2, updated_at = NOW()
-                   WHERE id = $3""",
-                current_user.id, body.notes, document_id,
+                       review_notes = $2, expires_at = $3, updated_at = NOW()
+                   WHERE id = $4""",
+                current_user.id, body.notes, body.expiration_date, document_id,
             )
 
             if requirement:
@@ -670,10 +683,12 @@ async def reclassify_credential_document(
             )
             row = await conn.fetchrow(
                 """UPDATE credential_documents
-                   SET document_type=$1, updated_at=NOW()
-                   WHERE id=$2
+                   SET document_type=$1,
+                       expires_at=CASE WHEN $1='food_handler_card' THEN $2 ELSE NULL END,
+                       updated_at=NOW()
+                   WHERE id=$3
                    RETURNING *""",
-                body.document_type, document_id,
+                body.document_type, body.expiration_date, document_id,
             )
             if row["review_status"] == "approved" and new_requirement:
                 await conn.execute(
@@ -723,7 +738,7 @@ async def reject_credential_document(
             await conn.execute(
                 """UPDATE employee_credential_requirements
                    SET status = 'pending', credential_document_id = NULL,
-                       verified_at = NULL, verified_by = NULL, expires_at = NULL,
+                       verified_at = NULL, verified_by = NULL,
                        updated_at = NOW()
                    WHERE credential_document_id = $1""",
                 document_id,
