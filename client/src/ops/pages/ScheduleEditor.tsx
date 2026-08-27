@@ -41,6 +41,7 @@ export default function ScheduleEditor() {
   const { me, hasFeature } = useMe()
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
+  const credentialTemplatesEnabled = hasFeature('credential_templates')
   const [editPublished, setEditPublished] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [inspectorShiftId, setInspectorShiftId] = useState<string | null>(null)
@@ -187,10 +188,11 @@ export default function ScheduleEditor() {
           onHelp={() => setGuideOpen(true)}
           jobsOpen={jobsOpen}
           jobsDisabled={!locationId}
-          onToggleJobs={() => setJobsOpen((value) => !value)}
+          credentialsEnabled={credentialTemplatesEnabled}
+          onToggleJobs={() => { setJobsOpen((value) => !value); setChatOpen(false) }}
           chatOpen={chatOpen}
           huumeSelectionCount={huumeSelectedShifts.length}
-          onToggleChat={() => setChatOpen((value) => !value)}
+          onToggleChat={() => { setChatOpen((value) => !value); setJobsOpen(false) }}
         />
         {!locationId ? (
           <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
@@ -203,7 +205,7 @@ export default function ScheduleEditor() {
           </div>
         ) : jobsOpen ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-            <ScheduleJobsTab locationId={locationId} onJobsChanged={reloadJobs} />
+            <ScheduleJobsTab key={locationId} locationId={locationId} credentialTemplatesEnabled={credentialTemplatesEnabled} onJobsChanged={reloadJobs} />
           </div>
         ) : editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
