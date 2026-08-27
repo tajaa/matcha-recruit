@@ -33,6 +33,26 @@ def test_autopr_marker_recovers_production_build_from_pr_trailers():
     assert reworked == marked
 
 
+def test_autopr_marker_replaces_stale_triage_suffix_from_rework_trailers():
+    body = """<!-- matcha-production-build: 850 -->
+<!-- matcha-production-backend-sha: bbbbbbb -->
+<!-- matcha-production-frontend-sha: bbbbbbb -->
+<!-- matcha-autopr-criticality: yellow -->
+<!-- matcha-autopr-confidence-score: 88 -->
+<!-- matcha-autopr-note-state: ready_for_review -->"""
+
+    marked = github._with_autopr_progress_note(
+        "from auto setup · build 849 · prod aaaaaaa · PR #295 · 🔴 C42 · awaiting answers · Human note",
+        pr_body=body,
+        pr_number=295,
+    )
+
+    assert marked == (
+        "from auto setup · build 850 · prod bbbbbbb · PR #295 · "
+        "🟡 C88 · ready for review · Human note"
+    )
+
+
 @pytest.mark.asyncio
 async def test_merged_autopr_moves_card_to_review_and_marks_its_origin(monkeypatch):
     task_id, project_id = uuid4(), uuid4()

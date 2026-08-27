@@ -37,6 +37,17 @@ CONFIDENCE_BAND="$(jq -r '.confidence_band' "$DECISION_FILE")"
 CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
+NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
+NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
+NOTE_STATE="ready_for_review"
+NOTE_STATE_LABEL="ready for review"
+if [ "$AWAITING_HUMAN" = true ]; then
+    NOTE_STATE="awaiting_answers"
+    NOTE_STATE_LABEL="awaiting answers"
+elif [ "$OUTCOME" = no_safe_action ]; then
+    NOTE_STATE="no_safe_action"
+    NOTE_STATE_LABEL="no safe action"
+fi
 
 [ -n "$PROD_BUILD_NUMBER" ] || die "card context is missing the production build number"
 [ -n "$PROD_BACKEND_SHA" ] || die "card context is missing the production backend SHA"
@@ -53,7 +64,7 @@ progress_note_with_origin() {
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
     remainder="$(printf '%s' "$existing" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review))?( · )?//')"
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$existing" ] && [[ "$existing" != "from auto setup"* ]]; then
@@ -64,19 +75,6 @@ progress_note_with_origin() {
 }
 
 BRANCH="bot/task-$ID8"
-
-feedback_snapshot() {
-    local pr_number="$1"
-    gh pr view "$pr_number" --repo "$REPO" --json comments,reviews 2>/dev/null | jq -c '
-      def human:
-        ((.author.login // "") | test("\\[bot\\]$"; "i") | not)
-        and ((.author.login // "") != "matcha-kanban-autopr");
-      {
-        comment_id: ([.comments[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // ""),
-        review_id: ([.reviews[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // "")
-      }
-    '
-}
 
 existing_feedback_checkpoint() {
     local body="$1" kind="$2"
@@ -92,6 +90,10 @@ render_body() {
         echo "<!-- matcha-production-backend-sha: $PROD_BACKEND_SHA -->"
         echo "<!-- matcha-production-frontend-sha: $PROD_FRONTEND_SHA -->"
         echo "<!-- matcha-autopr-outcome: $OUTCOME -->"
+        echo "<!-- matcha-autopr-criticality: $CRITICALITY -->"
+        echo "<!-- matcha-autopr-confidence-score: $CONFIDENCE_SCORE -->"
+        echo "<!-- matcha-autopr-note-state: $NOTE_STATE -->"
+        [ -z "$NO_SAFE_ACTION_REASON" ] || echo "<!-- matcha-autopr-no-safe-action-reason: $NO_SAFE_ACTION_REASON -->"
         echo "<!-- matcha-feedback-comment-id: ${comment_id:-none} -->"
         echo "<!-- matcha-feedback-review-id: ${review_id:-none} -->"
         echo
@@ -117,15 +119,27 @@ render_body() {
 }
 
 replace_triage_labels() {
-    local branch="$1"
-    local old
+    local target="$1"
+    local labels old desired_criticality="criticality:$CRITICALITY" desired_confidence="confidence:$CONFIDENCE_BAND"
+    local -a args=(pr edit "$target" --repo "$REPO")
+    labels="$(gh pr view "$target" --repo "$REPO" --json labels --jq '.labels[].name')"
     for old in criticality:red criticality:orange criticality:yellow confidence:high confidence:medium confidence:low autopr-awaiting-input; do
-        gh pr edit "$branch" --repo "$REPO" --remove-label "$old" >/dev/null 2>&1 || true
+        if printf '%s\n' "$labels" | grep -qx "$old" \
+            && [ "$old" != "$desired_criticality" ] \
+            && [ "$old" != "$desired_confidence" ] \
+            && { [ "$old" != autopr-awaiting-input ] || [ "$AWAITING_HUMAN" != true ]; }; then
+            args+=(--remove-label "$old")
+        fi
     done
-    gh pr edit "$branch" --repo "$REPO" --add-label autopr >/dev/null 2>&1 || true
-    [ "$MODE" != rework ] || gh pr edit "$branch" --repo "$REPO" --add-label autopr-rework >/dev/null 2>&1 || true
-    gh pr edit "$branch" --repo "$REPO" --add-label "criticality:$CRITICALITY" --add-label "confidence:$CONFIDENCE_BAND" >/dev/null 2>&1 || true
-    [ "$AWAITING_HUMAN" != true ] || gh pr edit "$branch" --repo "$REPO" --add-label autopr-awaiting-input >/dev/null 2>&1 || true
+    args+=(--add-label autopr --add-label "$desired_criticality" --add-label "$desired_confidence")
+    [ "$MODE" != rework ] || args+=(--add-label autopr-rework)
+    [ "$AWAITING_HUMAN" != true ] || args+=(--add-label autopr-awaiting-input)
+    if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
+        args+=(--add-label needs-work)
+    elif printf '%s\n' "$labels" | grep -qx needs-work; then
+        args+=(--remove-label needs-work)
+    fi
+    gh "${args[@]}" >/dev/null
 }
 
 cd "$REPO_ROOT"
@@ -188,24 +202,58 @@ case "$OUTCOME" in
     *) die "unknown triage outcome: $OUTCOME" ;;
 esac
 
-# ---- unautomatable: visible no-spec card marker, no PR ----
+existing_open_json='[]'
+if [ "$OUTCOME" != no_safe_action ] || [ "$MODE" = rework ]; then
+    git config user.name "matcha-kanban-autopr"
+    git config user.email "matcha-kanban-autopr@users.noreply.github.com"
+    existing_open_json="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number,body)"
+fi
+existing_open_pr="$(printf '%s' "$existing_open_json" | jq -r '.[0].number // empty')"
+existing_body="$(printf '%s' "$existing_open_json" | jq -r '.[0].body // ""')"
+old_comment_id="$(existing_feedback_checkpoint "$existing_body" comment)"
+old_review_id="$(existing_feedback_checkpoint "$existing_body" review)"
+if jq -e '.feedback_checkpoint | type == "object"' "$DECISION_FILE" >/dev/null; then
+    consumed_comment_id="$(jq -r '.feedback_checkpoint.comment_id // ""' "$DECISION_FILE")"
+    consumed_review_id="$(jq -r '.feedback_checkpoint.review_id // ""' "$DECISION_FILE")"
+else
+    consumed_comment_id="$old_comment_id"
+    consumed_review_id="$old_review_id"
+fi
+
+RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/$REPO/actions/runs/${GITHUB_RUN_ID:-}"
+TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
+
+# ---- unautomatable: mark the card and reconcile an existing rework PR ----
 if [ "$OUTCOME" = no_safe_action ]; then
     git reset --hard >/dev/null 2>&1
-    reason="$(jq -r '.no_safe_action_reason' "$DECISION_FILE")"
-    note="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · [autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $reason"
-    mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-        "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null
-    echo "No diff produced; marked card $TASK_ID no-spec: $reason"
+    no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
+    note_prefix="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL"
+    if [ "$MODE" = rework ]; then
+        [ -n "$existing_open_pr" ] || die "rework no-safe-action has no open PR for $BRANCH"
+        BODY_FILE="$(mktemp)"
+        render_body "$BODY_FILE" "$consumed_comment_id" "$consumed_review_id"
+        gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"
+        replace_triage_labels "$existing_open_pr"
+        pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$existing_open_pr"
+        origin_note="$(progress_note_with_origin \
+            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$EXISTING_PROGRESS_NOTE")"
+        mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+            "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
+                '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
+        echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
+    else
+        origin_note="$(progress_note_with_origin \
+            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$EXISTING_PROGRESS_NOTE")"
+        mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+            "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
+        echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
+    fi
     exit 0
 fi
 
 # ---- code diff or an explicit questions-only draft: open/update the PR ----
-git config user.name "matcha-kanban-autopr"
-git config user.email "matcha-kanban-autopr@users.noreply.github.com"
-
-existing_open_json="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number,body)"
-existing_open_pr="$(printf '%s' "$existing_open_json" | jq -r '.[0].number // empty')"
-existing_body="$(printf '%s' "$existing_open_json" | jq -r '.[0].body // ""')"
 
 if [ "$AWAITING_HUMAN" = true ] && [ -z "$existing_open_pr" ]; then
     max_awaiting="${MAX_OPEN_AWAITING_INPUT_PRS:-10}"
@@ -224,15 +272,8 @@ elif [ -z "$existing_open_pr" ]; then
     git push --force-with-lease --set-upstream origin "$BRANCH"
 fi
 
-NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
-RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/$REPO/actions/runs/${GITHUB_RUN_ID:-}"
-
 BODY_FILE="$(mktemp)"
-old_comment_id="$(existing_feedback_checkpoint "$existing_body" comment)"
-old_review_id="$(existing_feedback_checkpoint "$existing_body" review)"
-render_body "$BODY_FILE" "$old_comment_id" "$old_review_id"
-
-TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
+render_body "$BODY_FILE" "$consumed_comment_id" "$consumed_review_id"
 
 if [ -n "$existing_open_pr" ]; then
     gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"
@@ -250,30 +291,14 @@ fi
 
 pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
 card_column=in_progress
-note_state="ready for review"
-[ "$AWAITING_HUMAN" != true ] || { card_column=changes_requested; note_state="awaiting answers"; }
+[ "$AWAITING_HUMAN" != true ] || card_column=changes_requested
 origin_note="$(progress_note_with_origin \
-    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $note_state" \
+    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL" \
     "$EXISTING_PROGRESS_NOTE")"
+replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \
         --arg note "$origin_note" \
         '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
-
-# Commit the feedback checkpoint only after the PR and card are both updated.
-# If an earlier operation fails, select.sh sees the old checkpoint and retries
-# the human answer instead of silently dropping it.
-if [ "$AWAITING_HUMAN" = true ]; then
-    snapshot="$(feedback_snapshot "$published_pr")"
-    new_comment_id="$(printf '%s' "$snapshot" | jq -r '.comment_id // ""')"
-    new_review_id="$(printf '%s' "$snapshot" | jq -r '.review_id // ""')"
-    render_body "$BODY_FILE" "$new_comment_id" "$new_review_id"
-    gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"
-fi
-
-replace_triage_labels "$BRANCH"
-if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
-    gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true
-fi
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"

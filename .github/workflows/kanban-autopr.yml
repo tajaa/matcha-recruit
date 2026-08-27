@@ -1,8 +1,6 @@
 name: Kanban autopr
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 # This must run on Finch's Mac. It uses that user's authenticated OpenCode
@@ -12,7 +10,9 @@ on:
 # production image identities, migration revisions, and redacted error evidence;
 # it never writes prod Postgres and removes SSH from the model environment. Board
 # reads/writes use HTTPS as the bot. The concurrency group collapses queued ticks
-# while the one-slot Mac runner is busy, so five-minute ticks never overlap.
+# while the one-slot Mac runner is busy. The local LaunchAgent is the only
+# automatic clock; keeping a second GitHub cron would leave a check/dispatch
+# race that can queue a duplicate run.
 permissions:
   contents: write
   pull-requests: write

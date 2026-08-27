@@ -20,8 +20,8 @@ check() {
 }
 
 workflow="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
-check "workflow checks the card queue every five minutes" \
-    $(grep -qF "cron: '*/5 * * * *'" "$workflow" && echo 0 || echo 1)
+check "local dispatcher is the workflow's only automatic clock" \
+    $(! grep -qF 'schedule:' "$workflow" && grep -qF 'workflow_dispatch:' "$workflow" && echo 0 || echo 1)
 
 check "workflow resolves the active production build before collecting cards" \
     $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" && echo 0 || echo 1)
@@ -123,7 +123,7 @@ set -a
 source "$env_file"
 set +a
 ( GITHUB_ACTIONS=true _kanban_autopr_validate_ci_scope ) > /dev/null 2>&1
-check "scheduled runs reject a localhost/non-production board target" \
+check "Actions runs reject a localhost/non-production board target" \
     $([ "$?" != "0" ] && echo 0 || echo 1)
 unset GITHUB_ACTIONS
 unset -f curl mw_login
@@ -175,7 +175,7 @@ cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
     "pr list") printf '44\n' ;;
-    "pr view") printf '{"reviews":[{"body":"Use Journal everywhere"}],"comments":[]}' ;;
+    "pr view") printf '{"reviews":[{"id":"review-44","body":"Use Journal everywhere","author":{"login":"haley"}}],"comments":[]}' ;;
 esac
 EOF
 chmod +x "$TMP_DIR/bin/gh"
@@ -245,7 +245,7 @@ check "investigation context reserves bounded production diagnostics" \
     $(jq -e '.production == null and .production_recent_errors == [] and .production_log_signals == "" and .changes_since_production == []' "$TMP_DIR/context.json" >/dev/null && echo 0 || echo 1)
 
 check "investigation normalizes validated confidence and triage" \
-    $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
+    $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
 
 cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"
 jq '.outcome = "questions_only" | .questions = [] | .safe_changes_present = false' \

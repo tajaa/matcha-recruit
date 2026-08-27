@@ -303,10 +303,23 @@ _PRODUCTION_BACKEND_SHA_RE = re.compile(
 _PRODUCTION_FRONTEND_SHA_RE = re.compile(
     r"<!--\s*matcha-production-frontend-sha:\s*([0-9a-f]{7,40})\s*-->", re.IGNORECASE
 )
+_AUTOPR_CRITICALITY_RE = re.compile(
+    r"<!--\s*matcha-autopr-criticality:\s*(red|orange|yellow)\s*-->", re.IGNORECASE
+)
+_AUTOPR_CONFIDENCE_SCORE_RE = re.compile(
+    r"<!--\s*matcha-autopr-confidence-score:\s*([0-9]{1,3})\s*-->", re.IGNORECASE
+)
+_AUTOPR_NOTE_STATE_RE = re.compile(
+    r"<!--\s*matcha-autopr-note-state:\s*(awaiting_answers|ready_for_review|no_safe_action)\s*-->",
+    re.IGNORECASE,
+)
 _AUTOPR_STRUCTURED_NOTE_RE = re.compile(
     r"^from auto setup · build [0-9]+ · prod "
     r"(?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40})"
-    r"(?: · PR #[0-9]+)?",
+    r"(?: · PR #[0-9]+)?"
+    r"(?: · [^·]+ C[0-9]+ · (?:awaiting answers|ready for review|no safe action))?"
+    r"(?: · \[autopr:no-spec [^]]+\] "
+    r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
     re.IGNORECASE,
 )
 
@@ -351,6 +364,9 @@ def _with_autopr_progress_note(
     build_match = _PRODUCTION_BUILD_RE.search(pr_body)
     backend_match = _PRODUCTION_BACKEND_SHA_RE.search(pr_body)
     frontend_match = _PRODUCTION_FRONTEND_SHA_RE.search(pr_body)
+    criticality_match = _AUTOPR_CRITICALITY_RE.search(pr_body)
+    confidence_match = _AUTOPR_CONFIDENCE_SCORE_RE.search(pr_body)
+    note_state_match = _AUTOPR_NOTE_STATE_RE.search(pr_body)
     if build_match:
         marker += f" · build {build_match.group(1)}"
         if backend_match and frontend_match:
@@ -362,6 +378,16 @@ def _with_autopr_progress_note(
                 marker += f" · prod backend {backend_sha} / frontend {frontend_sha}"
         if pr_number is not None:
             marker += f" · PR #{pr_number}"
+    if criticality_match and confidence_match and note_state_match:
+        emoji = {"red": "🔴", "orange": "🟠", "yellow": "🟡"}[
+            criticality_match.group(1).lower()
+        ]
+        note_state = {
+            "awaiting_answers": "awaiting answers",
+            "ready_for_review": "ready for review",
+            "no_safe_action": "no safe action",
+        }[note_state_match.group(1).lower()]
+        marker += f" · {emoji} C{confidence_match.group(1)} · {note_state}"
 
     current = (existing or "").strip()
     if not current:

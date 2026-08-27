@@ -35,6 +35,7 @@ TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
 ID8="$(jq -r '.id8' "$CARD_FILE")"
 
 ATTACH_ARGS=()
+FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist
@@ -179,10 +180,18 @@ if [ "$MODE" = rework ]; then
     branch="bot/task-$ID8"
     pr_number="$(gh pr list --repo "$REPO" --head "$branch" --state open --limit 1 --json number --jq '.[0].number // empty')"
     if [ -n "$pr_number" ]; then
-        gh pr view "$pr_number" --repo "$REPO" --json reviews,comments > "$WORK_DIR/feedback.json" 2>/dev/null \
-            || echo '{}' > "$WORK_DIR/feedback.json"
+        if gh pr view "$pr_number" --repo "$REPO" --json reviews,comments > "$WORK_DIR/feedback.json" 2>/dev/null; then
+            FEEDBACK_CHECKPOINT="$("$SCRIPT_DIR/decision.sh" feedback-snapshot "$WORK_DIR/feedback.json")"
+        else
+            echo '{}' > "$WORK_DIR/feedback.json"
+            # Preserve the prior PR-body checkpoint when GitHub feedback could
+            # not be read. Writing empty ids would make every old answer appear
+            # new and spin this draft on each cooldown.
+            FEEDBACK_CHECKPOINT=null
+        fi
     else
         echo '{}' > "$WORK_DIR/feedback.json"
+        FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
     fi
     ATTACH_ARGS+=(-f "$WORK_DIR/feedback.json")
 else
@@ -212,4 +221,8 @@ done
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
 "$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized"
+jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
+    '. + {feedback_checkpoint: $checkpoint}' \
+    "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
+mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
 mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"

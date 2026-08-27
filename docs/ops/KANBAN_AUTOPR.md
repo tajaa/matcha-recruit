@@ -1,11 +1,12 @@
 # Kanban Autopr
 
-`.github/workflows/kanban-autopr.yml` is scheduled every 5 minutes on the same
-self-hosted Mac runner as `silent-error-autofix.yml`. GitHub cron is a fallback; a
-local macOS LaunchAgent is the authoritative five-minute clock and dispatches only when
-no Kanban autopr run is queued or active. The runner has one job slot, so a long coding
-job can delay the next start; the workflow concurrency group remains the final overlap
-guard. The unit of work is one kanban card assigned to
+`.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
+`silent-error-autofix.yml`. A local macOS LaunchAgent is the sole automatic five-minute
+clock and dispatches only when no Kanban autopr run is queued or active; GitHub's manual
+workflow dispatch remains the recovery path. There is deliberately no second GitHub cron:
+a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
+run. The runner has one job slot, and the workflow concurrency group remains the final
+overlap guard. The unit of work is one kanban card assigned to
 `haley@oceaneca.com` sitting in `todo` or `changes_requested`, across four fixed
 Espresso projects — WerkWerk, Beetlejuse, Gummfit, and MATCHA. It never scans the whole
 board or every user's cards.
@@ -67,9 +68,9 @@ changes.
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
 5. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
-   JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`; GitHub cron remains
-   enabled as a fallback.
-6. `gh workflow run kanban-autopr.yml` once by hand before relying on either timer.
+   JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. Do not add a GitHub
+   cron alongside it; use manual `workflow_dispatch` if the local timer needs recovery.
+6. `gh workflow run kanban-autopr.yml` once by hand before relying on the local timer.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 
@@ -135,6 +136,9 @@ changes.
    <!-- matcha-production-build: <frontend build number> -->
    <!-- matcha-production-backend-sha: <active backend image SHA> -->
    <!-- matcha-production-frontend-sha: <active frontend image SHA> -->
+   <!-- matcha-autopr-criticality: red|orange|yellow -->
+   <!-- matcha-autopr-confidence-score: 0-100 -->
+   <!-- matcha-autopr-note-state: awaiting_answers|ready_for_review|no_safe_action -->
    ```
    `implementation` → `gh pr create --draft`, label `autopr` (+ `needs-work` on new
    failures), then PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`.
@@ -145,8 +149,10 @@ changes.
    remaining blocking questions it returns the card to `in_progress` (this is the one
    transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not
-   a fresh start). `no_safe_action` → PATCH `progress_note` to the no-spec marker; no
-   branch, no PR, no GitHub issue.
+   a fresh start). A fresh `no_safe_action` PATCHes `progress_note` to the no-spec marker
+   without creating a branch, PR, or GitHub issue. During rework it updates the existing
+   PR's title, body, and triage labels before writing the durable no-spec card note, so the
+   prior round cannot remain visible as the current decision.
 
 ## Card ↔ PR linkage (`mw_tasks.pr_url` / `pr_number`)
 
@@ -197,7 +203,7 @@ can never drag a card backwards:
 | action | from | to | also |
 |---|---|---|---|
 | `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
-| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | preserve the visible `from auto setup · build … · prod … · PR #…` note; reconstruct it from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
+| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | preserve the visible `from auto setup · build … · prod … · PR #…` note; reconstruct production plus current criticality/confidence/state from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
 | `closed` with `merged == true` | `review` | `review` | add/recover the same origin/build note and PR link; never move the card backwards |
 | `closed` with `merged == false` | — | — | no move |
 | anything else | — | — | ignore |

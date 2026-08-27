@@ -73,6 +73,19 @@ autopr_normalize_decision() {
     ' "$raw_file" > "$normalized_file"
 }
 
+autopr_feedback_snapshot_file() {
+    local feedback_file="$1"
+    jq -c '
+      def human:
+        ((.author.login // "") | test("\\[bot\\]$"; "i") | not)
+        and ((.author.login // "") != "matcha-kanban-autopr");
+      {
+        comment_id: ([.comments[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // ""),
+        review_id: ([.reviews[]? | select(human and ((.body // "") | gsub("[[:space:]]"; "") | length > 0)) | .id] | last // "")
+      }
+    ' "$feedback_file"
+}
+
 autopr_criticality_emoji() {
     case "$1" in
         red) printf '🔴' ;;
@@ -91,6 +104,7 @@ autopr_title_marker() {
     case "$outcome" in
         questions_only) mode_marker=' [QUESTIONS]' ;;
         partial_implementation) mode_marker=' [PARTIAL]' ;;
+        no_safe_action) mode_marker=' [NO SAFE ACTION]' ;;
     esac
     printf '%s [C%s]%s' "$emoji" "$score" "$mode_marker"
 }
@@ -117,8 +131,12 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
             [ "$#" -eq 3 ] || die "usage: decision.sh normalize raw-decision.json decision.json"
             autopr_normalize_decision "$2" "$3"
             ;;
+        feedback-snapshot)
+            [ "$#" -eq 2 ] || die "usage: decision.sh feedback-snapshot feedback.json"
+            autopr_feedback_snapshot_file "$2"
+            ;;
         *)
-            die "usage: decision.sh normalize raw-decision.json decision.json"
+            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh feedback-snapshot feedback.json"
             ;;
     esac
 fi
