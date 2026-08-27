@@ -89,6 +89,29 @@ async def get_schedule_location_readiness(
     )
 
 
+_MISSING_FIELD_LABELS: dict[str, str] = {
+    "location_id": "a location",
+    "address": "an address",
+    "city": "a city",
+    "state": "a state",
+    "zipcode": "a zip code",
+    "jurisdiction_id": "a matched jurisdiction",
+    "timezone": "a timezone",
+    "industry": "an industry",
+}
+
+
+def _missing_fields_message(missing_fields: tuple[str, ...]) -> str:
+    labels = [_MISSING_FIELD_LABELS.get(field, field) for field in missing_fields]
+    if not labels:
+        return "This location isn't ready to publish yet."
+    if len(labels) == 1:
+        joined = labels[0]
+    else:
+        joined = ", ".join(labels[:-1]) + f" and {labels[-1]}"
+    return f"This location needs {joined} before its schedule can be published."
+
+
 async def assert_schedule_location_ready_to_publish(
     conn,
     company_id: UUID,
@@ -107,5 +130,6 @@ async def assert_schedule_location_ready_to_publish(
             "code": "schedule_location_not_ready",
             "location_id": str(location_id) if location_id else None,
             "missing_fields": list(readiness.missing_fields),
+            "message": _missing_fields_message(readiness.missing_fields),
         },
     )

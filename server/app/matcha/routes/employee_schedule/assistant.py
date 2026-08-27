@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from ...dependencies import require_company_member
+from app.core.feature_flags import get_company_features
 from app.core.services.redis_cache import check_rate_limit
 from ...models.scheduling.employee_schedule import ScheduleVoiceTranscript
 from ...services._shared.uploads import read_wav_or_400
@@ -32,6 +33,18 @@ async def create_schedule_assistant_session(
     current_user=Depends(require_company_member),
 ) -> dict:
     company_id = await require_company_id(current_user)
+    # The mount only gates `employee_schedule`; a Huume turn (turn_pipeline.py's
+    # `_run_huume_dispatch`) also needs `huume` + `matcha_work`. Without this
+    # check the panel opens fine and every turn then dies mid-stream with a
+    # generic error — check before creating the (always-huume_mode=true)
+    # session row so the caller gets one clear reason instead.
+    features = await get_company_features(company_id)
+    if not features.get("huume") or not features.get("matcha_work"):
+        missing = "huume" if not features.get("huume") else "matcha_work"
+        raise HTTPException(
+            status_code=403,
+            detail=f"The '{missing}' feature is not enabled for your company",
+        )
     return await get_or_create_schedule_assistant_session(
         company_id=company_id,
         user_id=current_user.id,

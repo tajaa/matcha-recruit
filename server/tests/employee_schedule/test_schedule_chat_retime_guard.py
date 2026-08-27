@@ -32,6 +32,7 @@ _SHIFT = {
     "kind": "regular",
     "break_minutes": 0,
     "training_requirement_id": None,
+    "published_at": None,
     "role": "Opener",
 }
 
@@ -103,3 +104,40 @@ async def test_resolvable_new_day_hint_still_builds_a_real_retime(monkeypatch):
     )
 
     assert build.kind == "proposal"
+
+
+@pytest.mark.asyncio
+async def test_draft_retime_preview_is_not_treated_as_published_for_fair_workweek(monkeypatch):
+    """Editor Huume can resolve drafts, whose preview must not accrue
+    published-shift Fair Workweek advisories."""
+    captured = {}
+
+    async def fake_resolve_shift_ref(conn, company_id, location_id, ref, today, **kwargs):
+        return {"shift": _SHIFT}
+
+    async def fake_check_shift_compliance(*args, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(schedule_chat, "_resolve_shift_ref", fake_resolve_shift_ref)
+    monkeypatch.setattr(schedule_chat, "check_shift_compliance", fake_check_shift_compliance)
+
+    parsed = {
+        "edit_requests": [{
+            "kind": "retime", "target_employee_name": None, "target_date": "2026-08-07",
+            "target_day_hint": None, "target_time_hint": "08:00", "target_role_hint": "opener",
+            "to_employee_name": None, "second_employee_name": None, "second_date": None,
+            "second_day_hint": None, "second_role_hint": None,
+            "new_date": None, "new_day_hint": None,
+            "new_start_time": "09:00", "new_end_time": "17:00", "shift_by_minutes": None,
+        }],
+    }
+    build = await schedule_chat.build_edit_proposal(
+        _FakeConn(), company_id=_COMPANY_ID, channel_id=None, source_message_id=None,
+        created_by=_CREATED_BY, parsed=parsed, today=date(2026, 8, 5),
+        original_content="move the draft opener to 9am",
+        surface="editor", shift_statuses=("draft", "published"),
+    )
+
+    assert build.kind == "proposal"
+    assert captured["fw_shift_published"] is False

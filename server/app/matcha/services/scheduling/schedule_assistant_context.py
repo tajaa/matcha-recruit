@@ -27,7 +27,7 @@ async def get_schedule_overview(
     async with get_connection() as conn:
         location = await conn.fetchrow(
             """
-            SELECT id, name, address, city, state, postal_code
+            SELECT id, name, address, city, state, zipcode
             FROM business_locations
             WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE
             """,

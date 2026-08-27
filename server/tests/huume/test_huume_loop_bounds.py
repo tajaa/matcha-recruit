@@ -192,6 +192,35 @@ async def test_matching_confirm_call_is_not_blocked_by_schedule_cap(monkeypatch)
     assert result["steps"][-1]["status"] == "ok"
 
 
+@pytest.mark.asyncio
+async def test_matching_schedule_confirm_id_without_explicit_user_confirmation_does_not_execute(monkeypatch):
+    confirm_id = "cc33dd44"
+    responses = [_fake_response(calls=[_fake_call(
+        "propose_schedule_change", {"kind": "assign", "confirm_id": confirm_id},
+    )])]
+    frames, _client = await _run_turn(
+        monkeypatch,
+        responses,
+        current_state={
+            "huume_action": {
+                "type": "schedule_change", "status": "proposed",
+                "confirm_id": confirm_id, "proposal_id": "proposal-1",
+                "kind": "assign",
+            },
+        },
+        schedule_execute_result={
+            "status": "created", "message": "Schedule updated.",
+            "record_id": "proposal-1", "bg_tasks": [],
+        },
+        history_text="What conflicts did you find?",
+    )
+    result = _result(frames)
+
+    assert schedule_skill.execute.await_count == 0
+    assert result["steps"][-1]["status"] == "rejected"
+    assert "explicit confirmation" in result["message"]
+
+
 def test_tool_call_fingerprint_ignores_dictionary_order():
     first = agent._tool_call_fingerprint("propose_schedule_change", {"kind": "cancel", "target_date": "2026-08-07"})
     second = agent._tool_call_fingerprint("propose_schedule_change", {"target_date": "2026-08-07", "kind": "cancel"})

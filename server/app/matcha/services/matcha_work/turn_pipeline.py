@@ -896,7 +896,8 @@ async def _run_huume_dispatch(tc: TurnContext):
     # falls through to the normal skill engine instead of keeping Huume.
     features = await get_company_features(company_id)
     is_schedule_thread = thread.get("surface") == "schedule_assistant"
-    if not features.get("huume") or (is_schedule_thread and not features.get("employee_schedule")):
+    schedule_flag_off = is_schedule_thread and not features.get("employee_schedule")
+    if not features.get("huume") or schedule_flag_off:
         if is_schedule_thread:
             # An employee is only admitted to this endpoint (messaging.py)
             # BECAUSE the thread is schedule_assistant. Falling through to
@@ -904,10 +905,17 @@ async def _run_huume_dispatch(tc: TurnContext):
             # downgraded non-schedule company, see the comment above — would
             # hand that same employee the full workspace AI the surface
             # exists to deny them.
-            yield _sse_data({
-                "type": "error",
-                "message": "Scheduling isn't enabled for this company right now.",
-            })
+            #
+            # Name the flag that's actually off — a 2026-08-26 incident
+            # traced a real prod company to `huume` being disabled while
+            # `employee_schedule` was on, and this message blamed scheduling
+            # for three days because the two were OR'd into one string.
+            message = (
+                "Scheduling isn't enabled for this company right now."
+                if schedule_flag_off
+                else "Huume isn't enabled for this company."
+            )
+            yield _sse_data({"type": "error", "message": message})
             tc.terminated = True
         return
 
