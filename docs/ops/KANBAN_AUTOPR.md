@@ -16,6 +16,16 @@ Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as
 user; OpenCode uses that user's profile, and the Matcha bot credential lives in
 `~/.config/matcha-autopr/env` (`chmod 600`, never committed).
 
+The existing `EC2_SSH_KEY` Actions secret is used only by the trusted harness. Before
+each queue scan, `resolve-production-context.sh` resolves the active blue/green
+backend/frontend containers through their ECR digests, recovers their immutable Git SHA
+tags, reads the public frontend build number, and compares production's read-only
+`alembic_version` set with the repository heads. A live SHA missing from or divergent
+from `main`, an unreadable build number, or an unreadable schema state fails the run
+closed. New frontend images expose the build/SHA in `/version.json`; the resolver keeps
+a compiled-bundle fallback only for older images that predate the manifest. The key is
+removed from the environment before OpenCode starts.
+
 ## Why per-project collaborator rows, not a company scope
 
 The four projects span **two different `companies` rows** — WerkWerk/Beetlejuse/Gummfit
@@ -58,13 +68,21 @@ changes.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 
-1. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
+1. **Production freshness** — the trusted local runner records the exact active frontend
+   build plus backend/frontend SHAs and production migration heads. Once a card is
+   selected it also attaches bounded, redacted recent error reports and error-level
+   backend/worker/nginx log signals. OpenCode receives those files and a commit list
+   between each live image and the checked-out branch, but never SSH or database
+   credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
+   fix or an unapplied migration. It may diagnose migration drift but the path guard still
+   forbids it from authoring or applying a migration.
+2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
    `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, joins each card's `element_id`
    against the bundle's `elements` array to attach `repo_paths` (prompt-only scoping, not
    a gate).
-2. **`select.sh`** — picks one card GitHub hasn't already handled. Branch key is
+3. **`select.sh`** — picks one card GitHub hasn't already handled. Branch key is
    `bot/task-<id8>` (first 8 hex of the task UUID). Ranks `changes_requested` before
    `todo` (rework is better-specified — it has a written `review_note` — and unblocks a
    PR already in flight), then oldest `last_moved_at` first. For `todo`, any PR at all on
@@ -72,13 +90,13 @@ changes.
    to the task, so a second run would collide. For `changes_requested`, an **open** PR on
    the branch is the *target* to push to (`mode: rework`); no open PR means a human moved
    it there by hand, so it's treated like a fresh `todo` card. A durable no-spec ledger
-   lives on the card itself (`progress_note` prefixed `[autopr:no-spec <date>]`) rather
+   lives on the card itself (`progress_note` contains `[autopr:no-spec <date>]`) rather
    than a GitHub issue — it's the thing that stops an unscopable card being re-run every
    five minutes forever, it's visible to the human who owns the card, and it clears itself
    the moment `last_moved_at` advances past the marker date. A failed attempt cools down
    for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 3 open `autopr` PRs.
-3. **`investigate.sh`** — both modes receive a single context bundle containing the card,
+4. **`investigate.sh`** — both modes receive a single context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
    trusted harness and attached locally; the model never needs board or storage network
@@ -89,26 +107,31 @@ changes.
    report with `### Summary` / `### Changes` / `### Blast radius` / `### Confidence`.
    Bails to the no-spec path on `Confidence: none`, no diff, or more than 25 changed
    files — a card that sprawls needed a human to scope it.
-4. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
+5. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
-5. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+6. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
    restricted to `server/(app|tests)/*.py` and `client/src/*.{ts,tsx}`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
    fix is. A card that genuinely needs a migration or infra change cannot be auto-PR'd —
    that's the intended outcome; it takes the no-spec path and says why. PR title is
    prefixed from the card's `category` (`feat:`/`fix:`/else `chore:`). PR body carries
-   two machine trailers other steps depend on:
+   production baseline trailers as well as the task/project linkage:
    ```html
    <!-- matcha-task: <full task uuid> -->
    <!-- matcha-project: <full project uuid> -->
+   <!-- matcha-production-build: <frontend build number> -->
+   <!-- matcha-production-backend-sha: <active backend image SHA> -->
+   <!-- matcha-production-frontend-sha: <active frontend image SHA> -->
    ```
    `todo` → `gh pr create --draft`, label `autopr` (+ `needs-work` on new failures), then
    PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`. `rework` → push to
    the existing branch, `gh pr edit` to refresh the body + add `autopr-rework`, then PATCH
-   to `in_progress` (this is the one transition `project_task_service` deliberately
+   to `in_progress` and write a visible progress note such as
+   `from auto setup · build 550 · prod c5d3a49 · PR #295` (this is the one
+   transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not
    a fresh start). No diff → PATCH `progress_note` to the no-spec marker; no branch, no
    PR, no GitHub issue.
@@ -162,8 +185,8 @@ can never drag a card backwards:
 | action | from | to | also |
 |---|---|---|---|
 | `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
-| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | prepend `from auto setup` without discarding an existing note; refresh `pr_url`/`pr_number` |
-| `closed` with `merged == true` | `review` | `review` | add the same origin note and PR link; never move the card backwards |
+| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | preserve the visible `from auto setup · build … · prod … · PR #…` note; reconstruct it from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
+| `closed` with `merged == true` | `review` | `review` | add/recover the same origin/build note and PR link; never move the card backwards |
 | `closed` with `merged == false` | — | — | no move |
 | anything else | — | — | ignore |
 

@@ -38,13 +38,16 @@ RUN cd oceanlab && npx vite build
 COPY . .
 
 ARG VITE_LANDING_BUILD_VERSION=0
+ARG GIT_SHA=unknown
 ENV VITE_LANDING_BUILD_VERSION=${VITE_LANDING_BUILD_VERSION}
 
 # Build application (API_BASE will be replaced at runtime). npx vite build
 # directly (not `npm run build`, which runs `tsc -b` first) — typecheck is a
 # local/CI step (`npx tsc -p tsconfig.app.json --noEmit`), not an image-build
 # gate; esbuild strips types without checking them either way.
-RUN npx vite build
+RUN npx vite build \
+    && printf '{"build_number":"%s","git_sha":"%s"}\n' \
+        "$VITE_LANDING_BUILD_VERSION" "$GIT_SHA" > dist/version.json
 
 # Stage 2: Runtime with nginx
 FROM nginx:1.25-alpine

@@ -23,6 +23,27 @@ workflow="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
 check "workflow checks the card queue every five minutes" \
     $(grep -qF "cron: '*/5 * * * *'" "$workflow" && echo 0 || echo 1)
 
+check "workflow resolves the active production build before collecting cards" \
+    $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" && echo 0 || echo 1)
+
+check "production resolver uses active container digests and read-only migration revisions" \
+    $(grep -qF 'aws ecr describe-images' "$AUTOPR_DIR/resolve-production-context.sh" \
+      && grep -qF 'schema-snapshot.sh" prod-revisions' "$AUTOPR_DIR/resolve-production-context.sh" \
+      && echo 0 || echo 1)
+
+check "future frontend images expose a small stable build manifest" \
+    $(grep -qF '> dist/version.json' "$REPO_ROOT/client/Dockerfile" \
+      && grep -qF '.build_number // .build // empty' "$AUTOPR_DIR/resolve-production-context.sh" \
+      && echo 0 || echo 1)
+
+check "model process is stripped of production SSH credentials" \
+    $(grep -qF 'env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
+
+check "published PR and card carry production build provenance" \
+    $(grep -qF '<!-- matcha-production-build: $PROD_BUILD_NUMBER -->' "$AUTOPR_DIR/publish.sh" \
+      && grep -qF 'from auto setup · build $PROD_BUILD_NUMBER' "$AUTOPR_DIR/publish.sh" \
+      && echo 0 || echo 1)
+
 ################################################################################
 # mw_api must load config in its own shell, not only mw_login's command
 # substitution (the bug that opened a PR and then failed to patch its card).
@@ -160,6 +181,9 @@ if [ "$investigate_rc" = "0" ] \
 fi
 check "rework investigation receives discussion, checklist, PR feedback, and screenshot" "$context_ok"
 
+check "investigation context reserves bounded production diagnostics" \
+    $(jq -e '.production == null and .production_recent_errors == [] and .production_log_signals == "" and .changes_since_production == []' "$TMP_DIR/context.json" >/dev/null && echo 0 || echo 1)
+
 check "collector preserves task attachment metadata" \
     $(grep -qF 'attachments: (($t.attachments // []) | map(del(.storage_url)))' "$AUTOPR_DIR/collect.sh" && echo 0 || echo 1)
 
@@ -194,6 +218,21 @@ second_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-rec
     AUTOPR_CACHE_DIR="$select_cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json")"
 check "cooldown lets the next tick advance to another card" \
     $([ "$(printf '%s' "$second_selected" | jq -r '.id8')" = "11111111" ] && echo 0 || echo 1)
+
+check "no-spec dedup recognizes the marker inside the visible origin note" \
+    $(grep -qF '[[ "$progress_note" == *"[autopr:no-spec "* ]]' "$AUTOPR_DIR/select.sh" && echo 0 || echo 1)
+
+cat > "$TMP_DIR/no-spec-card.json" <<'EOF'
+[
+  {"task_id":"33333333-0000-4000-8000-000000000003","id8":"33333333","project_id":"p","title":"Unscopable","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"from auto setup · build 550 · prod c5d3a49 · [autopr:no-spec 2026-01-02T00:00:00Z] missing evidence"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/no-spec-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/no-spec-card.json" >/dev/null 2>&1
+no_spec_rc=$?
+check "visible origin note still durably suppresses an unchanged no-spec card" \
+    $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

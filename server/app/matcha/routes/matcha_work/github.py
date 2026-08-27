@@ -296,6 +296,19 @@ async def install_github_webhook_endpoint(
 # head branch's id8 against mw_tasks.id with hyphens stripped.
 _TASK_TRAILER_RE = re.compile(r"<!--\s*matcha-task:\s*([0-9a-fA-F-]{36})\s*-->")
 _TASK_BRANCH_RE = re.compile(r"^(?:bot/task|task)-?/?([0-9a-f]{8})")
+_PRODUCTION_BUILD_RE = re.compile(r"<!--\s*matcha-production-build:\s*([0-9]+)\s*-->")
+_PRODUCTION_BACKEND_SHA_RE = re.compile(
+    r"<!--\s*matcha-production-backend-sha:\s*([0-9a-f]{7,40})\s*-->", re.IGNORECASE
+)
+_PRODUCTION_FRONTEND_SHA_RE = re.compile(
+    r"<!--\s*matcha-production-frontend-sha:\s*([0-9a-f]{7,40})\s*-->", re.IGNORECASE
+)
+_AUTOPR_STRUCTURED_NOTE_RE = re.compile(
+    r"^from auto setup · build [0-9]+ · prod "
+    r"(?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40})"
+    r"(?: · PR #[0-9]+)?",
+    re.IGNORECASE,
+)
 
 # install_repo_webhook is shared by every company that connects its own repo
 # for commit-scanning — GITHUB_WEBHOOK_SECRET is one global value across all
@@ -322,14 +335,53 @@ _KANBAN_AUTOPR_PROJECT_IDS = {
 _AUTOPR_PROGRESS_NOTE = "from auto setup"
 
 
-def _with_autopr_progress_note(existing: Optional[str]) -> str:
-    """Mark an auto-setup card without discarding its current progress note."""
+def _with_autopr_progress_note(
+    existing: Optional[str],
+    *,
+    pr_body: str = "",
+    pr_number: Optional[int] = None,
+) -> str:
+    """Mark an auto-setup card without discarding its current progress note.
+
+    publish.sh normally writes the detailed marker as soon as it opens the PR.
+    Reconstruct it from machine trailers on merge as a recovery path if the PR
+    was created but the card PATCH failed.
+    """
+    marker = _AUTOPR_PROGRESS_NOTE
+    build_match = _PRODUCTION_BUILD_RE.search(pr_body)
+    backend_match = _PRODUCTION_BACKEND_SHA_RE.search(pr_body)
+    frontend_match = _PRODUCTION_FRONTEND_SHA_RE.search(pr_body)
+    if build_match:
+        marker += f" · build {build_match.group(1)}"
+        if backend_match and frontend_match:
+            backend_sha = backend_match.group(1)
+            frontend_sha = frontend_match.group(1)
+            if backend_sha == frontend_sha:
+                marker += f" · prod {backend_sha}"
+            else:
+                marker += f" · prod backend {backend_sha} / frontend {frontend_sha}"
+        if pr_number is not None:
+            marker += f" · PR #{pr_number}"
+
     current = (existing or "").strip()
     if not current:
-        return _AUTOPR_PROGRESS_NOTE
-    if current.casefold().startswith(_AUTOPR_PROGRESS_NOTE.casefold()):
+        return marker
+    if current.casefold().startswith(marker.casefold()):
         return current
-    return f"{_AUTOPR_PROGRESS_NOTE} · {current}"
+    if current.casefold() == _AUTOPR_PROGRESS_NOTE.casefold():
+        return marker
+    if current.casefold().startswith(f"{_AUTOPR_PROGRESS_NOTE} · ".casefold()):
+        # A later rework PR has a new build/PR marker. Replace the old system
+        # prefix while retaining text a human wrote after it.
+        if marker != _AUTOPR_PROGRESS_NOTE:
+            structured = _AUTOPR_STRUCTURED_NOTE_RE.match(current)
+            if structured:
+                remainder = current[structured.end():].removeprefix(" · ")
+            else:
+                remainder = current[len(_AUTOPR_PROGRESS_NOTE):].removeprefix(" · ")
+            return f"{marker} · {remainder}" if remainder else marker
+        return current
+    return f"{marker} · {current}"
 
 
 async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
@@ -395,7 +447,11 @@ async def _handle_pull_request_event(payload: dict) -> dict:
         merged = bool(pr.get("merged"))
         if merged and column != "done":
             patch = {}
-            progress_note = _with_autopr_progress_note(task["progress_note"])
+            progress_note = _with_autopr_progress_note(
+                task["progress_note"],
+                pr_body=pr.get("body") or "",
+                pr_number=pr.get("number"),
+            )
             if progress_note != task["progress_note"]:
                 patch["progress_note"] = progress_note
             if pr.get("html_url") and pr["html_url"] != task["pr_url"]:

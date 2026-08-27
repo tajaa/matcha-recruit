@@ -16,6 +16,18 @@ file is listed in `files` but absent from `downloaded_attachments`, say that
 the missing evidence prevents a safe conclusion instead of guessing from its
 filename.
 
+The trusted harness also supplies production evidence. `production` identifies
+the exact live frontend build, backend/frontend image SHAs, and production
+Alembic revisions; `changes_since_production` lists code already merged after
+the live images; `production_recent_errors` and `production_log_signals` are
+bounded and redacted. Use them to distinguish genuine PR feedback from a test
+against an older production build, and code defects from unapplied migrations.
+Recent errors may be unrelated to this card: only use one when its route,
+exception, or failure signature actually correlates with the ticket evidence.
+If the existing branch already contains the requested fix and production is
+simply behind it, do not manufacture another change; report deployment as the
+remaining action.
+
 Address the feedback on the EXISTING diff on this branch. Do not re-litigate
 or redo what the diff already does correctly — read it first, then make the
 smallest change that resolves the feedback.

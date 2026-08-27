@@ -8,10 +8,11 @@ on:
 # This must run on Finch's Mac. It uses that user's authenticated OpenCode
 # profile; the Matcha bot credential lives in ~/.config/matcha-autopr/env
 # (chmod 600, never committed, never a GitHub secret) — same design
-# constraint as silent-error-autofix.yml. This workflow never touches prod
-# Postgres; it reads/writes the production board over HTTPS as the bot. The
-# concurrency group collapses queued ticks while the one-slot Mac runner is
-# busy, so a five-minute schedule does not create overlapping coding jobs.
+# constraint as silent-error-autofix.yml. The trusted harness reads the active
+# production image identities, migration revisions, and redacted error evidence;
+# it never writes prod Postgres and removes SSH from the model environment. Board
+# reads/writes use HTTPS as the bot. The concurrency group collapses queued ticks
+# while the one-slot Mac runner is busy, so five-minute ticks never overlap.
 permissions:
   contents: write
   pull-requests: write
@@ -61,6 +62,24 @@ jobs:
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
           done
 
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Resolve active production build and schema
+        timeout-minutes: 3
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ./scripts/kanban-autopr/resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"
+          {
+            echo '## Production baseline'
+            jq '{build_number, release_sha, containers: {backend: .containers.backend.git_sha, frontend: .containers.frontend.git_sha}, database}' "$RUNNER_TEMP/production-context.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Collect candidate cards
         id: collect
         timeout-minutes: 2
@@ -84,6 +103,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "id8=$(jq -r '.id8' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
             echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
+            jq --slurpfile production "$RUNNER_TEMP/production-context.json" \
+              '. + {production: $production[0]}' "$RUNNER_TEMP/card.json" \
+              > "$RUNNER_TEMP/card-with-production.json"
+            mv "$RUNNER_TEMP/card-with-production.json" "$RUNNER_TEMP/card.json"
           fi
 
       - name: Create or check out task branch
@@ -116,6 +139,8 @@ jobs:
         if: steps.select.outputs.skip == 'false'
         timeout-minutes: 15
         continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
           ./scripts/kanban-autopr/investigate.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md"
 

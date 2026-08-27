@@ -53,7 +53,7 @@ already_handled() {
     # No-spec ledger lives on the card itself, not GitHub — this stops a
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
-    if [[ "$progress_note" == "[autopr:no-spec"* ]]; then
+    if [[ "$progress_note" == *"[autopr:no-spec "* ]]; then
         # Full ISO timestamp, not just a date: BSD `date -j -f` fills any
         # field the format string doesn't specify from the CURRENT time, not
         # midnight — a date-only marker parsed on a later run would silently
@@ -61,7 +61,7 @@ already_handled() {
         # marker" drift throughout the day instead of comparing two fixed
         # instants.
         local marker_ts marker_epoch
-        marker_ts="$(printf '%s' "$progress_note" | sed -E 's/^\[autopr:no-spec ([0-9TZ:-]+)\].*/\1/')"
+        marker_ts="$(printf '%s' "$progress_note" | sed -E 's/^.*\[autopr:no-spec ([0-9TZ:-]+)\].*/\1/')"
         marker_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$marker_ts" +%s 2>/dev/null || date -u -d "$marker_ts" +%s 2>/dev/null || echo 0)"
         local moved_epoch
         moved_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "${last_moved:0:19}" +%s 2>/dev/null || date -u -d "$last_moved" +%s 2>/dev/null || echo 0)"

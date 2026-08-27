@@ -45,6 +45,59 @@ printf '%s' "$subtasks" > "$WORK_DIR/subtasks.json"
 printf '%s' "$history" > "$WORK_DIR/history.json"
 printf '%s' "$files" > "$WORK_DIR/files.json"
 
+# Production access stays in this trusted shell. Give the coding model bounded,
+# redacted diagnostics only: recent error reports, recent error-level container
+# signals, live migration state, and the commits between the live image and the
+# checked-out branch. A card about a missing column can therefore be recognized
+# as schema drift; a card reporting behavior from an older build can be checked
+# against changes already merged after that build.
+printf '[]' > "$WORK_DIR/production-errors.json"
+: > "$WORK_DIR/production-log-signals.txt"
+printf '[]' > "$WORK_DIR/changes-since-production.json"
+if jq -e '.production' "$CARD_FILE" >/dev/null 2>&1; then
+    if [ -n "${SSH_KEY:-}" ]; then
+        if ! "$REPO_ROOT/scripts/error-autofix/collect.sh" \
+            --hours "${AUTOPR_PROD_ERROR_HOURS:-24}" \
+            --limit "${AUTOPR_PROD_ERROR_LIMIT:-25}" \
+            > "$WORK_DIR/production-errors.json" 2> "$WORK_DIR/production-errors.stderr"; then
+            jq -n --rawfile detail "$WORK_DIR/production-errors.stderr" \
+                '[{kind:"collection_unavailable",message:($detail | .[0:1000])}]' \
+                > "$WORK_DIR/production-errors.json"
+        else
+            jq '.[0:10] | map(
+                .message = ((.message // "")[0:2000])
+                | .traceback = ((.traceback // "")[0:6000])
+                | .context_excerpt = ((.context_excerpt // "")[0:1000])
+              )' "$WORK_DIR/production-errors.json" \
+                > "$WORK_DIR/production-errors.bounded.json"
+            mv "$WORK_DIR/production-errors.bounded.json" "$WORK_DIR/production-errors.json"
+        fi
+
+        WINDOW_MINUTES="${AUTOPR_PROD_LOG_WINDOW_MINUTES:-120}" \
+            EVIDENCE_FILE="$WORK_DIR/production-log-signals.txt" \
+            "$REPO_ROOT/scripts/collect-silent-error-evidence.sh" \
+            >/dev/null 2> "$WORK_DIR/production-logs.stderr" || true
+    fi
+
+    # Both components normally share one SHA. If a backend-only or
+    # frontend-only deploy split them, keep both comparisons explicit.
+    for component in backend frontend; do
+        prod_sha="$(jq -r ".production.containers.${component}.git_sha // empty" "$CARD_FILE")"
+        [ -n "$prod_sha" ] || continue
+        path_scope="server"
+        [ "$component" != frontend ] || path_scope="client"
+        changes="$(git -C "$REPO_ROOT" log --max-count=100 --pretty=format:'%h %s' "$prod_sha..HEAD" -- \
+            "$path_scope" 2>/dev/null || true)"
+        row="$(jq -n --arg component "$component" --arg production_sha "$prod_sha" \
+            --arg head_sha "$(git -C "$REPO_ROOT" rev-parse --short HEAD)" \
+            --arg changes "$changes" \
+            '{component:$component,production_sha:$production_sha,head_sha:$head_sha,commits:($changes | split("\n") | map(select(length > 0)))}')"
+        jq --argjson row "$row" '. + [$row]' "$WORK_DIR/changes-since-production.json" \
+            > "$WORK_DIR/changes-since-production.next"
+        mv "$WORK_DIR/changes-since-production.next" "$WORK_DIR/changes-since-production.json"
+    done
+fi
+
 # Attach a bounded, current-round-first set of the actual files. The JSON
 # context still lists every file even when a large/old attachment is not
 # downloaded, so the model can explain what evidence was unavailable rather
@@ -108,8 +161,11 @@ jq -n \
     --slurpfile subtasks "$WORK_DIR/subtasks.json" \
     --slurpfile history "$WORK_DIR/history.json" \
     --slurpfile files "$WORK_DIR/files.json" \
+    --slurpfile production_errors "$WORK_DIR/production-errors.json" \
+    --slurpfile changes_since_production "$WORK_DIR/changes-since-production.json" \
+    --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    '{card: $card[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
 
 # Put the structured brief first, then the locally downloaded evidence.
@@ -134,7 +190,7 @@ PROMPT_TEXT="$(sed "s#REPORT_PATH#$REPORT_FILE#g" "$PROMPT_FILE")"
 
 # Defense in depth: this step's workflow env should already omit these, but
 # strip them here too in case a future edit adds them back.
-env -u GH_TOKEN -u MATCHA_BOT_PASSWORD \
+env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
     opencode run --auto --model openai/gpt-5.6-terra --variant high \
     "${ATTACH_ARGS[@]}" \
     -- "$PROMPT_TEXT"

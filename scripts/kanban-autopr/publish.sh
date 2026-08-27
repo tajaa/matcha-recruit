@@ -25,6 +25,35 @@ TITLE="$(jq -r '.title' "$CARD_FILE")"
 DESCRIPTION="$(jq -r '.description // ""' "$CARD_FILE")"
 CATEGORY="$(jq -r '.category // "manual"' "$CARD_FILE")"
 PROJECT_TITLE="$(jq -r '.project_title // ""' "$CARD_FILE")"
+PROD_BUILD_NUMBER="$(jq -r '.production.build_number // empty' "$CARD_FILE")"
+PROD_BACKEND_SHA="$(jq -r '.production.containers.backend.git_sha // empty' "$CARD_FILE")"
+PROD_FRONTEND_SHA="$(jq -r '.production.containers.frontend.git_sha // empty' "$CARD_FILE")"
+EXISTING_PROGRESS_NOTE="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+
+[ -n "$PROD_BUILD_NUMBER" ] || die "card context is missing the production build number"
+[ -n "$PROD_BACKEND_SHA" ] || die "card context is missing the production backend SHA"
+[ -n "$PROD_FRONTEND_SHA" ] || die "card context is missing the production frontend SHA"
+
+if [ "$PROD_BACKEND_SHA" = "$PROD_FRONTEND_SHA" ]; then
+    PROD_LABEL="prod $PROD_BACKEND_SHA"
+else
+    PROD_LABEL="prod backend $PROD_BACKEND_SHA / frontend $PROD_FRONTEND_SHA"
+fi
+
+progress_note_with_origin() {
+    local marker="$1" existing="$2" remainder
+    # Replace this system's prior structured prefix on rework instead of
+    # nesting it every round. Preserve any human-authored text after it.
+    remainder="$(printf '%s' "$existing" | sed -E \
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · )?//')"
+    if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
+        printf '%s · %s' "$marker" "$remainder"
+    elif [ -n "$existing" ] && [[ "$existing" != "from auto setup"* ]]; then
+        printf '%s · %s' "$marker" "$existing"
+    else
+        printf '%s' "$marker"
+    fi
+}
 
 BRANCH="bot/task-$ID8"
 
@@ -75,7 +104,7 @@ if git diff --cached --quiet; then
     git reset --hard >/dev/null 2>&1
     reason="$(grep -A2 '### Confidence' "$REPORT_FILE" | tail -n +2 | head -1 | sed 's/^[[:space:]]*//' | cut -c1-200)"
     [ -n "$reason" ] || reason="no safe fix produced"
-    note="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $reason"
+    note="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · [autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $reason"
     mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null
     echo "No diff produced; marked card $TASK_ID no-spec: $reason"
@@ -95,9 +124,13 @@ BODY_FILE="$(mktemp)"
 {
     echo "<!-- matcha-task: $TASK_ID -->"
     echo "<!-- matcha-project: $PROJECT_ID -->"
+    echo "<!-- matcha-production-build: $PROD_BUILD_NUMBER -->"
+    echo "<!-- matcha-production-backend-sha: $PROD_BACKEND_SHA -->"
+    echo "<!-- matcha-production-frontend-sha: $PROD_FRONTEND_SHA -->"
     echo
     echo "## $TITLE"
     [ -n "$PROJECT_TITLE" ] && echo "**Board** $PROJECT_TITLE"
+    echo "**Production baseline** build $PROD_BUILD_NUMBER · $PROD_LABEL"
     echo
     if [ -n "$DESCRIPTION" ]; then
         echo "$DESCRIPTION"
@@ -136,8 +169,12 @@ if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
 fi
 
 pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
+origin_note="$(progress_note_with_origin \
+    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr" \
+    "$EXISTING_PROGRESS_NOTE")"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "in_progress" \
-        '{pr_url: $url, pr_number: $num, board_column: $col}')" >/dev/null
+        --arg note "$origin_note" \
+        '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE)"
