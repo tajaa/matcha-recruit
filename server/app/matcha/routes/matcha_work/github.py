@@ -414,7 +414,9 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
         task = await conn.fetchrow(
             """SELECT id, project_id, board_column, progress_note,
                       to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
-                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      ((to_jsonb(mw_tasks) ? 'pr_url') AND
+                       (to_jsonb(mw_tasks) ? 'pr_number')) AS pr_columns_exist
                FROM mw_tasks WHERE id = $1""",
             UUID(task_id),
         )
@@ -436,12 +438,23 @@ async def _handle_pull_request_event(payload: dict) -> dict:
     action = payload.get("action") or ""
     pr = payload.get("pull_request") or {}
     column = task["board_column"]
+    # Older schemas can still process the lifecycle transition; only the
+    # optional link persistence must wait for the migration. Dict fixtures from
+    # before this compatibility field was added retain the migrated-schema path.
+    pr_columns_exist = (
+        "pr_columns_exist" not in task or bool(task["pr_columns_exist"])
+    )
 
     if action in ("opened", "reopened"):
         if column == "todo":
+            patch = {"board_column": "in_progress"}
+            if pr_columns_exist:
+                patch.update({
+                    "pr_url": pr.get("html_url"),
+                    "pr_number": pr.get("number"),
+                })
             await pt_svc.update_project_task(
-                task["project_id"], task["id"],
-                {"board_column": "in_progress", "pr_url": pr.get("html_url"), "pr_number": pr.get("number")},
+                task["project_id"], task["id"], patch,
             )
         return {"ok": True, "task": str(task["id"])}
 
@@ -456,10 +469,11 @@ async def _handle_pull_request_event(payload: dict) -> dict:
             )
             if progress_note != task["progress_note"]:
                 patch["progress_note"] = progress_note
-            if pr.get("html_url") and pr["html_url"] != task["pr_url"]:
-                patch["pr_url"] = pr["html_url"]
-            if pr.get("number") is not None and pr["number"] != task["pr_number"]:
-                patch["pr_number"] = pr["number"]
+            if pr_columns_exist:
+                if pr.get("html_url") and pr["html_url"] != task["pr_url"]:
+                    patch["pr_url"] = pr["html_url"]
+                if pr.get("number") is not None and pr["number"] != task["pr_number"]:
+                    patch["pr_number"] = pr["number"]
             if column in ("todo", "in_progress", "changes_requested"):
                 patch["board_column"] = "review"
             if patch:
