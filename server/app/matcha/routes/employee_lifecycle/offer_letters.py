@@ -720,6 +720,19 @@ async def _resolve_huume_offer_recipients(offer: dict, thread: dict) -> set[UUID
 
     try:
         async with get_connection() as conn:
+            collaborator_rows = await conn.fetch(
+                "SELECT user_id FROM mw_thread_collaborators WHERE thread_id = $1",
+                thread["id"],
+            )
+        recipients.update(row["user_id"] for row in collaborator_rows)
+    except Exception:
+        logger.exception(
+            "[Huume] offer collaborator lookup failed offer=%s thread=%s",
+            offer.get("id"), thread.get("id"),
+        )
+
+    try:
+        async with get_connection() as conn:
             approver_rows = await conn.fetch(
                 """
                 SELECT u.id FROM clients c JOIN users u ON u.id = c.user_id

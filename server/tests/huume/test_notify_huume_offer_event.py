@@ -34,6 +34,7 @@ THREAD_ID = uuid4()
 CREATOR_ID = uuid4()
 APPROVER_ID = uuid4()
 SENDER_ID = uuid4()
+COLLABORATOR_ID = uuid4()
 
 
 def _conn_ctx(conn):
@@ -65,10 +66,16 @@ def _patch_side_effects(monkeypatch):
     return bulk
 
 
-def _thread_conn(*, thread=None, approvers=None, sender_id=None):
+def _thread_conn(*, thread=None, collaborators=None, approvers=None, sender_id=None):
     conn = MagicMock()
     conn.fetchrow = AsyncMock(return_value=thread or {"id": THREAD_ID, "created_by": CREATOR_ID})
-    conn.fetch = AsyncMock(return_value=approvers or [])
+
+    async def fetch(query, *args):
+        if "mw_thread_collaborators" in query:
+            return collaborators or []
+        return approvers or []
+
+    conn.fetch = AsyncMock(side_effect=fetch)
     conn.fetchval = AsyncMock(return_value=sender_id)
     return conn
 
@@ -199,8 +206,11 @@ class TestNotificationShape:
         assert "threads" not in bulk.call_args.kwargs["link"]
 
     @pytest.mark.asyncio
-    async def test_recipients_are_creator_plus_hr_approvers_deduped(self, monkeypatch):
-        conn = _thread_conn(approvers=[{"id": CREATOR_ID}, {"id": APPROVER_ID}])
+    async def test_recipients_include_thread_collaborators_and_hr_approvers_deduped(self, monkeypatch):
+        conn = _thread_conn(
+            collaborators=[{"user_id": CREATOR_ID}, {"user_id": COLLABORATOR_ID}],
+            approvers=[{"id": CREATOR_ID}, {"id": APPROVER_ID}],
+        )
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         bulk = _patch_side_effects(monkeypatch)
 
@@ -209,7 +219,8 @@ class TestNotificationShape:
         )
 
         sent_ids = set(bulk.call_args.kwargs["user_ids"])
-        assert sent_ids == {CREATOR_ID, APPROVER_ID}
+        assert sent_ids == {CREATOR_ID, COLLABORATOR_ID, APPROVER_ID}
+        assert "mw_thread_collaborators" in conn.fetch.call_args_list[0].args[0]
 
     @pytest.mark.asyncio
     async def test_no_recipients_skips_notification_call_but_still_posts_message(self, monkeypatch):
