@@ -344,6 +344,13 @@ answered_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-r
 check "new human feedback reselects the same draft for rework" \
     $([ "$(printf '%s' "$answered_selected" | jq -r '.mode')" = "rework" ] && echo 0 || echo 1)
 
+readonly_cache="$TMP_DIR/readonly-select-cache"
+AUTOPR_SELECT_READ_ONLY=true PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$readonly_cache" AUTOPR_TEST_NEW_FEEDBACK=1 \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json" >/dev/null
+check "dashboard selection probe creates no cooldown state" \
+    $([ ! -e "$readonly_cache" ] && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

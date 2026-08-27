@@ -35,6 +35,7 @@ chmod +x "$TMP_DIR/gh"
 run_dispatcher() {
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
+    AUTOPR_TMUX_DASHBOARD=0 \
     "$DISPATCHER" >/dev/null 2>&1
 }
 

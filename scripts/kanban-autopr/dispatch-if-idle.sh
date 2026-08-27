@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Mac-owned clock for kanban-autopr. GitHub cron remains a fallback, while the
-# workflow's concurrency group remains the final guard against a race.
+# Mac-owned clock for kanban-autopr. The workflow has no GitHub cron; its
+# concurrency group remains the final guard against duplicate manual dispatch.
 set -euo pipefail
 
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
@@ -10,6 +10,8 @@ GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispatch.lock}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DASHBOARD_ENSURE="${AUTOPR_DASHBOARD_ENSURE:-$SCRIPT_DIR/ensure-dashboard.sh}"
 
 log_event() {
     local action="$1" reason="$2" runs="${3:-[]}"
@@ -54,6 +56,11 @@ dispatch_workflow() {
 
 main() {
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
+    if [ "${AUTOPR_TMUX_DASHBOARD:-1}" != 0 ] && [ -x "$DASHBOARD_ENSURE" ]; then
+        # Observability must not become a scheduling dependency. Record a pane
+        # startup failure, then continue the authoritative dispatch check.
+        "$DASHBOARD_ENSURE" >/dev/null 2>&1 || log_event error dashboard-start-failed
+    fi
     if ! acquire_dispatch_lock; then
         log_event skip local-lock
         exit 0

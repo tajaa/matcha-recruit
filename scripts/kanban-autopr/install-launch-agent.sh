@@ -10,20 +10,25 @@ INSTALL_ROOT="${AUTOPR_DISPATCH_INSTALL_ROOT:-$USER_HOME/.local/share/matcha-kan
 LAUNCH_AGENTS_DIR="${AUTOPR_LAUNCH_AGENTS_DIR:-$USER_HOME/Library/LaunchAgents}"
 LAUNCHCTL_BIN="${AUTOPR_LAUNCHCTL_BIN:-/bin/launchctl}"
 PLIST_TEMPLATE="$SCRIPT_DIR/launchd/$LABEL.plist.in"
-DISPATCHER_SOURCE="$SCRIPT_DIR/dispatch-if-idle.sh"
 DISPATCHER_DESTINATION="$INSTALL_ROOT/dispatch-if-idle.sh"
 PLIST_DESTINATION="$LAUNCH_AGENTS_DIR/$LABEL.plist"
+TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 
 validate_dependencies() {
     [ -x /opt/homebrew/bin/gh ] || { echo "missing /opt/homebrew/bin/gh" >&2; exit 1; }
     command -v jq >/dev/null || { echo "missing jq" >&2; exit 1; }
+    [ -x "$TMUX_BIN" ] || { echo "missing tmux: $TMUX_BIN" >&2; exit 1; }
     [ -x "$LAUNCHCTL_BIN" ] || { echo "missing launchctl: $LAUNCHCTL_BIN" >&2; exit 1; }
     /opt/homebrew/bin/gh auth status >/dev/null
 }
 
-install_dispatcher() {
+install_runtime() {
     mkdir -p "$INSTALL_ROOT"
-    install -m 755 "$DISPATCHER_SOURCE" "$DISPATCHER_DESTINATION"
+    local name
+    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh collect.sh select.sh; do
+        install -m 755 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
+    done
+    install -m 644 "$SCRIPT_DIR/lib.sh" "$INSTALL_ROOT/lib.sh"
 }
 
 render_launch_agent() {
@@ -36,7 +41,7 @@ render_launch_agent() {
 }
 
 bootstrap_launch_agent() {
-    local uid domain="gui/$(id -u)"
+    local domain="gui/$(id -u)"
     "$LAUNCHCTL_BIN" bootout "$domain/$LABEL" >/dev/null 2>&1 || true
     "$LAUNCHCTL_BIN" bootstrap "$domain" "$PLIST_DESTINATION"
     "$LAUNCHCTL_BIN" kickstart -k "$domain/$LABEL"
@@ -45,10 +50,14 @@ bootstrap_launch_agent() {
 
 main() {
     validate_dependencies
-    install_dispatcher
+    install_runtime
     render_launch_agent
     bootstrap_launch_agent
+    # Recreate this one named observer session so an idempotent reinstall also
+    # picks up newer pane scripts copied above.
+    "$INSTALL_ROOT/ensure-dashboard.sh" --restart
     echo "Installed $LABEL; logs: $USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log"
+    echo "Open dashboard: tmux attach -t matcha-autopr"
 }
 
 main "$@"

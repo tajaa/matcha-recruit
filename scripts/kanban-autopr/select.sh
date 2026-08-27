@@ -20,7 +20,7 @@ CARDS_FILE="${1:?usage: select.sh cards.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 CACHE_DIR="${AUTOPR_CACHE_DIR:-$HOME/.cache/matcha-autopr}"
 ATTEMPTS_DIR="$CACHE_DIR/attempts"
-mkdir -p "$ATTEMPTS_DIR"
+[ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || mkdir -p "$ATTEMPTS_DIR"
 
 NOTHING_TO_DO=3
 MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-3}"
@@ -182,7 +182,9 @@ for ((i = 0; i < n; i++)); do
         continue
     fi
     if [ "$decision" = investigate ] || [ "$decision" = rework ]; then
-        touch "$ATTEMPTS_DIR/$id8"
+        # The tmux dashboard asks the same selector what would run next. Its
+        # read-only probe must never create a cooldown marker or consume work.
+        [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || touch "$ATTEMPTS_DIR/$id8"
         printf '%s' "$card" | jq -c --arg mode "$decision" '. + {mode: $mode}'
         exit 0
     fi

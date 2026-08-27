@@ -68,9 +68,33 @@ changes.
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
 5. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
-   JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. Do not add a GitHub
-   cron alongside it; use manual `workflow_dispatch` if the local timer needs recovery.
+   JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. The installer also
+   creates the `matcha-autopr` tmux dashboard; open it with
+   `tmux attach -t matcha-autopr` and detach with `Ctrl-b d`. Do not add a GitHub cron
+   alongside it; use manual `workflow_dispatch` if the local timer needs recovery.
 6. `gh workflow run kanban-autopr.yml` once by hand before relying on the local timer.
+
+## Local tmux dashboard
+
+The LaunchAgent recreates the read-only `matcha-autopr` session on its next five-minute
+tick if the session is missing. Closing the dashboard never stops or duplicates the
+workflow; GitHub Actions remains the only coding execution path. The window uses a
+main-left layout:
+
+- **24h queue + PR dashboard** — active workflow, the exact card `select.sh` would choose
+  next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs
+  from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
+  refresh cannot create a cooldown marker or consume a card.
+- **live PR-creation work** — current Actions job/step state from `gh run view`, plus only
+  the local worker process names and elapsed times. It never prints command arguments,
+  ticket prompts, or credentials.
+- **timer + runner health** — LaunchAgent state, self-hosted runner presence, and recent
+  structured dispatch/skip/error events.
+
+The summary pane refreshes every 60 seconds, the work pane every 10 seconds, and health
+every 15 seconds. Override those intervals with `AUTOPR_DASHBOARD_REFRESH_SECONDS`,
+`AUTOPR_WORK_REFRESH_SECONDS`, and `AUTOPR_HEALTH_REFRESH_SECONDS` before creating the
+session if needed.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 
