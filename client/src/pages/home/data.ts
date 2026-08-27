@@ -15,7 +15,7 @@ export const PRODUCTS: Product[] = [
     name: "Full Platform",
     subheader: "Full Risk and Employee Relations Suite",
     blurb:
-      "Agentic risk management — safety, compliance, and employee relations on one brain.",
+      "Location-aware compliance, labor-aware scheduling, inventory insight, and team coordination in one operating system.",
     to: "/matcha-platform",
     accent: "#F5F2ED",
   },
@@ -33,7 +33,7 @@ export const PRODUCTS: Product[] = [
     name: "Compliance",
     subheader: "Multi-State Jurisdictional Intelligence",
     blurb:
-      "Multi-state regulatory tracking, jurisdiction-aware alerts, and audit-ready records.",
+      "Keep every operating location current with jurisdiction-aware requirements, alerts, and audit-ready records.",
     to: "/matcha-compliance",
     accent: "#E2725B",
   },
@@ -100,9 +100,9 @@ export type ProofItem =
   | { kind: "claim"; text: string };
 
 export const HERO_PROOF: ProofItem[] = [
-  { kind: "claim", text: "Multi-state jurisdictional tracking" },
-  { kind: "claim", text: "OSHA 300 logs built in" },
-  { kind: "claim", text: "Senior practitioners, in the room" },
+  { kind: "claim", text: "Compliance that stays current by location" },
+  { kind: "claim", text: "Scheduling guidance and break notifications" },
+  { kind: "claim", text: "Inventory, cost, and shift-level operating insight" },
 ];
 
 export const HOME_JSON_LD = {
@@ -111,7 +111,7 @@ export const HOME_JSON_LD = {
   name: "Matcha",
   url: "https://hey-matcha.com/",
   description:
-    "Full-service HR — an agentic risk & compliance platform, Matcha Lite for small teams, multi-state compliance tracking, and senior advisory.",
+    "Location-aware operations for modern teams — compliance tracking, labor-aware scheduling, inventory and cost insight, team communication, and HR advisory.",
   makesOffer: [
     {
       "@type": "Offer",
