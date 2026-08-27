@@ -143,7 +143,7 @@ struct JournalListView: View {
             Button("Delete…") {
                 let alert = NSAlert()
                 alert.messageText = "Delete \"\(j.title)\"?"
-                alert.informativeText = "Permanently deletes the note and its contents. Cannot be undone."
+                alert.informativeText = "Permanently deletes the journal and its contents. Cannot be undone."
                 alert.alertStyle = .critical
                 alert.addButton(withTitle: "Delete Permanently")
                 alert.addButton(withTitle: "Cancel")
@@ -196,7 +196,7 @@ enum JournalKind: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .note: return "Note"
+        case .note: return "Journal"
         case .blog: return "Blog"
         case .todo: return "To-dos"
         case .novel: return "Novel"
@@ -216,7 +216,7 @@ enum JournalKind: String, CaseIterable, Identifiable {
     }
     var blurb: String {
         switch self {
-        case .note: return "A blank page for quick thoughts."
+        case .note: return "A blank journal for quick thoughts."
         case .blog: return "Title, hook, sections, CTA."
         case .todo: return "Today / this week / someday checklist."
         case .novel: return "Chapter heading + scene break."
@@ -228,7 +228,7 @@ enum JournalKind: String, CaseIterable, Identifiable {
 
     // MARK: - Workspace behavior
 
-    /// Every journal is a single-document note (Evernote model) — opens straight
+    /// Every journal is a single-document workspace (Evernote model) — opens straight
     /// into one editor backed by a single body entry. The `.journal` (diary)
     /// kind is retained only to decode any pre-migration row; its old
     /// multi-entry timeline is gone, so this is always true.
@@ -307,10 +307,10 @@ extension SlashBlock {
 
 // MARK: - Journals workspace (macOS Notes / Evernote, three columns)
 
-/// The Journals surface: folder rail · note list (title + snippet + modified
-/// date) · document editor. Folders are colorable + nestable; notes are
+/// The Journals surface: folder rail · journal list (title + snippet + modified
+/// date) · document editor. Folders are colorable + nestable; journals are
 /// color-coded by document type and open in the embedded per-kind editor
-/// (markdown or screenplay). The col-3 selection is LOCAL — picking a note must
+/// (markdown or screenplay). The col-3 selection is LOCAL — picking a journal must
 /// not route the primary pane away from this workspace.
 struct JournalsWorkspace: View {
     @Environment(AppState.self) private var appState
@@ -358,7 +358,7 @@ struct JournalsWorkspace: View {
             if let v { selectedJournalId = v; ensureModeFor(v) }
         }
         .onChange(of: selectedJournalId) { _, _ in
-            // After leaving an edited note, re-sort the list by recent edit
+            // After leaving an edited journal, re-sort the list by recent edit
             // (the backend bumps the journal's updated_at on entry save).
             Task { try? await Task.sleep(for: .milliseconds(700)); await refreshNotes() }
         }
@@ -390,7 +390,7 @@ struct JournalsWorkspace: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    fixedRow(title: "All Notes", icon: "tray.full", selected: mode == .all) { mode = .all }
+                    fixedRow(title: "All Journals", icon: "tray.full", selected: mode == .all) { mode = .all }
                     fixedRow(title: "Starred", icon: "star", selected: mode == .starred) { mode = .starred }
                     if hasSharedNotes {
                         fixedRow(title: "Shared with me", icon: "person.2",
@@ -531,7 +531,7 @@ struct JournalsWorkspace: View {
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .help("Sort")
                     Menu {
-                        // Diary `.journal` kind is retired — every new note is a
+                        // Diary `.journal` kind is retired — every new journal is a
                         // single document. Offer only the doc-kind templates.
                         ForEach(JournalKind.allCases.filter { $0 != .journal }) { k in
                             Button { Task { await createNote(k) } } label: { Label(k.label, systemImage: k.icon) }
@@ -540,7 +540,7 @@ struct JournalsWorkspace: View {
                         Image(systemName: "square.and.pencil").font(.system(size: 13)).foregroundColor(appState.themeAccent)
                     }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .help("New note")
+                    .help("New journal")
                 }
             }
             .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
@@ -661,7 +661,7 @@ struct JournalsWorkspace: View {
         VStack(spacing: 8) {
             Spacer()
             Image(systemName: "note.text").font(.system(size: 26)).foregroundColor(appState.themeTextSecondary.opacity(0.6))
-            Text(search.isEmpty ? "No notes here" : "No matches")
+            Text(search.isEmpty ? "No journals here" : "No matches")
                 .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
             Spacer()
         }
@@ -678,7 +678,7 @@ struct JournalsWorkspace: View {
             VStack(spacing: 10) {
                 Spacer()
                 Image(systemName: "doc.text").font(.system(size: 40)).foregroundColor(appState.themeTextSecondary.opacity(0.45))
-                Text("Select a note").font(.system(size: 14, weight: .medium)).foregroundColor(appState.themeTextSecondary)
+                Text("Select a journal").font(.system(size: 14, weight: .medium)).foregroundColor(appState.themeTextSecondary)
                 Text("or create one with the pencil button.").font(.system(size: 12)).foregroundColor(appState.themeTextSecondary.opacity(0.8))
                 Spacer()
             }
@@ -691,7 +691,7 @@ struct JournalsWorkspace: View {
 
     private var listTitle: String {
         switch mode {
-        case .all: return "All Notes"
+        case .all: return "All Journals"
         case .starred: return "Starred"
         case .shared: return "Shared with me"
         case .uncategorized: return "Uncategorized"
@@ -711,7 +711,7 @@ struct JournalsWorkspace: View {
         _ = JournalStarStore.shared.generation
         var base: [MWJournal]
         switch mode {
-        // "All Notes" + folders are PERSONAL (my own). Notes shared with me by
+        // "All Journals" + folders are PERSONAL (my own). Journals shared with me by
         // a collaborator live only under "Shared with me" so they don't blend
         // into my own notebooks.
         case .all: base = journals.filter { !$0.isSharedWithMe }
@@ -763,7 +763,7 @@ struct JournalsWorkspace: View {
 
     private func ensureModeFor(_ jid: String) {
         guard let j = journals.first(where: { $0.id == jid }) else { return }
-        // A note shared with me carries the OWNER's folder_id (not in my tree),
+        // A journal shared with me carries the OWNER's folder_id (not in my tree),
         // so route it to the "Shared with me" view, not a phantom folder.
         if j.isSharedWithMe { mode = .shared; return }
         if let fid = j.folderId { mode = .folder(fid); collapsed.remove(fid) } else { mode = .uncategorized }
