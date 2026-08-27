@@ -5,11 +5,13 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 REFRESH_SECONDS="${AUTOPR_DASHBOARD_REFRESH_SECONDS:-60}"
+CARD_SNAPSHOT="${AUTOPR_CARD_SNAPSHOT:-$USER_HOME/Library/Caches/matcha-kanban-autopr/cards.json}"
 
 utc_24_hours_ago() {
     date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
@@ -21,7 +23,7 @@ safe_gh() {
 }
 
 render_dashboard() {
-    local runs open_prs merged_prs cards selected selected_rc cutoff
+    local runs open_prs merged_prs cards selected selected_rc cutoff snapshot_tmp
     cutoff="$(utc_24_hours_ago)"
     runs="$(safe_gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch "$REF" --limit 100 \
         --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
@@ -33,6 +35,15 @@ render_dashboard() {
     cards="[]"
     if ! cards="$($SCRIPT_DIR/collect.sh 2>/dev/null)"; then
         cards="[]"
+    fi
+    # Share the already-collected board snapshot with the PR pane. This avoids
+    # four extra production API bundle reads every ten seconds merely to turn
+    # bot/task-<id> into a human-readable card title.
+    if mkdir -p "$(dirname "$CARD_SNAPSHOT")" 2>/dev/null; then
+        snapshot_tmp="$CARD_SNAPSHOT.$$"
+        if (umask 077; printf '%s' "$cards" > "$snapshot_tmp") 2>/dev/null; then
+            mv "$snapshot_tmp" "$CARD_SNAPSHOT" 2>/dev/null || true
+        fi
     fi
     selected="$(AUTOPR_SELECT_READ_ONLY=true GITHUB_REPOSITORY="$REPO" \
         "$SCRIPT_DIR/select.sh" <(printf '%s' "$cards") 2>/dev/null)"

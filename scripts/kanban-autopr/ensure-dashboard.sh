@@ -43,11 +43,15 @@ fi
 printf -v dashboard_cmd '%q' "$SCRIPT_DIR/dashboard.sh"
 printf -v work_cmd '%q' "$SCRIPT_DIR/watch-work.sh"
 printf -v health_cmd '%q' "$SCRIPT_DIR/watch-health.sh"
+printf -v pr_cmd '%q' "$SCRIPT_DIR/watch-pr.sh"
 
 "$TMUX_BIN" new-session -d -s "$SESSION" -n autopr "$dashboard_cmd"
 main_pane="$("$TMUX_BIN" display-message -p -t "$SESSION:autopr" '#{pane_id}')"
 work_pane="$("$TMUX_BIN" split-window -h -P -F '#{pane_id}' -t "$main_pane" "$work_cmd")"
-health_pane="$("$TMUX_BIN" split-window -v -P -F '#{pane_id}' -t "$work_pane" "$health_cmd")"
+pr_pane="$("$TMUX_BIN" split-window -v -P -F '#{pane_id}' -t "$work_pane" "$pr_cmd")"
+health_pane="$("$TMUX_BIN" split-window -v -P -F '#{pane_id}' -t "$pr_pane" "$health_cmd")"
+# Keep the information-dense 24-hour dashboard full-height on the left and
+# stack the three focused observers on the right.
 "$TMUX_BIN" select-layout -t "$SESSION:autopr" main-vertical >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" remain-on-exit on >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" pane-border-status top >/dev/null
@@ -55,6 +59,7 @@ health_pane="$("$TMUX_BIN" split-window -v -P -F '#{pane_id}' -t "$work_pane" "$
 "$TMUX_BIN" select-pane -t "$main_pane" -T '24h queue + PR dashboard'
 "$TMUX_BIN" select-pane -t "$work_pane" -T 'live PR-creation work'
 "$TMUX_BIN" select-pane -t "$health_pane" -T 'timer + runner health'
+"$TMUX_BIN" select-pane -t "$pr_pane" -T 'active PR + live diff'
 "$TMUX_BIN" select-pane -t "$main_pane"
 
 printf 'Dashboard ready: tmux attach -t %s\n' "$SESSION"
