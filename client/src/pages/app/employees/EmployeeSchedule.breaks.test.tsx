@@ -2,12 +2,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../../components/ui'
+import { ApiError } from '../../../api/client'
 import EmployeeSchedule from './EmployeeSchedule'
 
 const {
   createWeekTemplateMock,
   fetchWeekMock,
   fetchWeekTemplatesMock,
+  publishRangeMock,
   updateShiftMock,
   useLocationScopeMock,
   useMeMock,
@@ -15,6 +17,7 @@ const {
   createWeekTemplateMock: vi.fn(),
   fetchWeekMock: vi.fn(),
   fetchWeekTemplatesMock: vi.fn(),
+  publishRangeMock: vi.fn(),
   updateShiftMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   useMeMock: vi.fn(),
@@ -39,7 +42,7 @@ vi.mock('../../../api/employees/employeeSchedule', () => ({
   fetchWeek: fetchWeekMock,
   fetchWeekTemplates: fetchWeekTemplatesMock,
   generateFromWeekTemplate: vi.fn(),
-  publishRange: vi.fn(),
+  publishRange: publishRangeMock,
   publishShift: vi.fn(),
   reviewRequest: vi.fn(),
   unassignEmployee: vi.fn(),
@@ -104,6 +107,7 @@ describe('EmployeeSchedule break planning', () => {
       break_minutes: payload.break_minutes ?? shift.break_minutes,
     }))
     createWeekTemplateMock.mockResolvedValue({ id: 'template-1', name: 'Standard Week', blocks: [] })
+    publishRangeMock.mockReset()
   })
 
   it('repairs an existing shift by saving planned break minutes', async () => {
@@ -137,5 +141,16 @@ describe('EmployeeSchedule break planning', () => {
       location_id: 'loc-1',
       blocks: [expect.objectContaining({ break_minutes: 30 })],
     })))
+  })
+
+  it('shows a corrective message when location prerequisites block publication', async () => {
+    publishRangeMock.mockRejectedValue(new ApiError('Request failed', 422, {
+      detail: { code: 'schedule_location_not_ready' },
+    }))
+    renderSchedule()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Publish week/ }))
+
+    expect(await screen.findByText("Complete this location's scheduling prerequisites before publishing.")).toBeInTheDocument()
   })
 })
