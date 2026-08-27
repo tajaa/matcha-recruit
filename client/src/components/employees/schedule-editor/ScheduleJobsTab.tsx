@@ -11,7 +11,7 @@ import { errorMessage } from '../../../types/employeeSchedule'
 
 const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500'
 
-export default function ScheduleJobsTab({ locationId, onJobsChanged }: { locationId: string; onJobsChanged?: () => Promise<void> }) {
+export default function ScheduleJobsTab({ locationId, credentialTemplatesEnabled, onJobsChanged }: { locationId: string; credentialTemplatesEnabled: boolean; onJobsChanged?: () => Promise<void> }) {
   const { toast } = useToast()
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
@@ -22,7 +22,13 @@ export default function ScheduleJobsTab({ locationId, onJobsChanged }: { locatio
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [jobResponse, rosterResponse, types] = await Promise.all([fetchJobs(locationId), fetchRoster(locationId), fetchCredentialTypes()])
+      const credentialTypesPromise = credentialTemplatesEnabled
+        ? fetchCredentialTypes().catch((error) => {
+          toast(errorMessage(error), 'error')
+          return []
+        })
+        : Promise.resolve([])
+      const [jobResponse, rosterResponse, types] = await Promise.all([fetchJobs(locationId), fetchRoster(locationId), credentialTypesPromise])
       setJobs(jobResponse.jobs)
       setRoster(rosterResponse.employees)
       setCredentialTypes(types)
@@ -31,7 +37,7 @@ export default function ScheduleJobsTab({ locationId, onJobsChanged }: { locatio
     } finally {
       setLoading(false)
     }
-  }, [locationId, toast])
+  }, [credentialTemplatesEnabled, locationId, toast])
 
   useEffect(() => { void load() }, [load])
 
@@ -46,17 +52,17 @@ export default function ScheduleJobsTab({ locationId, onJobsChanged }: { locatio
         </div>
         <button onClick={() => setCreating((value) => !value)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:text-zinc-100"><Plus className="h-4 w-4" /> New job</button>
       </div>
-      {creating && <NewJobForm locationId={locationId} credentialTypes={credentialTypes} onDone={() => { setCreating(false); void load(); void onJobsChanged?.() }} onCancel={() => setCreating(false)} />}
+      {creating && <NewJobForm locationId={locationId} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} onDone={() => { setCreating(false); void load(); void onJobsChanged?.() }} onCancel={() => setCreating(false)} />}
       {jobs.length === 0 && !creating ? <p className="rounded-xl border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-600">No jobs yet. Start with an area such as Box Office, Concessions, or Ushers.</p> : (
         <div className="space-y-2">
-          {jobs.map((job) => <JobCard key={job.id} job={job} roster={roster} credentialTypes={credentialTypes} onChanged={async () => { await load(); await onJobsChanged?.() }} />)}
+          {jobs.map((job) => <JobCard key={job.id} job={job} roster={roster} credentialTypes={credentialTypes} credentialTemplatesEnabled={credentialTemplatesEnabled} onChanged={async () => { await load(); await onJobsChanged?.() }} />)}
         </div>
       )}
     </div>
   )
 }
 
-function NewJobForm({ locationId, credentialTypes, onDone, onCancel }: { locationId: string; credentialTypes: CredentialType[]; onDone(): void; onCancel(): void }) {
+function NewJobForm({ locationId, credentialTypes, credentialTemplatesEnabled, onDone, onCancel }: { locationId: string; credentialTypes: CredentialType[]; credentialTemplatesEnabled: boolean; onDone(): void; onCancel(): void }) {
   const { toast } = useToast()
   const [name, setName] = useState('')
   const [notes, setNotes] = useState('')
@@ -86,9 +92,9 @@ function NewJobForm({ locationId, credentialTypes, onDone, onCancel }: { locatio
       <div className="grid gap-2 md:grid-cols-2">
         <label className="text-[10px] uppercase tracking-wide text-zinc-500">Job name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Box Office" className={`${inputCls} mt-1`} /></label>
         <label className="text-[10px] uppercase tracking-wide text-zinc-500">Notes<input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional qualification context" className={`${inputCls} mt-1`} /></label>
-        <label className="text-[10px] uppercase tracking-wide text-zinc-500">Grace days<input value={graceDays} min="0" max="365" type="number" onChange={(event) => setGraceDays(event.target.value)} placeholder="Company default" className={`${inputCls} mt-1`} /></label>
+        {credentialTemplatesEnabled && <label className="text-[10px] uppercase tracking-wide text-zinc-500">Grace days<input value={graceDays} min="0" max="365" type="number" onChange={(event) => setGraceDays(event.target.value)} placeholder="Company default" className={`${inputCls} mt-1`} /></label>}
       </div>
-      <CredentialRequirementPicker credentialTypes={credentialTypes} selectedIds={requirementIds} onChange={setRequirementIds} />
+      {credentialTemplatesEnabled && <CredentialRequirementPicker credentialTypes={credentialTypes} selectedIds={requirementIds} onChange={setRequirementIds} />}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Create job</button>
         <button onClick={onCancel} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-100">Cancel</button>
@@ -97,7 +103,7 @@ function NewJobForm({ locationId, credentialTypes, onDone, onCancel }: { locatio
   )
 }
 
-function JobCard({ job, roster, credentialTypes, onChanged }: { job: ScheduleJob; roster: RosterEmployee[]; credentialTypes: CredentialType[]; onChanged(): Promise<void> }) {
+function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onChanged }: { job: ScheduleJob; roster: RosterEmployee[]; credentialTypes: CredentialType[]; credentialTemplatesEnabled: boolean; onChanged(): Promise<void> }) {
   const { toast } = useToast()
   const [expanded, setExpanded] = useState(false)
   const [selected, setSelected] = useState(() => new Set(job.employee_ids))
@@ -174,7 +180,7 @@ function JobCard({ job, roster, credentialTypes, onChanged }: { job: ScheduleJob
         <BriefcaseBusiness className="h-4 w-4 text-emerald-400" />
         <div className="min-w-0 flex-1">
           <div className="text-sm text-zinc-200">{job.name}</div>
-          <div className="text-[11px] text-zinc-600">{job.employee_ids.length} qualified employee{job.employee_ids.length === 1 ? '' : 's'} · {job.credential_requirements.length} credential rule{job.credential_requirements.length === 1 ? '' : 's'}</div>
+          <div className="text-[11px] text-zinc-600">{job.employee_ids.length} qualified employee{job.employee_ids.length === 1 ? '' : 's'}{credentialTemplatesEnabled ? ` · ${job.credential_requirements.length} credential rule${job.credential_requirements.length === 1 ? '' : 's'}` : ''}</div>
         </div>
         <button onClick={remove} disabled={deleting} className="p-1 text-zinc-600 hover:text-red-400" aria-label={`Delete ${job.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
@@ -188,12 +194,12 @@ function JobCard({ job, roster, credentialTypes, onChanged }: { job: ScheduleJob
           </label>)}
         </div>
         <button onClick={saveRoster} disabled={saving} className="mt-3 inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save qualified roster</button>
-        <div className="mt-4 border-t border-zinc-800/70 pt-3">
+        {credentialTemplatesEnabled && <div className="mt-4 border-t border-zinc-800/70 pt-3">
           <p className="mb-2 text-xs text-zinc-500">Required credentials block this job after the new-hire grace period. They do not affect unrelated jobs.</p>
           <label className="block max-w-48 text-[10px] uppercase tracking-wide text-zinc-500">Grace days<input value={graceDays} min="0" max="365" type="number" onChange={(event) => setGraceDays(event.target.value)} placeholder="Company default" className={`${inputCls} mt-1`} /></label>
           <CredentialRequirementPicker credentialTypes={credentialTypes} selectedIds={requirementIds} onChange={setRequirementIds} />
           <button onClick={saveCredentials} disabled={savingCredentials} className="mt-3 inline-flex items-center gap-1 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-950 disabled:opacity-50">{savingCredentials ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save credential rules</button>
-        </div>
+        </div>}
       </div>}
     </Card>
   )

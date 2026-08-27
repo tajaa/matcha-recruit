@@ -15,6 +15,15 @@ const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionM
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 vi.mock('../../hooks/employees/useScheduleEditor', () => ({ useScheduleEditor: useEditorMock }))
+vi.mock('../../components/employees/schedule-editor/ScheduleJobsTab', async () => {
+  const { useState } = await vi.importActual<typeof import('react')>('react')
+  return {
+    default: ({ locationId }: { locationId: string }) => {
+      const [draft, setDraft] = useState('')
+      return <div><div>Jobs configuration</div><div>Location {locationId}</div><input aria-label="Job draft" value={draft} onChange={(event) => setDraft(event.target.value)} /></div>
+    },
+  }
+})
 vi.mock('../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
   transcribeScheduleVoice: vi.fn(),
@@ -86,6 +95,79 @@ describe('ScheduleEditor', () => {
     expect(screen.getByText('Week of 2026-08-09')).toBeInTheDocument()
     expect(screen.getAllByText(/8\/9|8\/10|8\/11|8\/12|8\/13|8\/14|8\/15/).length).toBeGreaterThanOrEqual(7)
     expect(screen.getByText('Opener')).toBeInTheDocument()
+  })
+
+  it('opens location job and credential configuration from the editor toolbar', () => {
+    useMeMock.mockReturnValue({
+      me: { profile: { name: 'Jamie Rivera' } },
+      hasFeature: (feature: string) => feature === 'credential_templates',
+    })
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jobs & credentials' }))
+
+    expect(screen.getByText('Jobs configuration')).toBeInTheDocument()
+  })
+
+  it('shows jobs without credential controls when credential templates are disabled', () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Jobs' })).toHaveAttribute('title', 'Configure location jobs')
+  })
+
+  it('keeps jobs and Huume as mutually exclusive views', async () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jobs' }))
+    expect(screen.getByText('Jobs configuration')).toBeInTheDocument()
+    expect(screen.queryByText('Huume · Schedule assistant')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    expect(screen.queryByText('Jobs configuration')).not.toBeInTheDocument()
+    expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
+  })
+
+  it('clears the job draft when the location changes', () => {
+    let locationId = 'loc1'
+    const setLocationId = vi.fn((next: string) => { locationId = next })
+    const locations = [
+      { id: 'loc1', name: 'Wilshire', city: 'Los Angeles', state: 'CA', is_active: true },
+      { id: 'loc2', name: 'Venice', city: 'Los Angeles', state: 'CA', is_active: true },
+    ]
+    useLocationScopeMock.mockImplementation(() => ({ locationId, setLocationId, locations, loading: false }))
+
+    const view = render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Jobs' }))
+    fireEvent.change(screen.getByLabelText('Job draft'), { target: { value: 'Opener' } })
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'loc2' } })
+    view.rerender(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('Location loc2')).toBeInTheDocument()
+    expect(screen.getByLabelText('Job draft')).toHaveValue('')
   })
 
   it('opens the shift break planner when assignment needs a compliant break', async () => {
