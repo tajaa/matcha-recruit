@@ -117,6 +117,7 @@ def test_schema_compares_multihand_sets_exactly_and_order_independently():
     report = schema.compare_revision_sets({"revisions": ["head_b", "head_a"]}, {"revisions": ["head_a", "head_b"]})
     assert report["status"] == "equal"
     assert report["dev_revisions"] == ["head_a", "head_b"]
+    assert report["needs_schema_diff"] is True
 
 
 def test_schema_reports_each_side_and_preserves_ancestor_rows():
@@ -164,6 +165,31 @@ def test_schema_does_not_double_count_the_ancestor_half_of_a_behind_pair():
     assert report["true_prod_only"] == []
 
 
+def test_schema_consumes_every_parent_when_dev_is_ahead_over_a_merge():
+    # a branches to b/c, m merges both, and d advances beyond the merge.
+    graph = {"a": set(), "b": {"a"}, "c": {"a"}, "m": {"b", "c"}, "d": {"m"}}
+    report = schema.compare_revision_sets({"revisions": ["d"]}, {"revisions": ["b", "c"]}, graph=graph)
+    assert report["status"] == "behind"
+    assert report["true_dev_only"] == []
+    assert report["true_prod_only"] == []
+    assert report["behind"] == [
+        {"side_ahead": "dev", "ahead_revision": "d", "behind_revision": "b"},
+        {"side_ahead": "dev", "ahead_revision": "d", "behind_revision": "c"},
+    ]
+
+
+def test_schema_handles_the_same_merge_symmetrically_when_prod_is_ahead():
+    graph = {"a": set(), "b": {"a"}, "c": {"a"}, "m": {"b", "c"}, "d": {"m"}}
+    report = schema.compare_revision_sets({"revisions": ["b", "c"]}, {"revisions": ["d"]}, graph=graph)
+    assert report["status"] == "behind"
+    assert report["true_dev_only"] == []
+    assert report["true_prod_only"] == []
+    assert report["behind"] == [
+        {"side_ahead": "prod", "ahead_revision": "d", "behind_revision": "b"},
+        {"side_ahead": "prod", "ahead_revision": "d", "behind_revision": "c"},
+    ]
+
+
 def test_schema_flags_unrelated_heads_as_genuine_drift():
     report = schema.compare_revision_sets({"revisions": ["c"]}, {"revisions": ["d"]}, graph=_fake_graph())
     assert report["status"] == "drift"
@@ -188,6 +214,26 @@ def test_schema_load_revision_graph_handles_multiline_merge_tuple(tmp_path):
     assert graph["typed01"] == {"merge01"}
     assert "merge01" in schema.ancestors_of("typed01", graph)
     assert "parent_a" in schema.ancestors_of("typed01", graph)
+
+
+def test_schema_revision_graph_ignores_parentheses_and_quotes_in_comments(tmp_path):
+    (tmp_path / "closing_comment.py").write_text(
+        'revision = "merge01"\n'
+        "down_revision = (  # merge parents below)\n"
+        '    "parent_a",\n'
+        '    "parent_b",\n'
+        ")\n"
+    )
+    (tmp_path / "opening_comment.py").write_text(
+        'revision = "child01"\n'
+        "down_revision = (\n"
+        '    "merge01",\n'
+        ')  # unmatched comment paren ( and "not_a_parent"\n'
+        'branch_labels = "also_not_a_parent"\n'
+    )
+    graph = schema.load_revision_graph(tmp_path)
+    assert graph["merge01"] == {"parent_a", "parent_b"}
+    assert graph["child01"] == {"merge01"}
 
 
 @pytest.mark.parametrize("payload", [{}, {"revisions": []}, {"revisions": ["bad-id"]}, {"revisions": ["dup", "dup"]}])
@@ -254,3 +300,11 @@ def test_revision_drift_remains_actionable_when_normalized_schema_matches():
     report["schema"] = schema.compare_schemas(_dump(), _dump())
     assert report["status"] == "drift"
     assert report["schema"]["schema_equal"] is True
+
+
+def test_equal_revisions_with_different_ddl_are_schema_drift():
+    report = schema.compare_revision_sets({"revisions": ["same_head"]}, {"revisions": ["same_head"]})
+    report = schema.attach_schema_comparison(report, _dump("integer"), _dump("bigint"))
+    assert report["revision_status"] == "equal"
+    assert report["schema"]["schema_equal"] is False
+    assert report["status"] == "drift"

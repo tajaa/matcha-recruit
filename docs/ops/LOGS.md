@@ -171,6 +171,9 @@ changes a database row.
 - Worker: checks the `matcha-worker` container, a 10-second Celery ping, and
   the systemd timer/service state. The timer must have triggered in the last
   35 minutes.
+- Certificate renewal: requires `lego-gummfit.service`'s last result to be
+  successful and `lego-gummfit.timer` to be enabled, active, and triggered in
+  the last 30 hours. Missing units fail closed.
 
 Collection failures are alerts too. A failed SSH or production DB query must
 never be represented as a healthy check.
@@ -190,9 +193,12 @@ monitor collection failures.
   --list` validates archive metadata, not a complete restore.
 - `.github/workflows/schema-drift-checks.yml` runs once daily on the
   self-hosted Mac. Schema issues report exact multi-head `alembic_version`
-  sets. When they differ, the workflow adds a bounded, redacted schema-only
-  diff. A DDL-equal mismatch still needs attention because data-only
-  migrations and stale version rows are possible.
+  sets. Equal heads are still checked with normalized schema-only dumps so a
+  stamped-but-unrun migration cannot look healthy. Unexplained revision drift
+  also includes a bounded, redacted schema-only diff; ancestry-explained
+  `behind` skips the expected DDL difference. A DDL-equal revision mismatch
+  still needs attention because data-only migrations and stale version rows
+  are possible.
 
 Raw schema dumps and backup contents never leave their temporary hosts. A failed
 collection opens a separate monitor issue and cannot resolve an existing health

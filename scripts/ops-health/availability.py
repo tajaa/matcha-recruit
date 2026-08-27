@@ -106,8 +106,20 @@ def assess_worker(status: dict) -> dict:
     if status.get("lego_failed") == "failed":
         failures.append("lego-gummfit.service (cert renewal) is in a failed state")
     lego_result = status.get("lego_result", "missing")
-    if lego_result not in {"success", "", "missing"}:
+    if lego_result != "success":
         failures.append(f"lego-gummfit.service last result is {lego_result}")
+    if status.get("lego_timer_enabled") != "enabled" or status.get("lego_timer_active") != "active":
+        failures.append("lego-gummfit.timer is not enabled and active")
+    if not status.get("lego_timer_last") or status.get("lego_timer_last") == "n/a":
+        failures.append("lego-gummfit.timer has no recorded trigger")
+    try:
+        lego_timer_age = int(status.get("lego_timer_age_seconds", -1))
+    except (TypeError, ValueError):
+        lego_timer_age = -1
+    if lego_timer_age < 0:
+        failures.append("lego-gummfit.timer trigger age is unavailable")
+    elif lego_timer_age > 30 * 60 * 60:
+        failures.append(f"lego-gummfit.timer last triggered {lego_timer_age // 3600} hours ago")
     return {"ok": not failures, "failures": failures}
 
 

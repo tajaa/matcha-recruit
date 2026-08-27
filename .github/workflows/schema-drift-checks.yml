@@ -66,9 +66,12 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           [ "$status" = drift ] || exit "$rc"
 
-      - name: Capture read-only schema dumps on drift
+      - name: Capture read-only schema dumps when revisions are comparable
         id: dumps
-        if: steps.compare.outputs.status == 'drift'
+        # Equal heads still need a DDL comparison: stamped-but-unrun migrations
+        # produce exactly that state. "behind" intentionally skips the dump
+        # because its schema difference is already explained by ancestry.
+        if: steps.compare.outputs.status == 'equal' || steps.compare.outputs.status == 'drift'
         continue-on-error: true
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
@@ -106,16 +109,20 @@ jobs:
           if [ "${{ steps.revisions.outcome }}" != success ] || [ "${{ steps.compare.outcome }}" != success ]; then
             printf 'The schema monitor could not collect an authoritative read-only revision comparison.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
             ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
-          elif [ "${{ steps.compare.outputs.status }}" = drift ]; then
-            if [ "${{ steps.dumps.outcome }}" != success ] || [ "${{ steps.schema.outcome }}" != success ]; then
+          elif [ "${{ steps.compare.outputs.status }}" = behind ]; then
+            printf 'Schema comparison recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
+          elif [ "${{ steps.dumps.outcome }}" != success ] || [ "${{ steps.schema.outcome }}" != success ]; then
+            if [ "${{ steps.compare.outputs.status }}" = drift ]; then
               ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-revision-report.md" ops-health
-              printf 'Alembic revision drift was detected, but the read-only schema diagnostics failed.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
-              ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
-            else
-              ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-report.md" ops-health
-              printf 'Schema monitor recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
-              ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
             fi
+            printf 'The read-only schema diagnostics failed.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
+          elif [ "${{ steps.schema.outputs.status }}" = drift ]; then
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-report.md" ops-health
+            printf 'Schema monitor recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
           else
             printf 'Schema comparison recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
             ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
@@ -140,7 +147,7 @@ jobs:
         # normal, expected state between a dev apply and a prod apply — not
         # a failure. Only 'drift' (genuinely unexplained divergence) and
         # collection/comparison failures should redden the workflow.
-        if: always() && (steps.revisions.outcome != 'success' || steps.compare.outcome != 'success' || (steps.compare.outputs.status != 'equal' && steps.compare.outputs.status != 'behind') || steps.dumps.outcome == 'failure' || steps.schema.outcome == 'failure')
+        if: always() && (steps.revisions.outcome != 'success' || steps.compare.outcome != 'success' || (steps.compare.outputs.status != 'equal' && steps.compare.outputs.status != 'behind') || steps.dumps.outcome == 'failure' || steps.schema.outcome == 'failure' || (steps.compare.outputs.status == 'equal' && steps.schema.outputs.status != 'equal'))
         run: exit 1
 
       - name: Delete schema dumps and SSH key

@@ -21,6 +21,24 @@ availability = _load("availability")
 regression = _load("error-regression")
 
 
+def _healthy_worker_status() -> dict:
+    return {
+        "worker": "running",
+        "celery_ping": "ok",
+        "timer_enabled": "enabled",
+        "timer_active": "active",
+        "timer_last": "Tue 2026-08-25 00:00:00 UTC",
+        "timer_age_seconds": "60",
+        "timer_result": "success",
+        "lego_result": "success",
+        "lego_failed": "inactive",
+        "lego_timer_enabled": "enabled",
+        "lego_timer_active": "active",
+        "lego_timer_last": "Tue 2026-08-25 04:26:00 UTC",
+        "lego_timer_age_seconds": "3600",
+    }
+
+
 def test_disk_warns_on_low_absolute_space_even_when_percent_is_low():
     result = availability.assess_disk({"mount": "/", "total_kb": str(60 * 1024**2), "available_kb": str(7 * 1024**2)})
     assert result["ok"] is False
@@ -42,13 +60,9 @@ def test_disk_marks_missing_mount_critical():
 
 def test_worker_requires_container_ping_and_timer():
     result = availability.assess_worker({
-        "worker": "running",
-        "celery_ping": "ok",
-        "timer_enabled": "enabled",
-        "timer_active": "active",
+        **_healthy_worker_status(),
         "timer_last": "n/a",
         "timer_age_seconds": "-1",
-        "timer_result": "success",
     })
     assert result["ok"] is False
     assert "no recorded trigger" in result["failures"][0]
@@ -56,45 +70,41 @@ def test_worker_requires_container_ping_and_timer():
 
 def test_worker_rejects_stale_timer_trigger():
     result = availability.assess_worker({
-        "worker": "running",
-        "celery_ping": "ok",
-        "timer_enabled": "enabled",
-        "timer_active": "active",
-        "timer_last": "Tue 2026-08-25 00:00:00 UTC",
+        **_healthy_worker_status(),
         "timer_age_seconds": "5401",
-        "timer_result": "success",
     })
     assert result["ok"] is False
     assert "90 minutes ago" in result["failures"][0]
 
 
-def test_worker_ignores_lego_status_when_absent_for_backward_compatibility():
+def test_worker_rejects_missing_cert_renewal_service_and_timer():
     result = availability.assess_worker({
-        "worker": "running",
-        "celery_ping": "ok",
-        "timer_enabled": "enabled",
-        "timer_active": "active",
-        "timer_last": "Tue 2026-08-25 00:00:00 UTC",
-        "timer_age_seconds": "60",
-        "timer_result": "success",
+        key: value for key, value in _healthy_worker_status().items() if not key.startswith("lego_")
     })
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert any("last result is missing" in failure for failure in result["failures"])
+    assert any("timer is not enabled" in failure for failure in result["failures"])
 
 
 def test_worker_flags_failed_cert_renewal_service():
     result = availability.assess_worker({
-        "worker": "running",
-        "celery_ping": "ok",
-        "timer_enabled": "enabled",
-        "timer_active": "active",
-        "timer_last": "Tue 2026-08-25 00:00:00 UTC",
-        "timer_age_seconds": "60",
-        "timer_result": "success",
+        **_healthy_worker_status(),
         "lego_result": "exit-code",
         "lego_failed": "failed",
     })
     assert result["ok"] is False
     assert any("lego-gummfit" in f for f in result["failures"])
+
+
+def test_worker_rejects_disabled_or_stale_cert_renewal_timer():
+    result = availability.assess_worker({
+        **_healthy_worker_status(),
+        "lego_timer_active": "inactive",
+        "lego_timer_age_seconds": str(31 * 60 * 60),
+    })
+    assert result["ok"] is False
+    assert any("timer is not enabled and active" in failure for failure in result["failures"])
+    assert any("last triggered 31 hours ago" in failure for failure in result["failures"])
 
 
 def _error(message: str, occurrences: int, *, level: str = "ERROR", error_id: str = "e1") -> dict:

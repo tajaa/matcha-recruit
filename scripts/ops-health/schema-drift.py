@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import hashlib
 import json
 import re
+import warnings
 from pathlib import Path
 
 REVISION_RE = re.compile(r"^[A-Za-z0-9_]+$")
 VERSIONS_DIR = Path(__file__).resolve().parents[2] / "server" / "alembic" / "versions"
-REVISION_LINE_RE = re.compile(r"^revision(?:\s*:\s*[^=]+)?\s*=\s*")
-DOWN_REVISION_LINE_RE = re.compile(r"^down_revision(?:\s*:\s*[^=]+)?\s*=\s*")
-QUOTED_RE = re.compile(r"[\"']([A-Za-z0-9_]+)[\"']")
 HEADER_RE = re.compile(r"^-- Name: (?P<name>.*); Type: (?P<type>.*); Schema: (?P<schema>.*); Owner: (?P<owner>.*)$")
 DOLLAR_TAG_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -40,32 +39,49 @@ def load_revision_graph(versions_dir: Path = VERSIONS_DIR) -> dict[str, set[str]
     Parses `revision = ...` / `down_revision = ...` out of every migration
     file rather than importing them (no need to construct a real DB session,
     and importing 500+ migration modules for a read-only comparison would be
-    needlessly heavy). Handles single string, `None`, single-line tuple, and
-    multi-line tuple (merge migration) down_revision forms by paren-balance
-    scanning rather than a single-line regex.
+    needlessly heavy). Python's AST keeps comments and parentheses inside
+    strings from corrupting merge-tuple parsing.
     """
     graph: dict[str, set[str]] = {}
     if not versions_dir.is_dir():
         return graph
     for path in sorted(versions_dir.glob("*.py")):
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        revision_id: str | None = None
-        parents: set[str] = set()
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if revision_id is None and REVISION_LINE_RE.match(line):
-                ids = QUOTED_RE.findall(line)
-                if ids:
-                    revision_id = ids[0]
-            elif DOWN_REVISION_LINE_RE.match(line):
-                buf = line
-                while buf.count("(") > buf.count(")") and i + 1 < len(lines):
-                    i += 1
-                    buf += "\n" + lines[i]
-                parents = set(QUOTED_RE.findall(buf))
-            i += 1
-        if revision_id:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
+        except (OSError, SyntaxError):
+            continue
+        values: dict[str, object] = {}
+        for node in tree.body:
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            else:
+                continue
+            names = [target.id for target in targets if isinstance(target, ast.Name)]
+            for name in names:
+                if name not in {"revision", "down_revision"}:
+                    continue
+                try:
+                    values[name] = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    pass
+        revision_id = values.get("revision")
+        down_revision = values.get("down_revision")
+        if not isinstance(revision_id, str) or not REVISION_RE.fullmatch(revision_id):
+            continue
+        if down_revision is None:
+            parents: set[str] = set()
+        elif isinstance(down_revision, str):
+            parents = {down_revision}
+        elif isinstance(down_revision, (tuple, list)) and all(isinstance(parent, str) for parent in down_revision):
+            parents = set(down_revision)
+        else:
+            continue
+        if all(REVISION_RE.fullmatch(parent) for parent in parents):
             graph[revision_id] = parents
     return graph
 
@@ -99,19 +115,21 @@ def explain_head_diff(
     true_dev_only: list[str] = []
     true_prod_only: list[str] = []
     behind: list[dict] = []
+    ancestor_cache = {revision: ancestors_of(revision, graph) for revision in set(dev_only + prod_only)}
     consumed_prod: set[str] = set()
     for rev in dev_only:
         # Case A — dev ahead: rev descends from a revision prod already has.
-        match = next((p for p in prod_all if p in ancestors_of(rev, graph)), None)
-        if match:
-            behind.append({"side_ahead": "dev", "ahead_revision": rev, "behind_revision": match})
-            consumed_prod.add(match)
+        matches = [p for p in prod_all if p in ancestor_cache[rev]]
+        if matches:
+            for match in matches:
+                behind.append({"side_ahead": "dev", "ahead_revision": rev, "behind_revision": match})
+            consumed_prod.update(matches)
             continue
         # Case B — dev behind: some prod-only head already descends from rev,
         # meaning prod moved past rev and this is the SAME gap the prod_only
         # loop below will explain from the other direction — not a second,
         # independent piece of drift on top of it.
-        if any(rev in ancestors_of(p, graph) for p in prod_only):
+        if any(rev in ancestor_cache[p] for p in prod_only):
             continue
         true_dev_only.append(rev)
     for rev in prod_only:
@@ -119,9 +137,10 @@ def explain_head_diff(
         # (e.g. dev has taskpr0001, prod has its parent sales02).
         if rev in consumed_prod:
             continue
-        match = next((d for d in dev_all if d in ancestors_of(rev, graph)), None)
-        if match:
-            behind.append({"side_ahead": "prod", "ahead_revision": rev, "behind_revision": match})
+        matches = [d for d in dev_all if d in ancestor_cache[rev]]
+        if matches:
+            for match in matches:
+                behind.append({"side_ahead": "prod", "ahead_revision": rev, "behind_revision": match})
         else:
             true_prod_only.append(rev)
     return true_dev_only, true_prod_only, behind
@@ -135,6 +154,7 @@ def compare_revision_sets(dev_payload: object, prod_payload: object, graph: dict
     if not dev_only and not prod_only:
         return {
             "status": "equal",
+            "revision_status": "equal",
             "dev_revisions": list(dev),
             "prod_revisions": list(prod),
             "dev_only": dev_only,
@@ -142,13 +162,14 @@ def compare_revision_sets(dev_payload: object, prod_payload: object, graph: dict
             "true_dev_only": [],
             "true_prod_only": [],
             "behind": [],
-            "needs_schema_diff": False,
+            "needs_schema_diff": True,
         }
     true_dev_only, true_prod_only, behind = explain_head_diff(
         dev_only, prod_only, dev, prod, graph if graph is not None else load_revision_graph(),
     )
     return {
         "status": "drift" if (true_dev_only or true_prod_only) else "behind",
+        "revision_status": "drift" if (true_dev_only or true_prod_only) else "behind",
         "dev_revisions": list(dev),
         "prod_revisions": list(prod),
         "dev_only": dev_only,
@@ -256,6 +277,14 @@ def compare_schemas(dev_text: str, prod_text: str) -> dict:
     }
 
 
+def attach_schema_comparison(report: dict, dev_text: str, prod_text: str) -> dict:
+    """Attach normalized DDL results and promote any DDL mismatch to drift."""
+    report = {**report, "schema": compare_schemas(dev_text, prod_text)}
+    if not report["schema"]["schema_equal"]:
+        report["status"] = "drift"
+    return report
+
+
 def render_schema_markdown(report: dict, workflow_url: str) -> str:
     lines = ["Production schema drift check.", ""]
     lines.append(f"- Dev Alembic revisions: `{', '.join(report.get('dev_revisions', [])) or 'unavailable'}`")
@@ -298,7 +327,7 @@ def main() -> int:
         if bool(args.dev_schema) != bool(args.prod_schema):
             raise ValueError("both schema dumps are required together")
         if args.dev_schema and args.prod_schema:
-            report["schema"] = compare_schemas(args.dev_schema.read_text(), args.prod_schema.read_text())
+            report = attach_schema_comparison(report, args.dev_schema.read_text(), args.prod_schema.read_text())
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         report = {"status": "unknown", "failures": [f"invalid schema check input: {exc}"], "needs_schema_diff": False}
     args.output.write_text(json.dumps(report, indent=2) + "\n")

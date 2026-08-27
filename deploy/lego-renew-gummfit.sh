@@ -15,6 +15,32 @@
 # gummfit.com's own TLS is served via the standalone `origin` A record
 # (origin.gummfit.com -> 54.177.107.107), which this script never touches.
 set -uo pipefail
+LEGO_BIN=/usr/local/bin/lego
+EXPECTED_LEGO_VERSION=5.2.2
+EXPECTED_LEGO_SHA256=22f3e25889f0cb0f109ce4706310658549ec06a86ae0026897421055fd023de4
+if [ ! -x "$LEGO_BIN" ]; then
+  echo "[$(date)] $LEGO_BIN missing or not executable — aborting" >&2
+  exit 1
+fi
+lego_version="$($LEGO_BIN --version 2>&1)" || {
+  echo "[$(date)] unable to read lego version — aborting" >&2
+  exit 1
+}
+case "$lego_version" in
+  "lego version $EXPECTED_LEGO_VERSION "*) ;;
+  *)
+    echo "[$(date)] unsupported lego version (expected $EXPECTED_LEGO_VERSION) — aborting" >&2
+    exit 1
+    ;;
+esac
+lego_sha256="$(sha256sum "$LEGO_BIN" | awk '{print $1}')" || {
+  echo "[$(date)] unable to checksum lego binary — aborting" >&2
+  exit 1
+}
+if [ "$lego_sha256" != "$EXPECTED_LEGO_SHA256" ]; then
+  echo "[$(date)] unsupported lego binary checksum — aborting" >&2
+  exit 1
+fi
 if [ ! -r /etc/lego/hostinger.env ]; then
   echo "[$(date)] /etc/lego/hostinger.env missing or unreadable — aborting" >&2
   exit 1
@@ -29,15 +55,13 @@ export LEGO_PATH=/etc/lego
 # daily since ~2026-08-11. Disabling CNAME support writes the TXT directly into the
 # gummfit.com zone, where an explicit record outranks the wildcard.
 export LEGO_DISABLE_CNAME_SUPPORT=true
-# `run` on lego 5.x is get-OR-renew and idempotent — it only issues a new
+# `run` on the verified lego 5.2.2 binary is get-OR-renew and idempotent — it only issues a new
 # cert when the existing one is within --renew-days of expiry, so a daily
 # cron cadence does not trip Let's Encrypt's 5-duplicate-certs/week limit.
-# (Older lego had a separate `renew` subcommand for this; 5.2.2 on this host
-# dropped it and folded the behavior into `run` — `lego renew` here is
-# "flag provided but not defined", not a no-op. Confirmed against `lego
-# run --help` on the host 2026-08-27; re-check syntax with that command if
-# a future lego upgrade breaks this again.)
-/usr/local/bin/lego run --accept-tos -m aaron@hey-matcha.com --dns hostinger \
+# (Older lego had a separate `renew` subcommand. Keep EXPECTED_LEGO_VERSION
+# and EXPECTED_LEGO_SHA256 synchronized with the deliberately installed binary
+# and re-verify `run --help` before changing either.)
+"$LEGO_BIN" run --accept-tos -m aaron@hey-matcha.com --dns hostinger \
   --dns.propagation.wait 180s -d gummfit.com -d "*.gummfit.com" \
   --renew-days 30 \
   --deploy-hook "systemctl reload nginx"
