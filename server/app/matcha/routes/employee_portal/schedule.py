@@ -354,7 +354,8 @@ async def withdraw_schedule_request(
                 await conn.execute(
                     """UPDATE schedule_requests
                        SET target_employee_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE target_employee_id END,
-                           counter_shift_id = NULL, counterparty_confirmed_at = NULL,
+                           counter_shift_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE counter_shift_id END,
+                           counterparty_confirmed_at = NULL,
                            status = 'awaiting_counterparty', updated_at = NOW()
                        WHERE id = $1""",
                     request_id,

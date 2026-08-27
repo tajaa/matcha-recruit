@@ -285,7 +285,7 @@ function OfferCard({ request, shifts, onChanged }: { request: ScheduleRequest; s
   async function accept() {
     setBusy(true)
     try {
-      if (request.request_type === 'swap' && !counterShiftId) {
+      if (request.request_type === 'swap' && !hasSelectedCounterShift && !counterShiftId) {
         toast('Choose your shift to trade', 'error')
         return
       }
