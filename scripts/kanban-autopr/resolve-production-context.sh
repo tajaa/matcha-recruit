@@ -115,35 +115,22 @@ prod_revisions="$({
 printf '%s' "$prod_revisions" | jq -e '.revisions | type == "array"' >/dev/null \
     || die "production Alembic revision snapshot was invalid"
 
-repo_heads="$({
-    cd "$REPO_ROOT/server"
-    ./venv/bin/alembic heads 2>/dev/null | awk '{print $1}' | jq -Rsc 'split("\n") | map(select(length > 0)) | sort'
-} 2>&1)" || die "could not resolve repository Alembic heads: $repo_heads"
-
-repo_revisions="$({
-    "$REPO_ROOT/server/venv/bin/python" - "$REPO_ROOT/server" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-
-root = Path(sys.argv[1])
-config = Config(str(root / "alembic.ini"))
-config.set_main_option("script_location", str(root / "alembic"))
-script = ScriptDirectory.from_config(config)
-print(json.dumps(sorted(rev.revision for rev in script.walk_revisions())))
-PY
-} 2>&1)" || die "could not resolve the repository migration graph: $repo_revisions"
-
 current_revisions="$(printf '%s' "$prod_revisions" | jq -r '.revisions[]')"
-pending="$(
+migration_graph="$({
+    # Revision files contain static literal metadata. The Actions checkout
+    # deliberately has no backend virtualenv, so use the standard-library
+    # parser instead of importing Alembic merely to inspect that graph.
     # Intentional word splitting: each current revision is one argv entry.
     # shellcheck disable=SC2086
-    "$REPO_ROOT/server/venv/bin/python" "$REPO_ROOT/scripts/alembic_pending.py" $current_revisions \
-        | jq -Rsc 'split("\n") | map(select(length > 0))'
-)" || die "could not compare production migrations with the repository"
+    python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+        "$REPO_ROOT/server/alembic/versions" $current_revisions
+} 2>&1)" || die "could not resolve repository migration graph: $migration_graph"
+printf '%s' "$migration_graph" | jq -e \
+    '.heads and .revisions and .pending and .unknown_current' >/dev/null \
+    || die "repository migration graph snapshot was invalid"
+repo_heads="$(printf '%s' "$migration_graph" | jq -c '.heads')"
+repo_revisions="$(printf '%s' "$migration_graph" | jq -c '.revisions')"
+pending="$(printf '%s' "$migration_graph" | jq -c '.pending')"
 
 schema_status="current"
 [ "$(printf '%s' "$pending" | jq 'length')" -eq 0 ] || schema_status="behind"

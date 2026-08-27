@@ -31,6 +31,13 @@ check "production resolver uses active container digests and read-only migration
       && grep -qF 'schema-snapshot.sh" prod-revisions' "$AUTOPR_DIR/resolve-production-context.sh" \
       && echo 0 || echo 1)
 
+graph_snapshot="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+    "$REPO_ROOT/server/alembic/versions" 2>/dev/null)"
+check "migration graph snapshot works without the backend virtualenv" \
+    $(printf '%s' "$graph_snapshot" | jq -e \
+      '(.heads | length) > 0 and (.revisions | length) > 0 and (.pending | length) == (.revisions | length)' \
+      >/dev/null 2>&1 && echo 0 || echo 1)
+
 check "future frontend images expose a small stable build manifest" \
     $(grep -qF '> dist/version.json' "$REPO_ROOT/client/Dockerfile" \
       && grep -qF '.build_number // .build // empty' "$AUTOPR_DIR/resolve-production-context.sh" \
@@ -76,6 +83,38 @@ MATCHA_AUTOPR_ENV="$env_file" mw_api GET /probe > "$TMP_DIR/api_result" 2>/dev/n
 api_rc=$?
 check "mw_api keeps MATCHA_API_URL available after login" \
     $([ "$api_rc" = "0" ] && grep -qF 'https://example.invalid/api/probe' "$TMP_DIR/curl_args" && echo 0 || echo 1)
+
+mw_login() {
+    _kanban_autopr_load_env
+    if [ "${1:-}" = "--refresh" ]; then
+        printf 'refresh\n' >> "$TMP_DIR/login_calls"
+        printf fresh-token
+    else
+        printf cached\n >> "$TMP_DIR/login_calls"
+        printf stale-token
+    fi
+}
+curl() {
+    local output_file="" arg all_args="$*"
+    while [ "$#" -gt 0 ]; do
+        arg="$1"; shift
+        if [ "$arg" = "-o" ]; then output_file="$1"; shift; fi
+    done
+    if [[ "$all_args" == *"Bearer stale-token"* ]]; then
+        [ -z "$output_file" ] || printf '{"detail":"expired"}' > "$output_file"
+        printf 401
+    else
+        [ -z "$output_file" ] || printf '{"ok":true}' > "$output_file"
+        printf 200
+    fi
+}
+MATCHA_AUTOPR_ENV="$env_file" mw_api GET /refresh > "$TMP_DIR/refresh_result" 2>/dev/null
+refresh_rc=$?
+check "mw_api refreshes one stale token after a 401" \
+    $([ "$refresh_rc" = "0" ] \
+      && grep -qF refresh "$TMP_DIR/login_calls" \
+      && grep -qF '"ok":true' "$TMP_DIR/refresh_result" \
+      && echo 0 || echo 1)
 
 set -a
 source "$env_file"
