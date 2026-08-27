@@ -74,6 +74,15 @@ def test_swap_confirmation_checks_both_employees_for_same_day_conflicts():
     assert 'request["employee_id"], counter["starts_at"]' in source
 
 
+def test_counterparty_withdrawal_preserves_the_requested_swap_shift():
+    portal = Path(__file__).parents[2] / "app/matcha/routes/employee_portal/schedule.py"
+    source = portal.read_text()
+    assert (
+        "counter_shift_id = CASE WHEN request_type = 'pickup' "
+        "THEN NULL ELSE counter_shift_id END"
+    ) in source
+
+
 def test_notification_outbox_is_idempotent_and_migration_activates_digest():
     migration = Path(__file__).parents[2] / "alembic/versions/empsched13_schedule_round2_followups.py"
     source = migration.read_text()

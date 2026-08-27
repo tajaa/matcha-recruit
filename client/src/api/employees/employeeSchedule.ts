@@ -254,6 +254,12 @@ export function fetchMySchedule(start: string, end: string) {
   )
 }
 
+export function fetchMyTeamSchedule(start: string, end: string) {
+  return api.get<{ shifts: Shift[] }>(
+    `/v1/portal/me/schedule?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&team=true`,
+  )
+}
+
 export function fetchMyRequests() {
   return api.get<{ requests: ScheduleRequest[] }>('/v1/portal/me/schedule/requests')
 }
@@ -280,6 +286,7 @@ export interface MyRequestPayload {
   request_type: 'swap' | 'drop' | 'pickup' | 'unavailable'
   shift_id?: string | null
   target_employee_id?: string | null
+  counter_shift_id?: string | null
   unavailable_start?: string | null
   unavailable_end?: string | null
   reason?: string | null

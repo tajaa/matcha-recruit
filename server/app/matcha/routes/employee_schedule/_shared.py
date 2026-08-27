@@ -44,8 +44,10 @@ REQUEST_SELECT = """
            r.review_notes, r.reviewed_at, r.created_at,
            e.first_name, e.last_name,
            te.first_name AS target_first_name, te.last_name AS target_last_name,
-           s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
-           cs.starts_at AS counter_shift_starts_at, cs.ends_at AS counter_shift_ends_at
+            s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
+            s.role AS shift_role, s.department AS shift_department,
+            cs.starts_at AS counter_shift_starts_at, cs.ends_at AS counter_shift_ends_at,
+            cs.role AS counter_shift_role, cs.department AS counter_shift_department
     FROM schedule_requests r
     JOIN employees e ON e.id = r.employee_id
     LEFT JOIN employees te ON te.id = r.target_employee_id
@@ -510,12 +512,16 @@ def serialize_request(r) -> dict:
         "shift_id": str(r["shift_id"]) if r["shift_id"] else None,
         "shift_starts_at": _iso(r["shift_starts_at"]) if "shift_starts_at" in r else None,
         "shift_ends_at": _iso(r["shift_ends_at"]) if "shift_ends_at" in r else None,
+        "shift_role": r.get("shift_role"),
+        "shift_department": r.get("shift_department"),
         "target_employee_id": str(r["target_employee_id"]) if r["target_employee_id"] else None,
         "target_employee_name": _display_name(r.get("target_first_name"), r.get("target_last_name")),
         "counter_shift_id": str(r["counter_shift_id"]) if r.get("counter_shift_id") else None,
         "counterparty_confirmed_at": _iso(r["counterparty_confirmed_at"]) if r.get("counterparty_confirmed_at") else None,
         "counter_shift_starts_at": _iso(r["counter_shift_starts_at"]) if r.get("counter_shift_starts_at") else None,
         "counter_shift_ends_at": _iso(r["counter_shift_ends_at"]) if r.get("counter_shift_ends_at") else None,
+        "counter_shift_role": r.get("counter_shift_role"),
+        "counter_shift_department": r.get("counter_shift_department"),
         "unavailable_start": _iso(r["unavailable_start"]),
         "unavailable_end": _iso(r["unavailable_end"]),
         "reason": r["reason"],

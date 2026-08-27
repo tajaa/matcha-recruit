@@ -19,9 +19,10 @@ router = APIRouter()
 async def get_my_schedule(
     start: datetime = Query(...),
     end: datetime = Query(...),
+    team: bool = Query(False),
     employee: dict = Depends(require_employee_record),
 ):
-    """The signed-in employee's PUBLISHED shifts overlapping [start, end)."""
+    """Published shifts for the signed-in employee or their company team."""
     from app.matcha.routes.employee_schedule._shared import fetch_shifts
 
     if end <= start:
@@ -29,8 +30,16 @@ async def get_my_schedule(
     async with get_connection() as conn:
         shifts = await fetch_shifts(
             conn, employee["org_id"], start, end,
-            status="published", employee_id=employee["id"],
+            status="published", employee_id=None if team else employee["id"],
         )
+    if team:
+        # Team visibility supports finding coverage without exposing private
+        # manager notes, individualized guidance, or assignment controls.
+        for shift in shifts:
+            shift["assignments"] = [
+                {key: assignment[key] for key in ("employee_id", "name", "job_title", "status")}
+                for assignment in shift["assignments"]
+            ]
     return {"shifts": shifts}
 
 
@@ -139,21 +148,37 @@ async def create_my_schedule_request(
                     status_code=409,
                     detail="That coworker is no longer active and can't take the shift",
                 )
+        if body.counter_shift_id is not None:
+            counter = await conn.fetchrow(
+                """
+                SELECT s.status
+                FROM schedule_shifts s
+                JOIN schedule_shift_assignments a
+                  ON a.shift_id = s.id AND a.employee_id = $2 AND a.status <> 'declined'
+                WHERE s.id = $1 AND s.company_id = $3
+                """,
+                body.counter_shift_id, body.target_employee_id, company_id,
+            )
+            if not counter or counter["status"] != "published":
+                raise HTTPException(
+                    status_code=404,
+                    detail="Selected coworker shift is no longer available",
+                )
 
         async with conn.transaction():
             request_id = await conn.fetchval(
                 """
                 INSERT INTO schedule_requests
-                    (company_id, employee_id, request_type, shift_id, target_employee_id,
+                    (company_id, employee_id, request_type, shift_id, target_employee_id, counter_shift_id,
                      unavailable_start, unavailable_end, reason, status)
-                VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,
+                VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,
                         CASE WHEN $3::text IN ('pickup', 'swap')
-                             THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
+                              THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
                 RETURNING id
                 """,
                 company_id, employee["id"], body.request_type, body.shift_id,
-                body.target_employee_id, body.unavailable_start, body.unavailable_end,
-                body.reason,
+                body.target_employee_id, body.counter_shift_id, body.unavailable_start,
+                body.unavailable_end, body.reason,
             )
             await log_audit(
                 conn, company_id, "request", request_id, employee.get("user_id"),
@@ -208,9 +233,11 @@ async def accept_schedule_request(
             if request["request_type"] == "swap":
                 if request["target_employee_id"] != employee["id"]:
                     raise HTTPException(status_code=403, detail="Swap is addressed to another employee")
-                counter_shift_id = body.counter_shift_id
+                counter_shift_id = request["counter_shift_id"] or body.counter_shift_id
                 if counter_shift_id is None:
                     raise HTTPException(status_code=422, detail="counter_shift_id is required for a swap")
+                if request["counter_shift_id"] and body.counter_shift_id not in (None, request["counter_shift_id"]):
+                    raise HTTPException(status_code=422, detail="Accept the shift selected in the swap request")
                 if counter_shift_id == request["shift_id"]:
                     raise HTTPException(status_code=422, detail="A swap needs two different shifts")
             elif request["request_type"] == "pickup":
@@ -327,7 +354,8 @@ async def withdraw_schedule_request(
                 await conn.execute(
                     """UPDATE schedule_requests
                        SET target_employee_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE target_employee_id END,
-                           counter_shift_id = NULL, counterparty_confirmed_at = NULL,
+                           counter_shift_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE counter_shift_id END,
+                           counterparty_confirmed_at = NULL,
                            status = 'awaiting_counterparty', updated_at = NOW()
                        WHERE id = $1""",
                     request_id,
