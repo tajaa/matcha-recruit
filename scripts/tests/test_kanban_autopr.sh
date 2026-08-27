@@ -51,6 +51,9 @@ check "published PR and card carry production build provenance" \
       && grep -qF 'from auto setup · build $PROD_BUILD_NUMBER' "$AUTOPR_DIR/publish.sh" \
       && echo 0 || echo 1)
 
+check "publisher permits only Espresso Swift source outside web/backend paths" \
+    $(grep -qF 'platforms/desktop/Espresso/Espresso/.*\.swift' "$AUTOPR_DIR/publish.sh" && echo 0 || echo 1)
+
 ################################################################################
 # mw_api must load config in its own shell, not only mw_login's command
 # substitution (the bug that opened a PR and then failed to patch its card).
