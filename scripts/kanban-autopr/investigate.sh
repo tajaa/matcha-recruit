@@ -208,11 +208,43 @@ fi
 PROMPT_TEXT="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" -e "s#DECISION_PATH#$RAW_DECISION_FILE#g" "$PROMPT_FILE")"
 
 # Defense in depth: this step's workflow env should already omit these, but
-# strip them here too in case a future edit adds them back.
-env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-    opencode run --auto --model openai/gpt-5.6-terra --variant high \
-    "${ATTACH_ARGS[@]}" \
-    -- "$PROMPT_TEXT"
+# strip them here too in case a future edit adds them back. Mirror the model's
+# terminal output to one local, mode-600 observer log: GitHub does not expose
+# an in-progress step's stdout, while the operator explicitly needs to see
+# OpenCode/OpenAI investigate and edit the task live in tmux.
+LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
+live_log_ready=false
+if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
+    if (umask 077; {
+        printf 'MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM\n'
+        printf 'run %s · task %s · mode %s · started %s\n\n' \
+            "${GITHUB_RUN_ID:-local}" "$ID8" "$MODE" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    } > "$LIVE_LOG") 2>/dev/null; then
+        live_log_ready=true
+    fi
+fi
+
+run_opencode() {
+    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        opencode run --auto --model openai/gpt-5.6-terra --variant high \
+        "${ATTACH_ARGS[@]}" \
+        -- "$PROMPT_TEXT"
+}
+
+if [ "$live_log_ready" = true ]; then
+    run_opencode 2>&1 | tee -a "$LIVE_LOG"
+    opencode_rc="${PIPESTATUS[0]}"
+else
+    run_opencode
+    opencode_rc=$?
+fi
+if [ "$opencode_rc" -ne 0 ]; then
+    [ "$live_log_ready" != true ] || printf '\n[FAILED] OpenCode exited %s at %s\n' \
+        "$opencode_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+    die "OpenCode investigation exited $opencode_rc"
+fi
+[ "$live_log_ready" != true ] || printf '\n[COMPLETE] OpenCode finished at %s\n' \
+    "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
 
 if [ ! -s "$REPORT_FILE" ]; then
     die "investigation produced no report at $REPORT_FILE"

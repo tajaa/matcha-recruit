@@ -186,6 +186,7 @@ chmod +x "$TMP_DIR/bin/gh"
 
 cat > "$TMP_DIR/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
+printf 'OpenCode: inspecting card context\n'
 while [ "$#" -gt 0 ]; do
     if [ "$1" = "-f" ]; then
         printf '%s\n' "$2" >> "$OPENCODE_STUB_FILES"
@@ -195,6 +196,10 @@ while [ "$#" -gt 0 ]; do
         shift
     fi
 done
+if [ "${OPENCODE_STUB_FAIL:-0}" = 1 ]; then
+    printf 'OpenCode: simulated failure\n'
+    exit 17
+fi
 cat > "$OPENCODE_STUB_REPORT" <<'REPORT'
 ### Summary
 stub
@@ -232,7 +237,7 @@ EOF
 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/runner" \
 GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode_files" \
 OPENCODE_STUB_CONTEXT="$TMP_DIR/context.json" OPENCODE_STUB_REPORT="$TMP_DIR/report.md" \
-OPENCODE_STUB_DECISION="$TMP_DIR/decision.json" \
+OPENCODE_STUB_DECISION="$TMP_DIR/decision.json" AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > /dev/null 2>&1
 investigate_rc=$?
 
@@ -251,13 +256,18 @@ check "investigation context reserves bounded production diagnostics" \
 check "investigation normalizes validated confidence and triage" \
     $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
 
+check "investigation mirrors OpenCode output to the local live-work log" \
+    $(grep -q 'OPENCODE LIVE STREAM' "$TMP_DIR/live-work.log" \
+      && grep -q 'OpenCode: inspecting card context' "$TMP_DIR/live-work.log" \
+      && grep -q '\[COMPLETE\]' "$TMP_DIR/live-work.log" && echo 0 || echo 1)
+
 # The real failure that blocked the first LaunchAgent-dispatched run happened
 # before OpenCode: Bash 3.2 + `set -u` rejected an empty attachment array.
 jq '.mode = "investigate"' "$TMP_DIR/card.json" > "$TMP_DIR/card-no-files.json"
 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
 GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode-no-files" \
 OPENCODE_STUB_CONTEXT="$TMP_DIR/context-no-files.json" OPENCODE_STUB_REPORT="$TMP_DIR/report-no-files.md" \
-OPENCODE_STUB_DECISION="$TMP_DIR/decision-no-files.json" \
+OPENCODE_STUB_DECISION="$TMP_DIR/decision-no-files.json" AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
     "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
 no_files_rc=$?
@@ -265,6 +275,19 @@ check "investigation accepts a card with no attachments on macOS Bash" \
     $([ "$no_files_rc" = 0 ] \
       && [ "$(wc -l < "$TMP_DIR/opencode-no-files" | tr -d '[:space:]')" = 1 ] \
       && jq -e '.downloaded_attachments == []' "$TMP_DIR/context-no-files.json" >/dev/null \
+      && echo 0 || echo 1)
+
+OPENCODE_STUB_FAIL=1 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" \
+MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+OPENCODE_STUB_FILES="$TMP_DIR/opencode-failed-files" OPENCODE_STUB_CONTEXT="$TMP_DIR/context-failed.json" \
+OPENCODE_STUB_REPORT="$TMP_DIR/report-failed.md" OPENCODE_STUB_DECISION="$TMP_DIR/decision-failed.json" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-failed.log" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-failed.md" \
+    "$TMP_DIR/decision-failed.json" > /dev/null 2>&1
+failed_opencode_rc=$?
+check "live tee preserves a failing OpenCode exit status" \
+    $([ "$failed_opencode_rc" != 0 ] \
+      && grep -q '\[FAILED\] OpenCode exited 17' "$TMP_DIR/live-failed.log" \
       && echo 0 || echo 1)
 
 cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"
