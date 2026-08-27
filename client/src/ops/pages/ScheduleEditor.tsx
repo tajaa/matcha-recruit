@@ -16,6 +16,7 @@ import ShiftInspector, { type NewShiftDefaults } from '../../components/employee
 import WeekTimeGrid from '../../components/employees/schedule-editor/WeekTimeGrid'
 import ScheduleEditorGuide from '../../components/employees/schedule-editor/ScheduleEditorGuide'
 import ScheduleHuumePanel from '../../components/employees/schedule-editor/ScheduleHuumePanel'
+import ScheduleJobsTab from '../../components/employees/schedule-editor/ScheduleJobsTab'
 
 const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v2'
 
@@ -47,6 +48,7 @@ export default function ScheduleEditor() {
   const [activeDrag, setActiveDrag] = useState<ScheduleDragData | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
+  const [jobsOpen, setJobsOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
@@ -73,13 +75,22 @@ export default function ScheduleEditor() {
     setHuumeSelectedShiftIds(new Set())
   }, [locationId, weekStart])
 
-  useEffect(() => {
+  const reloadJobs = useCallback(async () => {
     if (!locationId) {
       setJobs([])
       return
     }
-    fetchJobs(locationId).then((response) => setJobs(response.jobs)).catch(() => setJobs([]))
+    try {
+      const response = await fetchJobs(locationId)
+      setJobs(response.jobs)
+    } catch {
+      setJobs([])
+    }
   }, [locationId])
+
+  useEffect(() => {
+    void reloadJobs()
+  }, [reloadJobs])
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {
@@ -174,6 +185,9 @@ export default function ScheduleEditor() {
           onPublish={handlePublish}
           onExit={() => navigate(`/ops/schedule?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`)}
           onHelp={() => setGuideOpen(true)}
+          jobsOpen={jobsOpen}
+          jobsDisabled={!locationId}
+          onToggleJobs={() => setJobsOpen((value) => !value)}
           chatOpen={chatOpen}
           huumeSelectionCount={huumeSelectedShifts.length}
           onToggleChat={() => setChatOpen((value) => !value)}
@@ -186,6 +200,10 @@ export default function ScheduleEditor() {
             ) : (
               <p className="text-xs text-zinc-600">No locations set up yet — add one under Company.</p>
             )}
+          </div>
+        ) : jobsOpen ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+            <ScheduleJobsTab locationId={locationId} onJobsChanged={reloadJobs} />
           </div>
         ) : editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>

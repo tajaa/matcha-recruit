@@ -15,6 +15,9 @@ const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionM
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 vi.mock('../../hooks/employees/useScheduleEditor', () => ({ useScheduleEditor: useEditorMock }))
+vi.mock('../../components/employees/schedule-editor/ScheduleJobsTab', () => ({
+  default: () => <div>Jobs configuration</div>,
+}))
 vi.mock('../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
   transcribeScheduleVoice: vi.fn(),
@@ -86,6 +89,18 @@ describe('ScheduleEditor', () => {
     expect(screen.getByText('Week of 2026-08-09')).toBeInTheDocument()
     expect(screen.getAllByText(/8\/9|8\/10|8\/11|8\/12|8\/13|8\/14|8\/15/).length).toBeGreaterThanOrEqual(7)
     expect(screen.getByText('Opener')).toBeInTheDocument()
+  })
+
+  it('opens location job and credential configuration from the editor toolbar', () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jobs & credentials' }))
+
+    expect(screen.getByText('Jobs configuration')).toBeInTheDocument()
   })
 
   it('opens the shift break planner when assignment needs a compliant break', async () => {
