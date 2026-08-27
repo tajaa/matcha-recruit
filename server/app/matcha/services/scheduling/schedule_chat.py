@@ -2071,7 +2071,7 @@ async def execute_edit_proposal(
             shift_id = UUID(op["shift_id"])
             shift_row = await conn.fetchrow(
                 """
-                SELECT id, starts_at, ends_at, status, role, location_id, break_minutes,
+                SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
                        kind, training_requirement_id, published_at, required_staff
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
                 """,
@@ -2124,7 +2124,7 @@ async def execute_edit_proposal(
                 # no remove-then-restore round trip padding the audit log.
                 other_row = await conn.fetchrow(
                     """
-                    SELECT id, starts_at, ends_at, status, role, location_id, break_minutes,
+                    SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
                            kind, training_requirement_id, published_at
                     FROM schedule_shifts WHERE id = $1 AND company_id = $2
                     """,
@@ -2149,13 +2149,33 @@ async def execute_edit_proposal(
                 # double-booking against the one they're moving to.
                 own_shift_ids = {str(shift_id), str(other_row["id"])}
                 blocked: Optional[str] = None
-                for eid, dest in [(e, other_row) for e in a_ids] + [(e, shift_row) for e in b_ids]:
+                moves = (
+                    [(eid, other_row, shift_id) for eid in a_ids]
+                    + [(eid, shift_row, other_row["id"]) for eid in b_ids]
+                )
+                for eid, dest, source_shift_id in moves:
                     conflicts = await find_conflicts(
                         conn, company_id, eid, dest["starts_at"], dest["ends_at"],
                         exclude_shift_id=dest["id"])
                     conflicts = [c for c in conflicts if c["shift_id"] not in own_shift_ids]
                     if conflicts:
                         blocked = "it would double-book someone"
+                        break
+                    violations = await check_shift_compliance(
+                        conn, company_id, location_id=dest["location_id"],
+                        job_id=dest.get("job_id"), starts_at=dest["starts_at"],
+                        ends_at=dest["ends_at"], break_minutes=dest["break_minutes"] or 0,
+                        employee_id=eid, exclude_shift_id=source_shift_id,
+                        fw_event="assign", fw_shift_published=dest["published_at"] is not None,
+                        shift_kind=dest["kind"],
+                        training_requirement_id=dest["training_requirement_id"],
+                    )
+                    block = next(
+                        (violation for violation in violations if violation.get("severity") == "block"),
+                        None,
+                    )
+                    if block:
+                        blocked = block["message"]
                         break
                 if blocked:
                     results.append({**op, "ok": False, "reason": blocked})

@@ -30,31 +30,10 @@ def upgrade() -> None:
            AND cd.expires_at IS NULL
            AND ecr.expires_at IS NOT NULL
     """)
-    # Older approvals did not persist the manually confirmed date. Recover a
-    # valid extracted ISO date when available; malformed extraction remains
-    # NULL and therefore creates a pending, schedule-blocking requirement.
-    op.execute("""
-        DO $$
-        DECLARE
-            item RECORD;
-            parsed_expiry DATE;
-        BEGIN
-            FOR item IN
-                SELECT id, extracted_data #>> '{fields,expiration,value}' AS value
-                  FROM credential_documents
-                 WHERE document_type='food_handler_card'
-                   AND expires_at IS NULL
-                   AND extracted_data #>> '{fields,expiration,value}' IS NOT NULL
-            LOOP
-                BEGIN
-                    parsed_expiry := item.value::date;
-                    UPDATE credential_documents SET expires_at=parsed_expiry WHERE id=item.id;
-                EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN
-                    NULL;
-                END;
-            END LOOP;
-        END $$
-    """)
+    # Extraction is advisory, not manager confirmation. Legacy documents with
+    # no persisted requirement expiry remain pending until a manager confirms
+    # the date through the approval flow; only the ECR backfill above may make
+    # a historical expiry authoritative.
     op.execute("""
         WITH ranked_documents AS (
             SELECT cd.*,
@@ -91,8 +70,6 @@ def upgrade() -> None:
             ON credential_documents(employee_id, expires_at)
             WHERE document_type='food_handler_card' AND review_status='approved'
     """)
-
-
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_credential_documents_food_handler_expiry")
     # Retain materialized requirement evidence; deleting it would make a

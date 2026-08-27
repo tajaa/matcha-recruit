@@ -23,11 +23,18 @@ def test_local_date_uses_location_timezone_and_falls_back_to_utc():
 def test_food_handler_tracking_migration_backfills_orphan_documents():
     migration = Path(__file__).parents[2] / "alembic/versions/empsched14_food_handler_document_tracking.py"
     source = migration.read_text()
+    delivery_migration = (
+        Path(__file__).parents[2]
+        / "alembic/versions/empsched15_schedule_eligibility_notification_deliveries.py"
+    ).read_text()
 
     assert "ADD COLUMN IF NOT EXISTS expires_at DATE" in source
     assert "document_type='food_handler_card'" in source
     assert "INSERT INTO employee_credential_requirements" in source
     assert "applies_company_wide" in source
+    assert "extracted_data #>> '{fields,expiration,value}'" not in source
+    assert "schedule_eligibility_notification_deliveries" in delivery_migration
+    assert 'down_revision = "empsched14"' in delivery_migration
 
 
 class FakeConn:

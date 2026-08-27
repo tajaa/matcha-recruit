@@ -45,6 +45,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _lock_and_assert_publish_assignments_eligible(
+    conn,
+    company_id: UUID,
+    candidate_shifts: list[dict],
+) -> None:
+    """Lock assignees and reject publication if eligibility changed in draft."""
+    if not candidate_shifts:
+        return
+    shifts_by_id = {shift["id"]: shift for shift in candidate_shifts}
+    assignments = await conn.fetch(
+        """
+        SELECT shift_id, employee_id
+        FROM schedule_shift_assignments
+        WHERE shift_id = ANY($1::uuid[])
+        ORDER BY shift_id, employee_id
+        FOR UPDATE
+        """,
+        list(shifts_by_id),
+    )
+    for assignment in assignments:
+        shift = shifts_by_id[assignment["shift_id"]]
+        violations = await check_shift_compliance(
+            conn, company_id, location_id=shift["location_id"],
+            job_id=shift.get("job_id"), starts_at=shift["starts_at"],
+            ends_at=shift["ends_at"], break_minutes=shift["break_minutes"] or 0,
+            employee_id=assignment["employee_id"], exclude_shift_id=shift["id"],
+            shift_kind=shift["kind"],
+            training_requirement_id=shift["training_requirement_id"],
+        )
+        eligibility_blocks = [
+            violation for violation in violations
+            if violation.get("check") == "schedule_eligibility"
+            and violation.get("severity") == "block"
+        ]
+        raise_for_violations(eligibility_blocks, force=False)
+
+
 async def _duplicate_assignment_block(
     conn,
     company_id: UUID,
@@ -709,13 +746,22 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
     async with get_connection() as conn:
         async with conn.transaction():
             shift = await conn.fetchrow(
-                "SELECT location_id FROM schedule_shifts WHERE id = $1 AND company_id = $2",
+                """
+                SELECT id, location_id, job_id, starts_at, ends_at, break_minutes,
+                       kind, training_requirement_id
+                FROM schedule_shifts
+                WHERE id = $1 AND company_id = $2 AND status <> 'cancelled'
+                FOR UPDATE
+                """,
                 shift_id, company_id,
             )
             if not shift:
                 raise HTTPException(status_code=404, detail="Shift not found")
             await assert_schedule_location_ready_to_publish(
                 conn, company_id, shift["location_id"],
+            )
+            await _lock_and_assert_publish_assignments_eligible(
+                conn, company_id, [shift],
             )
             row = await conn.fetchrow(
                 """
@@ -749,21 +795,34 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         async with conn.transaction():
-            locations = await conn.fetch(
+            candidate_shifts = await conn.fetch(
                 """
-                SELECT DISTINCT location_id
+                SELECT id, location_id, job_id, starts_at, ends_at, break_minutes,
+                       kind, training_requirement_id
                 FROM schedule_shifts
                 WHERE company_id = $1 AND status = 'draft'
                   AND starts_at >= $2 AND starts_at < $3
                   AND ($4::uuid IS NULL OR location_id = $4 OR location_id IS NULL)
+                ORDER BY id
+                FOR UPDATE
                 """,
                 company_id, body.start, body.end, body.location_id,
             )
-            for location in locations:
+            seen_locations = set()
+            for shift in candidate_shifts:
+                if shift["location_id"] in seen_locations:
+                    continue
+                seen_locations.add(shift["location_id"])
                 await assert_schedule_location_ready_to_publish(
-                    conn, company_id, location["location_id"],
+                    conn, company_id, shift["location_id"],
                 )
-            count = await conn.fetchval(
+            await _lock_and_assert_publish_assignments_eligible(
+                conn, company_id, candidate_shifts,
+            )
+            candidate_ids = [shift["id"] for shift in candidate_shifts]
+            count = 0
+            if candidate_ids:
+                count = await conn.fetchval(
                 """
                 WITH updated AS (
                     UPDATE schedule_shifts
@@ -771,14 +830,13 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
                         published_at = COALESCE(published_at, NOW()),
                         updated_at = NOW()
                     WHERE company_id = $1 AND status = 'draft'
-                      AND starts_at >= $2 AND starts_at < $3
-                      AND ($4::uuid IS NULL OR location_id = $4 OR location_id IS NULL)
+                      AND id = ANY($2::uuid[])
                     RETURNING id
                 )
                 SELECT COUNT(*) FROM updated
                 """,
-                company_id, body.start, body.end, body.location_id,
-            )
+                    company_id, candidate_ids,
+                )
             await log_audit(conn, company_id, "shift", None, current_user.id,
                             "shift.publish_range", {"count": count, "location_id": str(body.location_id) if body.location_id else None})
         await reconcile_warning_events(conn, company_id)
