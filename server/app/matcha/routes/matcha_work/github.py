@@ -412,7 +412,9 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
 
     async with get_connection() as conn:
         task = await conn.fetchrow(
-            """SELECT id, project_id, board_column, progress_note, pr_url, pr_number
+            """SELECT id, project_id, board_column, progress_note,
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number
                FROM mw_tasks WHERE id = $1""",
             UUID(task_id),
         )

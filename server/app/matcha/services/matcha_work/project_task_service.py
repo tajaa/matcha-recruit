@@ -320,7 +320,9 @@ async def list_project_tasks(
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
-                   t.element_id, t.review_note, t.pr_url, t.pr_number,
+                    t.element_id, t.review_note,
+                    to_jsonb(t) ->> 'pr_url' AS pr_url,
+                    (to_jsonb(t) ->> 'pr_number')::integer AS pr_number,
                    t.deal_value, t.probability, t.contact_name, t.contact_company,
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
@@ -769,6 +771,21 @@ async def update_project_task(
         if pipeline_column is not None and pipeline_column not in _ALLOWED_PIPELINE_COLUMNS:
             raise ValueError(f"Invalid pipeline_column: {pipeline_column}")
 
+        has_pr_update = "pr_url" in patch or "pr_number" in patch
+        if has_pr_update:
+            pr_columns_exist = await conn.fetchval(
+                """
+                SELECT COUNT(*) = 2
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'mw_tasks'
+                  AND column_name = ANY($1::text[])
+                """,
+                ["pr_url", "pr_number"],
+            )
+            if not pr_columns_exist:
+                raise ValueError("Pull request links are unavailable until the database is updated")
+
         # Compute completed_at in Python rather than via a SQL CASE on $3.
         # asyncpg infers each $N's type from how it's used. $3 is assigned to
         # `status` (varchar column) AND compared to text inside the CASE; the
@@ -783,50 +800,8 @@ async def update_project_task(
             datetime.now(timezone.utc) if new_status == "completed" else None
         )
 
-        row = await conn.fetchrow(
-            """
-            UPDATE mw_tasks SET
-                board_column = $1::text,
-                status = $3::text,
-                completed_at = CASE
-                    WHEN $3::text = 'completed' THEN COALESCE(completed_at, $13::timestamptz)
-                    ELSE NULL
-                END,
-                title = COALESCE($4::text, title),
-                description = CASE WHEN $5::boolean THEN $6::text ELSE description END,
-                priority = COALESCE($7::text, priority),
-                due_date = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
-                assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
-                progress_note = CASE WHEN $14::boolean THEN $15::text ELSE progress_note END,
-                element_id = CASE WHEN $16::boolean THEN $17::text ELSE element_id END,
-                deal_value = CASE WHEN $18::boolean THEN $19::numeric ELSE deal_value END,
-                probability = CASE WHEN $20::boolean THEN $21::smallint ELSE probability END,
-                contact_name = CASE WHEN $22::boolean THEN $23::text ELSE contact_name END,
-                contact_company = CASE WHEN $24::boolean THEN $25::text ELSE contact_company END,
-                contact_email = CASE WHEN $26::boolean THEN $27::text ELSE contact_email END,
-                contact_phone = CASE WHEN $28::boolean THEN $29::text ELSE contact_phone END,
-                outcome = CASE WHEN $30::boolean THEN $31::text ELSE outcome END,
-                loss_reason = CASE WHEN $32::boolean THEN $33::text ELSE loss_reason END,
-                next_action_at = CASE WHEN $34::boolean THEN $35::date ELSE next_action_at END,
-                expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
-                pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
-                pr_url = CASE WHEN $40::boolean THEN $41::text ELSE pr_url END,
-                pr_number = CASE WHEN $42::boolean THEN $43::integer ELSE pr_number END,
-                -- Clear the reviewer's "needs work" note once the task is
-                -- re-submitted to review or marked done — the bounce-back
-                -- banner only applies while it sits back in todo/in_progress.
-                review_note = CASE WHEN $1::text IN ('review', 'done') THEN NULL ELSE review_note END,
-                updated_at = NOW()
-            WHERE id = $2 AND project_id = $12
-            RETURNING id, project_id, company_id, created_by, title, description,
-                      due_date, priority, status, board_column,
-                      COALESCE(pipeline_column, 'lead') AS pipeline_column,
-                      assigned_to, completed_at, created_at, updated_at,
-                      progress_note, category, element_id, review_note,
-                      deal_value, probability, contact_name, contact_company,
-                      contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close, pr_url, pr_number
-            """,
+        pr_update = ""
+        params = [
             new_column,                   # $1
             task_id,                      # $2
             new_status,                   # $3
@@ -866,10 +841,65 @@ async def update_project_task(
             expected_close,               # $37
             "pipeline_column" in patch,   # $38
             pipeline_column,              # $39
-            "pr_url" in patch,            # $40
-            pr_url,                       # $41
-            "pr_number" in patch,         # $42
-            pr_number,                    # $43
+        ]
+        if has_pr_update:
+            pr_update = """
+                pr_url = CASE WHEN $40::boolean THEN $41::text ELSE pr_url END,
+                pr_number = CASE WHEN $42::boolean THEN $43::integer ELSE pr_number END,
+            """
+            params.extend([
+                "pr_url" in patch,        # $40
+                pr_url,                    # $41
+                "pr_number" in patch,     # $42
+                pr_number,                 # $43
+            ])
+
+        row = await conn.fetchrow(
+            f"""
+            UPDATE mw_tasks SET
+                board_column = $1::text,
+                status = $3::text,
+                completed_at = CASE
+                    WHEN $3::text = 'completed' THEN COALESCE(completed_at, $13::timestamptz)
+                    ELSE NULL
+                END,
+                title = COALESCE($4::text, title),
+                description = CASE WHEN $5::boolean THEN $6::text ELSE description END,
+                priority = COALESCE($7::text, priority),
+                due_date = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
+                assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
+                progress_note = CASE WHEN $14::boolean THEN $15::text ELSE progress_note END,
+                element_id = CASE WHEN $16::boolean THEN $17::text ELSE element_id END,
+                deal_value = CASE WHEN $18::boolean THEN $19::numeric ELSE deal_value END,
+                probability = CASE WHEN $20::boolean THEN $21::smallint ELSE probability END,
+                contact_name = CASE WHEN $22::boolean THEN $23::text ELSE contact_name END,
+                contact_company = CASE WHEN $24::boolean THEN $25::text ELSE contact_company END,
+                contact_email = CASE WHEN $26::boolean THEN $27::text ELSE contact_email END,
+                contact_phone = CASE WHEN $28::boolean THEN $29::text ELSE contact_phone END,
+                outcome = CASE WHEN $30::boolean THEN $31::text ELSE outcome END,
+                loss_reason = CASE WHEN $32::boolean THEN $33::text ELSE loss_reason END,
+                next_action_at = CASE WHEN $34::boolean THEN $35::date ELSE next_action_at END,
+                expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
+                pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
+                {pr_update}
+                -- Clear the reviewer's "needs work" note once the task is
+                -- re-submitted to review or marked done — the bounce-back
+                -- banner only applies while it sits back in todo/in_progress.
+                review_note = CASE WHEN $1::text IN ('review', 'done') THEN NULL ELSE review_note END,
+                updated_at = NOW()
+            WHERE id = $2 AND project_id = $12
+            RETURNING id, project_id, company_id, created_by, title, description,
+                      due_date, priority, status, board_column,
+                      COALESCE(pipeline_column, 'lead') AS pipeline_column,
+                      assigned_to, completed_at, created_at, updated_at,
+                       progress_note, category, element_id, review_note,
+                       deal_value, probability, contact_name, contact_company,
+                       contact_email, contact_phone, outcome, loss_reason,
+                       next_action_at, expected_close,
+                       to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                       (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number
+            """,
+            *params,
         )
 
         if row and new_column != current["board_column"]:
