@@ -23,7 +23,7 @@ export default function BrokerRoutes() {
         {/* Module 1 — Book of Business (account-performance master view) */}
         <Route index element={<BrokerDashboard />} />
 
-        {/* Module 2 — Action Center (tabbed: alerts / renewals / eligibility / milestones) */}
+        {/* Module 2 — Action Center */}
         <Route path="action-center" element={<BrokerActionCenter />} />
 
         {/* Book-wide analytics — interactive exposure-weighted risk curve */}
