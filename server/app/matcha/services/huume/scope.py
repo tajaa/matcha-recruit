@@ -22,6 +22,8 @@ class HuumeSurfaceContext:
 
 SCHEDULE_TOOLS = frozenset({
     "get_schedule_overview",
+    "get_week_build_readiness",
+    "build_week_schedule",
     "list_schedule_eligibility_cases",
     "find_shift_coverage",
     "propose_schedule_change",
@@ -30,6 +32,7 @@ SCHEDULE_TOOLS = frozenset({
     "propose_work_permit",
     "propose_eligibility_case_decision",
     "lookup_context",
+    "cancel_staged",
     "finish",
 })
 

@@ -209,6 +209,18 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"confirms applies it; omitting confirm_id (or a different one) stages a NEW "
                 f"proposal instead."
             )
+        elif action.get("type") == "schedule_week_draft":
+            metrics = action.get("metrics") or {}
+            filled = metrics.get("filled_positions", "?")
+            required = metrics.get("required_positions", "?")
+            open_positions = metrics.get("open_positions", "?")
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: generated weekly schedule "
+                f"({filled}/{required} positions filled; {open_positions} open), "
+                f"confirm_id={action.get('confirm_id')}. Calling build_week_schedule again with "
+                f"EXACTLY this confirm_id after the admin explicitly confirms applies it to the "
+                f"editor as drafts; omitting confirm_id (or using a different one) builds a NEW proposal."
+            )
         elif action.get("type") == "schedule_note":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: assignment note "
@@ -321,7 +333,7 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
 
     if not lines:
         if schedule_surface:
-            return "Nothing is currently staged. Any propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, or propose_eligibility_case_decision call today starts fresh."
+            return "Nothing is currently staged. Any build_week_schedule, propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, or propose_eligibility_case_decision call today starts fresh."
         return "Nothing is currently staged. Any send_offer, build_onboarding_plan, or execute_approved_steps call today starts fresh."
     return "\n".join(lines)
 
@@ -348,7 +360,9 @@ You have a real multi-turn conversation. Use prior answers and the schedule tool
 
 Use deterministic schedule data for staffing, breaks, notes, eligibility, permits, credentials, and waiver status. Never invent availability, legal requirements, employee facts, or a successful write. Reuse employee and shift ids already returned by get_schedule_overview; do not spend extra calls looking up the same people again.
 
-Every schedule mutation is staged first and requires explicit confirmation in a later user message. A staged operation is not applied. Keep the real confirmation id from the staged state; never guess one. Complete requested read-only checks before staging. Only one staged action can occupy the pending slot: after any tool returns `status=staged`, do not call another staged tool in that turn. If the request contains several action types, stage the first fully grounded one and clearly list the others as deferred until the pending action is confirmed or cancelled. Related shift edits are the exception only in shape, not confirmation: batch up to four of them in one propose_schedule_change `changes` call, which still creates one staged action. Assignment notes, waivers, permits, and eligibility decisions remain separate staged actions. If a tool returns clarification, refusal, or deferral, relay its actual options/reason.
+For a request to make the whole week's schedule, call get_week_build_readiness and then build_week_schedule when the demand source is unambiguous. Availability tells you who can work; existing draft shifts or a saved week template define how many people the store needs and when. The deterministic builder preserves existing assignments, excludes unconfirmed availability, respects qualifications/time away/hour caps, and explains any open positions. A generated week always lands as editable drafts after confirmation; only the manager publishes it.
+
+Every schedule mutation is staged first and requires explicit confirmation in a later user message. A staged operation is not applied. Keep the real confirmation id from the staged state; never guess one. Complete requested read-only checks before staging. Only one staged action can occupy the pending slot: after any tool returns `status=staged`, do not call another staged tool in that turn. If the request contains several action types, stage the first fully grounded one and clearly list the others as deferred until the pending action is confirmed or cancelled. Related shift edits are the exception only in shape, not confirmation: batch up to four of them in one propose_schedule_change `changes` call, which still creates one staged action. Assignment notes, waivers, permits, eligibility decisions, and whole-week generation remain separate staged actions. If a tool returns clarification, refusal, or deferral, relay its actual options/reason.
 
 ## Current staged state
 
@@ -377,7 +391,7 @@ You also carry the company's two document pilots into this chat, when they're en
 
 ## The confirm-first rule — READ FIRST, NEVER VIOLATE
 
-You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. These tools are "staged": send_offer, draft_discipline, draft_disciplinary_action, decide_disciplinary_action, build_onboarding_plan, report_incident, open_er_case, assign_training, decide_pto_request, promote_ems_event, record_stock_movement, decide_inventory_order, create_inventory_item, archive_inventory_item, stage_receipt_from_attachment, propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, and propose_eligibility_case_decision. Calling them proposes an action; nothing actually sends, files, assigns, decides, promotes, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE new action can be staged per turn. After a staged tool succeeds, do not call another staged tool: the server preserves the first and defers later attempts. Tell the admin exactly which requested actions remain deferred until they confirm or cancel the pending one.
+You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. These tools are "staged": send_offer, draft_discipline, draft_disciplinary_action, decide_disciplinary_action, build_onboarding_plan, report_incident, open_er_case, assign_training, decide_pto_request, promote_ems_event, record_stock_movement, decide_inventory_order, create_inventory_item, archive_inventory_item, stage_receipt_from_attachment, build_week_schedule, propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, and propose_eligibility_case_decision. Calling them proposes an action; nothing actually sends, files, assigns, decides, promotes, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE new action can be staged per turn. After a staged tool succeeds, do not call another staged tool: the server preserves the first and defers later attempts. Tell the admin exactly which requested actions remain deferred until they confirm or cancel the pending one.
 
 execute_approved_steps only runs plan steps the admin has explicitly approved (in full, or by name). If they haven't approved anything yet, ask which steps to run rather than calling it. A plan you build THIS turn cannot be executed THIS turn, even if the admin's message told you to do both — build it, describe it, and wait for their next message.
 

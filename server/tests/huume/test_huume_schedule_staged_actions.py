@@ -21,6 +21,7 @@ import pytest
 from google.genai import types
 
 from app.matcha.services.huume import agent, schedule_skill
+from app.matcha.services.scheduling import week_builder
 from app.matcha.services.huume.scope import (
     HuumeSurfaceContext,
     SCHEDULE_LOOKUP_TOPICS,
@@ -195,3 +196,37 @@ async def test_first_staged_action_owns_slot_and_later_action_types_are_deferred
     deferred = [step["detail"] for step in result["steps"] if step["status"] == "skipped"]
     assert any("did not stage the assignment note" in detail for detail in deferred)
     assert any("did not stage the meal-break waiver" in detail for detail in deferred)
+
+
+@pytest.mark.asyncio
+async def test_build_week_schedule_stages_scoped_preview(monkeypatch):
+    run_id = uuid4()
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "ready",
+        "generation_run_id": str(run_id),
+        "source_mode": "existing",
+        "summary": "Built 2 of 2 positions.",
+        "metrics": {"shift_count": 1, "required_positions": 2, "filled_positions": 2, "open_positions": 0},
+        "unfilled": [],
+        "schedule_preview": [{
+            "shift_key": "shift-1", "starts_at": "2026-08-24T09:00:00+00:00",
+            "ends_at": "2026-08-24T17:00:00+00:00", "role": "Floor",
+            "required_staff": 2, "assignment_names": ["Amy", "Ben"],
+        }],
+        "preview_truncated": False,
+    }))
+    call = _fake_call("build_week_schedule", {"source_mode": "auto"})
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="The generated week is ready for approval.")],
+    )
+    result = _result(frames)
+    action = result["state_updates"]["huume_action"]
+
+    assert action["type"] == "schedule_week_draft"
+    assert action["generation_run_id"] == str(run_id)
+    assert action["location_id"]
+    assert action["week_start"] == "2026-08-23"
+    assert action["schedule_preview"][0]["assignment_names"] == ["Amy", "Ben"]
+    assert ("build_week_schedule", "ok") in _step_statuses(result)

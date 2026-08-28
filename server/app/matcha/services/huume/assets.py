@@ -119,6 +119,10 @@ ASSET_SPECS: dict[str, AssetSpec] = {
         "schedule_proposal", "schedule_chat_proposals",
         lambda a, r: f"Schedule change ({a.get('kind') or 'edit'})",
     ),
+    "schedule_week_draft": AssetSpec(
+        "schedule_generation", "schedule_generation_runs",
+        lambda a, r: f"Generated week ({a.get('week_start') or 'schedule draft'})",
+    ),
 }
 
 # amend_handbook: its executor (handbook_skill.promote) returns status="ok",
@@ -207,6 +211,7 @@ _STATUS_SQL: dict[str, str] = {
         "FROM inventory_items WHERE company_id = $1 AND id = ANY($2::uuid[])"
     ),
     "schedule_chat_proposals": "SELECT id::text AS ref_id, status FROM schedule_chat_proposals WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    "schedule_generation_runs": "SELECT id::text AS ref_id, status FROM schedule_generation_runs WHERE company_id = $1 AND id = ANY($2::uuid[])",
 }
 
 

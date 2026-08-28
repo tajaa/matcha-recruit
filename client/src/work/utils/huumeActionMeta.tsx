@@ -22,6 +22,7 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   inventory_item_archive: { archived: 'Item archived' },
   inventory_receipt: { committed: 'Receipt committed' },
   schedule_change: { applied: 'Schedule updated' },
+  schedule_week_draft: { applied: 'Generated week added as drafts' },
   schedule_note: { created: 'Assignment note saved' },
   meal_break_waiver: { created: 'Meal-break waiver recorded' },
   work_permit: { created: 'Work permit recorded' },
@@ -69,6 +70,11 @@ export function bannerLabel(action: HuumeAction): string {
       return `Commit this receipt (${action.lines.length} line${action.lines.length === 1 ? '' : 's'})?`
     case 'schedule_change':
       return action.pill_text?.split('\n', 1)[0] ?? 'Apply this schedule change?'
+    case 'schedule_week_draft': {
+      const filled = action.metrics?.filled_positions ?? '?'
+      const required = action.metrics?.required_positions ?? '?'
+      return `Use this generated week (${filled}/${required} positions filled)?`
+    }
     case 'schedule_note':
       return 'Save this assignment note?'
     case 'meal_break_waiver':
@@ -97,6 +103,6 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'inventory_order_decision') return <Truck size={size} />
   if (type === 'inventory_item_archive') return <Archive size={size} />
   if (type === 'inventory_receipt') return <Receipt size={size} />
-  if (type === 'schedule_change' || type === 'schedule_note' || type === 'meal_break_waiver' || type === 'work_permit' || type === 'eligibility_case_decision') return <CalendarClock size={size} />
+  if (type === 'schedule_change' || type === 'schedule_week_draft' || type === 'schedule_note' || type === 'meal_break_waiver' || type === 'work_permit' || type === 'eligibility_case_decision') return <CalendarClock size={size} />
   return <ShieldAlert size={size} />
 }

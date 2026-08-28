@@ -849,6 +849,43 @@ export interface HuumeActionScheduleChange {
   employee_names?: string[] | null
 }
 
+export interface HuumeActionScheduleWeekDraft {
+  type: 'schedule_week_draft'
+  status: 'proposed' | 'applied' | 'failed' | 'cancelled'
+  confirm_id: string
+  generation_run_id: string
+  location_id: string
+  week_start: string
+  source_mode: 'existing' | 'template'
+  week_template_id?: string | null
+  summary?: string | null
+  metrics?: {
+    shift_count?: number
+    required_positions?: number
+    fixed_positions?: number
+    overstaffed_positions?: number
+    proposed_positions?: number
+    filled_positions?: number
+    open_positions?: number
+  }
+  unfilled?: Array<{
+    shift_key?: string
+    starts_at?: string
+    role?: string | null
+    reason?: string
+  }>
+  schedule_preview?: Array<{
+    shift_key: string
+    starts_at: string
+    ends_at: string
+    role?: string | null
+    required_staff: number
+    assignment_names: string[]
+    existing_assignment_count?: number
+  }>
+  preview_truncated?: boolean
+}
+
 export interface HuumeActionScheduleNote {
   type: 'schedule_note'
   status: 'proposed' | 'created' | 'failed' | 'cancelled'
@@ -913,6 +950,7 @@ export type HuumeAction =
   | HuumeActionInventoryItemArchive
   | HuumeActionInventoryReceipt
   | HuumeActionScheduleChange
+  | HuumeActionScheduleWeekDraft
   | HuumeActionScheduleNote
   | HuumeActionMealBreakWaiver
   | HuumeActionWorkPermit

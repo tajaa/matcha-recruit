@@ -68,7 +68,7 @@ const STEPS: GuideStep[] = [
   {
     eyebrow: '08 / Ask Huume',
     title: 'Build shifts by talking, not clicking',
-    body: 'Use Ask Huume in the top bar to describe what you need in plain language, or dictate by voice. Huume drafts the shifts or template changes and you review before anything saves.',
+    body: 'Use Ask Huume in the top bar to build the whole week from confirmed availability, describe a smaller change in plain language, or dictate by voice. Huume shows a proposal first; generated schedules land as editable drafts and only you publish them.',
     icon: Sparkles,
     detail: <span>Every AI-drafted change lands as an editable draft first — nothing is assigned or published without your confirmation.</span>,
   },

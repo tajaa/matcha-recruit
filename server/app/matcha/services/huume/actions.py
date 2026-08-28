@@ -132,6 +132,7 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "waste_par_change": "inventory_waste",
     "waste_recipe_correction": "inventory_waste",
     "schedule_change": "employee_schedule",
+    "schedule_week_draft": "employee_schedule",
     "schedule_note": "employee_schedule",
     "meal_break_waiver": "employee_schedule",
     "work_permit": "employee_schedule",
@@ -375,6 +376,22 @@ def evaluate_huume_action(
         # amend_handbook.
         if not staged_action.get("proposal_id"):
             return HuumeVerdict(kind="refuse", message="There's no schedule change to apply.")
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+    if action_type == "schedule_week_draft":
+        required = ("confirm_id", "generation_run_id", "location_id", "week_start")
+        if any(not staged_action.get(field) for field in required):
+            return HuumeVerdict(
+                kind="refuse", message="There's no generated weekly schedule to apply."
+            )
+        try:
+            UUID(str(staged_action["generation_run_id"]))
+            UUID(str(staged_action["location_id"]))
+            date.fromisoformat(str(staged_action["week_start"]))
+        except (TypeError, ValueError):
+            return HuumeVerdict(
+                kind="refuse", message="The generated weekly schedule has invalid scope details."
+            )
         return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
 
     if action_type in {"schedule_note", "meal_break_waiver", "work_permit"}:
@@ -1250,6 +1267,15 @@ async def execute_huume_action(
         result = await schedule_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
             week_start=week_start, week_end=week_end,
+        )
+    elif action.get("type") == "schedule_week_draft":
+        from app.matcha.services.scheduling.week_builder import apply_week_draft
+        result = await apply_week_draft(
+            company_id=company_id,
+            actor_user_id=actor_user_id,
+            generation_run_id=UUID(str(action["generation_run_id"])),
+            location_id=UUID(str(action["location_id"])),
+            week_start=date.fromisoformat(str(action["week_start"])),
         )
     elif action.get("type") in {"schedule_note", "meal_break_waiver", "work_permit"}:
         from app.matcha.services.scheduling import schedule_assistant_actions
