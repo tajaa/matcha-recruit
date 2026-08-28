@@ -132,7 +132,7 @@ describe('EmployeeSchedule break planning', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Standard Week' } })
+    fireEvent.change(screen.getByLabelText('Template name'), { target: { value: 'Standard Week' } })
     fireEvent.change(screen.getByLabelText('Planned break (minutes)'), { target: { value: '30' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save template' }))
 
@@ -140,6 +140,28 @@ describe('EmployeeSchedule break planning', () => {
       name: 'Standard Week',
       location_id: 'loc-1',
       blocks: [expect.objectContaining({ break_minutes: 30 })],
+    })))
+  })
+
+  it('creates a weekly template with independent unassigned shift blocks', async () => {
+    renderSchedule()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
+    fireEvent.change(screen.getByLabelText('Template name'), { target: { value: 'Opening and closing' } })
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'Opener' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add shift' }))
+    fireEvent.change(screen.getAllByLabelText('Role')[1], { target: { value: 'Closer' } })
+    fireEvent.change(screen.getAllByLabelText('Start')[1], { target: { value: '16:00' } })
+    fireEvent.change(screen.getAllByLabelText('End')[1], { target: { value: '23:00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save template' }))
+
+    await waitFor(() => expect(createWeekTemplateMock).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Opening and closing',
+      blocks: [
+        expect.objectContaining({ name: 'Opener', role: 'Opener' }),
+        expect.objectContaining({ name: 'Closer', role: 'Closer', start_time: '16:00:00', end_time: '23:00:00' }),
+      ],
     })))
   })
 
