@@ -11,7 +11,7 @@ export default function InventoryNavigation() {
   const tabs = [
     { label: 'Inventory', icon: Boxes, href: `${base}/inventory`, visible: true, active: location.pathname === `${base}/inventory` || /^.+\/inventory\/[^/]+$/.test(location.pathname) },
     { label: 'Waste & loss', icon: ClipboardList, href: `${base}/inventory/waste`, visible: hasFeature('inventory_waste'), active: location.pathname === `${base}/inventory/waste` },
-    { label: 'Predictive PARs', icon: BarChart3, href: `${base}/inventory/forecast`, visible: hasFeature('inventory_forecasting'), active: location.pathname === `${base}/inventory/forecast` },
+    { label: 'Insights & PARs', icon: BarChart3, href: `${base}/inventory/forecast`, visible: hasFeature('inventory_forecasting'), active: location.pathname === `${base}/inventory/forecast` },
   ]
 
   return <nav aria-label="Inventory sections" className="flex gap-1 overflow-x-auto border-b border-w-line pb-3">

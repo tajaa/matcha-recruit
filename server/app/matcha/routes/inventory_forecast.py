@@ -21,9 +21,10 @@ from app.matcha.models.inventory import (
     ForecastRunCreate,
     ForecastParApply,
     ForecastParAIDraft,
+    ForecastNetworkPlanOut,
     ForecastSettingsUpsert,
 )
-from app.matcha.services.inventory import forecast_store, insight
+from app.matcha.services.inventory import forecast_store, insight, network
 from app.matcha.services.inventory import forecast_ai
 from app.matcha.services.inventory.waste import par_store
 from app.matcha.services.inventory.waste import par_ai
@@ -198,6 +199,25 @@ async def get_latest_forecast_run(
         return await forecast_store.get_latest_run(
             conn, company_id=company_id, location_id=location_id,
         )
+
+
+@router.get("/network", response_model=ForecastNetworkPlanOut)
+async def get_inventory_network_plan(
+    run_id: UUID = Query(...),
+    company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client),
+    _gate=_forecast_gate,
+):
+    """Read-only transfer opportunities across the tenant's active stores."""
+    async with get_connection() as conn:
+        plan = await network.build_network_preview(
+            conn,
+            company_id=company_id,
+            run_id=run_id,
+        )
+    if plan is None:
+        raise HTTPException(404, "Forecast run not found.")
+    return plan
 
 
 @router.post("/runs/{run_id}/apply-par")
