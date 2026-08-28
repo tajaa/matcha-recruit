@@ -276,6 +276,12 @@ struct TaskViewerSheet: View {
             // "you are here" banner together so the top isn't a stack of blocks.
             metaLine
 
+            // AutoPR provenance is durable ticket context, not a card-only
+            // preview. Keep the full stored note visible whenever this ticket
+            // is opened so a person can distinguish automated work from their
+            // own and see exactly why the automation acted or stopped.
+            autoSetupBanner
+
             if PacificDateFormatter.absolute(task.createdAt) != nil
                 || PacificDateFormatter.absolute(task.lastMovedAt) != nil {
                 HStack(spacing: 8) {
