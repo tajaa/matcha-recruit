@@ -440,8 +440,10 @@ class GustoHRISService:
         jobs = gusto_employee.get("jobs") or []
         primary_job = next((j for j in jobs if j.get("primary")), jobs[0] if jobs else {})
 
-        home_addr = gusto_employee.get("home_address") or {}
-        work_addr = gusto_employee.get("work_address") or home_addr
+        # A residence is not a compliance work jurisdiction. Keep work fields
+        # empty when Gusto does not supply a work address so the roster sync
+        # cannot derive a business location from an employee's home address.
+        work_addr = gusto_employee.get("work_address") or {}
 
         # Prefer work_email; fall back to personal email field
         email = gusto_employee.get("work_email") or gusto_employee.get("email")
@@ -533,8 +535,9 @@ _GUSTO_MOCK_EMPLOYEES: list[dict] = [
         "department": "Engineering",
         "terminated": False,
         "jobs": [{"title": "Software Engineer", "hire_date": "2023-03-01", "primary": True,
-                  "current_compensation": {"payment_unit": "Year"}}],
+                   "current_compensation": {"payment_unit": "Year"}}],
         "home_address": {"state": "CA", "city": "San Francisco"},
+        "work_address": {"state": "CA", "city": "San Francisco"},
     },
     {
         "uuid": "gusto-mock-002",
@@ -546,8 +549,9 @@ _GUSTO_MOCK_EMPLOYEES: list[dict] = [
         "department": "Operations",
         "terminated": False,
         "jobs": [{"title": "Operations Manager", "hire_date": "2022-06-15", "primary": True,
-                  "current_compensation": {"payment_unit": "Year"}}],
+                   "current_compensation": {"payment_unit": "Year"}}],
         "home_address": {"state": "CA", "city": "Oakland"},
+        "work_address": {"state": "CA", "city": "Oakland"},
     },
     {
         "uuid": "gusto-mock-003",
@@ -559,8 +563,9 @@ _GUSTO_MOCK_EMPLOYEES: list[dict] = [
         "department": "HR",
         "terminated": False,
         "jobs": [{"title": "HR Coordinator", "hire_date": "2023-09-01", "primary": True,
-                  "current_compensation": {"payment_unit": "Year"}}],
+                   "current_compensation": {"payment_unit": "Year"}}],
         "home_address": {"state": "NY", "city": "New York"},
+        "work_address": {"state": "NY", "city": "New York"},
     },
 ]
 
