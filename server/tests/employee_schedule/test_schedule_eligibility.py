@@ -129,7 +129,8 @@ def test_shift_job_change_rechecks_existing_assignments():
     source = shifts.read_text()
     assert "kind, training_requirement_id, job_id" in source
     assert 'or "job_id" in patch' in source
-    assert "unqualified = await check_job_qualification(conn, company_id, emp, new_job_id)" in source
+    assert "unqualified = await check_job_qualification(" in source
+    assert "starts_at=new_start" in source
 
 
 def test_schedule_feature_no_longer_requires_matcha_ops():

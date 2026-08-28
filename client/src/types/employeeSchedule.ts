@@ -5,6 +5,8 @@ export type ShiftKind = 'work' | 'training'
 export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
 export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable'
 export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
+export type AvailabilityState = 'unconfirmed' | 'always_available' | 'windows'
+export type QualificationStatus = 'active' | 'training' | 'suspended'
 
 export type BreakGuidanceRequirement = {
   kind: 'meal' | 'rest'
@@ -91,6 +93,11 @@ export interface RosterEmployee {
   job_title: string | null
   department: string | null
   job_ids: string[]
+  job_qualifications?: Array<{
+    job_id: string
+    qualified_from: string | null
+    qualified_until: string | null
+  }>
 }
 
 export type JobCredentialRequirement = {
@@ -115,6 +122,37 @@ export type ScheduleJob = {
   employee_ids: string[]
   credential_requirements: JobCredentialRequirement[]
 }
+
+export type EmployeeJobAssignment = {
+  job_id: string
+  job_name: string
+  location_id: string | null
+  is_primary: boolean
+  qualification_status: QualificationStatus
+  qualified_from: string | null
+  qualified_until: string | null
+  notes: string | null
+  credential_requirements: JobCredentialRequirement[]
+}
+
+export type EmployeeJobAssignmentPayload = Omit<EmployeeJobAssignment, 'job_name' | 'location_id' | 'credential_requirements'>
+
+export type EmployeeScheduleProfile = {
+  employee_id: string
+  availability_state: AvailabilityState
+  availability_confirmed_at: string | null
+  min_weekly_minutes: number | null
+  target_weekly_minutes: number | null
+  max_weekly_minutes: number | null
+  max_consecutive_days: number | null
+  allow_overtime: boolean
+  prefer_extra_hours: boolean
+}
+
+export type EmployeeScheduleProfilePayload = Partial<Pick<EmployeeScheduleProfile,
+  'min_weekly_minutes' | 'target_weekly_minutes' |
+  'max_weekly_minutes' | 'max_consecutive_days' | 'allow_overtime' | 'prefer_extra_hours'
+>>
 
 export type JobPayload = {
   name?: string

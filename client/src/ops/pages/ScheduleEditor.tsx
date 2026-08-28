@@ -211,7 +211,7 @@ export default function ScheduleEditor() {
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <RosterPanel roster={editor.roster} rosterFlags={editor.rosterFlags} selectedEmployeeId={selectedEmployeeId} onSelectEmployee={setSelectedEmployeeId} requiredJobId={inspectorShift?.job_id} />
+            <RosterPanel roster={editor.roster} rosterFlags={editor.rosterFlags} selectedEmployeeId={selectedEmployeeId} onSelectEmployee={setSelectedEmployeeId} requiredJobId={inspectorShift?.job_id} requiredJobDate={inspectorShift?.starts_at.slice(0, 10)} />
             <WeekTimeGrid days={days} shifts={editor.shifts} pendingKeys={editor.pendingKeys} editPublished={editPublished} selectedEmployeeId={selectedEmployeeId} huumeSelectedShiftIds={huumeSelectedShiftIds} onCreateAt={(date, minute, employeeId) => openNew({ date, minute, employeeIds: employeeId ? [employeeId] : undefined })} onOpenShift={openShift} onToggleHuumeSelection={(shift) => setHuumeSelectedShiftIds((current) => { const next = new Set(current); if (next.has(shift.id)) next.delete(shift.id); else next.add(shift.id); return next })} onAssignSelected={(shift) => { if (selectedEmployeeId && canMutate(shift)) void editor.assignToShift(shift, selectedEmployeeId) }} onResizeShift={(shift, endMinute) => { if (canMutate(shift)) void editor.resizeShift(shift, endMinute) }} />
             {(inspectorShift || newDefaults) && (
               <ShiftInspector

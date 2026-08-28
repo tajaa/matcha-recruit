@@ -71,7 +71,9 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     outside = availability_violations(availability[employee_id], shift["starts_at"], shift["ends_at"])
     if outside and not force:
         raise_outside_availability(employee_id, outside)
-    unqualified = await check_job_qualification(conn, company_id, employee_id, shift["job_id"])
+    unqualified = await check_job_qualification(
+        conn, company_id, employee_id, shift["job_id"], starts_at=shift["starts_at"],
+    )
     if unqualified and not force:
         raise_not_qualified(unqualified)
     violations = await check_shift_compliance(

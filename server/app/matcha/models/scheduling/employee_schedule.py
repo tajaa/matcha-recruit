@@ -36,6 +36,8 @@ RequestStatus = Literal[
     "pending", "awaiting_counterparty", "awaiting_manager", "approved", "denied", "cancelled"
 ]
 RequestDecision = Literal["approved", "denied"]
+AvailabilityState = Literal["unconfirmed", "always_available", "windows"]
+QualificationStatus = Literal["active", "training", "suspended"]
 
 # ISO-ish weekday integers: 0=Sunday .. 6=Saturday.
 Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
@@ -248,6 +250,58 @@ class JobEmployeesReplace(BaseModel):
     employee_ids: list[UUID] = Field(default_factory=list, max_length=500)
 
 
+class EmployeeJobAssignmentInput(BaseModel):
+    job_id: UUID
+    is_primary: bool = False
+    qualification_status: QualificationStatus = "active"
+    qualified_from: Optional[date] = None
+    qualified_until: Optional[date] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _check_qualification_dates(self) -> "EmployeeJobAssignmentInput":
+        if self.qualified_from and self.qualified_until and self.qualified_until < self.qualified_from:
+            raise ValueError("qualified_until must be on or after qualified_from")
+        if self.is_primary and self.qualification_status != "active":
+            raise ValueError("only an active qualification can be primary")
+        return self
+
+
+class EmployeeJobsReplace(BaseModel):
+    assignments: list[EmployeeJobAssignmentInput] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def _check_jobs(self) -> "EmployeeJobsReplace":
+        job_ids = [job.job_id for job in self.assignments]
+        if len(job_ids) != len(set(job_ids)):
+            raise ValueError("job assignments must be unique")
+        if sum(job.is_primary for job in self.assignments) > 1:
+            raise ValueError("an employee can have only one primary job")
+        return self
+
+
+class EmployeeScheduleProfileUpdate(BaseModel):
+    min_weekly_minutes: Optional[int] = Field(None, ge=0, le=10080)
+    target_weekly_minutes: Optional[int] = Field(None, ge=0, le=10080)
+    max_weekly_minutes: Optional[int] = Field(None, ge=0, le=10080)
+    max_consecutive_days: Optional[int] = Field(None, ge=1, le=14)
+    allow_overtime: bool = False
+    prefer_extra_hours: bool = False
+
+    @model_validator(mode="after")
+    def _ordered_hours(self) -> "EmployeeScheduleProfileUpdate":
+        if self.min_weekly_minutes is not None and self.target_weekly_minutes is not None:
+            if self.min_weekly_minutes > self.target_weekly_minutes:
+                raise ValueError("min_weekly_minutes cannot exceed target_weekly_minutes")
+        if self.target_weekly_minutes is not None and self.max_weekly_minutes is not None:
+            if self.target_weekly_minutes > self.max_weekly_minutes:
+                raise ValueError("target_weekly_minutes cannot exceed max_weekly_minutes")
+        if self.min_weekly_minutes is not None and self.max_weekly_minutes is not None:
+            if self.min_weekly_minutes > self.max_weekly_minutes:
+                raise ValueError("min_weekly_minutes cannot exceed max_weekly_minutes")
+        return self
+
+
 JobCreate.model_rebuild()
 
 
@@ -352,12 +406,23 @@ class AvailabilityWindow(BaseModel):
 
 class AvailabilityReplace(BaseModel):
     """Full-replacement weekly availability (PUT semantics — the stored set
-    becomes exactly this list). Empty list = clear = fully available."""
+    becomes exactly this list). Legacy callers may omit state: an empty list
+    then explicitly means always available, preserving the original API.
 
+    ``unconfirmed`` is a data-readiness state for future auto-assignment. It
+    does not change legacy/manual assignment behavior and cannot be submitted
+    as a confirmed availability choice.
+    """
+
+    availability_state: Optional[Literal["always_available", "windows"]] = None
     windows: list[AvailabilityWindow] = Field(default_factory=list, max_length=42)
 
     @model_validator(mode="after")
     def _check_overlaps(self) -> "AvailabilityReplace":
+        if self.availability_state == "windows" and not self.windows:
+            raise ValueError("windows state requires at least one availability window")
+        if self.availability_state == "always_available" and self.windows:
+            raise ValueError("always_available state cannot include availability windows")
         by_day: dict[int, list[AvailabilityWindow]] = {}
         for w in self.windows:
             by_day.setdefault(w.weekday, []).append(w)
@@ -367,6 +432,18 @@ class AvailabilityReplace(BaseModel):
                 if b.start_time < a.end_time:
                     raise ValueError(f"overlapping windows on weekday {day}")
         return self
+
+
+class EmployeeSchedulingDetailsUpdate(BaseModel):
+    """Atomic employee scheduling-details save used by the admin profile panel.
+
+    ``jobs`` is optional so an unrelated profile/availability save can preserve
+    stale location assignments until an admin deliberately resolves them.
+    """
+
+    jobs: Optional[EmployeeJobsReplace] = None
+    availability: AvailabilityReplace
+    profile: EmployeeScheduleProfileUpdate
 
 
 class DuplicateShift(BaseModel):
