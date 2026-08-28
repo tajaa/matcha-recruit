@@ -17,7 +17,6 @@ import { CompliancePostersTab } from '../../../components/compliance/ComplianceP
 import { ComplianceCredentialsTab } from '../../../components/compliance/ComplianceCredentialsTab'
 import { ComplianceScanProgress } from '../../../components/compliance/ComplianceScanProgress'
 import PendingResearchPanel from '../../../components/compliance/PendingResearchPanel'
-import { FacilityProfileBanner } from '../../../components/compliance/FacilityProfileBanner'
 import { RegulatoryQuickAsk } from '../../../components/compliance/RegulatoryQuickAsk'
 import { PayerPolicyNavigator } from '../../../components/compliance/PayerPolicyNavigator'
 import { ProtocolAnalysis } from '../../../components/compliance/ProtocolAnalysis'
@@ -323,14 +322,6 @@ function ComplianceFull() {
                     {check.scanning ? 'Scanning...' : 'Run Compliance Check'}
                   </Button>
                 </div>
-
-                <FacilityProfileBanner
-                  locationId={selectedId!}
-                  facilityAttributes={selectedLoc?.facility_attributes}
-                  onUpdated={() => data.loadLocations()}
-                  allLocations={data.locations}
-                  source={selectedLoc?.source}
-                />
 
                 <ComplianceScanProgress scanning={check.scanning} messages={check.messages} />
 
