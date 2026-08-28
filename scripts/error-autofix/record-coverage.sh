@@ -6,12 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-INCIDENT_FILE="${1:?usage: record-coverage.sh incident.json coverage.json}"
-COVERAGE_FILE="${2:?usage: record-coverage.sh incident.json coverage.json}"
+INCIDENT_FILE="${1:?usage: record-coverage.sh incident.json coverage.json decision.json}"
+COVERAGE_FILE="${2:?usage: record-coverage.sh incident.json coverage.json decision.json}"
+DECISION_FILE="${3:?usage: record-coverage.sh incident.json coverage.json decision.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 KEY="$(jq -r '.stable_key' "$INCIDENT_FILE")"
 PR="$(jq -r '.covering_pr' "$COVERAGE_FILE")"
 EXPECTED_SHA="$(jq -r '.covering_head_sha' "$COVERAGE_FILE")"
+CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
+CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
+CONFIDENCE_BAND="$(jq -r '.confidence_band' "$DECISION_FILE")"
 [[ "$KEY" =~ ^[0-9a-f]{12}$ ]] || die "stable_key has unexpected shape: $KEY"
 [[ "$PR" =~ ^[0-9]+$ ]] || die "coverage is missing a covering PR"
 
@@ -40,6 +44,9 @@ if ! printf '%s' "$comments" | jq -e --arg marker "$marker" 'any(.[]; (.body // 
     trap 'rm -f "$body_file"' EXIT
     {
         echo "$marker"
+        echo "<!-- matcha-autofix-notify-review: $KEY -->"
+        echo "<!-- matcha-autopr-criticality: $CRITICALITY -->"
+        echo "<!-- matcha-autopr-confidence-score: $CONFIDENCE_SCORE -->"
         echo "Production error \`$KEY\` is already scoped by this PR."
         echo
         echo "- Endpoint: \`$method $path\`"
@@ -51,4 +58,6 @@ if ! printf '%s' "$comments" | jq -e --arg marker "$marker" 'any(.[]; (.body // 
     gh pr comment "$PR" --repo "$REPO" --body-file "$body_file" >/dev/null
 fi
 gh pr edit "$PR" --repo "$REPO" --add-label covers-prod-error >/dev/null
+gh pr edit "$PR" --repo "$REPO" --add-label "criticality:$CRITICALITY" >/dev/null 2>&1 || true
+gh pr edit "$PR" --repo "$REPO" --add-label "confidence:$CONFIDENCE_BAND" >/dev/null 2>&1 || true
 printf 'error-autofix: incident %s is already scoped in PR #%s\n' "$KEY" "$PR" >&2

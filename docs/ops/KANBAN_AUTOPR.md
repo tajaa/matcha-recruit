@@ -3,8 +3,10 @@
 `.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
 `silent-error-autofix.yml`. `msandbox` is the authoritative master switch. While it is
 ON, a local macOS LaunchAgent is the sole automatic five-minute clock and dispatches only
-when no Kanban autopr run is queued or active; GitHub's manual workflow dispatch remains
-the recovery path but also fails closed when `msandbox` is OFF. There is deliberately no second GitHub cron:
+when neither AutoPR lane is queued or active. A production-error pass gets the next slot
+when its last completion is at least ten minutes old; otherwise Kanban advances.
+GitHub's manual workflow dispatch remains the recovery path but also fails closed when
+`msandbox` is OFF. There is deliberately no second GitHub cron:
 a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
 run. The runner has one job slot, and the workflow concurrency group remains the final
 overlap guard. The unit of work is one kanban card assigned to

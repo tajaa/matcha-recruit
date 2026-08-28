@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Mac-owned clock for kanban-autopr. The workflow has no GitHub cron; its
-# concurrency group remains the final guard against duplicate manual dispatch.
+# Mac-owned clock for both AutoPR lanes. Production errors get the first slot
+# whenever their last completed pass is stale; otherwise the clock advances
+# the Kanban queue. Neither workflow has a competing GitHub cron.
 set -euo pipefail
 
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
-WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
+KANBAN_WORKFLOW="${AUTOPR_KANBAN_WORKFLOW:-${AUTOPR_WORKFLOW:-kanban-autopr.yml}}"
+ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
+ERROR_MAX_AGE_SECONDS="${AUTOPR_ERROR_MAX_AGE_SECONDS:-600}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
@@ -32,7 +35,9 @@ acquire_dispatch_lock() {
     # A killed launchd process can leave an empty directory behind. Reclaim
     # only a lock older than fifteen minutes; normal dispatches take seconds.
     local lock_mtime now
-    lock_mtime="$(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)"
+    lock_mtime="$(stat -f '%m' "$LOCK_DIR" 2>/dev/null || true)"
+    [[ "$lock_mtime" =~ ^[0-9]+$ ]] \
+        || lock_mtime="$(stat -c '%Y' "$LOCK_DIR" 2>/dev/null || echo 0)"
     now="$(date +%s)"
     if [ $((now - lock_mtime)) -gt 900 ] 2>/dev/null; then
         rmdir "$LOCK_DIR" 2>/dev/null || return 1
@@ -44,8 +49,9 @@ acquire_dispatch_lock() {
 }
 
 get_workflow_runs_json() {
-    "$GH_BIN" run list --repo "$REPO" --workflow "$WORKFLOW" --branch "$REF" --limit 20 \
-        --json databaseId,status,event,createdAt,url
+    local workflow="$1"
+    "$GH_BIN" run list --repo "$REPO" --workflow "$workflow" --branch "$REF" --limit 20 \
+        --json databaseId,status,event,createdAt,updatedAt,url
 }
 
 has_active_workflow_run() {
@@ -54,7 +60,23 @@ has_active_workflow_run() {
 }
 
 dispatch_workflow() {
-    "$GH_BIN" workflow run "$WORKFLOW" --repo "$REPO" --ref "$REF"
+    "$GH_BIN" workflow run "$1" --repo "$REPO" --ref "$REF"
+}
+
+iso_to_epoch() {
+    local iso="$1"
+    date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$iso" +%s 2>/dev/null \
+        || date -u -d "$iso" +%s
+}
+
+error_pass_due() {
+    local runs="$1" last_completed completed_epoch now
+    last_completed="$(printf '%s' "$runs" | jq -r \
+        '[.[] | select(.status == "completed")] | sort_by(.updatedAt // .createdAt) | last | (.updatedAt // .createdAt) // empty')"
+    [ -n "$last_completed" ] || return 0
+    completed_epoch="$(iso_to_epoch "$last_completed")" || return 0
+    now="$(date +%s)"
+    [ $((now - completed_epoch)) -ge "$ERROR_MAX_AGE_SECONDS" ]
 }
 
 autopr_master_ready() {
@@ -90,22 +112,35 @@ main() {
         exit 0
     fi
 
-    local runs
-    if ! runs="$(get_workflow_runs_json)"; then
+    local kanban_runs error_runs all_runs workflow reason
+    if ! error_runs="$(get_workflow_runs_json "$ERROR_WORKFLOW")"; then
         # Fail closed: a blind dispatch could create a second queued coding job.
-        log_event error run-list-failed
+        log_event error error-run-list-failed
         exit 1
     fi
-    if has_active_workflow_run "$runs"; then
-        log_event skip active-workflow "$runs"
+    if ! kanban_runs="$(get_workflow_runs_json "$KANBAN_WORKFLOW")"; then
+        log_event error kanban-run-list-failed
+        exit 1
+    fi
+    all_runs="$(jq -cn --argjson errors "$error_runs" --argjson kanban "$kanban_runs" \
+        '$errors + $kanban')"
+    if has_active_workflow_run "$all_runs"; then
+        log_event skip active-autopr-workflow "$all_runs"
         exit 0
     fi
 
-    if ! dispatch_workflow >/dev/null; then
-        log_event error dispatch-failed
+    if error_pass_due "$error_runs"; then
+        workflow="$ERROR_WORKFLOW"
+        reason="production-error-pass-due"
+    else
+        workflow="$KANBAN_WORKFLOW"
+        reason="kanban-pass"
+    fi
+    if ! dispatch_workflow "$workflow" >/dev/null; then
+        log_event error "${workflow}-dispatch-failed"
         exit 1
     fi
-    log_event dispatch workflow-dispatched
+    log_event dispatch "$reason"
 }
 
 main "$@"

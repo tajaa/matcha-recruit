@@ -1,15 +1,19 @@
 # Silent Error Autofix
 
-`.github/workflows/silent-error-autofix.yml` runs every 10 minutes on this Mac's self-hosted
-GitHub Actions runner. The unit of work is one normalized incident from
+`.github/workflows/silent-error-autofix.yml` runs from the same Mac-owned five-minute
+LaunchAgent clock as Kanban AutoPR. GitHub's best-effort cron was removed after it left
+multi-hour gaps. When no AutoPR workflow is active, the dispatcher gives this lane the
+next slot if its last completed pass is at least ten minutes old; otherwise it advances
+Kanban. The unit of work is one normalized incident from
 `server_error_reports` or `client_error_reports`, not a log window. Server rows retain
 their established stable keys; raw browser rows use a separate `client|` keyspace and
 group by normalized message, route, frame, and component context.
 
 The collector still looks back 24 hours. That is a recovery window, not the
-schedule: selection dedupes against GitHub and the local attempt cache, so a wide
-lookback catches incidents missed during runner downtime without reinvestigating
-handled incidents every 10 minutes.
+schedule: selection dedupes against GitHub and the local attempt cache, prioritizes
+`last_seen` so a fresh single occurrence cannot sit behind an older high-count error,
+and a wide lookback catches incidents missed during runner downtime without
+reinvestigating handled incidents on every pass.
 
 Pipeline (`scripts/error-autofix/`):
 
@@ -31,10 +35,12 @@ Pipeline (`scripts/error-autofix/`):
    `gh pr list --head bot/err-<key> --state all`: open → skip; merged → skip unless a
    genuine recurrence is seen well after a deploy-grace window; closed-unmerged → skip
    for a 7-day cooldown, not forever. Also caps total open `autofix`-labeled PRs.
-4. **`investigate.sh`** — one `opencode run` with `openai/gpt-5.6-terra --variant high`,
-   evidence attached as a file (not
-   interpolated into the prompt), that must produce a markdown report with four
-   required headings (Root cause / Fix / Blast radius / Confidence). **The model never
+4. **`investigate.sh`** — one sandboxed `opencode run` with
+   `openai/gpt-5.6-terra --variant high` in a disposable tracked-files-only clone,
+   with evidence attached as a file (not interpolated into the prompt). It must produce
+   a markdown report with four required headings (Root cause / Fix / Blast radius /
+   Confidence) plus a shell-validated JSON decision. The decision independently scores
+   confidence and classifies criticality as red/orange/yellow. **The model never
    reports test results** — that's the next script's job, and anything it writes about
    tests there is discarded. `--` terminates the repeated `--file` option before the
    prompt; without it OpenCode interprets the prompt itself as another attachment.
@@ -56,10 +62,17 @@ Pipeline (`scripts/error-autofix/`):
    trigger an unpinned install in the scheduled workflow.
 7. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
    report + verification table (endpoint, occurrence count, admin link, traceback,
-   correlated log lines). If the model made no diff, opens or replaces a tracking issue
+   correlated log lines). The PR title, labels, and durable body trailers carry the same
+   `🔴` / `🟠` / `🟡` criticality and C0–100 confidence presentation as Kanban
+   AutoPR. If the model made no diff, opens or replaces a tracking issue
    body instead of silently doing nothing. Replacing the original placeholder body is
    essential: placeholders stay retryable after a failed run, while finalized no-fix
    reports stop queue starvation. A successful draft closes its matching no-fix issue.
+8. **`notify-review-ready.sh`** — after a reviewable PR exists, uses the trusted SSH
+   harness to call the live backend's already-configured Gmail/MailerSend transport and
+   emails `aaron@hey-matcha.com` with the production error, triage, and PR link. A
+   durable PR comment makes delivery idempotent; the next pass retries any opted-in open
+   PR whose send failed after publication.
 
 It never deploys or auto-merges. A human reads the PR body and decides.
 
@@ -73,7 +86,8 @@ It never deploys or auto-merges. A human reads the PR body and decides.
    query and, as a fallback, log collection.
 4. Add repository variables `PROD_HEALTH_URL` / `PROD_API_HEALTH_URL` for the fallback
    path's health probes. Empty skips them.
-5. Enable the workflow under Actions; `workflow_dispatch` once to verify connectivity.
+5. Install/reinstall `scripts/kanban-autopr/install-launch-agent.sh`; that one local
+   timer owns both AutoPR lanes. Use `workflow_dispatch` once to verify connectivity.
 6. `server/venv` on this Mac must have `pytest` and `pytest-asyncio` installed
    alongside the app's own requirements (`verify.sh` reuses this venv rather than
    building one, so it needs to already work): `server/venv/bin/pip install pytest

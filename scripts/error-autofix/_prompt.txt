@@ -30,6 +30,37 @@ If the evidence cannot support a safe, well-understood fix, write the report
 anyway (root cause as far as you got, confidence: low) and make NO code
 changes.
 
+In addition to REPORT_PATH, write a JSON object to DECISION_PATH. This is
+untrusted triage data that a trusted shell validates before it can mark a PR.
+Write valid JSON with no markdown fence, using exactly this shape:
+
+{
+  "schema_version": 1,
+  "outcome": "fix|no_safe_fix",
+  "confidence": {
+    "evidence_quality": {"score": 0, "reason": "..."},
+    "root_cause_clarity": {"score": 0, "reason": "..."},
+    "code_localization": {"score": 0, "reason": "..."},
+    "verification_readiness": {"score": 0, "reason": "..."},
+    "production_impact": {"score": 0, "reason": "..."}
+  },
+  "criticality": {"level": "red|orange|yellow", "reasons": ["..."]},
+  "safe_changes_present": true,
+  "no_safe_fix_reason": null
+}
+
+Score maxima are evidence_quality 25, root_cause_clarity 25,
+code_localization 20, verification_readiness 15, and production_impact 15.
+These scores measure confidence in the proposed fix, not how severe the error
+is. Use outcome=fix only when a safe code diff exists. Use no_safe_fix when no
+safe diff exists, set safe_changes_present=false, and replace
+no_safe_fix_reason with a concrete explanation.
+
+Criticality is independent of confidence: red is security/privacy, data loss,
+production outage, compliance/payroll, or a blocked core workflow; orange is a
+material regression or broad workflow impact without a reasonable workaround;
+yellow is scoped or recoverable production behavior.
+
 Hard limits, no exceptions:
 - Do not access production, environment variables, credentials, network
   services, deployment scripts, workflow files, migrations, or git
