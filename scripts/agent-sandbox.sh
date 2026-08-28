@@ -67,6 +67,7 @@ Commands:
   start                       Start workspace and the normal local dev services.
   stop [--force]              Stop everything; refuse active agent work unless forced.
   status                      Show sandbox service and AutoPR master-switch status.
+  workspace-state             Print this sandbox project's container runtime state.
   autopr-ready                Exit 0 only when the complete AutoPR system is healthy.
   shell [cmd...]               Open a workspace shell (or run one command).
   exec <cmd> [args...]         Run one non-interactive command with exact argv.
@@ -182,6 +183,19 @@ container_has_agent_process() {
     '
 }
 
+workspace_state() {
+    local container_id state
+    container_id="$("${COMPOSE[@]}" ps --all --quiet workspace 2>/dev/null)" \
+        || return 1
+    if [ -z "$container_id" ]; then
+        printf 'absent\n'
+        return 0
+    fi
+    state="$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null)" \
+        || return 1
+    printf '%s\n' "$state"
+}
+
 detect_agentic_activity() {
     AGENTIC_ACTIVITY_STATE=idle
     AGENTIC_ACTIVITY_DETAIL="no Codex, OpenCode, Claude, or queued/running AutoPR work"
@@ -189,11 +203,10 @@ detect_agentic_activity() {
         return 0
     fi
 
-    local found_local=0 runs=""
-    if container_has_agent_process "$PRIMARY_SANDBOX_PROJECT_NAME" \
-        || container_has_agent_process "$AUTOPR_SANDBOX_PROJECT_NAME"; then
-        found_local=1
-    fi
+    local primary_agent=0 autopr_agent=0 found_local=0 runs=""
+    container_has_agent_process "$PRIMARY_SANDBOX_PROJECT_NAME" && primary_agent=1
+    container_has_agent_process "$AUTOPR_SANDBOX_PROJECT_NAME" && autopr_agent=1
+    if [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ]; then found_local=1; fi
 
     if [ -x "$AUTOPR_GH_BIN" ] && command -v jq >/dev/null \
         && runs="$("$AUTOPR_GH_BIN" run list --repo "$AUTOPR_REPO" \
@@ -209,7 +222,13 @@ detect_agentic_activity() {
     else
         if [ "$found_local" = 1 ]; then
             AGENTIC_ACTIVITY_STATE=active
-            AGENTIC_ACTIVITY_DETAIL="a local coding-agent process is running"
+            if [ "$primary_agent" = 1 ] && [ "$autopr_agent" = 1 ]; then
+                AGENTIC_ACTIVITY_DETAIL="coding agents are running in both sandboxes"
+            elif [ "$autopr_agent" = 1 ]; then
+                AGENTIC_ACTIVITY_DETAIL="an AutoPR coding agent is running"
+            else
+                AGENTIC_ACTIVITY_DETAIL="a coding agent is running in the primary sandbox"
+            fi
         else
             AGENTIC_ACTIVITY_STATE=unknown
             AGENTIC_ACTIVITY_DETAIL="GitHub activity could not be verified"
@@ -219,7 +238,13 @@ detect_agentic_activity() {
 
     if [ "$found_local" = 1 ]; then
         AGENTIC_ACTIVITY_STATE=active
-        AGENTIC_ACTIVITY_DETAIL="a local coding-agent process is running"
+        if [ "$primary_agent" = 1 ] && [ "$autopr_agent" = 1 ]; then
+            AGENTIC_ACTIVITY_DETAIL="coding agents are running in both sandboxes"
+        elif [ "$autopr_agent" = 1 ]; then
+            AGENTIC_ACTIVITY_DETAIL="an AutoPR coding agent is running"
+        else
+            AGENTIC_ACTIVITY_DETAIL="a coding agent is running in the primary sandbox"
+        fi
     fi
 }
 
@@ -545,6 +570,10 @@ case "$command_name" in
             "${COMPOSE[@]}" port workspace "$container_port" 2>/dev/null || echo "not published"
         done
         print_system_status "MSANDBOX CURRENT STATE"
+        ;;
+    workspace-state)
+        require_docker
+        workspace_state
         ;;
     autopr-ready)
         require_docker

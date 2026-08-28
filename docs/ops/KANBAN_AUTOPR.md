@@ -109,8 +109,10 @@ live. The window uses a 2x2 grid: dashboard/work above PR/health.
   trusted harness tees that output to the mode-600 local file
   `~/Library/Logs/matcha-kanban-autopr-live.log`; GitHub does not expose live step stdout.
   Model credentials remain stripped, and the display adds common token and PEM redaction.
-- **timer + runner health** — LaunchAgent state, self-hosted runner presence, and recent
-  structured dispatch/skip/error events.
+- **timer + runner health** — LaunchAgent state, self-hosted runner presence, recent
+  structured dispatch/skip/error events, and the dedicated worker's real Docker state.
+  A container stuck in `created`, `exited`, or another non-running state is shown as
+  blocked rather than healthy.
 
 The summary pane refreshes every 60 seconds, the PR pane every 10 seconds, the local model
 stream every 2 seconds (with GitHub status refreshed every 10), and health every 15

@@ -4,6 +4,13 @@
 # deliberately does not include this file.
 services:
   workspace:
+    # The interactive sandbox publishes local development ports for a human
+    # browser. AutoPR runs alongside that sandbox and needs outbound access to
+    # the already-running host services, but it must never compete for those
+    # host ports. Compose merges sequence fields across overlays unless they
+    # are explicitly reset, so `ports: []` alone would leave the base ports in
+    # place and make the autonomous worker fail before OpenCode starts.
+    ports: !reset []
     volumes:
       # A model process must be able to read an OpenCode credential to call
       # its provider. This is precisely one copied auth file, read-only—not a
