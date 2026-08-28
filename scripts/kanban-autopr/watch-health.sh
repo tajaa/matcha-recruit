@@ -7,9 +7,11 @@ USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 LABEL="com.matcha.kanban-autopr-dispatch"
 REFRESH_SECONDS="${AUTOPR_HEALTH_REFRESH_SECONDS:-15}"
+MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
+SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 
 render_health() {
-    local launch_state runner_pids
+    local launch_state runner_pids sandbox_status
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(date '+%H:%M:%S %Z')"
 
@@ -21,12 +23,36 @@ render_health() {
         printf 'LAUNCHAGENT\n  not loaded\n'
     fi
 
+    printf '\nMSANDBOX MASTER SWITCH · '
+    if [ ! -x "$MSANDBOX_BIN" ]; then
+        printf 'unavailable\n'
+    elif "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
+        printf 'ON · autonomous work permitted\n'
+    else
+        printf 'OFF · no AutoPR dispatch or model start permitted\n'
+    fi
+
     printf '\nSELF-HOSTED RUNNER · '
     runner_pids="$(pgrep -f 'Runner.Listener' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
     if [ -n "$runner_pids" ]; then
         ps -p "$runner_pids" -o pid=,etime=,comm= 2>/dev/null | sed 's/^[[:space:]]*//' || true
     else
         printf '  Runner.Listener not found\n'
+    fi
+
+    printf '\nAUTOPR MSANDBOX · '
+    if [ ! -x "$MSANDBOX_BIN" ]; then
+        printf 'missing (%s)\n' "$MSANDBOX_BIN"
+    elif sandbox_status="$(env AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+        "$MSANDBOX_BIN" status 2>&1)"; then
+        if printf '%s\n' "$sandbox_status" | grep -q 'workspace'; then
+            printf 'running · %s\n' "$SANDBOX_PROJECT"
+        else
+            printf 'ready, idle · %s\n' "$SANDBOX_PROJECT"
+        fi
+    else
+        printf 'unavailable · %s\n' \
+            "$(printf '%s' "$sandbox_status" | head -n 1)"
     fi
 
     printf '\nRECENT TIMER EVENTS\n'
@@ -41,7 +67,7 @@ render_health() {
         printf '  no timer events yet\n'
     fi
 
-    printf '\nSession is recreated by the five-minute dispatcher if closed.\n'
+    printf '\nSession exists only while the msandbox master switch is ON.\n'
 }
 
 while :; do

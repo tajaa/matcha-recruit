@@ -8,6 +8,7 @@ WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
+MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
 LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispatch.lock}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,6 +57,15 @@ dispatch_workflow() {
 
 main() {
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
+    [ -x "$MSANDBOX_BIN" ] || { log_event error "msandbox-not-executable"; exit 1; }
+    # `msandbox` is the authoritative kill switch. A persistent marker alone
+    # is insufficient after a reboot/crash, so `autopr-ready` also verifies
+    # that the primary workspace container is currently running. Check this
+    # before creating the dashboard or touching GitHub.
+    if ! "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
+        log_event skip msandbox-off
+        exit 0
+    fi
     if [ "${AUTOPR_TMUX_DASHBOARD:-1}" != 0 ] && [ -x "$DASHBOARD_ENSURE" ]; then
         # Observability must not become a scheduling dependency. Record a pane
         # startup failure, then continue the authoritative dispatch check.

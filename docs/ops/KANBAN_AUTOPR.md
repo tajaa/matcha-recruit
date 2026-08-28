@@ -1,9 +1,10 @@
 # Kanban Autopr
 
 `.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
-`silent-error-autofix.yml`. A local macOS LaunchAgent is the sole automatic five-minute
-clock and dispatches only when no Kanban autopr run is queued or active; GitHub's manual
-workflow dispatch remains the recovery path. There is deliberately no second GitHub cron:
+`silent-error-autofix.yml`. `msandbox` is the authoritative master switch. While it is
+ON, a local macOS LaunchAgent is the sole automatic five-minute clock and dispatches only
+when no Kanban autopr run is queued or active; GitHub's manual workflow dispatch remains
+the recovery path but also fails closed when `msandbox` is OFF. There is deliberately no second GitHub cron:
 a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
 run. The runner has one job slot, and the workflow concurrency group remains the final
 overlap guard. The unit of work is one kanban card assigned to
@@ -16,8 +17,11 @@ a card back. The bot never merges and never approves.
 
 **Design constraint carried over from silent-error-autofix**: no model credential and no
 Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as Finch's
-user; OpenCode uses that user's profile, and the Matcha bot credential lives in
-`~/.config/matcha-autopr/env` (`chmod 600`, never committed).
+user; before each run the trusted bridge makes a temporary mode-600 copy of the Mac's
+existing OpenCode `auth.json` and exposes that one file read-only in the dedicated
+`matcha-kanban-autopr-sandbox` container. The Matcha bot credential lives in
+`~/.config/matcha-autopr/env` (`chmod 600`, never committed). OpenCode itself never
+receives that file or credential.
 
 The existing `EC2_SSH_KEY` Actions secret is used only by the trusted harness. Before
 each queue scan, `resolve-production-context.sh` resolves the active blue/green
@@ -67,19 +71,24 @@ changes.
    `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
-5. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
-   JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. The installer also
-   creates the `matcha-autopr` tmux dashboard; open it with
-   `tmux attach -t matcha-autopr` and detach with `Ctrl-b d`. Do not add a GitHub cron
-   alongside it; use manual `workflow_dispatch` if the local timer needs recovery.
-6. `gh workflow run kanban-autopr.yml` once by hand before relying on the local timer.
+5. Ensure the host OpenCode worker is already authenticated (the existing AutoPR setup
+   satisfies this). Do **not** run `opencode auth login` or add an API key for the
+   sandbox: each run securely reuses only the host auth file.
+6. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Installation
+   alone leaves autonomous work OFF. Its JSONL log is
+   `~/Library/Logs/matcha-kanban-autopr-dispatch.log`.
+7. Run `msandbox` or `msandbox start`. This starts the primary sandbox, enables and kicks
+   the timer, and creates the `matcha-autopr` host tmux dashboard. Open it with
+   `tmux attach -t matcha-autopr`; detach with `Ctrl-b d`. `msandbox stop` removes the
+   authorization gate before unloading the timer and stopping both sandbox containers.
+   Do not add a GitHub cron alongside it.
 
 ## Local tmux dashboard
 
-The LaunchAgent recreates the read-only `matcha-autopr` session on its next five-minute
-tick if the session is missing. Closing the dashboard never stops or duplicates the
-workflow; GitHub Actions remains the only coding execution path. The window uses a 2x2
-grid: dashboard/work above PR/health.
+While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
+`matcha-autopr` session on its next five-minute tick if the session is missing. Detaching
+the dashboard does not stop work; `msandbox stop` does. The window uses a 2x2 grid:
+dashboard/work above PR/health.
 
 - **24h queue + PR dashboard** — active workflow, the exact card `select.sh` would choose
   next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs
@@ -90,7 +99,8 @@ grid: dashboard/work above PR/health.
   and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
   runner worktree and never displays the ticket prompt or credential-bearing process
   arguments.
-- **live OpenCode/OpenAI work** — current Actions run/step plus the real model terminal
+- **live OpenCode/OpenAI work** — current Actions run/step, dedicated msandbox identity,
+  plus the real model terminal
   stream while it investigates, reads files, edits code, and verifies the task. The
   trusted harness tees that output to the mode-600 local file
   `~/Library/Logs/matcha-kanban-autopr-live.log`; GitHub does not expose live step stdout.
@@ -136,14 +146,19 @@ seconds. Override those intervals with
    the moment `last_moved_at` advances past the marker date. A failed attempt cools down
    for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 3 open `autopr` PRs.
-4. **`investigate.sh`** — both modes receive a single context bundle containing the card,
+4. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
    trusted harness and attached locally; the model never needs board or storage network
    access. `todo` mode implements the card; `rework` mode additionally receives the
    existing PR's reviews/comments and addresses the latest `review_note`, rejection
    events, discussion, and screenshots without re-litigating accepted earlier rounds.
-   Both require a report with `### Summary` / `### Changes` / `### Blast radius` /
+   It then calls `run-opencode-sandboxed.sh`, which clones only tracked files into a
+   dedicated msandbox workspace, removes the clone's remote, mounts an empty AWS
+   directory, gives OpenCode only a read-only copy of its existing auth file, and strips
+   GitHub/Matcha/SSH credentials. OpenCode gets broad permissions
+   inside that disposable clone, while the trusted harness copies back only its patch,
+   report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
    `### Confidence` plus a shell-validated JSON triage decision. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
