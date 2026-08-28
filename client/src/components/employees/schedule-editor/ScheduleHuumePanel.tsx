@@ -254,7 +254,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
         </div>
       )}
       <div className="flex max-h-[min(560px,70vh)] min-h-[220px] flex-col gap-3 overflow-y-auto px-3 py-3" role="log" aria-live="polite">
-        {messages.length === 0 && !sessionError && (
+        {messages.length === 0 && !action && !sessionError && (
           <div className="space-y-3">
             <div className="text-xs text-zinc-400">Hi, {firstName}. I can review this week or build the whole schedule from confirmed availability.</div>
             <div className="grid grid-cols-2 gap-2">
@@ -277,6 +277,11 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
                 <span className="mt-0.5 block text-zinc-500">Find missing inputs first</span>
               </button>
             </div>
+          </div>
+        )}
+        {action?.type === 'schedule_week_draft' && action.auto_generated && action.status === 'proposed' && (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-3 py-2 text-xs text-emerald-100">
+            Huume prepared this suggestion automatically. Review the staffing below, then approve it or describe the changes you want.
           </div>
         )}
         {messages.map((message) => <MessageBubble key={message.id} message={message} lightMode={false} />)}

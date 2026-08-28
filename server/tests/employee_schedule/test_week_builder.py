@@ -199,7 +199,7 @@ async def test_readiness_loads_week_shift_counts(monkeypatch):
     company_id = UUID("3f6b1c22-2000-4000-8000-000000000001")
     location_id = UUID("3f6b1c22-2000-4000-8000-000000000002")
     conn = _FakeConn({"id": location_id, "name": "Main Store"})
-    monkeypatch.setattr(week_builder, "get_connection", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
     monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
         "employees": [{
             "id": "employee-1", "name": "Amy", "availability_state": "windows",
@@ -258,7 +258,7 @@ async def test_apply_template_proposal_rechecks_empty_week_guard(monkeypatch):
         "id": run_id, "company_id": company_id, "location_id": location_id,
         "week_start": week_start, "status": "proposed", "source_mode": "template",
     })
-    monkeypatch.setattr(week_builder, "get_connection", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
     monkeypatch.setattr(
         week_builder, "_week_shift_counts",
         AsyncMock(return_value={"draft": 1, "published": 0}),

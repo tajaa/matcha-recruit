@@ -1,12 +1,13 @@
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useLocationScope, locationLabel } from '../../hooks/useLocationScope'
 import { useScheduleEditor } from '../../hooks/employees/useScheduleEditor'
 import { useToast } from '../../components/ui'
 import { fetchJobs } from '../../api/employees/employeeSchedule'
+import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../api/employees/scheduleAssistant'
 import LocationPicker from '../../components/shared/LocationPicker'
 import { addDays, startOfWeekSunday, toISODate, type ScheduleJob, type Shift } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
@@ -53,6 +54,7 @@ export default function ScheduleEditor() {
   const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
   const [jobsOpen, setJobsOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
@@ -76,6 +78,20 @@ export default function ScheduleEditor() {
 
   useEffect(() => {
     setHuumeSelectedShiftIds(new Set())
+  }, [locationId, weekStart])
+
+  useEffect(() => {
+    let cancelled = false
+    setAutomaticSuggestion(null)
+    if (!locationId) return () => { cancelled = true }
+    void getScheduleSuggestionStatus(locationId, weekStart)
+      .then((result) => {
+        if (!cancelled) setAutomaticSuggestion(result.available ? result : null)
+      })
+      .catch(() => {
+        if (!cancelled) setAutomaticSuggestion(null)
+      })
+    return () => { cancelled = true }
   }, [locationId, weekStart])
 
   const reloadJobs = useCallback(async () => {
@@ -196,6 +212,25 @@ export default function ScheduleEditor() {
           huumeSelectionCount={huumeSelectedShifts.length}
           onToggleChat={() => { setChatOpen((value) => !value); setJobsOpen(false) }}
         />
+        {automaticSuggestion && !chatOpen && locationId && (
+          <div className="flex items-center gap-3 border-b border-emerald-500/20 bg-emerald-500/[0.07] px-4 py-2 text-xs text-emerald-100 md:px-6">
+            <Sparkles className="h-4 w-4 shrink-0 text-emerald-300" />
+            <span>Huume prepared a suggested schedule for the week of {automaticSuggestion.week_start}.</span>
+            <button
+              type="button"
+              onClick={() => {
+                if (automaticSuggestion.week_start && automaticSuggestion.week_start !== weekStart) {
+                  setWeek(automaticSuggestion.week_start)
+                }
+                setChatOpen(true)
+                setJobsOpen(false)
+              }}
+              className="ml-auto rounded-lg border border-emerald-400/40 px-2.5 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-400/10"
+            >
+              Review suggestion
+            </button>
+          </div>
+        )}
         {!locationId ? (
           <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
             <p className="text-sm text-zinc-400">Pick a location to see its schedule.</p>
@@ -243,7 +278,7 @@ export default function ScheduleEditor() {
                 locationName={currentLocationName}
                 selectedShifts={huumeSelectedShifts}
                 onClearSelectedShifts={() => setHuumeSelectedShiftIds(new Set())}
-                onApplied={() => void editor.reload()}
+                onApplied={() => { setAutomaticSuggestion(null); void editor.reload() }}
                 onClose={() => setChatOpen(false)}
               />
             )}

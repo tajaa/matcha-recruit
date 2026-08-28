@@ -283,6 +283,7 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <Meta label="Week of" value={action.week_start} />
             <Meta label="Demand source" value={action.source_mode === 'template' ? 'Saved template' : 'Existing draft shifts'} />
+            {action.auto_generated && <Meta label="Prepared" value="Automatically by Huume" />}
             <Meta label="Shifts" value={action.metrics?.shift_count} />
             <Meta label="Positions filled" value={action.metrics?.filled_positions} />
             <Meta label="Positions needed" value={action.metrics?.required_positions} />

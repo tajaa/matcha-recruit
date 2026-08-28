@@ -4,11 +4,12 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
-const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, sendMessageStreamMock, reloadMock } = vi.hoisted(() => ({
+const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, getScheduleSuggestionStatusMock, sendMessageStreamMock, reloadMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useEditorMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   getScheduleHuumeSessionMock: vi.fn(),
+  getScheduleSuggestionStatusMock: vi.fn(),
   sendMessageStreamMock: vi.fn(() => new AbortController()),
   reloadMock: vi.fn().mockResolvedValue(undefined),
 }))
@@ -26,6 +27,7 @@ vi.mock('../../components/employees/schedule-editor/ScheduleJobsTab', async () =
 })
 vi.mock('../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
+  getScheduleSuggestionStatus: getScheduleSuggestionStatusMock,
   transcribeScheduleVoice: vi.fn(),
 }))
 vi.mock('../../work/api/matchaWork/messaging', () => ({
@@ -51,6 +53,9 @@ describe('ScheduleEditor', () => {
     getScheduleHuumeSessionMock.mockResolvedValue({
       session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
       week_start: '2026-08-09', week_end: '2026-08-16', messages: [], current_state: {}, version: 1,
+    })
+    getScheduleSuggestionStatusMock.mockResolvedValue({
+      available: false, generation_run_id: null, week_start: null, created_at: null,
     })
     useMeMock.mockReturnValue({
       me: { profile: { name: 'Jamie Rivera' } },
@@ -209,6 +214,50 @@ describe('ScheduleEditor', () => {
 
     expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument())
+  })
+
+  it('surfaces an automatically prepared schedule for review', async () => {
+    getScheduleSuggestionStatusMock.mockResolvedValue({
+      available: true, generation_run_id: 'generation-1', week_start: '2026-08-09',
+      created_at: '2026-08-24T16:00:00Z',
+    })
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Huume prepared a suggested schedule for the week of 2026-08-09.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Review suggestion' }))
+    expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
+  })
+
+  it('renders the automatically prepared proposal without requiring a prompt', async () => {
+    getScheduleHuumeSessionMock.mockResolvedValue({
+      session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+      week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 2,
+      current_state: {
+        huume_action: {
+          type: 'schedule_week_draft', status: 'proposed', confirm_id: 'auto1234',
+          generation_run_id: 'generation-1', location_id: 'loc1', week_start: '2026-08-09',
+          source_mode: 'template', week_template_id: 'template-1', origin: 'automatic',
+          auto_generated: true, summary: 'Prepared the week.',
+          metrics: { shift_count: 1, required_positions: 1, fixed_positions: 0, overstaffed_positions: 0, proposed_positions: 1, filled_positions: 1, open_positions: 0 },
+          unfilled: [], schedule_preview: [{ shift_key: 'shift-1', starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z', role: 'Opener', required_staff: 1, assignment_names: ['Aisha Rivera'], existing_assignment_count: 0 }],
+          preview_truncated: false,
+        },
+      },
+    })
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    expect(await screen.findByText(/Huume prepared this suggestion automatically/)).toBeInTheDocument()
+    expect(screen.getByText('Automatically by Huume')).toBeInTheDocument()
+    expect(screen.queryByText(/Hi, Jamie/)).not.toBeInTheDocument()
   })
 
   it('sends selected blocks as authoritative Huume context', async () => {

@@ -14,6 +14,7 @@ from ...services._shared.uploads import read_wav_or_400
 from ...services.scheduling import schedule_voice
 from ...services.scheduling.schedule_chat_rules import parse_confirm_reply
 from ...services.scheduling.schedule_assistant_session import (
+    get_automatic_suggestion_status,
     get_or_create_schedule_assistant_session,
 )
 from ._shared import require_company_id
@@ -27,6 +28,16 @@ class ScheduleAssistantSessionRequest(BaseModel):
 router = APIRouter()
 
 
+async def _require_schedule_huume(company_id: UUID) -> None:
+    features = await get_company_features(company_id)
+    if not features.get("huume") or not features.get("matcha_work"):
+        missing = "huume" if not features.get("huume") else "matcha_work"
+        raise HTTPException(
+            status_code=403,
+            detail=f"The '{missing}' feature is not enabled for your company",
+        )
+
+
 @router.post("/assistant/sessions")
 async def create_schedule_assistant_session(
     body: ScheduleAssistantSessionRequest,
@@ -38,19 +49,30 @@ async def create_schedule_assistant_session(
     # check the panel opens fine and every turn then dies mid-stream with a
     # generic error — check before creating the (always-huume_mode=true)
     # session row so the caller gets one clear reason instead.
-    features = await get_company_features(company_id)
-    if not features.get("huume") or not features.get("matcha_work"):
-        missing = "huume" if not features.get("huume") else "matcha_work"
-        raise HTTPException(
-            status_code=403,
-            detail=f"The '{missing}' feature is not enabled for your company",
-        )
+    await _require_schedule_huume(company_id)
     return await get_or_create_schedule_assistant_session(
         company_id=company_id,
         user_id=current_user.id,
         actor_role=current_user.role,
         location_id=body.location_id,
         week_start=body.week_start,
+    )
+
+
+@router.get("/assistant/suggestions")
+async def automatic_schedule_suggestion_status(
+    location_id: UUID,
+    week_start: date,
+    current_user=Depends(require_company_member),
+) -> dict:
+    company_id = await require_company_id(current_user)
+    await _require_schedule_huume(company_id)
+    return await get_automatic_suggestion_status(
+        company_id=company_id,
+        user_id=current_user.id,
+        actor_role=current_user.role,
+        location_id=location_id,
+        week_start=week_start,
     )
 
 
