@@ -83,7 +83,7 @@ render_dashboard() {
 
     printf '\nOPEN AUTO PRS\n'
     printf '%s' "$open_prs" | jq -r '
-      if length == 0 then "  none" else .[:3][] |
+      if length == 0 then "  none" else .[:10][] |
         "  #\(.number) " + (if .isDraft then "DRAFT" else "OPEN " end) + " " + (.title[0:50])
         + (if ([.labels[].name] | index("autopr-awaiting-input")) then "  [WAITING]" else "" end)
       end

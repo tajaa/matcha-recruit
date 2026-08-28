@@ -164,7 +164,8 @@ seconds. Override those intervals with
    five minutes forever, it's visible to the human who owns the card, and it clears itself
    the moment `last_moved_at` advances past the marker date. A failed attempt cools down
    for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
-   starving the queue on one broken task. Caps at 3 open `autopr` PRs.
+   starving the queue on one broken task. Caps at 10 open implementation
+   `autopr` PRs (question-only drafts use their separate cap).
 5. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
@@ -196,7 +197,7 @@ seconds. Override those intervals with
    that's the intended outcome; it takes the no-spec path and says why. PR titles begin
    with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`
    is triaged visually. Question drafts also carry `autopr-awaiting-input`; those drafts
-   do not consume the three-PR implementation cap. PR body carries
+   do not consume the ten-PR implementation cap. PR body carries
    production baseline trailers as well as the task/project linkage:
    ```html
    <!-- matcha-task: <full task uuid> -->
