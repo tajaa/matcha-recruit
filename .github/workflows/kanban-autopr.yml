@@ -32,7 +32,7 @@ env:
 jobs:
   build:
     runs-on: [self-hosted, macOS, opencode]
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -79,6 +79,8 @@ jobs:
                    "confidence:high|0E8A16|Autopr confidence 75-100" \
                    "confidence:medium|FBCA04|Autopr confidence 45-74" \
                    "confidence:low|D93F0B|Autopr confidence 0-44" \
+                   "covers-kanban-task|0E8A16|Also covers a Matcha Work task" \
+                   "possible-duplicate|FBCA04|May overlap another open pull request" \
                    "needs-work|D93F0B|Verification found a new test failure"; do
             IFS='|' read -r name color desc <<< "$l"
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
@@ -206,9 +208,38 @@ jobs:
           echo "safe_changes=$safe_changes" >> "$GITHUB_OUTPUT"
           jq '{outcome, confidence_score, confidence_band, criticality, awaiting_human}' "$RUNNER_TEMP/decision.json" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Check whether an open PR already covers this task
+        id: coverage
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework'
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOPR_SCOPE_DEDUPE_MODE: enforce
+        run: |
+          ./scripts/autopr-scope/check-open-prs.sh \
+            --lane kanban --identity "$(jq -r '.task_id' "$RUNNER_TEMP/card.json")" \
+            --evidence "$RUNNER_TEMP/card.json" --report "$RUNNER_TEMP/report.md" \
+            --output "$RUNNER_TEMP/coverage.json"
+          jq . "$RUNNER_TEMP/coverage.json" >> "$GITHUB_STEP_SUMMARY"
+          decision="$(jq -r '.decision' "$RUNNER_TEMP/coverage.json")"
+          confidence="$(jq -r '.confidence' "$RUNNER_TEMP/coverage.json")"
+          mode="$(jq -r '.mode' "$RUNNER_TEMP/coverage.json")"
+          if [ "$mode" = enforce ] && [ "$decision" = covered ] && [ "$confidence" = high ]; then
+            echo "covered=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "covered=false" >> "$GITHUB_OUTPUT"
+          fi
+          [ "$(jq -r '.possible_duplicate' "$RUNNER_TEMP/coverage.json")" != true ] || echo "possible_duplicate=true" >> "$GITHUB_OUTPUT"
+
+      - name: Link task to its covering PR
+        if: steps.coverage.outputs.covered == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/kanban-autopr/record-coverage.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/coverage.json"
+
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 8
         run: |
           ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
@@ -221,9 +252,10 @@ jobs:
           printf '%s\n' '## Verification' '' 'Not run: this result contains no product diff and is awaiting requirements or a human-only action.' > "$RUNNER_TEMP/verification.md"
 
       - name: Publish PR, question draft, or no-spec marker
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
         run: |
           ./scripts/kanban-autopr/publish.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
 

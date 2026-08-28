@@ -143,7 +143,8 @@ seconds. Override those intervals with
 2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
-   `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, joins each card's `element_id`
+   `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, plus system-linked
+   `in_progress` cards awaiting owner-PR reconciliation, joins each card's `element_id`
    against the bundle's `elements` array to attach `repo_paths` (prompt-only scoping, not
    a gate).
 3. **`reconcile-merged-cards.sh`** — repairs a missed `pull_request` webhook before
@@ -184,11 +185,19 @@ seconds. Override those intervals with
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
    work, migrations, policy boundaries, and external dependencies.
-6. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
+6. **Cross-lane scope check** — for a fresh implementation patch, the shared
+   `scripts/autopr-scope/check-open-prs.sh` checks every older open PR before verification
+   or publication. Exact patch-id or credential-free Terra/high may prove full coverage;
+   only a high-confidence `covered` verdict suppresses the new PR. The existing owner PR
+   receives a `covers-kanban-task` label and exact task comment, while the card stores
+   that PR's URL/number and a visible `ALREADY SCOPED` note. Closed-unmerged owners make
+   the card eligible again; merged owners move it to Review through the webhook or
+   reconciliation pass. Uncertain results publish with `possible-duplicate`.
+7. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
-7. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+8. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
    restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
@@ -230,6 +239,11 @@ Additive migration `taskpr0001`. Plumbed through the board SELECT
 (`project_task_service.py`), the PATCH whitelist (`routes/matcha_work/tasks.py`), the
 client types (`client/src/work/types.ts`), and a PR pill on the kanban card
 (`KanbanCard.tsx`, next to the churn chip) linking out to `pr_url`.
+
+The pull-request webhook resolves in three steps: task trailer, task-shaped branch, then
+the exact persisted `pr_number`. The last path supports cross-lane ownership where an
+error-bot branch owns a Kanban task; the existing repository and four-project allowlists
+still apply before any card mutation.
 
 ## `post-checkout` hook (checkout → in_progress)
 

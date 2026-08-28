@@ -68,11 +68,11 @@ awaiting_input_has_new_feedback() {
         || { [ -n "$new_review" ] && [ "$new_review" != "$old_review" ]; }
 }
 
-# already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE
+# already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 # Echoes "skip", "investigate", or "rework" (rework = push to the existing
 # open PR rather than opening a new one).
 already_handled() {
-    local id8="$1" column="$2" last_moved="$3" progress_note="$4" branch="bot/task-$id8"
+    local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}" branch="bot/task-$id8"
 
     local attempt_marker="$ATTEMPTS_DIR/$id8"
     if [ -f "$attempt_marker" ]; then
@@ -103,6 +103,29 @@ already_handled() {
             echo skip
             return
         fi
+    fi
+
+    # A card may be owned by a PR from the other automation lane, so its head
+    # branch will not be bot/task-$id8. The explicit link written by
+    # record-coverage.sh is the durable association.
+    if [[ "$progress_note" == "🤖 AUTO SETUP · ALREADY SCOPED"* ]] && [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+        local linked_pr linked_state
+        if ! linked_pr="$(gh pr view "$pr_number" --repo "$REPO" --json state)"; then
+            echo skip
+            return
+        fi
+        linked_state="$(printf '%s' "$linked_pr" | jq -r '.state // empty')"
+        case "$linked_state" in
+            OPEN|MERGED)
+                echo skip
+                return ;;
+            CLOSED)
+                echo investigate
+                return ;;
+            *)
+                echo skip
+                return ;;
+        esac
     fi
 
     local prs n
@@ -183,8 +206,9 @@ for ((i = 0; i < n; i++)); do
     column="$(printf '%s' "$card" | jq -r '.board_column')"
     last_moved="$(printf '%s' "$card" | jq -r '.last_moved_at // .created_at')"
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
+    pr_number="$(printf '%s' "$card" | jq -r '.pr_number // empty')"
 
-    decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note")"
+    decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number")"
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and

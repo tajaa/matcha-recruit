@@ -24,7 +24,8 @@ while IFS= read -r card; do
     pr_number="$(printf '%s' "$card" | jq -r '.pr_number // empty')"
     reconciled=false
 
-    if [ "$column" = changes_requested ] \
+    if { [ "$column" = changes_requested ] \
+            || { [ "$column" = in_progress ] && [[ "$progress_note" == "🤖 AUTO SETUP · ALREADY SCOPED"* ]]; }; } \
         && [ -n "$pr_number" ] \
         && { [[ "$progress_note" == "from auto setup"* ]] \
             || [[ "$progress_note" == "🤖 AUTO SETUP"* ]]; }; then
@@ -33,7 +34,9 @@ while IFS= read -r card; do
         pr="$($GH_BIN pr view "$pr_number" --repo "$REPO" --json state,headRefName)"
         state="$(printf '%s' "$pr" | jq -r '.state // empty')"
         head="$(printf '%s' "$pr" | jq -r '.headRefName // empty')"
-        if [ "$state" = MERGED ] && [ "$head" = "bot/task-$id8" ]; then
+        if [ "$state" = MERGED ] \
+            && { [ "$head" = "bot/task-$id8" ] \
+                || [[ "$progress_note" == "🤖 AUTO SETUP · ALREADY SCOPED"* ]]; }; then
             mw_move_card "$project_id" "$task_id" review
             printf 'Reconciled merged AutoPR #%s: card %s -> review\n' "$pr_number" "$task_id" >&2
             reconciled=true

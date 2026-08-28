@@ -39,6 +39,7 @@ CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
 NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
+POSSIBLE_DUPLICATE="${AUTOPR_POSSIBLE_DUPLICATE:-0}"
 NOTE_STATE="ready_for_review"
 if [ "$AWAITING_HUMAN" = true ]; then
     NOTE_STATE="awaiting_answers"
@@ -157,6 +158,7 @@ replace_triage_labels() {
     args+=(--add-label autopr --add-label "$desired_criticality" --add-label "$desired_confidence")
     [ "$MODE" != rework ] || args+=(--add-label autopr-rework)
     [ "$AWAITING_HUMAN" != true ] || args+=(--add-label autopr-awaiting-input)
+    [ "$POSSIBLE_DUPLICATE" != 1 ] || args+=(--add-label possible-duplicate)
     if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
         args+=(--add-label needs-work)
     elif printf '%s\n' "$labels" | grep -qx needs-work; then

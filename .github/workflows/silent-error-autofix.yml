@@ -19,7 +19,7 @@ concurrency:
 jobs:
   investigate:
     runs-on: [self-hosted, macOS, opencode]
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -53,6 +53,9 @@ jobs:
         run: |
           for l in "autofix|1D76DB|Opened by the silent-error autofix bot" \
                    "autofix-superseded|6B7280|Draft superseded by a merged human PR" \
+                   "autofix-duplicate|6B7280|Duplicate of an older open pull request" \
+                   "covers-prod-error|0E8A16|Also covers a production error incident" \
+                   "possible-duplicate|FBCA04|May overlap another open pull request" \
                    "needs-work|D93F0B|Verification found a new test failure" \
                    "autofix-nofix|CFD3D7|Investigated but no safe fix found" \
                    "sev:high|B60205|" "sev:med|D4C5F9|" "sev:low|0E8A16|"; do
@@ -174,9 +177,38 @@ jobs:
           echo "Investigation failed before producing a valid report; this incident remains eligible for retry." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
+      - name: Check whether an open PR already covers this fix
+        id: coverage
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOPR_SCOPE_DEDUPE_MODE: enforce
+        run: |
+          ./scripts/autopr-scope/check-open-prs.sh \
+            --lane error --identity "${{ steps.select.outputs.key }}" \
+            --evidence "$RUNNER_TEMP/incident.json" --report "$RUNNER_TEMP/report.md" \
+            --output "$RUNNER_TEMP/coverage.json"
+          jq . "$RUNNER_TEMP/coverage.json" >> "$GITHUB_STEP_SUMMARY"
+          decision="$(jq -r '.decision' "$RUNNER_TEMP/coverage.json")"
+          confidence="$(jq -r '.confidence' "$RUNNER_TEMP/coverage.json")"
+          mode="$(jq -r '.mode' "$RUNNER_TEMP/coverage.json")"
+          if [ "$mode" = enforce ] && [ "$decision" = covered ] && [ "$confidence" = high ]; then
+            echo "covered=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "covered=false" >> "$GITHUB_OUTPUT"
+          fi
+          [ "$(jq -r '.possible_duplicate' "$RUNNER_TEMP/coverage.json")" != true ] || echo "possible_duplicate=true" >> "$GITHUB_OUTPUT"
+
+      - name: Link production incident to its covering PR
+        if: steps.coverage.outputs.covered == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/error-autofix/record-coverage.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/coverage.json"
+
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 8
         run: |
           ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
@@ -184,9 +216,10 @@ jobs:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
       - name: Publish PR (or no-fix issue)
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
         run: |
           ./scripts/error-autofix/publish.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
 

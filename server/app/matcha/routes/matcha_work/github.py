@@ -432,6 +432,7 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
     pr = payload.get("pull_request") or {}
     body = pr.get("body") or ""
     head_ref = (pr.get("head") or {}).get("ref") or ""
+    pr_number = pr.get("number")
 
     task_id: Optional[str] = None
     m = _TASK_TRAILER_RE.search(body)
@@ -447,19 +448,30 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
                 )
             if row:
                 task_id = row["id"]
-    if not task_id:
-        return None
-
     async with get_connection() as conn:
-        task = await conn.fetchrow(
-            """SELECT id, project_id, board_column, progress_note,
-                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
-                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
-                      ((to_jsonb(mw_tasks) ? 'pr_url') AND
-                       (to_jsonb(mw_tasks) ? 'pr_number')) AS pr_columns_exist
-               FROM mw_tasks WHERE id = $1""",
-            UUID(task_id),
-        )
+        select_sql = """SELECT id, project_id, board_column, progress_note,
+                                to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                                (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                                ((to_jsonb(mw_tasks) ? 'pr_url') AND
+                                 (to_jsonb(mw_tasks) ? 'pr_number')) AS pr_columns_exist
+                           FROM mw_tasks"""
+        if task_id:
+            task = await conn.fetchrow(
+                select_sql + " WHERE id = $1",
+                UUID(task_id),
+            )
+        elif isinstance(pr_number, int):
+            # Cross-lane scope ownership deliberately links a card to an
+            # existing PR whose body and branch belong to another bot. The
+            # exact persisted PR number is therefore the final resolution
+            # path. Repo and project allowlists below still gate the event.
+            task = await conn.fetchrow(
+                select_sql
+                + " WHERE to_jsonb(mw_tasks) ->> 'pr_number' = $1 ORDER BY created_at LIMIT 1",
+                str(pr_number),
+            )
+        else:
+            return None
     if not task or str(task["project_id"]) not in _KANBAN_AUTOPR_PROJECT_IDS:
         return None
     return task

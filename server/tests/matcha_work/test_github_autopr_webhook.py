@@ -6,6 +6,50 @@ from app.matcha.routes.matcha_work import github
 from app.matcha.services.matcha_work import project_task_service
 
 
+@pytest.mark.asyncio
+async def test_resolve_cross_lane_pr_by_exact_persisted_number(monkeypatch):
+    task_id = uuid4()
+    project_id = next(iter(github._KANBAN_AUTOPR_PROJECT_IDS))
+    calls = []
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "🤖 AUTO SETUP · ALREADY SCOPED · PR #334",
+        "pr_url": "https://github.com/tajaa/matcha-recruit/pull/334",
+        "pr_number": 334,
+        "pr_columns_exist": True,
+    }
+
+    class Connection:
+        async def fetchrow(self, query, *args):
+            calls.append((query, args))
+            return task
+
+    class ConnectionContext:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(github, "get_connection", lambda: ConnectionContext())
+
+    resolved = await github._resolve_pull_request_task({
+        "repository": {"full_name": github._KANBAN_AUTOPR_REPO},
+        "pull_request": {
+            "number": 334,
+            "body": "",
+            "head": {"ref": "bot/err-5cf9ce1fea8b"},
+        },
+    })
+
+    assert resolved == task
+    assert len(calls) == 1
+    assert "to_jsonb(mw_tasks) ->> 'pr_number' = $1" in calls[0][0]
+    assert calls[0][1] == ("334",)
+
+
 def test_autopr_marker_preserves_existing_progress_and_is_idempotent():
     marked = github._with_autopr_progress_note("Waiting on QA")
     assert marked == "🤖 AUTO SETUP · MERGED: READY FOR REVIEW · Waiting on QA"
