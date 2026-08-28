@@ -349,6 +349,7 @@ fi
 
 DEV_WATCH_ENV=""
 VITE_HOST_ARGS="--host 127.0.0.1"
+BACKEND_TRUST_ENV=""
 if [ "$IS_AGENT_SANDBOX" = true ]; then
     # Bind-mounted macOS source trees do not reliably emit native filesystem
     # events inside Linux, and published ports need a non-loopback Vite bind.
@@ -361,11 +362,20 @@ else
     SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
     STATUS_PANE="echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
     WAITING_MESSAGE="Waiting for DB tunnel on localhost:$LOCAL_PORT..."
+
+    # Docker Desktop reaches this host-run backend with a
+    # host.docker.internal Host header. Keep the production allowlist strict,
+    # but let sandbox browser/tests use HOST_DEV_BACKEND_URL in local dev.
+    case ",${EXTRA_ALLOWED_HOSTS:-}," in
+        *,host.docker.internal,*) ;;
+        *) EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:+${EXTRA_ALLOWED_HOSTS},}host.docker.internal" ;;
+    esac
+    BACKEND_TRUST_ENV="export EXTRA_ALLOWED_HOSTS='$EXTRA_ALLOWED_HOSTS' &&"
 fi
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "$GS_OFF ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "$GS_OFF ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling

@@ -79,10 +79,14 @@ echo "PASS: AutoPR overlay still publishes no host ports"
 
 grep -qF 'VITE_HOST_ARGS="--host 127.0.0.1"' "$REPO_ROOT/scripts/dev-remote.sh"
 grep -qF 'VITE_HOST_ARGS="--host 0.0.0.0"' "$REPO_ROOT/scripts/dev-remote.sh"
+grep -qF 'EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:+${EXTRA_ALLOWED_HOSTS},}host.docker.internal"' \
+    "$REPO_ROOT/scripts/dev-remote.sh"
+grep -qF '${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate' \
+    "$REPO_ROOT/scripts/dev-remote.sh"
 for config in \
     "$REPO_ROOT/client/vite.config.ts" \
     "$REPO_ROOT/client/tellus/vite.config.ts" \
     "$REPO_ROOT/client/oceanlab/vite.config.ts"; do
     grep -qF "allowedHosts: ['host.docker.internal']" "$config"
 done
-echo "PASS: host Vite listeners accept the Docker Desktop gateway only"
+echo "PASS: host app listeners accept the Docker Desktop gateway only"
