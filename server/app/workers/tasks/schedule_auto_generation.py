@@ -1,38 +1,30 @@
-"""Prepare next-week schedule proposals for manager review.
-
-The worker is intentionally deterministic and review-only: it creates a
-``schedule_generation_runs`` proposal but never creates or publishes shifts.
-The schedule assistant adopts the proposal when an authorized manager opens
-that location/week.
-"""
+"""Execute one tenant-configured, review-only schedule automation rule."""
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from app.core.feature_flags import merge_company_features
+from app.matcha.services.scheduling.schedule_automation import (
+    generate_review_suggestion,
+    next_run_at,
+    target_week_start,
+)
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection, scheduler_settings_row
+from ..utils import get_db_connection
 
 
 logger = logging.getLogger(__name__)
-TASK_KEY = "schedule_auto_generation"
 
 
-def upcoming_week_start(today: date) -> date:
-    """Return the Sunday beginning the next editor week."""
-    current_sunday = today - timedelta(days=(today.weekday() + 1) % 7)
-    return current_sunday + timedelta(days=7)
-
-
-def location_today(timezone_name: str | None) -> date:
-    try:
-        zone = ZoneInfo(timezone_name or "UTC")
-    except (KeyError, ValueError):
-        zone = timezone.utc
-    return datetime.now(zone).date()
+def enqueue_schedule_automation(rule_id: UUID, schedule_version: int, scheduled_for: datetime) -> None:
+    """Publish the exact rule/version occurrence; edited rules make it stale."""
+    run_schedule_auto_generation.apply_async(
+        args=[str(rule_id), schedule_version, scheduled_for.isoformat()],
+        eta=scheduled_for,
+    )
 
 
 def supports_automatic_generation(enabled_features, signup_source: str | None) -> bool:
@@ -40,110 +32,106 @@ def supports_automatic_generation(enabled_features, signup_source: str | None) -
     return all(features.get(key) for key in ("employee_schedule", "huume", "matcha_work"))
 
 
-async def _run() -> dict:
+async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
+    rule_uuid = UUID(rule_id)
+    expected_at = datetime.fromisoformat(scheduled_for)
+    if expected_at.tzinfo is None:
+        expected_at = expected_at.replace(tzinfo=timezone.utc)
+    expected_at = expected_at.astimezone(timezone.utc)
+
     conn = await get_db_connection()
     try:
-        settings = await scheduler_settings_row(conn, TASK_KEY)
-        if not settings:
-            return {"skipped": True, "reason": "scheduler_not_registered"}
-        if not settings["enabled"]:
-            return {"skipped": True, "reason": "scheduler_disabled"}
-        max_per_cycle = max(1, min(int(settings["max_per_cycle"] or 100), 1_000))
-        locations = await conn.fetch(
+        rule = await conn.fetchrow(
             """
-            SELECT l.id AS location_id, l.company_id, l.timezone,
-                   c.enabled_features, c.signup_source
-            FROM business_locations l
-            JOIN companies c ON c.id=l.company_id
-            WHERE l.is_active IS NOT FALSE
-              AND (c.status IS NULL OR c.status='approved')
-            ORDER BY l.company_id, l.id
-            """
+            SELECT r.*, l.timezone, c.enabled_features, c.signup_source, c.status AS company_status
+            FROM schedule_automation_rules r
+            JOIN business_locations l ON l.id=r.location_id AND l.company_id=r.company_id
+            JOIN companies c ON c.id=r.company_id
+            WHERE r.id=$1 AND l.is_active IS NOT FALSE
+            """,
+            rule_uuid,
         )
-        generated = 0
-        already_present = 0
-        not_ready = 0
-        failures = 0
-        eligible_locations = 0
-        from app.matcha.services.scheduling.week_builder import (
-            get_week_build_readiness,
-            propose_week_draft,
-        )
-
-        for location in locations:
-            if generated >= max_per_cycle:
-                break
-            if not supports_automatic_generation(
-                location["enabled_features"], location["signup_source"],
-            ):
-                continue
-            eligible_locations += 1
-            week_start = upcoming_week_start(location_today(location["timezone"]))
-            has_active_run = await conn.fetchval(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM schedule_generation_runs
-                    WHERE company_id=$1 AND location_id=$2 AND week_start=$3
-                      AND (
-                          status IN ('proposed', 'applied')
-                          OR (origin='automatic' AND status='cancelled')
-                      )
-                )
-                """,
-                location["company_id"], location["location_id"], week_start,
+        if not rule or not rule["enabled"] or rule["schedule_version"] != schedule_version:
+            return {"skipped": True, "reason": "stale_or_disabled_rule"}
+        if rule["next_run_at"] != expected_at:
+            return {"skipped": True, "reason": "superseded_occurrence"}
+        if rule["company_status"] not in (None, "approved") or not supports_automatic_generation(
+            rule["enabled_features"], rule["signup_source"],
+        ):
+            await conn.execute(
+                """UPDATE schedule_automation_rules
+                   SET enabled=false, next_run_at=NULL, last_attempt_at=NOW(),
+                       last_completed_at=NOW(), last_status='feature_disabled',
+                       last_message='Required scheduling or Huume features are not enabled.', updated_at=NOW()
+                   WHERE id=$1""",
+                rule_uuid,
             )
-            if has_active_run:
-                already_present += 1
-                continue
-            try:
-                readiness = await get_week_build_readiness(
-                    company_id=location["company_id"],
-                    location_id=location["location_id"],
-                    week_start=week_start,
-                )
-                if readiness.get("status") != "ok" or not readiness.get("ready"):
-                    not_ready += 1
-                    continue
-                result = await propose_week_draft(
-                    company_id=location["company_id"],
-                    actor_user_id=None,
-                    thread_id=None,
-                    location_id=location["location_id"],
-                    week_start=week_start,
-                    source_mode="auto",
-                    origin="automatic",
-                )
-            except Exception:
-                failures += 1
-                logger.exception(
-                    "Automatic schedule generation failed company=%s location=%s week=%s",
-                    location["company_id"], location["location_id"], week_start,
-                )
-                continue
-            if result.get("status") == "ready":
-                generated += 1
-            elif result.get("status") == "skipped":
-                already_present += 1
+            return {"skipped": True, "reason": "feature_disabled"}
+
+        following_at = None
+        following_enabled = False
+        if rule["cadence"] == "weekly":
+            following_at = next_run_at(
+                cadence="weekly",
+                timezone_name=rule["timezone"],
+                run_time=rule["run_time"],
+                run_weekday=rule["run_weekday"],
+                after=expected_at + timedelta(seconds=1),
+            )
+            following_enabled = True
+        claim = await conn.execute(
+            """UPDATE schedule_automation_rules
+               SET next_run_at=$1, enabled=$2, last_attempt_at=NOW(),
+                   last_status='running', last_message=NULL, updated_at=NOW()
+               WHERE id=$3 AND schedule_version=$4 AND enabled=true AND next_run_at=$5""",
+            following_at, following_enabled, rule_uuid, schedule_version, expected_at,
+        )
+        if claim == "UPDATE 0":
+            return {"skipped": True, "reason": "already_claimed"}
+        # Queue the following occurrence immediately after the DB claim. A
+        # planner failure (or worker death during planning) must not silently
+        # erase the recurring rule's future cadence.
+        if following_at:
+            enqueue_schedule_automation(rule_uuid, schedule_version, following_at)
+
+        week_start = target_week_start(
+            cadence=rule["cadence"],
+            scheduled_for=expected_at,
+            timezone_name=rule["timezone"],
+            target_weeks_ahead=rule["target_weeks_ahead"],
+            one_time_week_start=rule["target_week_start"],
+        )
+        try:
+            if rule["week_template_id"] is None:
+                result = {"status": "not_ready", "message": "Choose a saved week template."}
             else:
-                # Missing availability, demand, or an unambiguous template is
-                # expected setup state, not a failed worker run.
-                not_ready += 1
-        return {
-            "locations_checked": len(locations),
-            "eligible_locations": eligible_locations,
-            "generated": generated,
-            "already_present": already_present,
-            "not_ready": not_ready,
-            "failures": failures,
-        }
+                result = await generate_review_suggestion(
+                    company_id=rule["company_id"],
+                    location_id=rule["location_id"],
+                    week_start=week_start,
+                    week_template_id=rule["week_template_id"],
+                )
+        except Exception as exc:
+            logger.exception("Schedule planner failed rule=%s", rule_uuid)
+            result = {"status": "failed", "message": str(exc)[:1000]}
+        generation_id = result.get("generation_run_id")
+        await conn.execute(
+            """UPDATE schedule_automation_rules
+               SET last_completed_at=NOW(), last_status=$1, last_message=$2,
+                   last_generation_run_id=$3, updated_at=NOW()
+               WHERE id=$4 AND schedule_version=$5""",
+            result["status"], result.get("message"), UUID(generation_id) if generation_id else None,
+            rule_uuid, schedule_version,
+        )
+        return {**result, "week_start": week_start.isoformat(), "next_run_at": following_at}
     finally:
         await conn.close()
 
 
 @celery_app.task(name="schedule_auto_generation.run", bind=True, max_retries=1)
-def run_schedule_auto_generation(self):
+def run_schedule_auto_generation(self, rule_id: str, schedule_version: int, scheduled_for: str):
     try:
-        return asyncio.run(_run())
+        return asyncio.run(_run(rule_id, schedule_version, scheduled_for))
     except Exception as exc:
-        logger.exception("Automatic schedule generation sweep failed")
+        logger.exception("Schedule automation failed rule=%s", rule_id)
         raise self.retry(exc=exc, countdown=120)

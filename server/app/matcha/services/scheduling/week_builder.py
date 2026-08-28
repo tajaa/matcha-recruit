@@ -658,6 +658,7 @@ async def _planning_snapshot(
 
 async def get_week_build_readiness(
     *, company_id: UUID, location_id: UUID, week_start: date,
+    week_template_id: UUID | None = None,
 ) -> dict[str, Any]:
     async with connection_or_direct() as conn:
         location = await conn.fetchrow(
@@ -692,14 +693,19 @@ async def get_week_build_readiness(
         blockers.append("No active employees are assigned to this location.")
     if not confirmed:
         blockers.append("No employee has confirmed scheduling availability.")
-    if not demand and not any(template["block_count"] for template in templates):
+    selected_template = next(
+        (template for template in templates if str(template["id"]) == str(week_template_id)), None,
+    ) if week_template_id else None
+    if week_template_id and (not selected_template or not selected_template["block_count"]):
+        blockers.append("The selected week template is unavailable or has no shift blocks.")
+    elif not demand and not any(template["block_count"] for template in templates):
         blockers.append("Add draft shifts or a week template to define the store's staffing needs.")
     if not demand and shift_counts["published"]:
         blockers.append(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
     usable_templates = [template for template in templates if template["block_count"]]
-    if not demand and len(usable_templates) > 1:
+    if not demand and not week_template_id and len(usable_templates) > 1:
         blockers.append("Choose which saved week template Huume should use as staffing demand.")
     return {
         "status": "ok", "ready": not blockers, "location_name": location["name"],

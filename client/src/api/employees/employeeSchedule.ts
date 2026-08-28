@@ -7,6 +7,7 @@ import type {
   AssignmentNotePayload, MealBreakWaiverAttestation,
   AvailabilityState, EmployeeJobAssignment, EmployeeJobAssignmentPayload,
   EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
+  ScheduleAutomationRule, ScheduleAutomationPayload,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -234,6 +235,24 @@ export function generateFromWeekTemplate(weekTemplateId: string, startDate: stri
     compliance_warnings?: { check: string; severity: string; message: string; statute?: string | null }[]
   }>(
     `/employee-schedule/week-templates/${weekTemplateId}/generate`, { start_date: startDate, end_date: endDate },
+  )
+}
+
+// ---- Admin: Huume schedule automation ----
+
+export function fetchAutoSchedule(locationId: string) {
+  return api.get<{ rule: ScheduleAutomationRule | null }>(
+    `/employee-schedule/auto-schedules?location_id=${encodeURIComponent(locationId)}`,
+  )
+}
+
+export function saveAutoSchedule(locationId: string, payload: ScheduleAutomationPayload) {
+  return api.put<ScheduleAutomationRule>(`/employee-schedule/auto-schedules/${locationId}`, payload)
+}
+
+export function runAutoScheduleNow(locationId: string) {
+  return api.post<{ status: string; message: string; week_start: string; generation_run_id?: string }>(
+    `/employee-schedule/auto-schedules/${locationId}/run-now`, {},
   )
 }
 

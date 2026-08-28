@@ -38,6 +38,7 @@ RequestStatus = Literal[
 RequestDecision = Literal["approved", "denied"]
 AvailabilityState = Literal["unconfirmed", "always_available", "windows"]
 QualificationStatus = Literal["active", "training", "suspended"]
+ScheduleAutomationCadence = Literal["weekly", "once"]
 
 # ISO-ish weekday integers: 0=Sunday .. 6=Saturday.
 Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
@@ -482,3 +483,32 @@ class ScheduleVoiceTranscript(BaseModel):
     transcript: Optional[str] = None
     command: Literal["confirm", "cancel", "other"] = "other"
     model: Optional[str] = None
+
+
+class ScheduleAutomationRuleUpsert(BaseModel):
+    """One review-only Huume generation cadence for a store location."""
+
+    enabled: bool = True
+    cadence: ScheduleAutomationCadence = "weekly"
+    week_template_id: UUID
+    run_weekday: Optional[Weekday] = None
+    run_date: Optional[date] = None
+    run_time: time
+    target_weeks_ahead: Optional[int] = Field(None, ge=1, le=8)
+    target_week_start: Optional[date] = None
+
+    @model_validator(mode="after")
+    def _check_cadence_shape(self) -> "ScheduleAutomationRuleUpsert":
+        if self.cadence == "weekly":
+            if self.run_weekday is None or self.target_weeks_ahead is None:
+                raise ValueError("weekly schedules require run_weekday and target_weeks_ahead")
+            if self.run_date is not None or self.target_week_start is not None:
+                raise ValueError("weekly schedules cannot include one-time dates")
+        else:
+            if self.run_date is None or self.target_week_start is None:
+                raise ValueError("one-time schedules require run_date and target_week_start")
+            if self.run_weekday is not None or self.target_weeks_ahead is not None:
+                raise ValueError("one-time schedules cannot include weekly fields")
+            if self.target_week_start.weekday() != 6:
+                raise ValueError("target_week_start must be a Sunday")
+        return self

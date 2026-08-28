@@ -198,7 +198,6 @@ _SCHEDULED_TASKS = [
     ("schedule_warning_events", "app.workers.tasks.schedule_warning_events", "reconcile_schedule_warning_events_task"),
     ("schedule_daily_digest", "app.workers.tasks.schedule_daily_digest", "send_schedule_daily_digest"),
     ("schedule_request_notifications", "app.workers.tasks.schedule_request_notifications", "recover_schedule_request_notifications"),
-    ("schedule_auto_generation", "app.workers.tasks.schedule_auto_generation", "run_schedule_auto_generation"),
     ("inventory_expiry_sweep", "app.workers.tasks.inventory_waste_sweeps", "run_inventory_expiry_sweep"),
     ("inventory_waste_digest", "app.workers.tasks.inventory_waste_sweeps", "run_inventory_waste_digest"),
     ("inventory_par_sweep", "app.workers.tasks.inventory_waste_sweeps", "run_inventory_par_sweep"),

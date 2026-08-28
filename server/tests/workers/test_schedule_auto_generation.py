@@ -1,146 +1,118 @@
-"""Automatic weekly schedule proposal cadence and dispatch behavior."""
+"""Tenant-configured schedule automation timing and execution."""
 
-from datetime import date
-from unittest.mock import AsyncMock
+from datetime import date, datetime, time, timezone
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 
+from app.matcha.services.scheduling.schedule_automation import next_run_at, target_week_start
 from app.workers.tasks import schedule_auto_generation as worker
 
 
 class _Conn:
-    def __init__(self, locations, active=False):
-        self.locations = locations
-        self.active = active
+    def __init__(self, rule):
+        self.rule = rule
         self.closed = False
+        self.execute_calls = []
 
-    async def fetch(self, *_args):
-        return self.locations
+    async def fetchrow(self, *_args):
+        return self.rule
 
-    async def fetchval(self, *_args):
-        return self.active
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+        return "UPDATE 1"
 
     async def close(self):
         self.closed = True
 
 
-def test_upcoming_week_starts_on_next_sunday():
-    assert worker.upcoming_week_start(date(2026, 8, 24)) == date(2026, 8, 30)
-    assert worker.upcoming_week_start(date(2026, 8, 30)) == date(2026, 9, 6)
+def test_weekly_next_run_uses_location_wall_clock():
+    after = datetime(2026, 8, 24, 20, tzinfo=timezone.utc)  # Monday afternoon LA
+    result = next_run_at(
+        cadence="weekly",
+        timezone_name="America/Los_Angeles",
+        run_time=time(9),
+        run_weekday=4,  # Thursday in the product's Sunday=0 convention
+        after=after,
+    )
+    assert result == datetime(2026, 8, 27, 16, tzinfo=timezone.utc)
 
 
-def test_feature_gate_requires_schedule_and_huume_workspace():
-    enabled = {"employee_schedule": True, "huume": True, "matcha_work": True}
-    assert worker.supports_automatic_generation(enabled, None) is True
-    assert worker.supports_automatic_generation({**enabled, "huume": False}, None) is False
+def test_weekly_target_is_relative_to_the_scheduled_occurrence():
+    result = target_week_start(
+        cadence="weekly",
+        scheduled_for=datetime(2026, 8, 27, 16, tzinfo=timezone.utc),
+        timezone_name="America/Los_Angeles",
+        target_weeks_ahead=2,
+        one_time_week_start=None,
+    )
+    assert result == date(2026, 9, 6)
 
 
 @pytest.mark.asyncio
-async def test_worker_generates_one_review_only_proposal(monkeypatch):
-    company_id, location_id = uuid4(), uuid4()
-    conn = _Conn([{
+async def test_rule_generates_review_proposal_and_queues_only_its_next_occurrence(monkeypatch):
+    company_id, location_id, rule_id, template_id = uuid4(), uuid4(), uuid4(), uuid4()
+    scheduled_for = datetime(2026, 8, 27, 16, tzinfo=timezone.utc)
+    conn = _Conn({
+        "id": rule_id,
         "company_id": company_id,
         "location_id": location_id,
+        "week_template_id": template_id,
+        "enabled": True,
+        "cadence": "weekly",
+        "run_weekday": 4,
+        "run_time": time(9),
+        "target_weeks_ahead": 1,
+        "target_week_start": None,
+        "next_run_at": scheduled_for,
+        "schedule_version": 3,
         "timezone": "America/Los_Angeles",
-        "enabled_features": {
-            "employee_schedule": True, "huume": True, "matcha_work": True,
-        },
+        "enabled_features": {"employee_schedule": True, "huume": True, "matcha_work": True},
         "signup_source": None,
-    }])
+        "company_status": "approved",
+    })
     monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
-    monkeypatch.setattr(
-        worker, "scheduler_settings_row",
-        AsyncMock(return_value={"enabled": True, "max_per_cycle": 100}),
-    )
-    propose = AsyncMock(return_value={"status": "ready", "generation_run_id": str(uuid4())})
-    readiness = AsyncMock(return_value={"status": "ok", "ready": True})
-    monkeypatch.setattr(
-        "app.matcha.services.scheduling.week_builder.get_week_build_readiness", readiness,
-    )
-    monkeypatch.setattr(
-        "app.matcha.services.scheduling.week_builder.propose_week_draft", propose,
-    )
+    generation_id = uuid4()
+    generate = AsyncMock(return_value={
+        "status": "generated", "message": "Ready", "generation_run_id": str(generation_id),
+    })
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
+    enqueue = Mock()
+    monkeypatch.setattr(worker, "enqueue_schedule_automation", enqueue)
 
-    result = await worker._run()
+    result = await worker._run(str(rule_id), 3, scheduled_for.isoformat())
 
-    assert result["generated"] == 1
-    propose.assert_awaited_once()
-    kwargs = propose.await_args.kwargs
-    assert kwargs["origin"] == "automatic"
-    assert kwargs["actor_user_id"] is None
-    assert kwargs["thread_id"] is None
-    assert kwargs["source_mode"] == "auto"
-    assert kwargs["week_start"].weekday() == 6
-    readiness.assert_awaited_once()
+    assert result["status"] == "generated"
+    assert result["week_start"] == "2026-08-30"
+    generate.assert_awaited_once_with(
+        company_id=company_id,
+        location_id=location_id,
+        week_start=date(2026, 8, 30),
+        week_template_id=template_id,
+    )
+    enqueue.assert_called_once()
+    assert enqueue.call_args.args[:2] == (rule_id, 3)
     assert conn.closed is True
 
 
 @pytest.mark.asyncio
-async def test_worker_skips_scope_with_existing_proposal(monkeypatch):
-    conn = _Conn([{
-        "company_id": uuid4(),
-        "location_id": uuid4(),
-        "timezone": "UTC",
-        "enabled_features": {
-            "employee_schedule": True, "huume": True, "matcha_work": True,
-        },
-        "signup_source": None,
-    }], active=True)
-    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
-    monkeypatch.setattr(
-        worker, "scheduler_settings_row",
-        AsyncMock(return_value={"enabled": True, "max_per_cycle": 100}),
-    )
-    propose = AsyncMock()
-    readiness = AsyncMock()
-    monkeypatch.setattr(
-        "app.matcha.services.scheduling.week_builder.get_week_build_readiness", readiness,
-    )
-    monkeypatch.setattr(
-        "app.matcha.services.scheduling.week_builder.propose_week_draft", propose,
-    )
-
-    result = await worker._run()
-
-    assert result["already_present"] == 1
-    readiness.assert_not_awaited()
-    propose.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_worker_does_not_persist_proposal_until_week_is_ready(monkeypatch):
-    conn = _Conn([{
-        "company_id": uuid4(),
-        "location_id": uuid4(),
-        "timezone": "UTC",
-        "enabled_features": {
-            "employee_schedule": True, "huume": True, "matcha_work": True,
-        },
-        "signup_source": None,
-    }])
-    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
-    monkeypatch.setattr(
-        worker, "scheduler_settings_row",
-        AsyncMock(return_value={"enabled": True, "max_per_cycle": 100}),
-    )
-    readiness = AsyncMock(return_value={
-        "status": "ok",
-        "ready": False,
-        "blockers": ["No employee has confirmed scheduling availability."],
+async def test_stale_queued_version_is_a_noop(monkeypatch):
+    rule_id = uuid4()
+    scheduled_for = datetime(2026, 8, 27, 16, tzinfo=timezone.utc)
+    conn = _Conn({
+        "id": rule_id,
+        "enabled": True,
+        "schedule_version": 4,
+        "next_run_at": scheduled_for,
     })
-    propose = AsyncMock()
-    monkeypatch.setattr(
-        "app.matcha.services.scheduling.week_builder.get_week_build_readiness", readiness,
-    )
-    monkeypatch.setattr(
-        "app.matcha.services.scheduling.week_builder.propose_week_draft", propose,
-    )
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    generate = AsyncMock()
+    monkeypatch.setattr(worker, "generate_review_suggestion", generate)
 
-    result = await worker._run()
+    result = await worker._run(str(rule_id), 3, scheduled_for.isoformat())
 
-    assert result["not_ready"] == 1
-    assert result["generated"] == 0
-    readiness.assert_awaited_once()
-    propose.assert_not_awaited()
+    assert result == {"skipped": True, "reason": "stale_or_disabled_rule"}
+    generate.assert_not_awaited()
+    assert conn.execute_calls == []
     assert conn.closed is True
