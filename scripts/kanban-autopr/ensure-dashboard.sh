@@ -33,11 +33,25 @@ acquire_session_lock() {
 
 [ -x "$TMUX_BIN" ] || { echo "tmux is not executable: $TMUX_BIN" >&2; exit 1; }
 acquire_session_lock
-if [ "${1:-}" = --restart ] && "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; then
-    "$TMUX_BIN" kill-session -t "$SESSION"
-fi
+session_healthy() {
+    local pane_states pane_count
+    pane_states="$("$TMUX_BIN" list-panes -t "$SESSION" -F '#{pane_dead}' 2>/dev/null)" \
+        || return 1
+    pane_count="$(printf '%s\n' "$pane_states" | awk 'NF {count++} END {print count+0}')"
+    [ "$pane_count" = 4 ] || return 1
+    ! printf '%s\n' "$pane_states" | grep -q '^1$'
+}
+
 if "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; then
-    exit 0
+    if [ "${1:-}" = --restart ] || ! session_healthy; then
+        # A detached session can still contain dead/missing panes. Rebuild the
+        # observer session automatically instead of treating its name alone as
+        # proof that the dashboard started successfully.
+        "$TMUX_BIN" kill-session -t "$SESSION"
+    else
+        printf 'Dashboard already ready: tmux attach -t %s\n' "$SESSION"
+        exit 0
+    fi
 fi
 
 printf -v dashboard_cmd '%q' "$SCRIPT_DIR/dashboard.sh"
@@ -60,5 +74,11 @@ health_pane="$("$TMUX_BIN" split-window -v -p 50 -P -F '#{pane_id}' -t "$work_pa
 "$TMUX_BIN" select-pane -t "$health_pane" -T 'timer + runner health'
 "$TMUX_BIN" select-pane -t "$pr_pane" -T 'active PR + live diff'
 "$TMUX_BIN" select-pane -t "$main_pane"
+
+session_healthy || {
+    echo "dashboard was created but its four panes are not healthy" >&2
+    "$TMUX_BIN" kill-session -t "$SESSION" >/dev/null 2>&1 || true
+    exit 1
+}
 
 printf 'Dashboard ready: tmux attach -t %s\n' "$SESSION"

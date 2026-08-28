@@ -23,6 +23,9 @@ AUTOPR_LAUNCH_AGENT_PLIST="${AUTOPR_LAUNCH_AGENT_PLIST:-$HOME/Library/LaunchAgen
 AUTOPR_LAUNCHCTL_BIN="${AUTOPR_LAUNCHCTL_BIN:-/bin/launchctl}"
 AUTOPR_TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 AUTOPR_TMUX_SESSION="${AUTOPR_TMUX_SESSION:-matcha-autopr}"
+AUTOPR_GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
+AUTOPR_REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
+AUTOPR_WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
 # Callers that need a separate trust boundary (Kanban AutoPR, for example)
 # get their own container and named volumes without duplicating this launcher.
@@ -62,9 +65,9 @@ into a shell in the workspace — the one-command way in.
 Commands:
   build [--playwright]        Build the isolated workspace image.
   start                       Start workspace and the normal local dev services.
-  stop                        Stop the sandbox and disable AutoPR immediately.
+  stop [--force]              Stop everything; refuse active agent work unless forced.
   status                      Show sandbox service and AutoPR master-switch status.
-  autopr-ready                Exit 0 only when msandbox has enabled AutoPR.
+  autopr-ready                Exit 0 only when the complete AutoPR system is healthy.
   shell [cmd...]               Open a workspace shell (or run one command).
   exec <cmd> [args...]         Run one non-interactive command with exact argv.
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
@@ -122,13 +125,13 @@ start_services() {
     # explicitly enabled. Check both before and after `up` so `msandbox stop`
     # wins a concurrent start and no autonomous container survives the switch.
     if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then
-        require_autopr_master
+        require_autopr_system
     fi
     if [ "${AGENT_SANDBOX_SKIP_HOST_SERVICES:-0}" != 1 ]; then
         ensure_host_dev_services
     fi
     "${COMPOSE[@]}" up --detach workspace
-    if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ] && ! autopr_master_ready; then
+    if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ] && ! autopr_system_ready; then
         "${COMPOSE[@]}" stop workspace >/dev/null 2>&1 || true
         echo "AutoPR refused to start because the primary msandbox was switched off." >&2
         return 1
@@ -146,9 +149,133 @@ autopr_master_ready() {
     [ -f "$AUTOPR_ENABLE_FILE" ] && primary_workspace_running
 }
 
+autopr_dashboard_healthy() {
+    local pane_states pane_count
+    [ -x "$AUTOPR_TMUX_BIN" ] || return 1
+    "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null || return 1
+    pane_states="$("$AUTOPR_TMUX_BIN" list-panes -t "$AUTOPR_TMUX_SESSION" \
+        -F '#{pane_dead}' 2>/dev/null)" || return 1
+    pane_count="$(printf '%s\n' "$pane_states" | awk 'NF {count++} END {print count+0}')"
+    [ "$pane_count" = 4 ] && ! printf '%s\n' "$pane_states" | grep -q '^1$'
+}
+
+autopr_timer_loaded() {
+    local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
+    [ -x "$AUTOPR_LAUNCHCTL_BIN" ] \
+        && "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$label" >/dev/null 2>&1
+}
+
+autopr_system_ready() {
+    autopr_master_ready && autopr_timer_loaded && autopr_dashboard_healthy
+}
+
+container_has_agent_process() {
+    local project="$1" container_id process_rows
+    container_id="$(docker compose --project-name "$project" --file "$COMPOSE_FILE" \
+        ps --quiet workspace 2>/dev/null)" || return 1
+    [ -n "$container_id" ] || return 1
+    process_rows="$(docker exec "$container_id" ps -eo comm=,args= 2>/dev/null)" || return 1
+    printf '%s\n' "$process_rows" | awk '
+      $1 ~ /^(codex|opencode|claude)$/ {found=1}
+      $0 ~ /\/(codex|opencode|claude)([[:space:]]|$)/ {found=1}
+      END {exit !found}
+    '
+}
+
+detect_agentic_activity() {
+    AGENTIC_ACTIVITY_STATE=idle
+    AGENTIC_ACTIVITY_DETAIL="no Codex, OpenCode, Claude, or queued/running AutoPR work"
+    if [ "${AGENT_SANDBOX_SKIP_ACTIVITY_CHECK:-0}" = 1 ]; then
+        return 0
+    fi
+
+    local found_local=0 runs=""
+    if container_has_agent_process "$PRIMARY_SANDBOX_PROJECT_NAME" \
+        || container_has_agent_process "$AUTOPR_SANDBOX_PROJECT_NAME"; then
+        found_local=1
+    fi
+
+    if [ -x "$AUTOPR_GH_BIN" ] && command -v jq >/dev/null \
+        && runs="$("$AUTOPR_GH_BIN" run list --repo "$AUTOPR_REPO" \
+            --workflow "$AUTOPR_WORKFLOW" --branch main --limit 20 \
+            --json databaseId,status,url 2>/dev/null)"; then
+        if printf '%s' "$runs" | jq -e \
+            'any(.[]; .status | IN("queued", "in_progress", "requested", "waiting", "pending"))' \
+            >/dev/null; then
+            AGENTIC_ACTIVITY_STATE=active
+            AGENTIC_ACTIVITY_DETAIL="an AutoPR workflow is queued or running"
+            return 0
+        fi
+    else
+        if [ "$found_local" = 1 ]; then
+            AGENTIC_ACTIVITY_STATE=active
+            AGENTIC_ACTIVITY_DETAIL="a local coding-agent process is running"
+        else
+            AGENTIC_ACTIVITY_STATE=unknown
+            AGENTIC_ACTIVITY_DETAIL="GitHub activity could not be verified"
+        fi
+        return 0
+    fi
+
+    if [ "$found_local" = 1 ]; then
+        AGENTIC_ACTIVITY_STATE=active
+        AGENTIC_ACTIVITY_DETAIL="a local coding-agent process is running"
+    fi
+}
+
+print_system_status() {
+    local heading="${1:-MSANDBOX SYSTEM STATUS}"
+    detect_agentic_activity
+    printf '\n%s\n' "$heading"
+    if primary_workspace_running; then
+        printf '  Primary sandbox: RUNNING\n'
+    else
+        printf '  Primary sandbox: STOPPED\n'
+    fi
+    if autopr_master_ready; then
+        printf '  AutoPR master:   ON\n'
+    else
+        printf '  AutoPR master:   OFF\n'
+    fi
+    if autopr_timer_loaded; then
+        printf '  AutoPR timer:    LOADED\n'
+    else
+        printf '  AutoPR timer:    STOPPED\n'
+    fi
+    if autopr_dashboard_healthy; then
+        printf '  Dashboard:       READY (4 live panes)\n'
+    elif "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null; then
+        printf '  Dashboard:       BROKEN (dead or missing pane)\n'
+    else
+        printf '  Dashboard:       STOPPED\n'
+    fi
+    printf '  Agentic work:    %s — %s\n\n' \
+        "$(printf '%s' "$AGENTIC_ACTIVITY_STATE" | tr '[:lower:]' '[:upper:]')" \
+        "$AGENTIC_ACTIVITY_DETAIL"
+}
+
+guard_interactive_entry() {
+    local operation="$1"
+    print_system_status "MSANDBOX PREFLIGHT"
+    if [ "$AGENTIC_ACTIVITY_STATE" = active ] \
+        || [ "$AGENTIC_ACTIVITY_STATE" = unknown ]; then
+        echo "Refusing to $operation: $AGENTIC_ACTIVITY_DETAIL." >&2
+        echo "Existing work and system state were left untouched." >&2
+        return 1
+    fi
+    return 0
+}
+
 require_autopr_master() {
     autopr_master_ready || {
         echo "AutoPR is off. Start the primary sandbox with: msandbox start" >&2
+        return 1
+    }
+}
+
+require_autopr_system() {
+    autopr_system_ready || {
+        echo "AutoPR is not fully healthy; refusing autonomous model startup." >&2
         return 1
     }
 }
@@ -162,21 +289,46 @@ enable_autopr_control_plane() {
 
     local dashboard_ensure="$AUTOPR_INSTALL_ROOT/ensure-dashboard.sh"
     [ -x "$dashboard_ensure" ] || dashboard_ensure="$PROJECT_ROOT/scripts/kanban-autopr/ensure-dashboard.sh"
-    if [ -x "$dashboard_ensure" ]; then
-        "$dashboard_ensure" >/dev/null 2>&1 \
-            || echo "[WARN] AutoPR dashboard could not be started." >&2
+    if [ ! -x "$dashboard_ensure" ]; then
+        echo "AutoPR startup failed: dashboard helper is not installed." >&2
+        disable_autopr_control_plane
+        return 1
+    fi
+    if ! "$dashboard_ensure" >/dev/null; then
+        echo "AutoPR startup failed: dashboard creation failed." >&2
+        disable_autopr_control_plane
+        return 1
+    fi
+    if ! autopr_dashboard_healthy; then
+        echo "AutoPR startup failed: dashboard does not have four live panes." >&2
+        disable_autopr_control_plane
+        return 1
     fi
 
     local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
-    if [ -x "$AUTOPR_LAUNCHCTL_BIN" ] && [ -f "$AUTOPR_LAUNCH_AGENT_PLIST" ]; then
-        if ! "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$label" >/dev/null 2>&1; then
-            "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_LAUNCH_AGENT_PLIST"
-        fi
-        "$AUTOPR_LAUNCHCTL_BIN" kickstart -k "$domain/$label"
-        echo "AutoPR enabled; dashboard: tmux attach -t $AUTOPR_TMUX_SESSION"
-    else
-        echo "[WARN] AutoPR timer is not installed; run scripts/kanban-autopr/install-launch-agent.sh." >&2
+    if [ ! -x "$AUTOPR_LAUNCHCTL_BIN" ] || [ ! -f "$AUTOPR_LAUNCH_AGENT_PLIST" ]; then
+        echo "AutoPR startup failed: timer is not installed; run scripts/kanban-autopr/install-launch-agent.sh." >&2
+        disable_autopr_control_plane
+        return 1
     fi
+    if ! "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$label" >/dev/null 2>&1 \
+        && ! "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_LAUNCH_AGENT_PLIST"; then
+        echo "AutoPR startup failed: LaunchAgent could not be loaded." >&2
+        disable_autopr_control_plane
+        return 1
+    fi
+    if ! "$AUTOPR_LAUNCHCTL_BIN" kickstart -k "$domain/$label"; then
+        echo "AutoPR startup failed: LaunchAgent could not be started." >&2
+        disable_autopr_control_plane
+        return 1
+    fi
+    if ! autopr_timer_loaded; then
+        echo "AutoPR startup failed: LaunchAgent did not remain loaded." >&2
+        disable_autopr_control_plane
+        return 1
+    fi
+
+    echo "AutoPR enabled; dashboard: tmux attach -t $AUTOPR_TMUX_SESSION"
 }
 
 disable_autopr_control_plane() {
@@ -200,8 +352,19 @@ stop_autopr_container() {
 }
 
 start_primary_and_enable_autopr() {
+    local primary_was_running=0
+    primary_workspace_running && primary_was_running=1
     start_services
-    enable_autopr_control_plane
+    if ! enable_autopr_control_plane; then
+        if [ "$primary_was_running" = 0 ]; then
+            "${PRIMARY_COMPOSE[@]}" stop workspace >/dev/null 2>&1 || true
+            echo "MSANDBOX STARTUP FAILED — all newly started systems are shut down." >&2
+        else
+            echo "MSANDBOX STARTUP FAILED — the pre-existing primary sandbox was left untouched." >&2
+        fi
+        return 1
+    fi
+    print_system_status "MSANDBOX STARTED"
 }
 
 exec_workspace() {
@@ -327,11 +490,17 @@ case "$command_name" in
         ;;
     run)
         require_docker
-        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
+        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then
+            start_services
+        else
+            guard_interactive_entry "start another coding agent" || exit 3
+            start_primary_and_enable_autopr
+        fi
         run_agent "$@"
         ;;
     codex|claude|opencode)
         require_docker
+        guard_interactive_entry "start another coding agent" || exit 3
         start_primary_and_enable_autopr
         run_agent "$command_name" "$@"
         ;;
@@ -346,6 +515,7 @@ case "$command_name" in
         ;;
     shell)
         require_docker
+        guard_interactive_entry "open another sandbox shell" || exit 3
         start_primary_and_enable_autopr
         if [[ $# -gt 0 ]]; then
             # Not a login shell: Debian's /etc/profile resets PATH for login
@@ -374,16 +544,13 @@ case "$command_name" in
             printf 'workspace container port %s -> ' "$container_port"
             "${COMPOSE[@]}" port workspace "$container_port" 2>/dev/null || echo "not published"
         done
-        echo
-        if autopr_master_ready; then
-            echo "AutoPR master switch: ON"
-        elif [ -f "$AUTOPR_ENABLE_FILE" ]; then
-            echo "AutoPR master switch: BLOCKED (primary workspace is not running)"
-        else
-            echo "AutoPR master switch: OFF"
-        fi
+        print_system_status "MSANDBOX CURRENT STATE"
         ;;
     autopr-ready)
+        require_docker
+        autopr_system_ready
+        ;;
+    autopr-master-ready)
         require_docker
         autopr_master_ready
         ;;
@@ -397,18 +564,34 @@ case "$command_name" in
             require_docker
             "${COMPOSE[@]}" stop workspace
         else
+            force_stop=0
+            if [ "${1:-}" = --force ]; then
+                force_stop=1
+                shift
+            fi
+            [ "$#" = 0 ] || { echo "usage: msandbox stop [--force]" >&2; exit 2; }
+            detect_agentic_activity
+            if [ "$force_stop" = 0 ] \
+                && { [ "$AGENTIC_ACTIVITY_STATE" = active ] \
+                    || [ "$AGENTIC_ACTIVITY_STATE" = unknown ]; }; then
+                print_system_status "MSANDBOX SHUTDOWN BLOCKED"
+                echo "Refusing to stop: $AGENTIC_ACTIVITY_DETAIL." >&2
+                echo "Wait for the work to finish, or explicitly override with: msandbox stop --force" >&2
+                exit 3
+            fi
             disable_autopr_control_plane
             if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
                 stop_autopr_container
                 "${PRIMARY_COMPOSE[@]}" stop workspace
             fi
-            echo "AutoPR disabled and msandbox stopped."
+            print_system_status "MSANDBOX STOPPED"
         fi
         ;;
     "")
         # Bare `msandbox` — the one-command path: build (no-op if cached),
         # start services, drop into a shell ready to run an agent.
         require_docker
+        guard_interactive_entry "open another sandbox shell" || exit 3
         "${COMPOSE[@]}" build workspace
         start_primary_and_enable_autopr
         exec_workspace bash

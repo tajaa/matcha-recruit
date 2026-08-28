@@ -23,6 +23,19 @@ if [ "$1" = new-session ]; then
   mkdir "$AUTOPR_TEST_SESSION" 2>/dev/null || { echo "duplicate session" >&2; exit 1; }
   exit 0
 fi
+if [ "$1" = list-panes ]; then
+  if [ -e "${AUTOPR_TEST_BROKEN_SESSION:-/nonexistent}" ]; then
+    printf '%s\n' 0 1 0 0
+  else
+    printf '%s\n' 0 0 0 0
+  fi
+  exit 0
+fi
+if [ "$1" = kill-session ]; then
+  rm -rf "$AUTOPR_TEST_SESSION"
+  [ -z "${AUTOPR_TEST_BROKEN_SESSION:-}" ] || rm -f "$AUTOPR_TEST_BROKEN_SESSION"
+  exit 0
+fi
 if [ "$1" = display-message ]; then printf '%%0\n'; exit 0; fi
 if [ "$1" = split-window ]; then
   count=0
@@ -51,6 +64,17 @@ check "tmux panes receive operator-facing titles" \
     && grep -q 'live OpenCode / OpenAI work' "$TMP_DIR/tmux.log" \
     && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
     && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+
+: > "$TMP_DIR/broken-session"
+AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
+  AUTOPR_TEST_SESSION="$TMP_DIR/session" AUTOPR_TEST_SPLITS="$TMP_DIR/splits" \
+  AUTOPR_TEST_BROKEN_SESSION="$TMP_DIR/broken-session" \
+  "$AUTOPR_DIR/ensure-dashboard.sh" >/dev/null
+check "dashboard helper replaces an existing session with a dead pane" \
+  $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 2 ] \
+    && grep -q '^kill-session ' "$TMP_DIR/tmux.log" \
+    && [ ! -e "$TMP_DIR/broken-session" ] \
+    && echo 0 || echo 1)
 
 rm -rf "$TMP_DIR/session" "$TMP_DIR/ensure.lock"
 : > "$TMP_DIR/tmux.log"

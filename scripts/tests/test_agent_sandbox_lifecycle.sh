@@ -21,6 +21,7 @@ cat > "$TMP_DIR/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -eu
 [ "$1" != info ] || exit 0
+[ "$1" != exec ] || exit 1
 [ "$1" = compose ] || exit 1
 shift
 project=""
@@ -48,6 +49,16 @@ case "${1:-}" in
 esac
 EOF
 
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+[ "$1 $2" = "run list" ] || exit 1
+if [ "${AUTOPR_TEST_ACTIVE:-0}" = 1 ]; then
+    printf '%s\n' '[{"databaseId":9,"status":"in_progress","url":"https://example.invalid/run/9"}]'
+else
+    printf '%s\n' '[]'
+fi
+EOF
+
 cat > "$TMP_DIR/bin/launchctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AUTOPR_TEST_ROOT/launchctl.log"
@@ -62,6 +73,10 @@ cat > "$TMP_DIR/bin/tmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
     has-session) [ -f "$AUTOPR_TEST_ROOT/tmux.session" ] ;;
+    list-panes)
+        if [ -f "$AUTOPR_TEST_ROOT/dashboard.broken" ]; then printf '%s\n' 0 1 0 0;
+        else printf '%s\n' 0 0 0 0; fi
+        ;;
     kill-session) rm -f "$AUTOPR_TEST_ROOT/tmux.session" ;;
 esac
 EOF
@@ -71,13 +86,13 @@ cat > "$TMP_DIR/runtime/ensure-dashboard.sh" <<'EOF'
 : > "$AUTOPR_TEST_ROOT/tmux.session"
 EOF
 chmod +x "$TMP_DIR/bin/docker" "$TMP_DIR/bin/launchctl" "$TMP_DIR/bin/tmux" \
-    "$TMP_DIR/runtime/ensure-dashboard.sh"
+    "$TMP_DIR/bin/gh" "$TMP_DIR/runtime/ensure-dashboard.sh"
 : > "$TMP_DIR/launch-agent.plist"
 : > "$TMP_DIR/auth.json"
 
 run_msandbox() {
     env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
-        AGENT_SANDBOX_SKIP_HOST_SERVICES=1 \
+        AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AUTOPR_GH_BIN="$TMP_DIR/bin/gh" \
         AUTOPR_STATE_DIR="$TMP_DIR/state" \
         AUTOPR_DISPATCH_INSTALL_ROOT="$TMP_DIR/runtime" \
         AUTOPR_LAUNCH_AGENT_PLIST="$TMP_DIR/launch-agent.plist" \
@@ -101,14 +116,35 @@ check "autopr-ready succeeds only while the master switch is on" $?
 env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
     AUTOPR_STATE_DIR="$TMP_DIR/state" \
+    AUTOPR_LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" AUTOPR_TMUX_BIN="$TMP_DIR/bin/tmux" \
     SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
     SANDBOX_WORKSPACE_DIR="$TMP_DIR/workspace" SANDBOX_AWS_DIR="$TMP_DIR/empty-aws" \
     "$MSANDBOX" exec true >/dev/null
 check "dedicated AutoPR lane starts while the master switch is on" \
     $([ -f "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] && echo 0 || echo 1)
 
-run_msandbox stop >/dev/null
-check "msandbox stop disables timer/dashboard and stops both sandboxes" \
+set +e
+AUTOPR_TEST_ACTIVE=1 run_msandbox >/dev/null 2>&1
+active_entry_rc=$?
+set -e
+check "bare msandbox refuses a second shell during active agent work" \
+    $([ "$active_entry_rc" != 0 ] \
+      && [ -f "$TMP_DIR/state/autopr-enabled" ] \
+      && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && echo 0 || echo 1)
+
+set +e
+AUTOPR_TEST_ACTIVE=1 run_msandbox stop >/dev/null 2>&1
+active_stop_rc=$?
+set -e
+check "msandbox stop refuses to interrupt active AutoPR work" \
+    $([ "$active_stop_rc" != 0 ] \
+      && [ -f "$TMP_DIR/state/autopr-enabled" ] \
+      && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && echo 0 || echo 1)
+
+AUTOPR_TEST_ACTIVE=1 run_msandbox stop --force >/dev/null
+check "forced stop disables timer/dashboard and stops both sandboxes" \
     $([ ! -e "$TMP_DIR/state/autopr-enabled" ] \
       && [ ! -e "$TMP_DIR/launchagent.loaded" ] \
       && [ ! -e "$TMP_DIR/tmux.session" ] \
@@ -120,6 +156,7 @@ set +e
 env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
     AUTOPR_STATE_DIR="$TMP_DIR/state" \
+    AUTOPR_LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" AUTOPR_TMUX_BIN="$TMP_DIR/bin/tmux" \
     SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
     SANDBOX_WORKSPACE_DIR="$TMP_DIR/workspace" SANDBOX_AWS_DIR="$TMP_DIR/empty-aws" \
     "$MSANDBOX" exec true >/dev/null 2>&1
@@ -128,6 +165,18 @@ set -e
 check "dedicated AutoPR lane fails closed after msandbox stop" \
     $([ "$off_rc" != 0 ] \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
+      && echo 0 || echo 1)
+
+: > "$TMP_DIR/dashboard.broken"
+set +e
+run_msandbox start >/dev/null 2>&1
+broken_start_rc=$?
+set -e
+check "partial startup rolls back instead of leaving an enabled system" \
+    $([ "$broken_start_rc" != 0 ] \
+      && [ ! -e "$TMP_DIR/state/autopr-enabled" ] \
+      && [ ! -e "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && [ ! -e "$TMP_DIR/tmux.session" ] \
       && echo 0 || echo 1)
 
 echo

@@ -78,17 +78,21 @@ changes.
    alone leaves autonomous work OFF. Its JSONL log is
    `~/Library/Logs/matcha-kanban-autopr-dispatch.log`.
 7. Run `msandbox` or `msandbox start`. This starts the primary sandbox, enables and kicks
-   the timer, and creates the `matcha-autopr` host tmux dashboard. Open it with
+   the timer, creates the `matcha-autopr` host tmux dashboard, and prints a mandatory
+   health/activity summary. Open it with
    `tmux attach -t matcha-autopr`; detach with `Ctrl-b d`. `msandbox stop` removes the
-   authorization gate before unloading the timer and stopping both sandbox containers.
-   Do not add a GitHub cron alongside it.
+   authorization gate before unloading the timer and stopping both sandbox containers,
+   but refuses while an agent or AutoPR workflow is active. `msandbox stop --force` is
+   the explicit interruption override. Do not add a GitHub cron alongside it.
 
 ## Local tmux dashboard
 
 While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
 `matcha-autopr` session on its next five-minute tick if the session is missing. Detaching
-the dashboard does not stop work; `msandbox stop` does. The window uses a 2x2 grid:
-dashboard/work above PR/health.
+the dashboard does not stop work; `msandbox stop` does. A session name alone is not
+considered healthy: if any of the four panes is dead or missing, the helper replaces the
+whole observer session. Autonomous model startup fails closed until all four panes are
+live. The window uses a 2x2 grid: dashboard/work above PR/health.
 
 - **24h queue + PR dashboard** — active workflow, the exact card `select.sh` would choose
   next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs

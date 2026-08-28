@@ -34,8 +34,11 @@ chmod +x "$TMP_DIR/gh"
 
 cat > "$TMP_DIR/msandbox" <<'EOF'
 #!/usr/bin/env bash
-[ "$1" = autopr-ready ] || exit 1
-[ "${AUTOPR_TEST_SANDBOX_OFF:-0}" = 0 ]
+case "$1" in
+  autopr-master-ready) [ "${AUTOPR_TEST_SANDBOX_OFF:-0}" = 0 ] ;;
+  autopr-ready) [ "${AUTOPR_TEST_SYSTEM_UNHEALTHY:-0}" = 0 ] ;;
+  *) exit 1 ;;
+esac
 EOF
 chmod +x "$TMP_DIR/msandbox"
 
@@ -50,6 +53,12 @@ run_dispatcher() {
 AUTOPR_TEST_SANDBOX_OFF=1 run_dispatcher
 check "msandbox-off master switch skips before dispatch" \
   $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
+    && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+
+AUTOPR_TEST_SYSTEM_UNHEALTHY=1 run_dispatcher || unhealthy_rc=$?
+check "unhealthy dashboard/timer fails closed before dispatch" \
+  $([ "${unhealthy_rc:-0}" != 0 ] \
+    && grep -q 'autopr-system-unhealthy' "$TMP_DIR/log.jsonl" \
     && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
 AUTOPR_TEST_RUNS='[]' run_dispatcher
