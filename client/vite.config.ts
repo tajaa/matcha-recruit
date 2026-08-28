@@ -25,6 +25,10 @@ export default defineConfig({
     // react/react-dom manualChunks rule.
   },
   server: {
+    // Docker Desktop forwards the IPv4 loopback listener to containers via
+    // host.docker.internal. Allow only that additional Host header so an
+    // isolated agent can test the host-run dev stack.
+    allowedHosts: ['host.docker.internal'],
     port: 5174,
     proxy: {
       // Tell-Us is a SEPARATE Vite app (client/tellus, base '/tellus/') with

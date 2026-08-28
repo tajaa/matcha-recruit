@@ -18,6 +18,7 @@ export default defineConfig({
     // Explicit IPv4 host: 'localhost' can bind ::1 only (macOS), which the
     // main app's 127.0.0.1 proxy target can't reach (ECONNREFUSED).
     host: '127.0.0.1',
+    allowedHosts: ['host.docker.internal'],
     port: 5191,
     proxy: {
       '/api': { target: backendTarget, changeOrigin: true },

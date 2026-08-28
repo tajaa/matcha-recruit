@@ -29,6 +29,13 @@ services:
       # normal local dev services without needing sandbox-specific knowledge.
       DATABASE_URL: postgresql://matcha:matcha_dev@host.docker.internal:${HOST_DB_PORT:-5432}/matcha
       REDIS_URL: redis://host.docker.internal:${HOST_REDIS_PORT:-6380}/0
+      # The host-run dev stack keeps the canonical localhost ports. These
+      # explicit gateway URLs let browser/tests inside the container exercise
+      # that same stack while preserving Docker's network namespace.
+      HOST_DEV_BACKEND_URL: http://host.docker.internal:${HOST_DEV_BACKEND_PORT:-8001}
+      HOST_DEV_FRONTEND_URL: http://host.docker.internal:${HOST_DEV_FRONTEND_PORT:-5174}
+      HOST_DEV_TELLUS_URL: http://host.docker.internal:${HOST_DEV_TELLUS_PORT:-5191}
+      HOST_DEV_OCEANLAB_URL: http://host.docker.internal:${HOST_DEV_OCEANLAB_PORT:-5201}
       BACKEND_PORT: ${BACKEND_PORT:-8001}
       FRONTEND_PORT: ${FRONTEND_PORT:-5174}
       TELLUS_PORT: ${TELLUS_PORT:-5191}
@@ -50,11 +57,14 @@ services:
       - sandbox_tellus_node_modules:/workspace/client/tellus/node_modules
       - sandbox_oceanlab_node_modules:/workspace/client/oceanlab/node_modules
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8001}:${BACKEND_PORT:-8001}"
-      - "127.0.0.1:${FRONTEND_PORT:-5174}:${FRONTEND_PORT:-5174}"
-      - "127.0.0.1:${TELLUS_PORT:-5191}:${TELLUS_PORT:-5191}"
-      - "127.0.0.1:${OCEANLAB_PORT:-5201}:${OCEANLAB_PORT:-5201}"
-      - "127.0.0.1:${CHAT_PORT:-8080}:${CHAT_PORT:-8080}"
+      # Keep the host's canonical dev-remote.sh ports free. Processes inside
+      # this container still use the normal ports; only their Mac-facing
+      # publications move into a dedicated +10000 sandbox range.
+      - "127.0.0.1:${SANDBOX_HOST_BACKEND_PORT:-18001}:${BACKEND_PORT:-8001}"
+      - "127.0.0.1:${SANDBOX_HOST_FRONTEND_PORT:-15174}:${FRONTEND_PORT:-5174}"
+      - "127.0.0.1:${SANDBOX_HOST_TELLUS_PORT:-15191}:${TELLUS_PORT:-5191}"
+      - "127.0.0.1:${SANDBOX_HOST_OCEANLAB_PORT:-15201}:${OCEANLAB_PORT:-5201}"
+      - "127.0.0.1:${SANDBOX_HOST_CHAT_PORT:-18080}:${CHAT_PORT:-8080}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=1g
