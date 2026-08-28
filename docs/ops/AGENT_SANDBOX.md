@@ -11,7 +11,8 @@ Quickstart, from anywhere (`~/.local/bin/msandbox` is a symlink to
 generic devcontainer launcher for other projects):
 
 ```bash
-msandbox                # one command: build (if needed) + start + shell in
+msandbox                # start sandbox + AutoPR master switch, then open shell
+msandbox stop           # disable AutoPR first, then stop both sandbox lanes
 ```
 From that shell: `codex`, `claude`, or `opencode` are already on `PATH` and
 already logged in once you've run `login` (below) — or drive the rest from
@@ -92,7 +93,8 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | Command | What it does |
 |---|---|
 | `build [--playwright]` | Build the workspace image |
-| `start` / `stop` / `status` | Workspace lifecycle; `start` also ensures the normal local dev DB/Redis are running |
+| `start` / `stop` / `status` | Master lifecycle: start enables AutoPR; stop disables dispatch/model work before stopping both sandbox containers |
+| `autopr-ready` | Silent readiness probe used by the dispatcher/workflow; succeeds only when the ON marker and primary workspace are both present |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
 | `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |
 | `dev [args]` | `AGENT_SANDBOX=1 ./scripts/dev-remote.sh` inside the container |
@@ -132,6 +134,16 @@ out the report/decision and applies one binary patch to the task branch; the
 normal verifier and publisher remain outside the container. The bridge rejects
 more than 25 changed files, patches larger than 5 MB, oversized reports or
 decisions, and any symlink/submodule change before applying the patch.
+
+The primary `msandbox` command is the authoritative AutoPR master switch.
+`msandbox` or `msandbox start` starts the normal workspace container, writes a
+private enable marker, loads/kicks the five-minute LaunchAgent, and creates the
+host tmux dashboard. `msandbox stop` removes that marker first, unloads the
+timer, closes the dashboard, and stops both the normal and dedicated AutoPR
+workspace containers. The dispatcher, GitHub workflow, and dedicated model
+launcher each independently require both the marker and a running primary
+workspace, so a stale marker after reboot cannot authorize work and a queued
+workflow cannot start a model after the switch is turned off.
 
 No second OpenCode login is required for the Kanban worker. Before each run,
 the trusted bridge copies the Mac's existing `~/.local/share/opencode/auth.json`

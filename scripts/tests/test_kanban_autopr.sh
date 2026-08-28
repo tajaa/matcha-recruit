@@ -52,6 +52,19 @@ check "workflow forces OpenCode through the dedicated AutoPR msandbox" \
       && grep -qF 'run-opencode-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
       && echo 0 || echo 1)
 
+check "workflow and dispatcher require the msandbox master switch" \
+    $(grep -qF './scripts/agent-sandbox.sh autopr-ready' "$workflow" \
+      && grep -qF '"$MSANDBOX_BIN" autopr-ready' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && grep -qF 'log_event skip msandbox-off' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && echo 0 || echo 1)
+
+check "msandbox start and stop own the AutoPR lifecycle" \
+    $(grep -qF 'enable_autopr_control_plane' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && grep -qF 'disable_autopr_control_plane' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && grep -qF 'stop_autopr_container' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && grep -qF 'AutoPR disabled and msandbox stopped.' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && echo 0 || echo 1)
+
 check "msandbox mounts only a staged read-only AutoPR OpenCode auth file" \
     $(grep -qF 'SANDBOX_OPENCODE_AUTH_FILE' "$REPO_ROOT/scripts/agent-sandbox.sh" \
       && grep -qF 'docker-compose.autopr-sandbox.yml' "$REPO_ROOT/scripts/agent-sandbox.sh" \

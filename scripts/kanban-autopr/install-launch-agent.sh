@@ -13,6 +13,7 @@ PLIST_TEMPLATE="$SCRIPT_DIR/launchd/$LABEL.plist.in"
 DISPATCHER_DESTINATION="$INSTALL_ROOT/dispatch-if-idle.sh"
 PLIST_DESTINATION="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
+ENABLE_FILE="${AUTOPR_ENABLE_FILE:-$USER_HOME/.local/state/matcha-agent-sandbox/autopr-enabled}"
 
 validate_dependencies() {
     [ -x /opt/homebrew/bin/gh ] || { echo "missing /opt/homebrew/bin/gh" >&2; exit 1; }
@@ -62,12 +63,21 @@ main() {
     install_runtime
     render_launch_agent
     stop_launch_agent
-    # Recreate this one named observer session so an idempotent reinstall also
-    # picks up newer pane scripts copied above.
-    "$INSTALL_ROOT/ensure-dashboard.sh" --restart
-    start_launch_agent
-    echo "Installed $LABEL; logs: $USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log"
-    echo "Open dashboard: tmux attach -t matcha-autopr"
+    if [ -f "$ENABLE_FILE" ] && "$USER_HOME/.local/bin/msandbox" autopr-ready >/dev/null 2>&1; then
+        # Preserve an already-on master switch across an idempotent reinstall
+        # while ensuring the tmux panes use the freshly copied scripts.
+        "$INSTALL_ROOT/ensure-dashboard.sh" --restart
+        start_launch_agent
+        echo "Installed and enabled $LABEL; logs: $USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log"
+        echo "Open dashboard: tmux attach -t matcha-autopr"
+    else
+        # Installation is not authorization to start autonomous work. The
+        # primary `msandbox start` command owns that transition.
+        if "$TMUX_BIN" has-session -t matcha-autopr 2>/dev/null; then
+            "$TMUX_BIN" kill-session -t matcha-autopr
+        fi
+        echo "Installed $LABEL in the OFF state. Run: msandbox start"
+    fi
 }
 
 main "$@"

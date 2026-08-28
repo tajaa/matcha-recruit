@@ -14,6 +14,16 @@ done
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.sandbox.yml"
 AUTOPR_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.autopr-sandbox.yml"
+PRIMARY_SANDBOX_PROJECT_NAME="${AGENT_SANDBOX_PRIMARY_PROJECT_NAME:-matcha-agent-sandbox}"
+AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+AUTOPR_STATE_DIR="${AUTOPR_STATE_DIR:-$HOME/.local/state/matcha-agent-sandbox}"
+AUTOPR_ENABLE_FILE="${AUTOPR_ENABLE_FILE:-$AUTOPR_STATE_DIR/autopr-enabled}"
+AUTOPR_INSTALL_ROOT="${AUTOPR_DISPATCH_INSTALL_ROOT:-$HOME/.local/share/matcha-kanban-autopr}"
+AUTOPR_LAUNCH_AGENT_PLIST="${AUTOPR_LAUNCH_AGENT_PLIST:-$HOME/Library/LaunchAgents/com.matcha.kanban-autopr-dispatch.plist}"
+AUTOPR_LAUNCHCTL_BIN="${AUTOPR_LAUNCHCTL_BIN:-/bin/launchctl}"
+AUTOPR_TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
+AUTOPR_TMUX_SESSION="${AUTOPR_TMUX_SESSION:-matcha-autopr}"
+PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
 # Callers that need a separate trust boundary (Kanban AutoPR, for example)
 # get their own container and named volumes without duplicating this launcher.
 # The workspace and AWS mounts are explicit inputs so a trusted host wrapper
@@ -52,8 +62,9 @@ into a shell in the workspace — the one-command way in.
 Commands:
   build [--playwright]        Build the isolated workspace image.
   start                       Start workspace and the normal local dev services.
-  stop                        Stop sandbox services without deleting their volumes.
-  status                      Show sandbox service status and published localhost ports.
+  stop                        Stop the sandbox and disable AutoPR immediately.
+  status                      Show sandbox service and AutoPR master-switch status.
+  autopr-ready                Exit 0 only when msandbox has enabled AutoPR.
   shell [cmd...]               Open a workspace shell (or run one command).
   exec <cmd> [args...]         Run one non-interactive command with exact argv.
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
@@ -107,8 +118,90 @@ ensure_host_dev_services() {
 }
 
 start_services() {
-    ensure_host_dev_services
+    # The dedicated AutoPR lane may start only while the primary msandbox is
+    # explicitly enabled. Check both before and after `up` so `msandbox stop`
+    # wins a concurrent start and no autonomous container survives the switch.
+    if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then
+        require_autopr_master
+    fi
+    if [ "${AGENT_SANDBOX_SKIP_HOST_SERVICES:-0}" != 1 ]; then
+        ensure_host_dev_services
+    fi
     "${COMPOSE[@]}" up --detach workspace
+    if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ] && ! autopr_master_ready; then
+        "${COMPOSE[@]}" stop workspace >/dev/null 2>&1 || true
+        echo "AutoPR refused to start because the primary msandbox was switched off." >&2
+        return 1
+    fi
+}
+
+primary_workspace_running() {
+    local container_ids
+    container_ids="$("${PRIMARY_COMPOSE[@]}" ps --status running --quiet workspace 2>/dev/null)" \
+        || return 1
+    [ -n "$container_ids" ]
+}
+
+autopr_master_ready() {
+    [ -f "$AUTOPR_ENABLE_FILE" ] && primary_workspace_running
+}
+
+require_autopr_master() {
+    autopr_master_ready || {
+        echo "AutoPR is off. Start the primary sandbox with: msandbox start" >&2
+        return 1
+    }
+}
+
+enable_autopr_control_plane() {
+    [ "${AGENT_SANDBOX_AUTOPR:-0}" != 1 ] || return 0
+
+    mkdir -p "$AUTOPR_STATE_DIR"
+    chmod 700 "$AUTOPR_STATE_DIR"
+    (umask 077; : > "$AUTOPR_ENABLE_FILE")
+
+    local dashboard_ensure="$AUTOPR_INSTALL_ROOT/ensure-dashboard.sh"
+    [ -x "$dashboard_ensure" ] || dashboard_ensure="$PROJECT_ROOT/scripts/kanban-autopr/ensure-dashboard.sh"
+    if [ -x "$dashboard_ensure" ]; then
+        "$dashboard_ensure" >/dev/null 2>&1 \
+            || echo "[WARN] AutoPR dashboard could not be started." >&2
+    fi
+
+    local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
+    if [ -x "$AUTOPR_LAUNCHCTL_BIN" ] && [ -f "$AUTOPR_LAUNCH_AGENT_PLIST" ]; then
+        if ! "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$label" >/dev/null 2>&1; then
+            "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_LAUNCH_AGENT_PLIST"
+        fi
+        "$AUTOPR_LAUNCHCTL_BIN" kickstart -k "$domain/$label"
+        echo "AutoPR enabled; dashboard: tmux attach -t $AUTOPR_TMUX_SESSION"
+    else
+        echo "[WARN] AutoPR timer is not installed; run scripts/kanban-autopr/install-launch-agent.sh." >&2
+    fi
+}
+
+disable_autopr_control_plane() {
+    # Remove the authoritative gate first. Even if launchctl or Docker fails,
+    # the installed dispatcher and workflow/model entrypoints now fail closed.
+    rm -f -- "$AUTOPR_ENABLE_FILE"
+
+    local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
+    if [ -x "$AUTOPR_LAUNCHCTL_BIN" ]; then
+        "$AUTOPR_LAUNCHCTL_BIN" bootout "$domain/$label" >/dev/null 2>&1 || true
+    fi
+    if [ -x "$AUTOPR_TMUX_BIN" ] \
+        && "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null; then
+        "$AUTOPR_TMUX_BIN" kill-session -t "$AUTOPR_TMUX_SESSION"
+    fi
+}
+
+stop_autopr_container() {
+    docker compose --project-name "$AUTOPR_SANDBOX_PROJECT_NAME" \
+        --file "$COMPOSE_FILE" stop workspace >/dev/null 2>&1 || true
+}
+
+start_primary_and_enable_autopr() {
+    start_services
+    enable_autopr_control_plane
 }
 
 exec_workspace() {
@@ -224,36 +317,36 @@ case "$command_name" in
         ;;
     login)
         require_docker
-        start_services
+        start_primary_and_enable_autopr
         login_agent "${1:?usage: login <codex|claude|opencode|gh>}"
         ;;
     git-login)
         require_docker
-        start_services
+        start_primary_and_enable_autopr
         login_agent gh
         ;;
     run)
         require_docker
-        start_services
+        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
         run_agent "$@"
         ;;
     codex|claude|opencode)
         require_docker
-        start_services
+        start_primary_and_enable_autopr
         run_agent "$command_name" "$@"
         ;;
     start)
         require_docker
-        start_services
+        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
         ;;
     dev)
         require_docker
-        start_services
+        start_primary_and_enable_autopr
         exec_workspace env AGENT_SANDBOX=1 ./scripts/dev-remote.sh "$@"
         ;;
     shell)
         require_docker
-        start_services
+        start_primary_and_enable_autopr
         if [[ $# -gt 0 ]]; then
             # Not a login shell: Debian's /etc/profile resets PATH for login
             # shells, dropping /opt/node/bin (where codex/claude/opencode
@@ -267,7 +360,7 @@ case "$command_name" in
     exec)
         require_docker
         [[ $# -gt 0 ]] || { echo "usage: msandbox exec <cmd> [args...]" >&2; exit 1; }
-        start_services
+        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
         # This path is intended for automation. Keep argv boundaries intact
         # and disable TTY allocation so prompts/files never pass through a
         # shell string or fail on a headless GitHub Actions runner.
@@ -281,22 +374,43 @@ case "$command_name" in
             printf 'workspace container port %s -> ' "$container_port"
             "${COMPOSE[@]}" port workspace "$container_port" 2>/dev/null || echo "not published"
         done
+        echo
+        if autopr_master_ready; then
+            echo "AutoPR master switch: ON"
+        elif [ -f "$AUTOPR_ENABLE_FILE" ]; then
+            echo "AutoPR master switch: BLOCKED (primary workspace is not running)"
+        else
+            echo "AutoPR master switch: OFF"
+        fi
+        ;;
+    autopr-ready)
+        require_docker
+        autopr_master_ready
         ;;
     doctor)
         require_docker
-        start_services
+        start_primary_and_enable_autopr
         run_doctor
         ;;
     stop)
-        require_docker
-        "${COMPOSE[@]}" stop
+        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then
+            require_docker
+            "${COMPOSE[@]}" stop workspace
+        else
+            disable_autopr_control_plane
+            if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+                stop_autopr_container
+                "${PRIMARY_COMPOSE[@]}" stop workspace
+            fi
+            echo "AutoPR disabled and msandbox stopped."
+        fi
         ;;
     "")
         # Bare `msandbox` — the one-command path: build (no-op if cached),
         # start services, drop into a shell ready to run an agent.
         require_docker
         "${COMPOSE[@]}" build workspace
-        start_services
+        start_primary_and_enable_autopr
         exec_workspace bash
         ;;
     -h|--help|help)

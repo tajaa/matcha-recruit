@@ -23,6 +23,15 @@ render_health() {
         printf 'LAUNCHAGENT\n  not loaded\n'
     fi
 
+    printf '\nMSANDBOX MASTER SWITCH · '
+    if [ ! -x "$MSANDBOX_BIN" ]; then
+        printf 'unavailable\n'
+    elif "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
+        printf 'ON · autonomous work permitted\n'
+    else
+        printf 'OFF · no AutoPR dispatch or model start permitted\n'
+    fi
+
     printf '\nSELF-HOSTED RUNNER · '
     runner_pids="$(pgrep -f 'Runner.Listener' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
     if [ -n "$runner_pids" ]; then
@@ -58,7 +67,7 @@ render_health() {
         printf '  no timer events yet\n'
     fi
 
-    printf '\nSession is recreated by the five-minute dispatcher if closed.\n'
+    printf '\nSession exists only while the msandbox master switch is ON.\n'
 }
 
 while :; do

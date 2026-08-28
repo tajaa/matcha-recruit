@@ -39,6 +39,13 @@ jobs:
           # disables client verification (CLIENT_DEPS_READY always false).
           clean: false
 
+      - name: Require msandbox master switch
+        run: |
+          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+            echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
+            exit 1
+          fi
+
       - name: Reset any stray bot branch from a prior interrupted run
         run: |
           git worktree list --porcelain | awk '/^branch refs\/heads\/bot\/task-/{print}' || true

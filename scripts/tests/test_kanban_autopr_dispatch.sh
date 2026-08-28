@@ -34,8 +34,8 @@ chmod +x "$TMP_DIR/gh"
 
 cat > "$TMP_DIR/msandbox" <<'EOF'
 #!/usr/bin/env bash
-[ "${AUTOPR_TEST_SANDBOX_FAIL:-0}" = 0 ] || exit 1
-[ "$1" = status ]
+[ "$1" = autopr-ready ] || exit 1
+[ "${AUTOPR_TEST_SANDBOX_OFF:-0}" = 0 ]
 EOF
 chmod +x "$TMP_DIR/msandbox"
 
@@ -47,9 +47,9 @@ run_dispatcher() {
     "$DISPATCHER" >/dev/null 2>&1
 }
 
-AUTOPR_TEST_SANDBOX_FAIL=1 run_dispatcher || sandbox_rc=$?
-check "unavailable msandbox fails closed before dispatch" \
-  $([ "${sandbox_rc:-0}" != 0 ] && grep -q 'sandbox-unavailable' "$TMP_DIR/log.jsonl" \
+AUTOPR_TEST_SANDBOX_OFF=1 run_dispatcher
+check "msandbox-off master switch skips before dispatch" \
+  $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
     && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
 AUTOPR_TEST_RUNS='[]' run_dispatcher
