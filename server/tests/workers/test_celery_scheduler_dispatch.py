@@ -25,7 +25,15 @@ sys.modules.setdefault("google", google_module)
 sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)
 
-from app.workers.celery_app import _SCHEDULED_TASKS
+from app.workers.celery_app import _SCHEDULED_TASKS, celery_app
+
+
+def test_schedule_eligibility_is_registered_during_worker_startup():
+    module_path = "app.workers.tasks.schedule_eligibility"
+
+    assert module_path in celery_app.conf.include
+    celery_app.loader.import_default_modules()
+    assert "schedule_eligibility.run" in celery_app.tasks
 
 
 def test_task_keys_are_unique():

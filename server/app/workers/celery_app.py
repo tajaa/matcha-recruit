@@ -66,6 +66,7 @@ celery_app = Celery(
         "app.workers.tasks.huume_code",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
+        "app.workers.tasks.schedule_eligibility",
         "app.workers.tasks.schedule_warning_events",
         "app.workers.tasks.schedule_daily_digest",
         "app.workers.tasks.schedule_request_notifications",
