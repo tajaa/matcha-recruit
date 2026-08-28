@@ -136,7 +136,7 @@ check "publisher does not checkpoint feedback that investigation never consumed"
 check "question draft title exposes criticality and confidence" \
   $(grep -q '🔴 \[C42\] \[QUESTIONS\] fix: Clarify terminology' "$TMP_DIR/gh.log" && echo 0 || echo 1)
 check "card remains Changes Requested with a visible auto-setup note" \
-  $(jq -e '.board_column == "changes_requested" and (.progress_note | contains("from auto setup")) and (.progress_note | contains("awaiting answers"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+  $(jq -e '.board_column == "changes_requested" and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 
 cat > "$TMP_DIR/rework-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"rework","progress_note":"from auto setup · build 849 · prod 1111111 · PR #501 · 🔴 C42 · awaiting answers · Human note","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
@@ -165,7 +165,7 @@ check "rework no-safe-action reconciles the existing PR title and labels" \
     && grep -q -- '--add-label criticality:orange' "$TMP_DIR/gh.log" \
     && echo 0 || echo 1)
 check "rework no-safe-action keeps accurate PR and triage card provenance" \
-  $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | contains("PR #501 · 🟠 C100 · no safe action · [autopr:no-spec")) and (.progress_note | endswith("migration_required · Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+  $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | startswith("🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED")) and (.progress_note | contains("PR #501 · 🟠 C100 · [autopr:no-spec")) and (.progress_note | endswith("migration_required · Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/card-patch.json"
 set +e

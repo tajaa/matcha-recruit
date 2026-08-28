@@ -2,6 +2,14 @@
 
 Four products share this codebase: **Free** (resources hub), **Matcha-lite** (paid IR/HR-records bundle), **Matcha** (full bespoke platform), and **Matcha-work** (collaborative AI workspace, web + macOS).
 
+## Git worktrees
+
+Use temporary worktrees when they are useful for isolating concurrent work from
+the main checkout. Once a PR is submitted (or the isolated work is abandoned),
+verify that its changes are committed and pushed, then immediately remove that
+exact worktree. Never leave a submitted PR branch checked out in a worktree, and
+never remove another user or agent's worktree.
+
 ## Products
 
 Differentiated at signup via `companies.signup_source` and routed in the UI by `client/src/utils/tier.ts` + `client/src/components/sidebars/TenantSidebar.tsx`.

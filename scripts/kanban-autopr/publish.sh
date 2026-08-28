@@ -40,14 +40,30 @@ AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
 NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
 NOTE_STATE="ready_for_review"
-NOTE_STATE_LABEL="ready for review"
 if [ "$AWAITING_HUMAN" = true ]; then
     NOTE_STATE="awaiting_answers"
-    NOTE_STATE_LABEL="awaiting answers"
 elif [ "$OUTCOME" = no_safe_action ]; then
     NOTE_STATE="no_safe_action"
-    NOTE_STATE_LABEL="no safe action"
 fi
+
+auto_setup_status() {
+    if [ "$AWAITING_HUMAN" = true ]; then
+        printf 'BLOCKED: AWAITING ANSWERS'
+        return
+    fi
+    if [ "$OUTCOME" = no_safe_action ]; then
+        case "$NO_SAFE_ACTION_REASON" in
+            already_fixed) printf 'NO PR: ALREADY FIXED' ;;
+            migration_required) printf 'NO PR: MIGRATION REQUIRED' ;;
+            policy_blocked) printf 'NO PR: POLICY BLOCKED' ;;
+            external_dependency) printf 'NO PR: EXTERNAL DEPENDENCY' ;;
+            *) printf 'NO PR: HUMAN ACTION REQUIRED' ;;
+        esac
+        return
+    fi
+    printf 'READY FOR REVIEW'
+}
+AUTO_SETUP_STATUS="$(auto_setup_status)"
 
 [ -n "$PROD_BUILD_NUMBER" ] || die "card context is missing the production build number"
 [ -n "$PROD_BACKEND_SHA" ] || die "card context is missing the production backend SHA"
@@ -65,9 +81,16 @@ progress_note_with_origin() {
     # nesting it every round. Preserve any human-authored text after it.
     remainder="$(printf '%s' "$existing" | sed -E \
         's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
+    # New notes put the state first so the narrow card face shows the reason
+    # for a stall before build provenance. Keep accepting the legacy lowercase
+    # prefix above so an upgrade does not duplicate an existing human note.
+    remainder="$(printf '%s' "$remainder" | sed -E \
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
         printf '%s · %s' "$marker" "$remainder"
-    elif [ -n "$existing" ] && [[ "$existing" != "from auto setup"* ]]; then
+    elif [ -n "$existing" ] \
+        && [[ "$existing" != "from auto setup"* ]] \
+        && [[ "$existing" != "🤖 AUTO SETUP"* ]]; then
         printf '%s · %s' "$marker" "$existing"
     else
         printf '%s' "$marker"
@@ -227,7 +250,7 @@ TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
 if [ "$OUTCOME" = no_safe_action ]; then
     git reset --hard >/dev/null 2>&1
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
-    note_prefix="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL"
+    note_prefix="🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL"
     if [ "$MODE" = rework ]; then
         [ -n "$existing_open_pr" ] || die "rework no-safe-action has no open PR for $BRANCH"
         BODY_FILE="$(mktemp)"
@@ -236,7 +259,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         replace_triage_labels "$existing_open_pr"
         pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$existing_open_pr"
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
@@ -244,7 +267,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
@@ -293,7 +316,7 @@ pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
 card_column=in_progress
 [ "$AWAITING_HUMAN" != true ] || card_column=changes_requested
 origin_note="$(progress_note_with_origin \
-    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL" \
+    "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE" \
     "$EXISTING_PROGRESS_NOTE")"
 replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \

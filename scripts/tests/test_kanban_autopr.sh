@@ -54,9 +54,14 @@ check "workflow forces OpenCode through the dedicated AutoPR msandbox" \
 
 check "workflow and dispatcher require the msandbox master switch" \
     $(grep -qF './scripts/agent-sandbox.sh autopr-ready' "$workflow" \
-      && grep -qF '"$MSANDBOX_BIN" autopr-master-ready' "$AUTOPR_DIR/dispatch-if-idle.sh" \
-      && grep -qF 'log_event error autopr-system-unhealthy' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && grep -qF '[ -f "$ENABLE_FILE" ]' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && grep -qF 'label=com.docker.compose.project=$PRIMARY_SANDBOX_PROJECT' "$AUTOPR_DIR/dispatch-if-idle.sh" \
       && grep -qF 'log_event skip msandbox-off' "$AUTOPR_DIR/dispatch-if-idle.sh" \
+      && echo 0 || echo 1)
+
+check "LaunchAgent reinstall preserves an enabled master switch" \
+    $(grep -qF 'msandbox" autopr-master-ready' "$AUTOPR_DIR/install-launch-agent.sh" \
+      && ! grep -qF 'msandbox" autopr-ready' "$AUTOPR_DIR/install-launch-agent.sh" \
       && echo 0 || echo 1)
 
 check "msandbox start and stop own the AutoPR lifecycle" \
@@ -97,7 +102,7 @@ check "sandbox bridge uses a clean clone and empty AWS mount" \
 
 check "published PR and card carry production build provenance" \
     $(grep -qF '<!-- matcha-production-build: $PROD_BUILD_NUMBER -->' "$AUTOPR_DIR/publish.sh" \
-      && grep -qF 'from auto setup · build $PROD_BUILD_NUMBER' "$AUTOPR_DIR/publish.sh" \
+      && grep -qF '🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER' "$AUTOPR_DIR/publish.sh" \
       && echo 0 || echo 1)
 
 check "publisher permits only Espresso Swift source outside web/backend paths" \
@@ -487,6 +492,30 @@ PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 no_spec_rc=$?
 check "visible origin note still durably suppresses an unchanged no-spec card" \
     $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1 $2" = "pr list" ]; then
+    if [[ "$*" == *"--label autopr"* ]]; then
+        printf '0\n'
+    elif [[ "$*" == *"--head bot/task-55555555"* ]]; then
+        printf '%s\n' '[{"state":"MERGED","createdAt":"2026-08-27T00:00:00Z","number":55,"labels":[{"name":"autopr"}],"body":""}]'
+    else
+        printf '[]\n'
+    fi
+fi
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+cat > "$TMP_DIR/merged-card.json" <<'EOF'
+[
+  {"task_id":"55555555-0000-4000-8000-000000000005","id8":"55555555","project_id":"p","title":"Already merged","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · PR #55"},
+  {"task_id":"66666666-0000-4000-8000-000000000006","id8":"66666666","project_id":"p","title":"Fresh todo","board_column":"todo","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+merged_fallback_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/merged-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/merged-card.json")"
+check "merged AutoPR in Changes Requested cannot block or duplicate ahead of Todo" \
+    $([ "$(printf '%s' "$merged_fallback_selected" | jq -r '.id8')" = "66666666" ] && echo 0 || echo 1)
 
 ################################################################################
 # A questions draft remains in Changes Requested but cannot spin every five

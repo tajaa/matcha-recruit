@@ -101,6 +101,18 @@ jobs:
         timeout-minutes: 2
         run: ./scripts/kanban-autopr/collect.sh > "$RUNNER_TEMP/cards.json"
 
+      - name: Reconcile merged PR cards missed by the webhook
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GitHub delivery is the fast path; this is the five-minute repair
+          # path. It also removes repaired cards from this run's candidate
+          # snapshot, preventing a duplicate PR before the next collection.
+          ./scripts/kanban-autopr/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
+            > "$RUNNER_TEMP/reconciled-cards.json"
+          mv "$RUNNER_TEMP/reconciled-cards.json" "$RUNNER_TEMP/cards.json"
+
       - name: Select one card
         id: select
         env:
@@ -212,4 +224,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          git worktree prune
+          # Temporary isolation is allowed while building a PR, but no
+          # submitted PR branch may remain checked out on the Mac runner.
+          # Dirty state is preserved and reported instead of deleted.
+          ./scripts/kanban-autopr/leave-task-checkout.sh

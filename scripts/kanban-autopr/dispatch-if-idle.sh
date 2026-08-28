@@ -8,7 +8,9 @@ WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
-MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
+DOCKER_BIN="${AUTOPR_DOCKER_BIN:-/usr/local/bin/docker}"
+ENABLE_FILE="${AUTOPR_ENABLE_FILE:-$USER_HOME/.local/state/matcha-agent-sandbox/autopr-enabled}"
+PRIMARY_SANDBOX_PROJECT="${AUTOPR_PRIMARY_SANDBOX_PROJECT:-matcha-agent-sandbox}"
 LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispatch.lock}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,14 +57,26 @@ dispatch_workflow() {
     "$GH_BIN" workflow run "$WORKFLOW" --repo "$REPO" --ref "$REF"
 }
 
+autopr_master_ready() {
+    # This is the same two-part master predicate owned by `msandbox`: its
+    # enable marker must exist and the primary sandbox workspace must still be
+    # running. Evaluate it here with paths outside ~/Documents because macOS
+    # TCC can deny background LaunchAgents access to the repo-backed msandbox
+    # symlink even though the same command works in Terminal.
+    [ -f "$ENABLE_FILE" ] || return 1
+    [ -x "$DOCKER_BIN" ] || return 1
+    [ -n "$("$DOCKER_BIN" ps --quiet \
+        --filter "label=com.docker.compose.project=$PRIMARY_SANDBOX_PROJECT" \
+        --filter 'label=com.docker.compose.service=workspace' \
+        --filter 'status=running' 2>/dev/null)" ]
+}
+
 main() {
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
-    [ -x "$MSANDBOX_BIN" ] || { log_event error "msandbox-not-executable"; exit 1; }
-    # `msandbox` is the authoritative kill switch. A persistent marker alone
-    # is insufficient after a reboot/crash, so `autopr-master-ready` also verifies
-    # that the primary workspace container is currently running. Check this
-    # before creating the dashboard or touching GitHub.
-    if ! "$MSANDBOX_BIN" autopr-master-ready >/dev/null 2>&1; then
+    # `msandbox` remains the authoritative kill switch: it alone creates and
+    # removes ENABLE_FILE. A persistent marker alone is insufficient after a
+    # reboot/crash, so also require its primary workspace container to be live.
+    if ! autopr_master_ready; then
         log_event skip msandbox-off
         exit 0
     fi
@@ -70,10 +84,6 @@ main() {
         # Observability must not become a scheduling dependency. Record a pane
         # startup failure, then continue the authoritative dispatch check.
         "$DASHBOARD_ENSURE" >/dev/null 2>&1 || log_event error dashboard-start-failed
-    fi
-    if ! "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
-        log_event error autopr-system-unhealthy
-        exit 1
     fi
     if ! acquire_dispatch_lock; then
         log_event skip local-lock

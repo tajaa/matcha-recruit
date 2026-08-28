@@ -309,15 +309,21 @@ _AUTOPR_CRITICALITY_RE = re.compile(
 _AUTOPR_CONFIDENCE_SCORE_RE = re.compile(
     r"<!--\s*matcha-autopr-confidence-score:\s*([0-9]{1,3})\s*-->", re.IGNORECASE
 )
-_AUTOPR_NOTE_STATE_RE = re.compile(
-    r"<!--\s*matcha-autopr-note-state:\s*(awaiting_answers|ready_for_review|no_safe_action)\s*-->",
-    re.IGNORECASE,
-)
-_AUTOPR_STRUCTURED_NOTE_RE = re.compile(
+_AUTOPR_LEGACY_STRUCTURED_NOTE_RE = re.compile(
     r"^from auto setup · build [0-9]+ · prod "
     r"(?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40})"
     r"(?: · PR #[0-9]+)?"
     r"(?: · [^·]+ C[0-9]+ · (?:awaiting answers|ready for review|no safe action))?"
+    r"(?: · \[autopr:no-spec [^]]+\] "
+    r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
+    re.IGNORECASE,
+)
+_AUTOPR_STRUCTURED_NOTE_RE = re.compile(
+    r"^🤖 AUTO SETUP · [^·]+"
+    r"(?: · build [0-9]+)?"
+    r"(?: · prod (?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40}))?"
+    r"(?: · PR #[0-9]+)?"
+    r"(?: · [^·]+ C[0-9]+)?"
     r"(?: · \[autopr:no-spec [^]]+\] "
     r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
     re.IGNORECASE,
@@ -345,7 +351,8 @@ _KANBAN_AUTOPR_PROJECT_IDS = {
     "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
 }
 
-_AUTOPR_PROGRESS_NOTE = "from auto setup"
+_AUTOPR_PROGRESS_NOTE = "🤖 AUTO SETUP"
+_AUTOPR_LEGACY_PROGRESS_NOTE = "from auto setup"
 
 
 def _with_autopr_progress_note(
@@ -360,13 +367,14 @@ def _with_autopr_progress_note(
     Reconstruct it from machine trailers on merge as a recovery path if the PR
     was created but the card PATCH failed.
     """
-    marker = _AUTOPR_PROGRESS_NOTE
+    # A merged PR is no longer merely "ready"; state that outcome first so
+    # the narrow card face shows it before build provenance.
+    marker = f"{_AUTOPR_PROGRESS_NOTE} · MERGED: READY FOR REVIEW"
     build_match = _PRODUCTION_BUILD_RE.search(pr_body)
     backend_match = _PRODUCTION_BACKEND_SHA_RE.search(pr_body)
     frontend_match = _PRODUCTION_FRONTEND_SHA_RE.search(pr_body)
     criticality_match = _AUTOPR_CRITICALITY_RE.search(pr_body)
     confidence_match = _AUTOPR_CONFIDENCE_SCORE_RE.search(pr_body)
-    note_state_match = _AUTOPR_NOTE_STATE_RE.search(pr_body)
     if build_match:
         marker += f" · build {build_match.group(1)}"
         if backend_match and frontend_match:
@@ -376,35 +384,41 @@ def _with_autopr_progress_note(
                 marker += f" · prod {backend_sha}"
             else:
                 marker += f" · prod backend {backend_sha} / frontend {frontend_sha}"
-        if pr_number is not None:
-            marker += f" · PR #{pr_number}"
-    if criticality_match and confidence_match and note_state_match:
+    if pr_number is not None:
+        marker += f" · PR #{pr_number}"
+    if criticality_match and confidence_match:
         emoji = {"red": "🔴", "orange": "🟠", "yellow": "🟡"}[
             criticality_match.group(1).lower()
         ]
-        note_state = {
-            "awaiting_answers": "awaiting answers",
-            "ready_for_review": "ready for review",
-            "no_safe_action": "no safe action",
-        }[note_state_match.group(1).lower()]
-        marker += f" · {emoji} C{confidence_match.group(1)} · {note_state}"
+        marker += f" · {emoji} C{confidence_match.group(1)}"
 
     current = (existing or "").strip()
     if not current:
         return marker
     if current.casefold().startswith(marker.casefold()):
         return current
-    if current.casefold() == _AUTOPR_PROGRESS_NOTE.casefold():
+    auto_prefixes = (_AUTOPR_PROGRESS_NOTE, _AUTOPR_LEGACY_PROGRESS_NOTE)
+    if any(current.casefold() == prefix.casefold() for prefix in auto_prefixes):
         return marker
-    if current.casefold().startswith(f"{_AUTOPR_PROGRESS_NOTE} · ".casefold()):
+    if any(
+        current.casefold().startswith(f"{prefix} · ".casefold())
+        for prefix in auto_prefixes
+    ):
         # A later rework PR has a new build/PR marker. Replace the old system
         # prefix while retaining text a human wrote after it.
         if marker != _AUTOPR_PROGRESS_NOTE:
-            structured = _AUTOPR_STRUCTURED_NOTE_RE.match(current)
+            structured = (
+                _AUTOPR_STRUCTURED_NOTE_RE.match(current)
+                or _AUTOPR_LEGACY_STRUCTURED_NOTE_RE.match(current)
+            )
             if structured:
                 remainder = current[structured.end():].removeprefix(" · ")
             else:
-                remainder = current[len(_AUTOPR_PROGRESS_NOTE):].removeprefix(" · ")
+                matched_prefix = next(
+                    prefix for prefix in auto_prefixes
+                    if current.casefold().startswith(prefix.casefold())
+                )
+                remainder = current[len(matched_prefix):].removeprefix(" · ")
             return f"{marker} · {remainder}" if remainder else marker
         return current
     return f"{marker} · {current}"
