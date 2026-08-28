@@ -37,6 +37,35 @@ async def test_missing_profile_reads_unconfirmed_without_insert():
     assert "INSERT" not in conn.calls[0][0]
 
 
+class ProfileUpsertConn:
+    def __init__(self):
+        self.calls = []
+
+    async def fetchrow(self, sql, *args):
+        self.calls.append((sql, args))
+        if "INSERT INTO employee_schedule_profiles" not in sql:
+            return None
+        return {
+            "availability_state": "always_available",
+            "availability_confirmed_by": ACTOR,
+        }
+
+
+@pytest.mark.asyncio
+async def test_profile_upsert_types_confirmation_parameters_as_uuid():
+    conn = ProfileUpsertConn()
+    profile = await schedule_profiles.upsert_schedule_profile(
+        conn, company_id=COMPANY, employee_id=EMPLOYEE,
+        values={"availability_state": "always_available"},
+        actor_user_id=ACTOR,
+    )
+    insert_sql, args = conn.calls[1]
+    assert "$13::uuid" in insert_sql
+    assert "$5::uuid" in insert_sql
+    assert args[12] == ACTOR
+    assert profile.availability_confirmed_by == ACTOR
+
+
 class ExecuteConn:
     def __init__(self):
         self.executed = []
