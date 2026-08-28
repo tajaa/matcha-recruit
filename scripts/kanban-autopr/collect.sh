@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Collect candidate kanban cards across every project in MATCHA_PROJECT_IDS
 # (comma-separated) assigned to MATCHA_ASSIGNEE_EMAIL and sitting in `todo`
-# or `changes_requested`. One bundle fetch per project (no company-wide list
+# or `changes_requested`, plus system-linked `in_progress` cards whose owner
+# PR may need lifecycle reconciliation. One bundle fetch per project (no company-wide list
 # endpoint — the bot's access is per-project mw_project_collaborators rows,
 # not a single company scope; see docs/ops/KANBAN_AUTOPR.md).
 #
@@ -35,7 +36,11 @@ for project_id in "${PROJECT_IDS[@]}"; do
         .tasks // []
         | map(select(
             .assigned_email == $email
-            and (.board_column == "todo" or .board_column == "changes_requested")
+            and (
+              .board_column == "todo"
+              or .board_column == "changes_requested"
+              or (.board_column == "in_progress" and ((.progress_note // "") | startswith("🤖 AUTO SETUP · ALREADY SCOPED")))
+            )
             and .status != "cancelled"
           ))
         | map(

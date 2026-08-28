@@ -38,13 +38,23 @@ Pipeline (`scripts/error-autofix/`):
    reports test results** — that's the next script's job, and anything it writes about
    tests there is discarded. `--` terminates the repeated `--file` option before the
    prompt; without it OpenCode interprets the prompt itself as another attachment.
-5. **`verify.sh`** — runs the same backend checks against `main` and the branch and
+5. **Cross-lane scope check** — `scripts/autopr-scope/check-open-prs.sh` captures the
+   uncommitted proposal with a temporary Git index, prefilters open PRs targeting
+   `main` by changed-file overlap, and suppresses publication only for an exact stable
+   patch-id match. Broader overlaps are untrusted public input, so they are never
+   executed by a model; the draft still publishes with `possible-duplicate` for human
+   review. An exact-match owner PR gets a
+   `covers-prod-error` label and an idempotent
+   `<!-- matcha-autofix-coverage-error: <key> -->` comment; `select.sh` enumerates those
+   comments directly as its durable ledger. Uncertain comparisons still publish and are
+   labeled `possible-duplicate`.
+6. **`verify.sh`** — runs the same backend checks against `main` and the branch and
    diffs *failing test node IDs* rather than counts. For client changes, it shares the
    runner's existing `client/node_modules` with the baseline worktree, compares
    TypeScript diagnostics, and runs changed or colocated Vitest files against both
    trees. Missing verification dependencies label a draft `needs-work`; they never
    trigger an unpinned install in the scheduled workflow.
-6. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
+7. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
    report + verification table (endpoint, occurrence count, admin link, traceback,
    correlated log lines). If the model made no diff, opens or replaces a tracking issue
    body instead of silently doing nothing. Replacing the original placeholder body is
@@ -92,6 +102,9 @@ It never deploys or auto-merges. A human reads the PR body and decides.
   (no incidents found, verification toolchain missing → PR still opens, labeled
   `needs-work`, with an explicit "checks did not run" banner — never a silently blank
   table).
+- `AUTOPR_SCOPE_DEDUPE_MODE=off|observe|enforce` is the rollback switch. The workflows
+  currently pin `enforce`; `observe` records an exact-match verdict in the job summary
+  without suppressing a PR.
 
 ## Known gap
 

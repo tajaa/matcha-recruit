@@ -14,6 +14,7 @@ generic devcontainer launcher for other projects):
 msandbox                # start sandbox + AutoPR master switch, then open shell
 msandbox stop           # stop only when no agent work is active
 msandbox stop --force   # explicit interrupt/cancel override
+msandbox off            # immediately stop the sandbox, AutoPR, and dashboard
 ```
 From that shell: `codex`, `claude`, or `opencode` are already on `PATH` and
 already logged in once you've run `login` (below) — or drive the rest from
@@ -94,7 +95,7 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | Command | What it does |
 |---|---|
 | `build [--playwright]` | Build the workspace image |
-| `start` / `stop` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work unless `--force` is explicit |
+| `start` / `stop` / `off` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work unless `--force` is explicit; `off` is the explicit immediate shutdown |
 | `autopr-ready` | Silent readiness probe used by the dispatcher/workflow; succeeds only when the ON marker and primary workspace are both present |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
 | `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |
@@ -153,7 +154,8 @@ mistaken for an unseen AutoPR run.
 `msandbox stop` likewise refuses active work—or an unknown GitHub state—and
 requires `msandbox stop --force` to interrupt deliberately. A successful stop
 removes the marker first, unloads the timer, closes the dashboard, and stops
-both workspace containers. The dispatcher, GitHub workflow, and dedicated
+both workspace containers. `msandbox off` is the equivalent immediate
+shutdown command, so it also interrupts active work. The dispatcher, GitHub workflow, and dedicated
 model launcher independently require the marker, running primary workspace,
 loaded timer, and four live dashboard panes.
 

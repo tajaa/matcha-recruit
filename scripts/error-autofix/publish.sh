@@ -205,6 +205,9 @@ fi
 
 gh pr edit "$BRANCH" --repo "$REPO" --add-label autofix >/dev/null 2>&1 || true
 gh pr edit "$BRANCH" --repo "$REPO" --add-label "sev:$SEV" >/dev/null 2>&1 || true
+if [ "${AUTOPR_POSSIBLE_DUPLICATE:-0}" = 1 ]; then
+    gh pr edit "$BRANCH" --repo "$REPO" --add-label possible-duplicate >/dev/null 2>&1 || true
+fi
 if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
     gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true
 fi

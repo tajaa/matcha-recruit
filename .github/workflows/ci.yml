@@ -32,7 +32,7 @@ jobs:
           python -m pip install pytest 'asyncpg>=0.29.0'
           python -m compileall -q server/app server/alembic scripts
           python -m pytest -q scripts/tests/test_ops_health.py scripts/tests/test_operational_integrity.py scripts/tests/test_error_autofix_query.py
-          bash -n scripts/update-ec2.sh scripts/ops-health/prod-query.sh scripts/ops-health/publish-issue.sh scripts/ops-health/backup-probe.sh scripts/ops-health/schema-snapshot.sh scripts/error-autofix/reconcile.sh
+          bash -n scripts/update-ec2.sh scripts/ops-health/prod-query.sh scripts/ops-health/publish-issue.sh scripts/ops-health/backup-probe.sh scripts/ops-health/schema-snapshot.sh scripts/error-autofix/reconcile.sh scripts/error-autofix/record-coverage.sh scripts/kanban-autopr/record-coverage.sh scripts/autopr-scope/check-open-prs.sh scripts/autopr-scope/lib.sh
           bash scripts/tests/test_ci_guards.sh
           bash scripts/tests/test_error_autofix.sh
           bash scripts/tests/test_operational_integrity.sh

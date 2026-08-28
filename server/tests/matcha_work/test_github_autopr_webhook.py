@@ -6,6 +6,95 @@ from app.matcha.routes.matcha_work import github
 from app.matcha.services.matcha_work import project_task_service
 
 
+@pytest.mark.asyncio
+async def test_resolve_all_cross_lane_tasks_by_exact_persisted_number(monkeypatch):
+    task_id, second_task_id = uuid4(), uuid4()
+    project_id = next(iter(github._KANBAN_AUTOPR_PROJECT_IDS))
+    calls = []
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "🤖 AUTO SETUP · ALREADY SCOPED · PR #334",
+        "pr_url": "https://github.com/tajaa/matcha-recruit/pull/334",
+        "pr_number": 334,
+        "pr_columns_exist": True,
+    }
+    second_task = {**task, "id": second_task_id}
+
+    class Connection:
+        async def fetch(self, query, *args):
+            calls.append((query, args))
+            return [task, second_task]
+
+    class ConnectionContext:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(github, "get_connection", lambda: ConnectionContext())
+
+    resolved = await github._resolve_pull_request_tasks({
+        "repository": {"full_name": github._KANBAN_AUTOPR_REPO},
+        "pull_request": {
+            "number": 334,
+            "body": "",
+            "head": {"ref": "bot/err-5cf9ce1fea8b"},
+        },
+    })
+
+    assert resolved == [task, second_task]
+    assert len(calls) == 1
+    assert "to_jsonb(mw_tasks) ->> 'pr_number' = $1" in calls[0][0]
+    assert "LIMIT 1" not in calls[0][0]
+    assert calls[0][1] == ("334",)
+
+
+@pytest.mark.asyncio
+async def test_resolver_unions_primary_trailer_task_with_secondary_links(monkeypatch):
+    primary_id, secondary_id = uuid4(), uuid4()
+    project_id = next(iter(github._KANBAN_AUTOPR_PROJECT_IDS))
+    base = {
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": None,
+        "pr_url": "https://github.com/tajaa/matcha-recruit/pull/334",
+        "pr_number": 334,
+        "pr_columns_exist": True,
+    }
+    primary = {**base, "id": primary_id}
+    secondary = {**base, "id": secondary_id}
+
+    class Connection:
+        async def fetchrow(self, _query, *_args):
+            return primary
+
+        async def fetch(self, _query, *_args):
+            return [primary, secondary]
+
+    class ConnectionContext:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(github, "get_connection", lambda: ConnectionContext())
+
+    resolved = await github._resolve_pull_request_tasks({
+        "repository": {"full_name": github._KANBAN_AUTOPR_REPO},
+        "pull_request": {
+            "number": 334,
+            "body": f"<!-- matcha-task: {primary_id} -->",
+            "head": {"ref": "bot/task-primary"},
+        },
+    })
+
+    assert resolved == [primary, secondary]
+
+
 def test_autopr_marker_preserves_existing_progress_and_is_idempotent():
     marked = github._with_autopr_progress_note("Waiting on QA")
     assert marked == "🤖 AUTO SETUP · MERGED: READY FOR REVIEW · Waiting on QA"
@@ -70,12 +159,12 @@ async def test_merged_autopr_moves_card_to_review_and_marks_its_origin(monkeypat
     updates = []
 
     async def resolve(_payload):
-        return task
+        return [task]
 
     async def update(project, task, patch):
         updates.append((project, task, patch))
 
-    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
     monkeypatch.setattr(project_task_service, "update_project_task", update)
 
     result = await github._handle_pull_request_event({
@@ -101,6 +190,53 @@ async def test_merged_autopr_moves_card_to_review_and_marks_its_origin(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_merged_owner_pr_moves_every_linked_card_to_review(monkeypatch):
+    first_id, second_id, project_id = uuid4(), uuid4(), uuid4()
+    base = {
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": None,
+        "pr_url": "https://github.com/tajaa/matcha-recruit/pull/334",
+        "pr_number": 334,
+    }
+    tasks = [{**base, "id": first_id}, {**base, "id": second_id}]
+    updates = []
+
+    async def resolve(_payload):
+        return tasks
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    result = await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {
+            "merged": True,
+            "html_url": "https://github.com/tajaa/matcha-recruit/pull/334",
+            "number": 334,
+        },
+    })
+
+    assert result == {
+        "ok": True,
+        "task": str(first_id),
+        "tasks": [str(first_id), str(second_id)],
+        "merged": True,
+    }
+    assert [task_id for _project_id, task_id, _patch in updates] == [
+        first_id,
+        second_id,
+    ]
+    assert all(
+        patch["board_column"] == "review"
+        for _project_id, _task_id, patch in updates
+    )
+
+
+@pytest.mark.asyncio
 async def test_merged_autopr_marks_a_card_already_in_review_without_moving_it(monkeypatch):
     task_id, project_id = uuid4(), uuid4()
     task = {
@@ -114,12 +250,12 @@ async def test_merged_autopr_marks_a_card_already_in_review_without_moving_it(mo
     updates = []
 
     async def resolve(_payload):
-        return task
+        return [task]
 
     async def update(project, task, patch):
         updates.append((project, task, patch))
 
-    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
     monkeypatch.setattr(project_task_service, "update_project_task", update)
 
     await github._handle_pull_request_event({
@@ -157,12 +293,12 @@ async def test_merged_autopr_without_pr_columns_still_moves_card(monkeypatch):
     updates = []
 
     async def resolve(_payload):
-        return task
+        return [task]
 
     async def update(project, task, patch):
         updates.append((project, task, patch))
 
-    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
     monkeypatch.setattr(project_task_service, "update_project_task", update)
 
     result = await github._handle_pull_request_event({
@@ -200,12 +336,12 @@ async def test_opened_autopr_without_pr_columns_still_starts_card(monkeypatch):
     updates = []
 
     async def resolve(_payload):
-        return task
+        return [task]
 
     async def update(project, task, patch):
         updates.append((project, task, patch))
 
-    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
     monkeypatch.setattr(project_task_service, "update_project_task", update)
 
     result = await github._handle_pull_request_event({
@@ -235,12 +371,12 @@ async def test_merged_autopr_redelivery_is_a_true_noop(monkeypatch):
     updates = []
 
     async def resolve(_payload):
-        return task
+        return [task]
 
     async def update(project, task, patch):
         updates.append((project, task, patch))
 
-    monkeypatch.setattr(github, "_resolve_pull_request_task", resolve)
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
     monkeypatch.setattr(project_task_service, "update_project_task", update)
 
     await github._handle_pull_request_event({

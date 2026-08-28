@@ -143,7 +143,8 @@ seconds. Override those intervals with
 2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
-   `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, joins each card's `element_id`
+   `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, plus system-linked
+   `in_progress` cards awaiting owner-PR reconciliation, joins each card's `element_id`
    against the bundle's `elements` array to attach `repo_paths` (prompt-only scoping, not
    a gate).
 3. **`reconcile-merged-cards.sh`** — repairs a missed `pull_request` webhook before
@@ -184,11 +185,20 @@ seconds. Override those intervals with
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
    work, migrations, policy boundaries, and external dependencies.
-6. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
+6. **Cross-lane scope check** — for a fresh implementation patch, the shared
+   `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
+   or publication. Only an exact stable patch-id match suppresses the new PR; broader
+   file-overlapping patches are untrusted public input and are surfaced with a
+   `possible-duplicate` label for human review rather than executed by a model. The
+   existing owner PR receives a `covers-kanban-task` label and exact task comment, while
+   the card stores that PR's URL/number and a visible `ALREADY SCOPED` note.
+   Closed-unmerged owners make the card eligible again; merged owners move every linked
+   card to Review through the webhook or reconciliation pass.
+7. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
-7. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+8. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
    restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
@@ -231,6 +241,12 @@ Additive migration `taskpr0001`. Plumbed through the board SELECT
 client types (`client/src/work/types.ts`), and a PR pill on the kanban card
 (`KanbanCard.tsx`, next to the churn chip) linking out to `pr_url`.
 
+The pull-request webhook resolves the primary card from a task trailer or task-shaped
+branch, then unions every card carrying the exact persisted `pr_number`. The latter
+supports cross-lane and multi-card ownership where one error-bot or human PR owns several
+Kanban tasks; the existing repository and four-project allowlists still apply before any
+card mutation.
+
 ## `post-checkout` hook (checkout → in_progress)
 
 `scripts/kanban-autopr/hooks/post-checkout`, installed via `install-hooks.sh` as a
@@ -262,13 +278,14 @@ close that off before resolution ever runs:
   `PROJECTS` list). Even a legitimate PR in this repo can't move a card outside the four
   target projects.
 
-Task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR body;
-else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
+Primary task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR
+body; else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
 `mw_tasks.id` with hyphens stripped (same regex the `post-checkout` hook uses — this is
-what lets a human's own hand-made branch work too, not just bot-authored PRs). Column
-moves are a no-op unless the card is currently in the listed source column; metadata is
-written only when it changed. Redelivery is therefore idempotent, and a webhook replay
-can never drag a card backwards:
+what lets a human's own hand-made branch work too, not just bot-authored PRs). Every
+additional card whose persisted `pr_number` matches is included and deduplicated before
+the transition. Column moves are a no-op unless the card is currently in the listed source
+column; metadata is written only when it changed. Redelivery is therefore idempotent, and
+a webhook replay can never drag a card backwards:
 
 | action | from | to | also |
 |---|---|---|---|

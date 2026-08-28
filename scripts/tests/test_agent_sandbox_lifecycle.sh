@@ -169,6 +169,16 @@ check "forced stop disables timer/dashboard and stops both sandboxes" \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
       && echo 0 || echo 1)
 
+run_msandbox start >/dev/null
+AUTOPR_TEST_ACTIVE=1 run_msandbox off >/dev/null
+check "msandbox off immediately shuts down the dashboard and both sandboxes" \
+    $([ ! -e "$TMP_DIR/state/autopr-enabled" ] \
+      && [ ! -e "$TMP_DIR/launchagent.loaded" ] \
+      && [ ! -e "$TMP_DIR/tmux.session" ] \
+      && [ ! -e "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
+      && echo 0 || echo 1)
+
 set +e
 env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
@@ -179,7 +189,7 @@ env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     "$MSANDBOX" exec true >/dev/null 2>&1
 off_rc=$?
 set -e
-check "dedicated AutoPR lane fails closed after msandbox stop" \
+check "dedicated AutoPR lane fails closed after msandbox off" \
     $([ "$off_rc" != 0 ] \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
       && echo 0 || echo 1)
