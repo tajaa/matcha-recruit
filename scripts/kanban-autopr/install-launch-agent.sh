@@ -63,7 +63,12 @@ main() {
     install_runtime
     render_launch_agent
     stop_launch_agent
-    if [ -f "$ENABLE_FILE" ] && "$USER_HOME/.local/bin/msandbox" autopr-ready >/dev/null 2>&1; then
+    # stop_launch_agent intentionally makes the *complete* health check false.
+    # Preserve authorization based on the master switch alone, then recreate
+    # the dashboard and timer below. Checking autopr-ready here created a
+    # circular dependency that turned every enabled reinstall into OFF state.
+    if [ -f "$ENABLE_FILE" ] \
+        && "$USER_HOME/.local/bin/msandbox" autopr-master-ready >/dev/null 2>&1; then
         # Preserve an already-on master switch across an idempotent reinstall
         # while ensuring the tmux panes use the freshly copied scripts.
         "$INSTALL_ROOT/ensure-dashboard.sh" --restart

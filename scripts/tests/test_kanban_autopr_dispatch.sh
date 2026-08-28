@@ -32,33 +32,33 @@ exit 1
 EOF
 chmod +x "$TMP_DIR/gh"
 
-cat > "$TMP_DIR/msandbox" <<'EOF'
+cat > "$TMP_DIR/docker" <<'EOF'
 #!/usr/bin/env bash
-case "$1" in
-  autopr-master-ready) [ "${AUTOPR_TEST_SANDBOX_OFF:-0}" = 0 ] ;;
-  autopr-ready) [ "${AUTOPR_TEST_SYSTEM_UNHEALTHY:-0}" = 0 ] ;;
-  *) exit 1 ;;
-esac
+[ "$1" = ps ] || exit 1
+[ "${AUTOPR_TEST_CONTAINER_OFF:-0}" = 0 ] || exit 0
+printf 'primary-container-id\n'
 EOF
-chmod +x "$TMP_DIR/msandbox"
+chmod +x "$TMP_DIR/docker"
+touch "$TMP_DIR/autopr-enabled"
 
 run_dispatcher() {
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
-    AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox" \
+    AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
     AUTOPR_TMUX_DASHBOARD=0 \
     "$DISPATCHER" >/dev/null 2>&1
 }
 
-AUTOPR_TEST_SANDBOX_OFF=1 run_dispatcher
+rm "$TMP_DIR/autopr-enabled"
+run_dispatcher
 check "msandbox-off master switch skips before dispatch" \
   $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
     && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+touch "$TMP_DIR/autopr-enabled"
 
-AUTOPR_TEST_SYSTEM_UNHEALTHY=1 run_dispatcher || unhealthy_rc=$?
-check "unhealthy dashboard/timer fails closed before dispatch" \
-  $([ "${unhealthy_rc:-0}" != 0 ] \
-    && grep -q 'autopr-system-unhealthy' "$TMP_DIR/log.jsonl" \
+AUTOPR_TEST_CONTAINER_OFF=1 run_dispatcher
+check "stopped primary sandbox skips before dispatch" \
+  $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
     && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
 AUTOPR_TEST_RUNS='[]' run_dispatcher
@@ -90,6 +90,8 @@ sed -e "s|__DISPATCHER_PATH__|$DISPATCHER|g" -e "s|__USER_HOME__|$TMP_DIR|g" "$T
 plutil -lint "$rendered" >/dev/null
 check "LaunchAgent plist is valid and uses the required timer" \
   $(grep -q '<integer>300</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
+check "LaunchAgent PATH can reach the Docker Desktop CLI used by msandbox" \
+  $(grep -q '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' "$rendered" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

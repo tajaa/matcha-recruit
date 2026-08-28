@@ -77,7 +77,7 @@ render_dashboard() {
         (sort_by((if .board_column == "changes_requested" then 0 else 1 end), (.last_moved_at // .created_at))[:4][] |
           "  " + (if .board_column == "changes_requested" then "CR  " else "TODO" end)
           + " " + (.project_title // "?") + " · " + (.title[0:50])
-          + (if (.progress_note // "") | contains("awaiting answers") then "  [WAITING]" else "" end))
+          + (if (.progress_note // "") | test("awaiting answers"; "i") then "  [WAITING]" else "" end))
       end
     '
 

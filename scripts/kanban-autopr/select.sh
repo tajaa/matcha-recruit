@@ -140,6 +140,13 @@ already_handled() {
             else
                 echo rework
             fi
+        elif [ "$state" = "MERGED" ] \
+            && { [[ "$progress_note" == "from auto setup"* ]] \
+                || [[ "$progress_note" == "🤖 AUTO SETUP"* ]]; }; then
+            # Defense in depth for a missed merge webhook. The workflow's
+            # reconciliation step moves this card to Review; until that write
+            # succeeds, never mistake the merged bot branch for fresh work.
+            echo skip
         else
             echo investigate
         fi

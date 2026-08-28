@@ -94,6 +94,14 @@ considered healthy: if any of the four panes is dead or missing, the helper repl
 whole observer session. Autonomous model startup fails closed until all four panes are
 live. The window uses a 2x2 grid: dashboard/work above PR/health.
 
+The LaunchAgent does not execute the repo-backed `msandbox` symlink directly:
+macOS can deny background agents access to `~/Documents` even when Terminal has
+access. Instead, the dispatcher evaluates the same fail-closed master predicate
+from launchd-safe locations: the `autopr-enabled` marker created only by
+`msandbox`, plus a running Docker Compose `matcha-agent-sandbox` workspace.
+The workflow repeats the complete `msandbox autopr-ready` check before starting
+OpenCode. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
+
 - **24h queue + PR dashboard** — active workflow, the exact card `select.sh` would choose
   next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs
   from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
@@ -138,7 +146,12 @@ seconds. Override those intervals with
    `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, joins each card's `element_id`
    against the bundle's `elements` array to attach `repo_paths` (prompt-only scoping, not
    a gate).
-3. **`select.sh`** — picks one card GitHub hasn't already handled. Branch key is
+3. **`reconcile-merged-cards.sh`** — repairs a missed `pull_request` webhook before
+   selection. A Changes Requested card whose linked `bot/task-<id8>` PR is already
+   merged is moved to Review and removed from that run's candidate snapshot. A
+   matching defensive check in `select.sh` skips the card if the repair write fails,
+   so a delayed webhook can never produce a duplicate PR.
+4. **`select.sh`** — picks one card GitHub hasn't already handled. Branch key is
    `bot/task-<id8>` (first 8 hex of the task UUID). Ranks `changes_requested` before
    `todo` (rework is better-specified — it has a written `review_note` — and unblocks a
    PR already in flight), then oldest `last_moved_at` first. For `todo`, any PR at all on
@@ -152,7 +165,7 @@ seconds. Override those intervals with
    the moment `last_moved_at` advances past the marker date. A failed attempt cools down
    for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 3 open `autopr` PRs.
-4. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
+5. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
    trusted harness and attached locally; the model never needs board or storage network
@@ -170,11 +183,11 @@ seconds. Override those intervals with
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
    work, migrations, policy boundaries, and external dependencies.
-5. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
+6. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
-6. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+7. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
    restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
@@ -199,12 +212,13 @@ seconds. Override those intervals with
    failures), then PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`.
    `questions_only` creates a no-product-change draft PR, applies
    `autopr-awaiting-input`, and leaves the card in `changes_requested` with a visible
-   note such as `from auto setup · build 550 · prod c5d3a49 · PR #295 · 🟡 C42 ·
-   awaiting answers`. `rework` updates the existing branch and PR; once there are no
-   remaining blocking questions it returns the card to `in_progress` (this is the one
-   transition `project_task_service` deliberately
+   note such as `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod
+   c5d3a49 · PR #295 · 🟡 C42`. `rework` updates the existing branch and PR;
+   once there are no remaining blocking questions it returns the card to `in_progress`
+   (this is the one transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not
-   a fresh start). A fresh `no_safe_action` PATCHes `progress_note` to the no-spec marker
+   a fresh start). A fresh `no_safe_action` PATCHes `progress_note` with a visible
+   `🤖 AUTO SETUP · NO PR: …` state plus the durable no-spec marker
    without creating a branch, PR, or GitHub issue. During rework it updates the existing
    PR's title, body, and triage labels before writing the durable no-spec card note, so the
    prior round cannot remain visible as the current decision.
@@ -258,7 +272,7 @@ can never drag a card backwards:
 | action | from | to | also |
 |---|---|---|---|
 | `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
-| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | preserve the visible `from auto setup · build … · prod … · PR #…` note; reconstruct production plus current criticality/confidence/state from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
+| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | write the visible `🤖 AUTO SETUP · MERGED: READY FOR REVIEW · build … · prod … · PR #…` note; reconstruct production plus current criticality/confidence from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
 | `closed` with `merged == true` | `review` | `review` | add/recover the same origin/build note and PR link; never move the card backwards |
 | `closed` with `merged == false` | — | — | no move |
 | anything else | — | — | ignore |
@@ -267,3 +281,10 @@ can never drag a card backwards:
 approval.
 
 It never deploys or auto-merges. A human reads the PR body and decides.
+
+The persistent runner may check out a local `bot/task-*` branch while assembling
+the PR. Its always-run finalizer switches a clean task checkout back to `main`
+after publication. It refuses to erase dirty state. Human/agent work may likewise
+use temporary worktrees for isolation, but the exact temporary worktree is removed
+immediately after its PR is submitted; submitted PR branches are never left checked
+out in a worktree.
