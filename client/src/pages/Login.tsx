@@ -13,7 +13,7 @@ type LoginResponse = {
 const roleRoutes: Record<string, string> = {
   admin: '/admin',
   client: '/app',
-  employee: '/portal',
+  employee: '/portal/schedule',
   candidate: '/candidate',
   broker: '/broker',
   individual: '/werk',

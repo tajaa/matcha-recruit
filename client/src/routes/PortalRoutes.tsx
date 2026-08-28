@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import { FeatureGate } from '../components/shared/FeatureGate'
 import PortalLayout from '../pages/portal/PortalLayout'
 import PortalDashboard from '../pages/portal/PortalDashboard'
@@ -12,7 +12,8 @@ export default function PortalRoutes() {
   return (
     <Routes>
       <Route element={<PortalLayout />}>
-        <Route index element={<PortalDashboard />} />
+        <Route index element={<Navigate to="schedule" replace />} />
+        <Route path="dashboard" element={<PortalDashboard />} />
         <Route
           path="schedule"
           element={
