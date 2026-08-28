@@ -371,15 +371,17 @@ async def withdraw_schedule_request(
 
 @router.get("/me/schedule/availability", dependencies=_schedule_dep)
 async def get_my_availability(employee: dict = Depends(require_employee_record)):
+    from app.matcha.services.scheduling.schedule_profiles import (
+        fetch_availability_windows, fetch_schedule_profile,
+    )
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            "SELECT weekday, start_time, end_time FROM schedule_employee_availability "
-            "WHERE company_id = $1 AND employee_id = $2 ORDER BY weekday, start_time",
-            employee["org_id"], employee["id"],
+        windows = await fetch_availability_windows(
+            conn, company_id=employee["org_id"], employee_id=employee["id"],
         )
-    return {"windows": [
-        {"weekday": r["weekday"], "start_time": str(r["start_time"])[:5],
-         "end_time": str(r["end_time"])[:5]} for r in rows]}
+        profile = await fetch_schedule_profile(
+            conn, company_id=employee["org_id"], employee_id=employee["id"],
+        )
+    return {"availability_state": profile.availability_state, "windows": windows}
 
 
 @router.put("/me/schedule/availability", dependencies=_schedule_dep)
@@ -387,28 +389,18 @@ async def replace_my_availability(
     body: AvailabilityReplace,
     employee: dict = Depends(require_employee_record),
 ):
-    """Full replacement. Empty windows list clears availability entirely
-    (= back to fully available)."""
-    from app.matcha.routes.employee_schedule._shared import log_audit
+    """Full replacement; omitted state preserves legacy empty=always behavior."""
+    from app.matcha.services.scheduling.schedule_profiles import replace_availability_core
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
         async with conn.transaction():
-            await conn.execute(
-                "DELETE FROM schedule_employee_availability WHERE company_id = $1 AND employee_id = $2",
-                company_id, employee["id"],
+            result = await replace_availability_core(
+                conn, company_id=company_id, employee_id=employee["id"],
+                availability_state=body.availability_state, windows=body.windows,
+                actor_user_id=employee.get("user_id"), actor_kind="employee",
             )
-            for w in body.windows:
-                await conn.execute(
-                    "INSERT INTO schedule_employee_availability "
-                    "(company_id, employee_id, weekday, start_time, end_time) "
-                    "VALUES ($1,$2,$3,$4,$5)",
-                    company_id, employee["id"], w.weekday, w.start_time, w.end_time,
-                )
-            await log_audit(conn, company_id, "availability", employee["id"],
-                            employee.get("user_id"), "availability.update",
-                            {"windows": len(body.windows), "actor": "employee"})
-    return {"saved": len(body.windows)}
+    return {"saved": result["saved"], "availability_state": result["state"]}
 
 
 @router.delete("/me/schedule/requests/{request_id}", dependencies=_schedule_dep)

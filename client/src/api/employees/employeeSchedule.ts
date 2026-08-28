@@ -5,6 +5,8 @@ import type {
   AssignmentMovePayload, AssignmentMoveResponse,
   ScheduleJob, JobPayload, JobCredentialRequirement, RosterEmployee,
   AssignmentNotePayload, MealBreakWaiverAttestation,
+  AvailabilityState, EmployeeJobAssignment, EmployeeJobAssignmentPayload,
+  EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -44,6 +46,26 @@ export function replaceJobCredentialRequirements(jobId: string, requirements: Jo
   return api.put<{ job_id: string; credential_requirements: JobCredentialRequirement[] }>(
     `/employee-schedule/jobs/${jobId}/credential-requirements`, { requirements },
   )
+}
+
+export function fetchEmployeeJobs(employeeId: string) {
+  return api.get<{ employee_id: string; assignments: EmployeeJobAssignment[] }>(
+    `/employee-schedule/employees/${employeeId}/jobs`,
+  )
+}
+
+export function replaceEmployeeJobs(employeeId: string, jobs: EmployeeJobAssignmentPayload[]) {
+  return api.put<{ employee_id: string; assignments: EmployeeJobAssignment[] }>(
+    `/employee-schedule/employees/${employeeId}/jobs`, { assignments: jobs },
+  )
+}
+
+export function fetchEmployeeScheduleProfile(employeeId: string) {
+  return api.get<EmployeeScheduleProfile>(`/employee-schedule/profiles/${employeeId}`)
+}
+
+export function updateEmployeeScheduleProfile(employeeId: string, payload: EmployeeScheduleProfilePayload) {
+  return api.put<EmployeeScheduleProfile>(`/employee-schedule/profiles/${employeeId}`, payload)
 }
 
 /** For a `?shift=` deep link (the Huume `[[shift:…]]` pill) that carries no
@@ -203,11 +225,13 @@ export function generateFromWeekTemplate(weekTemplateId: string, startDate: stri
 export interface AvailabilityWindow { weekday: number; start_time: string; end_time: string }
 
 export function fetchEmployeeAvailability(employeeId: string) {
-  return api.get<{ windows: AvailabilityWindow[] }>(`/employee-schedule/availability/${employeeId}`)
+  return api.get<{ availability_state: AvailabilityState; windows: AvailabilityWindow[] }>(`/employee-schedule/availability/${employeeId}`)
 }
 
-export function saveEmployeeAvailability(employeeId: string, windows: AvailabilityWindow[]) {
-  return api.put<{ saved: number }>(`/employee-schedule/availability/${employeeId}`, { windows })
+export function saveEmployeeAvailability(employeeId: string, windows: AvailabilityWindow[], state?: AvailabilityState) {
+  return api.put<{ saved: number; availability_state: AvailabilityState }>(
+    `/employee-schedule/availability/${employeeId}`, { windows, ...(state ? { availability_state: state } : {}) },
+  )
 }
 
 // ---- Admin: request review ----
