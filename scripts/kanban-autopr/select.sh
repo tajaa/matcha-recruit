@@ -23,7 +23,11 @@ ATTEMPTS_DIR="$CACHE_DIR/attempts"
 [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || mkdir -p "$ATTEMPTS_DIR"
 
 NOTHING_TO_DO=3
-MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-3}"
+# The AutoPR review queue is deliberately bounded, but ten open implementation
+# drafts lets the four supported projects make progress without a three-PR
+# bottleneck. The workflow sets this explicitly; this default also keeps local
+# dashboard/selector probes consistent when they run outside Actions.
+MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"
 ATTEMPT_COOLDOWN_MINUTES="${AUTOPR_ATTEMPT_COOLDOWN_MINUTES:-15}"
 
 count="$(jq 'length' "$CARDS_FILE")"

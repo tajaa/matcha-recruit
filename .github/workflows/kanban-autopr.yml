@@ -23,6 +23,12 @@ concurrency:
   group: kanban-autopr
   cancel-in-progress: false
 
+# Keep the review queue bounded, but let the five-minute runner make progress
+# across the four supported projects instead of idling after only three drafts.
+# `select.sh` carries the same value as its safe local/dashboard default.
+env:
+  MAX_OPEN_IMPLEMENTATION_PRS: 10
+
 jobs:
   build:
     runs-on: [self-hosted, macOS, opencode]

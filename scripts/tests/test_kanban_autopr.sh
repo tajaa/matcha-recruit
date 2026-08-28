@@ -478,6 +478,11 @@ second_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-rec
 check "cooldown lets the next tick advance to another card" \
     $([ "$(printf '%s' "$second_selected" | jq -r '.id8')" = "11111111" ] && echo 0 || echo 1)
 
+check "implementation PR cap defaults to ten and workflow pins it" \
+    $(grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"' "$AUTOPR_DIR/select.sh" \
+      && grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS: 10' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \
+      && echo 0 || echo 1)
+
 check "no-spec dedup recognizes the marker inside the visible origin note" \
     $(grep -qF '[[ "$progress_note" == *"[autopr:no-spec "* ]]' "$AUTOPR_DIR/select.sh" && echo 0 || echo 1)
 
