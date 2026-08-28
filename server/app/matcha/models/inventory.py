@@ -1,9 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer
+
+
+JsonDecimal = Annotated[
+    Decimal,
+    PlainSerializer(lambda value: float(value), return_type=float, when_used="json"),
+]
 
 MovementKind = Literal["out", "in", "stockout", "adjust", "sale", "waste"]
 WasteReason = Literal[
@@ -298,30 +304,30 @@ class ForecastNetworkSummaryOut(BaseModel):
     shortages_fully_covered: int
     remaining_reorder_count: int
     attention_count: int
-    inventory_value_moved: Optional[Decimal] = None
+    inventory_value_moved: Optional[JsonDecimal] = None
 
 
 class ForecastNetworkTransferOut(BaseModel):
     item_name: str
     unit: Optional[str] = None
-    quantity: Decimal
+    quantity: JsonDecimal
     from_item_id: UUID
     from_location_id: UUID
     from_location_name: str
-    from_current_quantity: Decimal
-    from_target_quantity: Decimal
-    from_post_transfer_quantity: Decimal
+    from_current_quantity: JsonDecimal
+    from_target_quantity: JsonDecimal
+    from_post_transfer_quantity: JsonDecimal
     to_item_id: UUID
     to_location_id: UUID
     to_location_name: str
-    to_current_quantity: Decimal
-    to_target_quantity: Decimal
-    to_post_transfer_quantity: Decimal
-    receiver_remaining_shortage: Decimal
+    to_current_quantity: JsonDecimal
+    to_target_quantity: JsonDecimal
+    to_post_transfer_quantity: JsonDecimal
+    receiver_remaining_shortage: JsonDecimal
     runout_date: Optional[date] = None
     order_by_date: Optional[date] = None
-    days_of_cover_added: Optional[Decimal] = None
-    inventory_value: Optional[Decimal] = None
+    days_of_cover_added: Optional[JsonDecimal] = None
+    inventory_value: Optional[JsonDecimal] = None
     coverage: Literal["full", "partial"]
     confidence: Literal["low", "medium", "high"]
     rationale: str
@@ -333,8 +339,8 @@ class ForecastNetworkShortageOut(BaseModel):
     unit: Optional[str] = None
     location_id: UUID
     location_name: str
-    shortage_quantity: Decimal
-    suggested_order_quantity: Decimal
+    shortage_quantity: JsonDecimal
+    suggested_order_quantity: JsonDecimal
     runout_date: Optional[date] = None
     order_by_date: Optional[date] = None
     confidence: Literal["low", "medium", "high"]

@@ -203,19 +203,21 @@ async def get_latest_forecast_run(
 
 @router.get("/network", response_model=ForecastNetworkPlanOut)
 async def get_inventory_network_plan(
-    forecast_start: Optional[date] = Query(None),
+    run_id: UUID = Query(...),
     company_id: UUID = Depends(get_client_company_id),
     _=Depends(require_admin_or_client),
     _gate=_forecast_gate,
 ):
     """Read-only transfer opportunities across the tenant's active stores."""
     async with get_connection() as conn:
-        start = await _forecast_start(conn, company_id, None, forecast_start)
-        return await network.build_network_preview(
+        plan = await network.build_network_preview(
             conn,
             company_id=company_id,
-            forecast_start=start,
+            run_id=run_id,
         )
+    if plan is None:
+        raise HTTPException(404, "Forecast run not found.")
+    return plan
 
 
 @router.post("/runs/{run_id}/apply-par")

@@ -2,6 +2,10 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
+from app.matcha.models.inventory import ForecastNetworkPlanOut
+from app.matcha.services.inventory import network
 from app.matcha.services.inventory.network import build_network_plan
 
 
@@ -114,3 +118,81 @@ def test_network_plan_surfaces_untrusted_counts_instead_of_using_them_as_supply(
         "location_name": "Uptown",
         "status": "insufficient_history",
     }]
+
+
+def test_network_response_serializes_decimal_fields_as_json_numbers():
+    plan = build_network_plan([
+        _line(item_id="50000000-0000-0000-0000-000000000001", location_id=_DOWNTOWN, location_name="Downtown", current="2", target="10"),
+        _line(item_id="50000000-0000-0000-0000-000000000002", location_id=_UPTOWN, location_name="Uptown", current="25", target="8"),
+    ], forecast_start=date(2026, 8, 27), location_count=2)
+
+    payload = ForecastNetworkPlanOut.model_validate(plan).model_dump(mode="json")
+
+    assert payload["transfers"][0]["quantity"] == 8.0
+    assert isinstance(payload["transfers"][0]["quantity"], float)
+    assert payload["summary"]["inventory_value_moved"] == 32.0
+
+
+@pytest.mark.asyncio
+async def test_network_preview_reuses_the_saved_run_scenario(monkeypatch):
+    run_id = UUID("60000000-0000-0000-0000-000000000001")
+    company_id = UUID("60000000-0000-0000-0000-000000000002")
+    receiver = _line(
+        item_id="60000000-0000-0000-0000-000000000003",
+        location_id=_DOWNTOWN,
+        location_name="Downtown",
+        current="2",
+        target="20",
+        case_pack="6",
+    )
+    donor = _line(
+        item_id="60000000-0000-0000-0000-000000000004",
+        location_id=_UPTOWN,
+        location_name="Uptown",
+        current="25",
+        target="8",
+    )
+
+    preview_calls = []
+
+    async def fake_build_preview(_conn, **kwargs):
+        preview_calls.append(kwargs)
+        line = receiver if kwargs["location_id"] == _DOWNTOWN else donor
+        return {"lines": [line]}
+
+    monkeypatch.setattr(network.forecast_store, "build_preview", fake_build_preview)
+
+    class FakeConnection:
+        async def fetchrow(self, _query, _run_id, _company_id):
+            return {"forecast_start": date(2026, 8, 27), "location_id": None}
+
+        async def fetch(self, query, *_args):
+            if "inventory_forecast_overrides" in query:
+                return [{
+                    "week_start": date(2026, 8, 31),
+                    "demand_multiplier": Decimal("1.5"),
+                    "reason": "Tournament week",
+                    "source": "ai_accepted",
+                    "confidence": "high",
+                }]
+            if "SELECT id, COALESCE(name" in query:
+                return [
+                    {"id": _DOWNTOWN, "name": "Downtown"},
+                    {"id": _UPTOWN, "name": "Uptown"},
+                ]
+            return [
+                {"id": receiver["item_id"], "normalized_name": receiver["normalized_name"], "location_id": _DOWNTOWN, "location_name": "Downtown"},
+                {"id": donor["item_id"], "normalized_name": donor["normalized_name"], "location_id": _UPTOWN, "location_name": "Uptown"},
+            ]
+
+    plan = await network.build_network_preview(
+        FakeConnection(), company_id=company_id, run_id=run_id,
+    )
+
+    assert plan is not None
+    assert len(preview_calls) == 2
+    assert all(call["forecast_start"] == date(2026, 8, 27) for call in preview_calls)
+    assert all(call["overrides"][0]["demand_multiplier"] == Decimal("1.5") for call in preview_calls)
+    assert plan["transfers"][0]["quantity"] == Decimal("17")
+    assert plan["remaining_shortages"][0]["shortage_quantity"] == Decimal("1")
+    assert plan["remaining_shortages"][0]["suggested_order_quantity"] == Decimal("6")

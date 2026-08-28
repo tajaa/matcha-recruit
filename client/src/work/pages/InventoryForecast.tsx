@@ -50,6 +50,7 @@ export default function InventoryForecast() {
   const [settings, setSettings] = useState<ForecastSettings>(DEFAULT_SETTINGS)
   const [run, setRun] = useState<ForecastRun | null>(null)
   const [networkPlan, setNetworkPlan] = useState<InventoryNetworkPlanType | null>(null)
+  const [networkError, setNetworkError] = useState(false)
   const [insight, setInsight] = useState<InventoryInsight | null>(null)
   const [parPreview, setParPreview] = useState<ForecastParPreview | null>(null)
   const [managerContext, setManagerContext] = useState('')
@@ -67,15 +68,24 @@ export default function InventoryForecast() {
   useEffect(() => {
     let active = true
     setLoading(true)
-    const networkRequest = locationId ? Promise.resolve(null) : getInventoryNetworkPlan().catch(() => null)
-    Promise.all([getForecastSettings(locationId || undefined), getLatestForecastRun(locationId || undefined), networkRequest]).then(async ([nextSettings, latest, nextNetworkPlan]) => {
+    setNetworkPlan(null)
+    setNetworkError(false)
+    Promise.all([getForecastSettings(locationId || undefined), getLatestForecastRun(locationId || undefined)]).then(async ([nextSettings, latest]) => {
       if (!active) return
       setSettings(nextSettings)
-      setNetworkPlan(nextNetworkPlan)
       const stale = !latest || Date.now() - new Date(latest.created_at).getTime() > 12 * 60 * 60 * 1000
       const nextRun = stale ? await createForecastRun({ location_id: locationId || null }) : latest
       if (!active) return
+      let nextNetworkPlan: InventoryNetworkPlanType | null = null
+      let nextNetworkError = false
+      if (!locationId) {
+        try { nextNetworkPlan = await getInventoryNetworkPlan(nextRun.id) }
+        catch { nextNetworkError = true }
+      }
+      if (!active) return
       setRun(nextRun)
+      setNetworkPlan(nextNetworkPlan)
+      setNetworkError(nextNetworkError)
       void getForecastInsight(nextRun.id).then(setInsight).catch(() => setInsight(null))
       void previewForecastPar(nextRun.id).then(setParPreview).catch(() => setParPreview(null))
     }).catch(() => { if (active) toast('Failed to load reorder plan', 'error') }).finally(() => { if (active) setLoading(false) })
@@ -110,15 +120,19 @@ export default function InventoryForecast() {
   async function recalculate() {
     setSaving(true)
     try {
-      const [nextRun, nextNetworkPlan] = await Promise.all([
-        createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides }),
-        locationId ? Promise.resolve(null) : getInventoryNetworkPlan().catch(() => null),
-      ])
+      const nextRun = await createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides })
+      let nextNetworkPlan: InventoryNetworkPlanType | null = null
+      let nextNetworkError = false
+      if (!locationId) {
+        try { nextNetworkPlan = await getInventoryNetworkPlan(nextRun.id) }
+        catch { nextNetworkError = true }
+      }
       setRun(nextRun)
       setNetworkPlan(nextNetworkPlan)
+      setNetworkError(nextNetworkError)
       void getForecastInsight(nextRun.id).then(setInsight).catch(() => setInsight(null))
       void previewForecastPar(nextRun.id).then(setParPreview).catch(() => setParPreview(null))
-      toast('Reorder plan refreshed', 'success')
+      toast(nextNetworkError ? 'Reorder plan refreshed, but network balancing is unavailable' : 'Reorder plan refreshed', nextNetworkError ? 'error' : 'success')
     }
     catch { toast('Could not refresh the reorder plan', 'error') }
     finally { setSaving(false) }
@@ -174,6 +188,7 @@ export default function InventoryForecast() {
         <InventoryNavigation />
 
         {run && <>
+          {!locationId && networkError && <section className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200"><p className="font-medium">Cross-location balancing is unavailable</p><p className="mt-1 text-xs text-amber-100/70">Review physical stock at other locations before placing orders from this plan.</p></section>}
           {!locationId && networkPlan && <InventoryNetworkPlan plan={networkPlan} onAudit={() => navigate(`${base}/inventory/audit`)} />}
           <ReorderPlan run={run} networkPlan={!locationId ? networkPlan : null} onOrder={async (line) => { try { await createOrder({ item_id: line.item_id, quantity: line.suggested_quantity ?? undefined }); toast(`${line.name} added to the order queue`, 'success') } catch { toast('Could not stage that order', 'error') } }} onAudit={() => navigate(`${base}/inventory/audit`)} />
           {parPreview && <ParPreview preview={parPreview} onApply={async () => { try { await applyForecastPar(run.id); await recalculate(); toast('Eligible PARs applied for review', 'success') } catch { toast('Could not apply eligible PARs', 'error') } }} />}
@@ -334,7 +349,7 @@ function ReorderPlan({ run, networkPlan, onOrder, onAudit }: { run: ForecastRun;
       </div>
       <div className="grid divide-y divide-w-line">{plan.lines.map((line) => {
         const transfers = networkPlan?.transfers.filter((transfer) => transfer.to_item_id === line.item_id) ?? []
-        const transferQuantity = transfers.reduce((total, transfer) => total + transfer.quantity, 0)
+        const transferQuantity = transfers.reduce((total, transfer) => total + Number(transfer.quantity), 0)
         const remaining = networkPlan?.remaining_shortages.find((shortage) => shortage.item_id === line.item_id)
         return <div key={line.item_id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-w-text">{line.name}</p><UrgencyBadge urgency={line.urgency} />{transferQuantity > 0 && <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] text-emerald-300">Transfer option</span>}</div><p className="mt-1 text-xs text-w-dim">{formatNumber(line.average_daily_demand)}/day · {line.lead_demand ? `${formatNumber(line.lead_demand)} lead demand` : 'no lead demand'} · {line.runout_date ? `runs out ${line.runout_date}` : 'no runout date'}</p>{transferQuantity > 0 && <p className="mt-1 text-[11px] text-emerald-300">Move {formatNumber(transferQuantity)} from {transfers.map((transfer) => transfer.from_location_name).join(', ')} first{remaining ? `; forecast still suggests ordering ${formatNumber(remaining.suggested_order_quantity)}` : '; this covers the forecast shortage'}.</p>}</div><div className="flex items-center gap-3"><div className="text-right text-xs text-w-dim"><p className="font-medium text-w-text">Order {formatNumber(line.suggested_quantity)}{line.unit ? ` ${line.unit}` : ''}</p><p>{line.extended_cost === null ? 'Cost unavailable' : formatMoney(line.extended_cost)}</p></div><Button size="sm" variant={transferQuantity > 0 ? 'secondary' : undefined} disabled={orderingId === line.item_id} onClick={() => void handleOrder(line)}>{orderingId === line.item_id ? 'Ordering…' : transferQuantity > 0 ? 'Order anyway' : 'Order'}</Button></div></div>
       })}</div>

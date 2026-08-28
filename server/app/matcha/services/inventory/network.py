@@ -209,8 +209,26 @@ def build_network_plan(
     }
 
 
-async def build_network_preview(conn, *, company_id: UUID, forecast_start: date) -> dict:
-    """Build per-location forecasts, then balance only physical-location rows."""
+async def build_network_preview(conn, *, company_id: UUID, run_id: UUID) -> dict | None:
+    """Rebuild each location with the saved run's date and scenario overrides."""
+    run = await conn.fetchrow(
+        """SELECT forecast_start, location_id
+           FROM inventory_forecast_runs
+           WHERE id=$1 AND company_id=$2""",
+        run_id,
+        company_id,
+    )
+    if run is None or run["location_id"] is not None:
+        return None
+    override_rows = await conn.fetch(
+        """SELECT week_start, demand_multiplier, reason, source, confidence
+           FROM inventory_forecast_overrides
+           WHERE run_id=$1 AND company_id=$2
+           ORDER BY week_start, id""",
+        run_id,
+        company_id,
+    )
+    overrides = [dict(row) for row in override_rows]
     locations = await conn.fetch(
         """SELECT id, COALESCE(name, city, 'Unnamed') AS name
            FROM business_locations
@@ -235,8 +253,8 @@ async def build_network_preview(conn, *, company_id: UUID, forecast_start: date)
             conn,
             company_id=company_id,
             location_id=location["id"],
-            forecast_start=forecast_start,
-            overrides=[],
+            forecast_start=run["forecast_start"],
+            overrides=overrides,
         )
         for raw in preview["lines"]:
             if raw.get("location_id") != location["id"]:
@@ -249,4 +267,8 @@ async def build_network_preview(conn, *, company_id: UUID, forecast_start: date)
                 "normalized_name": item_metadata["normalized_name"],
                 "location_name": item_metadata["location_name"],
             })
-    return build_network_plan(lines, forecast_start=forecast_start, location_count=len(locations))
+    return build_network_plan(
+        lines,
+        forecast_start=run["forecast_start"],
+        location_count=len(locations),
+    )
