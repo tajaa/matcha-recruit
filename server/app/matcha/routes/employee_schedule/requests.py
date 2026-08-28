@@ -15,6 +15,9 @@ from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
 from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
+from ...services.scheduling.schedule_request_notifications import (
+    mark_manager_ready_notifications_resolved,
+)
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
@@ -224,6 +227,9 @@ async def review_request(request_id: UUID, body: RequestReview,
                    reviewed_by = $5, reviewed_at = NOW(), updated_at = NOW()
                    WHERE id = $1 AND company_id = $2""",
                 request_id, company_id, new_status, body.review_notes, current_user.id,
+            )
+            await mark_manager_ready_notifications_resolved(
+                conn, company_id=company_id, request_id=request_id,
             )
             shift_start = None
             if req["shift_id"]:

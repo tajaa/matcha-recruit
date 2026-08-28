@@ -70,6 +70,9 @@ async def list_notifications(
     items = await notif_svc.get_notifications(
         current_user.id, company_id=company_id, unread_only=unread_only, limit=limit, offset=offset,
     )
+    total = await notif_svc.count_notifications(
+        current_user.id, company_id=company_id, unread_only=unread_only,
+    )
     return {
         "notifications": [
             {
@@ -84,6 +87,7 @@ async def list_notifications(
             }
             for n in items
         ],
+        "total": total,
     }
 
 

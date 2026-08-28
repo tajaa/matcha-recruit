@@ -11,6 +11,24 @@ from app.core.services.email._shared import _is_reserved_test_domain
 from app.config import get_settings
 
 
+async def mark_manager_ready_notifications_resolved(
+    conn, *, company_id: UUID, request_id: UUID,
+) -> int:
+    """Clear unread manager alerts once a request leaves the approval queue."""
+    result = await conn.execute(
+        """
+        UPDATE mw_notifications
+        SET is_read = TRUE
+        WHERE company_id = $1
+          AND type = 'schedule_request_pending'
+          AND is_read = FALSE
+          AND metadata->>'request_id' = $2
+        """,
+        company_id, str(request_id),
+    )
+    return int(result.split()[-1])
+
+
 async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[str, int]:
     """Send each company reviewer one email after both employees confirm.
 

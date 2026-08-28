@@ -332,6 +332,9 @@ async def withdraw_schedule_request(
 ):
     """Withdraw an offer or a counterparty acceptance before manager review."""
     from app.matcha.routes.employee_schedule._shared import log_audit
+    from app.matcha.services.scheduling.schedule_request_notifications import (
+        mark_manager_ready_notifications_resolved,
+    )
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
@@ -362,6 +365,10 @@ async def withdraw_schedule_request(
                 )
             else:
                 raise HTTPException(status_code=403, detail="You cannot withdraw this request")
+            if row["status"] == "awaiting_manager":
+                await mark_manager_ready_notifications_resolved(
+                    conn, company_id=company_id, request_id=request_id,
+                )
             await log_audit(
                 conn, company_id, "request", request_id, employee.get("user_id"),
                 "request.withdraw", {"employee_id": str(employee["id"])},
@@ -409,17 +416,25 @@ async def cancel_my_schedule_request(
     employee: dict = Depends(require_employee_record),
 ):
     """Backward-compatible cancellation endpoint for requests I filed."""
+    from app.matcha.services.scheduling.schedule_request_notifications import (
+        mark_manager_ready_notifications_resolved,
+    )
+
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE schedule_requests
-            SET status = 'cancelled', updated_at = NOW()
-            WHERE id = $1 AND employee_id = $2
-              AND status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')
-            RETURNING id
-            """,
-            request_id, employee["id"],
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Pending request not found")
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE schedule_requests
+                SET status = 'cancelled', updated_at = NOW()
+                WHERE id = $1 AND employee_id = $2
+                  AND status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')
+                RETURNING id
+                """,
+                request_id, employee["id"],
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Pending request not found")
+            await mark_manager_ready_notifications_resolved(
+                conn, company_id=employee["org_id"], request_id=request_id,
+            )
     return {"status": "cancelled", "request_id": str(request_id)}
