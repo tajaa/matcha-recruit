@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from html import escape
 from uuid import UUID
 
@@ -48,6 +49,42 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
     service = get_email_service()
     sent = 0
     for recipient in recipients:
+        link = f"/ops/schedule?tab=requests&request={request['id']}"
+        in_app_claimed = await conn.fetchval(
+            """
+            INSERT INTO schedule_request_notification_deliveries
+                (company_id, request_id, recipient_user_id, event_type)
+            VALUES ($1,$2,$3,'manager_ready_in_app')
+            ON CONFLICT (request_id, recipient_user_id, event_type) DO UPDATE
+               SET created_at=NOW()
+             WHERE schedule_request_notification_deliveries.sent_at IS NULL
+               AND schedule_request_notification_deliveries.created_at < NOW() - INTERVAL '5 minutes'
+            RETURNING id
+            """,
+            request["company_id"], request["id"], recipient["id"],
+        )
+        if in_app_claimed:
+            owner = request["owner_name"] or "Employee"
+            target = request["target_name"] or "Coworker"
+            request_type = request["request_type"]
+            # One statement commits the bell row and its outbox receipt together,
+            # preventing retry recovery from creating duplicate manager alerts.
+            await conn.execute(
+                """
+                WITH notification AS (
+                    INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
+                    VALUES ($1, $2, 'schedule_request_pending', $3, $4, $5, $6::jsonb)
+                )
+                UPDATE schedule_request_notification_deliveries
+                SET sent_at=NOW() WHERE id=$7
+                """,
+                recipient["id"], request["company_id"],
+                f"Shift {request_type} request awaiting approval",
+                f"{owner} and {target} confirmed a {request_type} request. Review it to approve or deny it.",
+                link,
+                json.dumps({"request_id": str(request["id"])}),
+                in_app_claimed,
+            )
         claimed = await conn.fetchval(
             """
             INSERT INTO schedule_request_notification_deliveries
@@ -72,10 +109,10 @@ async def send_manager_ready_notifications(conn, *, request_id: UUID) -> dict[st
         owner = request["owner_name"] or "Employee"
         target = request["target_name"] or "Coworker"
         subject = "Shift request ready for manager approval"
-        link = f"{settings.app_base_url.rstrip('/')}/ops/schedule?tab=requests&request={request['id']}"
+        email_link = f"{settings.app_base_url.rstrip('/')}{link}"
         html = (
             f"<p>{escape(owner)} and {escape(target)} have confirmed a {escape(request['request_type'])} request.</p>"
-            f"<p><a href=\"{escape(link, quote=True)}\">Review the request</a>. "
+            f"<p><a href=\"{escape(email_link, quote=True)}\">Review the request</a>. "
             "The schedule remains unchanged until you approve it.</p>"
         )
         try:

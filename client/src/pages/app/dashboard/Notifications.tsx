@@ -22,11 +22,23 @@ interface NotificationItem {
   status: string | null
   created_at: string
   link: string | null
+  workspace_notification_id?: string
 }
 
 interface NotificationsResponse {
   items: NotificationItem[]
   total: number
+}
+
+interface WorkspaceNotificationsResponse {
+  notifications: Array<{
+    id: string
+    type: string
+    title: string
+    body: string | null
+    link: string | null
+    created_at: string
+  }>
 }
 
 const SEV_DOT: Record<string, string> = {
@@ -47,6 +59,7 @@ const TYPE_LABEL: Record<string, { text: string; color: string }> = {
   employee: { text: 'Employee', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' },
   offer_letter: { text: 'Offer', color: 'bg-violet-900/30 text-violet-400 border-violet-800/40' },
   handbook: { text: 'Handbook', color: 'bg-cyan-900/30 text-cyan-400 border-cyan-800/40' },
+  schedule_request_pending: { text: 'Schedule', color: 'bg-sky-900/30 text-sky-400 border-sky-800/40' },
   job_posting_invite: { text: 'Job Invite', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' },
   job_application_received: { text: 'Application', color: 'bg-blue-900/30 text-blue-400 border-blue-800/40' },
   job_application_status_changed: { text: 'Status Update', color: 'bg-purple-900/30 text-purple-400 border-purple-800/40' },
@@ -64,13 +77,29 @@ export default function Notifications() {
     if (isInitial) setLoading(true)
     else setLoadingMore(true)
     try {
-      const data = await api.get<NotificationsResponse>(`/dashboard/notifications?limit=30&offset=${offset}`)
+      const [data, workspace] = await Promise.all([
+        api.get<NotificationsResponse>(`/dashboard/notifications?limit=30&offset=${offset}`),
+        offset === 0
+          ? api.get<WorkspaceNotificationsResponse>('/matcha-work/notifications?limit=30')
+          : Promise.resolve({ notifications: [] }),
+      ])
+      const workspaceItems: NotificationItem[] = workspace.notifications.map((item) => ({
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        subtitle: item.body,
+        severity: null,
+        status: null,
+        created_at: item.created_at,
+        link: item.link,
+        workspace_notification_id: item.id,
+      }))
       if (isInitial) {
-        setItems(data.items)
+        setItems([...workspaceItems, ...data.items].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)))
       } else {
         setItems((prev) => [...prev, ...data.items])
       }
-      setTotal(data.total)
+      if (isInitial) setTotal(data.total + workspaceItems.length)
     } catch {}
     setLoading(false)
     setLoadingMore(false)
@@ -102,7 +131,15 @@ export default function Notifications() {
             return (
               <button
                 key={`${item.type}-${item.id}`}
-                onClick={() => item.link && navigate(item.link)}
+                onClick={() => {
+                  if (!item.link) return
+                  if (item.workspace_notification_id) {
+                    api.post('/matcha-work/notifications/mark-read', {
+                      notification_ids: [item.workspace_notification_id],
+                    }).catch(() => {})
+                  }
+                  navigate(item.link)
+                }}
                 disabled={!item.link}
                 className="flex items-start gap-3 w-full px-4 py-3 text-left bg-zinc-900 hover:bg-zinc-800/70 transition-colors disabled:cursor-default"
               >
@@ -131,7 +168,7 @@ export default function Notifications() {
       {!loading && items.length < total && (
         <div className="flex justify-center mt-4">
           <button
-            onClick={() => load(items.length)}
+            onClick={() => load(items.filter((item) => !item.workspace_notification_id).length)}
             disabled={loadingMore}
             className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors flex items-center gap-1.5"
           >
