@@ -136,6 +136,7 @@ export default function PortalSchedule() {
                 <div key={shift.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                   <div className="text-sm font-medium text-zinc-100">{fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}</div>
                   {(shift.role || shift.department) && <div className="text-[11px] text-zinc-500">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>}
+                  {shift.notes?.trim() && <p className="mt-1 text-[11px] text-zinc-400 whitespace-pre-wrap">Schedule note: {shift.notes.trim()}</p>}
                   <div className="mt-1 text-[11px] text-zinc-400">{shift.assignments.length ? `Assigned: ${shift.assignments.map((assignment) => assignment.name).join(', ')}` : 'Open shift'}</div>
                 </div>
               ))}
@@ -236,6 +237,7 @@ function ShiftCard({ shift, coworkers, teamShifts, onChanged }: { shift: Shift; 
             )}
           </div>
           {(shift.role || shift.department) && <div className="text-[11px] text-zinc-500 truncate">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>}
+          {shift.notes?.trim() && <p className="mt-1 text-[11px] text-zinc-400 whitespace-pre-wrap">Schedule note: {shift.notes.trim()}</p>}
           <AssignmentGuidance assignment={shift.assignments[0]} />
         </div>
         <button onClick={() => { setMode(mode === 'swap' ? null : 'swap'); setCounterShiftId('') }} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><Repeat className="h-3.5 w-3.5" /> Swap</button>
