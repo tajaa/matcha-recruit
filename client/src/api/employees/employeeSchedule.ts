@@ -68,6 +68,23 @@ export function updateEmployeeScheduleProfile(employeeId: string, payload: Emplo
   return api.put<EmployeeScheduleProfile>(`/employee-schedule/profiles/${employeeId}`, payload)
 }
 
+export function updateEmployeeSchedulingDetails(
+  employeeId: string,
+  payload: {
+    jobs?: { assignments: EmployeeJobAssignmentPayload[] }
+    availability: { availability_state: Exclude<AvailabilityState, 'unconfirmed'>; windows: AvailabilityWindow[] }
+    profile: EmployeeScheduleProfilePayload
+  },
+) {
+  return api.put<{
+    employee_id: string
+    assignments: EmployeeJobAssignment[] | null
+    availability_state: AvailabilityState
+    saved_windows: number
+    profile: EmployeeScheduleProfile
+  }>(`/employee-schedule/profiles/${employeeId}/details`, payload)
+}
+
 /** For a `?shift=` deep link (the Huume `[[shift:…]]` pill) that carries no
  *  location — resolves which location to scope the page to. */
 export function fetchShift(shiftId: string) {

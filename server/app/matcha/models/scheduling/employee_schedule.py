@@ -434,6 +434,18 @@ class AvailabilityReplace(BaseModel):
         return self
 
 
+class EmployeeSchedulingDetailsUpdate(BaseModel):
+    """Atomic employee scheduling-details save used by the admin profile panel.
+
+    ``jobs`` is optional so an unrelated profile/availability save can preserve
+    stale location assignments until an admin deliberately resolves them.
+    """
+
+    jobs: Optional[EmployeeJobsReplace] = None
+    availability: AvailabilityReplace
+    profile: EmployeeScheduleProfileUpdate
+
+
 class DuplicateShift(BaseModel):
     """Copy one shift onto other calendar dates (drafts)."""
 

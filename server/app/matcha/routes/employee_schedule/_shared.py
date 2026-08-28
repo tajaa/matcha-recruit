@@ -296,7 +296,10 @@ def raise_outside_availability(employee_id: UUID, violations: list[dict]) -> Non
     raise HTTPException(status_code=409, detail=availability_detail(employee_id, violations))
 
 
-async def check_job_qualification(conn, company_id: UUID, employee_id: UUID, job_id) -> Optional[dict]:
+async def check_job_qualification(
+    conn, company_id: UUID, employee_id: UUID, job_id,
+    *, starts_at: datetime,
+) -> Optional[dict]:
     """None when the shift carries no job (ungated — every pre-empsched04
     shift, or any shift with no job picked) or the employee is on that job's
     qualified list. Otherwise the 409 detail dict, for the caller to raise
@@ -315,10 +318,14 @@ async def check_job_qualification(conn, company_id: UUID, employee_id: UUID, job
                EXISTS (
                    SELECT 1 FROM schedule_job_employees je
                    WHERE je.job_id = j.id AND je.employee_id = $3
+                     AND je.company_id = $2
+                     AND je.qualification_status = 'active'
+                     AND (je.qualified_from IS NULL OR je.qualified_from <= $4)
+                     AND (je.qualified_until IS NULL OR je.qualified_until >= $4)
                ) AS qualified
         FROM schedule_jobs j WHERE j.id = $1 AND j.company_id = $2
         """,
-        job_id, company_id, employee_id,
+        job_id, company_id, employee_id, starts_at.date(),
     )
     if row is None or row["qualified"]:
         return None
@@ -561,6 +568,9 @@ async def fetch_roster(conn, company_id: UUID, location_id: Optional[UUID] = Non
             SELECT je.employee_id, je.job_id
             FROM schedule_job_employees je
             WHERE je.company_id = $1 AND je.employee_id = ANY($2::uuid[])
+              AND je.qualification_status = 'active'
+              AND (je.qualified_from IS NULL OR je.qualified_from <= CURRENT_DATE)
+              AND (je.qualified_until IS NULL OR je.qualified_until >= CURRENT_DATE)
             """,
             company_id, [r["id"] for r in rows],
         )

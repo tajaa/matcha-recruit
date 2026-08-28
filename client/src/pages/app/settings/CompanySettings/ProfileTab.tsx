@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Button, Input } from '../../../../components/ui'
+import { Button } from '../../../../components/ui'
 import { LABEL } from '../../../../components/ui/typography'
 import { INDUSTRY_OPTIONS } from '../../../../data/industryConstants'
 import { api } from '../../../../api/client'

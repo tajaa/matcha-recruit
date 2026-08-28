@@ -7,9 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchEmployeeJobs: vi.fn(),
   fetchProfile: vi.fn(),
   fetchAvailability: vi.fn(),
-  replaceJobs: vi.fn(),
-  saveAvailability: vi.fn(),
-  updateProfile: vi.fn(),
+  updateDetails: vi.fn(),
 }))
 
 vi.mock('../../api/employees/employeeSchedule', () => ({
@@ -17,9 +15,7 @@ vi.mock('../../api/employees/employeeSchedule', () => ({
   fetchEmployeeJobs: mocks.fetchEmployeeJobs,
   fetchEmployeeScheduleProfile: mocks.fetchProfile,
   fetchEmployeeAvailability: mocks.fetchAvailability,
-  replaceEmployeeJobs: mocks.replaceJobs,
-  saveEmployeeAvailability: mocks.saveAvailability,
-  updateEmployeeScheduleProfile: mocks.updateProfile,
+  updateEmployeeSchedulingDetails: mocks.updateDetails,
 }))
 
 const profile = {
@@ -48,9 +44,11 @@ describe('EmployeeSchedulingPanel', () => {
     })
     mocks.fetchProfile.mockResolvedValue(profile)
     mocks.fetchAvailability.mockResolvedValue({ availability_state: 'unconfirmed', windows: [] })
-    mocks.replaceJobs.mockResolvedValue({ employee_id: 'employee-1', assignments: [] })
-    mocks.saveAvailability.mockResolvedValue({ saved: 0, availability_state: 'always_available' })
-    mocks.updateProfile.mockResolvedValue({ ...profile, availability_state: 'always_available' })
+    mocks.updateDetails.mockResolvedValue({
+      employee_id: 'employee-1', assignments: [], saved_windows: 0,
+      availability_state: 'always_available',
+      profile: { ...profile, availability_state: 'always_available' },
+    })
   })
 
   it('loads inputs, switches primary, converts hours, and confirms always available', async () => {
@@ -66,18 +64,19 @@ describe('EmployeeSchedulingPanel', () => {
     fireEvent.change(hourInputs[2], { target: { value: '40' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save scheduling details' }))
 
-    await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalled())
-    const assignments = mocks.replaceJobs.mock.calls[0][1]
+    await waitFor(() => expect(mocks.updateDetails).toHaveBeenCalled())
+    const payload = mocks.updateDetails.mock.calls[0][1]
+    const assignments = payload.jobs.assignments
     expect(assignments.filter((assignment: { is_primary: boolean }) => assignment.is_primary)).toHaveLength(1)
     expect(assignments.find((assignment: { job_id: string }) => assignment.job_id === 'job-2').is_primary).toBe(true)
-    expect(mocks.saveAvailability).toHaveBeenCalledWith('employee-1', [], 'always_available')
-    expect(mocks.updateProfile).toHaveBeenCalledWith('employee-1', expect.objectContaining({
+    expect(payload.availability).toEqual({ availability_state: 'always_available', windows: [] })
+    expect(payload.profile).toEqual(expect.objectContaining({
       min_weekly_minutes: 1200, target_weekly_minutes: 1950, max_weekly_minutes: 2400,
     }))
   })
 
   it('surfaces API validation errors without clearing the form', async () => {
-    mocks.replaceJobs.mockRejectedValue(new Error('Job does not belong to this location'))
+    mocks.updateDetails.mockRejectedValue(new Error('Job does not belong to this location'))
     render(<EmployeeSchedulingPanel employeeId="employee-1" workLocationId="loc-1" />)
 
     expect(await screen.findByText('Barista')).toBeInTheDocument()
@@ -86,5 +85,30 @@ describe('EmployeeSchedulingPanel', () => {
 
     expect(await screen.findByText('Job does not belong to this location')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Shift leader' })).toBeChecked()
+  })
+
+  it('preserves legacy windows and omits unchanged stale-location jobs', async () => {
+    mocks.fetchJobs.mockResolvedValue({ jobs: [] })
+    mocks.fetchEmployeeJobs.mockResolvedValue({
+      employee_id: 'employee-1',
+      assignments: [{
+        job_id: 'job-old', job_name: 'Old location role', location_id: 'loc-old',
+        is_primary: false, qualification_status: 'active', qualified_from: null,
+        qualified_until: null, notes: null, credential_requirements: [],
+      }],
+    })
+    const legacyWindows = [{ weekday: 1, start_time: '09:00', end_time: '17:00' }]
+    mocks.fetchAvailability.mockResolvedValue({ availability_state: 'unconfirmed', windows: legacyWindows })
+
+    render(<EmployeeSchedulingPanel employeeId="employee-1" workLocationId="loc-1" />)
+
+    expect(await screen.findByText('Old location role')).toBeInTheDocument()
+    expect(screen.getByText(/previous work location/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save scheduling details' }))
+
+    await waitFor(() => expect(mocks.updateDetails).toHaveBeenCalledWith('employee-1', expect.objectContaining({
+      jobs: undefined,
+      availability: { availability_state: 'windows', windows: legacyWindows },
+    })))
   })
 })

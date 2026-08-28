@@ -61,4 +61,3 @@ def test_windows_state_requires_a_window():
 def test_always_available_rejects_windows():
     with pytest.raises(ValidationError, match="cannot include"):
         AvailabilityReplace(availability_state="always_available", windows=[WINDOW])
-

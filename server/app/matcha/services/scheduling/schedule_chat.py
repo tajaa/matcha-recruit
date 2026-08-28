@@ -60,6 +60,7 @@ from .schedule_chat_rules import (
     resolve_week,
 )
 from .schedule_intelligence import fetch_lapse_items
+from .schedule_profiles import fetch_effective_job_employee_ids
 from .schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES, availability_violations, sunday_indexed_weekday,
     template_windows,
@@ -878,6 +879,10 @@ async def build_proposal(
         # Pinned employees skip the pre-filter — their conflict is reported
         # by find_conflicts below, not silently dropped from consideration.
         free = [r for r in roster if str(r["id"]) not in busy or str(r["id"]) in pinned]
+        qualified_ids = await fetch_effective_job_employee_ids(
+            conn, company_id=company_id, job_id=shift.get("job_id"),
+            employee_ids=[r["id"] for r in free], as_of=starts_at.date(),
+        )
 
         # A cheap week-hours-only pass over every free candidate (roster is
         # ordered alphabetically, not by load) so the cap below keeps the
@@ -921,6 +926,12 @@ async def build_proposal(
                 lapse_items=lapse_map.get(str(eid), []),
                 fw_event="assign", fw_shift_published=True,
             )
+            if eid not in qualified_ids:
+                violations.insert(0, {
+                    "check": "job_qualification", "severity": "block",
+                    "message": "Employee is not actively qualified for this job on the shift date",
+                    "statute": None, "state": "",
+                })
             contexts.append(CandidateContext(
                 employee_id=str(eid), name=name, job_title=r["job_title"],
                 conflicts=conflicts, violations=violations, week_hours=hours_by_id[str(eid)],
@@ -1919,8 +1930,19 @@ async def execute_proposal(
 
             surviving_ids: list[UUID] = []
             assignee_names: list[str] = []
+            proposed_ids = [UUID(a["employee_id"]) for a in shift["assignees"]]
+            qualified_ids = await fetch_effective_job_employee_ids(
+                conn, company_id=company_id, job_id=job_id,
+                employee_ids=proposed_ids, as_of=starts_at.date(),
+            )
             for a in shift["assignees"]:
                 eid = UUID(a["employee_id"])
+                if eid not in qualified_ids:
+                    dropped.append({
+                        "name": a["name"], "label": shift["label"],
+                        "reason": "they are not actively qualified for this job on the shift date",
+                    })
+                    continue
                 conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
                 avail = availability_violations(avail_map.get(eid, {}), starts_at, ends_at)
                 violations = await check_shift_compliance(
@@ -2154,6 +2176,13 @@ async def execute_edit_proposal(
                     + [(eid, shift_row, other_row["id"]) for eid in b_ids]
                 )
                 for eid, dest, source_shift_id in moves:
+                    qualified_ids = await fetch_effective_job_employee_ids(
+                        conn, company_id=company_id, job_id=dest.get("job_id"),
+                        employee_ids=[eid], as_of=dest["starts_at"].date(),
+                    )
+                    if eid not in qualified_ids:
+                        blocked = "someone is not actively qualified for the destination job"
+                        break
                     conflicts = await find_conflicts(
                         conn, company_id, eid, dest["starts_at"], dest["ends_at"],
                         exclude_shift_id=dest["id"])
@@ -2228,6 +2257,13 @@ async def execute_edit_proposal(
                 blocked_reason: Optional[str] = None
                 for a in assignee_rows:
                     eid = a["employee_id"]
+                    qualified_ids = await fetch_effective_job_employee_ids(
+                        conn, company_id=company_id, job_id=shift_row.get("job_id"),
+                        employee_ids=[eid], as_of=new_starts_at.date(),
+                    )
+                    if eid not in qualified_ids:
+                        blocked_reason = "someone is not actively qualified for this job on the new date"
+                        break
                     conflicts = await find_conflicts(
                         conn, company_id, eid, new_starts_at, new_ends_at, exclude_shift_id=shift_id)
                     violations = await check_shift_compliance(
@@ -2259,6 +2295,17 @@ async def execute_edit_proposal(
             # (reassign only — a plain `assign` never appears in `removed`)
             # so the shift isn't left short a person over a failed swap.
             to_id = UUID(op["to_employee_id"])
+            qualified_ids = await fetch_effective_job_employee_ids(
+                conn, company_id=company_id, job_id=shift_row.get("job_id"),
+                employee_ids=[to_id], as_of=shift_row["starts_at"].date(),
+            )
+            if to_id not in qualified_ids:
+                await _restore_if_removed(idx)
+                results.append({
+                    **op, "ok": False,
+                    "reason": "they are not actively qualified for this job on the shift date",
+                })
+                continue
             conflicts = await find_conflicts(
                 conn, company_id, to_id, shift_row["starts_at"], shift_row["ends_at"],
                 exclude_shift_id=shift_id,

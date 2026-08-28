@@ -322,7 +322,9 @@ async def create_shift(body: ShiftCreate,
             avail = availability_violations(
                 avail_map.get(emp_id, {}), body.starts_at, body.ends_at,
             )
-            unqualified = await check_job_qualification(conn, company_id, emp_id, body.job_id)
+            unqualified = await check_job_qualification(
+                conn, company_id, emp_id, body.job_id, starts_at=body.starts_at,
+            )
             if not force:
                 conflicts = await find_conflicts(
                     conn, company_id, emp_id, body.starts_at, body.ends_at,
@@ -449,7 +451,9 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                 for eid in employee_ids:
                     conflicts = await find_conflicts(conn, company_id, eid, new_start, new_end)
                     avail = availability_violations(avail_map.get(eid, {}), new_start, new_end)
-                    unqualified = await check_job_qualification(conn, company_id, eid, src["job_id"])
+                    unqualified = await check_job_qualification(
+                        conn, company_id, eid, src["job_id"], starts_at=new_start,
+                    )
                     blocked = await _duplicate_assignment_block(
                         conn, company_id, employee_id=eid, location_id=src["location_id"], job_id=src["job_id"],
                         starts_at=new_start, ends_at=new_end,
@@ -585,7 +589,9 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         raise_outside_availability(emp, avail)
                 if avail:
                     availability_overrides[str(emp)] = avail
-                unqualified = await check_job_qualification(conn, company_id, emp, new_job_id)
+                unqualified = await check_job_qualification(
+                    conn, company_id, emp, new_job_id, starts_at=new_start,
+                )
                 if unqualified and not force:
                     raise_not_qualified(unqualified)
                 if unqualified:

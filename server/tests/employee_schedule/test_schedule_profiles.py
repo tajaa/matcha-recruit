@@ -150,3 +150,14 @@ def test_primary_unique_violation_is_a_clean_conflict():
     source = route.read_text()
     assert "except asyncpg.UniqueViolationError" in source
     assert 'status_code=409' in source
+
+
+def test_combined_details_route_uses_one_caller_owned_transaction():
+    route = Path(__file__).parents[2] / "app/matcha/routes/employee_schedule/availability.py"
+    source = route.read_text()
+    start = source.index('async def update_employee_scheduling_details(')
+    body = source[start:]
+    assert 'async with conn.transaction()' in body
+    assert 'replace_employee_jobs_core(' in body
+    assert 'replace_availability_core(' in body
+    assert 'upsert_schedule_profile(' in body

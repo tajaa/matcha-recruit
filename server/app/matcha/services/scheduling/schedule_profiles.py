@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -82,6 +82,35 @@ def validate_weekly_minutes(profile: dict) -> None:
         raise ValueError("target_weekly_minutes cannot exceed max_weekly_minutes")
     if minimum is not None and maximum is not None and minimum > maximum:
         raise ValueError("min_weekly_minutes cannot exceed max_weekly_minutes")
+
+
+async def fetch_effective_job_employee_ids(
+    conn, *, company_id: UUID, job_id: UUID | None,
+    employee_ids: Sequence[UUID], as_of: date,
+) -> set[UUID]:
+    """Employees actively qualified for ``job_id`` on the shift date.
+
+    A jobless shift remains ungated. Qualification dates are evaluated against
+    the scheduled work date rather than today's date so future scheduling and
+    later retimes make the same decision.
+    """
+    unique_ids = list(dict.fromkeys(employee_ids))
+    if job_id is None:
+        return set(unique_ids)
+    if not unique_ids:
+        return set()
+    rows = await conn.fetch(
+        """SELECT je.employee_id
+             FROM schedule_job_employees je
+             JOIN schedule_jobs j ON j.id=je.job_id AND j.company_id=je.company_id
+            WHERE je.company_id=$1 AND je.job_id=$2
+              AND je.employee_id=ANY($3::uuid[])
+              AND je.qualification_status='active'
+              AND (je.qualified_from IS NULL OR je.qualified_from <= $4)
+              AND (je.qualified_until IS NULL OR je.qualified_until >= $4)""",
+        company_id, job_id, unique_ids, as_of,
+    )
+    return {row["employee_id"] for row in rows}
 
 
 async def fetch_schedule_profile(

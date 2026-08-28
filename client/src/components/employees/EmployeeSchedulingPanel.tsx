@@ -2,8 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button, Input, Select, useToast } from '../ui'
 import {
   fetchEmployeeAvailability, fetchEmployeeJobs, fetchEmployeeScheduleProfile,
-  fetchJobs, replaceEmployeeJobs, saveEmployeeAvailability,
-  updateEmployeeScheduleProfile, type AvailabilityWindow,
+  fetchJobs, updateEmployeeSchedulingDetails, type AvailabilityWindow,
 } from '../../api/employees/employeeSchedule'
 import type {
   AvailabilityState, EmployeeJobAssignmentPayload, EmployeeScheduleProfile,
@@ -35,6 +34,7 @@ export function EmployeeSchedulingPanel({
   const { toast } = useToast()
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const [assignments, setAssignments] = useState<EmployeeJobAssignmentPayload[]>([])
+  const [jobsDirty, setJobsDirty] = useState(false)
   const [profile, setProfile] = useState<EmployeeScheduleProfile | null>(null)
   const [availabilityState, setAvailabilityState] = useState<Exclude<AvailabilityState, 'unconfirmed'>>('always_available')
   const [windows, setWindows] = useState<AvailabilityWindow[]>([])
@@ -68,8 +68,11 @@ export function EmployeeSchedulingPanel({
       setAssignments(assignmentResult.assignments.map(({ job_id, is_primary, qualification_status, qualified_from, qualified_until, notes }) => ({
         job_id, is_primary, qualification_status, qualified_from, qualified_until, notes,
       })))
+      setJobsDirty(false)
       setProfile(nextProfile)
-      setAvailabilityState(availability.availability_state === 'unconfirmed' ? 'always_available' : availability.availability_state)
+      setAvailabilityState(availability.availability_state === 'unconfirmed'
+        ? (availability.windows.length > 0 ? 'windows' : 'always_available')
+        : availability.availability_state)
       setWindows(availability.windows)
       setHours({
         min: minutesToHours(nextProfile.min_weekly_minutes),
@@ -86,17 +89,20 @@ export function EmployeeSchedulingPanel({
   useEffect(() => { void load() }, [load])
 
   function toggleJob(jobId: string, checked: boolean) {
+    setJobsDirty(true)
     setAssignments((current) => checked
       ? [...current, { job_id: jobId, is_primary: false, qualification_status: 'active', qualified_from: null, qualified_until: null, notes: null }]
       : current.filter((assignment) => assignment.job_id !== jobId))
   }
 
   function updateAssignment(jobId: string, patch: Partial<EmployeeJobAssignmentPayload>) {
+    setJobsDirty(true)
     setAssignments((current) => current.map((assignment) => assignment.job_id === jobId
       ? { ...assignment, ...patch } : assignment))
   }
 
   function setPrimary(jobId: string) {
+    setJobsDirty(true)
     setAssignments((current) => current.map((assignment) => ({
       ...assignment,
       is_primary: assignment.job_id === jobId,
@@ -133,19 +139,22 @@ export function EmployeeSchedulingPanel({
     setSaving(true)
     setError('')
     try {
-      await replaceEmployeeJobs(employeeId, assignments)
-      await saveEmployeeAvailability(
-        employeeId, availabilityState === 'windows' ? windows : [], availabilityState,
-      )
-      const nextProfile = await updateEmployeeScheduleProfile(employeeId, {
-        min_weekly_minutes: min,
-        target_weekly_minutes: target,
-        max_weekly_minutes: max,
-        max_consecutive_days: profile.max_consecutive_days,
-        allow_overtime: profile.allow_overtime,
-        prefer_extra_hours: profile.prefer_extra_hours,
+      const result = await updateEmployeeSchedulingDetails(employeeId, {
+        jobs: jobsDirty ? { assignments } : undefined,
+        availability: {
+          availability_state: availabilityState,
+          windows: availabilityState === 'windows' ? windows : [],
+        },
+        profile: {
+          min_weekly_minutes: min,
+          target_weekly_minutes: target,
+          max_weekly_minutes: max,
+          max_consecutive_days: profile.max_consecutive_days,
+          allow_overtime: profile.allow_overtime,
+          prefer_extra_hours: profile.prefer_extra_hours,
+        },
       })
-      setProfile(nextProfile)
+      setProfile(result.profile)
       toast('Scheduling details saved', 'success')
       await load()
     } catch (caught) {
@@ -164,7 +173,10 @@ export function EmployeeSchedulingPanel({
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-medium text-zinc-200">Qualified jobs</h3>
           {assignments.some((assignment) => assignment.is_primary) && (
-            <Button variant="ghost" size="sm" onClick={() => setAssignments((current) => current.map((assignment) => ({ ...assignment, is_primary: false })))}>
+            <Button variant="ghost" size="sm" onClick={() => {
+              setJobsDirty(true)
+              setAssignments((current) => current.map((assignment) => ({ ...assignment, is_primary: false })))
+            }}>
               Clear primary
             </Button>
           )}
@@ -196,6 +208,9 @@ export function EmployeeSchedulingPanel({
                 )}
                 {assignment && job.credential_requirements.length > 0 && (
                   <p className="mt-2 text-xs text-amber-300">Credentials: {job.credential_requirements.map((item) => item.credential_type_label).join(', ')}</p>
+                )}
+                {assignment && job.location_id != null && job.location_id !== workLocationId && (
+                  <p className="mt-2 text-xs text-amber-300">Assigned at a previous work location. Remove this job before changing job assignments.</p>
                 )}
               </div>
             )
