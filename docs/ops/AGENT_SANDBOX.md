@@ -28,6 +28,16 @@ msandbox exec command args    # exact-argv, non-TTY automation path
 msandbox doctor               # isolation + capability self-check
 ```
 
+The normal host development stack can stay running at the same time:
+```bash
+./scripts/dev-remote.sh       # host: http://localhost:5174
+msandbox codex                # container: $HOST_DEV_FRONTEND_URL
+```
+The repository bind mount means host Vite/uvicorn watchers see edits made by
+the sandboxed agent. From inside the container, `localhost` correctly refers to
+the container itself; `HOST_DEV_*_URL` uses Docker Desktop's
+`host.docker.internal` gateway to reach the host-run stack.
+
 `msandbox` is just `./scripts/agent-sandbox.sh` under a short name; both work
 identically. Run `msandbox help` for the full command list.
 
@@ -111,9 +121,29 @@ still works as an alias in `dev-remote.sh` and the two dev-DB scripts).
 macOS uid/gid, so files the agent writes land owned by you, not root).
 Every sandbox shell also receives `DATABASE_URL` and `REDIS_URL` pointing at
 the normal local dev services through `host.docker.internal`; these override
-the repo `.env` files' host-only `localhost` addresses.
+the repo `.env` files' host-only `localhost` addresses. `HOST_DEV_BACKEND_URL`,
+`HOST_DEV_FRONTEND_URL`, `HOST_DEV_TELLUS_URL`, and `HOST_DEV_OCEANLAB_URL`
+point at the host-run application stack for browser and integration tests.
 `INSTALL_PLAYWRIGHT_BROWSERS=true` bakes in a Chromium for isolated Playwright
 runs. `SANDBOX_ALLOW_DEPLOY=1` permits `update-ec2.sh` from inside the sandbox.
+
+The host and sandbox development stacks use separate host port namespaces:
+
+| Service | Host `dev-remote.sh` | Container port | Sandbox URL on the Mac |
+|---|---:|---:|---:|
+| Backend | 8001 | 8001 | `http://localhost:18001` |
+| Main frontend | 5174 | 5174 | `http://localhost:15174` |
+| Tell-Us | 5191 | 5191 | `http://localhost:15191` |
+| Oceanlab | 5201 | 5201 | `http://localhost:15201` |
+| Chat/utility | 8080 | 8080 | `http://localhost:18080` |
+
+`SANDBOX_HOST_BACKEND_PORT`, `SANDBOX_HOST_FRONTEND_PORT`,
+`SANDBOX_HOST_TELLUS_PORT`, `SANDBOX_HOST_OCEANLAB_PORT`, and
+`SANDBOX_HOST_CHAT_PORT` override only the Mac-facing sandbox publications.
+`BACKEND_PORT`, `FRONTEND_PORT`, `TELLUS_PORT`, `OCEANLAB_PORT`, and `CHAT_PORT`
+remain the ports used by processes inside the container. If the host stack is
+deliberately moved, the corresponding `HOST_DEV_*_PORT` variable updates the
+gateway URL without changing either sandbox port.
 
 `AGENT_SANDBOX_PROJECT_NAME`, `SANDBOX_WORKSPACE_DIR`, and `SANDBOX_AWS_DIR`
 let a trusted wrapper create a separate container/volume namespace and narrow
@@ -132,8 +162,9 @@ checkout, host home, Docker socket, GitHub token, Matcha bot password,
 production SSH key, and AWS credentials are absent. The model has broad
 edit/bash/web access inside the clone and can reach the normal local dev
 Postgres/Redis services through the Docker host gateway. The dedicated worker
-publishes no host ports; the interactive sandbox remains the sole owner of
-the browser/backend development ports, so both containers can run together.
+publishes no host ports; the interactive sandbox uses its separate sandbox
+port range, so the worker, interactive sandbox, and host dev stack can all run
+together.
 When it exits successfully, the trusted host copies
 out the report/decision and applies one binary patch to the task branch; the
 normal verifier and publisher remain outside the container. The bridge rejects
@@ -194,6 +225,9 @@ Manual checks worth doing once after a fresh build:
   `client/src` file on the host and confirm HMR fires (the sandbox uses
   polling watchers since bind-mounted macOS trees don't emit native Linux
   filesystem events)
+- with host `./scripts/dev-remote.sh` running, `curl "$HOST_DEV_FRONTEND_URL"`
+  from `msandbox shell` reaches that host frontend while the Mac browser keeps
+  using `http://localhost:5174`
 - `msandbox stop` leaves the host's browser data, Docker state, and
   `matcha-postgres`/`matcha-redis` containers alone (the data persists because
   it is the normal local development stack)

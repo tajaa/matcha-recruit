@@ -348,7 +348,7 @@ if [ "$ENABLE_CHAT" = true ]; then
 fi
 
 DEV_WATCH_ENV=""
-VITE_HOST_ARGS=""
+VITE_HOST_ARGS="--host 127.0.0.1"
 if [ "$IS_AGENT_SANDBOX" = true ]; then
     # Bind-mounted macOS source trees do not reliably emit native filesystem
     # events inside Linux, and published ports need a non-loopback Vite bind.

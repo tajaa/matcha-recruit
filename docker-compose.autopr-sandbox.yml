@@ -4,9 +4,9 @@
 # deliberately does not include this file.
 services:
   workspace:
-    # The interactive sandbox publishes local development ports for a human
-    # browser. AutoPR runs alongside that sandbox and needs outbound access to
-    # the already-running host services, but it must never compete for those
+    # The interactive sandbox publishes its dedicated development port range
+    # for a human browser. AutoPR runs alongside that sandbox and needs outbound
+    # access to the already-running host services, but it never needs inbound
     # host ports. Compose merges sequence fields across overlays unless they
     # are explicitly reset, so `ports: []` alone would leave the base ports in
     # place and make the autonomous worker fail before OpenCode starts.

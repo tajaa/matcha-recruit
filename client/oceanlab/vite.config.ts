@@ -17,6 +17,7 @@ export default defineConfig({
     // tellus's dev port (5191), matched by the main vite.config's
     // '/oceanlab' proxy default.
     host: '127.0.0.1',
+    allowedHosts: ['host.docker.internal'],
     port: 5201,
     proxy: {
       '/api': { target: backendTarget, changeOrigin: true },

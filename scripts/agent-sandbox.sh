@@ -92,7 +92,8 @@ Commands:
 Set INSTALL_PLAYWRIGHT_BROWSERS=true (or `build --playwright`) to include an
 isolated Chromium binary for Playwright. Set SANDBOX_UID/SANDBOX_GID to change
 the in-container user (defaults to your macOS uid/gid so file ownership matches
-on both sides).
+on both sides). Host dev keeps ports 8001/5174; sandbox services publish on
+18001/15174 by default. See docs/ops/AGENT_SANDBOX.md for the complete map.
 EOF
 }
 
