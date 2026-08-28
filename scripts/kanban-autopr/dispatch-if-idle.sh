@@ -59,10 +59,10 @@ main() {
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
     [ -x "$MSANDBOX_BIN" ] || { log_event error "msandbox-not-executable"; exit 1; }
     # `msandbox` is the authoritative kill switch. A persistent marker alone
-    # is insufficient after a reboot/crash, so `autopr-ready` also verifies
+    # is insufficient after a reboot/crash, so `autopr-master-ready` also verifies
     # that the primary workspace container is currently running. Check this
     # before creating the dashboard or touching GitHub.
-    if ! "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
+    if ! "$MSANDBOX_BIN" autopr-master-ready >/dev/null 2>&1; then
         log_event skip msandbox-off
         exit 0
     fi
@@ -70,6 +70,10 @@ main() {
         # Observability must not become a scheduling dependency. Record a pane
         # startup failure, then continue the authoritative dispatch check.
         "$DASHBOARD_ENSURE" >/dev/null 2>&1 || log_event error dashboard-start-failed
+    fi
+    if ! "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
+        log_event error autopr-system-unhealthy
+        exit 1
     fi
     if ! acquire_dispatch_lock; then
         log_event skip local-lock
