@@ -7,6 +7,7 @@ export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable'
 export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
 export type AvailabilityState = 'unconfirmed' | 'always_available' | 'windows'
 export type QualificationStatus = 'active' | 'training' | 'suspended'
+export type ScheduleAutomationCadence = 'weekly' | 'once'
 
 export type BreakGuidanceRequirement = {
   kind: 'meal' | 'rest'
@@ -267,6 +268,39 @@ export interface WeekTemplatePayload {
   color?: string | null
   notes?: string | null
   blocks?: BlockPayload[]
+}
+
+export interface ScheduleAutomationRule {
+  id: string
+  location_id: string
+  location_name: string | null
+  timezone: string
+  enabled: boolean
+  cadence: ScheduleAutomationCadence
+  week_template_id: string | null
+  week_template_name: string | null
+  run_weekday: number | null
+  run_date: string | null
+  run_time: string
+  target_weeks_ahead: number | null
+  target_week_start: string | null
+  next_run_at: string | null
+  last_attempt_at: string | null
+  last_completed_at: string | null
+  last_status: string | null
+  last_message: string | null
+  last_generation_run_id: string | null
+}
+
+export interface ScheduleAutomationPayload {
+  enabled: boolean
+  cadence: ScheduleAutomationCadence
+  week_template_id: string
+  run_weekday: number | null
+  run_date: string | null
+  run_time: string
+  target_weeks_ahead: number | null
+  target_week_start: string | null
 }
 
 export interface ScheduleRequest {

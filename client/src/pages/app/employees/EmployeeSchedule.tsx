@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
-  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp,
+  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp, CalendarClock,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
@@ -29,6 +29,7 @@ import ScheduleHelperWizard from '../../../components/employees/onboarding/Sched
 import { useMe } from '../../../hooks/useMe'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../../components/shared/LocationPicker'
+import AutoSchedulesTab from '../../../components/employees/AutoSchedulesTab'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 const SCHEDULE_GUIDE_STORAGE_KEY = 'matcha.employee-schedule.guide.v1'
@@ -148,6 +149,7 @@ export default function EmployeeSchedule() {
         <div className="flex items-center gap-1">
           <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
           <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
+          <TabButton active={tab === 'auto-schedules'} onClick={() => setTab('auto-schedules')} icon={<CalendarClock className="h-4 w-4" />}>Auto schedules</TabButton>
           <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
           {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
         </div>
@@ -208,6 +210,7 @@ export default function EmployeeSchedule() {
       )}
 
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
+      {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} />}
       {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
@@ -217,7 +220,7 @@ export default function EmployeeSchedule() {
 }
 
 function parseScheduleTab(value: string | null): EmployeeScheduleTab {
-  if (value === 'templates' || value === 'requests' || value === 'intelligence') return value
+  if (value === 'templates' || value === 'auto-schedules' || value === 'requests' || value === 'intelligence') return value
   return 'schedule'
 }
 

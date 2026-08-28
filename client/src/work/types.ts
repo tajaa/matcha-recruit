@@ -884,6 +884,8 @@ export interface HuumeActionScheduleWeekDraft {
     existing_assignment_count?: number
   }>
   preview_truncated?: boolean
+  origin?: 'manual' | 'automatic'
+  auto_generated?: boolean
 }
 
 export interface HuumeActionScheduleNote {

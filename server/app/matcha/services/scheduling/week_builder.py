@@ -15,7 +15,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
 from uuid import UUID, uuid4
 
-from app.database import get_connection
+from app.database import connection_or_direct
 
 from .schedule_profiles import fetch_effective_job_employee_ids
 from .schedule_rules import availability_violations, template_windows
@@ -51,6 +51,52 @@ def _iso(value: Any) -> Any:
 def _input_hash(snapshot: dict[str, Any]) -> str:
     raw = json.dumps(_iso(snapshot), sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _review_payload(
+    *, plan: dict[str, Any], snapshot: dict[str, Any],
+    source_mode: str, template_name: str | None,
+) -> dict[str, Any]:
+    """Build the persisted manager-facing view of a generated proposal."""
+    metrics = plan["metrics"]
+    employee_names = {
+        employee["id"]: employee["name"] for employee in snapshot["employees"]
+    }
+    schedule_preview = []
+    for shift in plan["shifts"][:_MAX_PREVIEW_SHIFTS]:
+        fixed_names = [
+            employee_names.get(employee_id, "Existing assignee")
+            for employee_id in shift.get("fixed_employee_ids") or []
+        ]
+        proposed_names = [
+            assignment.get("employee_name")
+            or employee_names.get(assignment["employee_id"], "Employee")
+            for assignment in shift.get("proposed_assignments") or []
+        ]
+        schedule_preview.append({
+            "shift_key": shift["key"],
+            "starts_at": shift["starts_at"],
+            "ends_at": shift["ends_at"],
+            "role": shift.get("role"),
+            "required_staff": shift["required_staff"],
+            "assignment_names": fixed_names + proposed_names,
+            "existing_assignment_count": len(fixed_names),
+        })
+    source_label = (
+        "the existing draft shifts"
+        if source_mode == "existing"
+        else f'template "{template_name}"'
+    )
+    summary = (
+        f"Built a draft proposal from {source_label}: {metrics['filled_positions']} of "
+        f"{metrics['required_positions']} positions filled across {metrics['shift_count']} shifts"
+        f"; {metrics['open_positions']} position(s) remain open."
+    )
+    return {
+        "summary": summary,
+        "schedule_preview": schedule_preview,
+        "preview_truncated": len(plan["shifts"]) > len(schedule_preview),
+    }
 
 
 def _overlaps(left: tuple[datetime, datetime], right: tuple[datetime, datetime]) -> bool:
@@ -612,8 +658,9 @@ async def _planning_snapshot(
 
 async def get_week_build_readiness(
     *, company_id: UUID, location_id: UUID, week_start: date,
+    week_template_id: UUID | None = None,
 ) -> dict[str, Any]:
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         location = await conn.fetchrow(
             "SELECT id, name FROM business_locations WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE",
             location_id, company_id,
@@ -646,14 +693,19 @@ async def get_week_build_readiness(
         blockers.append("No active employees are assigned to this location.")
     if not confirmed:
         blockers.append("No employee has confirmed scheduling availability.")
-    if not demand and not any(template["block_count"] for template in templates):
+    selected_template = next(
+        (template for template in templates if str(template["id"]) == str(week_template_id)), None,
+    ) if week_template_id else None
+    if week_template_id and (not selected_template or not selected_template["block_count"]):
+        blockers.append("The selected week template is unavailable or has no shift blocks.")
+    elif not demand and not any(template["block_count"] for template in templates):
         blockers.append("Add draft shifts or a week template to define the store's staffing needs.")
     if not demand and shift_counts["published"]:
         blockers.append(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
     usable_templates = [template for template in templates if template["block_count"]]
-    if not demand and len(usable_templates) > 1:
+    if not demand and not week_template_id and len(usable_templates) > 1:
         blockers.append("Choose which saved week template Huume should use as staffing demand.")
     return {
         "status": "ok", "ready": not blockers, "location_name": location["name"],
@@ -704,12 +756,15 @@ async def propose_week_draft(
     week_template_id: str | None = None,
     exclude_employee_ids: Iterable[str] | None = None,
     employee_hour_caps: Iterable[dict[str, Any]] | None = None,
+    origin: str = "manual",
 ) -> dict[str, Any]:
+    if origin not in {"manual", "automatic"}:
+        return {"status": "refused", "message": "Unknown schedule generation origin."}
     try:
         constraints = _coerce_constraints(exclude_employee_ids, employee_hour_caps)
     except ValueError as exc:
         return {"status": "clarify", "message": str(exc)}
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         existing = await _load_existing_demand(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
@@ -814,63 +869,46 @@ async def propose_week_draft(
                 employee_hour_caps=constraints["employee_hour_caps"],
                 blocked_pairs=blocked_pairs,
             )
+        review = _review_payload(
+            plan=plan, snapshot=snapshot, source_mode=selected_source,
+            template_name=template_name,
+        )
+        persisted_plan = {**plan, "review": review}
         run_id = uuid4()
         input_hash = _input_hash(snapshot)
-        await conn.execute(
+        insert_result = await conn.execute(
             """
             INSERT INTO schedule_generation_runs(
                 id, company_id, location_id, week_start, thread_id, source_mode,
-                week_template_id, input_hash, planner_version, constraints,
+                week_template_id, origin, input_hash, planner_version, constraints,
                 proposal, metrics, created_by
-            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13)
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14)
+            ON CONFLICT DO NOTHING
             """,
             run_id, company_id, location_id, week_start, thread_id, selected_source,
-            template_uuid, input_hash, PLANNER_VERSION, json.dumps(constraints),
-            json.dumps(_iso(plan)), json.dumps(plan["metrics"]), actor_user_id,
+            template_uuid, origin, input_hash, PLANNER_VERSION, json.dumps(constraints),
+            json.dumps(_iso(persisted_plan)), json.dumps(plan["metrics"]), actor_user_id,
         )
+        if insert_result == "INSERT 0 0":
+            return {
+                "status": "skipped",
+                "message": "A schedule suggestion already exists for this location and week.",
+            }
     metrics = plan["metrics"]
-    employee_names = {
-        employee["id"]: employee["name"] for employee in snapshot["employees"]
-    }
-    schedule_preview = []
-    for shift in plan["shifts"][:_MAX_PREVIEW_SHIFTS]:
-        fixed_names = [
-            employee_names.get(employee_id, "Existing assignee")
-            for employee_id in shift.get("fixed_employee_ids") or []
-        ]
-        proposed_names = [
-            assignment.get("employee_name") or employee_names.get(assignment["employee_id"], "Employee")
-            for assignment in shift.get("proposed_assignments") or []
-        ]
-        schedule_preview.append({
-            "shift_key": shift["key"],
-            "starts_at": shift["starts_at"],
-            "ends_at": shift["ends_at"],
-            "role": shift.get("role"),
-            "required_staff": shift["required_staff"],
-            "assignment_names": fixed_names + proposed_names,
-            "existing_assignment_count": len(fixed_names),
-        })
-    source_label = "the existing draft shifts" if selected_source == "existing" else f'template "{template_name}"'
-    summary = (
-        f"Built a draft proposal from {source_label}: {metrics['filled_positions']} of "
-        f"{metrics['required_positions']} positions filled across {metrics['shift_count']} shifts"
-        f"; {metrics['open_positions']} position(s) remain open."
-    )
     return {
         "status": "ready", "generation_run_id": str(run_id), "source_mode": selected_source,
         "week_template_id": str(template_uuid) if template_uuid else None,
-        "summary": summary, "metrics": metrics,
+        "origin": origin, "summary": review["summary"], "metrics": metrics,
         "unfilled": plan["unfilled"][:20],
-        "schedule_preview": schedule_preview,
-        "preview_truncated": len(plan["shifts"]) > len(schedule_preview),
+        "schedule_preview": review["schedule_preview"],
+        "preview_truncated": review["preview_truncated"],
     }
 
 
 async def _reconcile_warnings_best_effort(company_id: UUID, shift_ids: list[UUID]) -> None:
     try:
         from .schedule_warning_events import reconcile_schedule_warning_events
-        async with get_connection() as conn:
+        async with connection_or_direct() as conn:
             await reconcile_schedule_warning_events(conn, company_id, shift_ids=shift_ids)
     except Exception:
         # Warning fan-out is advisory and must not roll back a confirmed draft.
@@ -879,7 +917,7 @@ async def _reconcile_warnings_best_effort(company_id: UUID, shift_ids: list[UUID
 
 async def cancel_week_draft(*, company_id: UUID, generation_run_id: UUID) -> None:
     """Mark an unused proposal cancelled when its Huume action is cancelled."""
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         await conn.execute(
             """UPDATE schedule_generation_runs
                SET status='cancelled', updated_at=NOW()
@@ -895,7 +933,7 @@ async def apply_week_draft(
     created_shift_ids: list[UUID] = []
     touched_shift_ids: list[UUID] = []
     dropped: list[dict[str, Any]] = []
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         async with conn.transaction():
             run = await conn.fetchrow(
                 """SELECT * FROM schedule_generation_runs

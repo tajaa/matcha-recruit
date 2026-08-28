@@ -22,6 +22,7 @@ interface ScheduleHuumePanelProps {
   selectedShifts: Shift[]
   onClearSelectedShifts(): void
   onApplied(): void
+  onAutomaticActionSettled(): void
   onClose(): void
 }
 
@@ -57,7 +58,13 @@ function appliedActionKey(response: MWSendResponse): string | null {
   return runId ? 'run:' + runId : null
 }
 
-export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onClose }: ScheduleHuumePanelProps) {
+function settledAutomaticActionKey(state: Record<string, unknown>): string | null {
+  const action = getHuumeState(state).action
+  if (action?.type !== 'schedule_week_draft' || !action.auto_generated || action.status === 'proposed') return null
+  return `${action.confirm_id}:${action.status}`
+}
+
+export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onAutomaticActionSettled, onClose }: ScheduleHuumePanelProps) {
   const { toast } = useToast()
   const [threadId, setThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
@@ -75,6 +82,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
   const mountedRef = useRef(true)
   const stepsRef = useRef<HuumeStep[]>([])
   const appliedKeysRef = useRef(new Set<string>())
+  const settledAutomaticKeysRef = useRef(new Set<string>())
   const abortRef = useRef<AbortController | null>(null)
   const voiceTurnRef = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -125,6 +133,13 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ block: 'nearest' })
   }, [messages, steps, status])
+
+  const settledAutomaticKey = settledAutomaticActionKey(currentState)
+  useEffect(() => {
+    if (!settledAutomaticKey || settledAutomaticKeysRef.current.has(settledAutomaticKey)) return
+    settledAutomaticKeysRef.current.add(settledAutomaticKey)
+    onAutomaticActionSettled()
+  }, [onAutomaticActionSettled, settledAutomaticKey])
 
   async function send(contentOverride?: string) {
     const displayContent = (contentOverride ?? input).trim()
@@ -254,7 +269,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
         </div>
       )}
       <div className="flex max-h-[min(560px,70vh)] min-h-[220px] flex-col gap-3 overflow-y-auto px-3 py-3" role="log" aria-live="polite">
-        {messages.length === 0 && !sessionError && (
+        {messages.length === 0 && !action && !sessionError && (
           <div className="space-y-3">
             <div className="text-xs text-zinc-400">Hi, {firstName}. I can review this week or build the whole schedule from confirmed availability.</div>
             <div className="grid grid-cols-2 gap-2">
@@ -277,6 +292,11 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
                 <span className="mt-0.5 block text-zinc-500">Find missing inputs first</span>
               </button>
             </div>
+          </div>
+        )}
+        {action?.type === 'schedule_week_draft' && action.auto_generated && action.status === 'proposed' && (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-3 py-2 text-xs text-emerald-100">
+            Huume prepared this suggestion automatically. Review the staffing below, then approve it or describe the changes you want.
           </div>
         )}
         {messages.map((message) => <MessageBubble key={message.id} message={message} lightMode={false} />)}

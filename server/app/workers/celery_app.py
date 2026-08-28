@@ -70,6 +70,7 @@ celery_app = Celery(
         "app.workers.tasks.schedule_warning_events",
         "app.workers.tasks.schedule_daily_digest",
         "app.workers.tasks.schedule_request_notifications",
+        "app.workers.tasks.schedule_auto_generation",
         "app.workers.tasks.inventory_waste_sweeps",
         "app.workers.tasks.tellus_shoutout_scan",
     ],

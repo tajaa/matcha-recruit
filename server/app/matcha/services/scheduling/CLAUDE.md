@@ -15,7 +15,31 @@ turns to the canonical Matcha Work SSE route; it does not use the retired
 returns complete, non-cancelled shifts and aggregates assignments before its
 500-shift cap. `schedule_chat.py` and `schedule_assistant_actions.py` enforce
 the inclusive selected-week bound at both stage and confirm time. Huume writes
-are confirmation-gated published-schedule writes; there is no draft mode.
+remain confirmation-gated. Individual schedule edits may affect published
+shifts; the whole-week builder applies only editable drafts and never publishes.
+
+### Automatic weekly suggestions (migration `empsched18`)
+
+`schedule_auto_generation` is the review-only Celery sweep for the upcoming
+Sunday-starting editor week. The global scheduler row is enabled by the
+migration; each location still requires the merged `employee_schedule`,
+`huume`, and `matcha_work` feature flags. The worker uses existing draft shifts
+as staffing demand or the one unambiguous saved week template, then calls the
+same deterministic `week_builder.propose_week_draft` path as conversational
+Huume. It creates only a `schedule_generation_runs` proposal (`origin=automatic`)
+and is idempotent per company/location/week. Existing manual proposals and
+applied plans suppress it; cancelling an automatic proposal suppresses it for
+the rest of that week rather than recreating it on the next worker restart.
+
+An automatic run has no manager thread up front. The authorized
+`schedule_assistant_session` adopts it into that manager's durable
+location/week session when opened, minting the normal confirmation token. The
+editor's lightweight suggestion-status read can point a manager from the
+current week to the prepared upcoming week. Confirmation reuses
+`apply_week_draft`, including its input-hash, live-week, availability,
+qualification, conflict, and compliance rechecks. The manager can approve,
+request a replacement proposal, cancel, or edit the applied drafts before
+publishing; no worker path creates or publishes a shift.
 
 The daily digest is fail-closed behind `schedule_daily_digest` plus the
 `employee_schedule`/`matcha_ops` feature flags. It groups employee rows before
