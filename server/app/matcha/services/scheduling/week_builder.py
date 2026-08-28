@@ -479,6 +479,43 @@ async def _week_shift_counts(conn, *, company_id: UUID, location_id: UUID,
     }
 
 
+async def _load_week_shift_state(conn, *, company_id: UUID, location_id: UUID,
+                                 week_start: date) -> list[dict[str, Any]]:
+    """Return deterministic live week state for proposal staleness checks."""
+    lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
+    hi = lo + timedelta(days=7)
+    rows = await conn.fetch(
+        """
+        SELECT s.id, s.status, s.role, s.department, s.starts_at, s.ends_at,
+               s.break_minutes, s.required_staff, s.color, s.notes, s.kind,
+               s.template_id, s.job_id, s.training_requirement_id,
+               COALESCE(array_agg(a.employee_id ORDER BY a.employee_id)
+                        FILTER (WHERE a.employee_id IS NOT NULL), ARRAY[]::uuid[]) AS employee_ids
+        FROM schedule_shifts s
+        LEFT JOIN schedule_shift_assignments a ON a.shift_id=s.id
+        WHERE s.company_id=$1 AND s.location_id=$2
+          AND s.status IN ('draft', 'published')
+          AND s.starts_at >= $3 AND s.starts_at < $4
+        GROUP BY s.id
+        ORDER BY s.starts_at, s.id
+        """,
+        company_id, location_id, lo, hi,
+    )
+    return [{
+        "id": str(row["id"]), "status": row["status"], "role": row["role"],
+        "department": row["department"], "starts_at": row["starts_at"],
+        "ends_at": row["ends_at"], "break_minutes": row["break_minutes"] or 0,
+        "required_staff": row["required_staff"], "color": row["color"],
+        "notes": row["notes"], "kind": row["kind"],
+        "template_id": str(row["template_id"]) if row["template_id"] else None,
+        "job_id": str(row["job_id"]) if row["job_id"] else None,
+        "training_requirement_id": (
+            str(row["training_requirement_id"]) if row["training_requirement_id"] else None
+        ),
+        "employee_ids": [str(employee_id) for employee_id in row["employee_ids"]],
+    } for row in rows]
+
+
 async def _list_templates(conn, *, company_id: UUID, location_id: UUID) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         """
@@ -549,12 +586,12 @@ async def _planning_snapshot(
     roster = await _load_roster_context(
         conn, company_id=company_id, location_id=location_id, week_start=week_start,
     )
+    week_shift_state = await _load_week_shift_state(
+        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+    )
     template_name = None
     if source_mode == "existing":
         demand = await _load_existing_demand(
-            conn, company_id=company_id, location_id=location_id, week_start=week_start,
-        )
-        shift_counts = await _week_shift_counts(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
     elif source_mode == "template" and week_template_id is not None:
@@ -568,7 +605,7 @@ async def _planning_snapshot(
         "location_id": str(location_id), "week_start": week_start.isoformat(),
         "source_mode": source_mode,
         "week_template_id": str(week_template_id) if week_template_id else None,
-        "demand": demand, **roster,
+        "demand": demand, "week_shift_state": week_shift_state, **roster,
     }
     return snapshot, demand, template_name
 
@@ -587,6 +624,9 @@ async def get_week_build_readiness(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
         demand = await _load_existing_demand(
+            conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        )
+        shift_counts = await _week_shift_counts(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
         templates = await _list_templates(conn, company_id=company_id, location_id=location_id)
@@ -869,6 +909,22 @@ async def apply_week_draft(
                         "message": "That generated draft was already applied."}
             if run["status"] != "proposed":
                 return {"status": "error", "message": "That week proposal is no longer available."}
+            if run["source_mode"] == "template":
+                shift_counts = await _week_shift_counts(
+                    conn, company_id=company_id, location_id=location_id, week_start=week_start,
+                )
+                if shift_counts["draft"] or shift_counts["published"]:
+                    await conn.execute(
+                        "UPDATE schedule_generation_runs SET status='stale', updated_at=NOW() WHERE id=$1",
+                        generation_run_id,
+                    )
+                    return {
+                        "status": "error",
+                        "message": (
+                            "This week gained shifts after the template proposal was built. "
+                            "Ask me to rebuild it so I don't create duplicates."
+                        ),
+                    }
             snapshot, _demand, _template_name = await _planning_snapshot(
                 conn, company_id=company_id, location_id=location_id, week_start=week_start,
                 source_mode=run["source_mode"], week_template_id=run["week_template_id"],

@@ -1,13 +1,42 @@
 """Pure tests for Huume's deterministic whole-week assignment planner."""
 
 from datetime import date, datetime, time, timezone
+from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
+from app.matcha.services.scheduling import week_builder
 from app.matcha.services.scheduling.week_builder import _coerce_constraints, build_plan
 
 
 UTC = timezone.utc
+
+
+class _AsyncContext:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeConn:
+    def __init__(self, row):
+        self.row = row
+        self.executed = []
+
+    def transaction(self):
+        return _AsyncContext(self)
+
+    async def fetchrow(self, *_args):
+        return self.row
+
+    async def execute(self, *args):
+        self.executed.append(args)
 
 
 def _employee(employee_id: str, name: str, *, jobs=None, state="windows", cap=2400):
@@ -163,3 +192,86 @@ def test_manager_constraints_fail_closed_instead_of_being_silently_dropped():
             "employee_id": "3f6b1c22-2000-4000-8000-000000000001",
             "max_weekly_minutes": 10081,
         }])
+
+
+@pytest.mark.asyncio
+async def test_readiness_loads_week_shift_counts(monkeypatch):
+    company_id = UUID("3f6b1c22-2000-4000-8000-000000000001")
+    location_id = UUID("3f6b1c22-2000-4000-8000-000000000002")
+    conn = _FakeConn({"id": location_id, "name": "Main Store"})
+    monkeypatch.setattr(week_builder, "get_connection", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [{
+            "id": "employee-1", "name": "Amy", "availability_state": "windows",
+            "target_weekly_minutes": 1200, "max_weekly_minutes": 2400,
+        }],
+    }))
+    monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=[]))
+    counts = AsyncMock(return_value={"draft": 0, "published": 1})
+    monkeypatch.setattr(week_builder, "_week_shift_counts", counts)
+    monkeypatch.setattr(week_builder, "_list_templates", AsyncMock(return_value=[]))
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=company_id, location_id=location_id, week_start=date(2026, 8, 23),
+    )
+
+    assert result["published_shift_count"] == 1
+    assert result["recommended_source"] is None
+    assert any("published shifts" in blocker for blocker in result["blockers"])
+    counts.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_template_snapshot_includes_live_week_shift_state(monkeypatch):
+    company_id = UUID("3f6b1c22-2000-4000-8000-000000000001")
+    location_id = UUID("3f6b1c22-2000-4000-8000-000000000002")
+    template_id = UUID("3f6b1c22-2000-4000-8000-000000000003")
+    live_state = [{"id": "shift-1", "status": "draft", "employee_ids": []}]
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [], "availability": {}, "existing_assignments": [],
+        "unavailable_ranges": {},
+    }))
+    monkeypatch.setattr(
+        week_builder, "_load_week_shift_state", AsyncMock(return_value=live_state),
+    )
+    monkeypatch.setattr(
+        week_builder, "_load_template_demand",
+        AsyncMock(return_value=("Standard Week", [{"key": "template-shift"}])),
+    )
+
+    snapshot, _demand, _name = await week_builder._planning_snapshot(
+        object(), company_id=company_id, location_id=location_id,
+        week_start=date(2026, 8, 23), source_mode="template",
+        week_template_id=template_id,
+    )
+
+    assert snapshot["week_shift_state"] == live_state
+
+
+@pytest.mark.asyncio
+async def test_apply_template_proposal_rechecks_empty_week_guard(monkeypatch):
+    company_id = UUID("3f6b1c22-2000-4000-8000-000000000001")
+    location_id = UUID("3f6b1c22-2000-4000-8000-000000000002")
+    run_id = UUID("3f6b1c22-2000-4000-8000-000000000003")
+    week_start = date(2026, 8, 23)
+    conn = _FakeConn({
+        "id": run_id, "company_id": company_id, "location_id": location_id,
+        "week_start": week_start, "status": "proposed", "source_mode": "template",
+    })
+    monkeypatch.setattr(week_builder, "get_connection", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(
+        week_builder, "_week_shift_counts",
+        AsyncMock(return_value={"draft": 1, "published": 0}),
+    )
+    planning_snapshot = AsyncMock(side_effect=AssertionError("must stop before rebuilding"))
+    monkeypatch.setattr(week_builder, "_planning_snapshot", planning_snapshot)
+
+    result = await week_builder.apply_week_draft(
+        company_id=company_id, actor_user_id=None, generation_run_id=run_id,
+        location_id=location_id, week_start=week_start,
+    )
+
+    assert result["status"] == "error"
+    assert "gained shifts" in result["message"]
+    planning_snapshot.assert_not_awaited()
+    assert any("status='stale'" in call[0] for call in conn.executed)

@@ -318,7 +318,7 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
               <div className="space-y-1">
                 {action.unfilled.map((item, index) => (
                   <div key={`${item.shift_key ?? 'shift'}-${index}`} className={`rounded border px-2 py-1.5 text-[11px] ${chipRed}`}>
-                    {item.starts_at ? new Date(item.starts_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'Shift'}
+                    {item.starts_at ? `${fmtDayLabel(item.starts_at)} · ${fmtTime(item.starts_at)}` : 'Shift'}
                     {item.role ? ` · ${item.role}` : ''} — {item.reason ?? 'No eligible employee'}
                   </div>
                 ))}
