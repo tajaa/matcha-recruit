@@ -245,8 +245,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "cancel_staged", "write",
         "Cancel a staged action or discard a staged onboarding plan when the "
         "admin changes their mind. target='action' voids whatever's pending "
-        "— a send_offer or a draft_discipline write-up (it will no longer "
-        "execute even if confirmed). target='plan' discards the onboarding "
+        "(it will no longer execute even if confirmed). target='plan' discards the onboarding "
         "plan for offer_id — refused once it's already executing or done, "
         "since steps that already ran can't be undone from here. Pass "
         "offer_id whenever more than one plan is active.",
@@ -845,6 +844,57 @@ TOOLS: tuple[HuumeTool, ...] = (
         properties={},
         discovery=True,
         intent_hints=("what needs attention", "review this week", "schedule overview", "check the schedule"),
+    ),
+    _tool(
+        "get_week_build_readiness", "read",
+        "Check whether Huume has enough confirmed availability and staffing "
+        "demand to build the selected location's entire week. Returns the "
+        "available demand sources, roster readiness, and exact blockers. "
+        "Call this before building a week when the inputs are uncertain.",
+        properties={},
+        discovery=True,
+        intent_hints=("build this week", "create the schedule", "schedule readiness", "staff the week"),
+    ),
+    _tool(
+        "build_week_schedule", "staged",
+        "Build and stage a deterministic whole-week schedule proposal from "
+        "confirmed employee availability and either the week's existing draft "
+        "shifts or a saved week template. Existing assignments are preserved. "
+        "Nothing is added to the editor until the manager confirms on a LATER "
+        "turn with the exact confirm_id; the resulting shifts remain drafts.",
+        properties={
+            "source_mode": types.Schema(
+                type=types.Type.STRING, enum=["auto", "existing", "template"],
+                description="Use auto unless the manager selected a specific source.",
+            ),
+            "week_template_id": types.Schema(
+                type=types.Type.STRING,
+                description="Required when source_mode=template; use an id returned by readiness.",
+            ),
+            "exclude_employee_ids": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="Employees the manager explicitly asked not to schedule in this proposal.",
+            ),
+            "employee_hour_caps": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "employee_id": types.Schema(type=types.Type.STRING),
+                        "max_weekly_minutes": types.Schema(type=types.Type.INTEGER),
+                    },
+                    required=["employee_id", "max_weekly_minutes"],
+                ),
+                description="Optional manager overrides that can only tighten weekly hour caps.",
+            ),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit when staging; after explicit approval, echo the staged confirm_id exactly.",
+            ),
+        },
+        required=[],
+        discovery=True,
+        intent_hints=("build my week", "generate weekly schedule", "fill the whole schedule", "make this week's schedule"),
     ),
     _tool(
         "find_shift_coverage", "read",
