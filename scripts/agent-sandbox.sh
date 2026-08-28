@@ -66,6 +66,7 @@ Commands:
   build [--playwright]        Build the isolated workspace image.
   start                       Start workspace and the normal local dev services.
   stop [--force]              Stop everything; refuse active agent work unless forced.
+  off                         Immediately stop everything, including active agent work.
   status                      Show sandbox service and AutoPR master-switch status.
   workspace-state             Print this sandbox project's container runtime state.
   autopr-ready                Exit 0 only when the complete AutoPR system is healthy.
@@ -367,13 +368,22 @@ disable_autopr_control_plane() {
     fi
     if [ -x "$AUTOPR_TMUX_BIN" ] \
         && "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null; then
-        "$AUTOPR_TMUX_BIN" kill-session -t "$AUTOPR_TMUX_SESSION"
+        "$AUTOPR_TMUX_BIN" kill-session -t "$AUTOPR_TMUX_SESSION" || true
     fi
 }
 
 stop_autopr_container() {
     docker compose --project-name "$AUTOPR_SANDBOX_PROJECT_NAME" \
         --file "$COMPOSE_FILE" stop workspace >/dev/null 2>&1 || true
+}
+
+shutdown_all_sandboxes() {
+    disable_autopr_control_plane
+    if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+        stop_autopr_container
+        "${PRIMARY_COMPOSE[@]}" stop workspace
+    fi
+    print_system_status "MSANDBOX STOPPED"
 }
 
 start_primary_and_enable_autopr() {
@@ -608,13 +618,12 @@ case "$command_name" in
                 echo "Wait for the work to finish, or explicitly override with: msandbox stop --force" >&2
                 exit 3
             fi
-            disable_autopr_control_plane
-            if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
-                stop_autopr_container
-                "${PRIMARY_COMPOSE[@]}" stop workspace
-            fi
-            print_system_status "MSANDBOX STOPPED"
+            shutdown_all_sandboxes
         fi
+        ;;
+    off)
+        [ "$#" = 0 ] || { echo "usage: msandbox off" >&2; exit 2; }
+        shutdown_all_sandboxes
         ;;
     "")
         # Bare `msandbox` — the one-command path: build (no-op if cached),
