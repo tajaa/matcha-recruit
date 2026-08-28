@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../components/ui'
 import type { ScheduleRequest, Shift } from '../../types/employeeSchedule'
@@ -91,16 +91,16 @@ const employeeBSameDayShift: Shift = {
   assignments: [{ employee_id: 'employee-b', name: 'Employee B', job_title: null, status: 'assigned', availability_overridden: false, availability_override_at: null }],
 }
 
-describe('PortalSchedule swap acceptance', () => {
-  beforeEach(() => {
-    fetchMyScheduleMock.mockResolvedValue({ shifts: [] })
-    fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [] })
-    fetchMyRequestsMock.mockResolvedValue({ requests: [] })
-    fetchMyOffersMock.mockResolvedValue({ offers: [selectedSwap] })
-    fetchMyCoworkersMock.mockResolvedValue({ employees: [] })
-    acceptMyRequestMock.mockResolvedValue({ ...selectedSwap, status: 'awaiting_manager' })
-  })
+beforeEach(() => {
+  fetchMyScheduleMock.mockResolvedValue({ shifts: [] })
+  fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [] })
+  fetchMyRequestsMock.mockResolvedValue({ requests: [] })
+  fetchMyOffersMock.mockResolvedValue({ offers: [selectedSwap] })
+  fetchMyCoworkersMock.mockResolvedValue({ employees: [] })
+  acceptMyRequestMock.mockResolvedValue({ ...selectedSwap, status: 'awaiting_manager' })
+})
 
+describe('PortalSchedule swap acceptance', () => {
   it('accepts the counter-shift selected by the requester', async () => {
     render(<ToastProvider><PortalSchedule /></ToastProvider>)
 
@@ -121,5 +121,37 @@ describe('PortalSchedule swap acceptance', () => {
     fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'employee-b' } })
 
     expect(await screen.findByRole('option', { name: /Fri 8\/28 5p.*9p.*Closing/ })).toBeInTheDocument()
+  })
+})
+
+describe('PortalSchedule notes', () => {
+  it('renders trimmed notes in personal and full schedule cards', async () => {
+    const shiftWithNote = {
+      ...employeeAShift,
+      notes: '  Bring ID\nat 8am  ',
+    }
+    fetchMyScheduleMock.mockResolvedValue({ shifts: [shiftWithNote] })
+    fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [shiftWithNote] })
+
+    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+
+    const myShifts = (await screen.findByRole('heading', { name: 'My shifts' })).closest('section')!
+    const fullSchedule = screen.getByRole('heading', { name: 'Full schedule' }).closest('section')!
+    const myNote = within(myShifts).getByText(/Schedule note:/)
+    const teamNote = within(fullSchedule).getByText(/Schedule note:/)
+
+    expect(myNote.textContent).toBe('Schedule note: Bring ID\nat 8am')
+    expect(teamNote.textContent).toBe('Schedule note: Bring ID\nat 8am')
+  })
+
+  it('omits whitespace-only notes', async () => {
+    const shiftWithBlankNote = { ...employeeAShift, notes: ' \n\t ' }
+    fetchMyScheduleMock.mockResolvedValue({ shifts: [shiftWithBlankNote] })
+    fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [shiftWithBlankNote] })
+
+    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+
+    await screen.findByRole('heading', { name: 'My shifts' })
+    expect(screen.queryByText(/Schedule note:/)).not.toBeInTheDocument()
   })
 })
