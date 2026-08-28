@@ -21,7 +21,15 @@ cat > "$TMP_DIR/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -eu
 [ "$1" != info ] || exit 0
-[ "$1" != exec ] || exit 1
+if [ "$1" = exec ]; then
+    if [ "${AUTOPR_TEST_PRIMARY_AGENT:-0}" = 1 ] \
+        && [ "${2:-}" = matcha-agent-sandbox-container ]; then
+        printf '%s\n' 'codex codex --sandboxed'
+        exit 0
+    fi
+    exit 1
+fi
+[ "$1" != inspect ] || { printf '%s\n' running; exit 0; }
 [ "$1" = compose ] || exit 1
 shift
 project=""
@@ -112,6 +120,15 @@ check "msandbox start enables the primary container, timer, and dashboard" \
 
 run_msandbox autopr-ready
 check "autopr-ready succeeds only while the master switch is on" $?
+
+primary_state="$(run_msandbox workspace-state)"
+check "workspace-state reports the selected Compose project's real state" \
+    $([ "$primary_state" = running ] && echo 0 || echo 1)
+
+primary_activity="$(AUTOPR_TEST_PRIMARY_AGENT=1 run_msandbox status)"
+check "activity status identifies a coding agent in the primary sandbox" \
+    $(printf '%s' "$primary_activity" | grep -q \
+      'ACTIVE — a coding agent is running in the primary sandbox' && echo 0 || echo 1)
 
 env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \

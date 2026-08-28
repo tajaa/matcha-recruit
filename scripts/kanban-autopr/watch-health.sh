@@ -11,7 +11,7 @@ MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
 SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 
 render_health() {
-    local launch_state runner_pids sandbox_status
+    local launch_state runner_pids sandbox_state
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(date '+%H:%M:%S %Z')"
 
@@ -43,16 +43,16 @@ render_health() {
     printf '\nAUTOPR MSANDBOX · '
     if [ ! -x "$MSANDBOX_BIN" ]; then
         printf 'missing (%s)\n' "$MSANDBOX_BIN"
-    elif sandbox_status="$(env AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
-        "$MSANDBOX_BIN" status 2>&1)"; then
-        if printf '%s\n' "$sandbox_status" | grep -q 'workspace'; then
-            printf 'running · %s\n' "$SANDBOX_PROJECT"
-        else
-            printf 'ready, idle · %s\n' "$SANDBOX_PROJECT"
-        fi
+    elif sandbox_state="$(env AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+        "$MSANDBOX_BIN" workspace-state 2>&1)"; then
+        case "$sandbox_state" in
+            running) printf 'running · %s\n' "$SANDBOX_PROJECT" ;;
+            absent) printf 'ready, idle · %s\n' "$SANDBOX_PROJECT" ;;
+            *) printf 'blocked · container state %s · %s\n' "$sandbox_state" "$SANDBOX_PROJECT" ;;
+        esac
     else
         printf 'unavailable · %s\n' \
-            "$(printf '%s' "$sandbox_status" | head -n 1)"
+            "$(printf '%s' "$sandbox_state" | head -n 1)"
     fi
 
     printf '\nRECENT TIMER EVENTS\n'

@@ -74,6 +74,21 @@ check "msandbox mounts only a staged read-only AutoPR OpenCode auth file" \
       && grep -qF 'cp "$HOST_OPENCODE_AUTH_FILE" "$SANDBOX_OPENCODE_AUTH_FILE"' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
       && echo 0 || echo 1)
 
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    autopr_ports="$(SANDBOX_WORKSPACE_DIR="$TMP_DIR" SANDBOX_AWS_DIR="$TMP_DIR" \
+      SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
+      docker compose --project-name matcha-kanban-autopr-sandbox \
+        --file "$REPO_ROOT/docker-compose.sandbox.yml" \
+        --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
+        config --format json | jq -c '.services.workspace.ports // []')"
+    check "dedicated AutoPR sandbox publishes no host ports" \
+      $([ "$autopr_ports" = '[]' ] && echo 0 || echo 1)
+else
+    check "dedicated AutoPR sandbox publishes no host ports" \
+      $(grep -qF 'ports: !reset []' "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
+        && echo 0 || echo 1)
+fi
+
 check "sandbox bridge uses a clean clone and empty AWS mount" \
     $(grep -qF 'git clone --quiet --no-hardlinks --no-checkout' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
       && grep -qF 'SANDBOX_AWS_DIR="$EMPTY_AWS_DIR"' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \

@@ -130,7 +130,10 @@ a dedicated msandbox project. Untracked `.env` files, PEM files, the Actions
 checkout, host home, Docker socket, GitHub token, Matcha bot password,
 production SSH key, and AWS credentials are absent. The model has broad
 edit/bash/web access inside the clone and can reach the normal local dev
-Postgres/Redis services. When it exits successfully, the trusted host copies
+Postgres/Redis services through the Docker host gateway. The dedicated worker
+publishes no host ports; the interactive sandbox remains the sole owner of
+the browser/backend development ports, so both containers can run together.
+When it exits successfully, the trusted host copies
 out the report/decision and applies one binary patch to the task branch; the
 normal verifier and publisher remain outside the container. The bridge rejects
 more than 25 changed files, patches larger than 5 MB, oversized reports or
@@ -144,6 +147,9 @@ dashboard, and agentic-activity state before opening a shell. A missing timer
 or any dead/missing dashboard pane makes startup fail and rolls back anything
 that invocation started. Re-entering bare `msandbox` refuses when another
 Codex/OpenCode/Claude or AutoPR run is active, leaving that work untouched.
+The activity summary identifies whether a coding agent belongs to the primary
+sandbox, the AutoPR sandbox, or both, so a protected interactive session is not
+mistaken for an unseen AutoPR run.
 `msandbox stop` likewise refuses active work—or an unknown GitHub state—and
 requires `msandbox stop --force` to interrupt deliberately. A successful stop
 removes the marker first, unloads the timer, closes the dashboard, and stops

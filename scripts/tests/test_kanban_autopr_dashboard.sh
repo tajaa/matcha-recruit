@@ -199,6 +199,23 @@ check "live-work pane shows model activity and redacts common credentials" \
     && ! grep -q 'this-token-must-not-render' "$TMP_DIR/work-pane.out" \
     && echo 0 || echo 1)
 
+cat > "$TMP_DIR/msandbox-health" <<'EOF'
+#!/usr/bin/env bash
+case "${AUTOPR_TEST_SANDBOX_STATE:-absent}" in
+  error) printf 'docker unavailable\n' >&2; exit 1 ;;
+  *) printf '%s\n' "${AUTOPR_TEST_SANDBOX_STATE:-absent}" ;;
+esac
+EOF
+chmod +x "$TMP_DIR/msandbox-health"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  AUTOPR_TEST_SANDBOX_STATE=created "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-created.out"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  AUTOPR_TEST_SANDBOX_STATE=running "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-running.out"
+check "health pane distinguishes a blocked container from a running worker" \
+  $(grep -q 'blocked · container state created' "$TMP_DIR/health-created.out" \
+    && grep -q 'running · matcha-kanban-autopr-sandbox' "$TMP_DIR/health-running.out" \
+    && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
