@@ -52,9 +52,11 @@ check "workflow forces OpenCode through the dedicated AutoPR msandbox" \
       && grep -qF 'run-opencode-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
       && echo 0 || echo 1)
 
-check "msandbox exposes a credential-minimized one-command AutoPR login" \
-    $(grep -qF 'autopr-login)' "$REPO_ROOT/scripts/agent-sandbox.sh" \
-      && grep -qF 'configure_autopr_lane' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+check "msandbox mounts only a staged read-only AutoPR OpenCode auth file" \
+    $(grep -qF 'SANDBOX_OPENCODE_AUTH_FILE' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && grep -qF 'docker-compose.autopr-sandbox.yml' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+      && grep -qF 'auth.json:ro' "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
+      && grep -qF 'cp "$HOST_OPENCODE_AUTH_FILE" "$SANDBOX_OPENCODE_AUTH_FILE"' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
       && echo 0 || echo 1)
 
 check "sandbox bridge uses a clean clone and empty AWS mount" \

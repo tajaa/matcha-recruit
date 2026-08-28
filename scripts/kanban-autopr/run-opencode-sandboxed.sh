@@ -21,6 +21,9 @@ SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 RUNTIME_ROOT="${AUTOPR_SANDBOX_RUNTIME_ROOT:-$REPO_ROOT/.git/matcha-kanban-autopr-sandbox}"
 SANDBOX_WORKSPACE="$RUNTIME_ROOT/workspace"
 EMPTY_AWS_DIR="$RUNTIME_ROOT/empty-aws"
+AUTH_DIR="$RUNTIME_ROOT/opencode-auth"
+SANDBOX_OPENCODE_AUTH_FILE="$AUTH_DIR/auth.json"
+HOST_OPENCODE_AUTH_FILE="${AUTOPR_HOST_OPENCODE_AUTH_FILE:-$HOME/.local/share/opencode/auth.json}"
 IO_DIR="$SANDBOX_WORKSPACE/.git/autopr-io"
 MODEL_CONTAINER_ROOT="/workspace"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
@@ -45,14 +48,27 @@ if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
     MODEL_CONTAINER_ROOT="$SANDBOX_WORKSPACE"
 else
     [ -x "$MSANDBOX_BIN" ] || die "msandbox is not executable: $MSANDBOX_BIN"
+    # AutoPR already runs successfully with Finch's local OpenCode account.
+    # Copy only its auth.json into a private runtime directory, then bind it
+    # read-only into the container. Do not mount the host OpenCode home: its
+    # history, logs, database, and every unrelated credential stay outside.
+    [ -r "$HOST_OPENCODE_AUTH_FILE" ] \
+        || die "missing host OpenCode auth file: $HOST_OPENCODE_AUTH_FILE"
+    mkdir -p "$AUTH_DIR"
+    chmod 700 "$AUTH_DIR"
+    cp "$HOST_OPENCODE_AUTH_FILE" "$SANDBOX_OPENCODE_AUTH_FILE"
+    chmod 600 "$SANDBOX_OPENCODE_AUTH_FILE"
 fi
 
 # Stop only the dedicated AutoPR container before replacing its bind-mounted
-# clone. Named auth/dependency volumes remain intact between runs.
+# clone. Named tool/dependency volumes remain intact between runs; the auth
+# file itself is freshly copied by the trusted bridge for each invocation.
 if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" != 1 ]; then
     env AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+        AGENT_SANDBOX_AUTOPR=1 \
         SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
         SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
+        SANDBOX_OPENCODE_AUTH_FILE="$SANDBOX_OPENCODE_AUTH_FILE" \
         "$MSANDBOX_BIN" stop >/dev/null 2>&1 || true
 fi
 
@@ -121,8 +137,10 @@ if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
 else
     env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
         AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+        AGENT_SANDBOX_AUTOPR=1 \
         SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
         SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
+        SANDBOX_OPENCODE_AUTH_FILE="$SANDBOX_OPENCODE_AUTH_FILE" \
         "$MSANDBOX_BIN" exec \
         opencode run --auto --model openai/gpt-5.6-terra --variant high \
         "${MODEL_INPUT_ARGS[@]}" -- "$PROMPT_TEXT"

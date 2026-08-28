@@ -16,9 +16,11 @@ a card back. The bot never merges and never approves.
 
 **Design constraint carried over from silent-error-autofix**: no model credential and no
 Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as Finch's
-user; OpenCode uses the dedicated `matcha-kanban-autopr-sandbox` account-state volume,
-and the Matcha bot credential lives in `~/.config/matcha-autopr/env` (`chmod 600`, never
-committed). OpenCode itself never receives that file or credential.
+user; before each run the trusted bridge makes a temporary mode-600 copy of the Mac's
+existing OpenCode `auth.json` and exposes that one file read-only in the dedicated
+`matcha-kanban-autopr-sandbox` container. The Matcha bot credential lives in
+`~/.config/matcha-autopr/env` (`chmod 600`, never committed). OpenCode itself never
+receives that file or credential.
 
 The existing `EC2_SSH_KEY` Actions secret is used only by the trusted harness. Before
 each queue scan, `resolve-production-context.sh` resolves the active blue/green
@@ -68,10 +70,9 @@ changes.
    `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
-5. Authenticate OpenCode once in the dedicated containment lane:
-   `msandbox autopr-login`.
-   This state persists in that Docker project's named home volume and is not copied into
-   GitHub secrets.
+5. Ensure the host OpenCode worker is already authenticated (the existing AutoPR setup
+   satisfies this). Do **not** run `opencode auth login` or add an API key for the
+   sandbox: each run securely reuses only the host auth file.
 6. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Its
    JSONL log is `~/Library/Logs/matcha-kanban-autopr-dispatch.log`. The installer also
    creates the `matcha-autopr` tmux dashboard; open it with
@@ -151,7 +152,8 @@ seconds. Override those intervals with
    events, discussion, and screenshots without re-litigating accepted earlier rounds.
    It then calls `run-opencode-sandboxed.sh`, which clones only tracked files into a
    dedicated msandbox workspace, removes the clone's remote, mounts an empty AWS
-   directory, and strips GitHub/Matcha/SSH credentials. OpenCode gets broad permissions
+   directory, gives OpenCode only a read-only copy of its existing auth file, and strips
+   GitHub/Matcha/SSH credentials. OpenCode gets broad permissions
    inside that disposable clone, while the trusted harness copies back only its patch,
    report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
    `### Confidence` plus a shell-validated JSON triage decision. Missing product intent

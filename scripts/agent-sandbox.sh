@@ -13,6 +13,7 @@ while [[ -L "$SCRIPT_SOURCE" ]]; do
 done
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.sandbox.yml"
+AUTOPR_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.autopr-sandbox.yml"
 # Callers that need a separate trust boundary (Kanban AutoPR, for example)
 # get their own container and named volumes without duplicating this launcher.
 # The workspace and AWS mounts are explicit inputs so a trusted host wrapper
@@ -25,10 +26,20 @@ COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_
 configure_autopr_lane() {
     local bootstrap_root="${AUTOPR_SANDBOX_BOOTSTRAP_ROOT:-$PROJECT_ROOT/.git/matcha-autopr-sandbox/bootstrap}"
     SANDBOX_PROJECT_NAME="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
-    export SANDBOX_WORKSPACE_DIR="$bootstrap_root/workspace"
-    export SANDBOX_AWS_DIR="$bootstrap_root/empty-aws"
+    export SANDBOX_WORKSPACE_DIR="${SANDBOX_WORKSPACE_DIR:-$bootstrap_root/workspace}"
+    export SANDBOX_AWS_DIR="${SANDBOX_AWS_DIR:-$bootstrap_root/empty-aws}"
     mkdir -p "$SANDBOX_WORKSPACE_DIR" "$SANDBOX_AWS_DIR"
-    COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
+    # The trusted bridge stages exactly one mode-600 OpenCode auth.json before
+    # setting this flag. Keep it out of ordinary interactive msandbox runs.
+    [ -n "${SANDBOX_OPENCODE_AUTH_FILE:-}" ] || {
+        echo "AutoPR sandbox requires SANDBOX_OPENCODE_AUTH_FILE from its trusted bridge." >&2
+        exit 1
+    }
+    [ -r "$SANDBOX_OPENCODE_AUTH_FILE" ] || {
+        echo "AutoPR OpenCode auth file is not readable: $SANDBOX_OPENCODE_AUTH_FILE" >&2
+        exit 1
+    }
+    COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE" --file "$AUTOPR_COMPOSE_FILE")
 }
 
 usage() {
@@ -48,7 +59,6 @@ Commands:
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
   doctor                       Check the isolation + capability checklist.
   login <codex|claude|opencode|gh>   Authenticate one agent (or GitHub) in its own state volume.
-  autopr-login                 Authenticate OpenCode in the dedicated credential-minimized AutoPR lane.
   run <codex|claude|opencode> [args] Start that agent with full execution inside the container boundary.
   codex [args]                       Shorthand for `run codex`.
   claude [args]                      Shorthand for `run claude`.
@@ -196,6 +206,13 @@ run_doctor() {
 command_name="${1:-}"
 shift || true
 
+# This flag is set exclusively by run-opencode-sandboxed.sh.  Configure the
+# dedicated compose overlay before any lifecycle command so stop/start/exec
+# all refer to the same contained AutoPR lane.
+if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then
+    configure_autopr_lane
+fi
+
 case "$command_name" in
     build)
         require_docker
@@ -209,15 +226,6 @@ case "$command_name" in
         require_docker
         start_services
         login_agent "${1:?usage: login <codex|claude|opencode|gh>}"
-        ;;
-    autopr-login)
-        # Use a deliberately empty bootstrap workspace/AWS mount even for the
-        # one-time interactive auth flow. The real task clone is mounted only
-        # later by run-opencode-sandboxed.sh.
-        configure_autopr_lane
-        require_docker
-        start_services
-        login_agent opencode
         ;;
     git-login)
         require_docker

@@ -19,7 +19,6 @@ outside the container instead:
 ```bash
 msandbox build --playwright   # rebuild with Chromium, or after Dockerfile changes
 msandbox login codex          # or: login claude / login opencode / login gh
-msandbox autopr-login         # isolated OpenCode login for the Kanban worker
 msandbox dev                  # backend/worker/frontend/Tell-Us/Oceanlab in tmux
 msandbox codex                # in another terminal — or `claude` / `opencode`
 msandbox exec command args    # exact-argv, non-TTY automation path
@@ -99,7 +98,6 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | `dev [args]` | `AGENT_SANDBOX=1 ./scripts/dev-remote.sh` inside the container |
 | `doctor` | Runs the isolation/capability checklist below |
 | `login <codex\|claude\|opencode\|gh>` | Authenticate one agent (own state volume) |
-| `autopr-login` | Authenticate OpenCode in the dedicated AutoPR project with empty workspace/AWS mounts |
 | `run <codex\|claude\|opencode> [args]` | Start that agent with full execution |
 | `codex` / `claude` / `opencode` | Shorthand for `run <agent>` |
 
@@ -135,15 +133,14 @@ normal verifier and publisher remain outside the container. The bridge rejects
 more than 25 changed files, patches larger than 5 MB, oversized reports or
 decisions, and any symlink/submodule change before applying the patch.
 
-The dedicated project has its own persistent OpenCode account state. Log in
-once before enabling the timer:
-
-```bash
-msandbox autopr-login
-```
-
-The next AutoPR investigation recreates that project's container with the
-sanitized workspace and empty AWS mount while preserving its named auth volume.
+No second OpenCode login is required for the Kanban worker. Before each run,
+the trusted bridge copies the Mac's existing `~/.local/share/opencode/auth.json`
+to a private mode-700 runtime directory and bind-mounts that **single file**
+read-only into the dedicated container. OpenCode needs an auth credential to
+call its provider; this keeps the rest of the host OpenCode home (history,
+logs, database, and other state) out of the model's reach. Set
+`AUTOPR_HOST_OPENCODE_AUTH_FILE` only if the working host auth file lives
+elsewhere.
 
 ## Validation checklist
 
