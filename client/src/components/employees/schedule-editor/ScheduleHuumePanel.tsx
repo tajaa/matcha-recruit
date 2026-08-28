@@ -22,6 +22,7 @@ interface ScheduleHuumePanelProps {
   selectedShifts: Shift[]
   onClearSelectedShifts(): void
   onApplied(): void
+  onAutomaticActionSettled(): void
   onClose(): void
 }
 
@@ -57,7 +58,13 @@ function appliedActionKey(response: MWSendResponse): string | null {
   return runId ? 'run:' + runId : null
 }
 
-export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onClose }: ScheduleHuumePanelProps) {
+function settledAutomaticActionKey(state: Record<string, unknown>): string | null {
+  const action = getHuumeState(state).action
+  if (action?.type !== 'schedule_week_draft' || !action.auto_generated || action.status === 'proposed') return null
+  return `${action.confirm_id}:${action.status}`
+}
+
+export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onAutomaticActionSettled, onClose }: ScheduleHuumePanelProps) {
   const { toast } = useToast()
   const [threadId, setThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
@@ -75,6 +82,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
   const mountedRef = useRef(true)
   const stepsRef = useRef<HuumeStep[]>([])
   const appliedKeysRef = useRef(new Set<string>())
+  const settledAutomaticKeysRef = useRef(new Set<string>())
   const abortRef = useRef<AbortController | null>(null)
   const voiceTurnRef = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -125,6 +133,13 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ block: 'nearest' })
   }, [messages, steps, status])
+
+  const settledAutomaticKey = settledAutomaticActionKey(currentState)
+  useEffect(() => {
+    if (!settledAutomaticKey || settledAutomaticKeysRef.current.has(settledAutomaticKey)) return
+    settledAutomaticKeysRef.current.add(settledAutomaticKey)
+    onAutomaticActionSettled()
+  }, [onAutomaticActionSettled, settledAutomaticKey])
 
   async function send(contentOverride?: string) {
     const displayContent = (contentOverride ?? input).trim()

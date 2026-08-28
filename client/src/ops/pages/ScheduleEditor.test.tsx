@@ -260,6 +260,37 @@ describe('ScheduleEditor', () => {
     expect(screen.queryByText(/Hi, Jamie/)).not.toBeInTheDocument()
   })
 
+  it('clears the automatic suggestion banner when the proposal is no longer active', async () => {
+    getScheduleSuggestionStatusMock.mockResolvedValue({
+      available: true, generation_run_id: 'generation-1', week_start: '2026-08-09',
+      created_at: '2026-08-24T16:00:00Z',
+    })
+    getScheduleHuumeSessionMock.mockResolvedValue({
+      session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+      week_start: '2026-08-09', week_end: '2026-08-16', messages: [], version: 3,
+      current_state: {
+        huume_action: {
+          type: 'schedule_week_draft', status: 'cancelled', confirm_id: 'auto1234',
+          generation_run_id: 'generation-1', location_id: 'loc1', week_start: '2026-08-09',
+          source_mode: 'template', week_template_id: 'template-1', origin: 'automatic',
+          auto_generated: true,
+        },
+      },
+    })
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Huume prepared a suggested schedule for the week of 2026-08-09.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Review suggestion' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Huume prepared a suggested schedule for the week of 2026-08-09.')).not.toBeInTheDocument()
+    })
+  })
+
   it('sends selected blocks as authoritative Huume context', async () => {
     render(
       <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>

@@ -54,6 +54,10 @@ async def test_worker_generates_one_review_only_proposal(monkeypatch):
         AsyncMock(return_value={"enabled": True, "max_per_cycle": 100}),
     )
     propose = AsyncMock(return_value={"status": "ready", "generation_run_id": str(uuid4())})
+    readiness = AsyncMock(return_value={"status": "ok", "ready": True})
+    monkeypatch.setattr(
+        "app.matcha.services.scheduling.week_builder.get_week_build_readiness", readiness,
+    )
     monkeypatch.setattr(
         "app.matcha.services.scheduling.week_builder.propose_week_draft", propose,
     )
@@ -68,6 +72,7 @@ async def test_worker_generates_one_review_only_proposal(monkeypatch):
     assert kwargs["thread_id"] is None
     assert kwargs["source_mode"] == "auto"
     assert kwargs["week_start"].weekday() == 6
+    readiness.assert_awaited_once()
     assert conn.closed is True
 
 
@@ -88,6 +93,10 @@ async def test_worker_skips_scope_with_existing_proposal(monkeypatch):
         AsyncMock(return_value={"enabled": True, "max_per_cycle": 100}),
     )
     propose = AsyncMock()
+    readiness = AsyncMock()
+    monkeypatch.setattr(
+        "app.matcha.services.scheduling.week_builder.get_week_build_readiness", readiness,
+    )
     monkeypatch.setattr(
         "app.matcha.services.scheduling.week_builder.propose_week_draft", propose,
     )
@@ -95,4 +104,43 @@ async def test_worker_skips_scope_with_existing_proposal(monkeypatch):
     result = await worker._run()
 
     assert result["already_present"] == 1
+    readiness.assert_not_awaited()
     propose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_persist_proposal_until_week_is_ready(monkeypatch):
+    conn = _Conn([{
+        "company_id": uuid4(),
+        "location_id": uuid4(),
+        "timezone": "UTC",
+        "enabled_features": {
+            "employee_schedule": True, "huume": True, "matcha_work": True,
+        },
+        "signup_source": None,
+    }])
+    monkeypatch.setattr(worker, "get_db_connection", AsyncMock(return_value=conn))
+    monkeypatch.setattr(
+        worker, "scheduler_settings_row",
+        AsyncMock(return_value={"enabled": True, "max_per_cycle": 100}),
+    )
+    readiness = AsyncMock(return_value={
+        "status": "ok",
+        "ready": False,
+        "blockers": ["No employee has confirmed scheduling availability."],
+    })
+    propose = AsyncMock()
+    monkeypatch.setattr(
+        "app.matcha.services.scheduling.week_builder.get_week_build_readiness", readiness,
+    )
+    monkeypatch.setattr(
+        "app.matcha.services.scheduling.week_builder.propose_week_draft", propose,
+    )
+
+    result = await worker._run()
+
+    assert result["not_ready"] == 1
+    assert result["generated"] == 0
+    readiness.assert_awaited_once()
+    propose.assert_not_awaited()
+    assert conn.closed is True

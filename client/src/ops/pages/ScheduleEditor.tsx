@@ -279,6 +279,7 @@ export default function ScheduleEditor() {
                 selectedShifts={huumeSelectedShifts}
                 onClearSelectedShifts={() => setHuumeSelectedShiftIds(new Set())}
                 onApplied={() => { setAutomaticSuggestion(null); void editor.reload() }}
+                onAutomaticActionSettled={() => setAutomaticSuggestion(null)}
                 onClose={() => setChatOpen(false)}
               />
             )}

@@ -65,7 +65,10 @@ async def _run() -> dict:
         not_ready = 0
         failures = 0
         eligible_locations = 0
-        from app.matcha.services.scheduling.week_builder import propose_week_draft
+        from app.matcha.services.scheduling.week_builder import (
+            get_week_build_readiness,
+            propose_week_draft,
+        )
 
         for location in locations:
             if generated >= max_per_cycle:
@@ -93,6 +96,14 @@ async def _run() -> dict:
                 already_present += 1
                 continue
             try:
+                readiness = await get_week_build_readiness(
+                    company_id=location["company_id"],
+                    location_id=location["location_id"],
+                    week_start=week_start,
+                )
+                if readiness.get("status") != "ok" or not readiness.get("ready"):
+                    not_ready += 1
+                    continue
                 result = await propose_week_draft(
                     company_id=location["company_id"],
                     actor_user_id=None,
