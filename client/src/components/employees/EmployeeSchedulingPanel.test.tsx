@@ -88,7 +88,7 @@ describe('EmployeeSchedulingPanel', () => {
   })
 
   it('preserves legacy windows and omits unchanged stale-location jobs', async () => {
-    mocks.fetchJobs.mockResolvedValue({ jobs: [] })
+    mocks.fetchJobs.mockResolvedValue({ jobs: [jobs[1]] })
     mocks.fetchEmployeeJobs.mockResolvedValue({
       employee_id: 'employee-1',
       assignments: [{
@@ -104,11 +104,42 @@ describe('EmployeeSchedulingPanel', () => {
 
     expect(await screen.findByText('Old location role')).toBeInTheDocument()
     expect(screen.getByText(/previous work location/)).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Shift leader' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Save scheduling details' }))
 
     await waitFor(() => expect(mocks.updateDetails).toHaveBeenCalledWith('employee-1', expect.objectContaining({
       jobs: undefined,
       availability: { availability_state: 'windows', windows: legacyWindows },
     })))
+  })
+
+  it('requires stale-location jobs to be removed before other job edits', async () => {
+    mocks.fetchJobs.mockResolvedValue({ jobs: [jobs[1]] })
+    mocks.fetchEmployeeJobs.mockResolvedValue({
+      employee_id: 'employee-1',
+      assignments: [{
+        job_id: 'job-old', job_name: 'Old location role', location_id: 'loc-old',
+        is_primary: false, qualification_status: 'active', qualified_from: null,
+        qualified_until: null, notes: null, credential_requirements: [],
+      }],
+    })
+
+    render(<EmployeeSchedulingPanel employeeId="employee-1" workLocationId="loc-1" />)
+
+    const currentJob = await screen.findByRole('checkbox', { name: 'Shift leader' })
+    const staleJob = screen.getByRole('checkbox', { name: 'Old location role' })
+    expect(currentJob).toBeDisabled()
+    expect(staleJob).toBeEnabled()
+
+    fireEvent.click(staleJob)
+    expect(currentJob).toBeEnabled()
+    expect(staleJob).toBeDisabled()
+    fireEvent.click(currentJob)
+    fireEvent.click(screen.getByRole('button', { name: 'Save scheduling details' }))
+
+    await waitFor(() => expect(mocks.updateDetails).toHaveBeenCalled())
+    expect(mocks.updateDetails.mock.calls[0][1].jobs.assignments).toEqual([
+      expect.objectContaining({ job_id: 'job-2' }),
+    ])
   })
 })

@@ -93,6 +93,11 @@ export interface RosterEmployee {
   job_title: string | null
   department: string | null
   job_ids: string[]
+  job_qualifications?: Array<{
+    job_id: string
+    qualified_from: string | null
+    qualified_until: string | null
+  }>
 }
 
 export type JobCredentialRequirement = {

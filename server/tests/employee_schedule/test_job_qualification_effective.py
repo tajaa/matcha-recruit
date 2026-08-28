@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 
 from app.matcha.routes.employee_schedule._shared import check_job_qualification
+from app.matcha.routes.employee_schedule._shared import fetch_roster
 from app.matcha.services.scheduling.schedule_profiles import (
     fetch_effective_job_employee_ids,
 )
@@ -67,3 +68,36 @@ async def test_jobless_shift_remains_ungated_without_query():
     )
     assert result == {EMPLOYEE}
     assert conn.sql == ""
+
+
+class RosterQualificationConn:
+    def __init__(self):
+        self.queries = []
+
+    async def fetch(self, sql, *args):
+        self.queries.append(sql)
+        if "FROM employees" in sql:
+            return [{
+                "id": EMPLOYEE, "first_name": "Aisha", "last_name": "Rivera",
+                "job_title": "Manager", "department": None,
+            }]
+        return [{
+            "employee_id": EMPLOYEE, "job_id": JOB,
+            "qualified_from": date(2026, 9, 1),
+            "qualified_until": date(2026, 9, 30),
+            "currently_effective": False,
+        }]
+
+
+@pytest.mark.asyncio
+async def test_roster_returns_active_qualification_windows_for_shift_date_preview():
+    conn = RosterQualificationConn()
+    roster = await fetch_roster(conn, COMPANY)
+
+    assert "qualification_status = 'active'" in conn.queries[1]
+    assert roster[0]["job_ids"] == []
+    assert roster[0]["job_qualifications"] == [{
+        "job_id": str(JOB),
+        "qualified_from": "2026-09-01",
+        "qualified_until": "2026-09-30",
+    }]

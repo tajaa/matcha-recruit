@@ -42,6 +42,11 @@ export function EmployeeSchedulingPanel({
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const assignedJobIds = new Set(assignments.map((assignment) => assignment.job_id))
+  const staleJobIds = new Set(jobs
+    .filter((job) => assignedJobIds.has(job.id) && job.location_id != null && job.location_id !== workLocationId)
+    .map((job) => job.id))
+  const hasStaleAssignments = staleJobIds.size > 0
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -129,6 +134,10 @@ export function EmployeeSchedulingPanel({
 
   async function save() {
     if (!profile) return
+    if (jobsDirty && hasStaleAssignments) {
+      setError('Remove all previous-location jobs before changing job assignments.')
+      return
+    }
     const min = hoursToMinutes(hours.min)
     const target = hoursToMinutes(hours.target)
     const max = hoursToMinutes(hours.max)
@@ -173,7 +182,7 @@ export function EmployeeSchedulingPanel({
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-medium text-zinc-200">Qualified jobs</h3>
           {assignments.some((assignment) => assignment.is_primary) && (
-            <Button variant="ghost" size="sm" onClick={() => {
+            <Button variant="ghost" size="sm" disabled={hasStaleAssignments} onClick={() => {
               setJobsDirty(true)
               setAssignments((current) => current.map((assignment) => ({ ...assignment, is_primary: false })))
             }}>
@@ -182,35 +191,47 @@ export function EmployeeSchedulingPanel({
           )}
         </div>
         <p className="mt-1 text-xs text-zinc-500">Job credentials become required as soon as the assignment is saved.</p>
+        {hasStaleAssignments && (
+          <p className="mt-2 text-xs text-amber-300">
+            Remove every previous-location job to unlock job edits. Hours, preferences, and availability can still be saved without changing jobs.
+          </p>
+        )}
         <div className="mt-3 space-y-3">
           {jobs.map((job) => {
             const assignment = assignments.find((item) => item.job_id === job.id)
+            const staleLocationJob = job.location_id != null && job.location_id !== workLocationId
+            const staleAssignment = Boolean(assignment && staleLocationJob)
+            const jobToggleDisabled = (hasStaleAssignments && !staleAssignment) || (staleLocationJob && !assignment)
             return (
               <div key={job.id} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
                 <label className="flex items-center gap-2 text-sm text-zinc-200">
-                  <input type="checkbox" checked={Boolean(assignment)} onChange={(event) => toggleJob(job.id, event.target.checked)} />
+                  <input type="checkbox" checked={Boolean(assignment)} disabled={jobToggleDisabled} onChange={(event) => toggleJob(job.id, event.target.checked)} />
                   {job.name}
                 </label>
                 {assignment && (
                   <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
                     <Select label="Status" options={STATUS_OPTIONS} value={assignment.qualification_status}
+                      disabled={hasStaleAssignments}
                       onChange={(event) => updateAssignment(job.id, { qualification_status: event.target.value as QualificationStatus, is_primary: event.target.value === 'active' ? assignment.is_primary : false })} />
                     <Input label="Qualified from" type="date" value={assignment.qualified_from ?? ''}
+                      disabled={hasStaleAssignments}
                       onChange={(event) => updateAssignment(job.id, { qualified_from: event.target.value || null })} />
                     <Input label="Qualified until" type="date" value={assignment.qualified_until ?? ''}
+                      disabled={hasStaleAssignments}
                       onChange={(event) => updateAssignment(job.id, { qualified_until: event.target.value || null })} />
                     <label className="flex items-end gap-2 pb-2 text-xs text-zinc-300">
-                      <input type="radio" name="primary-job" checked={assignment.is_primary} onChange={() => setPrimary(job.id)} /> Primary job
+                      <input type="radio" name="primary-job" checked={assignment.is_primary} disabled={hasStaleAssignments} onChange={() => setPrimary(job.id)} /> Primary job
                     </label>
                     <Input label="Notes" value={assignment.notes ?? ''}
+                      disabled={hasStaleAssignments}
                       onChange={(event) => updateAssignment(job.id, { notes: event.target.value || null })} />
                   </div>
                 )}
                 {assignment && job.credential_requirements.length > 0 && (
                   <p className="mt-2 text-xs text-amber-300">Credentials: {job.credential_requirements.map((item) => item.credential_type_label).join(', ')}</p>
                 )}
-                {assignment && job.location_id != null && job.location_id !== workLocationId && (
-                  <p className="mt-2 text-xs text-amber-300">Assigned at a previous work location. Remove this job before changing job assignments.</p>
+                {staleAssignment && (
+                  <p className="mt-2 text-xs text-amber-300">Assigned at a previous work location. Remove this job before changing any job assignments.</p>
                 )}
               </div>
             )
