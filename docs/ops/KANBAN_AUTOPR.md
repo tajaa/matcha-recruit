@@ -186,13 +186,14 @@ seconds. Override those intervals with
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
    work, migrations, policy boundaries, and external dependencies.
 6. **Cross-lane scope check** — for a fresh implementation patch, the shared
-   `scripts/autopr-scope/check-open-prs.sh` checks every older open PR before verification
-   or publication. Exact patch-id or credential-free Terra/high may prove full coverage;
-   only a high-confidence `covered` verdict suppresses the new PR. The existing owner PR
-   receives a `covers-kanban-task` label and exact task comment, while the card stores
-   that PR's URL/number and a visible `ALREADY SCOPED` note. Closed-unmerged owners make
-   the card eligible again; merged owners move it to Review through the webhook or
-   reconciliation pass. Uncertain results publish with `possible-duplicate`.
+   `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
+   or publication. Only an exact stable patch-id match suppresses the new PR; broader
+   file-overlapping patches are untrusted public input and are surfaced with a
+   `possible-duplicate` label for human review rather than executed by a model. The
+   existing owner PR receives a `covers-kanban-task` label and exact task comment, while
+   the card stores that PR's URL/number and a visible `ALREADY SCOPED` note.
+   Closed-unmerged owners make the card eligible again; merged owners move every linked
+   card to Review through the webhook or reconciliation pass.
 7. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
@@ -240,10 +241,11 @@ Additive migration `taskpr0001`. Plumbed through the board SELECT
 client types (`client/src/work/types.ts`), and a PR pill on the kanban card
 (`KanbanCard.tsx`, next to the churn chip) linking out to `pr_url`.
 
-The pull-request webhook resolves in three steps: task trailer, task-shaped branch, then
-the exact persisted `pr_number`. The last path supports cross-lane ownership where an
-error-bot branch owns a Kanban task; the existing repository and four-project allowlists
-still apply before any card mutation.
+The pull-request webhook resolves the primary card from a task trailer or task-shaped
+branch, then unions every card carrying the exact persisted `pr_number`. The latter
+supports cross-lane and multi-card ownership where one error-bot or human PR owns several
+Kanban tasks; the existing repository and four-project allowlists still apply before any
+card mutation.
 
 ## `post-checkout` hook (checkout → in_progress)
 
@@ -276,13 +278,14 @@ close that off before resolution ever runs:
   `PROJECTS` list). Even a legitimate PR in this repo can't move a card outside the four
   target projects.
 
-Task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR body;
-else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
+Primary task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR
+body; else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
 `mw_tasks.id` with hyphens stripped (same regex the `post-checkout` hook uses — this is
-what lets a human's own hand-made branch work too, not just bot-authored PRs). Column
-moves are a no-op unless the card is currently in the listed source column; metadata is
-written only when it changed. Redelivery is therefore idempotent, and a webhook replay
-can never drag a card backwards:
+what lets a human's own hand-made branch work too, not just bot-authored PRs). Every
+additional card whose persisted `pr_number` matches is included and deduplicated before
+the transition. Column moves are a no-op unless the card is currently in the listed source
+column; metadata is written only when it changed. Redelivery is therefore idempotent, and
+a webhook replay can never drag a card backwards:
 
 | action | from | to | also |
 |---|---|---|---|

@@ -39,10 +39,11 @@ Pipeline (`scripts/error-autofix/`):
    tests there is discarded. `--` terminates the repeated `--file` option before the
    prompt; without it OpenCode interprets the prompt itself as another attachment.
 5. **Cross-lane scope check** — `scripts/autopr-scope/check-open-prs.sh` captures the
-   uncommitted proposal with a temporary Git index, prefilters every open PR targeting
-   `main` by changed-file overlap, accepts an exact stable patch-id immediately, and
-   otherwise asks credential-free Terra/high whether an older PR fully covers the same
-   root cause. Only `covered` + `high` suppresses publication. The owner PR gets a
+   uncommitted proposal with a temporary Git index, prefilters open PRs targeting
+   `main` by changed-file overlap, and suppresses publication only for an exact stable
+   patch-id match. Broader overlaps are untrusted public input, so they are never
+   executed by a model; the draft still publishes with `possible-duplicate` for human
+   review. An exact-match owner PR gets a
    `covers-prod-error` label and an idempotent
    `<!-- matcha-autofix-coverage-error: <key> -->` comment; `select.sh` enumerates those
    comments directly as its durable ledger. Uncertain comparisons still publish and are
@@ -102,8 +103,8 @@ It never deploys or auto-merges. A human reads the PR body and decides.
   `needs-work`, with an explicit "checks did not run" banner — never a silently blank
   table).
 - `AUTOPR_SCOPE_DEDUPE_MODE=off|observe|enforce` is the rollback switch. The workflows
-  currently pin `enforce`; `observe` records the verdict in the job summary without
-  suppressing a PR.
+  currently pin `enforce`; `observe` records an exact-match verdict in the job summary
+  without suppressing a PR.
 
 ## Known gap
 

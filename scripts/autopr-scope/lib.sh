@@ -28,5 +28,9 @@ autopr_scope_capture_diff() {
 }
 
 autopr_scope_patch_id() {
-    git patch-id --stable < "$1" 2>/dev/null | awk 'NR == 1 {print $1}'
+    # A concatenated diff stream can produce more than one patch-id. Compare
+    # the complete sorted set: accepting only the first would let an exact
+    # proposal plus an additional patch masquerade as full identity.
+    git patch-id --stable < "$1" 2>/dev/null \
+        | awk '{print $1}' | sort | paste -sd, -
 }

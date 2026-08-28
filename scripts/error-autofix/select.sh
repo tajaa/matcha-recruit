@@ -74,9 +74,19 @@ already_handled() {
 
     local association association_state association_time association_grace
     association="$(jq -c --arg key "$key" '
-        [.[] | select(.stable_key == $key)]
-        | sort_by((if .state == "OPEN" then 0 elif .state == "MERGED" then 1 else 2 end), .createdAt)
-        | .[0] // empty
+        [.[] | select(.stable_key == $key)] as $matches
+        | if any($matches[]; .state == "OPEN") then
+            [$matches[] | select(.state == "OPEN")] | sort_by(.createdAt) | .[0]
+          elif any($matches[]; .state == "MERGED") then
+            # A recurrent incident can accumulate several merged owners. The
+            # newest merge controls deploy grace; choosing the oldest would
+            # immediately reopen while the latest fix is still undeployed.
+            [$matches[] | select(.state == "MERGED")]
+            | sort_by(.mergedAt // .createdAt) | last
+          else
+            [$matches[] | select(.state == "CLOSED")]
+            | sort_by(.closedAt // .createdAt) | last // empty
+          end
     ' "$COVERAGE_LEDGER")"
     if [ -n "$association" ]; then
         association_state="$(printf '%s' "$association" | jq -r '.state')"

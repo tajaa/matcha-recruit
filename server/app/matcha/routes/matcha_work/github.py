@@ -424,10 +424,10 @@ def _with_autopr_progress_note(
     return f"{marker} · {current}"
 
 
-async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
+async def _resolve_pull_request_tasks(payload: dict) -> list[dict]:
     repo_full_name = (payload.get("repository") or {}).get("full_name") or ""
     if repo_full_name != _KANBAN_AUTOPR_REPO:
-        return None
+        return []
 
     pr = payload.get("pull_request") or {}
     body = pr.get("body") or ""
@@ -455,26 +455,31 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
                                 ((to_jsonb(mw_tasks) ? 'pr_url') AND
                                  (to_jsonb(mw_tasks) ? 'pr_number')) AS pr_columns_exist
                            FROM mw_tasks"""
+        tasks = []
         if task_id:
-            task = await conn.fetchrow(
+            primary_task = await conn.fetchrow(
                 select_sql + " WHERE id = $1",
                 UUID(task_id),
             )
-        elif isinstance(pr_number, int):
+            if primary_task:
+                tasks.append(primary_task)
+        if isinstance(pr_number, int):
             # Cross-lane scope ownership deliberately links a card to an
             # existing PR whose body and branch belong to another bot. The
-            # exact persisted PR number is therefore the final resolution
-            # path. Repo and project allowlists below still gate the event.
-            task = await conn.fetchrow(
+            # exact persisted PR number therefore resolves every linked card,
+            # including secondary cards beside a trailer-owned primary task.
+            linked_tasks = await conn.fetch(
                 select_sql
-                + " WHERE to_jsonb(mw_tasks) ->> 'pr_number' = $1 ORDER BY created_at LIMIT 1",
+                + " WHERE to_jsonb(mw_tasks) ->> 'pr_number' = $1 ORDER BY created_at",
                 str(pr_number),
             )
-        else:
-            return None
-    if not task or str(task["project_id"]) not in _KANBAN_AUTOPR_PROJECT_IDS:
-        return None
-    return task
+            tasks.extend(linked_tasks)
+
+    unique_tasks = {}
+    for task in tasks:
+        if str(task["project_id"]) in _KANBAN_AUTOPR_PROJECT_IDS:
+            unique_tasks[str(task["id"])] = task
+    return list(unique_tasks.values())
 
 
 async def _handle_pull_request_event(payload: dict) -> dict:
@@ -483,36 +488,46 @@ async def _handle_pull_request_event(payload: dict) -> dict:
     card can never be dragged backwards by a webhook replay."""
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
-    task = await _resolve_pull_request_task(payload)
-    if not task:
+    tasks = await _resolve_pull_request_tasks(payload)
+    if not tasks:
         return {"ok": True, "task": None}
 
     action = payload.get("action") or ""
     pr = payload.get("pull_request") or {}
-    column = task["board_column"]
-    # Older schemas can still process the lifecycle transition; only the
-    # optional link persistence must wait for the migration. Dict fixtures from
-    # before this compatibility field was added retain the migrated-schema path.
-    pr_columns_exist = (
-        "pr_columns_exist" not in task or bool(task["pr_columns_exist"])
-    )
+    task_ids = [str(task["id"]) for task in tasks]
+
+    def result(**extra) -> dict:
+        response = {"ok": True, "task": task_ids[0], **extra}
+        if len(task_ids) > 1:
+            response["tasks"] = task_ids
+        return response
 
     if action in ("opened", "reopened"):
-        if column == "todo":
-            patch = {"board_column": "in_progress"}
-            if pr_columns_exist:
-                patch.update({
-                    "pr_url": pr.get("html_url"),
-                    "pr_number": pr.get("number"),
-                })
-            await pt_svc.update_project_task(
-                task["project_id"], task["id"], patch,
-            )
-        return {"ok": True, "task": str(task["id"])}
+        for task in tasks:
+            if task["board_column"] == "todo":
+                patch = {"board_column": "in_progress"}
+                # Older schemas can still process the lifecycle transition;
+                # only optional link persistence waits for the migration.
+                pr_columns_exist = (
+                    "pr_columns_exist" not in task
+                    or bool(task["pr_columns_exist"])
+                )
+                if pr_columns_exist:
+                    patch.update({
+                        "pr_url": pr.get("html_url"),
+                        "pr_number": pr.get("number"),
+                    })
+                await pt_svc.update_project_task(
+                    task["project_id"], task["id"], patch,
+                )
+        return result()
 
     if action == "closed":
         merged = bool(pr.get("merged"))
-        if merged and column != "done":
+        for task in tasks:
+            column = task["board_column"]
+            if not merged or column == "done":
+                continue
             patch = {}
             progress_note = _with_autopr_progress_note(
                 task["progress_note"],
@@ -521,6 +536,10 @@ async def _handle_pull_request_event(payload: dict) -> dict:
             )
             if progress_note != task["progress_note"]:
                 patch["progress_note"] = progress_note
+            pr_columns_exist = (
+                "pr_columns_exist" not in task
+                or bool(task["pr_columns_exist"])
+            )
             if pr_columns_exist:
                 if pr.get("html_url") and pr["html_url"] != task["pr_url"]:
                     patch["pr_url"] = pr["html_url"]
@@ -530,7 +549,7 @@ async def _handle_pull_request_event(payload: dict) -> dict:
                 patch["board_column"] = "review"
             if patch:
                 await pt_svc.update_project_task(task["project_id"], task["id"], patch)
-        return {"ok": True, "task": str(task["id"]), "merged": merged}
+        return result(merged=merged)
 
     return {"ignored": action}
 

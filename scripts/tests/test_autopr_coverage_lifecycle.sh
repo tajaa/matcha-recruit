@@ -12,8 +12,15 @@ cat > "$TMP_DIR/bin/gh" <<'EOF'
 case "$1 $2" in
   "pr list")
     if [[ "$*" == *"--label covers-prod-error"* ]]; then
-      printf '[{"number":334,"state":"%s","mergedAt":%s,"closedAt":%s,"createdAt":"2026-08-28T08:00:00Z"}]\n' \
-        "${OWNER_STATE:-OPEN}" "${OWNER_MERGED_AT:-null}" "${OWNER_CLOSED_AT:-null}"
+      if [ "${OWNER_SET:-}" = recurrent ]; then
+        printf '%s\n' '[
+          {"number":300,"state":"MERGED","mergedAt":"2026-08-01T08:00:00Z","closedAt":"2026-08-01T08:00:00Z","createdAt":"2026-08-01T07:00:00Z"},
+          {"number":334,"state":"MERGED","mergedAt":"2026-08-28T09:00:00Z","closedAt":"2026-08-28T09:00:00Z","createdAt":"2026-08-28T08:00:00Z"}
+        ]'
+      else
+        printf '[{"number":334,"state":"%s","mergedAt":%s,"closedAt":%s,"createdAt":"2026-08-28T08:00:00Z"}]\n' \
+          "${OWNER_STATE:-OPEN}" "${OWNER_MERGED_AT:-null}" "${OWNER_CLOSED_AT:-null}"
+      fi
     elif [[ "$*" == *"--label autofix"* || "$*" == *"--label autopr"* ]]; then
       printf '0\n'
     else
@@ -45,6 +52,15 @@ selected="$(OWNER_STATE=CLOSED OWNER_CLOSED_AT='"2026-08-28T10:00:00Z"' \
   "$REPO_ROOT/scripts/error-autofix/select.sh" "$TMP_DIR/incidents.json")"
 [ "$(printf '%s' "$selected" | jq -r '.stable_key')" = abc123abc123 ]
 printf 'PASS: closed-unmerged covering PR releases the production incident\n'
+
+set +e
+OWNER_SET=recurrent PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
+  AUTOFIX_CACHE_DIR="$TMP_DIR/prod-recurrent" \
+  "$REPO_ROOT/scripts/error-autofix/select.sh" "$TMP_DIR/incidents.json" >/dev/null
+rc=$?
+set -e
+[ "$rc" = 3 ]
+printf 'PASS: newest merged owner controls recurrence deploy grace\n'
 
 cat > "$TMP_DIR/card.json" <<'EOF'
 [{"task_id":"790f0fa0-0000-4000-8000-000000000001","id8":"790f0fa0","project_id":"p","title":"linked","board_column":"in_progress","created_at":"2026-08-28T08:00:00Z","last_moved_at":"2026-08-28T08:00:00Z","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #336 · source existing PR","pr_number":336}]

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Compare the current uncommitted proposal with older open PRs. GitHub data is
-# collected by the trusted harness; the semantic comparison receives no creds.
+# Compare the current uncommitted proposal with older open PRs. Public PR
+# patches are untrusted, so only deterministic patch identity may suppress a
+# new PR. Broader overlaps are surfaced for human review.
 #
 # Usage: check-open-prs.sh --lane error|kanban --identity ID --evidence FILE
 #        --report FILE --output FILE
@@ -39,11 +40,9 @@ done
 [ -f "$REPORT" ] || autopr_scope_die "--report must be a readable file"
 [ -n "$OUTPUT" ] || autopr_scope_die "--output is required"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
-MODEL="${AUTOPR_SCOPE_MODEL:-openai/gpt-5.6-terra}"
 MODE="$(autopr_scope_mode)"
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autopr-scope-XXXXXX")"
-TREE_DIR="$WORK_DIR/tree"
-trap 'git -C "$REPO_ROOT" worktree remove --force "$TREE_DIR" >/dev/null 2>&1 || true; rm -rf "$WORK_DIR"' EXIT
+trap 'rm -rf "$WORK_DIR"' EXIT
 
 emit_none() {
     jq -n --arg mode "$MODE" --arg decision "${1:-no_match}" --arg reason "${2:-No overlapping open pull request.}" \
@@ -116,44 +115,11 @@ if [ -n "$proposal_patch_id" ]; then
     done < <(jq -c '.[]' "$candidates")
 fi
 
-result="$WORK_DIR/model-result.json"
-prompt="$WORK_DIR/prompt.txt"
-sed "s#RESULT_PATH#$result#g" "$SCRIPT_DIR/_match_prompt.txt" > "$prompt"
-attachments=(-f "$EVIDENCE" -f "$REPORT" -f "$proposal" -f "$candidates")
-while IFS= read -r diff; do attachments+=(-f "$diff"); done < <(jq -r '.[].diff_file' "$candidates")
-
-# The comparator may inspect current source, but it never receives the live
-# checkout. Any accidental edits are confined to this disposable worktree.
-git -C "$REPO_ROOT" worktree add --detach "$TREE_DIR" HEAD >/dev/null
-
-if ! env -u GH_TOKEN -u GITHUB_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
-    opencode run --auto --model "$MODEL" --variant high --dir "$TREE_DIR" \
-    "${attachments[@]}" -- "$(<"$prompt")"; then
-    jq -n --arg mode "$MODE" '{decision:"uncertain",confidence:"low",covering_pr:null,covering_head_sha:null,reason:"Semantic comparator failed.",mode:$mode,possible_duplicate:true}' > "$OUTPUT"
-    exit 0
-fi
-
-if ! jq -e '
-    (.decision == "covered" or .decision == "no_match" or .decision == "uncertain") and
-    (.confidence == "high" or .confidence == "medium" or .confidence == "low") and
-    (.reason | type == "string" and length > 0) and
-    (if .decision == "covered" then (.covering_pr | type == "number") else .covering_pr == null end)
-' "$result" >/dev/null 2>&1; then
-    jq -n --arg mode "$MODE" '{decision:"uncertain",confidence:"low",covering_pr:null,covering_head_sha:null,reason:"Semantic comparator returned an invalid verdict.",mode:$mode,possible_duplicate:true}' > "$OUTPUT"
-    exit 0
-fi
-
-if [ "$(jq -r '.decision' "$result")" = covered ]; then
-    covering_pr="$(jq -r '.covering_pr' "$result")"
-    jq -e --argjson number "$covering_pr" 'any(.[]; .number == $number)' "$candidates" >/dev/null \
-        || autopr_scope_die "semantic comparator selected a non-candidate PR"
-    covering_sha="$(jq -r --argjson number "$covering_pr" '.[] | select(.number == $number) | .headRefOid' "$candidates")"
-else
-    covering_sha=""
-fi
-jq --arg mode "$MODE" --arg sha "$covering_sha" \
-    '. + {
-        mode:$mode,
-        covering_head_sha:(if $sha == "" then null else $sha end),
-        possible_duplicate:(.decision == "uncertain" or .confidence != "high" or ($mode == "observe" and .decision == "covered"))
-    }' "$result" > "$OUTPUT"
+# File overlap alone is never enough to suppress publication. Do not hand
+# public PR diffs to a host-level agent: even a credential-stripped process can
+# read runner files, and model instructions are not a security boundary.
+candidate_numbers="$(jq -r 'map("#" + (.number | tostring)) | join(", ")' "$candidates")"
+jq -n --arg mode "$MODE" --arg prs "$candidate_numbers" \
+    '{decision:"uncertain",confidence:"low",covering_pr:null,covering_head_sha:null,
+      reason:("Overlapping open PRs require human review: " + $prs),
+      mode:$mode,possible_duplicate:true}' > "$OUTPUT"
