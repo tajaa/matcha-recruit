@@ -23,6 +23,14 @@ AUTOPR_LAUNCH_AGENT_PLIST="${AUTOPR_LAUNCH_AGENT_PLIST:-$HOME/Library/LaunchAgen
 AUTOPR_LAUNCHCTL_BIN="${AUTOPR_LAUNCHCTL_BIN:-/bin/launchctl}"
 AUTOPR_TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 AUTOPR_TMUX_SESSION="${AUTOPR_TMUX_SESSION:-matcha-autopr}"
+# The self-hosted GitHub Actions runner LaunchAgent is what actually executes
+# the kanban-autopr workflow on this Mac. `msandbox off`/`stop` boots it out so
+# a stray workflow_dispatch has nowhere to land (not just a gated no-op);
+# `msandbox start` bootstraps it back. Set AUTOPR_MANAGE_RUNNER=0 if the runner
+# is administered separately (e.g. as a launchd system service via svc.sh).
+AUTOPR_MANAGE_RUNNER="${AUTOPR_MANAGE_RUNNER:-1}"
+AUTOPR_RUNNER_LAUNCH_LABEL="${AUTOPR_RUNNER_LAUNCH_LABEL:-com.matcha.github-actions-runner}"
+AUTOPR_RUNNER_LAUNCH_AGENT_PLIST="${AUTOPR_RUNNER_LAUNCH_AGENT_PLIST:-$HOME/Library/LaunchAgents/com.matcha.github-actions-runner.plist}"
 AUTOPR_GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 AUTOPR_REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 AUTOPR_WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
@@ -64,10 +72,10 @@ into a shell in the workspace — the one-command way in.
 
 Commands:
   build [--playwright]        Build the isolated workspace image.
-  start                       Start workspace and the normal local dev services.
-  stop [--force]              Stop everything; refuse active agent work unless forced.
-  off                         Immediately stop everything, including active agent work.
-  status                      Show sandbox service and AutoPR master-switch status.
+  start                       Start workspace + dev services; load the AutoPR timer and self-hosted runner.
+  stop [--force]              Stop everything (incl. the self-hosted runner); refuse active agent work unless forced.
+  off                         Immediately stop everything (incl. the self-hosted runner and active agent work).
+  status                      Show sandbox service, AutoPR master-switch, and runner status.
   workspace-state             Print this sandbox project's container runtime state.
   autopr-ready                Exit 0 only when the complete AutoPR system is healthy.
   shell [cmd...]               Open a workspace shell (or run one command).
@@ -165,6 +173,34 @@ autopr_timer_loaded() {
     local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
     [ -x "$AUTOPR_LAUNCHCTL_BIN" ] \
         && "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$label" >/dev/null 2>&1
+}
+
+autopr_runner_loaded() {
+    local domain="gui/$(id -u)"
+    [ -x "$AUTOPR_LAUNCHCTL_BIN" ] \
+        && "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1
+}
+
+start_actions_runner() {
+    [ "$AUTOPR_MANAGE_RUNNER" = 1 ] || return 0
+    [ -x "$AUTOPR_LAUNCHCTL_BIN" ] || return 0
+    local domain="gui/$(id -u)"
+    if [ ! -f "$AUTOPR_RUNNER_LAUNCH_AGENT_PLIST" ]; then
+        echo "AutoPR note: runner LaunchAgent plist not found at $AUTOPR_RUNNER_LAUNCH_AGENT_PLIST; leaving the self-hosted runner as-is." >&2
+        return 0
+    fi
+    "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 \
+        || "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_RUNNER_LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
+    "$AUTOPR_LAUNCHCTL_BIN" kickstart "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
+    autopr_runner_loaded \
+        || echo "AutoPR note: the self-hosted runner LaunchAgent did not load; the kanban-autopr workflow will queue until it is back." >&2
+}
+
+stop_actions_runner() {
+    [ "$AUTOPR_MANAGE_RUNNER" = 1 ] || return 0
+    [ -x "$AUTOPR_LAUNCHCTL_BIN" ] || return 0
+    local domain="gui/$(id -u)"
+    "$AUTOPR_LAUNCHCTL_BIN" bootout "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
 }
 
 autopr_system_ready() {
@@ -268,6 +304,13 @@ print_system_status() {
     else
         printf '  AutoPR timer:    STOPPED\n'
     fi
+    if [ "$AUTOPR_MANAGE_RUNNER" = 1 ]; then
+        if autopr_runner_loaded; then
+            printf '  Actions runner:  LOADED\n'
+        else
+            printf '  Actions runner:  STOPPED\n'
+        fi
+    fi
     if autopr_dashboard_healthy; then
         printf '  Dashboard:       READY (4 live panes)\n'
     elif "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null; then
@@ -354,6 +397,12 @@ enable_autopr_control_plane() {
         return 1
     fi
 
+    # Best-effort: `msandbox off`/`stop` booted the self-hosted runner out, so
+    # bring it back. A separately administered runner (AUTOPR_MANAGE_RUNNER=0)
+    # or a missing plist only warns — it does not fail the master switch, which
+    # the dispatcher/workflow/model launcher gate on independently.
+    start_actions_runner
+
     echo "AutoPR enabled; dashboard: tmux attach -t $AUTOPR_TMUX_SESSION"
 }
 
@@ -379,6 +428,7 @@ stop_autopr_container() {
 
 shutdown_all_sandboxes() {
     disable_autopr_control_plane
+    stop_actions_runner
     if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
         stop_autopr_container
         "${PRIMARY_COMPOSE[@]}" stop workspace

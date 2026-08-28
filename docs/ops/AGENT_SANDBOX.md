@@ -11,10 +11,10 @@ Quickstart, from anywhere (`~/.local/bin/msandbox` is a symlink to
 generic devcontainer launcher for other projects):
 
 ```bash
-msandbox                # start sandbox + AutoPR master switch, then open shell
-msandbox stop           # stop only when no agent work is active
+msandbox                # start sandbox + AutoPR master switch (incl. self-hosted runner), then open shell
+msandbox stop           # stop only when no agent work is active (also boots out the runner)
 msandbox stop --force   # explicit interrupt/cancel override
-msandbox off            # immediately stop the sandbox, AutoPR, and dashboard
+msandbox off            # immediately stop the sandbox, AutoPR, dashboard, and the self-hosted runner
 ```
 From that shell: `codex`, `claude`, or `opencode` are already on `PATH` and
 already logged in once you've run `login` (below) — or drive the rest from
@@ -95,7 +95,7 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | Command | What it does |
 |---|---|
 | `build [--playwright]` | Build the workspace image |
-| `start` / `stop` / `off` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work unless `--force` is explicit; `off` is the explicit immediate shutdown |
+| `start` / `stop` / `off` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work unless `--force` is explicit; `off` is the explicit immediate shutdown. `start` bootstraps the self-hosted `com.matcha.github-actions-runner` LaunchAgent; `stop`/`off` boot it out so a stray `workflow_dispatch` has nowhere to run. Set `AUTOPR_MANAGE_RUNNER=0` if the runner is administered separately. |
 | `autopr-ready` | Silent readiness probe used by the dispatcher/workflow; succeeds only when the ON marker and primary workspace are both present |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
 | `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |
@@ -153,11 +153,17 @@ sandbox, the AutoPR sandbox, or both, so a protected interactive session is not
 mistaken for an unseen AutoPR run.
 `msandbox stop` likewise refuses active work—or an unknown GitHub state—and
 requires `msandbox stop --force` to interrupt deliberately. A successful stop
-removes the marker first, unloads the timer, closes the dashboard, and stops
-both workspace containers. `msandbox off` is the equivalent immediate
-shutdown command, so it also interrupts active work. The dispatcher, GitHub workflow, and dedicated
-model launcher independently require the marker, running primary workspace,
-loaded timer, and four live dashboard panes.
+removes the marker first, unloads the timer, closes the dashboard, boots out the
+self-hosted `com.matcha.github-actions-runner` LaunchAgent, and stops both
+workspace containers. `msandbox off` is the equivalent immediate shutdown
+command, so it also interrupts active work. Booting the runner out means a
+`workflow_dispatch` (the only trigger `kanban-autopr.yml` has) queues with no
+executor instead of running a gated no-op — it also idles the sibling
+`schema-drift-checks.yml` and `silent-error-autofix.yml`, which share this
+runner, until the next `msandbox start` (or `AUTOPR_MANAGE_RUNNER=0` to opt out).
+The dispatcher, GitHub workflow, and dedicated model launcher independently
+require the marker, running primary workspace, loaded timer, and four live
+dashboard panes.
 
 No second OpenCode login is required for the Kanban worker. Before each run,
 the trusted bridge copies the Mac's existing `~/.local/share/opencode/auth.json`

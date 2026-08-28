@@ -70,10 +70,14 @@ EOF
 cat > "$TMP_DIR/bin/launchctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AUTOPR_TEST_ROOT/launchctl.log"
+case "$*" in
+    *github-actions-runner*) flag="$AUTOPR_TEST_ROOT/runner.loaded" ;;
+    *) flag="$AUTOPR_TEST_ROOT/launchagent.loaded" ;;
+esac
 case "$1" in
-    print) [ -f "$AUTOPR_TEST_ROOT/launchagent.loaded" ] ;;
-    bootstrap) : > "$AUTOPR_TEST_ROOT/launchagent.loaded" ;;
-    bootout) rm -f "$AUTOPR_TEST_ROOT/launchagent.loaded" ;;
+    print) [ -f "$flag" ] ;;
+    bootstrap|kickstart) : > "$flag" ;;
+    bootout) rm -f "$flag" ;;
 esac
 EOF
 
@@ -96,6 +100,7 @@ EOF
 chmod +x "$TMP_DIR/bin/docker" "$TMP_DIR/bin/launchctl" "$TMP_DIR/bin/tmux" \
     "$TMP_DIR/bin/gh" "$TMP_DIR/runtime/ensure-dashboard.sh"
 : > "$TMP_DIR/launch-agent.plist"
+: > "$TMP_DIR/github-actions-runner.plist"
 : > "$TMP_DIR/auth.json"
 
 run_msandbox() {
@@ -106,14 +111,17 @@ run_msandbox() {
         AUTOPR_LAUNCH_AGENT_PLIST="$TMP_DIR/launch-agent.plist" \
         AUTOPR_LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" \
         AUTOPR_TMUX_BIN="$TMP_DIR/bin/tmux" \
+        AUTOPR_RUNNER_LAUNCH_LABEL=com.matcha.github-actions-runner \
+        AUTOPR_RUNNER_LAUNCH_AGENT_PLIST="$TMP_DIR/github-actions-runner.plist" \
         "$MSANDBOX" "$@"
 }
 
 run_msandbox start >/dev/null
-check "msandbox start enables the primary container, timer, and dashboard" \
+check "msandbox start enables the primary container, timer, dashboard, and runner" \
     $([ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/launchagent.loaded" ] \
+      && [ -f "$TMP_DIR/runner.loaded" ] \
       && [ -f "$TMP_DIR/tmux.session" ] \
       && grep -q '^kickstart ' "$TMP_DIR/launchctl.log" \
       && echo 0 || echo 1)
@@ -161,19 +169,23 @@ check "msandbox stop refuses to interrupt active AutoPR work" \
       && echo 0 || echo 1)
 
 AUTOPR_TEST_ACTIVE=1 run_msandbox stop --force >/dev/null
-check "forced stop disables timer/dashboard and stops both sandboxes" \
+check "forced stop disables timer/dashboard/runner and stops both sandboxes" \
     $([ ! -e "$TMP_DIR/state/autopr-enabled" ] \
       && [ ! -e "$TMP_DIR/launchagent.loaded" ] \
+      && [ ! -e "$TMP_DIR/runner.loaded" ] \
       && [ ! -e "$TMP_DIR/tmux.session" ] \
       && [ ! -e "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
       && echo 0 || echo 1)
 
 run_msandbox start >/dev/null
+check "msandbox start bootstraps the self-hosted runner back after a stop" \
+    $([ -f "$TMP_DIR/runner.loaded" ] && echo 0 || echo 1)
 AUTOPR_TEST_ACTIVE=1 run_msandbox off >/dev/null
-check "msandbox off immediately shuts down the dashboard and both sandboxes" \
+check "msandbox off immediately shuts down the dashboard, runner, and both sandboxes" \
     $([ ! -e "$TMP_DIR/state/autopr-enabled" ] \
       && [ ! -e "$TMP_DIR/launchagent.loaded" ] \
+      && [ ! -e "$TMP_DIR/runner.loaded" ] \
       && [ ! -e "$TMP_DIR/tmux.session" ] \
       && [ ! -e "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
