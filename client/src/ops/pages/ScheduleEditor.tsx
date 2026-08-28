@@ -18,7 +18,9 @@ import ScheduleEditorGuide from '../../components/employees/schedule-editor/Sche
 import ScheduleHuumePanel from '../../components/employees/schedule-editor/ScheduleHuumePanel'
 import ScheduleJobsTab from '../../components/employees/schedule-editor/ScheduleJobsTab'
 
-const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v2'
+// Bump when guide content materially changes so existing managers see new
+// scheduling safeguards instead of staying pinned to an obsolete walkthrough.
+const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v3'
 
 function hasSeenGuide(): boolean {
   try {
