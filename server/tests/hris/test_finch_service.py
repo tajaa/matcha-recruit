@@ -48,11 +48,22 @@ class TestNormalizeWorkerLocation:
         assert norm["work_city"] == "Reno"
         assert norm["work_state"] == "NV"
 
-    def test_residence_fallback(self):
+    def test_residence_does_not_become_work_location(self):
         norm = FinchHRISService.normalize_worker(
             _worker({}, individual={"residence": {"city": "Boise", "state": "ID"}})
         )
-        assert norm["work_state"] == "ID"
+        assert norm["work_city"] is None
+        assert norm["work_state"] is None
+
+    def test_gusto_home_address_does_not_become_work_location(self):
+        norm = GustoHRISService.normalize_worker({
+            "uuid": "g-1",
+            "first_name": "A",
+            "last_name": "B",
+            "home_address": {"city": "Boise", "state": "ID"},
+        })
+        assert norm["work_city"] is None
+        assert norm["work_state"] is None
 
     def test_mock_dataset_uses_documented_key(self):
         # Regression: the mocks previously used work_location and never

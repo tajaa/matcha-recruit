@@ -491,12 +491,11 @@ class FinchHRISService:
 
         # Work location → state/city. Finch's documented schema puts the work
         # location on employment under `location` (line1/line2/city/state/
-        # postal_code/country); `work_location` kept as a defensive fallback for
-        # provider drift, then individual residence.
+        # postal_code/country); `work_location` is kept as a defensive fallback
+        # for provider drift. An individual residence is never a work location.
         work_loc = (
             employment.get("location")
             or employment.get("work_location")
-            or individual.get("residence")
             or {}
         )
 
