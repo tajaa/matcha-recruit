@@ -147,7 +147,7 @@ async def upsert_schedule_profile(
                 max_consecutive_days, allow_overtime, prefer_extra_hours)
            VALUES ($1,$2,$3,
                    CASE WHEN $12 THEN NOW() WHEN $14 THEN NULL ELSE $4 END,
-                   CASE WHEN $12 THEN $13 WHEN $14 THEN NULL ELSE $5 END,
+                   CASE WHEN $12 THEN $13::uuid WHEN $14 THEN NULL ELSE $5::uuid END,
                    $6,$7,$8,$9,$10,$11)
            ON CONFLICT (employee_id) DO UPDATE SET
                availability_state=EXCLUDED.availability_state,
