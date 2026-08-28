@@ -266,9 +266,16 @@ async def load_schema(conn):
 # Row collection
 # --------------------------------------------------------------------------- #
 class Collector:
-    def __init__(self, conn, cols, pks, fks, exclude):
+    def __init__(self, conn, cols, pks, fks, exclude,
+                 include_global_dependencies=False):
         self.conn, self.cols, self.pks, self.fks = conn, cols, pks, fks
         self.exclude = exclude
+        # Normal dev -> prod exports assume shared catalogs already exist and
+        # must not carry them. A prod -> sparse-dev tenant pull is the narrow
+        # exception: it needs the exact shared parent rows referenced by that
+        # tenant. Those rows remain ascend-only, so enabling this never fans
+        # out from a jurisdiction into its entire shared catalog.
+        self.include_global_dependencies = include_global_dependencies
         self.rows = defaultdict(dict)          # table -> pk tuple -> row
         self.children = defaultdict(list)      # parent table -> [fk]
         self.parents = defaultdict(list)       # child table -> [fk]
@@ -310,7 +317,7 @@ class Collector:
             val = row.get(fk["child_col"])
             if val is None:
                 continue
-            if fk["parent"] in GLOBAL_TABLES:
+            if fk["parent"] in GLOBAL_TABLES and not self.include_global_dependencies:
                 self.skipped_global[fk["parent"]].add(str(val))
                 continue
             if fk["parent"] in self.exclude:
