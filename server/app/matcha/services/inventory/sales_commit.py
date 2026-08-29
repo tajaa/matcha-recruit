@@ -80,7 +80,7 @@ async def _components_for_line(conn, company_id: UUID, line: dict) -> list[dict]
 async def commit_sales_import(
     conn, *, company_id: UUID, user_id: Optional[UUID], location_id: Optional[UUID],
     business_date, source: str, filename: Optional[str], gmail_message_id: Optional[str],
-    force: bool, lines: list[dict], note: Optional[str] = None, raw: Optional[dict] = None,
+    lines: list[dict], note: Optional[str] = None, raw: Optional[dict] = None,
     import_id: Optional[UUID] = None,
     connection_id: Optional[UUID] = None, external_batch_id: Optional[str] = None,
 ) -> dict:
@@ -157,7 +157,7 @@ async def commit_sales_import(
          if line.get("new_mapping") else line.get("status") == "ignored")
         for line in lines
     )
-    if business_date and not force and not all_ignored_submission:
+    if business_date and not all_ignored_submission:
         duplicate = await conn.fetchval(
             """
             SELECT id FROM inventory_sales_imports
@@ -168,7 +168,7 @@ async def commit_sales_import(
         )
         if duplicate:
             raise DuplicateSalesPeriodError(
-                f"Sales for {business_date.isoformat()} already exist — commit anyway?"
+                f"Sales for {business_date.isoformat()} have already been committed."
             )
 
     raw_json = json.dumps(raw, default=str) if raw is not None else None
@@ -376,6 +376,8 @@ async def commit_sales_import(
                 import_id, company_id,
             )
         label = business_date.isoformat() if business_date else "this period"
-        raise DuplicateSalesPeriodError(f"Sales for {label} already exist.") from exc
+        raise DuplicateSalesPeriodError(
+            f"Sales for {label} have already been committed."
+        ) from exc
     return {"import_id": import_id, "total": len(lines), "mapped": mapped,
             "unmapped": 0, "items_affected": len(depletion), "errors": []}

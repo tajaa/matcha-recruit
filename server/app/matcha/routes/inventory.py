@@ -440,7 +440,7 @@ async def commit_sales_route(
             result = await sales_commit_service.commit_sales_import(
                 conn, company_id=company_id, user_id=user.id, location_id=body.location_id,
                 business_date=body.business_date, source=body.source, filename=body.filename,
-                gmail_message_id=body.gmail_message_id, import_id=body.import_id, force=body.force,
+                gmail_message_id=body.gmail_message_id, import_id=body.import_id,
                 lines=[line.model_dump() for line in body.lines],
             )
         except ValueError as exc:

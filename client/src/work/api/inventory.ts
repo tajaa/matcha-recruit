@@ -346,7 +346,6 @@ export function commitSales(body: {
   source?: 'upload' | 'email' | 'square' | 'toast'
   filename?: string | null
   gmail_message_id?: string | null
-  force?: boolean
   lines: Omit<SalesLine, 'item_name' | 'matched_name' | 'auto_match'>[]
 }) {
   return api.post<SalesCommitResult>('/inventory/sales/commit', body)

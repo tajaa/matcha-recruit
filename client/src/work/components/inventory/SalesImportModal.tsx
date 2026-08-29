@@ -195,7 +195,6 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
         source,
         filename,
         gmail_message_id: gmailMessageId,
-        force: false,
         lines: lines.map((line) => buildCommitLine(line, locationId)),
       })
       if (result.unmapped > 0) {
