@@ -50,12 +50,31 @@ def import_files(
     session_max_bytes: int = DEFAULT_SESSION_MAX_BYTES,
 ) -> list[Attachment]:
     """Copy bounded regular files into the session inbox without following links."""
+    return import_files_to_inbox(
+        sources,
+        inbox=attachment_dir(session),
+        container_dir=Path("/attachments"),
+        lock_name=f"attachments-{session.id}",
+        max_bytes=max_bytes,
+        session_max_bytes=session_max_bytes,
+    )
+
+
+def import_files_to_inbox(
+    sources: Sequence[Path],
+    *,
+    inbox: Path,
+    container_dir: Path,
+    lock_name: str,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    session_max_bytes: int = DEFAULT_SESSION_MAX_BYTES,
+) -> list[Attachment]:
+    """Copy bounded regular files into an explicitly mounted attachment inbox."""
     if not sources:
         raise AttachmentError("at least one attachment is required")
-    inbox = attachment_dir(session)
     inbox.mkdir(parents=True, exist_ok=True, mode=0o700)
     imported: list[Attachment] = []
-    with state_lock(f"attachments-{session.id}"):
+    with state_lock(lock_name):
         current_bytes = _existing_bytes(inbox)
         for source in sources:
             source = source.expanduser()
@@ -150,7 +169,7 @@ def import_files(
                     sha256=full_digest,
                     size=size,
                     host_path=destination,
-                    container_path=Path("/attachments") / destination.name,
+                    container_path=container_dir / destination.name,
                 )
             )
     return imported

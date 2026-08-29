@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,7 +36,15 @@ from scripts.msandbox.git_worktrees import (
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
 from scripts.msandbox.install import InstallError, install_release, rollback_release
 from scripts.msandbox.models import PortSet, SessionRecord, SessionSpec, TestPlan, ValidationReference
-from scripts.msandbox.pty_proxy import PASTE_END, PASTE_START, rewrite_paste_stream
+from scripts.msandbox.pty_proxy import (
+    PASTE_END,
+    PASTE_START,
+    _sync_window_size,
+    rewrite_paste_stream,
+    rewrite_paste_stream_with_importer,
+    rewrite_paste_stream_to_inbox,
+    run_with_file_proxy,
+)
 from scripts.msandbox.sessions import (
     SessionError,
     _validation_current,
@@ -460,6 +471,204 @@ class AttachmentTests(MsandboxTestCase):
         self.assertIn(b"/attachments/", emitted2)
         self.assertTrue(emitted2.endswith(b"!"))
 
+    def test_legacy_drag_rewrites_into_workspace_attachment_mount(self) -> None:
+        source = self.root / "prod screenshot.png"
+        source.write_bytes(b"png")
+        frame = PASTE_START + str(source).replace(" ", "\\ ").encode() + PASTE_END
+        inbox = self.root / "legacy-inbox"
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            frame,
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="legacy-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+
+        self.assertEqual(pending, b"")
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        imported = list(inbox.iterdir())
+        self.assertEqual(len(imported), 1)
+        self.assertEqual(imported[0].read_bytes(), b"png")
+        payload = emitted[len(PASTE_START) : -len(PASTE_END)].decode()
+        self.assertEqual(
+            shlex.split(payload),
+            [str(Path("/workspace/.msandbox/attachments") / imported[0].name)],
+        )
+
+    def test_legacy_drag_error_preserves_frame_and_reports_without_raising(self) -> None:
+        source = self.root / "oversized.png"
+        source.write_bytes(b"too large")
+        frame = PASTE_START + str(source).encode() + PASTE_END
+        errors: list[AttachmentError] = []
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            frame,
+            inbox=self.root / "legacy-inbox",
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="legacy-error-test",
+            max_bytes=1,
+            session_max_bytes=4096,
+            on_error=errors.append,
+        )
+
+        self.assertEqual(emitted, frame)
+        self.assertEqual(pending, b"")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("exceeds 1 bytes", str(errors[0]))
+
+    def test_plain_macos_drag_path_is_rewritten_before_prompt_text(self) -> None:
+        source = self.root / "Screenshot 2026 at 5.40 PM.png"
+        source.write_bytes(b"png")
+        payload = f"{source} what does this image show\r".encode()
+        inbox = self.root / "legacy-inbox"
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            payload,
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="plain-drag-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+
+        self.assertEqual(pending, b"")
+        self.assertNotIn(str(source).encode(), emitted)
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        self.assertTrue(emitted.endswith(b" what does this image show\r"))
+
+    def test_plain_shell_escaped_drag_waits_for_delimiter_across_reads(self) -> None:
+        source = self.root / "Screen Shot.png"
+        source.write_bytes(b"png")
+        escaped = str(source).replace(" ", "\\ ").encode()
+        inbox = self.root / "legacy-inbox"
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            escaped,
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="plain-drag-split-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+        self.assertEqual(emitted, b"")
+        self.assertEqual(pending, escaped)
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            pending + b" describe it\r",
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="plain-drag-split-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+        self.assertEqual(pending, b"")
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        self.assertTrue(emitted.endswith(b" describe it\r"))
+
+    def test_plain_drag_rewrites_when_terminal_delivers_one_byte_at_a_time(self) -> None:
+        source = self.root / "Screenshot bytewise.png"
+        source.write_bytes(b"png")
+        payload = f"{source} whats in the screenshot\r".encode()
+        inbox = self.root / "legacy-inbox"
+        emitted = bytearray()
+        pending = b""
+
+        for byte in payload:
+            chunk, pending = rewrite_paste_stream_to_inbox(
+                pending + bytes([byte]),
+                inbox=inbox,
+                container_dir=Path("/workspace/.msandbox/attachments"),
+                lock_name="plain-drag-bytewise-test",
+                max_bytes=1024,
+                session_max_bytes=4096,
+            )
+            emitted.extend(chunk)
+
+        self.assertEqual(pending, b"")
+        self.assertNotIn(str(source).encode(), emitted)
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        self.assertTrue(emitted.endswith(b" whats in the screenshot\r"))
+
+    def test_nonexistent_plain_host_path_is_forwarded_on_enter(self) -> None:
+        payload = b"/Users/example/missing.png explain this\r"
+
+        emitted, pending = rewrite_paste_stream_with_importer(
+            payload,
+            lambda paths: self.fail(f"unexpected import: {paths}"),
+        )
+
+        self.assertEqual(emitted, payload)
+        self.assertEqual(pending, b"")
+
+    def test_proxy_copies_terminal_window_size(self) -> None:
+        window_size = b"\x18\x00\x50\x00\x00\x00\x00\x00"
+        with mock.patch("scripts.msandbox.pty_proxy.fcntl.ioctl") as ioctl:
+            ioctl.return_value = window_size
+            _sync_window_size(10, 11)
+
+        self.assertEqual(
+            ioctl.call_args_list,
+            [
+                mock.call(10, termios.TIOCGWINSZ, bytes(8)),
+                mock.call(11, termios.TIOCSWINSZ, window_size),
+            ],
+        )
+
+    def test_proxy_syncs_initial_and_resized_window(self) -> None:
+        stdin = mock.Mock()
+        stdin.isatty.return_value = True
+        stdin.fileno.return_value = 10
+        stdout = mock.Mock()
+        stdout.isatty.return_value = True
+        stdout.fileno.return_value = 11
+        previous_handler = mock.sentinel.previous_handler
+
+        with (
+            mock.patch("scripts.msandbox.pty_proxy.sys.stdin", stdin),
+            mock.patch("scripts.msandbox.pty_proxy.sys.stdout", stdout),
+            mock.patch(
+                "scripts.msandbox.pty_proxy.pty.fork",
+                return_value=(321, 12),
+            ),
+            mock.patch("scripts.msandbox.pty_proxy.termios.tcgetattr", return_value=[]),
+            mock.patch("scripts.msandbox.pty_proxy.termios.tcsetattr"),
+            mock.patch("scripts.msandbox.pty_proxy.tty.setraw"),
+            mock.patch(
+                "scripts.msandbox.pty_proxy.select.select",
+                return_value=([12], [], []),
+            ),
+            mock.patch("scripts.msandbox.pty_proxy.os.read", return_value=b""),
+            mock.patch("scripts.msandbox.pty_proxy.os.close"),
+            mock.patch("scripts.msandbox.pty_proxy.os.waitpid", return_value=(321, 0)),
+            mock.patch(
+                "scripts.msandbox.pty_proxy.signal.getsignal",
+                return_value=previous_handler,
+            ),
+            mock.patch("scripts.msandbox.pty_proxy.signal.signal") as set_signal,
+            mock.patch("scripts.msandbox.pty_proxy._sync_window_size") as sync_window,
+        ):
+            self.assertEqual(run_with_file_proxy(["true"], lambda data: (data, b"")), 0)
+            resize_handler = set_signal.call_args_list[0].args[1]
+            resize_handler(signal.SIGWINCH, None)
+
+        self.assertEqual(
+            sync_window.call_args_list,
+            [mock.call(10, 12), mock.call(10, 12)],
+        )
+        self.assertEqual(
+            set_signal.call_args_list[-1],
+            mock.call(signal.SIGWINCH, previous_handler),
+        )
+
+    def test_legacy_interactive_entrypoints_use_file_proxy(self) -> None:
+        launcher = (Path(__file__).resolve().parents[2] / "scripts/agent-sandbox.sh").read_text()
+        self.assertIn("exec_workspace_with_file_proxy codex", launcher)
+        self.assertIn("exec_workspace_with_file_proxy claude", launcher)
+        self.assertIn("exec_workspace_with_file_proxy opencode", launcher)
+        self.assertGreaterEqual(launcher.count("exec_workspace_with_file_proxy bash"), 2)
+
 
 class HostAndInstallTests(MsandboxTestCase):
     def test_xcode_boundary_rejects_arbitrary_targets_and_paths(self) -> None:
@@ -538,7 +747,7 @@ class HostAndInstallTests(MsandboxTestCase):
             text=True,
             capture_output=True,
         )
-        self.assertEqual(completed.stdout.strip(), "msandbox 2.0.0")
+        self.assertEqual(completed.stdout.strip(), "msandbox 2.0.1")
         launcher_text = launcher.read_text(encoding="utf-8")
         self.assertIn("scripts/agent-sandbox.sh", launcher_text)
         self.assertIn("legacy control plane", launcher_text)

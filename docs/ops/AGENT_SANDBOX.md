@@ -231,6 +231,13 @@ images directly; PDF and other document paths remain ordinary readable
 workspace files. This bridge is deliberately explicit because mounting the
 whole macOS temp tree or home directory would undo the sandbox boundary.
 
+Finder drags into a named session, `msandbox codex|claude|opencode`, or an
+interactive shell opened by bare `msandbox` are intercepted on the host. A
+complete bracketed paste containing only readable regular files is copied into
+the bounded inbox and rewritten to its container path; normal pasted text is
+unchanged. Restart an interactive shell that predates this proxy before
+dragging a file into it.
+
 The host and sandbox development stacks use separate host port namespaces:
 
 | Service | Host `dev-remote.sh` | Container port | Sandbox URL on the Mac |

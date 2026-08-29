@@ -50,6 +50,11 @@ rewritten to `/attachments/...`. All ordinary pasted text is forwarded without
 interpretation. Clipboard screenshots can always be delivered with
 `msandbox paste SESSION --send`.
 
+The legacy `msandbox codex|claude|opencode` commands and the interactive shell
+opened by bare `msandbox` use the same host-side interception, rewriting into
+`/workspace/.msandbox/attachments/...`. An interactive shell that was already
+open before the proxy was added must be restarted once.
+
 ## Validation
 
 ```bash

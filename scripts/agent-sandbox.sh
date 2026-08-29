@@ -702,6 +702,18 @@ exec_workspace_no_tty() {
     "${COMPOSE[@]}" exec --no-TTY --user "${SANDBOX_UID:-501}:${SANDBOX_GID:-20}" workspace "$@"
 }
 
+exec_workspace_with_file_proxy() {
+    # This host-side PTY is the only safe place to turn a Finder-dragged host
+    # path into a bounded copy under the workspace's mounted attachment inbox.
+    # It preserves all non-file terminal input byte-for-byte.
+    PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 -m scripts.msandbox.legacy_pty_proxy \
+        --inbox "$MSANDBOX_ATTACHMENTS_DIR" \
+        --container-dir /workspace/.msandbox/attachments \
+        -- "${COMPOSE[@]}" exec \
+        --user "${SANDBOX_UID:-501}:${SANDBOX_GID:-20}" workspace "$@"
+}
+
 login_agent() {
     local agent="$1"
     case "$agent" in
@@ -734,13 +746,13 @@ run_agent() {
     shift || true
     case "$agent" in
         codex)
-            exec_workspace codex --dangerously-bypass-approvals-and-sandbox "$@"
+            exec_workspace_with_file_proxy codex --dangerously-bypass-approvals-and-sandbox "$@"
             ;;
         claude)
-            exec_workspace claude --dangerously-skip-permissions "$@"
+            exec_workspace_with_file_proxy claude --dangerously-skip-permissions "$@"
             ;;
         opencode)
-            exec_workspace opencode "$@"
+            exec_workspace_with_file_proxy opencode "$@"
             ;;
         *)
             echo "Unknown agent: $agent (expected codex, claude, or opencode)" >&2
@@ -847,7 +859,7 @@ case "$command_name" in
             # PATH like every other exec_workspace call already does.
             exec_workspace bash -c "$*"
         else
-            exec_workspace bash
+            exec_workspace_with_file_proxy bash
         fi
         ;;
     exec)
@@ -930,7 +942,7 @@ case "$command_name" in
         guard_interactive_entry "open another sandbox shell" || exit 3
         "${COMPOSE[@]}" build workspace
         start_primary_and_enable_autopr
-        exec_workspace bash
+        exec_workspace_with_file_proxy bash
         ;;
     -h|--help|help)
         usage
