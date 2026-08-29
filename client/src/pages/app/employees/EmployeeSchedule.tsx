@@ -30,6 +30,7 @@ import { useMe } from '../../../hooks/useMe'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../../components/shared/LocationPicker'
 import AutoSchedulesTab from '../../../components/employees/AutoSchedulesTab'
+import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../../api/employees/scheduleAssistant'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 const SCHEDULE_GUIDE_STORAGE_KEY = 'matcha.employee-schedule.guide.v1'
@@ -51,6 +52,7 @@ export default function EmployeeSchedule() {
   const [guideOpen, setGuideOpen] = useState(() => {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
   })
+  const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
@@ -83,6 +85,20 @@ export default function EmployeeSchedule() {
       }, { replace: true })
     }
   }, [intelligenceEnabled, meLoading, requestedTab, setScheduleTab, setSearchParams, tab])
+
+  useEffect(() => {
+    let cancelled = false
+    setAutomaticSuggestion(null)
+    if (!locationId) return () => { cancelled = true }
+    void getScheduleSuggestionStatus(locationId, weekStart)
+      .then((result) => {
+        if (!cancelled) setAutomaticSuggestion(result.available ? result : null)
+      })
+      .catch(() => {
+        if (!cancelled) setAutomaticSuggestion(null)
+      })
+    return () => { cancelled = true }
+  }, [locationId, weekStart])
 
   function setTab(nextTab: EmployeeScheduleTab) {
     setScheduleTab(nextTab)
@@ -171,6 +187,19 @@ export default function EmployeeSchedule() {
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish week{summary?.draft ? ` (${summary.draft})` : ''}
             </button>
           </div>
+
+          {automaticSuggestion?.week_start && locationId && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2 text-xs text-emerald-100">
+              <Sparkles className="h-4 w-4 shrink-0 text-emerald-300" />
+              <span>Huume prepared a suggested schedule for the week of {automaticSuggestion.week_start}.</span>
+              <Link
+                to={`/ops/schedule/editor?week=${automaticSuggestion.week_start}&location=${locationId}`}
+                className="ml-auto font-medium text-emerald-300 hover:text-emerald-200"
+              >
+                Review suggestion
+              </Link>
+            </div>
+          )}
 
           {!locationId && !locationsLoading ? (
             <div className="flex items-center justify-center h-64 text-sm text-zinc-500">Select a location to view its schedule.</div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CalendarClock, Loader2, Play, Save, Sparkles } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import {
   fetchAutoSchedule, fetchWeekTemplates, runAutoScheduleNow, saveAutoSchedule,
@@ -69,11 +70,13 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  const [generatedWeekStart, setGeneratedWeekStart] = useState<string | null>(null)
 
   useEffect(() => {
     setRule(null)
     setForm(defaults())
     setTemplates([])
+    setGeneratedWeekStart(null)
     if (!locationId) return
     setLoading(true)
     Promise.all([fetchAutoSchedule(locationId), fetchWeekTemplates(locationId)])
@@ -118,6 +121,7 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
     try {
       const result = await runAutoScheduleNow(locationId)
       toast(result.message, result.status === 'generated' ? 'success' : 'info')
+      setGeneratedWeekStart(result.status === 'generated' ? result.week_start : null)
       const refreshed = await fetchAutoSchedule(locationId)
       setRule(refreshed.rule)
     } catch (err) {
@@ -208,6 +212,14 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
             </button>}
           </div>
+          {generatedWeekStart && (
+            <Link
+              to={`/ops/schedule/editor?week=${generatedWeekStart}&location=${locationId}`}
+              className="inline-flex items-center gap-1.5 text-sm text-emerald-300 hover:text-emerald-200"
+            >
+              <Sparkles className="h-4 w-4" /> Review the generated week in the full shift editor
+            </Link>
+          )}
         </div>
 
         <aside className="space-y-3 rounded-xl border border-white/[0.07] bg-zinc-900/40 p-5">

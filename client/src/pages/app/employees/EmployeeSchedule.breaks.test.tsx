@@ -13,6 +13,7 @@ const {
   updateShiftMock,
   useLocationScopeMock,
   useMeMock,
+  getScheduleSuggestionStatusMock,
 } = vi.hoisted(() => ({
   createWeekTemplateMock: vi.fn(),
   fetchWeekMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
   updateShiftMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   useMeMock: vi.fn(),
+  getScheduleSuggestionStatusMock: vi.fn(),
 }))
 
 vi.mock('../../../hooks/useMe', () => ({ useMe: useMeMock }))
@@ -30,6 +32,9 @@ vi.mock('../../../hooks/useLocationScope', () => ({
 }))
 vi.mock('../../../components/employees/ScheduleLawPanel', () => ({ default: () => null }))
 vi.mock('../../../components/employees/onboarding/ScheduleHelperWizard', () => ({ default: () => null }))
+vi.mock('../../../api/employees/scheduleAssistant', () => ({
+  getScheduleSuggestionStatus: getScheduleSuggestionStatusMock,
+}))
 vi.mock('../../../api/employees/employeeSchedule', () => ({
   assignEmployee: vi.fn(),
   createShift: vi.fn(),
@@ -108,6 +113,9 @@ describe('EmployeeSchedule break planning', () => {
     }))
     createWeekTemplateMock.mockResolvedValue({ id: 'template-1', name: 'Standard Week', blocks: [] })
     publishRangeMock.mockReset()
+    getScheduleSuggestionStatusMock.mockResolvedValue({
+      available: false, generation_run_id: null, week_start: null, created_at: null,
+    })
   })
 
   it('repairs an existing shift by saving planned break minutes', async () => {
@@ -152,5 +160,18 @@ describe('EmployeeSchedule break planning', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Publish week/ }))
 
     expect(await screen.findByText("Complete this location's scheduling prerequisites before publishing.")).toBeInTheDocument()
+  })
+
+  it('links a prepared suggestion to its generated-week review', async () => {
+    getScheduleSuggestionStatusMock.mockResolvedValue({
+      available: true, generation_run_id: 'generation-1', week_start: '2026-08-30',
+      created_at: '2026-08-28T16:00:00Z',
+    })
+    renderSchedule()
+
+    expect(await screen.findByText('Huume prepared a suggested schedule for the week of 2026-08-30.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review suggestion' })).toHaveAttribute(
+      'href', '/ops/schedule/editor?week=2026-08-30&location=loc-1',
+    )
   })
 })
