@@ -7,7 +7,7 @@ import type {
   AssignmentNotePayload, MealBreakWaiverAttestation,
   AvailabilityState, EmployeeJobAssignment, EmployeeJobAssignmentPayload,
   EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
-  ScheduleAutomationRule, ScheduleAutomationPayload,
+  ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -212,8 +212,13 @@ export function updateWeekTemplate(id: string, payload: Partial<WeekTemplatePayl
   return api.put<WeekTemplate>(`/employee-schedule/week-templates/${id}`, payload)
 }
 
+/** Reconciles the editor's complete block list in one server-side transaction. */
+export function replaceWeekTemplate(id: string, payload: WeekTemplateReplacePayload) {
+  return api.put<WeekTemplate>(`/employee-schedule/week-templates/${id}/contents`, payload)
+}
+
 export function deleteWeekTemplate(id: string) {
-  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/week-templates/${id}`)
+  return api.delete<{ ok: boolean; id: string; paused_auto_schedules: number }>(`/employee-schedule/week-templates/${id}`)
 }
 
 export function addTemplateBlock(weekTemplateId: string, payload: BlockPayload) {
