@@ -6,6 +6,13 @@ baked into any image and NOT applied by `build-and-push.sh` / `update-ec2.sh`.
 This copy is the source of truth for disaster recovery; if the box is rebuilt,
 restore from here.
 
+Public TLS terminates at CloudFront with an ACM-managed certificate for
+`hey-matcha.com`, `www.hey-matcha.com`, `gummfit.com`, and `*.gummfit.com`.
+The EC2 origin still needs valid certificates: Certbot manages Matcha and
+lego DNS-01 manages the Gummfit wildcard. Their systemd timers are the primary
+renewers; `.github/workflows/certificate-renewal.yml` invokes both daily as an
+external backstop and verifies the origin files, nginx config, and public TLS.
+
 | File | Serves | Upstream |
 |---|---|---|
 | `matcha.conf` | `hey-matcha.com` | `matcha_frontend` / `matcha_backend` blue-green upstreams, WS, LiveKit |
