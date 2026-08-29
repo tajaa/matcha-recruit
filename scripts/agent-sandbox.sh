@@ -22,9 +22,6 @@ run_v2_controller() {
         exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
 }
 
-if [ "$#" = 0 ]; then
-    run_v2_controller
-fi
 case "${1:-}" in
     session|worktree|pr|test|install|host)
         run_v2_controller "$@"
@@ -119,8 +116,9 @@ usage() {
     cat <<'EOF'
 Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
 
-Bare `msandbox` lists independent sessions and shows the create command. Use
-`msandbox system up` for the legacy AutoPR/control-plane services.
+Bare `msandbox` builds if needed, starts the legacy workspace and AutoPR
+control plane, then opens a shell. The dashboard is available with
+`tmux attach -t matcha-autopr`.
 
 Commands:
   session create NAME --agent AGENT   Create an isolated detached worktree session.

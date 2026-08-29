@@ -41,9 +41,12 @@ msandbox system down
 msandbox login codex
 ```
 
-Bare `msandbox` lists active sessions instead of opening or blocking on a
-global workspace. `scripts/agent-sandbox.sh` remains the repository
-compatibility entrypoint used by existing automation.
+Bare `msandbox` preserves the legacy one-command path: it builds if needed,
+starts the global workspace and AutoPR control plane, then opens a workspace
+shell. The dashboard is available with `tmux attach -t matcha-autopr`.
+Use `msandbox session list` to list independent v2 sessions explicitly.
+`scripts/agent-sandbox.sh` remains the repository compatibility entrypoint
+used by existing automation.
 
 ## What's isolated, and what isn't
 

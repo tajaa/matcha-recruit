@@ -509,7 +509,7 @@ class HostAndInstallTests(MsandboxTestCase):
         with self.assertRaises(InstallError):
             rollback_release("../escape", bin_dir=bin_dir)
 
-    def test_installed_launcher_routes_legacy_system_commands(self) -> None:
+    def test_installed_launcher_routes_legacy_control_plane_commands(self) -> None:
         project_root = Path(__file__).resolve().parents[2]
         fixture = self.root / "controller-repo"
         (fixture / "scripts").mkdir(parents=True)
@@ -548,6 +548,13 @@ class HostAndInstallTests(MsandboxTestCase):
             capture_output=True,
         )
         self.assertEqual(completed.stdout.strip(), "legacy:system status")
+        bare = subprocess.run(
+            [str(bin_dir / "msandbox")],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(bare.stdout.strip(), "legacy:")
 
 
 class ValidationPlannerTests(MsandboxTestCase):

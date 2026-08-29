@@ -163,11 +163,12 @@ check "activity detection includes the error and self-audit worker sandboxes" \
     $(printf '%s' "$audit_activity" | grep -q \
       'ACTIVE — an AutoPR coding agent is running' && echo 0 || echo 1)
 
-bare_output="$(AUTOPR_TEST_ACTIVE=1 run_msandbox)"
-check "bare msandbox lists independent sessions without disturbing active work" \
-    $(printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
+bare_output="$(run_msandbox)"
+check "bare msandbox starts the workspace and AutoPR dashboard" \
+    $(printf '%s' "$bare_output" | grep -q 'tmux attach -t matcha-autopr' \
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && [ -f "$TMP_DIR/tmux.session" ] \
       && echo 0 || echo 1)
 
 set +e
