@@ -1,10 +1,12 @@
 # Kanban Autopr
 
 `.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
-`silent-error-autofix.yml`. `msandbox` is the authoritative master switch. While it is
-ON, a local macOS LaunchAgent is the sole automatic five-minute clock and dispatches only
-when neither AutoPR lane is queued or active. A production-error pass gets the next slot
-when its last completion is at least ten minutes old; otherwise Kanban advances.
+`silent-error-autofix.yml` and `autopr-self-audit.yml`. `msandbox` is the authoritative
+master switch. While it is ON, a local macOS LaunchAgent is the sole automatic
+five-minute clock and dispatches only when no AutoPR lane is queued or active. A
+production-error pass gets the next slot when its last completion is at least ten
+minutes old; then a self-audit gets one when its last completion is at least six hours
+old; otherwise Kanban advances.
 GitHub's manual workflow dispatch remains the recovery path but also fails closed when
 `msandbox` is OFF. There is deliberately no second GitHub cron:
 a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
@@ -104,9 +106,9 @@ from launchd-safe locations: the `autopr-enabled` marker created only by
 The workflow repeats the complete `msandbox autopr-ready` check before starting
 OpenCode. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
 
-- **24h queue + PR dashboard** — active workflow, the exact card `select.sh` would choose
-  next, the Todo/Changes Requested queue, open bot PRs, merged bot PRs, and workflow runs
-  from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
+- **24h queue + PR dashboard** — active Kanban/error/self-audit workflow, the exact card
+  `select.sh` would choose next, the Todo/Changes Requested queue, open bot PRs across
+  all lanes, merged bot PRs, and workflow runs from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
   refresh cannot create a cooldown marker or consume a card.
 - **active PR + live diff** — the active `bot/task-*` branch and cached card title before
   publication, followed by its PR number, draft state, labels, checks, URL, changed files,
@@ -131,6 +133,11 @@ seconds. Override those intervals with
 `AUTOPR_WORK_REFRESH_SECONDS`, `AUTOPR_WORK_STATUS_REFRESH_SECONDS`, and
 `AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. Override
 `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
+
+The self-audit implementation and its sealed model allowlist are documented in
+`docs/ops/AGENT_SANDBOX.md`. Manual recovery commands are `msandbox audit` and
+`msandbox audit --draft`; they use the same workflow rather than creating a
+second scheduler.
 
 ## Pipeline (`scripts/kanban-autopr/`)
 

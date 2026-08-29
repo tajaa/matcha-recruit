@@ -4,7 +4,7 @@
 LaunchAgent clock as Kanban AutoPR. GitHub's best-effort cron was removed after it left
 multi-hour gaps. When no AutoPR workflow is active, the dispatcher gives this lane the
 next slot if its last completed pass is at least ten minutes old; otherwise it advances
-Kanban. The unit of work is one normalized incident from
+the six-hour AutoPR self-audit when due, then Kanban. The unit of work is one normalized incident from
 `server_error_reports` or `client_error_reports`, not a log window. Server rows retain
 their established stable keys; raw browser rows use a separate `client|` keyspace and
 group by normalized message, route, frame, and component context.
@@ -87,7 +87,7 @@ It never deploys or auto-merges. A human reads the PR body and decides.
 4. Add repository variables `PROD_HEALTH_URL` / `PROD_API_HEALTH_URL` for the fallback
    path's health probes. Empty skips them.
 5. Install/reinstall `scripts/kanban-autopr/install-launch-agent.sh`; that one local
-   timer owns both AutoPR lanes. Use `workflow_dispatch` once to verify connectivity.
+   timer owns all three AutoPR lanes. Use `workflow_dispatch` once to verify connectivity.
 6. `server/venv` on this Mac must have `pytest` and `pytest-asyncio` installed
    alongside the app's own requirements (`verify.sh` reuses this venv rather than
    building one, so it needs to already work): `server/venv/bin/pip install pytest

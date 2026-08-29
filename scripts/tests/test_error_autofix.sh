@@ -148,7 +148,8 @@ cat > "$TMP_DIR/investigate-incident.json" <<'EOF'
 {"message":"boom","traceback":"File \"/app/app/example.py\", line 1","stable_key":"abc123abc123"}
 EOF
 PATH="$TMP_DIR/bin:$PATH" OPENCODE_STUB_REPORT="$MODEL_OUTPUT_DIR/investigation.md" \
-    OPENCODE_STUB_DECISION="$MODEL_OUTPUT_DIR/investigation.json" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    OPENCODE_STUB_DECISION="$MODEL_OUTPUT_DIR/investigation.json" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_ACTIONS=false \
     "$AUTOFIX_DIR/investigate.sh" "$TMP_DIR/investigate-incident.json" \
     "$MODEL_OUTPUT_DIR/investigation.md" "$MODEL_OUTPUT_DIR/investigation.json" >/dev/null 2>&1
 check "investigate.sh terminates --file args before passing one prompt" $?
@@ -284,7 +285,10 @@ echo '[{"state":"OPEN","mergedAt":null,"closedAt":null}]' > "$GH_STUB_RESPONSE_F
 run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips (exit 3) when a PR is OPEN" $([ "$?" = "3" ] && echo 0 || echo 1)
 
-echo '[{"state":"CLOSED","mergedAt":null,"closedAt":"2026-08-22T00:00:00Z"}]' > "$GH_STUB_RESPONSE_FILE"
+recent_closed="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)"
+printf '[{"state":"CLOSED","mergedAt":null,"closedAt":"%s"}]\n' "$recent_closed" \
+    > "$GH_STUB_RESPONSE_FILE"
 run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips a just-closed-unmerged PR (within cooldown)" $([ "$?" = "3" ] && echo 0 || echo 1)
 
