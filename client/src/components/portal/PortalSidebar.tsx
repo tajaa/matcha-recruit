@@ -12,7 +12,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: '/portal', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/portal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/portal/schedule', icon: CalendarClock, label: 'My Schedule', feature: 'employee_schedule' },
   { to: '/portal/benefits', icon: HeartPulse, label: 'My Benefits', feature: 'benefits_admin' },
   { to: '/portal/ask-hr', icon: MessageCircleQuestion, label: 'Ask HR', feature: 'ask_hr' },
@@ -41,8 +41,7 @@ export default function PortalSidebar() {
 
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-auto">
         {navItems.map((item) => {
-          const active =
-            item.to === '/portal' ? pathname === '/portal' : pathname.startsWith(item.to)
+          const active = pathname === item.to || pathname.startsWith(`${item.to}/`)
           const Icon = item.icon
           return (
             <Link

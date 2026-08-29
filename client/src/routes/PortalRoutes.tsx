@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import { FeatureGate } from '../components/shared/FeatureGate'
 import PortalLayout from '../pages/portal/PortalLayout'
 import PortalDashboard from '../pages/portal/PortalDashboard'
@@ -7,12 +7,22 @@ import PortalBenefits from '../pages/portal/PortalBenefits'
 import AskHR from '../pages/portal/AskHR'
 import EmployeeTakeTraining from '../pages/portal/EmployeeTakeTraining'
 import EmployeeSignDocument from '../pages/portal/EmployeeSignDocument'
+import { useMe } from '../hooks/useMe'
+
+function PortalIndexRedirect() {
+  const { hasFeature, loading } = useMe()
+
+  if (loading) return null
+
+  return <Navigate to={hasFeature('employee_schedule') ? 'schedule' : 'dashboard'} replace />
+}
 
 export default function PortalRoutes() {
   return (
     <Routes>
       <Route element={<PortalLayout />}>
-        <Route index element={<PortalDashboard />} />
+        <Route index element={<PortalIndexRedirect />} />
+        <Route path="dashboard" element={<PortalDashboard />} />
         <Route
           path="schedule"
           element={
