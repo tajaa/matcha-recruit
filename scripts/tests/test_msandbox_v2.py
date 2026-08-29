@@ -41,6 +41,7 @@ from scripts.msandbox.pty_proxy import (
     PASTE_START,
     _sync_window_size,
     rewrite_paste_stream,
+    rewrite_paste_stream_with_importer,
     rewrite_paste_stream_to_inbox,
     run_with_file_proxy,
 )
@@ -516,6 +517,66 @@ class AttachmentTests(MsandboxTestCase):
         self.assertEqual(pending, b"")
         self.assertEqual(len(errors), 1)
         self.assertIn("exceeds 1 bytes", str(errors[0]))
+
+    def test_plain_macos_drag_path_is_rewritten_before_prompt_text(self) -> None:
+        source = self.root / "Screenshot 2026 at 5.40 PM.png"
+        source.write_bytes(b"png")
+        payload = f"{source} what does this image show\r".encode()
+        inbox = self.root / "legacy-inbox"
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            payload,
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="plain-drag-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+
+        self.assertEqual(pending, b"")
+        self.assertNotIn(str(source).encode(), emitted)
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        self.assertTrue(emitted.endswith(b" what does this image show\r"))
+
+    def test_plain_shell_escaped_drag_waits_for_delimiter_across_reads(self) -> None:
+        source = self.root / "Screen Shot.png"
+        source.write_bytes(b"png")
+        escaped = str(source).replace(" ", "\\ ").encode()
+        inbox = self.root / "legacy-inbox"
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            escaped,
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="plain-drag-split-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+        self.assertEqual(emitted, b"")
+        self.assertEqual(pending, escaped)
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            pending + b" describe it\r",
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="plain-drag-split-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+        self.assertEqual(pending, b"")
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        self.assertTrue(emitted.endswith(b" describe it\r"))
+
+    def test_nonexistent_plain_host_path_is_forwarded_on_enter(self) -> None:
+        payload = b"/Users/example/missing.png explain this\r"
+
+        emitted, pending = rewrite_paste_stream_with_importer(
+            payload,
+            lambda paths: self.fail(f"unexpected import: {paths}"),
+        )
+
+        self.assertEqual(emitted, payload)
+        self.assertEqual(pending, b"")
 
     def test_proxy_copies_terminal_window_size(self) -> None:
         window_size = b"\x18\x00\x50\x00\x00\x00\x00\x00"

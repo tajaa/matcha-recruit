@@ -25,6 +25,8 @@ from .models import Attachment, SessionRecord
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 MAX_PENDING_PASTE_BYTES = 1024 * 1024
+MAX_PENDING_HOST_PATH_BYTES = 4096
+HOST_PATH_PREFIXES = (b"/Users/", b"/private/", b"/var/folders/", b"/tmp/")
 PasteImporter = Callable[[Sequence[Path]], Sequence[Attachment]]
 PasteErrorHandler = Callable[[Exception], None]
 StreamRewriter = Callable[[bytes], tuple[bytes, bytes]]
@@ -79,7 +81,26 @@ def rewrite_paste_stream_with_importer(
     *,
     on_error: PasteErrorHandler | None = None,
 ) -> tuple[bytes, bytes]:
-    """Rewrite complete file-only paste frames with one attachment importer."""
+    """Rewrite bracketed pastes and macOS drag-inserted host file paths."""
+    bracketed, pending = _rewrite_bracketed_paste_stream_with_importer(
+        data,
+        importer,
+        on_error=on_error,
+    )
+    rewritten, plain_pending = _rewrite_plain_host_paths(
+        bracketed,
+        importer,
+        on_error=on_error,
+    )
+    return rewritten, plain_pending + pending
+
+
+def _rewrite_bracketed_paste_stream_with_importer(
+    data: bytes,
+    importer: PasteImporter,
+    *,
+    on_error: PasteErrorHandler | None = None,
+) -> tuple[bytes, bytes]:
     output = bytearray()
     cursor = 0
     while cursor < len(data):
@@ -116,6 +137,94 @@ def rewrite_paste_stream_with_importer(
                 ).encode()
                 output.extend(PASTE_START + replacement + PASTE_END)
         cursor = frame_end
+    return bytes(output), b""
+
+
+def _earliest_host_path_start(data: bytes, start: int = 0) -> int:
+    matches = [index for prefix in HOST_PATH_PREFIXES if (index := data.find(prefix, start)) >= 0]
+    return min(matches) if matches else -1
+
+
+def _existing_host_file_prefix(data: bytes) -> tuple[int, Path] | None:
+    """Return the longest leading host file path, escaped or literal."""
+    for end in range(len(data), 0, -1):
+        try:
+            text = data[:end].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        candidates = [(text, end)]
+        try:
+            tokens = shlex.split(text)
+        except ValueError:
+            tokens = []
+        if len(tokens) == 1 and tokens[0] != text:
+            candidates.append((tokens[0], len(data[:end].rstrip(b" \t"))))
+        for candidate, raw_end in candidates:
+            path = Path(candidate)
+            try:
+                if path.is_file() and not path.is_symlink():
+                    return raw_end, path
+            except OSError:
+                continue
+    return None
+
+
+def _rewrite_plain_host_paths(
+    data: bytes,
+    importer: PasteImporter,
+    *,
+    on_error: PasteErrorHandler | None = None,
+) -> tuple[bytes, bytes]:
+    """Rewrite host paths emitted as raw keystrokes by macOS file drags."""
+    output = bytearray()
+    cursor = 0
+    while cursor < len(data):
+        start = _earliest_host_path_start(data, cursor)
+        bracket_start = data.find(PASTE_START, cursor)
+        if bracket_start >= 0 and (start < 0 or bracket_start < start):
+            bracket_end = data.find(PASTE_END, bracket_start + len(PASTE_START))
+            if bracket_end < 0:
+                output.extend(data[cursor:])
+                return bytes(output), b""
+            frame_end = bracket_end + len(PASTE_END)
+            output.extend(data[cursor:frame_end])
+            cursor = frame_end
+            continue
+        if start < 0:
+            output.extend(data[cursor:])
+            return bytes(output), b""
+        output.extend(data[cursor:start])
+        candidate = data[start:]
+        match = _existing_host_file_prefix(candidate)
+        if match is not None:
+            end, path = match
+            # Wait for one following byte so a path which is itself a prefix
+            # of a longer dragged filename is not rewritten prematurely.
+            if end == len(candidate):
+                return bytes(output), candidate
+            if candidate[end : end + 1] in b" \t\r\n":
+                try:
+                    attachments = importer([path])
+                except (AttachmentError, OSError) as exc:
+                    if on_error is None:
+                        raise
+                    on_error(exc)
+                    output.extend(candidate[:end])
+                else:
+                    replacement = " ".join(
+                        shlex.quote(str(item.container_path)) for item in attachments
+                    ).encode()
+                    output.extend(replacement)
+                cursor = start + end
+                continue
+        if (
+            b"\r" in candidate
+            or b"\n" in candidate
+            or len(candidate) > MAX_PENDING_HOST_PATH_BYTES
+        ):
+            output.extend(candidate)
+            return bytes(output), b""
+        return bytes(output), candidate
     return bytes(output), b""
 
 
