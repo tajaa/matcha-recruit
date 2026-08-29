@@ -32,6 +32,9 @@ vi.mock('../../../hooks/useLocationScope', () => ({
 }))
 vi.mock('../../../components/employees/ScheduleLawPanel', () => ({ default: () => null }))
 vi.mock('../../../components/employees/onboarding/ScheduleHelperWizard', () => ({ default: () => null }))
+vi.mock('../../../components/employees/AutoSchedulesTab', () => ({
+  default: () => <div>Auto schedule settings</div>,
+}))
 vi.mock('../../../api/employees/scheduleAssistant', () => ({
   getScheduleSuggestionStatus: getScheduleSuggestionStatusMock,
 }))
@@ -75,10 +78,10 @@ const shift = {
   published_at: null,
 }
 
-function renderSchedule() {
+function renderSchedule(initialEntry = '/ops/schedule') {
   return render(
     <ToastProvider>
-      <MemoryRouter initialEntries={['/ops/schedule']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <EmployeeSchedule />
       </MemoryRouter>
     </ToastProvider>,
@@ -171,6 +174,22 @@ describe('EmployeeSchedule break planning', () => {
 
     expect(await screen.findByText('Huume prepared a suggested schedule for the week of 2026-08-30.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Review suggestion' })).toHaveAttribute(
+      'href', '/ops/schedule/editor?week=2026-08-30&location=loc-1',
+    )
+  })
+
+  it('refreshes prepared suggestions when returning from auto schedules', async () => {
+    renderSchedule('/ops/schedule?tab=auto-schedules')
+    expect(await screen.findByText('Auto schedule settings')).toBeInTheDocument()
+    expect(getScheduleSuggestionStatusMock).not.toHaveBeenCalled()
+
+    getScheduleSuggestionStatusMock.mockResolvedValue({
+      available: true, generation_run_id: 'generation-1', week_start: '2026-08-30',
+      created_at: '2026-08-28T16:00:00Z',
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
+
+    expect(await screen.findByRole('link', { name: 'Review suggestion' })).toHaveAttribute(
       'href', '/ops/schedule/editor?week=2026-08-30&location=loc-1',
     )
   })

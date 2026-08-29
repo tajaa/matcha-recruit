@@ -89,7 +89,7 @@ export default function EmployeeSchedule() {
   useEffect(() => {
     let cancelled = false
     setAutomaticSuggestion(null)
-    if (!locationId) return () => { cancelled = true }
+    if (!locationId || tab !== 'schedule') return () => { cancelled = true }
     void getScheduleSuggestionStatus(locationId, weekStart)
       .then((result) => {
         if (!cancelled) setAutomaticSuggestion(result.available ? result : null)
@@ -98,7 +98,7 @@ export default function EmployeeSchedule() {
         if (!cancelled) setAutomaticSuggestion(null)
       })
     return () => { cancelled = true }
-  }, [locationId, weekStart])
+  }, [locationId, tab, weekStart])
 
   function setTab(nextTab: EmployeeScheduleTab) {
     setScheduleTab(nextTab)

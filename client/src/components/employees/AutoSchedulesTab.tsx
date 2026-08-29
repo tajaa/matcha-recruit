@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarClock, Loader2, Play, Save, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -64,6 +64,8 @@ function formatTimestamp(value: string, timezoneName: string): string {
 
 export default function AutoSchedulesTab({ locationId }: { locationId: string }) {
   const { toast } = useToast()
+  const locationIdRef = useRef(locationId)
+  locationIdRef.current = locationId
   const [form, setForm] = useState<FormState>(defaults)
   const [rule, setRule] = useState<ScheduleAutomationRule | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
@@ -77,6 +79,7 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
     setForm(defaults())
     setTemplates([])
     setGeneratedWeekStart(null)
+    setRunning(false)
     if (!locationId) return
     setLoading(true)
     Promise.all([fetchAutoSchedule(locationId), fetchWeekTemplates(locationId)])
@@ -117,17 +120,20 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
   }
 
   async function runNow() {
+    const runLocationId = locationId
     setRunning(true)
     try {
-      const result = await runAutoScheduleNow(locationId)
+      const result = await runAutoScheduleNow(runLocationId)
+      if (locationIdRef.current !== runLocationId) return
       toast(result.message, result.status === 'generated' ? 'success' : 'info')
       setGeneratedWeekStart(result.status === 'generated' ? result.week_start : null)
-      const refreshed = await fetchAutoSchedule(locationId)
+      const refreshed = await fetchAutoSchedule(runLocationId)
+      if (locationIdRef.current !== runLocationId) return
       setRule(refreshed.rule)
     } catch (err) {
-      toast(errorMessage(err), 'error')
+      if (locationIdRef.current === runLocationId) toast(errorMessage(err), 'error')
     } finally {
-      setRunning(false)
+      if (locationIdRef.current === runLocationId) setRunning(false)
     }
   }
 
