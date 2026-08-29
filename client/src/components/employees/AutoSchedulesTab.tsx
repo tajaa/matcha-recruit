@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarClock, Loader2, Play, Save, Sparkles } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import {
   fetchAutoSchedule, fetchWeekTemplates, runAutoScheduleNow, saveAutoSchedule,
@@ -63,17 +64,22 @@ function formatTimestamp(value: string, timezoneName: string): string {
 
 export default function AutoSchedulesTab({ locationId }: { locationId: string }) {
   const { toast } = useToast()
+  const locationIdRef = useRef(locationId)
+  locationIdRef.current = locationId
   const [form, setForm] = useState<FormState>(defaults)
   const [rule, setRule] = useState<ScheduleAutomationRule | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  const [generatedWeekStart, setGeneratedWeekStart] = useState<string | null>(null)
 
   useEffect(() => {
     setRule(null)
     setForm(defaults())
     setTemplates([])
+    setGeneratedWeekStart(null)
+    setRunning(false)
     if (!locationId) return
     setLoading(true)
     Promise.all([fetchAutoSchedule(locationId), fetchWeekTemplates(locationId)])
@@ -114,16 +120,20 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
   }
 
   async function runNow() {
+    const runLocationId = locationId
     setRunning(true)
     try {
-      const result = await runAutoScheduleNow(locationId)
+      const result = await runAutoScheduleNow(runLocationId)
+      if (locationIdRef.current !== runLocationId) return
       toast(result.message, result.status === 'generated' ? 'success' : 'info')
-      const refreshed = await fetchAutoSchedule(locationId)
+      setGeneratedWeekStart(result.status === 'generated' ? result.week_start : null)
+      const refreshed = await fetchAutoSchedule(runLocationId)
+      if (locationIdRef.current !== runLocationId) return
       setRule(refreshed.rule)
     } catch (err) {
-      toast(errorMessage(err), 'error')
+      if (locationIdRef.current === runLocationId) toast(errorMessage(err), 'error')
     } finally {
-      setRunning(false)
+      if (locationIdRef.current === runLocationId) setRunning(false)
     }
   }
 
@@ -208,6 +218,14 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
             </button>}
           </div>
+          {generatedWeekStart && (
+            <Link
+              to={`/ops/schedule/editor?week=${generatedWeekStart}&location=${locationId}`}
+              className="inline-flex items-center gap-1.5 text-sm text-emerald-300 hover:text-emerald-200"
+            >
+              <Sparkles className="h-4 w-4" /> Review the generated week in the full shift editor
+            </Link>
+          )}
         </div>
 
         <aside className="space-y-3 rounded-xl border border-white/[0.07] bg-zinc-900/40 p-5">
