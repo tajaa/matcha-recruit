@@ -180,7 +180,7 @@ function RollupTable<T extends { calls: number; cost_usd: number | null; input_t
           <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
             <th className="py-2 px-3">{labelHeader}</th>
             <th className="py-2 px-3 text-right">Calls</th>
-            <th className="py-2 px-3 text-right">Cost</th>
+            <th className="py-2 px-3 text-right">Attributed cost</th>
             <th className="py-2 px-3 text-right">In</th>
             <th className="py-2 px-3 text-right">Out</th>
             <th className="py-2 px-3 text-right">Thinking</th>
@@ -249,6 +249,9 @@ function CallLogRow({ call, isOpen, onToggle }: { call: AiUsageCall; isOpen: boo
         <div className="px-3 pb-3 pl-11 space-y-2 bg-zinc-900/30">
           <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono flex-wrap">
             <span>id: {call.id}</span>
+            {call.provider_response_id && <span>provider id: {call.provider_response_id}</span>}
+            {call.provider_status && <span>provider status: {call.provider_status}</span>}
+            {call.service_tier && <span>service tier: {call.service_tier}</span>}
             <span>at: {new Date(call.created_at).toLocaleString()}</span>
             <span>thinking: {fmtTokens(call.thinking_tokens)}</span>
           </div>
@@ -367,7 +370,7 @@ export default function AiUsage() {
             <h1 className="text-xl font-semibold text-zinc-100">AI Usage</h1>
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Model calls across every feature and provider, including Gemini and OpenAI.
+            Exact provider-reported usage, attributed to the Matcha feature that made each call.
           </p>
         </div>
         <button
@@ -405,7 +408,7 @@ export default function AiUsage() {
 
       {totals && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
-          <StatCard label="Cost" value={fmtCost(totals.cost_usd)} />
+          <StatCard label="Attributed cost" value={fmtCost(totals.cost_usd)} sub="provider billing is authoritative" />
           <StatCard label="Calls" value={String(totals.calls)} />
           <StatCard label="Tokens in" value={fmtTokens(totals.input_tokens)} />
           <StatCard label="Tokens out" value={fmtTokens(totals.output_tokens)} />
@@ -423,8 +426,8 @@ export default function AiUsage() {
       {totals && totals.unknown_cost_calls > 0 && (
         <p className="mb-4 text-xs text-amber-300/90 flex items-center gap-1.5">
           <AlertCircle size={12} />
-          {totals.unknown_cost_calls} call(s) have unknown cost (unpriced model, or a timeout/error with no
-          token count) — the total above is undercounted.
+          {totals.unknown_cost_calls} call(s) have no locally attributed cost. Any recorded tokens are
+          provider-reported; provider billing remains the dollar source of truth.
         </p>
       )}
 
@@ -468,7 +471,7 @@ export default function AiUsage() {
 
       {/* Huume's agent loop (services/huume/agent.py) plus its embedded Legal
           Pilot / Handbook Pilot tool calls, each scoped under matcha.huume.* via
-          feature_scope so this spend doesn't get lost in matcha.legal_defense /
+          feature_scope so this usage doesn't get lost in matcha.legal_defense /
           matcha.handbook_pilot alongside the standalone pilot UIs. Same
           derived-not-fetched pattern as the image block above. */}
       {huumeTotals && (
@@ -478,8 +481,8 @@ export default function AiUsage() {
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             <StatCard label="Huume calls" value={String(huumeTotals.calls)} />
-            <StatCard label="Huume spend" value={fmtCost(huumeTotals.cost_usd)} />
             <StatCard label="Tokens in" value={fmtTokens(huumeTotals.input_tokens)} sub="context" />
+            <StatCard label="Tokens out" value={fmtTokens(huumeTotals.output_tokens)} />
             <StatCard label="Thinking" value={fmtTokens(huumeTotals.thinking_tokens)} />
             <StatCard label="Cached" value={fmtTokens(huumeTotals.cached_tokens)} />
           </div>
@@ -495,22 +498,17 @@ export default function AiUsage() {
                     : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
                 }`}
               >
-                {r.feature.slice(HUUME_FEATURE_PREFIX.length)} · {r.calls} · {fmtCost(r.cost_usd)}
+                {r.feature.slice(HUUME_FEATURE_PREFIX.length)} · {r.calls} calls · {fmtTokens(r.output_tokens)} out
               </button>
             ))}
           </div>
-          {huumeTotals.unknown_cost_calls > 0 && (
-            <p className="mt-1.5 text-[11px] text-amber-300/90">
-              {huumeTotals.unknown_cost_calls} huume call(s) have unknown cost — spend above is undercounted.
-            </p>
-          )}
         </div>
       )}
 
       {timeseries.points.length > 0 && (
         <div className="mb-6 p-3 rounded-lg border border-zinc-800 bg-zinc-900/40">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-            Cost by {timeseries.bucket}
+            Locally attributed cost by {timeseries.bucket}
           </p>
           <Bars points={timeseries.points} />
         </div>

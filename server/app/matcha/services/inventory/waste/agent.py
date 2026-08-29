@@ -60,21 +60,16 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
             response = await client.post(
                 "https://api.openai.com/v1/responses",
                 headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                json={"model": model, "input": prompt},
+                json={"model": model, "input": prompt, "reasoning": {"effort": "high"}},
             )
             response.raise_for_status()
         payload = response.json()
-        usage = payload.get("usage") if isinstance(payload, dict) else None
-        usage = usage if isinstance(usage, dict) else {}
-        input_details = usage.get("input_tokens_details")
-        output_details = usage.get("output_tokens_details")
+        if not isinstance(payload, dict):
+            raise TypeError("OpenAI Responses payload must be an object")
         await record_openai_response(
             model=model,
             latency_ms=int((time.monotonic() - started) * 1000),
-            input_tokens=usage.get("input_tokens"),
-            output_tokens=usage.get("output_tokens"),
-            thinking_tokens=output_details.get("reasoning_tokens") if isinstance(output_details, dict) else None,
-            cached_tokens=input_details.get("cached_tokens") if isinstance(input_details, dict) else None,
+            response=payload,
         )
         usage_recorded = True
         text = _response_text(payload)
@@ -85,6 +80,7 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
                 model=model,
                 latency_ms=int((time.monotonic() - started) * 1000),
                 error=str(exc),
+                status="timeout" if isinstance(exc, httpx.TimeoutException) else "error",
             )
         logger.warning("inventory waste Luna narration failed", exc_info=True)
         return None

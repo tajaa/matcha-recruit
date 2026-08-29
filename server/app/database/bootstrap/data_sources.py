@@ -321,6 +321,9 @@ async def create_data_sources(conn):
                 latency_ms      INTEGER,
                 status          TEXT NOT NULL DEFAULT 'ok',
                 error           TEXT,
+                provider_response_id TEXT,
+                provider_status TEXT,
+                service_tier    TEXT,
                 created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
@@ -351,4 +354,3 @@ async def create_data_sources(conn):
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_business_invitations_token ON business_invitations(token)
         """)
-

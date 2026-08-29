@@ -5,10 +5,11 @@ Wraps the `genai.Client` returned by `genai_client.get_genai_client()` so every
 async — logs its model, caller ("feature"), token counts, cost, latency, and
 outcome to `ai_usage_log`, with zero changes at any of the ~100 call sites.
 
-This is the LEDGER (what did we spend, and where). `rate_limiter.py` /
-`api_rate_limits` is the separate, pre-existing GUARD (are we about to spend too
-much) — untouched by this module, and not reused for storage: the guard only
-ever needed a call count, this needs the full row.
+This is the LEDGER (what did we use, where, and what cost can be attributed
+locally). `rate_limiter.py` / `api_rate_limits` is the separate, pre-existing
+GUARD (are we about to spend too much) — untouched by this module, and not
+reused for storage: the guard only ever needed a call count, this needs the full
+row.
 
 v1 known gaps (see admin UI / API docs for how these surface):
   - Live-API sessions (voice interviews) are not wrapped — `client.aio.live` is
@@ -50,7 +51,12 @@ LOGGING_ENABLED = os.getenv("AI_USAGE_LOGGING", "1") != "0"
 # logs cost_usd=NULL rather than a guessed number — the admin UI surfaces
 # "unpriced" calls so a real row gets added instead of a fabricated price.
 PRICING: dict[tuple[str, str], tuple[float, float]] = {
-    ("openai", "gpt-5.6-luna"): (1.00, 6.00),
+    # OpenAI intentionally has no local price rows. Responses return exact
+    # per-call token usage, but billed dollars are authoritative only in
+    # OpenAI's organization Costs API. Keeping cost_usd=NULL prevents this
+    # feature-attribution ledger from presenting a mutable local tariff as an
+    # invoice fact; the admin UI explains that provider cost is reconciled
+    # separately.
     ("gemini", "gemini-3.7-flash"): (1.50, 7.50),  # fleet quality tier (rate mirrors 3.6-flash pending 3.7 GA)
     ("gemini", "gemini-3.6-flash"): (1.50, 7.50),  # kept for already-logged rows
     ("gemini", "gemini-3.5-flash"): (1.50, 9.00),
@@ -240,13 +246,16 @@ async def _insert_row(row: dict[str, Any], *, direct: bool = False) -> None:
                 """
                 INSERT INTO ai_usage_log
                     (provider, model, feature, method, input_tokens, output_tokens,
-                     thinking_tokens, cached_tokens, cost_usd, latency_ms, status, error)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                     thinking_tokens, cached_tokens, cost_usd, latency_ms, status, error,
+                     provider_response_id, provider_status, service_tier)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                        $13, $14, $15)
                 """,
                 row["provider"], row["model"], row["feature"], row["method"],
                 row["input_tokens"], row["output_tokens"], row["thinking_tokens"],
                 row["cached_tokens"], row["cost_usd"], row["latency_ms"], row["status"],
-                row["error"],
+                row["error"], row["provider_response_id"], row["provider_status"],
+                row["service_tier"],
             )
     except Exception:  # noqa: BLE001 — telemetry must never break a model call
         logger.warning("ai_usage: failed to record call", exc_info=True)
@@ -304,7 +313,10 @@ def _record(row: dict[str, Any]) -> None:
 
 def _build_row(*, provider: str, model: str, method: str, feature: str,
                 latency_ms: int, status: str, error: Optional[str] = None,
-                usage: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] = (None, None, None, None)) -> dict[str, Any]:
+                usage: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] = (None, None, None, None),
+                provider_response_id: Optional[str] = None,
+                provider_status: Optional[str] = None,
+                service_tier: Optional[str] = None) -> dict[str, Any]:
     input_tokens, output_tokens, thinking_tokens, cached_tokens = usage
     return {
         "provider": provider,
@@ -319,28 +331,68 @@ def _build_row(*, provider: str, model: str, method: str, feature: str,
         "latency_ms": latency_ms,
         "status": status,
         "error": error[:500] if error else None,
+        "provider_response_id": provider_response_id[:200] if provider_response_id else None,
+        "provider_status": provider_status[:50] if provider_status else None,
+        "service_tier": service_tier[:50] if service_tier else None,
     }
 
 
 async def record_openai_response(
-    *, model: str, latency_ms: int, input_tokens: Optional[int] = None,
+    *, model: str, latency_ms: int, response: Optional[dict[str, Any]] = None,
+    input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None, thinking_tokens: Optional[int] = None,
     cached_tokens: Optional[int] = None, error: Optional[str] = None,
+    status: Optional[str] = None,
 ) -> None:
-    """Record one direct Responses API call without requiring the OpenAI SDK.
+    """Record exact usage from one direct Responses API call.
 
     Most existing callers are Gemini SDK proxies. Huume uses a small httpx
-    adapter for Responses tool calls, so it explicitly forwards equivalent
-    usage here and retains the same feature-scoped admin ledger.
+    adapter for Responses calls. Successful callers pass the provider payload
+    so this function owns the Responses schema mapping; explicit token fields
+    remain as a compatibility fallback for callers without a retained payload.
+
+    OpenAI cost_usd is deliberately NULL. The response supplies exact token
+    usage, but not billed dollars, and the organization Costs API cannot group
+    by Matcha's feature labels. Provider billing is reconciled separately.
     """
     if not LOGGING_ENABLED:
         return
-    await _record_async(_build_row(
-        provider="openai", model=model, method="responses.create",
+    payload = response if isinstance(response, dict) else {}
+    usage = payload.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    input_details = usage.get("input_tokens_details")
+    input_details = input_details if isinstance(input_details, dict) else {}
+    output_details = usage.get("output_tokens_details")
+    output_details = output_details if isinstance(output_details, dict) else {}
+
+    actual_model = payload.get("model")
+    actual_model = actual_model if isinstance(actual_model, str) and actual_model else model
+    provider_response_id = payload.get("id")
+    provider_response_id = provider_response_id if isinstance(provider_response_id, str) else None
+    provider_status = payload.get("status")
+    provider_status = provider_status if isinstance(provider_status, str) else None
+    service_tier = payload.get("service_tier")
+    service_tier = service_tier if isinstance(service_tier, str) else None
+
+    row = _build_row(
+        provider="openai", model=actual_model, method="responses.create",
         feature=_feature_label(), latency_ms=latency_ms,
-        status="error" if error else "ok", error=error,
-        usage=(input_tokens, output_tokens, thinking_tokens, cached_tokens),
-    ))
+        status=status if status in {"ok", "error", "timeout"} else ("error" if error else "ok"),
+        error=error,
+        usage=(
+            usage.get("input_tokens", input_tokens),
+            usage.get("output_tokens", output_tokens),
+            output_details.get("reasoning_tokens", thinking_tokens),
+            input_details.get("cached_tokens", cached_tokens),
+        ),
+        provider_response_id=provider_response_id,
+        provider_status=provider_status,
+        service_tier=service_tier,
+    )
+    # Never synthesize OpenAI billed dollars from a local tariff. Exact token
+    # usage above is the per-feature fact; OpenAI's Costs API is the dollar fact.
+    row["cost_usd"] = None
+    await _record_async(row)
 
 
 # --- Client proxy -----------------------------------------------------------

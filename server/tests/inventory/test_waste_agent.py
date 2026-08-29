@@ -19,7 +19,19 @@ def test_luna_narration_uses_configured_responses_model(monkeypatch):
             return None
 
         def json(self):
-            return {"output_text": "Waste appears concentrated in a recurring operating pattern."}
+            return {
+                "id": "resp_waste_123",
+                "model": "gpt-5.6-luna-2026-08-01",
+                "status": "completed",
+                "service_tier": "default",
+                "output_text": "Waste appears concentrated in a recurring operating pattern.",
+                "usage": {
+                    "input_tokens": 120,
+                    "input_tokens_details": {"cached_tokens": 20},
+                    "output_tokens": 35,
+                    "output_tokens_details": {"reasoning_tokens": 10},
+                },
+            }
 
     class Client:
         async def __aenter__(self):
@@ -46,8 +58,10 @@ def test_luna_narration_uses_configured_responses_model(monkeypatch):
 
     assert result == "Waste appears concentrated in a recurring operating pattern."
     assert payload["json"]["model"] == "gpt-5.6-luna"
+    assert payload["json"]["reasoning"] == {"effort": "high"}
     assert payload["headers"]["Authorization"] == "Bearer test-key"
     assert recorded[0]["model"] == "gpt-5.6-luna"
+    assert recorded[0]["response"]["id"] == "resp_waste_123"
 
 
 def test_luna_narration_rejects_numeric_model_output(monkeypatch):

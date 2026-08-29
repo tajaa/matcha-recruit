@@ -126,6 +126,7 @@ async def _record_turn_usage(
         # Only the huume loop records this key today; skill-engine turns
         # carry no thinking_tokens and price exactly as before.
         thinking_tokens=final_usage.get("thinking_tokens"),
+        cached_tokens=final_usage.get("cached_tokens"),
     )
     final_usage["cost_dollars"] = float(cost)
     try:

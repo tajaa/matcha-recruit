@@ -77,20 +77,19 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
     usage_recorded = False
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {settings.openai_api_key}"}, json={"model": model, "input": prompt})
+            response = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={"model": model, "input": prompt, "reasoning": {"effort": "high"}},
+            )
             response.raise_for_status()
         payload = response.json()
-        usage = payload.get("usage") if isinstance(payload, dict) else None
-        usage = usage if isinstance(usage, dict) else {}
-        input_details = usage.get("input_tokens_details")
-        output_details = usage.get("output_tokens_details")
+        if not isinstance(payload, dict):
+            raise TypeError("OpenAI Responses payload must be an object")
         await record_openai_response(
             model=model,
             latency_ms=int((time.monotonic() - started) * 1000),
-            input_tokens=usage.get("input_tokens"),
-            output_tokens=usage.get("output_tokens"),
-            thinking_tokens=output_details.get("reasoning_tokens") if isinstance(output_details, dict) else None,
-            cached_tokens=input_details.get("cached_tokens") if isinstance(input_details, dict) else None,
+            response=payload,
         )
         usage_recorded = True
         raw = json.loads(_response_text(payload))
@@ -113,5 +112,6 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
                 model=model,
                 latency_ms=int((time.monotonic() - started) * 1000),
                 error=str(exc),
+                status="timeout" if isinstance(exc, httpx.TimeoutException) else "error",
             )
         return fallback
