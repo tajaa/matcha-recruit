@@ -33,7 +33,12 @@ from scripts.msandbox.git_worktrees import (
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
 from scripts.msandbox.install import InstallError, install_release, rollback_release
 from scripts.msandbox.models import PortSet, SessionRecord, SessionSpec, TestPlan, ValidationReference
-from scripts.msandbox.pty_proxy import PASTE_END, PASTE_START, rewrite_paste_stream
+from scripts.msandbox.pty_proxy import (
+    PASTE_END,
+    PASTE_START,
+    rewrite_paste_stream,
+    rewrite_paste_stream_to_inbox,
+)
 from scripts.msandbox.sessions import (
     SessionError,
     _validation_current,
@@ -460,6 +465,34 @@ class AttachmentTests(MsandboxTestCase):
         self.assertIn(b"/attachments/", emitted2)
         self.assertTrue(emitted2.endswith(b"!"))
 
+    def test_legacy_drag_rewrites_into_workspace_attachment_mount(self) -> None:
+        source = self.root / "prod screenshot.png"
+        source.write_bytes(b"png")
+        frame = PASTE_START + str(source).replace(" ", "\\ ").encode() + PASTE_END
+        inbox = self.root / "legacy-inbox"
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            frame,
+            inbox=inbox,
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="legacy-test",
+            max_bytes=1024,
+            session_max_bytes=4096,
+        )
+
+        self.assertEqual(pending, b"")
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        imported = list(inbox.iterdir())
+        self.assertEqual(len(imported), 1)
+        self.assertEqual(imported[0].read_bytes(), b"png")
+
+    def test_legacy_interactive_entrypoints_use_file_proxy(self) -> None:
+        launcher = (Path(__file__).resolve().parents[2] / "scripts/agent-sandbox.sh").read_text()
+        self.assertIn("exec_workspace_with_file_proxy codex", launcher)
+        self.assertIn("exec_workspace_with_file_proxy claude", launcher)
+        self.assertIn("exec_workspace_with_file_proxy opencode", launcher)
+        self.assertGreaterEqual(launcher.count("exec_workspace_with_file_proxy bash"), 2)
+
 
 class HostAndInstallTests(MsandboxTestCase):
     def test_xcode_boundary_rejects_arbitrary_targets_and_paths(self) -> None:
@@ -538,7 +571,7 @@ class HostAndInstallTests(MsandboxTestCase):
             text=True,
             capture_output=True,
         )
-        self.assertEqual(completed.stdout.strip(), "msandbox 2.0.0")
+        self.assertEqual(completed.stdout.strip(), "msandbox 2.0.1")
         launcher_text = launcher.read_text(encoding="utf-8")
         self.assertIn("scripts/agent-sandbox.sh", launcher_text)
         self.assertIn("legacy control plane", launcher_text)

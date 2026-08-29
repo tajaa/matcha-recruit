@@ -8,14 +8,18 @@ import subprocess
 import sys
 import termios
 import tty
+from pathlib import Path
+from typing import Callable, Sequence
 
-from .attachments import import_files, parse_pasted_file_payload
-from .models import SessionRecord
+from .attachments import import_files, import_files_to_inbox, parse_pasted_file_payload
+from .models import Attachment, SessionRecord
 
 
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 MAX_PENDING_PASTE_BYTES = 1024 * 1024
+PasteImporter = Callable[[Sequence[Path]], Sequence[Attachment]]
+StreamRewriter = Callable[[bytes], tuple[bytes, bytes]]
 
 
 def rewrite_bracketed_paste(record: SessionRecord, data: bytes) -> bytes:
@@ -33,6 +37,37 @@ def _partial_marker_suffix(data: bytes) -> int:
 
 def rewrite_paste_stream(record: SessionRecord, data: bytes) -> tuple[bytes, bytes]:
     """Rewrite every complete paste and retain only an incomplete trailing frame."""
+    return rewrite_paste_stream_with_importer(data, lambda paths: import_files(record, paths))
+
+
+def rewrite_paste_stream_to_inbox(
+    data: bytes,
+    *,
+    inbox: Path,
+    container_dir: Path,
+    lock_name: str,
+    max_bytes: int,
+    session_max_bytes: int,
+) -> tuple[bytes, bytes]:
+    """Rewrite pasted host files into a caller-provided mounted inbox."""
+    return rewrite_paste_stream_with_importer(
+        data,
+        lambda paths: import_files_to_inbox(
+            paths,
+            inbox=inbox,
+            container_dir=container_dir,
+            lock_name=lock_name,
+            max_bytes=max_bytes,
+            session_max_bytes=session_max_bytes,
+        ),
+    )
+
+
+def rewrite_paste_stream_with_importer(
+    data: bytes,
+    importer: PasteImporter,
+) -> tuple[bytes, bytes]:
+    """Rewrite complete file-only paste frames with one attachment importer."""
     output = bytearray()
     cursor = 0
     while cursor < len(data):
@@ -56,7 +91,7 @@ def rewrite_paste_stream(record: SessionRecord, data: bytes) -> tuple[bytes, byt
         if paths is None:
             output.extend(data[start:frame_end])
         else:
-            attachments = import_files(record, paths)
+            attachments = importer(paths)
             replacement = " ".join(str(item.container_path) for item in attachments).encode()
             output.extend(PASTE_START + replacement + PASTE_END)
         cursor = frame_end
@@ -65,11 +100,21 @@ def rewrite_paste_stream(record: SessionRecord, data: bytes) -> tuple[bytes, byt
 
 def attach_with_file_proxy(record: SessionRecord) -> int:
     """Attach tmux through a PTY and translate dragged host files safely."""
+    return run_with_file_proxy(
+        ["tmux", "attach-session", "-t", record.tmux_session],
+        lambda data: rewrite_paste_stream(record, data),
+    )
+
+
+def run_with_file_proxy(argv: Sequence[str], rewriter: StreamRewriter) -> int:
+    """Run an interactive command while translating complete host-file pastes."""
+    if not argv:
+        raise ValueError("file proxy requires a command")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        return subprocess.run(["tmux", "attach-session", "-t", record.tmux_session], check=False).returncode
+        return subprocess.run(list(argv), check=False).returncode
     child_pid, child_fd = pty.fork()
     if child_pid == 0:
-        os.execvp("tmux", ["tmux", "attach-session", "-t", record.tmux_session])
+        os.execvp(argv[0], list(argv))
 
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
@@ -94,7 +139,7 @@ def attach_with_file_proxy(record: SessionRecord) -> int:
                         os.write(child_fd, buffer)
                     break
                 buffer += incoming
-                outgoing, buffer = rewrite_paste_stream(record, buffer)
+                outgoing, buffer = rewriter(buffer)
                 if outgoing:
                     os.write(child_fd, outgoing)
     finally:
