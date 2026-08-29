@@ -11,6 +11,7 @@ from pathlib import Path
 from . import __version__
 from .agent_adapters import attach_agent, deliver_attachments
 from .attachments import AttachmentError, import_clipboard, import_files
+from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session
 from .git_worktrees import detach_branch_owner, prune_stale_worktree_metadata, resolve_worktree_owner
 from .install import install_release, rollback_release
@@ -118,6 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
     worktree_commands.add_parser("doctor")
     gc = worktree_commands.add_parser("gc")
     gc.add_argument("--apply", action="store_true")
+    docker_gc = commands.add_parser("gc", help="reclaim unreachable sandbox images and volumes")
+    docker_gc.add_argument("--apply", action="store_true")
     pr = commands.add_parser("pr")
     pr_commands = pr.add_subparsers(dest="pr_command", required=True)
     checkout = pr_commands.add_parser("checkout")
@@ -295,6 +298,18 @@ def run(argv: list[str] | None = None) -> int:
         for path in stale:
             print(f"{'pruned' if getattr(args, 'apply', False) else 'stale'}: {path}")
         return 0
+    if args.command == "gc":
+        report = collect_garbage(repo, apply=args.apply)
+        if report.skipped:
+            print(f"Collected nothing: {report.skipped}")
+            return 1
+        if not report:
+            print("No unreachable sandbox images, volumes or containers.")
+        for item in report.collected:
+            print(f"{'reclaimed' if args.apply else 'unreachable'} {item.kind}: {item.name}")
+        for item in report.failed:
+            print(f"failed {item.kind}: {item.name} ({item.detail})")
+        return 1 if report.failed else 0
     if args.command == "pr":
         return _checkout_pr(repo, args.number)
     if args.command == "install":

@@ -14,6 +14,11 @@ from .models import SessionRecord, utc_now
 
 
 SCHEMA_VERSION = 1
+ARTIFACT_LIFECYCLE_LOCK = "artifact-lifecycle"
+
+
+class StateError(RuntimeError):
+    pass
 
 
 def state_root() -> Path:
@@ -90,15 +95,41 @@ def save_session(record: SessionRecord) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def list_sessions(*, include_released: bool = False) -> list[SessionRecord]:
+def list_sessions(*, include_released: bool = False, strict: bool = False) -> list[SessionRecord]:
     ensure_roots()
     records: list[SessionRecord] = []
-    for path in sorted((state_root() / "sessions").glob("*/session.json")):
+    sessions_root = state_root() / "sessions"
+    try:
+        entries = sorted(sessions_root.iterdir())
+    except OSError as exc:
+        if strict:
+            raise StateError(f"cannot enumerate session records in {sessions_root}: {exc}") from exc
+        return records
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_dir():
+            if strict:
+                raise StateError(f"unsafe session state entry: {entry}")
+            continue
+        path = entry / "session.json"
+        if not path.is_file():
+            if strict:
+                raise StateError(f"session record is missing: {path}")
+            continue
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             record = SessionRecord.from_dict(raw)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            if strict:
+                raise StateError(f"invalid session record {path}: {exc}") from exc
             continue
+        if strict and record.schema_version != SCHEMA_VERSION:
+            raise StateError(
+                f"unsupported session schema in {path}: {record.schema_version}"
+            )
+        if strict and record.id != entry.name:
+            raise StateError(
+                f"session id {record.id!r} does not match state directory {entry.name!r}"
+            )
         if include_released or record.phase != "released":
             records.append(record)
     return sorted(records, key=lambda item: item.created_at)

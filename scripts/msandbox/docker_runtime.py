@@ -14,11 +14,18 @@ from typing import Sequence
 
 from .git_worktrees import git_common_dir, session_git_dir, session_git_pointer
 from .models import PortSet, SessionRecord
-from .state import data_root, state_lock, state_root
+from .state import ARTIFACT_LIFECYCLE_LOCK, data_root, state_lock, state_root
 
 
 class DockerError(RuntimeError):
     pass
+
+
+# Every content-addressed workspace build is a tag under this repository. The
+# `:latest` tag in the same repository is NOT content-addressed — it is the
+# legacy/AutoPR lane's image (docker-compose.sandbox.yml) and must never be
+# treated as a collectable build.
+IMAGE_REPOSITORY = "matcha-agent-sandbox-workspace"
 
 
 def compose_project(session_id: str) -> str:
@@ -85,9 +92,9 @@ def _dependency_volume(prefix: str, paths: Sequence[Path], template_id: str) -> 
     return f"matcha-ms-deps-{prefix}-{digest.hexdigest()[:16]}"
 
 
-def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tuple[Path, str, str]:
-    """Create one immutable Docker context for this controller+lockfile set."""
-    sources = {
+def build_context_sources(record: SessionRecord, runtime_root: Path) -> dict[str, Path]:
+    """The exact file set whose bytes name this session's image."""
+    return {
         "docker/agent-sandbox/Dockerfile": runtime_root / "docker/agent-sandbox/Dockerfile",
         "docker/agent-sandbox/Dockerfile.dockerignore": runtime_root
         / "docker/agent-sandbox/Dockerfile.dockerignore",
@@ -100,32 +107,46 @@ def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tup
         "client/oceanlab/package.json": record.worktree / "client/oceanlab/package.json",
         "client/oceanlab/package-lock.json": record.worktree / "client/oceanlab/package-lock.json",
     }
+
+
+def build_identifier(sources: dict[str, Path], *, playwright: bool) -> str:
+    """Content-address a build. Pure — garbage collection reads it without
+    materializing a context directory for every candidate it has to consider."""
     digest = hashlib.sha256()
     digest.update(platform.machine().encode())
-    digest.update(f"playwright={record.playwright}".encode())
+    digest.update(f"playwright={playwright}".encode())
     for relative, source in sources.items():
         if not source.is_file():
             raise DockerError(f"sandbox build input is missing: {source}")
         digest.update(relative.encode())
         digest.update(source.read_bytes())
-    identifier = digest.hexdigest()[:20]
-    destination = data_root() / "build-contexts" / identifier
-    if not destination.is_dir():
-        with state_lock(f"build-context-{identifier}"):
-            if not destination.is_dir():
-                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                temporary = Path(
-                    tempfile.mkdtemp(prefix=f".{identifier}.", dir=destination.parent)
-                )
-                try:
-                    for relative, source in sources.items():
-                        target = temporary / relative
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(source, target)
-                    os.replace(temporary, destination)
-                finally:
-                    shutil.rmtree(temporary, ignore_errors=True)
-    return destination, f"matcha-agent-sandbox-workspace:{identifier}", identifier
+    return digest.hexdigest()[:20]
+
+
+def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tuple[Path, str, str]:
+    """Create one immutable Docker context for this controller+lockfile set."""
+    # GC removes orphaned contexts. Serialize this short materialization step
+    # with its sweep so it cannot remove the temporary directory mid-copy.
+    with state_lock(ARTIFACT_LIFECYCLE_LOCK, timeout_s=600):
+        sources = build_context_sources(record, runtime_root)
+        identifier = build_identifier(sources, playwright=record.playwright)
+        destination = data_root() / "build-contexts" / identifier
+        if not destination.is_dir():
+            with state_lock(f"build-context-{identifier}"):
+                if not destination.is_dir():
+                    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    temporary = Path(
+                        tempfile.mkdtemp(prefix=f".{identifier}.", dir=destination.parent)
+                    )
+                    try:
+                        for relative, source in sources.items():
+                            target = temporary / relative
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(source, target)
+                        os.replace(temporary, destination)
+                    finally:
+                        shutil.rmtree(temporary, ignore_errors=True)
+    return destination, f"{IMAGE_REPOSITORY}:{identifier}", identifier
 
 
 def _safe_git_subdirectory(common_dir: Path, relative: Path) -> Path:
@@ -294,6 +315,12 @@ def ensure_container(record: SessionRecord, *, test_services: bool = False) -> N
     )
     if build.returncode:
         raise DockerError("workspace image build failed")
+    # A successful build is the exact moment the image it supersedes became
+    # garbage, so reclaim here rather than waiting for someone to remember.
+    # Imported late: docker_gc reads this module's primitives.
+    from .docker_gc import collect_garbage_quietly
+
+    collect_garbage_quietly(record)
     with state_lock("dependency-initialization", timeout_s=600):
         for variable in (
             "SANDBOX_SERVER_VENV_VOLUME",

@@ -240,11 +240,18 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then groupadd --gid "${USER_GID}
 # Bake Linux-native dependency trees into the image, then copy them into named
 # volumes on first start. This prevents macOS node_modules and virtualenvs from
 # being reused by the container.
-COPY --from=pydeps /opt/bootstrap/server-venv /opt/bootstrap/server-venv
+#
+# --chown on each COPY, never a trailing `chown -R /opt/bootstrap`: these four
+# trees are ~1.65GB, and a recursive chown rewrites every one of those files
+# into a second layer, which cost 1.69GB of image for no observable effect.
+# Ownership here is in fact never read — entrypoint.sh rsyncs each tree to its
+# volume and chowns the destination itself, and reads .dependencies-sha as root
+# before dropping to `gosu agent`. Setting it during the copy is free.
+COPY --from=pydeps --chown=${USER_UID}:${USER_GID} /opt/bootstrap/server-venv /opt/bootstrap/server-venv
 COPY --from=pydeps /opt/playwright /opt/playwright
-COPY --from=npm-client /opt/client-node_modules /opt/bootstrap/client-node_modules
-COPY --from=npm-aux /opt/tellus-node_modules /opt/bootstrap/tellus-node_modules
-COPY --from=npm-aux /opt/oceanlab-node_modules /opt/bootstrap/oceanlab-node_modules
+COPY --from=npm-client --chown=${USER_UID}:${USER_GID} /opt/client-node_modules /opt/bootstrap/client-node_modules
+COPY --from=npm-aux --chown=${USER_UID}:${USER_GID} /opt/tellus-node_modules /opt/bootstrap/tellus-node_modules
+COPY --from=npm-aux --chown=${USER_UID}:${USER_GID} /opt/oceanlab-node_modules /opt/bootstrap/oceanlab-node_modules
 COPY server/requirements.txt /tmp/server-requirements.txt
 COPY client/package-lock.json /tmp/client/package-lock.json
 COPY client/tellus/package-lock.json /tmp/tellus/package-lock.json
@@ -254,7 +261,7 @@ RUN { \
         printf '%s\n' 'msandbox-test-tools:pytest,pytest-asyncio:v1'; \
         printf '%s\n' "controller-template:${DEPENDENCY_TEMPLATE_ID}"; \
     } | sha256sum | awk '{print $1}' > /opt/bootstrap/.dependencies-sha \
-    && chown -R "${USER_UID}:${USER_GID}" /opt/bootstrap
+    && chown "${USER_UID}:${USER_GID}" /opt/bootstrap /opt/bootstrap/.dependencies-sha
 
 COPY docker/agent-sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
 RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint \

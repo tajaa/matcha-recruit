@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
-from scripts.msandbox.docker_runtime import allocate_port_block, compose_environment
+from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
+from scripts.msandbox.docker_runtime import (
+    allocate_port_block,
+    build_context_sources,
+    build_identifier,
+    compose_environment,
+)
 from scripts.msandbox.git_worktrees import (
     GitError,
     branch_publish_state,
@@ -34,7 +43,14 @@ from scripts.msandbox.sessions import (
     stop_session,
     submit_session,
 )
-from scripts.msandbox.state import SCHEMA_VERSION, list_sessions, load_session, save_session, state_lock
+from scripts.msandbox.state import (
+    ARTIFACT_LIFECYCLE_LOCK,
+    SCHEMA_VERSION,
+    list_sessions,
+    load_session,
+    save_session,
+    state_lock,
+)
 from scripts.msandbox.validation import build_test_plan, changed_paths, run_test_plan
 
 
@@ -140,6 +156,27 @@ class StateTests(MsandboxTestCase):
 
 
 class WorktreeTests(MsandboxTestCase):
+    def test_initial_session_registration_holds_artifact_lifecycle_lock(self) -> None:
+        active_locks: list[str] = []
+
+        @contextmanager
+        def tracked_lock(scope: str, *args, **kwargs):
+            with state_lock(scope, *args, **kwargs):
+                active_locks.append(scope)
+                try:
+                    yield
+                finally:
+                    active_locks.remove(scope)
+
+        def assert_registration_locked(_record: SessionRecord) -> None:
+            self.assertIn(ARTIFACT_LIFECYCLE_LOCK, active_locks)
+
+        with mock.patch("scripts.msandbox.sessions.state_lock", tracked_lock), mock.patch(
+            "scripts.msandbox.sessions._copy_auth_templates",
+            side_effect=assert_registration_locked,
+        ):
+            create_session(self.repo, SessionSpec("locked", "codex", "main", start=False))
+
     def test_sessions_are_parallel_and_detached(self) -> None:
         first = create_session(self.repo, SessionSpec("first", "codex", "main", start=False))
         second = create_session(self.repo, SessionSpec("second", "codex", "main", start=False))
@@ -555,6 +592,19 @@ class HostAndInstallTests(MsandboxTestCase):
             capture_output=True,
         )
         self.assertEqual(bare.stdout.strip(), "legacy:")
+        # `gc` is a v2 verb, so it must not fall through to the legacy script.
+        garbage_environment = dict(os.environ)
+        garbage_environment["PATH"] = str(Path(sys.executable).parent)
+        garbage = subprocess.run(
+            [str(bin_dir / "msandbox"), "gc"],
+            check=False,
+            text=True,
+            capture_output=True,
+            env=garbage_environment,
+        )
+        self.assertEqual(garbage.returncode, 1)
+        self.assertIn("docker is not available", garbage.stdout)
+        self.assertNotIn("legacy:", garbage.stdout)
 
 
 class ValidationPlannerTests(MsandboxTestCase):
@@ -618,6 +668,311 @@ class ValidationPlannerTests(MsandboxTestCase):
             }.issubset(identifiers)
         )
         self.assertEqual(set(plan.xcode_targets), {"espresso", "matchatutor", "tellus", "gummfit"})
+
+
+class FakeDocker:
+    """Stand-in for the docker CLI, dispatching on the argv docker_gc builds."""
+
+    def __init__(
+        self,
+        *,
+        images: tuple[str, ...] = (),
+        volumes: tuple[str, ...] = (),
+        containers: tuple[tuple[str, str, str, str], ...] = (),
+        mounts: dict[str, tuple[str, ...]] | None = None,
+        binds: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        self.images = list(images)
+        self.volumes = list(volumes)
+        self.containers = list(containers)
+        self.mounts = dict(mounts or {})
+        self.binds = dict(binds or {})
+        self.removed: list[tuple[str, ...]] = []
+
+    def __call__(self, *argv: str) -> subprocess.CompletedProcess[str]:
+        out = ""
+        if argv[:2] == ("ps", "--all"):
+            out = "\n".join("\t".join(row) for row in self.containers)
+        elif argv[:2] == ("container", "inspect"):
+            out = json.dumps(
+                [
+                    {
+                        "Name": f"/{name}",
+                        "Mounts": [
+                            {
+                                "Type": "volume",
+                                "Name": volume,
+                                "Source": f"/var/lib/docker/volumes/{volume}/_data",
+                            }
+                            for volume in self.mounts.get(name, ())
+                        ]
+                        + [
+                            {"Type": "bind", "Name": "", "Source": source}
+                            for source in self.binds.get(name, ())
+                        ],
+                    }
+                    for name in argv[2:]
+                ]
+            )
+        elif argv[0] == "images":
+            out = "\n".join(self.images)
+        elif argv[:2] == ("volume", "ls"):
+            out = "\n".join(self.volumes)
+        elif argv[0] == "rmi":
+            self.removed.append(argv)
+            self.images = [item for item in self.images if item != argv[1]]
+        elif argv[:2] == ("volume", "rm"):
+            self.removed.append(argv)
+            self.volumes = [item for item in self.volumes if item != argv[2]]
+        elif argv[0] == "rm":
+            self.removed.append(argv)
+            self.containers = [row for row in self.containers if row[0] != argv[1]]
+        else:  # pragma: no cover - an argv shape the collector does not build
+            raise AssertionError(f"unexpected docker invocation: {argv}")
+        return subprocess.CompletedProcess(list(argv), 0, out, "")
+
+
+class DockerGcTests(MsandboxTestCase):
+    MANIFESTS = (
+        "server/requirements.txt",
+        "client/package.json",
+        "client/package-lock.json",
+        "client/tellus/package.json",
+        "client/tellus/package-lock.json",
+        "client/oceanlab/package.json",
+        "client/oceanlab/package-lock.json",
+    )
+
+    def sandbox_tree(self, root: Path, marker: str) -> Path:
+        directory = root / "docker/agent-sandbox"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "Dockerfile").write_text(f"FROM scratch # {marker}\n", encoding="utf-8")
+        (directory / "Dockerfile.dockerignore").write_text("*\n", encoding="utf-8")
+        (directory / "entrypoint.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        return root
+
+    def worktree_manifests(self, worktree: Path) -> Path:
+        for relative in self.MANIFESTS:
+            path = worktree / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}\n", encoding="utf-8")
+        return worktree
+
+    def live_session(self, session_id: str = "live-1") -> SessionRecord:
+        record = self.record(session_id)
+        self.worktree_manifests(record.worktree)
+        save_session(record)
+        return record
+
+    def test_live_session_artifacts_are_reachable_and_stale_ones_are_not(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        record = self.live_session()
+        live = reachable(self.repo)
+        self.assertTrue(live.complete)
+        # One tag per (root, playwright) pair, plus the protected :latest.
+        self.assertIn("matcha-agent-sandbox-workspace:latest", live.images)
+        self.assertEqual(len(live.images), 3)
+        self.assertEqual(len(live.volumes), 8)
+        self.assertIn(record.compose_project, live.projects)
+        self.assertTrue(live.covers_volume(f"{record.compose_project}_sandbox_npm_cache"))
+        self.assertFalse(live.covers_volume("matcha-ms-dead-9999_sandbox_npm_cache"))
+
+    def test_protected_lanes_survive_with_zero_session_records(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:latest", "matcha-agent-sandbox-workspace:deadbeef"),
+            volumes=(
+                "matcha-agent-sandbox_sandbox_home",
+                "matcha-kanban-autopr-sandbox_sandbox_home",
+                "matcha-ms-dead-9999_sandbox_npm_cache",
+            ),
+            containers=(
+                ("matcha-agent-sandbox-workspace-1", "exited", "matcha-agent-sandbox-workspace:latest", "matcha-agent-sandbox"),
+            ),
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        collected = {(item.kind, item.name) for item in report.collected}
+        self.assertEqual(
+            collected,
+            {("image", "matcha-agent-sandbox-workspace:deadbeef"),
+             ("volume", "matcha-ms-dead-9999_sandbox_npm_cache")},
+        )
+        # The lane with no SessionRecord keeps its login volume and its image.
+        self.assertIn("matcha-agent-sandbox_sandbox_home", docker.volumes)
+        self.assertIn("matcha-kanban-autopr-sandbox_sandbox_home", docker.volumes)
+        self.assertIn("matcha-agent-sandbox-workspace:latest", docker.images)
+        self.assertEqual(
+            docker.containers,
+            [("matcha-agent-sandbox-workspace-1", "exited", "matcha-agent-sandbox-workspace:latest", "matcha-agent-sandbox")],
+        )
+
+    def test_every_installed_release_keeps_its_own_rollback_image(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        releases = self.root / "data/releases"
+        for name in ("release-old", "release-new"):
+            self.sandbox_tree(releases / name, name)
+        record = self.live_session()
+        live = reachable(self.repo)
+        self.assertEqual(len(runtime_roots(self.repo)), 3)
+        # Three roots x two playwright variants, all distinct, plus :latest.
+        self.assertEqual(len(live.images), 7)
+        for root in (releases / "release-old", releases / "release-new"):
+            identifier = build_identifier(
+                build_context_sources(record, root), playwright=False
+            )
+            self.assertIn(f"matcha-agent-sandbox-workspace:{identifier}", live.images)
+
+    def test_shared_dependency_volume_is_matched_by_name_not_compose_label(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        record = self.live_session()
+        live = reachable(self.repo)
+        shared = sorted(live.volumes)[0]
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:latest",),
+            volumes=(shared, "matcha-ms-dead-9999_sandbox_npm_cache"),
+            # The volume still carries the compose label of the dead project
+            # that happened to create it first; selecting by label would delete
+            # a volume the live session depends on.
+            containers=(
+                ("matcha-ms-dead-9999-workspace-1", "exited", "matcha-agent-sandbox-workspace:deadbeef", "matcha-ms-dead-9999"),
+            ),
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertIn(shared, docker.volumes)
+        self.assertNotIn(("volume", shared), {(item.kind, item.name) for item in report.collected})
+        self.assertIn(("container", "matcha-ms-dead-9999-workspace-1"), {(i.kind, i.name) for i in report.collected})
+
+    def test_dry_run_reports_without_removing_anything(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        (self.root / "data/homes/orphan").mkdir(parents=True)
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            volumes=("matcha-ms-dead-9999_sandbox_npm_cache",),
+            containers=(
+                ("matcha-ms-dead-9999-workspace-1", "exited", "matcha-agent-sandbox-workspace:deadbeef", "matcha-ms-dead-9999"),
+            ),
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=False)
+        self.assertEqual(docker.removed, [])
+        self.assertIn("matcha-agent-sandbox-workspace:deadbeef", docker.images)
+        self.assertTrue((self.root / "data/homes/orphan").is_dir())
+        self.assertEqual(
+            {(item.kind, item.name) for item in report.collected},
+            {
+                ("container", "matcha-ms-dead-9999-workspace-1"),
+                ("image", "matcha-agent-sandbox-workspace:deadbeef"),
+                ("volume", "matcha-ms-dead-9999_sandbox_npm_cache"),
+                ("session-home", "orphan"),
+            },
+        )
+
+    def test_unreadable_build_inputs_collect_nothing(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        # A live session whose worktree lost its lockfiles makes every image
+        # indistinguishable from garbage; GC must refuse rather than guess.
+        save_session(self.record("broken-1"))
+        docker = FakeDocker(images=("matcha-agent-sandbox-workspace:deadbeef",))
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertIsNotNone(report.skipped)
+        self.assertEqual(docker.removed, [])
+        self.assertIn("matcha-agent-sandbox-workspace:deadbeef", docker.images)
+
+    def test_invalid_session_record_makes_reachability_incomplete(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        invalid = self.root / "state/sessions/live-corrupt/session.json"
+        invalid.parent.mkdir(parents=True)
+        invalid.write_text("{not-json\n", encoding="utf-8")
+        home = self.root / "data/homes/live-corrupt"
+        home.mkdir(parents=True)
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            volumes=("matcha-ms-dead-9999_sandbox_npm_cache",),
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertIn("invalid session record", report.skipped or "")
+        self.assertEqual(docker.removed, [])
+        self.assertTrue(home.is_dir())
+
+    def test_docker_inventory_failure_aborts_before_host_cleanup(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        home = self.root / "data/homes/orphan"
+        home.mkdir(parents=True)
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            containers=(
+                (
+                    "matcha-ms-dead-workspace-1",
+                    "exited",
+                    "matcha-agent-sandbox-workspace:deadbeef",
+                    "matcha-ms-dead",
+                ),
+            ),
+        )
+
+        def failed_inventory(*argv: str) -> subprocess.CompletedProcess[str]:
+            if argv[0] == "images":
+                return subprocess.CompletedProcess(list(argv), 1, "", "daemon unavailable")
+            return docker(*argv)
+
+        with mock.patch(
+            "scripts.msandbox.docker_gc._docker", side_effect=failed_inventory
+        ), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertIn("Docker inventory is incomplete", report.skipped or "")
+        self.assertEqual(docker.removed, [])
+        self.assertTrue(home.is_dir())
+
+    def test_running_orphan_container_protects_its_bind_mounted_home(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        running_home = self.root / "data/homes/running-orphan"
+        stale_home = self.root / "data/homes/stale-orphan"
+        running_home.mkdir(parents=True)
+        stale_home.mkdir(parents=True)
+        container = "matcha-ms-running-orphan-workspace-1"
+        mounted_volume = "matcha-ms-running-orphan_sandbox_npm_cache"
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            volumes=(mounted_volume,),
+            containers=(
+                (
+                    container,
+                    "running",
+                    "matcha-agent-sandbox-workspace:deadbeef",
+                    "matcha-ms-running-orphan",
+                ),
+            ),
+            mounts={container: (mounted_volume,)},
+            binds={container: (str(running_home),)},
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertTrue(running_home.is_dir())
+        self.assertFalse(stale_home.exists())
+        self.assertIn(mounted_volume, docker.volumes)
+        self.assertIn("matcha-agent-sandbox-workspace:deadbeef", docker.images)
+        self.assertIn(
+            ("session-home", "stale-orphan"),
+            {(item.kind, item.name) for item in report.collected},
+        )
 
 
 if __name__ == "__main__":
