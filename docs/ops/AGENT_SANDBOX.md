@@ -85,6 +85,59 @@ that's a design choice made in this plan, documented below rather than hidden.
   SSH/psql and call the AWS CLI. `update-ec2.sh` (live deploy) additionally
   requires `SANDBOX_ALLOW_DEPLOY=1` — see below.
 
+## Disk reclamation (`msandbox gc`)
+
+Every workspace build is content-addressed: the image tag is a hash of the
+Dockerfile, the dockerignore, the entrypoint, and the seven lockfiles
+(`docker_runtime.build_identifier`). Edit any one of them and the next build
+mints a **new ~5.75GB image** and strands the old one; the four
+`matcha-ms-deps-*` volumes are keyed off that same identifier, so they rotate
+with it. A `--playwright` session builds a second, separate image.
+
+`msandbox gc` computes what is still reachable and removes the rest —
+unreachable images, `matcha-ms-*` volumes, stopped `matcha-ms-*` containers, and
+orphaned `build-contexts/` and `homes/` directories. It is dry-run by default;
+`--apply` performs the removal. It also runs automatically after each successful
+build, which is exactly when the superseded image became garbage; set
+`MSANDBOX_SKIP_GC=1` to suppress that.
+
+Reachability is deliberately conservative:
+
+- `matcha-agent-sandbox-workspace:latest` is never collected — it is not
+  content-addressed, and both the legacy and AutoPR lanes run it.
+- Volumes of the four non-session compose projects (`matcha-agent-sandbox`,
+  `matcha-kanban-autopr-sandbox`, `matcha-error-autofix-sandbox`,
+  `matcha-autopr-self-audit-sandbox`) are protected by name. They have no
+  `SessionRecord`, and `matcha-agent-sandbox_sandbox_home` holds every agent
+  login — losing it costs four interactive sign-ins.
+- **Every installed release** under `~/.local/share/matcha-msandbox/releases`
+  contributes its own tags, because `msandbox install --rollback` can activate
+  any of them and each carries its own `docker/agent-sandbox` copy.
+- Dependency volumes are matched by recomputed name, never by Compose label: a
+  shared content-addressed volume keeps the label of whichever project created
+  it first, so a label-based sweep would delete one a live session needs.
+- If any live session's build inputs cannot be read, GC collects **nothing**
+  rather than guess.
+
+The build cache is separate from all of that and governed by
+`~/.docker/daemon.json` (`builder.gc.defaultKeepStorage`, currently 8GB). Trim
+it with `docker builder prune --max-used-space <bytes>`, which evicts LRU and so
+keeps the hottest layers — unlike `prune -af`, which wipes everything and turns
+the next build into a 15-25 minute one.
+
+**Gotcha, hit for real on 2026-08-29:** a size-capped LRU prune can evict *part*
+of a `type=cache` mount, leaving a truncated file behind. The `system` stage then
+dies on a corrupt apt index:
+
+```
+E: LZ4F: /var/lib/apt/lists/..._Packages.lz4 Unexpected end of file
+E: The package lists or status file could not be parsed or opened.
+```
+
+The fix is to drop the cache mounts wholesale rather than leave them half
+evicted — `docker builder prune -f --filter type=exec.cachemount` — and rebuild.
+Costs one slow apt/npm/uv re-download, and nothing else in the cache is touched.
+
 ## Three lanes
 
 **In-sandbox** (the default): editing code, running the dev stack against the
@@ -131,6 +184,7 @@ The session-oriented command reference is in `MSANDBOX_SESSIONS.md`.
 | `audit [--draft]` | Runs deterministic AutoPR/msandbox checks. Repository failures can dispatch the sealed draft-repair workflow with `--draft`; pending migrations and other machine state remain explicit operator actions. |
 | `attach <file...>` | Copies only explicitly selected files (50 MiB each by default) to the gitignored `.msandbox/attachments/` inbox and prints `/workspace/...` paths understood by Codex, Claude Code, and OpenCode. Content hashes make repeats idempotent. |
 | `paste` | macOS bridge for a copied Finder file/PDF or PNG clipboard image; imports it through the same bounded inbox. Run it in a host terminal, then paste the printed path into an existing agent prompt. |
+| `gc [--apply]` | Reclaim sandbox images/volumes/containers no live session can reach. Dry-run by default, like `worktree gc`. See "Disk reclamation" below. |
 | `login <codex\|claude\|opencode\|gh>` | Authenticate one agent (own state volume) |
 | `run <codex\|claude\|opencode> [args]` | Start that agent with full execution |
 | `codex` / `claude` / `opencode` | Shorthand for `run <agent>` |

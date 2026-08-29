@@ -23,7 +23,7 @@ run_v2_controller() {
 }
 
 case "${1:-}" in
-    session|worktree|pr|test|install|host)
+    session|worktree|pr|test|install|host|gc)
         run_v2_controller "$@"
         ;;
     attach)
