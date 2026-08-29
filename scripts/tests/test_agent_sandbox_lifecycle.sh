@@ -27,6 +27,11 @@ if [ "$1" = exec ]; then
         printf '%s\n' 'codex codex --sandboxed'
         exit 0
     fi
+    if [ "${AUTOPR_TEST_AUDIT_AGENT:-0}" = 1 ] \
+        && [ "${2:-}" = matcha-autopr-self-audit-sandbox-container ]; then
+        printf '%s\n' 'opencode opencode run audit'
+        exit 0
+    fi
     exit 1
 fi
 [ "$1" != inspect ] || { printf '%s\n' running; exit 0; }
@@ -148,6 +153,13 @@ env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
 check "dedicated AutoPR lane starts while the master switch is on" \
     $([ -f "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] && echo 0 || echo 1)
 
+: > "$TMP_DIR/matcha-error-autofix-sandbox.running"
+: > "$TMP_DIR/matcha-autopr-self-audit-sandbox.running"
+audit_activity="$(AUTOPR_TEST_AUDIT_AGENT=1 run_msandbox status)"
+check "activity detection includes the error and self-audit worker sandboxes" \
+    $(printf '%s' "$audit_activity" | grep -q \
+      'ACTIVE — an AutoPR coding agent is running' && echo 0 || echo 1)
+
 set +e
 AUTOPR_TEST_ACTIVE=1 run_msandbox >/dev/null 2>&1
 active_entry_rc=$?
@@ -176,6 +188,8 @@ check "forced stop disables timer/dashboard/runner and stops both sandboxes" \
       && [ ! -e "$TMP_DIR/tmux.session" ] \
       && [ ! -e "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
+      && [ ! -e "$TMP_DIR/matcha-error-autofix-sandbox.running" ] \
+      && [ ! -e "$TMP_DIR/matcha-autopr-self-audit-sandbox.running" ] \
       && echo 0 || echo 1)
 
 run_msandbox start >/dev/null

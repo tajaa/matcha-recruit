@@ -7,7 +7,9 @@ set -euo pipefail
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 KANBAN_WORKFLOW="${AUTOPR_KANBAN_WORKFLOW:-${AUTOPR_WORKFLOW:-kanban-autopr.yml}}"
 ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
+AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
 ERROR_MAX_AGE_SECONDS="${AUTOPR_ERROR_MAX_AGE_SECONDS:-600}"
+AUDIT_MAX_AGE_SECONDS="${AUTOPR_AUDIT_MAX_AGE_SECONDS:-21600}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
@@ -69,14 +71,14 @@ iso_to_epoch() {
         || date -u -d "$iso" +%s
 }
 
-error_pass_due() {
-    local runs="$1" last_completed completed_epoch now
+workflow_pass_due() {
+    local runs="$1" max_age="$2" last_completed completed_epoch now
     last_completed="$(printf '%s' "$runs" | jq -r \
         '[.[] | select(.status == "completed")] | sort_by(.updatedAt // .createdAt) | last | (.updatedAt // .createdAt) // empty')"
     [ -n "$last_completed" ] || return 0
     completed_epoch="$(iso_to_epoch "$last_completed")" || return 0
     now="$(date +%s)"
-    [ $((now - completed_epoch)) -ge "$ERROR_MAX_AGE_SECONDS" ]
+    [ $((now - completed_epoch)) -ge "$max_age" ]
 }
 
 autopr_master_ready() {
@@ -112,7 +114,7 @@ main() {
         exit 0
     fi
 
-    local kanban_runs error_runs all_runs workflow reason
+    local kanban_runs error_runs audit_runs all_runs workflow reason
     if ! error_runs="$(get_workflow_runs_json "$ERROR_WORKFLOW")"; then
         # Fail closed: a blind dispatch could create a second queued coding job.
         log_event error error-run-list-failed
@@ -122,16 +124,23 @@ main() {
         log_event error kanban-run-list-failed
         exit 1
     fi
-    all_runs="$(jq -cn --argjson errors "$error_runs" --argjson kanban "$kanban_runs" \
-        '$errors + $kanban')"
+    if ! audit_runs="$(get_workflow_runs_json "$AUDIT_WORKFLOW")"; then
+        log_event error audit-run-list-failed
+        exit 1
+    fi
+    all_runs="$(jq -cn --argjson errors "$error_runs" --argjson audit "$audit_runs" \
+        --argjson kanban "$kanban_runs" '$errors + $audit + $kanban')"
     if has_active_workflow_run "$all_runs"; then
         log_event skip active-autopr-workflow "$all_runs"
         exit 0
     fi
 
-    if error_pass_due "$error_runs"; then
+    if workflow_pass_due "$error_runs" "$ERROR_MAX_AGE_SECONDS"; then
         workflow="$ERROR_WORKFLOW"
         reason="production-error-pass-due"
+    elif workflow_pass_due "$audit_runs" "$AUDIT_MAX_AGE_SECONDS"; then
+        workflow="$AUDIT_WORKFLOW"
+        reason="autopr-self-audit-due"
     else
         workflow="$KANBAN_WORKFLOW"
         reason="kanban-pass"

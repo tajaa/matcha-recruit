@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
+ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
+AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 REFRESH_SECONDS="${AUTOPR_DASHBOARD_REFRESH_SECONDS:-60}"
@@ -23,12 +25,25 @@ safe_gh() {
 }
 
 render_dashboard() {
-    local runs open_prs merged_prs cards selected selected_rc cutoff snapshot_tmp
+    local runs kanban_runs error_runs audit_runs open_prs open_kanban open_errors open_audits merged_prs cards selected selected_rc cutoff snapshot_tmp
     cutoff="$(utc_24_hours_ago)"
-    runs="$(safe_gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch "$REF" --limit 100 \
+    kanban_runs="$(safe_gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch "$REF" --limit 100 \
         --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
-    open_prs="$(safe_gh pr list --repo "$REPO" --state open --label autopr --limit 100 \
+    error_runs="$(safe_gh run list --repo "$REPO" --workflow "$ERROR_WORKFLOW" --branch "$REF" --limit 100 \
+        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
+    audit_runs="$(safe_gh run list --repo "$REPO" --workflow "$AUDIT_WORKFLOW" --branch "$REF" --limit 100 \
+        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
+    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" '
+      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) + ($audit | map(. + {lane:"self-audit"})))
+      | sort_by(.createdAt // "") | reverse')"
+    open_kanban="$(safe_gh pr list --repo "$REPO" --state open --label autopr --limit 100 \
         --json number,title,isDraft,headRefName,updatedAt,labels,url)"
+    open_errors="$(safe_gh pr list --repo "$REPO" --state open --label autofix --limit 100 \
+        --json number,title,isDraft,headRefName,updatedAt,labels,url)"
+    open_audits="$(safe_gh pr list --repo "$REPO" --state open --label autopr-self-audit --limit 100 \
+        --json number,title,isDraft,headRefName,updatedAt,labels,url)"
+    open_prs="$(jq -cn --argjson kanban "$open_kanban" --argjson errors "$open_errors" --argjson audit "$open_audits" \
+        '$kanban + $errors + $audit | unique_by(.number) | sort_by(.updatedAt // "") | reverse')"
     merged_prs="$(safe_gh pr list --repo "$REPO" --state merged --label autopr --limit 100 \
         --json number,title,mergedAt,url)"
 
@@ -57,7 +72,7 @@ render_dashboard() {
     printf 'WORKFLOW NOW · '
     if ! printf '%s' "$runs" | jq -r '
       [.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))]
-      | if length == 0 then "idle" else .[0] | "#\(.databaseId)  \(.status)" end
+      | if length == 0 then "idle" else .[0] | "\(.lane) #\(.databaseId)  \(.status)" end
     '; then
         printf 'GitHub unavailable\n'
     fi
@@ -99,7 +114,7 @@ render_dashboard() {
     printf '%s' "$runs" | jq -r --arg cutoff "$cutoff" '
       [.[] | select((.createdAt // "") >= $cutoff)][:4]
       | if length == 0 then "  none" else .[] |
-        "  #\(.databaseId)  \(.createdAt[11:16])Z  " +
+        "  #\(.databaseId)  \(.createdAt[11:16])Z  " + .lane + " · " +
         (if .status == "completed" then (.conclusion // "completed") else .status end) + "  " + .event
       end
     '

@@ -15,7 +15,10 @@ PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.sandbox.yml"
 AUTOPR_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.autopr-sandbox.yml"
 PRIMARY_SANDBOX_PROJECT_NAME="${AGENT_SANDBOX_PRIMARY_PROJECT_NAME:-matcha-agent-sandbox}"
-AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+KANBAN_AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_KANBAN_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+ERROR_AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_ERROR_SANDBOX_PROJECT_NAME:-matcha-error-autofix-sandbox}"
+AUDIT_AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_AUDIT_SANDBOX_PROJECT_NAME:-matcha-autopr-self-audit-sandbox}"
+AUTOPR_SANDBOX_PROJECT_NAME="${AUTOPR_SANDBOX_PROJECT_NAME:-$KANBAN_AUTOPR_SANDBOX_PROJECT_NAME}"
 AUTOPR_STATE_DIR="${AUTOPR_STATE_DIR:-$HOME/.local/state/matcha-agent-sandbox}"
 AUTOPR_ENABLE_FILE="${AUTOPR_ENABLE_FILE:-$AUTOPR_STATE_DIR/autopr-enabled}"
 AUTOPR_INSTALL_ROOT="${AUTOPR_DISPATCH_INSTALL_ROOT:-$HOME/.local/share/matcha-kanban-autopr}"
@@ -34,6 +37,10 @@ AUTOPR_RUNNER_LAUNCH_AGENT_PLIST="${AUTOPR_RUNNER_LAUNCH_AGENT_PLIST:-$HOME/Libr
 AUTOPR_GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 AUTOPR_REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 AUTOPR_WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
+AUTOPR_ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
+AUTOPR_AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
+MSANDBOX_ATTACHMENTS_DIR="${MSANDBOX_ATTACHMENTS_DIR:-$PROJECT_ROOT/.msandbox/attachments}"
+MSANDBOX_ATTACHMENT_MAX_BYTES="${MSANDBOX_ATTACHMENT_MAX_BYTES:-52428800}"
 PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
 # Callers that need a separate trust boundary (Kanban AutoPR, for example)
 # get their own container and named volumes without duplicating this launcher.
@@ -82,6 +89,9 @@ Commands:
   exec <cmd> [args...]         Run one non-interactive command with exact argv.
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
   doctor                       Check the isolation + capability checklist.
+  audit [--draft]              Audit AutoPR; --draft dispatches its repair workflow when failures exist.
+  attach <file...>             Import selected images/PDFs/files and print sandbox-readable paths.
+  paste                        Import a copied Finder file or clipboard image (macOS).
   login <codex|claude|opencode|gh>   Authenticate one agent (or GitHub) in its own state volume.
   run <codex|claude|opencode> [args] Start that agent with full execution inside the container boundary.
   codex [args]                       Shorthand for `run codex`.
@@ -95,6 +105,150 @@ the in-container user (defaults to your macOS uid/gid so file ownership matches
 on both sides). Host dev keeps ports 8001/5174; sandbox services publish on
 18001/15174 by default. See docs/ops/AGENT_SANDBOX.md for the complete map.
 EOF
+}
+
+sanitize_attachment_name() {
+    local source_name="$1" safe_name
+    safe_name="$(printf '%s' "$source_name" | tr -cs '[:alnum:]._- ' '_' | cut -c1-160)"
+    safe_name="${safe_name#.}"
+    [ -n "$safe_name" ] || safe_name=attachment
+    printf '%s\n' "$safe_name"
+}
+
+import_attachments() {
+    [ "$#" -gt 0 ] || {
+        echo "usage: msandbox attach <file...>" >&2
+        return 2
+    }
+    mkdir -p "$MSANDBOX_ATTACHMENTS_DIR"
+    chmod 700 "$MSANDBOX_ATTACHMENTS_DIR" 2>/dev/null || true
+
+    local source_file resolved_file byte_count safe_name digest destination
+    for source_file in "$@"; do
+        [ -f "$source_file" ] || {
+            echo "Attachment is not a regular file: $source_file" >&2
+            return 1
+        }
+        resolved_file="$(cd "$(dirname "$source_file")" && pwd -P)/$(basename "$source_file")"
+        byte_count="$(wc -c < "$resolved_file" | tr -d '[:space:]')"
+        [ "$byte_count" -le "$MSANDBOX_ATTACHMENT_MAX_BYTES" ] 2>/dev/null || {
+            echo "Attachment exceeds $MSANDBOX_ATTACHMENT_MAX_BYTES bytes: $source_file" >&2
+            return 1
+        }
+        safe_name="$(sanitize_attachment_name "$(basename "$source_file")")"
+        digest="$(shasum -a 256 "$resolved_file" | awk '{print substr($1,1,12)}')"
+        destination="$MSANDBOX_ATTACHMENTS_DIR/${digest}-${safe_name}"
+        if [ "$resolved_file" != "$destination" ]; then
+            cp -p "$resolved_file" "$destination"
+        fi
+        chmod 600 "$destination" 2>/dev/null || true
+        printf '/workspace/.msandbox/attachments/%s\n' "$(basename "$destination")"
+    done
+}
+
+clipboard_file_paths() {
+    command -v osascript >/dev/null 2>&1 || return 1
+    osascript <<'APPLESCRIPT'
+try
+    set clipboardItems to the clipboard as alias list
+on error
+    try
+        set clipboardItems to {the clipboard as alias}
+    on error
+        return ""
+    end try
+end try
+set output to ""
+repeat with clipboardItem in clipboardItems
+    set output to output & POSIX path of clipboardItem & linefeed
+end repeat
+return output
+APPLESCRIPT
+}
+
+write_clipboard_image() {
+    local destination="$1"
+    command -v osascript >/dev/null 2>&1 || return 1
+    osascript - "$destination" <<'APPLESCRIPT'
+on run argv
+    set destinationPath to item 1 of argv
+    try
+        set imageData to the clipboard as «class PNGf»
+    on error
+        return "NO_IMAGE"
+    end try
+    set destinationFile to open for access POSIX file destinationPath with write permission
+    try
+        set eof destinationFile to 0
+        write imageData to destinationFile
+        close access destinationFile
+    on error errorMessage
+        try
+            close access destinationFile
+        end try
+        error errorMessage
+    end try
+    return "OK"
+end run
+APPLESCRIPT
+}
+
+import_clipboard() {
+    local clipboard_paths temp_image result
+    clipboard_paths="$(clipboard_file_paths 2>/dev/null || true)"
+    if [ -n "$clipboard_paths" ]; then
+        local -a files=()
+        while IFS= read -r clipboard_path; do
+            [ -n "$clipboard_path" ] && files+=("$clipboard_path")
+        done <<< "$clipboard_paths"
+        if [ "${#files[@]}" -gt 0 ]; then
+            import_attachments "${files[@]}"
+            return
+        fi
+    fi
+
+    temp_image="$(mktemp "${TMPDIR:-/tmp}/matcha-msandbox-clipboard.XXXXXX")"
+    mv "$temp_image" "$temp_image.png"
+    temp_image="$temp_image.png"
+    result="$(write_clipboard_image "$temp_image" 2>/dev/null || true)"
+    if [ "$result" != OK ] || [ ! -s "$temp_image" ]; then
+        rm -f "$temp_image"
+        echo "Clipboard has no copied file or PNG image. Copy a Finder file or screenshot, then retry." >&2
+        return 1
+    fi
+    import_attachments "$temp_image"
+    rm -f "$temp_image"
+}
+
+run_autopr_audit() {
+    local draft=0 audit_dir="$PROJECT_ROOT/scripts/autopr-self-audit"
+    if [ "${1:-}" = --draft ]; then draft=1; shift; fi
+    [ "$#" = 0 ] || { echo "usage: msandbox audit [--draft]" >&2; return 2; }
+    [ -x "$audit_dir/audit.sh" ] || {
+        echo "AutoPR audit helper is missing: $audit_dir/audit.sh" >&2
+        return 1
+    }
+
+    local audit_json audit_summary audit_rc=0
+    audit_json="$(mktemp "${TMPDIR:-/tmp}/matcha-autopr-audit-json.XXXXXX")"
+    audit_summary="$(mktemp "${TMPDIR:-/tmp}/matcha-autopr-audit-summary.XXXXXX")"
+    "$audit_dir/audit.sh" --json "$audit_json" --summary "$audit_summary" || audit_rc=$?
+    cat "$audit_summary"
+    if [ "$draft" = 1 ]; then
+        if [ "$(jq -r '.repairable_failures' "$audit_json")" -gt 0 ] 2>/dev/null; then
+            [ -x "$AUTOPR_GH_BIN" ] || {
+                rm -f "$audit_json" "$audit_summary"
+                echo "GitHub CLI is unavailable: $AUTOPR_GH_BIN" >&2
+                return 1
+            }
+            "$AUTOPR_GH_BIN" workflow run "$AUTOPR_AUDIT_WORKFLOW" --repo "$AUTOPR_REPO" --ref main
+            echo "Dispatched $AUTOPR_AUDIT_WORKFLOW to investigate repairable failures in msandbox."
+        else
+            echo "No repo-repairable AutoPR failure was found; no repair workflow dispatched."
+        fi
+    fi
+    rm -f "$audit_json" "$audit_summary"
+    return "$audit_rc"
 }
 
 require_docker() {
@@ -221,6 +375,15 @@ container_has_agent_process() {
     '
 }
 
+autopr_sandbox_projects() {
+    printf '%s\n' \
+        "$AUTOPR_SANDBOX_PROJECT_NAME" \
+        "$KANBAN_AUTOPR_SANDBOX_PROJECT_NAME" \
+        "$ERROR_AUTOPR_SANDBOX_PROJECT_NAME" \
+        "$AUDIT_AUTOPR_SANDBOX_PROJECT_NAME" \
+        | awk 'NF && !seen[$0]++'
+}
+
 workspace_state() {
     local container_id state
     container_id="$("${COMPOSE[@]}" ps --all --quiet workspace 2>/dev/null)" \
@@ -241,15 +404,32 @@ detect_agentic_activity() {
         return 0
     fi
 
-    local primary_agent=0 autopr_agent=0 found_local=0 runs=""
+    local primary_agent=0 autopr_agent=0 found_local=0 runs='[]' workflow_runs="" workflow="" project="" gh_ok=1
     container_has_agent_process "$PRIMARY_SANDBOX_PROJECT_NAME" && primary_agent=1
-    container_has_agent_process "$AUTOPR_SANDBOX_PROJECT_NAME" && autopr_agent=1
+    while IFS= read -r project; do
+        if container_has_agent_process "$project"; then
+            autopr_agent=1
+            break
+        fi
+    done < <(autopr_sandbox_projects)
     if [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ]; then found_local=1; fi
 
-    if [ -x "$AUTOPR_GH_BIN" ] && command -v jq >/dev/null \
-        && runs="$("$AUTOPR_GH_BIN" run list --repo "$AUTOPR_REPO" \
-            --workflow "$AUTOPR_WORKFLOW" --branch main --limit 20 \
-            --json databaseId,status,url 2>/dev/null)"; then
+    if [ -x "$AUTOPR_GH_BIN" ] && command -v jq >/dev/null; then
+        for workflow in "$AUTOPR_ERROR_WORKFLOW" "$AUTOPR_AUDIT_WORKFLOW" "$AUTOPR_WORKFLOW"; do
+            if workflow_runs="$("$AUTOPR_GH_BIN" run list --repo "$AUTOPR_REPO" \
+                --workflow "$workflow" --branch main --limit 20 \
+                --json databaseId,status,url 2>/dev/null)"; then
+                runs="$(jq -cn --argjson prior "$runs" --argjson current "$workflow_runs" \
+                    '$prior + $current')"
+            else
+                gh_ok=0
+                break
+            fi
+        done
+    else
+        gh_ok=0
+    fi
+    if [ "$gh_ok" = 1 ]; then
         if printf '%s' "$runs" | jq -e \
             'any(.[]; .status | IN("queued", "in_progress", "requested", "waiting", "pending"))' \
             >/dev/null; then
@@ -422,16 +602,19 @@ disable_autopr_control_plane() {
     fi
 }
 
-stop_autopr_container() {
-    docker compose --project-name "$AUTOPR_SANDBOX_PROJECT_NAME" \
-        --file "$COMPOSE_FILE" stop workspace >/dev/null 2>&1 || true
+stop_autopr_containers() {
+    local project
+    while IFS= read -r project; do
+        docker compose --project-name "$project" \
+            --file "$COMPOSE_FILE" stop workspace >/dev/null 2>&1 || true
+    done < <(autopr_sandbox_projects)
 }
 
 shutdown_all_sandboxes() {
     disable_autopr_control_plane
     stop_actions_runner
     if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
-        stop_autopr_container
+        stop_autopr_containers
         "${PRIMARY_COMPOSE[@]}" stop workspace
     fi
     print_system_status "MSANDBOX STOPPED"
@@ -648,6 +831,16 @@ case "$command_name" in
         require_docker
         start_primary_and_enable_autopr
         run_doctor
+        ;;
+    audit)
+        run_autopr_audit "$@"
+        ;;
+    attach)
+        import_attachments "$@"
+        ;;
+    paste)
+        [ "$#" = 0 ] || { echo "usage: msandbox paste" >&2; exit 2; }
+        import_clipboard
         ;;
     stop)
         if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then

@@ -26,6 +26,9 @@ msandbox dev                  # backend/worker/frontend/Tell-Us/Oceanlab in tmux
 msandbox codex                # in another terminal — or `claude` / `opencode`
 msandbox exec command args    # exact-argv, non-TTY automation path
 msandbox doctor               # isolation + capability self-check
+msandbox audit                # read-only AutoPR repo + machine-state audit
+msandbox attach ./shot.png    # import a dragged image/PDF/file; prints its in-sandbox path
+msandbox paste                # import the Finder file or screenshot currently on the clipboard
 ```
 
 The normal host development stack can stay running at the same time:
@@ -111,6 +114,9 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |
 | `dev [args]` | `AGENT_SANDBOX=1 ./scripts/dev-remote.sh` inside the container |
 | `doctor` | Runs the isolation/capability checklist below |
+| `audit [--draft]` | Runs deterministic AutoPR/msandbox checks. Repository failures can dispatch the sealed draft-repair workflow with `--draft`; pending migrations and other machine state remain explicit operator actions. |
+| `attach <file...>` | Copies only explicitly selected files (50 MiB each by default) to the gitignored `.msandbox/attachments/` inbox and prints `/workspace/...` paths understood by Codex, Claude Code, and OpenCode. Content hashes make repeats idempotent. |
+| `paste` | macOS bridge for a copied Finder file/PDF or PNG clipboard image; imports it through the same bounded inbox. Run it in a host terminal, then paste the printed path into an existing agent prompt. |
 | `login <codex\|claude\|opencode\|gh>` | Authenticate one agent (own state volume) |
 | `run <codex\|claude\|opencode> [args]` | Start that agent with full execution |
 | `codex` / `claude` / `opencode` | Shorthand for `run <agent>` |
@@ -126,6 +132,29 @@ the repo `.env` files' host-only `localhost` addresses. `HOST_DEV_BACKEND_URL`,
 point at the host-run application stack for browser and integration tests.
 `INSTALL_PLAYWRIGHT_BROWSERS=true` bakes in a Chromium for isolated Playwright
 runs. `SANDBOX_ALLOW_DEPLOY=1` permits `update-ec2.sh` from inside the sandbox.
+`MSANDBOX_ATTACHMENT_MAX_BYTES` changes the per-file import limit, and
+`MSANDBOX_ATTACHMENTS_DIR` exists as a test/administration override. The
+default inbox stays inside the repository bind mount but is ignored by Git, so
+no new host directory is exposed and no attachment can enter an AutoPR clone.
+
+Examples (run these from a host terminal; dragging after `attach` pastes the
+selected Finder path into that command):
+
+```bash
+evidence="$(msandbox attach "/path/you/dragged/screenshot.png")"
+msandbox codex -i "$evidence" "Diagnose what this screenshot shows"
+
+evidence="$(msandbox paste)"       # copied screenshot or Finder file/PDF
+msandbox claude "Read $evidence and help me fix the issue"
+msandbox opencode --prompt "Read $evidence and help me fix the issue"
+```
+
+For an agent session that is already open, run `msandbox attach` or
+`msandbox paste` in a second host terminal and paste the printed `/workspace/`
+path into the existing prompt. Codex's `-i/--image` flag attaches initial
+images directly; PDF and other document paths remain ordinary readable
+workspace files. This bridge is deliberately explicit because mounting the
+whole macOS temp tree or home directory would undo the sandbox boundary.
 
 The host and sandbox development stacks use separate host port namespaces:
 
@@ -185,13 +214,15 @@ mistaken for an unseen AutoPR run.
 `msandbox stop` likewise refuses active work—or an unknown GitHub state—and
 requires `msandbox stop --force` to interrupt deliberately. A successful stop
 removes the marker first, unloads the timer, closes the dashboard, boots out the
-self-hosted `com.matcha.github-actions-runner` LaunchAgent, and stops both
-workspace containers. `msandbox off` is the equivalent immediate shutdown
+self-hosted `com.matcha.github-actions-runner` LaunchAgent, and stops the
+primary workspace plus every Kanban/error/self-audit worker container.
+`msandbox off` is the equivalent immediate shutdown
 command, so it also interrupts active work. Booting the runner out means a
 `workflow_dispatch` (the only trigger `kanban-autopr.yml` has) queues with no
 executor instead of running a gated no-op — it also idles the sibling
 `schema-drift-checks.yml` and `silent-error-autofix.yml`, which share this
-runner, until the next `msandbox start` (or `AUTOPR_MANAGE_RUNNER=0` to opt out).
+runner, plus `autopr-self-audit.yml`, until the next `msandbox start` (or
+`AUTOPR_MANAGE_RUNNER=0` to opt out).
 The dispatcher, GitHub workflow, and dedicated model launcher independently
 require the marker, running primary workspace, loaded timer, and four live
 dashboard panes.
@@ -204,6 +235,26 @@ call its provider; this keeps the rest of the host OpenCode home (history,
 logs, database, and other state) out of the model's reach. Set
 `AUTOPR_HOST_OPENCODE_AUTH_FILE` only if the working host auth file lives
 elsewhere.
+
+## AutoPR self-audit lane
+
+The dispatcher gives `.github/workflows/autopr-self-audit.yml` one idle slot
+when its last completed audit is six hours old. `msandbox audit` runs the same
+checks on demand without changing state; `msandbox audit --draft` dispatches
+the workflow only when a deterministic repository contract fails. The audit
+also compares the running local dev database's `alembic_version` rows with the
+repository graph and checks the control plane, but classifies those as operator
+actions. It never applies DDL, starts a service, or creates a fake code fix for
+machine drift.
+
+For a repository failure, OpenCode runs in its own
+`matcha-autopr-self-audit-sandbox` tracked-files-only clone. Its publisher
+allows only the existing AutoPR/msandbox scripts, sandbox definitions, their
+contract tests, and corresponding docs. The self-audit scripts and workflow
+are a sealed capsule: the model cannot rewrite its own prompt, verifier,
+publisher, or workflow. Verification must turn every original repairable
+failure green without adding another one before the trusted host opens a draft
+PR. It never merges or deploys.
 
 ## Validation checklist
 

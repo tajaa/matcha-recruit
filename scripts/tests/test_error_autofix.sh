@@ -284,7 +284,10 @@ echo '[{"state":"OPEN","mergedAt":null,"closedAt":null}]' > "$GH_STUB_RESPONSE_F
 run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips (exit 3) when a PR is OPEN" $([ "$?" = "3" ] && echo 0 || echo 1)
 
-echo '[{"state":"CLOSED","mergedAt":null,"closedAt":"2026-08-22T00:00:00Z"}]' > "$GH_STUB_RESPONSE_FILE"
+recent_closed="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)"
+printf '[{"state":"CLOSED","mergedAt":null,"closedAt":"%s"}]\n' "$recent_closed" \
+    > "$GH_STUB_RESPONSE_FILE"
 run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips a just-closed-unmerged PR (within cooldown)" $([ "$?" = "3" ] && echo 0 || echo 1)
 

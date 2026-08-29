@@ -22,6 +22,8 @@ if [ "$1 $2" = "run list" ]; then
   [ "${AUTOPR_TEST_LIST_FAIL:-0}" = 0 ] || exit 1
   if [[ "$*" == *"silent-error-autofix.yml"* ]]; then
     printf '%s\n' "${AUTOPR_TEST_ERROR_RUNS:-[]}"
+  elif [[ "$*" == *"autopr-self-audit.yml"* ]]; then
+    printf '%s\n' "${AUTOPR_TEST_AUDIT_RUNS:-[]}"
   else
     printf '%s\n' "${AUTOPR_TEST_KANBAN_RUNS:-[]}"
   fi
@@ -72,12 +74,21 @@ check "stale error lane gets the first idle slot" \
 rm -f "$TMP_DIR/dispatches"
 recent="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 AUTOPR_TEST_ERROR_RUNS="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
-check "recent error pass advances the Kanban lane" \
+check "recent error pass gives a stale self-audit the next idle slot" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "autopr-self-audit.yml" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_AUDIT_RUNS="[{\"databaseId\":8,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "recent error and audit passes advance the Kanban lane" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS='[{"databaseId":7,"status":"in_progress","event":"workflow_dispatch","createdAt":"2026-08-27T00:00:00Z","updatedAt":"2026-08-27T00:00:00Z","url":"x"}]' \
   run_dispatcher
 check "active work in either lane skips dispatch" \
@@ -88,12 +99,12 @@ AUTOPR_TEST_LIST_FAIL=1 run_dispatcher || list_rc=$?
 check "run-list failure fails closed" \
   $([ "${list_rc:-0}" != 0 ] && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
-AUTOPR_TEST_DISPATCH_FAIL=1 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher || dispatch_rc=$?
+AUTOPR_TEST_DISPATCH_FAIL=1 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher || dispatch_rc=$?
 check "dispatch failure is visible and nonzero" \
   $([ "${dispatch_rc:-0}" != 0 ] && grep -q 'silent-error-autofix.yml-dispatch-failed' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
 mkdir "$TMP_DIR/lock"
-AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
 check "local lock produces a harmless skip" \
   $(grep -q 'local-lock' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 rmdir "$TMP_DIR/lock"

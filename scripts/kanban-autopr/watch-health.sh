@@ -8,10 +8,29 @@ LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-di
 LABEL="com.matcha.kanban-autopr-dispatch"
 REFRESH_SECONDS="${AUTOPR_HEALTH_REFRESH_SECONDS:-15}"
 MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
-SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+KANBAN_SANDBOX_PROJECT="${AUTOPR_KANBAN_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+ERROR_SANDBOX_PROJECT="${AUTOPR_ERROR_SANDBOX_PROJECT_NAME:-matcha-error-autofix-sandbox}"
+AUDIT_SANDBOX_PROJECT="${AUTOPR_AUDIT_SANDBOX_PROJECT_NAME:-matcha-autopr-self-audit-sandbox}"
+
+render_worker_state() {
+    local label="$1" project="$2" sandbox_state
+    printf '\nAUTOPR MSANDBOX · %s · ' "$label"
+    if [ ! -x "$MSANDBOX_BIN" ]; then
+        printf 'missing (%s)\n' "$MSANDBOX_BIN"
+    elif sandbox_state="$(env AGENT_SANDBOX_PROJECT_NAME="$project" \
+        "$MSANDBOX_BIN" workspace-state 2>&1)"; then
+        case "$sandbox_state" in
+            running) printf 'running · %s\n' "$project" ;;
+            absent) printf 'ready, idle · %s\n' "$project" ;;
+            *) printf 'blocked · container state %s · %s\n' "$sandbox_state" "$project" ;;
+        esac
+    else
+        printf 'unavailable · %s\n' "$(printf '%s' "$sandbox_state" | head -n 1)"
+    fi
+}
 
 render_health() {
-    local launch_state runner_pids sandbox_state
+    local launch_state runner_pids
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(date '+%H:%M:%S %Z')"
 
@@ -40,20 +59,9 @@ render_health() {
         printf '  Runner.Listener not found\n'
     fi
 
-    printf '\nAUTOPR MSANDBOX · '
-    if [ ! -x "$MSANDBOX_BIN" ]; then
-        printf 'missing (%s)\n' "$MSANDBOX_BIN"
-    elif sandbox_state="$(env AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
-        "$MSANDBOX_BIN" workspace-state 2>&1)"; then
-        case "$sandbox_state" in
-            running) printf 'running · %s\n' "$SANDBOX_PROJECT" ;;
-            absent) printf 'ready, idle · %s\n' "$SANDBOX_PROJECT" ;;
-            *) printf 'blocked · container state %s · %s\n' "$sandbox_state" "$SANDBOX_PROJECT" ;;
-        esac
-    else
-        printf 'unavailable · %s\n' \
-            "$(printf '%s' "$sandbox_state" | head -n 1)"
-    fi
+    render_worker_state kanban "$KANBAN_SANDBOX_PROJECT"
+    render_worker_state errors "$ERROR_SANDBOX_PROJECT"
+    render_worker_state self-audit "$AUDIT_SANDBOX_PROJECT"
 
     printf '\nRECENT TIMER EVENTS\n'
     if [ -s "$LOG_FILE" ]; then

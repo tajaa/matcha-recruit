@@ -8,6 +8,8 @@ set -uo pipefail
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
+ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
+AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 REFRESH_SECONDS="${AUTOPR_WORK_REFRESH_SECONDS:-2}"
@@ -15,11 +17,12 @@ STATUS_REFRESH_SECONDS="${AUTOPR_WORK_STATUS_REFRESH_SECONDS:-10}"
 
 RUN_ID=""
 RUN_STATUS="idle"
+RUN_LANE=""
 STEP_LINE=""
 LAST_STATUS_REFRESH=0
 
 refresh_workflow_status() {
-    local now runs details
+    local now runs kanban_runs error_runs audit_runs active details
     now="$(date +%s)"
     if [ "${AUTOPR_DASHBOARD_ONCE:-0}" != 1 ] \
         && [ $((now - LAST_STATUS_REFRESH)) -lt "$STATUS_REFRESH_SECONDS" ]; then
@@ -27,13 +30,20 @@ refresh_workflow_status() {
     fi
     LAST_STATUS_REFRESH="$now"
 
-    runs="$($GH_BIN run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 \
+    kanban_runs="$($GH_BIN run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 \
         --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
-    RUN_ID="$(printf '%s' "$runs" | jq -r \
-        '[.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))][0].databaseId // .[0].databaseId // empty' \
-        2>/dev/null)"
-    RUN_STATUS="$(printf '%s' "$runs" | jq -r --argjson id "${RUN_ID:-0}" \
-        '[.[] | select(.databaseId == $id)][0].status // "idle"' 2>/dev/null)"
+    error_runs="$($GH_BIN run list --repo "$REPO" --workflow "$ERROR_WORKFLOW" --limit 10 \
+        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
+    audit_runs="$($GH_BIN run list --repo "$REPO" --workflow "$AUDIT_WORKFLOW" --limit 10 \
+        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
+    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" '
+      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) + ($audit | map(. + {lane:"self-audit"})))
+      | sort_by(.createdAt // "") | reverse')"
+    active="$(printf '%s' "$runs" | jq -c \
+        '[.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))][0] // .[0] // {}' 2>/dev/null)"
+    RUN_ID="$(printf '%s' "$active" | jq -r '.databaseId // empty' 2>/dev/null)"
+    RUN_STATUS="$(printf '%s' "$active" | jq -r '.status // "idle"' 2>/dev/null)"
+    RUN_LANE="$(printf '%s' "$active" | jq -r '.lane // ""' 2>/dev/null)"
     STEP_LINE=""
     if [ -n "$RUN_ID" ] && [ "$RUN_STATUS" != idle ]; then
         details="$($GH_BIN run view "$RUN_ID" --repo "$REPO" --json jobs 2>/dev/null || printf '{"jobs":[]}')"
@@ -61,7 +71,7 @@ sanitize_model_stream() {
 }
 
 render_work() {
-    local pane_rows log_lines pids
+    local pane_rows log_lines pids sandbox_project
     refresh_workflow_status
     pane_rows="$(tput lines 2>/dev/null || printf '24')"
     log_lines=$((pane_rows - 8))
@@ -69,10 +79,14 @@ render_work() {
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     printf 'LIVE OPENCODE / OPENAI WORK · %s\n' "$(date '+%H:%M:%S %Z')"
-    printf 'EXECUTION msandbox · %s\n' \
-        "${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
+    case "$RUN_LANE" in
+        errors) sandbox_project=matcha-error-autofix-sandbox ;;
+        self-audit) sandbox_project=matcha-autopr-self-audit-sandbox ;;
+        *) sandbox_project=matcha-kanban-autopr-sandbox ;;
+    esac
+    printf 'EXECUTION msandbox · %s\n' "${AUTOPR_SANDBOX_PROJECT_NAME:-$sandbox_project}"
     if [ -n "$RUN_ID" ]; then
-        printf 'RUN #%s · %s\n' "$RUN_ID" "$RUN_STATUS"
+        printf 'RUN %s #%s · %s\n' "$RUN_LANE" "$RUN_ID" "$RUN_STATUS"
         [ -z "$STEP_LINE" ] || printf 'STEP %s\n' "$STEP_LINE"
     else
         printf 'RUN idle\n'
