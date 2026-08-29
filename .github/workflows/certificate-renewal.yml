@@ -38,7 +38,15 @@ jobs:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-            ec2-user@54.177.107.107 'sudo systemctl start certbot-renew.service && sudo systemctl start lego-gummfit.service'
+            ec2-user@54.177.107.107 'bash -s' <<'REMOTE'
+          certbot_rc=0
+          lego_rc=0
+          sudo systemctl start certbot-renew.service || certbot_rc=$?
+          sudo systemctl start lego-gummfit.service || lego_rc=$?
+          printf 'certbot-renew.service rc=%s\nlego-gummfit.service rc=%s\n' \
+            "$certbot_rc" "$lego_rc"
+          [ "$certbot_rc" -eq 0 ] && [ "$lego_rc" -eq 0 ]
+          REMOTE
 
       - name: Verify origin certificate automation
         id: origin
