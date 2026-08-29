@@ -9,6 +9,9 @@ from app.matcha.models.scheduling.employee_schedule import (
     AvailabilityReplace, CounterpartyAccept, ScheduleRequestCreate,
 )
 from app.matcha.dependencies import require_employee_record
+from app.matcha.services.scheduling.time_off_guard import (
+    PUBLISHED_WEEK_TIME_OFF_DETAIL, has_published_schedule_week,
+)
 
 from ._shared import _schedule_dep
 
@@ -110,6 +113,13 @@ async def create_my_schedule_request(
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
+        if (
+            body.request_type == "unavailable"
+            and await has_published_schedule_week(
+                conn, company_id, body.unavailable_start, body.unavailable_end,
+            )
+        ):
+            raise HTTPException(status_code=409, detail=PUBLISHED_WEEK_TIME_OFF_DETAIL)
         if body.request_type == "pickup" and body.target_employee_id is not None:
             raise HTTPException(status_code=422, detail="Pickup offers cannot name a target employee")
         # swap/drop/pickup must reference a PUBLISHED shift the employee is actually on.

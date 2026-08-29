@@ -1,11 +1,14 @@
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.matcha.models.scheduling.employee_schedule import ScheduleRequestCreate
+from app.matcha.routes.employee_portal import schedule as portal_schedule
 from app.matcha.services.scheduling.shift_requests import schedule_day_bounds, same_day_conflict_detail
 
 
@@ -89,3 +92,31 @@ def test_notification_outbox_is_idempotent_and_migration_activates_digest():
     assert "UNIQUE (request_id, recipient_user_id, event_type)" in source
     assert "UPDATE scheduler_settings SET enabled=true WHERE task_key='schedule_daily_digest'" in source
     assert "'schedule_request_notifications'" in source
+
+
+@pytest.mark.asyncio
+async def test_unavailable_request_rejects_a_week_with_published_shifts(monkeypatch):
+    class Connection:
+        async def fetchval(self, query, *args):
+            assert "EXTRACT(DOW FROM s.starts_at)" in query
+            assert args[1] == date(2026, 8, 10)
+            assert args[2] == date(2026, 8, 11)
+            return True
+
+    @asynccontextmanager
+    async def fake_get_connection():
+        yield Connection()
+
+    monkeypatch.setattr(portal_schedule, "get_connection", fake_get_connection)
+
+    with pytest.raises(HTTPException, match="week with published shifts") as exc_info:
+        await portal_schedule.create_my_schedule_request(
+            ScheduleRequestCreate(
+                request_type="unavailable",
+                unavailable_start=date(2026, 8, 10),
+                unavailable_end=date(2026, 8, 11),
+            ),
+            {"id": uuid4(), "org_id": uuid4()},
+        )
+
+    assert exc_info.value.status_code == 409
