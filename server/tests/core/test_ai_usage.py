@@ -85,7 +85,7 @@ def test_feature_label_transforms(module_name, expected):
 
 
 def test_split_service_packages_covers_every_real_split_package():
-    """`_SPLIT_SERVICE_PACKAGES` must name EVERY services/<domain>/<pkg>/ package.
+    """`_SPLIT_SERVICE_PACKAGES` must cover packages below a stripped domain.
 
     Derives the truth from the tree rather than restating the literal, because a
     missing entry is invisible at runtime: the call still succeeds, it is just
@@ -98,7 +98,15 @@ def test_split_service_packages_covers_every_real_split_package():
 
     services = pathlib.Path(ai_usage.__file__).resolve().parents[2] / "matcha" / "services"
     assert services.is_dir(), services
-    on_disk = {p.parent.name for p in services.glob("*/*/__init__.py")}
+    # Only folders whose parent is stripped by _SERVICES_DOMAINS can reach the
+    # second positional deletion in _feature_label. Older top-level domains
+    # such as inventory intentionally retain that segment and are not members
+    # of this compatibility registry.
+    on_disk = {
+        p.parent.name
+        for p in services.glob("*/*/__init__.py")
+        if p.parent.parent.name in ai_usage._SERVICES_DOMAINS
+    }
     assert on_disk, "found no split packages — glob or layout changed"
 
     missing = on_disk - ai_usage._SPLIT_SERVICE_PACKAGES
@@ -196,6 +204,10 @@ def test_compute_cost_unknown_model_is_none():
     assert ai_usage.compute_cost("gemini", "gemini-9-nonexistent", 100, 100, 0) is None
 
 
+def test_compute_cost_does_not_estimate_openai_billing():
+    assert ai_usage.compute_cost("openai", "gpt-5.6-luna", 100, 100, 50) is None
+
+
 def test_compute_cost_strips_models_prefix():
     a = ai_usage.compute_cost("gemini", "models/gemini-3.5-flash-lite", 100, 100, 0)
     b = ai_usage.compute_cost("gemini", "gemini-3.5-flash-lite", 100, 100, 0)
@@ -231,6 +243,39 @@ def test_compute_cost_prices_retired_preview_image_model():
     # retroactively show as unpriced.
     cost = ai_usage.compute_cost("gemini", "gemini-3.1-flash-image-preview", 1_000_000, 1_000_000, 0)
     assert cost == pytest.approx(0.30 + 30.00)
+
+
+@pytest.mark.asyncio
+async def test_record_openai_response_uses_exact_provider_payload(recorded):
+    await ai_usage.record_openai_response(
+        model="gpt-5.6-luna",
+        latency_ms=321,
+        response={
+            "id": "resp_exact_123",
+            "model": "gpt-5.6-luna-2026-08-01",
+            "status": "completed",
+            "service_tier": "default",
+            "usage": {
+                "input_tokens": 100,
+                "input_tokens_details": {"cached_tokens": 40},
+                "output_tokens": 50,
+                "output_tokens_details": {"reasoning_tokens": 30},
+                "total_tokens": 150,
+            },
+        },
+    )
+
+    row = recorded[0]
+    assert row["provider"] == "openai"
+    assert row["model"] == "gpt-5.6-luna-2026-08-01"
+    assert row["provider_response_id"] == "resp_exact_123"
+    assert row["provider_status"] == "completed"
+    assert row["service_tier"] == "default"
+    assert row["input_tokens"] == 100
+    assert row["cached_tokens"] == 40
+    assert row["output_tokens"] == 50
+    assert row["thinking_tokens"] == 30
+    assert row["cost_usd"] is None
 
 
 # --- proxy: fake client -----------------------------------------------------

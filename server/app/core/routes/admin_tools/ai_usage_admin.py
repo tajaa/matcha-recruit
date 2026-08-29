@@ -1,9 +1,8 @@
 """Admin endpoints for the AI usage ledger (/admin/ai-usage).
 
-Reads `ai_usage_log`, written by every Gemini call via the
-`get_genai_client()` -> `ai_usage.wrap_client()` instrumentation
-(app/core/services/ai_usage.py). Read-only over that table — nothing here
-writes a row; the wrapper is the only writer.
+Reads `ai_usage_log`, written by the Gemini client wrapper and the direct
+OpenAI Responses recorder in app/core/services/ai_usage.py. Read-only over
+that table — nothing here writes a row.
 """
 from __future__ import annotations
 
@@ -29,17 +28,18 @@ def _bucket_for(since_hours: int) -> str:
 
 _ROLLUP_COLUMNS = """
     COUNT(*) AS calls,
-    SUM(cost_usd) AS cost_usd,
+    -- Historical OpenAI rows may contain locally estimated dollars. Never
+    -- present those as billed cost; provider billing remains authoritative.
+    SUM(cost_usd) FILTER (WHERE provider <> 'openai') AS cost_usd,
     SUM(input_tokens) AS input_tokens,
     SUM(output_tokens) AS output_tokens,
     SUM(thinking_tokens) AS thinking_tokens,
     SUM(cached_tokens) AS cached_tokens,
     COUNT(*) FILTER (WHERE status <> 'ok') AS errors,
-    -- NULL cost has two causes, both meaning "the true total is undercounted":
-    -- an unpriced model (see ai_usage.PRICING), or a timed-out/errored call
-    -- that carries no token counts at all (compute_cost returns None rather
-    -- than 0 for exactly that reason — see ai_usage.py).
-    COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unknown_cost_calls,
+    -- NULL cost means dollars are not locally attributable: OpenAI rows keep
+    -- exact per-response usage while provider billing remains authoritative;
+    -- an unpriced Gemini model or failed call can also have no local cost.
+    COUNT(*) FILTER (WHERE provider = 'openai' OR cost_usd IS NULL) AS unknown_cost_calls,
     AVG(latency_ms) AS avg_latency_ms,
     PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_latency_ms
 """
@@ -82,7 +82,8 @@ async def ai_usage_summary(since_hours: int = 24):
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
             GROUP BY feature
-            ORDER BY SUM(cost_usd) DESC NULLS LAST, COUNT(*) DESC
+            ORDER BY SUM(cost_usd) FILTER (WHERE provider <> 'openai') DESC NULLS LAST,
+                     COUNT(*) DESC
             """,
             str(since_hours),
         )
@@ -92,7 +93,8 @@ async def ai_usage_summary(since_hours: int = 24):
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
             GROUP BY provider, model
-            ORDER BY SUM(cost_usd) DESC NULLS LAST, COUNT(*) DESC
+            ORDER BY SUM(cost_usd) FILTER (WHERE provider <> 'openai') DESC NULLS LAST,
+                     COUNT(*) DESC
             """,
             str(since_hours),
         )
@@ -123,7 +125,7 @@ async def ai_usage_timeseries(since_hours: int = 24):
             f"""
             SELECT date_trunc('{bucket}', created_at) AS bucket_at,
                    COUNT(*) AS calls,
-                   SUM(cost_usd) AS cost_usd,
+                   SUM(cost_usd) FILTER (WHERE provider <> 'openai') AS cost_usd,
                    COUNT(*) FILTER (WHERE status <> 'ok') AS errors
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
@@ -187,7 +189,10 @@ async def ai_usage_calls(
         rows = await conn.fetch(
             f"""
             SELECT id, provider, model, feature, method, input_tokens, output_tokens,
-                   thinking_tokens, cached_tokens, cost_usd, latency_ms, status, error, created_at
+                   thinking_tokens, cached_tokens,
+                   CASE WHEN provider = 'openai' THEN NULL ELSE cost_usd END AS cost_usd,
+                   latency_ms, status, error,
+                   provider_response_id, provider_status, service_tier, created_at
             FROM ai_usage_log
             WHERE {' AND '.join(filters)}
             ORDER BY id DESC
@@ -213,6 +218,9 @@ async def ai_usage_calls(
                 "latency_ms": r["latency_ms"],
                 "status": r["status"],
                 "error": r["error"],
+                "provider_response_id": r["provider_response_id"],
+                "provider_status": r["provider_status"],
+                "service_tier": r["service_tier"],
                 "created_at": r["created_at"].isoformat(),
             }
             for r in rows

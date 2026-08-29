@@ -162,6 +162,7 @@ class _LunaModels:
             "instructions": str(getattr(config, "system_instruction", "") or ""),
             "tools": _tools(config),
             "parallel_tool_calls": True,
+            "reasoning": {"effort": "high"},
         }
         if follow_up:
             payload["previous_response_id"] = self._previous_response_id
@@ -181,9 +182,27 @@ class _LunaModels:
                 model=model,
                 latency_ms=int((time.monotonic() - started) * 1000),
                 error=error_detail,
+                status="timeout" if isinstance(exc, httpx.TimeoutException) else "error",
             )
             raise RuntimeError(f"OpenAI Responses request failed: {error_detail}") from exc
-        data = response.json()
+        try:
+            data = response.json()
+        except (TypeError, ValueError) as exc:
+            await record_openai_response(
+                model=model,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=f"Invalid Responses JSON: {exc}",
+                status="error",
+            )
+            raise RuntimeError("OpenAI Responses returned invalid JSON") from exc
+        if not isinstance(data, dict):
+            await record_openai_response(
+                model=model,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error="OpenAI Responses payload must be an object",
+                status="error",
+            )
+            raise RuntimeError("OpenAI Responses payload must be an object")
         self._previous_response_id = data.get("id") or self._previous_response_id
         calls = [output for output in data.get("output", []) if isinstance(output, dict) and output.get("type") == "function_call"]
         self._pending_call_ids = [
@@ -211,11 +230,9 @@ class _LunaModels:
             cached_content_token_count=input_details.get("cached_tokens", 0),
         )
         await record_openai_response(
-            model=model, latency_ms=int((time.monotonic() - started) * 1000),
-            input_tokens=usage_metadata.prompt_token_count,
-            output_tokens=usage_metadata.candidates_token_count,
-            thinking_tokens=usage_metadata.thoughts_token_count,
-            cached_tokens=usage_metadata.cached_content_token_count,
+            model=model,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            response=data,
         )
         return SimpleNamespace(
             usage_metadata=usage_metadata,

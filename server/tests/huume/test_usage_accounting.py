@@ -2,8 +2,8 @@
 
     cd server && ./venv/bin/python -m pytest tests/huume/test_usage_accounting.py -q
 
-Covers: _accumulate_usage folding all five usage counters, Luna's shared
-pricing row, thinking-at-output-rate billing, and the huume feature-label
+Covers: _accumulate_usage folding all five usage counters, Luna's internal
+usage-event pricing, Responses token semantics, and the huume feature-label
 constants the admin page's HUUME_FEATURE_PREFIX filter depends on.
 """
 import inspect
@@ -45,22 +45,25 @@ class TestHuumeModelPricing:
         assert _MODEL in MODEL_PRICING
         assert MODEL_PRICING[_MODEL] != DEFAULT_PRICING
 
-    def test_rate_matches_admin_ledger(self):
-        # The saved Huume-run cost and admin usage ledger must agree.
+    def test_admin_ledger_does_not_estimate_openai_cost(self):
+        # Per-feature admin rows use exact provider tokens and leave billed
+        # dollars to OpenAI's organization Costs API.
         from app.core.services.ai_usage import PRICING
-        inp, outp = PRICING[("openai", LUNA)]
-        assert MODEL_PRICING[LUNA]["input_per_1m"] == Decimal(str(inp))
-        assert MODEL_PRICING[LUNA]["output_per_1m"] == Decimal(str(outp))
+        assert ("openai", LUNA) not in PRICING
 
     def test_million_token_cost(self):
         cost = calculate_call_cost(LUNA, 1_000_000, 1_000_000)
-        assert cost == Decimal("7.000000")   # 1.00 in + 6.00 out
+        assert cost == Decimal("1.400000")   # 0.20 in + 1.20 out
+
+    def test_cached_input_uses_cached_rate(self):
+        cost = calculate_call_cost(LUNA, 1_000_000, 0, cached_tokens=1_000_000)
+        assert cost == Decimal("0.020000")
 
 
 class TestThinkingBilling:
-    def test_thinking_bills_at_output_rate(self):
+    def test_responses_reasoning_is_already_in_output_tokens(self):
         with_thinking = calculate_call_cost(LUNA, 0, 100, thinking_tokens=100)
-        as_output = calculate_call_cost(LUNA, 0, 200)
+        as_output = calculate_call_cost(LUNA, 0, 100)
         assert with_thinking == as_output
 
     def test_omitted_and_none_are_identical(self):

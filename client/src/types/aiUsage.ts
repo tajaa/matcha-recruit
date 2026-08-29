@@ -52,6 +52,9 @@ export type AiUsageCall = {
   latency_ms: number | null
   status: AiUsageStatus
   error: string | null
+  provider_response_id?: string | null
+  provider_status?: string | null
+  service_tier?: string | null
   created_at: string
 }
 
