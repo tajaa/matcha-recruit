@@ -193,7 +193,6 @@ class SalesCommit(BaseModel):
     source: Literal["upload", "email", "square", "toast"] = "upload"
     filename: Optional[str] = None
     gmail_message_id: Optional[str] = None
-    force: bool = False
     lines: list[SalesLine]
 
 

@@ -138,7 +138,6 @@ async def _sync_one_connection(
                         source=provider_name,
                         filename=f"{provider_name}:{day.external_batch_id}",
                         gmail_message_id=None,
-                        force=False,
                         lines=lines,
                         note=f"{provider_name.title()} finalized sales sync",
                         raw={"external_batch_id": day.external_batch_id, "lines": lines},
