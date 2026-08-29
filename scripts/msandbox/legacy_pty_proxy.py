@@ -23,6 +23,14 @@ def _positive_limit(name: str, default: int) -> int:
     return parsed
 
 
+def _report_import_error(exc: Exception) -> None:
+    print(
+        f"\r\nmsandbox: attachment import failed: {exc}\r",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="msandbox-file-proxy")
     parser.add_argument("--inbox", required=True, type=Path)
@@ -49,6 +57,7 @@ def run(argv: list[str] | None = None) -> int:
             lock_name=f"attachments-legacy-{lock_digest}",
             max_bytes=max_bytes,
             session_max_bytes=session_max_bytes,
+            on_error=_report_import_error,
         ),
     )
 

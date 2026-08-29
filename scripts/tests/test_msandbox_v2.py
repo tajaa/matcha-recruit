@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -36,8 +39,10 @@ from scripts.msandbox.models import PortSet, SessionRecord, SessionSpec, TestPla
 from scripts.msandbox.pty_proxy import (
     PASTE_END,
     PASTE_START,
+    _sync_window_size,
     rewrite_paste_stream,
     rewrite_paste_stream_to_inbox,
+    run_with_file_proxy,
 )
 from scripts.msandbox.sessions import (
     SessionError,
@@ -485,6 +490,92 @@ class AttachmentTests(MsandboxTestCase):
         imported = list(inbox.iterdir())
         self.assertEqual(len(imported), 1)
         self.assertEqual(imported[0].read_bytes(), b"png")
+        payload = emitted[len(PASTE_START) : -len(PASTE_END)].decode()
+        self.assertEqual(
+            shlex.split(payload),
+            [str(Path("/workspace/.msandbox/attachments") / imported[0].name)],
+        )
+
+    def test_legacy_drag_error_preserves_frame_and_reports_without_raising(self) -> None:
+        source = self.root / "oversized.png"
+        source.write_bytes(b"too large")
+        frame = PASTE_START + str(source).encode() + PASTE_END
+        errors: list[AttachmentError] = []
+
+        emitted, pending = rewrite_paste_stream_to_inbox(
+            frame,
+            inbox=self.root / "legacy-inbox",
+            container_dir=Path("/workspace/.msandbox/attachments"),
+            lock_name="legacy-error-test",
+            max_bytes=1,
+            session_max_bytes=4096,
+            on_error=errors.append,
+        )
+
+        self.assertEqual(emitted, frame)
+        self.assertEqual(pending, b"")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("exceeds 1 bytes", str(errors[0]))
+
+    def test_proxy_copies_terminal_window_size(self) -> None:
+        window_size = b"\x18\x00\x50\x00\x00\x00\x00\x00"
+        with mock.patch("scripts.msandbox.pty_proxy.fcntl.ioctl") as ioctl:
+            ioctl.return_value = window_size
+            _sync_window_size(10, 11)
+
+        self.assertEqual(
+            ioctl.call_args_list,
+            [
+                mock.call(10, termios.TIOCGWINSZ, bytes(8)),
+                mock.call(11, termios.TIOCSWINSZ, window_size),
+            ],
+        )
+
+    def test_proxy_syncs_initial_and_resized_window(self) -> None:
+        stdin = mock.Mock()
+        stdin.isatty.return_value = True
+        stdin.fileno.return_value = 10
+        stdout = mock.Mock()
+        stdout.isatty.return_value = True
+        stdout.fileno.return_value = 11
+        previous_handler = mock.sentinel.previous_handler
+
+        with (
+            mock.patch("scripts.msandbox.pty_proxy.sys.stdin", stdin),
+            mock.patch("scripts.msandbox.pty_proxy.sys.stdout", stdout),
+            mock.patch(
+                "scripts.msandbox.pty_proxy.pty.fork",
+                return_value=(321, 12),
+            ),
+            mock.patch("scripts.msandbox.pty_proxy.termios.tcgetattr", return_value=[]),
+            mock.patch("scripts.msandbox.pty_proxy.termios.tcsetattr"),
+            mock.patch("scripts.msandbox.pty_proxy.tty.setraw"),
+            mock.patch(
+                "scripts.msandbox.pty_proxy.select.select",
+                return_value=([12], [], []),
+            ),
+            mock.patch("scripts.msandbox.pty_proxy.os.read", return_value=b""),
+            mock.patch("scripts.msandbox.pty_proxy.os.close"),
+            mock.patch("scripts.msandbox.pty_proxy.os.waitpid", return_value=(321, 0)),
+            mock.patch(
+                "scripts.msandbox.pty_proxy.signal.getsignal",
+                return_value=previous_handler,
+            ),
+            mock.patch("scripts.msandbox.pty_proxy.signal.signal") as set_signal,
+            mock.patch("scripts.msandbox.pty_proxy._sync_window_size") as sync_window,
+        ):
+            self.assertEqual(run_with_file_proxy(["true"], lambda data: (data, b"")), 0)
+            resize_handler = set_signal.call_args_list[0].args[1]
+            resize_handler(signal.SIGWINCH, None)
+
+        self.assertEqual(
+            sync_window.call_args_list,
+            [mock.call(10, 12), mock.call(10, 12)],
+        )
+        self.assertEqual(
+            set_signal.call_args_list[-1],
+            mock.call(signal.SIGWINCH, previous_handler),
+        )
 
     def test_legacy_interactive_entrypoints_use_file_proxy(self) -> None:
         launcher = (Path(__file__).resolve().parents[2] / "scripts/agent-sandbox.sh").read_text()

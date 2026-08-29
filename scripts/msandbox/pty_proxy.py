@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import fcntl
 import os
 import pty
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -11,7 +13,12 @@ import tty
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .attachments import import_files, import_files_to_inbox, parse_pasted_file_payload
+from .attachments import (
+    AttachmentError,
+    import_files,
+    import_files_to_inbox,
+    parse_pasted_file_payload,
+)
 from .models import Attachment, SessionRecord
 
 
@@ -19,6 +26,7 @@ PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 MAX_PENDING_PASTE_BYTES = 1024 * 1024
 PasteImporter = Callable[[Sequence[Path]], Sequence[Attachment]]
+PasteErrorHandler = Callable[[Exception], None]
 StreamRewriter = Callable[[bytes], tuple[bytes, bytes]]
 
 
@@ -48,6 +56,7 @@ def rewrite_paste_stream_to_inbox(
     lock_name: str,
     max_bytes: int,
     session_max_bytes: int,
+    on_error: PasteErrorHandler | None = None,
 ) -> tuple[bytes, bytes]:
     """Rewrite pasted host files into a caller-provided mounted inbox."""
     return rewrite_paste_stream_with_importer(
@@ -60,12 +69,15 @@ def rewrite_paste_stream_to_inbox(
             max_bytes=max_bytes,
             session_max_bytes=session_max_bytes,
         ),
+        on_error=on_error,
     )
 
 
 def rewrite_paste_stream_with_importer(
     data: bytes,
     importer: PasteImporter,
+    *,
+    on_error: PasteErrorHandler | None = None,
 ) -> tuple[bytes, bytes]:
     """Rewrite complete file-only paste frames with one attachment importer."""
     output = bytearray()
@@ -91,11 +103,29 @@ def rewrite_paste_stream_with_importer(
         if paths is None:
             output.extend(data[start:frame_end])
         else:
-            attachments = importer(paths)
-            replacement = " ".join(str(item.container_path) for item in attachments).encode()
-            output.extend(PASTE_START + replacement + PASTE_END)
+            try:
+                attachments = importer(paths)
+            except (AttachmentError, OSError) as exc:
+                if on_error is None:
+                    raise
+                on_error(exc)
+                output.extend(data[start:frame_end])
+            else:
+                replacement = " ".join(
+                    shlex.quote(str(item.container_path)) for item in attachments
+                ).encode()
+                output.extend(PASTE_START + replacement + PASTE_END)
         cursor = frame_end
     return bytes(output), b""
+
+
+def _sync_window_size(source_fd: int, target_fd: int) -> None:
+    """Copy the real terminal dimensions onto the proxy PTY."""
+    try:
+        window_size = fcntl.ioctl(source_fd, termios.TIOCGWINSZ, bytes(8))
+        fcntl.ioctl(target_fd, termios.TIOCSWINSZ, window_size)
+    except OSError:
+        pass
 
 
 def attach_with_file_proxy(record: SessionRecord) -> int:
@@ -119,7 +149,14 @@ def run_with_file_proxy(argv: Sequence[str], rewriter: StreamRewriter) -> int:
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
     previous = termios.tcgetattr(stdin_fd)
+    previous_sigwinch = signal.getsignal(signal.SIGWINCH)
     buffer = b""
+
+    def handle_sigwinch(_signum: int, _frame: object) -> None:
+        _sync_window_size(stdin_fd, child_fd)
+
+    signal.signal(signal.SIGWINCH, handle_sigwinch)
+    _sync_window_size(stdin_fd, child_fd)
     try:
         tty.setraw(stdin_fd)
         while True:
@@ -144,6 +181,7 @@ def run_with_file_proxy(argv: Sequence[str], rewriter: StreamRewriter) -> int:
                     os.write(child_fd, outgoing)
     finally:
         termios.tcsetattr(stdin_fd, termios.TCSADRAIN, previous)
+        signal.signal(signal.SIGWINCH, previous_sigwinch)
         try:
             os.close(child_fd)
         except OSError:
