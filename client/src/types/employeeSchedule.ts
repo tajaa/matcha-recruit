@@ -270,6 +270,22 @@ export interface WeekTemplatePayload {
   blocks?: BlockPayload[]
 }
 
+export interface WeekTemplateReplacePayload {
+  name: string
+  blocks: WeekTemplateBlockReplacePayload[]
+}
+
+export interface WeekTemplateBlockReplacePayload {
+  id?: string
+  name: string
+  role: string | null
+  start_time: string
+  end_time: string
+  break_minutes: number
+  required_staff: number
+  days_of_week: number[]
+}
+
 export interface ScheduleAutomationRule {
   id: string
   location_id: string

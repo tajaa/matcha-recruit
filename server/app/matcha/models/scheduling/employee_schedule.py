@@ -328,6 +328,44 @@ class WeekTemplateUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
 
 
+class WeekTemplateBlockReplace(BaseModel):
+    """A complete block submitted as part of a template-wide reconciliation.
+
+    ``id`` identifies an existing child to update.  Omitted IDs are inserted;
+    existing children omitted from the list are removed by the route. Only
+    fields owned by the week-template editor are accepted here, so saving the
+    visible form cannot overwrite richer block metadata managed elsewhere.
+    """
+
+    id: Optional[UUID] = None
+    name: str = Field(..., min_length=1, max_length=150)
+    role: Optional[str] = Field(None, max_length=150)
+    start_time: time
+    end_time: time
+    break_minutes: int = Field(0, ge=0, le=1440)
+    required_staff: int = Field(1, ge=1, le=99)
+    days_of_week: list[Weekday] = Field(default_factory=list)
+
+
+class WeekTemplateReplace(BaseModel):
+    """Atomically replace a template's editable block list.
+
+    This is deliberately separate from ``WeekTemplateUpdate``: the latter is a
+    true PATCH for parent fields, while this payload represents the whole list
+    rendered by the editor.
+    """
+
+    name: str = Field(..., min_length=1, max_length=150)
+    blocks: list[WeekTemplateBlockReplace] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def _check_unique_block_ids(self) -> "WeekTemplateReplace":
+        block_ids = [block.id for block in self.blocks if block.id is not None]
+        if len(block_ids) != len(set(block_ids)):
+            raise ValueError("template block ids must be unique")
+        return self
+
+
 class GenerateFromWeekTemplate(BaseModel):
     """Materialize concrete shifts from every block in a week template across
     a date range, all sharing one series_id.

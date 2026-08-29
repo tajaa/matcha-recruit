@@ -11,9 +11,8 @@ const {
   fetchWeekMock,
   fetchWeekTemplatesMock,
   publishRangeMock,
+  replaceWeekTemplateMock,
   updateShiftMock,
-  updateTemplateBlockMock,
-  updateWeekTemplateMock,
   useLocationScopeMock,
   useMeMock,
   getScheduleSuggestionStatusMock,
@@ -23,9 +22,8 @@ const {
   fetchWeekMock: vi.fn(),
   fetchWeekTemplatesMock: vi.fn(),
   publishRangeMock: vi.fn(),
+  replaceWeekTemplateMock: vi.fn(),
   updateShiftMock: vi.fn(),
-  updateTemplateBlockMock: vi.fn(),
-  updateWeekTemplateMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   useMeMock: vi.fn(),
   getScheduleSuggestionStatusMock: vi.fn(),
@@ -49,7 +47,6 @@ vi.mock('../../../api/employees/employeeSchedule', () => ({
   createShift: vi.fn(),
   createWeekTemplate: createWeekTemplateMock,
   deleteShift: vi.fn(),
-  deleteTemplateBlock: vi.fn(),
   deleteWeekTemplate: deleteWeekTemplateMock,
   duplicateShift: vi.fn(),
   fetchEligibilityCases: vi.fn().mockResolvedValue({ cases: [] }),
@@ -57,14 +54,12 @@ vi.mock('../../../api/employees/employeeSchedule', () => ({
   fetchWeek: fetchWeekMock,
   fetchWeekTemplates: fetchWeekTemplatesMock,
   generateFromWeekTemplate: vi.fn(),
-  addTemplateBlock: vi.fn(),
   publishRange: publishRangeMock,
+  replaceWeekTemplate: replaceWeekTemplateMock,
   publishShift: vi.fn(),
   reviewRequest: vi.fn(),
   unassignEmployee: vi.fn(),
   updateShift: updateShiftMock,
-  updateTemplateBlock: updateTemplateBlockMock,
-  updateWeekTemplate: updateWeekTemplateMock,
 }))
 
 const shift = {
@@ -126,8 +121,7 @@ describe('EmployeeSchedule break planning', () => {
     }))
     createWeekTemplateMock.mockResolvedValue({ id: 'template-1', name: 'Standard Week', blocks: [] })
     deleteWeekTemplateMock.mockReset()
-    updateTemplateBlockMock.mockReset()
-    updateWeekTemplateMock.mockReset()
+    replaceWeekTemplateMock.mockReset()
     publishRangeMock.mockReset()
     getScheduleSuggestionStatusMock.mockResolvedValue({
       available: false, generation_run_id: null, week_start: null, created_at: null,
@@ -225,8 +219,7 @@ describe('EmployeeSchedule break planning', () => {
         required_staff: 1, days_of_week: [1, 2, 3, 4, 5], color: null, notes: null, job_id: null,
       }],
     }] })
-    updateWeekTemplateMock.mockResolvedValue({})
-    updateTemplateBlockMock.mockResolvedValue({})
+    replaceWeekTemplateMock.mockResolvedValue({})
     renderSchedule()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
@@ -235,24 +228,57 @@ describe('EmployeeSchedule break planning', () => {
     fireEvent.change(screen.getByLabelText('Staff needed'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    await waitFor(() => expect(updateWeekTemplateMock).toHaveBeenCalledWith('template-1', { name: 'Weekday opening' }))
-    expect(updateTemplateBlockMock).toHaveBeenCalledWith('template-1', 'block-1', expect.objectContaining({ required_staff: 2 }))
+    await waitFor(() => expect(replaceWeekTemplateMock).toHaveBeenCalledWith('template-1', expect.objectContaining({
+      name: 'Weekday opening',
+      blocks: [expect.objectContaining({ id: 'block-1', name: 'Opening', required_staff: 2 })],
+    })))
+    const submittedBlock = replaceWeekTemplateMock.mock.calls[0][1].blocks[0]
+    expect(submittedBlock).not.toHaveProperty('department')
+    expect(submittedBlock).not.toHaveProperty('color')
+    expect(submittedBlock).not.toHaveProperty('notes')
+    expect(submittedBlock).not.toHaveProperty('job_id')
   })
 
   it('requires confirmation before deleting a template', async () => {
     fetchWeekTemplatesMock.mockResolvedValue({ week_templates: [{
       id: 'template-1', name: 'Standard Week', location_id: 'loc-1', color: null, notes: null, blocks: [],
     }] })
-    deleteWeekTemplateMock.mockResolvedValue({ ok: true, id: 'template-1' })
+    deleteWeekTemplateMock.mockResolvedValue({ ok: true, id: 'template-1', paused_auto_schedules: 1 })
     renderSchedule()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Standard Week' }))
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Standard Week' }))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Delete “Standard Week”?')
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('auto schedule using this template will be paused')
     expect(deleteWeekTemplateMock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Delete template' }))
 
     await waitFor(() => expect(deleteWeekTemplateMock).toHaveBeenCalledWith('template-1'))
+    expect(await screen.findByText('Paused 1 auto schedule that used this template.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
+  })
+
+  it('preserves a custom block name when saving template edits', async () => {
+    fetchWeekTemplatesMock.mockResolvedValue({ week_templates: [{
+      id: 'template-1', name: 'Standard Week', location_id: 'loc-1', color: null, notes: null,
+      blocks: [{
+        id: 'block-1', week_template_id: 'template-1', name: 'Front-door opening shift', role: 'Usher', department: null,
+        location_id: 'loc-1', start_time: '09:00:00', end_time: '17:00:00', break_minutes: 0,
+        required_staff: 1, days_of_week: [1, 2, 3, 4, 5], color: null, notes: null, job_id: null,
+      }],
+    }] })
+    replaceWeekTemplateMock.mockResolvedValue({})
+    renderSchedule()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Standard Week' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(replaceWeekTemplateMock).toHaveBeenCalledWith('template-1', expect.objectContaining({
+      blocks: [expect.objectContaining({ id: 'block-1', name: 'Front-door opening shift', role: 'Usher' })],
+    })))
   })
 
   it('shows a corrective message when location prerequisites block publication', async () => {

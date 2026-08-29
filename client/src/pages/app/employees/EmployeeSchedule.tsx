@@ -8,8 +8,7 @@ import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, updateWeekTemplate, deleteWeekTemplate,
-  addTemplateBlock, updateTemplateBlock, deleteTemplateBlock,
+  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, replaceWeekTemplate, deleteWeekTemplate,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
   fetchEligibilityCases, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
@@ -744,6 +743,14 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
   }, [locationId])
   useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
+  function handleDeleted(templateId: string) {
+    if (editing?.id === templateId) {
+      setAdding(false)
+      setEditing(null)
+    }
+    void load()
+  }
+
   if (!locationId) return <p className="text-sm text-zinc-600">Select a location to manage its week templates.</p>
   if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 
@@ -758,14 +765,14 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
         <p className="text-sm text-zinc-600">No templates yet — create one to generate recurring shifts.</p>
       ) : (
         <div className="space-y-2">
-          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} onEdit={() => { setEditing(t); setAdding(true) }} />)}
+          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onDeleted={() => handleDeleted(t.id)} onGenerated={onGenerated} onEdit={() => { setEditing(t); setAdding(true) }} />)}
         </div>
       )}
     </div>
   )
 }
 
-function TemplateRow({ tpl, onChanged, onGenerated, onEdit }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void; onEdit: () => void }) {
+function TemplateRow({ tpl, onDeleted, onGenerated, onEdit }: { tpl: WeekTemplate; onDeleted: () => void; onGenerated: () => void; onEdit: () => void }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -777,7 +784,16 @@ function TemplateRow({ tpl, onChanged, onGenerated, onEdit }: { tpl: WeekTemplat
 
   async function remove() {
     setBusy(true)
-    try { await deleteWeekTemplate(tpl.id); setConfirmDelete(false); onChanged() } finally { setBusy(false) }
+    try {
+      const result = await deleteWeekTemplate(tpl.id)
+      setConfirmDelete(false)
+      onDeleted()
+      if (result.paused_auto_schedules) {
+        toast(`Paused ${result.paused_auto_schedules} auto schedule${result.paused_auto_schedules === 1 ? '' : 's'} that used this template.`, 'info')
+      }
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    } finally { setBusy(false) }
   }
   async function generate() {
     setGenBusy(true)
@@ -816,7 +832,7 @@ function TemplateRow({ tpl, onChanged, onGenerated, onEdit }: { tpl: WeekTemplat
       {confirmDelete && (
         <div role="alertdialog" aria-modal="true" aria-labelledby={`delete-template-${tpl.id}`} className="mt-3 rounded-lg border border-red-900/60 bg-red-950/20 p-3">
           <p id={`delete-template-${tpl.id}`} className="text-sm text-zinc-200">Delete “{tpl.name}”?</p>
-          <p className="mt-1 text-xs text-zinc-500">Its shift blocks will be removed. Previously generated shifts will remain.</p>
+          <p className="mt-1 text-xs text-zinc-500">Its shift blocks will be removed. Previously generated shifts will remain. Any auto schedule using this template will be paused.</p>
           <div className="mt-3 flex items-center gap-2">
             <button onClick={() => setConfirmDelete(false)} disabled={busy} className="text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
             <button onClick={remove} disabled={busy} className="inline-flex items-center gap-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Delete template</button>
@@ -836,6 +852,7 @@ function TemplateRow({ tpl, onChanged, onGenerated, onEdit }: { tpl: WeekTemplat
 
 type TemplateBlockDraft = {
   id: number | string
+  name: string
   role: string
   start: string
   end: string
@@ -849,6 +866,7 @@ const MAX_TEMPLATE_BLOCKS = 40
 function newTemplateBlock(id: number): TemplateBlockDraft {
   return {
     id,
+    name: '',
     role: '',
     start: '09:00',
     end: '17:00',
@@ -863,6 +881,7 @@ function TemplateForm({ locationId, template, onDone, onCancel }: { locationId: 
   const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => template
     ? template.blocks.map((block) => ({
       id: block.id,
+      name: block.name,
       role: block.role ?? '',
       start: block.start_time.slice(0, 5),
       end: block.end_time.slice(0, 5),
@@ -901,7 +920,8 @@ function TemplateForm({ locationId, template, onDone, onCancel }: { locationId: 
     setBusy(true)
     try {
       const blockPayload = (block: TemplateBlockDraft, index: number) => ({
-        name: block.role.trim() || `Shift ${index + 1}`,
+        id: typeof block.id === 'string' ? block.id : undefined,
+        name: block.name.trim() || block.role.trim() || `Shift ${index + 1}`,
         role: block.role.trim() || null,
         start_time: `${block.start}:00`, end_time: `${block.end}:00`,
         break_minutes: Math.max(0, Math.round(Number(block.breakMinutes) || 0)),
@@ -909,18 +929,15 @@ function TemplateForm({ locationId, template, onDone, onCancel }: { locationId: 
         days_of_week: block.days,
       })
       if (!template) {
-        await createWeekTemplate({ name: name.trim(), location_id: locationId, blocks: blocks.map(blockPayload) })
+        await createWeekTemplate({
+          name: name.trim(), location_id: locationId,
+          blocks: blocks.map((block, index) => {
+            const { id: _id, ...payload } = blockPayload(block, index)
+            return payload
+          }),
+        })
       } else {
-        await updateWeekTemplate(template.id, { name: name.trim() })
-        await Promise.all(blocks.map((block, index) => (
-          typeof block.id === 'string'
-            ? updateTemplateBlock(template.id, block.id, blockPayload(block, index))
-            : addTemplateBlock(template.id, blockPayload(block, index))
-        )))
-        const retainedBlockIds = new Set(blocks.filter((block) => typeof block.id === 'string').map((block) => block.id))
-        await Promise.all(template.blocks
-          .filter((block) => !retainedBlockIds.has(block.id))
-          .map((block) => deleteTemplateBlock(template.id, block.id)))
+        await replaceWeekTemplate(template.id, { name: name.trim(), blocks: blocks.map(blockPayload) })
       }
       onDone()
     } finally { setBusy(false) }
