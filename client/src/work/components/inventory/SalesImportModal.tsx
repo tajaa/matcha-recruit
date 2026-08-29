@@ -4,7 +4,7 @@ import { Button, FileUpload, Modal, Select, useToast } from '../../../components
 import {
   commitSales, createItem, parseSales,
   type InventoryItem, type SalesDraft, type SalesLine, type SalesMappingComponentInput,
-  getSalesImport,
+  discardSalesImport, getSalesImport,
 } from '../../api/inventory'
 
 export type DraftComponent = {
@@ -72,6 +72,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
   const [gmailMessageId, setGmailMessageId] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
   const [committing, setCommitting] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null)
 
   const itemOptions = items.map((item) => ({ value: item.id, label: item.name }))
@@ -183,7 +184,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     }
   }
 
-  async function doCommit(force: boolean) {
+  async function doCommit() {
     if (!draft) return
     setCommitting(true)
     try {
@@ -194,7 +195,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
         source,
         filename,
         gmail_message_id: gmailMessageId,
-        force,
+        force: false,
         lines: lines.map((line) => buildCommitLine(line, locationId)),
       })
       if (result.unmapped > 0) {
@@ -213,6 +214,21 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
       }
     } finally {
       setCommitting(false)
+    }
+  }
+
+  async function discardDraft() {
+    if (!loadedImportId) return
+    setDiscarding(true)
+    try {
+      await discardSalesImport(loadedImportId)
+      toast('Sales import discarded', 'success')
+      onCommitted()
+      close()
+    } catch {
+      toast('Failed to discard sales import', 'error')
+    } finally {
+      setDiscarding(false)
     }
   }
 
@@ -269,15 +285,12 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
               </div>
             ))}
           </div>
-          {duplicateWarning && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-900 p-3 text-sm text-amber-400">
-              <span>{duplicateWarning}</span>
-              <Button onClick={() => void doCommit(true)} disabled={committing}>Commit anyway</Button>
-            </div>
-          )}
+          {duplicateWarning && <p className="rounded-lg border border-amber-900 p-3 text-sm text-amber-400">{duplicateWarning}</p>}
+          {!canCommit && <p className="text-xs text-amber-400">Map or ignore every sales line to enable Commit sales.</p>}
           <div className="flex justify-end gap-2">
             <Button onClick={close}>Cancel</Button>
-            <Button onClick={() => void doCommit(false)} disabled={committing || !canCommit}>
+            {loadedImportId && <Button variant="ghost" onClick={() => void discardDraft()} disabled={committing || discarding}>Discard import</Button>}
+            <Button onClick={() => void doCommit()} disabled={committing || discarding || !canCommit}>
               {committing ? 'Committing…' : 'Commit sales'}
             </Button>
           </div>

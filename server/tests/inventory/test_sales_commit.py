@@ -280,3 +280,34 @@ def test_manually_discarded_nonignored_import_still_refuses_commit():
             gmail_message_id=None, force=False,
             lines=[_recipe_line()], import_id='import-1',
         ))
+
+
+def test_period_constraint_race_returns_duplicate_error_and_removes_new_draft(monkeypatch):
+    class PeriodConflict(Exception):
+        constraint_name = 'uniq_inventory_sales_imports_period'
+
+    class RaceConn(FakeConn):
+        async def execute(self, query, *args):
+            if 'SET status=$2' in query:
+                raise PeriodConflict()
+            await super().execute(query, *args)
+
+    async def record_movements(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(sales_commit, 'UniqueViolationError', PeriodConflict)
+    monkeypatch.setattr(sales_commit.movements_service, 'record_movements', record_movements)
+    conn = RaceConn()
+
+    with pytest.raises(sales_commit.DuplicateSalesPeriodError, match='already exist'):
+        _run(sales_commit.commit_sales_import(
+            conn, company_id='company-1', user_id='user-1', location_id=None,
+            business_date='2026-08-25', source='upload', filename='sales.csv',
+            gmail_message_id=None, force=False,
+            lines=[{
+                'sold_name': 'Vanilla latte', 'quantity': 1, 'status': 'mapped',
+                'components': [{'item_id': 'cup', 'quantity_per_sale': 1}],
+            }],
+        ))
+
+    assert any('DELETE FROM inventory_sales_imports' in query for query, _args in conn.executed)

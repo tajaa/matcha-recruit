@@ -6,6 +6,8 @@ from datetime import date
 from typing import Optional
 from uuid import UUID
 
+from asyncpg.exceptions import UniqueViolationError
+
 from app.matcha.services.inventory import movements as movements_service
 from app.matcha.services.inventory import sales_mappings
 from app.matcha.services.inventory.matching import normalize_name
@@ -170,6 +172,7 @@ async def commit_sales_import(
             )
 
     raw_json = json.dumps(raw, default=str) if raw is not None else None
+    created_import = False
     if existing_import:
         import_id = existing_import["id"]
         await conn.execute(
@@ -200,6 +203,7 @@ async def commit_sales_import(
             connection_id, external_batch_id, raw_json, user_id, len(lines), note,
         )
         import_id = import_row["id"]
+        created_import = True
 
     normalized_lines = []
     mapped = 0
@@ -307,60 +311,71 @@ async def commit_sales_import(
     all_ignored = bool(normalized_lines) and all(
         line["status"] == "ignored" for line in normalized_lines
     )
-    async with conn.transaction():
-        for line in normalized_lines:
-            new_mapping = line.get("new_mapping")
-            if not new_mapping:
-                continue
-            saved = await sales_mappings.upsert_mapping(
-                conn, company_id=company_id, location_id=location_id,
-                sold_name=line["sold_name"], kind=new_mapping["kind"],
-                components=new_mapping.get("components", []), created_by=user_id,
-            )
-            line["mapping_id"] = saved["id"]
-            line["components"] = saved.get("components", [])
-        for line in normalized_lines:
-            sales_line = await conn.fetchrow(
+    try:
+        async with conn.transaction():
+            for line in normalized_lines:
+                new_mapping = line.get("new_mapping")
+                if not new_mapping:
+                    continue
+                saved = await sales_mappings.upsert_mapping(
+                    conn, company_id=company_id, location_id=location_id,
+                    sold_name=line["sold_name"], kind=new_mapping["kind"],
+                    components=new_mapping.get("components", []), created_by=user_id,
+                )
+                line["mapping_id"] = saved["id"]
+                line["components"] = saved.get("components", [])
+            for line in normalized_lines:
+                sales_line = await conn.fetchrow(
+                    """
+                    INSERT INTO inventory_sales_lines
+                        (import_id, company_id, sold_name, normalized_name, quantity,
+                         gross_sales, mapping_id, status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    RETURNING id
+                    """,
+                    import_id, company_id, line["sold_name"], line["normalized_name"],
+                    line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
+                )
+                if line["status"] == "mapped":
+                    for component in line["components"]:
+                        await conn.execute(
+                            """
+                            INSERT INTO inventory_sales_line_components
+                                (sales_line_id, item_id, quantity_per_sale, unit)
+                            VALUES ($1, $2, $3, $4)
+                            """,
+                            sales_line["id"], component["item_id"],
+                            component["quantity_per_sale"], component.get("unit"),
+                        )
+            if not all_ignored:
+                await movements_service.record_movements(
+                    conn, company_id=company_id, channel_id=None, source_message_id=None,
+                    recorded_by=user_id, kind="sale",
+                    lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}
+                           for item_id, quantity in depletion.items()],
+                    narrative=f"Sales depletion — {business_date.isoformat()}" if business_date else "Sales depletion",
+                    note=filename, sales_import_id=import_id,
+                )
+            await conn.execute(
                 """
-                INSERT INTO inventory_sales_lines
-                    (import_id, company_id, sold_name, normalized_name, quantity,
-                     gross_sales, mapping_id, status)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                RETURNING id
-                """,
-                import_id, company_id, line["sold_name"], line["normalized_name"],
-                line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
+                UPDATE inventory_sales_imports
+                SET status=$2, mapped_count=$3,
+                    committed_by=CASE WHEN $2='committed' THEN $4 ELSE NULL END,
+                    committed_at=CASE WHEN $2='committed' THEN NOW() ELSE NULL END
+                WHERE id=$1
+                """, import_id,
+                "discarded" if all_ignored else "committed",
+                mapped, user_id,
             )
-            if line["status"] == "mapped":
-                for component in line["components"]:
-                    await conn.execute(
-                        """
-                        INSERT INTO inventory_sales_line_components
-                            (sales_line_id, item_id, quantity_per_sale, unit)
-                        VALUES ($1, $2, $3, $4)
-                        """,
-                        sales_line["id"], component["item_id"],
-                        component["quantity_per_sale"], component.get("unit"),
-                    )
-        if not all_ignored:
-            await movements_service.record_movements(
-                conn, company_id=company_id, channel_id=None, source_message_id=None,
-                recorded_by=user_id, kind="sale",
-                lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}
-                       for item_id, quantity in depletion.items()],
-                narrative=f"Sales depletion — {business_date.isoformat()}" if business_date else "Sales depletion",
-                note=filename, sales_import_id=import_id,
+    except UniqueViolationError as exc:
+        if exc.constraint_name != "uniq_inventory_sales_imports_period":
+            raise
+        if created_import:
+            await conn.execute(
+                "DELETE FROM inventory_sales_imports WHERE id=$1 AND company_id=$2 AND status='draft'",
+                import_id, company_id,
             )
-        await conn.execute(
-            """
-            UPDATE inventory_sales_imports
-            SET status=$2, mapped_count=$3,
-                committed_by=CASE WHEN $2='committed' THEN $4 ELSE NULL END,
-                committed_at=CASE WHEN $2='committed' THEN NOW() ELSE NULL END
-            WHERE id=$1
-            """, import_id,
-            "discarded" if all_ignored else "committed",
-            mapped, user_id,
-        )
+        label = business_date.isoformat() if business_date else "this period"
+        raise DuplicateSalesPeriodError(f"Sales for {label} already exist.") from exc
     return {"import_id": import_id, "total": len(lines), "mapped": mapped,
             "unmapped": 0, "items_affected": len(depletion), "errors": []}
