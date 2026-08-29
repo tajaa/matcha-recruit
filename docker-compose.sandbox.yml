@@ -6,10 +6,12 @@ services:
     # interactive and AutoPR lanes reuse this large, pinned toolchain image.
     # Without an explicit name Compose would build a duplicate 7+ GB image for
     # every dedicated project name.
-    image: matcha-agent-sandbox-workspace:latest
+    image: ${SANDBOX_IMAGE:-matcha-agent-sandbox-workspace:latest}
     build:
-      context: .
-      dockerfile: docker/agent-sandbox/Dockerfile
+      # Installed msandbox releases keep their Compose templates immutable,
+      # while the build context remains the selected Matcha checkout.
+      context: ${SANDBOX_BUILD_CONTEXT:-.}
+      dockerfile: ${SANDBOX_DOCKERFILE:-docker/agent-sandbox/Dockerfile}
       args:
         INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-false}
         USER_UID: ${SANDBOX_UID:-501}
@@ -67,7 +69,11 @@ services:
       - "127.0.0.1:${SANDBOX_HOST_CHAT_PORT:-18080}:${CHAT_PORT:-8080}"
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=1g
+      # OpenCode's OpenTUI renderer extracts a versioned native library under
+      # /tmp and maps it executable. The agent can already execute code from
+      # /workspace and its isolated home, so noexec only breaks the supported
+      # CLI without strengthening the container boundary.
+      - /tmp:rw,exec,nosuid,size=1g
       - /run:rw,nosuid,size=16m
     cap_drop:
       - ALL
@@ -95,7 +101,13 @@ services:
 volumes:
   sandbox_home:
   sandbox_npm_cache:
+  # Session controllers provide content-addressed names. Legacy callers keep
+  # the existing shared defaults, avoiding a multi-gigabyte copy per session.
   sandbox_server_venv:
+    name: ${SANDBOX_SERVER_VENV_VOLUME:-matcha-agent-sandbox_sandbox_server_venv}
   sandbox_client_node_modules:
+    name: ${SANDBOX_CLIENT_NODE_MODULES_VOLUME:-matcha-agent-sandbox_sandbox_client_node_modules}
   sandbox_tellus_node_modules:
+    name: ${SANDBOX_TELLUS_NODE_MODULES_VOLUME:-matcha-agent-sandbox_sandbox_tellus_node_modules}
   sandbox_oceanlab_node_modules:
+    name: ${SANDBOX_OCEANLAB_NODE_MODULES_VOLUME:-matcha-agent-sandbox_sandbox_oceanlab_node_modules}

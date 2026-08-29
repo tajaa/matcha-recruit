@@ -12,6 +12,51 @@ while [[ -L "$SCRIPT_SOURCE" ]]; do
     [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
 done
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
+
+# The v2 controller is host-side and versionable. Keep the shell implementation
+# below as the compatibility/control-plane lane used by existing AutoPR jobs,
+# while all independent-session operations enter the Python controller.
+run_v2_controller() {
+    PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+        MATCHA_REPO_ROOT="${MATCHA_REPO_ROOT:-$PROJECT_ROOT}" \
+        exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
+}
+
+if [ "$#" = 0 ]; then
+    run_v2_controller
+fi
+case "${1:-}" in
+    session|worktree|pr|test|install|host)
+        run_v2_controller "$@"
+        ;;
+    attach)
+        # Preserve the pre-v2 `attach /host/file` contract for automation;
+        # a non-path first argument is an explicit v2 session name or id.
+        if [ "$#" -gt 1 ] && [ ! -e "${2:-}" ]; then
+            run_v2_controller "$@"
+        fi
+        ;;
+    paste)
+        if [ "$#" -gt 1 ]; then
+            run_v2_controller "$@"
+        fi
+        ;;
+    doctor)
+        if [ "$#" -gt 1 ]; then
+            run_v2_controller "$@"
+        fi
+        ;;
+    system)
+        system_action="${2:-status}"
+        if [ "$#" -ge 2 ]; then shift 2; else shift; fi
+        case "$system_action" in
+            up) set -- start "$@" ;;
+            down) set -- stop "$@" ;;
+            status) set -- status "$@" ;;
+            *) echo "usage: msandbox system <up|down|status>" >&2; exit 2 ;;
+        esac
+        ;;
+esac
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.sandbox.yml"
 AUTOPR_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.autopr-sandbox.yml"
 PRIMARY_SANDBOX_PROJECT_NAME="${AGENT_SANDBOX_PRIMARY_PROJECT_NAME:-matcha-agent-sandbox}"
@@ -74,10 +119,21 @@ usage() {
     cat <<'EOF'
 Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
 
-Bare `msandbox` (no command) builds if needed, starts services, and drops you
-into a shell in the workspace — the one-command way in.
+Bare `msandbox` lists independent sessions and shows the create command. Use
+`msandbox system up` for the legacy AutoPR/control-plane services.
 
 Commands:
+  session create NAME --agent AGENT   Create an isolated detached worktree session.
+  session list                        List concurrent Codex/OpenCode/Claude sessions.
+  session attach|shell|exec|stop      Work with one named session.
+  session submit NAME --draft         Validate, publish, open PR, and release worktree.
+  attach SESSION <file...>            Import files into one session's /attachments inbox.
+  paste SESSION --send                Import clipboard evidence and send it to the session.
+  test SESSION --changed|--pr|--all   Run reproducible validation in the session.
+  worktree doctor|gc                  Inspect or prune provably stale worktree metadata.
+  pr checkout NUMBER                  Safely release ownership before checking out a PR.
+  install [--rollback RELEASE]        Install/rollback a branch-independent controller.
+  system up|down|status               Control the legacy AutoPR system plane.
   build [--playwright]        Build the isolated workspace image.
   start                       Start workspace + dev services; load the AutoPR timer and self-hosted runner.
   stop [--force]              Stop everything (incl. the self-hosted runner); refuse active agent work unless forced.

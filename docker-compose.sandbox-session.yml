@@ -1,0 +1,40 @@
+# Per-session isolation overlay. Session worktrees always start detached, so
+# no refs/heads/* branch is owned by an msandbox worktree. Mount the common
+# Git directory at its exact host path so the linked worktree's existing .git
+# pointer works naturally. Do not export GIT_DIR/GIT_WORK_TREE globally:
+# inherited overrides would redirect nested test repositories into Matcha's
+# common config.
+services:
+  workspace:
+    ports: !reset []
+    environment:
+      MSANDBOX_SESSION_ID: ${MSANDBOX_SESSION_ID:?session id is required}
+      MSANDBOX_ATTACHMENTS_DIR: /attachments
+      MSANDBOX_BRIDGE_DIR: /msandbox-bridge
+    volumes:
+      - ${MSANDBOX_SESSION_HOME:?session home is required}:/home/agent
+      - ${SANDBOX_GIT_COMMON_DIR:?Git common dir is required}:${SANDBOX_GIT_COMMON_DIR}
+      - ${MSANDBOX_ATTACHMENTS_HOST_DIR:?attachment inbox is required}:/attachments:ro
+      - ${MSANDBOX_BRIDGE_HOST_DIR:?host bridge dir is required}:/msandbox-bridge
+      # Vite/Vitest write caches below node_modules. Keep those hotspots
+      # session-local while sharing the immutable package installation.
+      - session_client_vite_cache:/workspace/client/node_modules/.vite
+      - session_tellus_vite_cache:/workspace/client/tellus/node_modules/.vite
+      - session_oceanlab_vite_cache:/workspace/client/oceanlab/node_modules/.vite
+
+volumes:
+  sandbox_server_venv:
+    external: true
+    name: ${SANDBOX_SERVER_VENV_VOLUME:?server dependency volume is required}
+  sandbox_client_node_modules:
+    external: true
+    name: ${SANDBOX_CLIENT_NODE_MODULES_VOLUME:?client dependency volume is required}
+  sandbox_tellus_node_modules:
+    external: true
+    name: ${SANDBOX_TELLUS_NODE_MODULES_VOLUME:?Tellus dependency volume is required}
+  sandbox_oceanlab_node_modules:
+    external: true
+    name: ${SANDBOX_OCEANLAB_NODE_MODULES_VOLUME:?Oceanlab dependency volume is required}
+  session_client_vite_cache:
+  session_tellus_vite_cache:
+  session_oceanlab_vite_cache:

@@ -13,3 +13,4 @@
 !client/oceanlab/package.json
 !client/oceanlab/package-lock.json
 !docker/agent-sandbox/entrypoint.sh
+!scripts/msandbox/container/msandbox-host-client

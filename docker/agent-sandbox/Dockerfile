@@ -159,6 +159,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && uv venv /opt/bootstrap/server-venv \
     && uv pip install --python /opt/bootstrap/server-venv/bin/python --upgrade pip \
     && uv pip install --python /opt/bootstrap/server-venv/bin/python -r /tmp/server-requirements.txt \
+    && uv pip install --python /opt/bootstrap/server-venv/bin/python pytest pytest-asyncio \
     && mkdir -p /opt/playwright \
     && if [ "${INSTALL_PLAYWRIGHT_BROWSERS}" = "true" ]; then \
         /opt/bootstrap/server-venv/bin/python -m playwright install chromium; \
@@ -246,12 +247,20 @@ COPY server/requirements.txt /tmp/server-requirements.txt
 COPY client/package-lock.json /tmp/client/package-lock.json
 COPY client/tellus/package-lock.json /tmp/tellus/package-lock.json
 COPY client/oceanlab/package-lock.json /tmp/oceanlab/package-lock.json
-RUN sha256sum /tmp/server-requirements.txt /tmp/client/package-lock.json /tmp/tellus/package-lock.json /tmp/oceanlab/package-lock.json \
-        | sha256sum | awk '{print $1}' > /opt/bootstrap/.dependencies-sha \
+RUN { \
+        sha256sum /tmp/server-requirements.txt /tmp/client/package-lock.json /tmp/tellus/package-lock.json /tmp/oceanlab/package-lock.json; \
+        printf '%s\n' 'msandbox-test-tools:pytest,pytest-asyncio:v1'; \
+    } | sha256sum | awk '{print $1}' > /opt/bootstrap/.dependencies-sha \
     && chown -R "${USER_UID}:${USER_GID}" /opt/bootstrap
 
 COPY docker/agent-sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
-RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint \
+COPY scripts/msandbox/container/msandbox-host-client /usr/local/bin/msandbox-host
+RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint /usr/local/bin/msandbox-host \
+    && printf '%s\n' \
+        '# Keep the pinned sandbox toolchain visible when agents spawn login shells.' \
+        'export PATH="/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH"' \
+        > /etc/profile.d/10-msandbox-path.sh \
+    && chmod 0644 /etc/profile.d/10-msandbox-path.sh \
     && mkdir -p \
         /home/agent/.config/git \
         /home/agent/.config/opencode \

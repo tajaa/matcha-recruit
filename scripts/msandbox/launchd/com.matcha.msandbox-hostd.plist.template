@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.matcha.msandbox-hostd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__MSANDBOX_BIN__</string>
+    <string>host</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/hostd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/hostd.err.log</string>
+</dict>
+</plist>

@@ -56,9 +56,11 @@ jobs:
           echo "repairable=$(jq -r '.repairable_failures' "$RUNNER_TEMP/autopr-audit.json")" >> "$GITHUB_OUTPUT"
           echo "fingerprint=$(jq -r '.fingerprint' "$RUNNER_TEMP/autopr-audit.json")" >> "$GITHUB_OUTPUT"
 
-      - name: Create repair branch
+      - name: Create detached repair checkout
         if: steps.audit.outputs.repairable != '0'
-        run: git switch -C "bot/autopr-audit-${{ steps.audit.outputs.fingerprint }}" main
+        # Publication pushes detached HEAD explicitly. The runner checkout
+        # never owns the PR branch and therefore cannot block later checkout.
+        run: git switch --detach main
 
       - name: Investigate and repair inside msandbox
         id: investigate
@@ -131,8 +133,5 @@ jobs:
             ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
           git reset --hard >/dev/null 2>&1 || true
           git clean -fd >/dev/null 2>&1 || true
-          git switch main >/dev/null 2>&1 || true
-          if [ -n "${{ steps.audit.outputs.fingerprint }}" ]; then
-            git branch -D "bot/autopr-audit-${{ steps.audit.outputs.fingerprint }}" >/dev/null 2>&1 || true
-          fi
+          git switch --detach main >/dev/null 2>&1 || true
           git worktree prune || true

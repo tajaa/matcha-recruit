@@ -9,12 +9,16 @@ apply migrations, start services, access Docker, or change host state.
 
 You may edit only these existing system surfaces:
 - scripts/agent-sandbox.sh
+- scripts/msandbox/
 - scripts/kanban-autopr/, scripts/error-autofix/, scripts/autopr-scope/
-- docker/agent-sandbox/, docker-compose.sandbox.yml, docker-compose.autopr-sandbox.yml
+- docker/agent-sandbox/, docker-compose.sandbox.yml,
+  docker-compose.sandbox-session.yml, docker-compose.sandbox-dev.yml,
+  docker-compose.sandbox-test.yml, docker-compose.autopr-sandbox.yml
 - the corresponding scripts/tests/test_agent_sandbox*,
-  test_msandbox_attachments*, test_kanban_autopr*, test_error_autofix*, or
+  test_msandbox_*, test_kanban_autopr*, test_error_autofix*, or
   test_autopr* contract tests, except scripts/tests/test_autopr_self_audit.sh
-- docs/ops/AGENT_SANDBOX.md, docs/ops/KANBAN_AUTOPR.md, or
+- docs/ops/AGENT_SANDBOX.md, docs/ops/MSANDBOX_SESSIONS.md,
+  docs/ops/KANBAN_AUTOPR.md, or
   docs/ops/SILENT_ERROR_AUTOFIX.md when behavior changed
 
 Do not edit `.github/`, deploy code, migrations, product code, dependency or

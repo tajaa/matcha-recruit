@@ -21,7 +21,10 @@ sync_dependency_tree() {
 
     if [[ "$installed_version" != "$template_version" ]]; then
         mkdir -p "$destination_dir"
-        rsync -a --delete "${source_dir}/" "${destination_dir}/"
+        # Session-local Vite cache volumes may be mounted below node_modules.
+        # Excluding that mountpoint keeps rsync --delete from trying to remove
+        # a live nested filesystem during first-use dependency initialization.
+        rsync -a --delete --exclude='.vite/' "${source_dir}/" "${destination_dir}/"
         printf '%s\n' "$template_version" > "${destination_dir}/.agent-sandbox-template"
         chown -R "${AGENT_UID}:${AGENT_GID}" "$destination_dir"
     fi
@@ -31,6 +34,14 @@ sync_dependency_tree /opt/bootstrap/server-venv /workspace/server/venv
 sync_dependency_tree /opt/bootstrap/client-node_modules /workspace/client/node_modules
 sync_dependency_tree /opt/bootstrap/tellus-node_modules /workspace/client/tellus/node_modules
 sync_dependency_tree /opt/bootstrap/oceanlab-node_modules /workspace/client/oceanlab/node_modules
+
+# These are session-local nested volumes. Docker creates a brand-new named
+# volume as root, while the shared parent dependency tree may already match
+# its template and skip the recursive chown above.
+install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
+    /workspace/client/node_modules/.vite \
+    /workspace/client/tellus/node_modules/.vite \
+    /workspace/client/oceanlab/node_modules/.vite
 
 # Python virtualenv activation scripts contain their original build location.
 # Rewrite text files after the copy so commands use the named-volume venv.
@@ -53,5 +64,19 @@ install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
     /home/agent/.config/git \
     /home/agent/.cache \
     /home/agent/.npm
+
+if [[ ! -f /home/agent/.config/opencode/opencode.json ]]; then
+    printf '%s\n' \
+        '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow"}}' \
+        > /home/agent/.config/opencode/opencode.json
+    chown "${AGENT_UID}:${AGENT_GID}" /home/agent/.config/opencode/opencode.json
+    chmod 0600 /home/agent/.config/opencode/opencode.json
+fi
+
+# `docker compose up` returns as soon as the container process starts, while
+# first-use dependency-volume synchronization can still be running. The host
+# controller waits for this marker before it lets an agent or test command in.
+touch /run/msandbox-ready
+chown "${AGENT_UID}:${AGENT_GID}" /run/msandbox-ready
 
 exec gosu agent "$@"
