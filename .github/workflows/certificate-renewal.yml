@@ -1,0 +1,201 @@
+name: Production certificate renewal
+
+on:
+  schedule:
+    # External backstop for the host-local systemd timers. Both renewal
+    # commands are idempotent and skip certificates that are not yet due.
+    - cron: '43 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ops-certificate-renewal
+  cancel-in-progress: false
+
+jobs:
+  renew-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Run origin certificate renewal
+        id: renew
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            ec2-user@54.177.107.107 'bash -s' <<'REMOTE'
+          certbot_rc=0
+          lego_rc=0
+          sudo systemctl start certbot-renew.service || certbot_rc=$?
+          sudo systemctl start lego-gummfit.service || lego_rc=$?
+          printf 'certbot-renew.service rc=%s\nlego-gummfit.service rc=%s\n' \
+            "$certbot_rc" "$lego_rc"
+          [ "$certbot_rc" -eq 0 ] && [ "$lego_rc" -eq 0 ]
+          REMOTE
+
+      - name: Verify origin certificate automation
+        id: origin
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          set -o pipefail
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            ec2-user@54.177.107.107 'bash -s' <<'REMOTE' | tee "$RUNNER_TEMP/origin-tls.tsv"
+          set -euo pipefail
+          check_seconds=$((21 * 24 * 60 * 60))
+
+          test "$(systemctl is-enabled certbot-renew.timer)" = enabled
+          test "$(systemctl is-active certbot-renew.timer)" = active
+          test "$(systemctl show certbot-renew.service -p Result --value)" = success
+
+          test "$(systemctl is-enabled lego-gummfit.timer)" = enabled
+          test "$(systemctl is-active lego-gummfit.timer)" = active
+          test "$(systemctl show lego-gummfit.service -p Result --value)" = success
+
+          certificate_row() {
+            label="$1"
+            certificate_path="$2"
+            end_date="$(sudo openssl x509 -noout -enddate -in "$certificate_path" | cut -d= -f2)"
+            end_epoch="$(date -u -d "$end_date" +%s)"
+            days_remaining=$(( (end_epoch - $(date -u +%s)) / 86400 ))
+            sudo openssl x509 -checkend "$check_seconds" -noout \
+              -in "$certificate_path" >&2
+            printf '%s\t%s\t%s\tRenews automatically at 30 days\n' \
+              "$label" "$end_date" "$days_remaining"
+          }
+
+          certificate_row 'hey-matcha.com EC2 origin' /etc/letsencrypt/live/hey-matcha.com/fullchain.pem
+          certificate_row 'gummfit.com EC2 origin' /etc/lego/certificates/gummfit.com.crt
+          sudo nginx -t >&2
+          REMOTE
+
+      - name: Verify certificates served publicly
+        id: public
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          check_seconds=$((21 * 24 * 60 * 60))
+          : > "$RUNNER_TEMP/public-tls.tsv"
+          for host in \
+            hey-matcha.com \
+            www.hey-matcha.com \
+            gummfit.com \
+            www.gummfit.com \
+            origin.gummfit.com \
+            tls-probe.gummfit.com
+          do
+            pem="$RUNNER_TEMP/${host}.pem"
+            timeout 20 openssl s_client \
+              -connect "${host}:443" \
+              -servername "$host" \
+              -verify_return_error \
+              -verify_hostname "$host" \
+              </dev/null > "$pem"
+            openssl x509 -checkend "$check_seconds" -noout -in "$pem" >&2
+            end_date="$(openssl x509 -noout -enddate -in "$pem" | cut -d= -f2)"
+            end_epoch="$(date -u -d "$end_date" +%s)"
+            days_remaining=$(( (end_epoch - $(date -u +%s)) / 86400 ))
+            case "$host" in
+              origin.gummfit.com) policy='Origin lego renewal at 30 days' ;;
+              *) policy='ACM-managed CloudFront edge certificate' ;;
+            esac
+            printf '%s\t%s\t%s\t%s\n' \
+              "$host" "$end_date" "$days_remaining" "$policy" \
+              | tee -a "$RUNNER_TEMP/public-tls.tsv"
+          done
+
+      - name: Publish certificate alert
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$RUNNER_TEMP/certificate-renewal.md"
+          if [ "${{ steps.renew.outcome }}" != success ] || \
+             [ "${{ steps.origin.outcome }}" != success ] || \
+             [ "${{ steps.public.outcome }}" != success ]; then
+            printf 'Production certificate renewal or verification failed.\n\n- Renewal: `%s`\n- Origin verification: `%s`\n- Public verification: `%s`\n\nReview: %s\n' \
+              '${{ steps.renew.outcome }}' \
+              '${{ steps.origin.outcome }}' \
+              '${{ steps.public.outcome }}' \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$body"
+            ./scripts/ops-health/publish-issue.sh \
+              ops-health:certificates \
+              'ops: production certificate renewal failed' \
+              "$body" \
+              ops-health
+          else
+            printf 'Certificate renewal and verification recovered at %s.\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$body"
+            ./scripts/ops-health/publish-issue.sh \
+              ops-health:certificates \
+              'ops: production certificate renewal failed' \
+              "$body" \
+              ops-health \
+              --recover
+          fi
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo '## Production certificates'
+            echo
+            echo 'All healthy certificates are renewed automatically. The EC2 origin'
+            echo 'renewers request a replacement when 30 days remain.'
+            echo
+            echo '| Check | Outcome |'
+            echo '|---|---|'
+            echo '| Renewal | `${{ steps.renew.outcome }}` |'
+            echo '| Origin automation | `${{ steps.origin.outcome }}` |'
+            echo '| Public TLS | `${{ steps.public.outcome }}` |'
+            echo
+            echo '### Origin certificates'
+            echo
+            echo '| Certificate | Expires (UTC) | Days remaining | Renewal policy |'
+            echo '|---|---:|---:|---|'
+            if [ -s "$RUNNER_TEMP/origin-tls.tsv" ]; then
+              while IFS=$'\t' read -r label end_date days_remaining policy; do
+                printf '| %s | %s | %s | %s |\n' \
+                  "$label" "$end_date" "$days_remaining" "$policy"
+              done < "$RUNNER_TEMP/origin-tls.tsv"
+            else
+              echo '| _Unavailable — see failed origin verification step_ | | | |'
+            fi
+            echo
+            echo '### Public certificates'
+            echo
+            echo '| Host | Expires (UTC) | Days remaining | Renewal policy |'
+            echo '|---|---:|---:|---|'
+            if [ -s "$RUNNER_TEMP/public-tls.tsv" ]; then
+              while IFS=$'\t' read -r host end_date days_remaining policy; do
+                printf '| %s | %s | %s | %s |\n' \
+                  "$host" "$end_date" "$days_remaining" "$policy"
+              done < "$RUNNER_TEMP/public-tls.tsv"
+            else
+              echo '| _Unavailable — see failed public TLS step_ | | | |'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mark certificate failure
+        if: always() && (steps.renew.outcome != 'success' || steps.origin.outcome != 'success' || steps.public.outcome != 'success')
+        run: exit 1
+
+      - name: Delete production SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/matcha-prod.pem"
