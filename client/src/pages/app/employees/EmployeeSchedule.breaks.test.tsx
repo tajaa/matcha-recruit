@@ -165,6 +165,33 @@ describe('EmployeeSchedule break planning', () => {
     })))
   })
 
+  it('requires at least one weekday for every template shift', async () => {
+    renderSchedule()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
+    fireEvent.change(screen.getByLabelText('Template name'), { target: { value: 'Incomplete week' } })
+    for (const day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']) {
+      fireEvent.click(screen.getByRole('button', { name: `${day} for shift 1` }))
+    }
+
+    expect(screen.getByText('Select at least one day for this shift.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save template' })).toBeDisabled()
+  })
+
+  it('caps a weekly template at the API limit of 40 shifts', async () => {
+    renderSchedule()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Templates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
+    const addShift = screen.getByRole('button', { name: 'Add shift' })
+    for (let index = 1; index < 40; index += 1) fireEvent.click(addShift)
+
+    expect(screen.getByText('Shift 40')).toBeInTheDocument()
+    expect(addShift).toBeDisabled()
+    expect(screen.getByText('Maximum 40 shifts per template.')).toBeInTheDocument()
+  })
+
   it('shows a corrective message when location prerequisites block publication', async () => {
     publishRangeMock.mockRejectedValue(new ApiError('Request failed', 422, {
       detail: { code: 'schedule_location_not_ready' },

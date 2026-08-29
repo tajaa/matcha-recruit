@@ -801,6 +801,8 @@ type TemplateBlockDraft = {
   days: number[]
 }
 
+const MAX_TEMPLATE_BLOCKS = 40
+
 function newTemplateBlock(id: number): TemplateBlockDraft {
   return {
     id,
@@ -816,8 +818,8 @@ function newTemplateBlock(id: number): TemplateBlockDraft {
 function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => [newTemplateBlock(1)])
-  const [nextBlockId, setNextBlockId] = useState(2)
   const [busy, setBusy] = useState(false)
+  const blocksValid = blocks.every((block) => block.days.length > 0)
 
   function updateBlock(id: number, patch: Partial<TemplateBlockDraft>) {
     setBlocks((current) => current.map((block) => block.id === id ? { ...block, ...patch } : block))
@@ -834,12 +836,15 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
   }
 
   function addBlock() {
-    setBlocks((current) => [...current, newTemplateBlock(nextBlockId)])
-    setNextBlockId((current) => current + 1)
+    setBlocks((current) => {
+      if (current.length >= MAX_TEMPLATE_BLOCKS) return current
+      const nextId = Math.max(...current.map((block) => block.id)) + 1
+      return [...current, newTemplateBlock(nextId)]
+    })
   }
 
   async function save() {
-    if (!name.trim() || blocks.length === 0) return
+    if (!name.trim() || blocks.length === 0 || !blocksValid) return
     setBusy(true)
     try {
       await createWeekTemplate({
@@ -881,16 +886,18 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
               <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
               <div className="flex gap-1 mt-1">
                 {WEEKDAY_LABELS.map((lbl, day) => (
-                  <button type="button" key={day} onClick={() => toggleDay(block.id, day)} className={`w-9 py-1 rounded-md text-xs border ${block.days.includes(day) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
+                  <button type="button" key={day} aria-label={`${lbl} for shift ${index + 1}`} aria-pressed={block.days.includes(day)} onClick={() => toggleDay(block.id, day)} className={`w-9 py-1 rounded-md text-xs border ${block.days.includes(day) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
                 ))}
               </div>
+              {block.days.length === 0 && <div className="mt-1 text-xs text-red-400">Select at least one day for this shift.</div>}
             </div>
           </div>
         ))}
-        <button type="button" onClick={addBlock} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"><Plus className="h-3.5 w-3.5" /> Add shift</button>
+        <button type="button" onClick={addBlock} disabled={blocks.length >= MAX_TEMPLATE_BLOCKS} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 disabled:cursor-not-allowed disabled:text-zinc-600"><Plus className="h-3.5 w-3.5" /> Add shift</button>
+        {blocks.length >= MAX_TEMPLATE_BLOCKS && <div className="text-xs text-zinc-500">Maximum 40 shifts per template.</div>}
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
+        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0 || !blocksValid} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>
