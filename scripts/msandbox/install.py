@@ -37,6 +37,7 @@ def _release_id(root: Path) -> str:
             "status",
             "--porcelain",
             "--",
+            "scripts/__init__.py",
             "scripts/msandbox",
             "docker-compose.sandbox.yml",
             "docker-compose.sandbox-session.yml",
@@ -60,6 +61,7 @@ def _release_id(root: Path) -> str:
         return sha
     digest = hashlib.sha256()
     for relative in (
+        "scripts/__init__.py",
         "scripts/msandbox",
         "docker-compose.sandbox.yml",
         "docker-compose.sandbox-session.yml",
@@ -95,8 +97,20 @@ def _write_launcher(destination: Path, repo_root: Path, bin_dir: Path) -> None:
                 "#!/bin/sh\n"
                 f"export MSANDBOX_RUNTIME_ROOT={shlex.quote(str(destination))}\n"
                 f"export MATCHA_REPO_ROOT={shlex.quote(str(repo_root))}\n"
-                f"cd {shlex.quote(str(destination))}\n"
-                "exec python3 -m scripts.msandbox \"$@\"\n"
+                f"runtime_root={shlex.quote(str(destination))}\n"
+                f"repo_root={shlex.quote(str(repo_root))}\n"
+                "run_v2() { cd \"$runtime_root\" || exit 1; exec python3 -m scripts.msandbox \"$@\"; }\n"
+                "case \"${1:-}\" in\n"
+                "  ''|--version|--repo|session|worktree|pr|test|install) run_v2 \"$@\" ;;\n"
+                "  attach) if [ \"$#\" -gt 1 ] && [ ! -e \"${2:-}\" ]; then run_v2 \"$@\"; fi ;;\n"
+                "  paste|doctor) if [ \"$#\" -gt 1 ]; then run_v2 \"$@\"; fi ;;\n"
+                "esac\n"
+                "legacy=\"$repo_root/scripts/agent-sandbox.sh\"\n"
+                "if [ ! -x \"$legacy\" ]; then\n"
+                "  echo \"msandbox: legacy control plane is unavailable at $legacy\" >&2\n"
+                "  exit 1\n"
+                "fi\n"
+                "exec \"$legacy\" \"$@\"\n"
             )
             handle.flush()
             os.fsync(handle.fileno())
@@ -106,13 +120,35 @@ def _write_launcher(destination: Path, repo_root: Path, bin_dir: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _remove_legacy_host_service() -> None:
+    """Retire the former container-triggered Xcode LaunchAgent on upgrade."""
+    if __import__("sys").platform != "darwin":
+        return
+    label = "com.matcha.msandbox-hostd"
+    if shutil.which("launchctl"):
+        subprocess.run(
+            ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    (Path.home() / f"Library/LaunchAgents/{label}.plist").unlink(missing_ok=True)
+
+
 def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | None = None) -> Path:
     ensure_roots()
     root = (repo_root or source_root()).resolve()
     release_id = _release_id(root)
     releases = data_root() / "releases"
     destination = releases / release_id
-    if not destination.exists():
+    if destination.exists():
+        manifest_path = destination / "manifest.json"
+        if destination.is_symlink() or not manifest_path.is_file():
+            raise InstallError(f"unsafe existing msandbox release: {destination}")
+        existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if existing_manifest.get("release") != release_id:
+            raise InstallError(f"msandbox release manifest mismatch: {destination}")
+    else:
         temporary = Path(tempfile.mkdtemp(prefix=f".{release_id}.", dir=releases))
         try:
             (temporary / "scripts").mkdir(parents=True)
@@ -176,10 +212,8 @@ def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | No
         config_temporary.unlink(missing_ok=True)
     resolved_bin_dir = (bin_dir or Path.home() / ".local/bin").expanduser()
     _write_launcher(destination, root, resolved_bin_dir)
-    if bin_dir is None and __import__("sys").platform == "darwin" and os.environ.get("MSANDBOX_SKIP_HOST_SERVICE") != "1":
-        from .host_actions import install_host_service
-
-        install_host_service(msandbox_bin=resolved_bin_dir / "msandbox")
+    if bin_dir is None:
+        _remove_legacy_host_service()
     return destination
 
 
@@ -190,19 +224,24 @@ def install_release(*, repo_root: Path | None = None, bin_dir: Path | None = Non
 
 
 def rollback_release(release_id: str, *, bin_dir: Path | None = None) -> Path:
-    destination = data_root() / "releases" / release_id
-    manifest_path = destination / "manifest.json"
-    if not manifest_path.is_file():
-        raise InstallError(f"unknown msandbox release: {release_id}")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    current = data_root() / "current"
-    next_link = data_root() / ".current.next"
-    next_link.unlink(missing_ok=True)
-    next_link.symlink_to(destination)
-    os.replace(next_link, current)
-    _write_launcher(
-        destination,
-        Path(manifest["repo_root"]),
-        (bin_dir or Path.home() / ".local/bin").expanduser(),
-    )
-    return destination
+    if not release_id or release_id in (".", "..") or Path(release_id).name != release_id:
+        raise InstallError(f"invalid msandbox release id: {release_id!r}")
+    with state_lock("install", timeout_s=60):
+        destination = data_root() / "releases" / release_id
+        manifest_path = destination / "manifest.json"
+        if not manifest_path.is_file() or destination.is_symlink():
+            raise InstallError(f"unknown msandbox release: {release_id}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("release") != release_id or not isinstance(manifest.get("repo_root"), str):
+            raise InstallError(f"invalid msandbox release manifest: {release_id}")
+        current = data_root() / "current"
+        next_link = data_root() / ".current.next"
+        next_link.unlink(missing_ok=True)
+        next_link.symlink_to(destination)
+        os.replace(next_link, current)
+        _write_launcher(
+            destination,
+            Path(manifest["repo_root"]),
+            (bin_dir or Path.home() / ".local/bin").expanduser(),
+        )
+        return destination

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import secrets
 import subprocess
 import time
-from pathlib import Path
+from dataclasses import replace
 
-from .docker_runtime import ensure_container, exec_in_session
+from .docker_runtime import compose_project, ensure_container, exec_in_session, remove_container_project
 from .git_worktrees import current_head, dirty_fingerprint
 from .host_actions import XCODE_TARGETS, affected_xcode_targets, run_xcode_action
 from .models import (
@@ -18,7 +18,7 @@ from .models import (
     ValidationReport,
     utc_now,
 )
-from .state import save_session, session_dir
+from .state import save_session, session_dir, state_lock
 
 
 class ValidationError(RuntimeError):
@@ -170,9 +170,14 @@ def build_test_plan(
         )
 
     targets: set[str] = set()
-    if xcode == "all":
+    effective_xcode = xcode
+    if effective_xcode is None and mode == "pr":
+        effective_xcode = "affected"
+    elif effective_xcode is None and mode == "all":
+        effective_xcode = "all"
+    if effective_xcode == "all":
         targets = set(XCODE_TARGETS)
-    elif xcode == "affected":
+    elif effective_xcode == "affected":
         targets = affected_xcode_targets(paths)
     return TestPlan(mode, tuple(paths), tuple(checks), tuple(sorted(targets)))
 
@@ -187,37 +192,76 @@ def _run_container_check(session: SessionRecord, check: CommandCheck) -> Command
 
 
 def run_test_plan(session: SessionRecord, plan: TestPlan) -> ValidationReport:
-    ensure_container(session, test_services=True)
-    results = [_run_container_check(session, check) for check in plan.checks]
-    for target in plan.xcode_targets:
-        results.append(run_xcode_action(session, target, "build"))
-        if target != "espresso":
-            results.append(run_xcode_action(session, target, "test"))
-    status = "pass" if all(result.status in ("pass", "skip") for result in results) else "fail"
-    head = current_head(session.worktree)
-    fingerprint = dirty_fingerprint(session.worktree)
-    report_dir = session_dir(session.id) / "validation"
-    report_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    stamp = int(time.time())
-    report_path = report_dir / f"{stamp}-{plan.mode}.json"
-    payload = {
-        "schema_version": 1,
-        "mode": plan.mode,
-        "status": status,
-        "commit_sha": head,
-        "dirty_fingerprint": fingerprint,
-        "changed_paths": list(plan.changed_paths),
-        "results": [result.__dict__ for result in results],
-        "finished_at": utc_now(),
-    }
-    report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    session.last_validation = ValidationReference(
-        plan.mode,
-        head,
-        fingerprint,
-        status,
-        str(report_path),
-        payload["finished_at"],
-    )
-    save_session(session)
-    return ValidationReport(status, head, fingerprint, tuple(results), report_path)
+    from .sessions import stop_session
+
+    with state_lock(f"session-{session.id}"):
+        stop_session(session, _lock_held=True)
+        live_paths = tuple(changed_paths(session))
+        if live_paths != plan.changed_paths:
+            raise ValidationError(
+                "worktree changed while the validation plan was being prepared; run the test command again"
+            )
+        starting_head = current_head(session.worktree)
+        starting_fingerprint = dirty_fingerprint(session.worktree)
+        validation_session = replace(
+            session,
+            compose_project=compose_project(
+                f"{session.id}-validation-{secrets.token_hex(3)}"
+            ),
+            ports=None,
+            dev=False,
+        )
+        results: list[CommandResult] = []
+        try:
+            ensure_container(validation_session, test_services=True)
+            results.extend(
+                _run_container_check(validation_session, check) for check in plan.checks
+            )
+            for target in plan.xcode_targets:
+                results.append(run_xcode_action(session, target, "build"))
+                if target != "espresso":
+                    results.append(run_xcode_action(session, target, "test"))
+        finally:
+            remove_container_project(validation_session, volumes=True)
+
+        ending_head = current_head(session.worktree)
+        ending_fingerprint = dirty_fingerprint(session.worktree)
+        if ending_head != starting_head or ending_fingerprint != starting_fingerprint:
+            results.append(
+                CommandResult(
+                    "validation-snapshot",
+                    "Worktree remained unchanged during validation",
+                    "fail",
+                    None,
+                    0.0,
+                    "worktree changed during validation; discard this result and validate again",
+                )
+            )
+        status = "pass" if all(result.status in ("pass", "skip") for result in results) else "fail"
+        report_dir = session_dir(session.id) / "validation"
+        report_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stamp = int(time.time())
+        report_path = report_dir / f"{stamp}-{plan.mode}.json"
+        payload = {
+            "schema_version": 1,
+            "mode": plan.mode,
+            "status": status,
+            "commit_sha": starting_head,
+            "dirty_fingerprint": starting_fingerprint,
+            "changed_paths": list(plan.changed_paths),
+            "results": [result.__dict__ for result in results],
+            "finished_at": utc_now(),
+        }
+        report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        session.last_validation = ValidationReference(
+            plan.mode,
+            starting_head,
+            starting_fingerprint,
+            status,
+            str(report_path),
+            payload["finished_at"],
+        )
+        save_session(session)
+        return ValidationReport(
+            status, starting_head, starting_fingerprint, tuple(results), report_path
+        )

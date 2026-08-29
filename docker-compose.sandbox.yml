@@ -14,6 +14,7 @@ services:
       dockerfile: ${SANDBOX_DOCKERFILE:-docker/agent-sandbox/Dockerfile}
       args:
         INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-false}
+        DEPENDENCY_TEMPLATE_ID: ${SANDBOX_DEPENDENCY_TEMPLATE_ID:-legacy}
         USER_UID: ${SANDBOX_UID:-501}
         USER_GID: ${SANDBOX_GID:-20}
     init: true

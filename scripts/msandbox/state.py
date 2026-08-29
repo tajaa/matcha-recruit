@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import tempfile
 import time
+import fcntl
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -54,6 +54,7 @@ def ensure_roots() -> None:
         data_root() / "homes",
         data_root() / "releases",
         data_root() / "build-contexts",
+        data_root() / "git-sessions",
         data_root() / "xcode-derived-data",
         config_root(),
     ):
@@ -125,54 +126,29 @@ def delete_session_state(session_id: str) -> None:
         shutil.rmtree(directory)
 
 
-def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 @contextmanager
 def state_lock(scope: str, timeout_s: float = 10.0) -> Iterator[None]:
-    """Serialize host mutations and recover only provably stale lock owners."""
+    """Serialize host mutations with a kernel-released advisory lock."""
     ensure_roots()
     safe_scope = "".join(char if char.isalnum() or char in "._-" else "_" for char in scope)
-    lock_dir = state_root() / "locks" / f"{safe_scope}.lock"
+    lock_path = state_root() / "locks" / f"{safe_scope}.lock"
     deadline = time.monotonic() + timeout_s
-    while True:
-        try:
-            lock_dir.mkdir(mode=0o700)
-            owner = {
-                "pid": os.getpid(),
-                "host": socket.gethostname(),
-                "created_at": utc_now(),
-            }
-            (lock_dir / "owner.json").write_text(json.dumps(owner), encoding="utf-8")
-            break
-        except FileExistsError:
-            owner_file = lock_dir / "owner.json"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        os.chmod(lock_path, 0o600)
+        while True:
             try:
-                owner = json.loads(owner_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError, json.JSONDecodeError):
-                owner = {}
-            same_host = owner.get("host") == socket.gethostname()
-            if same_host and not _pid_alive(int(owner.get("pid", -1))):
-                shutil.rmtree(lock_dir, ignore_errors=True)
-                continue
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                pass
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"timed out waiting for msandbox lock: {scope}")
             time.sleep(0.1)
-    try:
-        yield
-    finally:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(json.dumps({"pid": os.getpid(), "created_at": utc_now()}))
+        handle.flush()
         try:
-            owner = json.loads((lock_dir / "owner.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError, json.JSONDecodeError):
-            owner = {}
-        if owner.get("pid") == os.getpid():
-            shutil.rmtree(lock_dir, ignore_errors=True)
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

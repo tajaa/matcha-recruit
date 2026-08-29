@@ -79,13 +79,16 @@ assert workspace.get("ports", []) == []
 PY
 echo "PASS: AutoPR overlay still publishes no host ports"
 
-mkdir -p "$TMP_DIR/worktree" "$TMP_DIR/git/worktrees/test" "$TMP_DIR/home" \
-    "$TMP_DIR/attachments" "$TMP_DIR/bridge"
-SANDBOX_WORKSPACE_DIR="$TMP_DIR/worktree" SANDBOX_GIT_COMMON_DIR="$TMP_DIR/git" \
+mkdir -p "$TMP_DIR/worktree" "$TMP_DIR/git/objects" "$TMP_DIR/isolated.git" \
+    "$TMP_DIR/home" "$TMP_DIR/attachments"
+printf 'gitdir: /msandbox-git\n' > "$TMP_DIR/workspace.git"
+SANDBOX_WORKSPACE_DIR="$TMP_DIR/worktree" \
+    SANDBOX_GIT_OBJECTS_DIR="$TMP_DIR/git/objects" \
+    MSANDBOX_GIT_DIR="$TMP_DIR/isolated.git" \
+    MSANDBOX_GIT_POINTER_FILE="$TMP_DIR/workspace.git" \
     SANDBOX_GIT_ADMIN_NAME=test MSANDBOX_SESSION_ID=test \
     MSANDBOX_SESSION_HOME="$TMP_DIR/home" \
     MSANDBOX_ATTACHMENTS_HOST_DIR="$TMP_DIR/attachments" \
-    MSANDBOX_BRIDGE_HOST_DIR="$TMP_DIR/bridge" \
     SANDBOX_SERVER_VENV_VOLUME=matcha-ms-test-server \
     SANDBOX_CLIENT_NODE_MODULES_VOLUME=matcha-ms-test-client \
     SANDBOX_TELLUS_NODE_MODULES_VOLUME=matcha-ms-test-tellus \
@@ -105,10 +108,22 @@ assert "GIT_WORK_TREE" not in workspace["environment"]
 mounts = {volume["target"]: volume for volume in workspace["volumes"]}
 assert mounts["/attachments"]["read_only"] is True
 assert Path(mounts["/home/agent"]["source"]).name == "home"
-git_mount = next(volume for volume in workspace["volumes"] if volume["source"].endswith("/git"))
-assert git_mount["source"] == git_mount["target"]
+objects = next(volume for volume in workspace["volumes"] if volume["source"].endswith("/git/objects"))
+assert objects["source"] == objects["target"]
+assert objects["read_only"] is True
+assert mounts["/msandbox-git"].get("read_only", False) is False
+assert mounts["/workspace/.git"]["read_only"] is True
+assert not any(volume["source"].endswith("/git") for volume in workspace["volumes"])
+assert "/msandbox-bridge" not in mounts
+for target in (
+    "/workspace/server/venv",
+    "/workspace/client/node_modules",
+    "/workspace/client/tellus/node_modules",
+    "/workspace/client/oceanlab/node_modules",
+):
+    assert mounts[target]["read_only"] is True, target
 PY
-echo "PASS: independent sessions are portless and mount only their Git metadata and attachment inbox"
+echo "PASS: sessions use private Git metadata with host objects as a read-only alternate"
 
 grep -qF '/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH' \
     "$REPO_ROOT/docker/agent-sandbox/Dockerfile"

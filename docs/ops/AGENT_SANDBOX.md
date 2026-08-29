@@ -60,6 +60,11 @@ that's a design choice made in this plan, documented below rather than hidden.
   entrypoint's one-time volume setup before it drops to the unprivileged
   `agent` user); `no-new-privileges`
 - published ports bind to `127.0.0.1` only
+- the repository's common Git config, hooks, refs, and objects are not writable.
+  Each container uses private Git metadata/objects with host objects exposed
+  only as a read-only alternate; the controller imports its committed HEAD
+  when the session stops. Host publication also disables hooks explicitly.
+- no container-to-host command or Xcode bridge exists
 
 **Deliberately reachable** (by design — see `docker-compose.sandbox.yml`):
 - the repo bind mount, including `secrets/roonMT-arm.pem` and `server/.env`
@@ -100,6 +105,9 @@ a Linux container. An agent in the sandbox can still edit Swift and
 ./scripts/xcode-build.sh espresso build
 ./scripts/xcode-build.sh matchatutor test
 ```
+For a registered session, prefer an explicit host invocation such as
+`msandbox test ios-review --pr`; containers cannot trigger it. This is an
+operator trust boundary because Xcode projects may contain shell build phases.
 See `scripts/xcode-build.sh` for the full target list and the existing
 `release.sh` / `release-appstore.sh` / `run-prod.sh` for signing/notarization
 and prod-tunneled runs — this wrapper doesn't reimplement those.

@@ -68,6 +68,9 @@ class SessionRecord:
     base_ref: str
     base_sha: str
     target_branch: str | None
+    start_sha: str | None = None
+    expected_remote_sha: str | None = None
+    synchronized_sha: str | None = None
     agent_session_id: str | None = None
     pr_number: int | None = None
     pr_url: str | None = None

@@ -80,10 +80,33 @@ def import_files(
                 after = os.fstat(fd)
                 if after.st_size != before.st_size or after.st_mtime_ns != before.st_mtime_ns:
                     raise AttachmentError(f"attachment changed while importing: {source}")
-                short_digest = digest.hexdigest()[:12]
+                full_digest = digest.hexdigest()
+                short_digest = full_digest[:12]
                 safe_name = _sanitize_name(source.name)
-                destination = inbox / f"{short_digest}-{safe_name}"
+                destination = inbox / f"{full_digest}-{safe_name}"
                 already_imported = destination.exists()
+                if destination.is_symlink():
+                    raise AttachmentError(f"unsafe attachment destination: {destination}")
+                if already_imported:
+                    existing_digest = hashlib.sha256()
+                    existing_fd = os.open(destination, flags)
+                    try:
+                        existing_stat = os.fstat(existing_fd)
+                        if not stat.S_ISREG(existing_stat.st_mode):
+                            raise AttachmentError(
+                                f"attachment destination is not a regular file: {destination}"
+                            )
+                        while chunk := os.read(existing_fd, 1024 * 1024):
+                            existing_digest.update(chunk)
+                    finally:
+                        os.close(existing_fd)
+                    if (
+                        existing_stat.st_size != before.st_size
+                        or existing_digest.hexdigest() != full_digest
+                    ):
+                        raise AttachmentError(
+                            f"attachment destination failed content verification: {destination}"
+                        )
                 if not already_imported:
                     if current_bytes + before.st_size > session_max_bytes:
                         raise AttachmentError(
@@ -92,14 +115,23 @@ def import_files(
                     os.lseek(fd, 0, os.SEEK_SET)
                     temporary_fd, temporary_name = tempfile.mkstemp(prefix=".attachment.", dir=inbox)
                     try:
+                        copied_digest = hashlib.sha256()
                         with os.fdopen(temporary_fd, "wb") as output:
                             while True:
                                 chunk = os.read(fd, 1024 * 1024)
                                 if not chunk:
                                     break
+                                copied_digest.update(chunk)
                                 output.write(chunk)
                             output.flush()
                             os.fsync(output.fileno())
+                        copied_source_stat = os.fstat(fd)
+                        if (
+                            copied_source_stat.st_size != before.st_size
+                            or copied_source_stat.st_mtime_ns != before.st_mtime_ns
+                            or copied_digest.hexdigest() != full_digest
+                        ):
+                            raise AttachmentError(f"attachment changed while importing: {source}")
                         os.chmod(temporary_name, 0o600)
                         os.replace(temporary_name, destination)
                     finally:
@@ -115,7 +147,7 @@ def import_files(
                     id=short_digest,
                     original_name=source.name,
                     mime_type=mimetypes.guess_type(source.name)[0] or "application/octet-stream",
-                    sha256=digest.hexdigest(),
+                    sha256=full_digest,
                     size=size,
                     host_path=destination,
                     container_path=Path("/attachments") / destination.name,

@@ -12,9 +12,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
 
-from .git_worktrees import git_common_dir
+from .git_worktrees import git_common_dir, session_git_dir, session_git_pointer
 from .models import PortSet, SessionRecord
-from .state import data_root, session_dir, state_lock, state_root
+from .state import data_root, state_lock, state_root
 
 
 class DockerError(RuntimeError):
@@ -47,6 +47,8 @@ def allocate_port_block() -> PortSet:
             for record_path in sessions_root.glob("*/session.json"):
                 try:
                     raw = json.loads(record_path.read_text(encoding="utf-8"))
+                    if raw.get("phase") == "released":
+                        continue
                     used.update(int(value) for value in (raw.get("ports") or {}).values())
                 except (OSError, ValueError, TypeError):
                     continue
@@ -72,29 +74,24 @@ def attachment_dir(record: SessionRecord) -> Path:
     return data_root() / "attachments" / record.id
 
 
-def bridge_dir(record: SessionRecord) -> Path:
-    return session_dir(record.id) / "bridge"
-
-
-def _dependency_volume(prefix: str, paths: Sequence[Path]) -> str:
+def _dependency_volume(prefix: str, paths: Sequence[Path], template_id: str) -> str:
     digest = hashlib.sha256()
     digest.update(platform.machine().encode())
-    digest.update(b"msandbox-dependencies-v2")
+    digest.update(b"msandbox-dependencies-v3")
+    digest.update(template_id.encode())
     for path in paths:
         digest.update(path.name.encode())
         digest.update(path.read_bytes())
     return f"matcha-ms-deps-{prefix}-{digest.hexdigest()[:16]}"
 
 
-def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tuple[Path, str]:
+def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tuple[Path, str, str]:
     """Create one immutable Docker context for this controller+lockfile set."""
     sources = {
         "docker/agent-sandbox/Dockerfile": runtime_root / "docker/agent-sandbox/Dockerfile",
         "docker/agent-sandbox/Dockerfile.dockerignore": runtime_root
         / "docker/agent-sandbox/Dockerfile.dockerignore",
         "docker/agent-sandbox/entrypoint.sh": runtime_root / "docker/agent-sandbox/entrypoint.sh",
-        "scripts/msandbox/container/msandbox-host-client": runtime_root
-        / "scripts/msandbox/container/msandbox-host-client",
         "server/requirements.txt": record.worktree / "server/requirements.txt",
         "client/package.json": record.worktree / "client/package.json",
         "client/package-lock.json": record.worktree / "client/package-lock.json",
@@ -128,21 +125,49 @@ def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tup
                     os.replace(temporary, destination)
                 finally:
                     shutil.rmtree(temporary, ignore_errors=True)
-    return destination, f"matcha-agent-sandbox-workspace:{identifier}"
+    return destination, f"matcha-agent-sandbox-workspace:{identifier}", identifier
+
+
+def _safe_git_subdirectory(common_dir: Path, relative: Path) -> Path:
+    common_dir = common_dir.resolve()
+    candidate = common_dir / relative
+    if candidate.is_symlink() or not candidate.is_dir():
+        raise DockerError(f"unsafe or missing Git metadata directory: {candidate}")
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(common_dir)
+    except ValueError as exc:
+        raise DockerError(f"Git metadata directory escapes the common directory: {candidate}") from exc
+    return resolved
 
 
 def compose_environment(record: SessionRecord) -> dict[str, str]:
     common_dir = git_common_dir(record.repo_path)
+    objects_dir = _safe_git_subdirectory(common_dir, Path("objects"))
+    isolated_git_dir = session_git_dir(record.id)
+    isolated_git_pointer = session_git_pointer(record.id)
+    expected_root = (data_root() / "git-sessions").resolve()
+    try:
+        isolated_git_dir.resolve().relative_to(expected_root)
+        isolated_git_pointer.resolve().relative_to(expected_root)
+    except ValueError as exc:
+        raise DockerError("isolated Git metadata escapes the msandbox data root") from exc
+    if (
+        isolated_git_dir.is_symlink()
+        or not isolated_git_dir.is_dir()
+        or isolated_git_pointer.is_symlink()
+        or not isolated_git_pointer.is_file()
+    ):
+        raise DockerError(f"isolated Git metadata is missing or unsafe for {record.id}")
     home = session_home(record)
     attachments = attachment_dir(record)
-    bridge = bridge_dir(record)
-    for directory in (home, attachments, bridge, bridge / "requests", bridge / "results", bridge / "logs"):
+    for directory in (home, attachments):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     runtime_root = Path(os.environ.get("MSANDBOX_RUNTIME_ROOT", record.repo_path))
     # Build inputs are copied to a content-addressed context. This prevents two
     # parallel PRs with different lockfiles from racing on one mutable `latest`
     # image, and keeps the controller/Dockerfile stable across branch switches.
-    build_context, image = _materialize_build_context(record, runtime_root)
+    build_context, image, template_id = _materialize_build_context(record, runtime_root)
     environment = dict(os.environ)
     environment.update(
         {
@@ -150,12 +175,13 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
             "SANDBOX_DOCKERFILE": "docker/agent-sandbox/Dockerfile",
             "SANDBOX_IMAGE": image,
             "SANDBOX_WORKSPACE_DIR": str(record.worktree),
-            "SANDBOX_GIT_COMMON_DIR": str(common_dir),
-            "SANDBOX_GIT_ADMIN_NAME": record.git_admin_name,
+            "SANDBOX_GIT_OBJECTS_DIR": str(objects_dir),
+            "MSANDBOX_GIT_DIR": str(isolated_git_dir.resolve()),
+            "MSANDBOX_GIT_POINTER_FILE": str(isolated_git_pointer.resolve()),
+            "SANDBOX_DEPENDENCY_TEMPLATE_ID": template_id,
             "MSANDBOX_SESSION_ID": record.id,
             "MSANDBOX_SESSION_HOME": str(home),
             "MSANDBOX_ATTACHMENTS_HOST_DIR": str(attachments),
-            "MSANDBOX_BRIDGE_HOST_DIR": str(bridge),
             "SANDBOX_AWS_DIR": str(Path.home() / ".aws"),
             "SANDBOX_UID": str(os.getuid()),
             "SANDBOX_GID": str(os.getgid()),
@@ -167,18 +193,22 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
             "SANDBOX_SERVER_VENV_VOLUME": _dependency_volume(
                 "server",
                 [record.worktree / "server/requirements.txt"],
+                template_id,
             ),
             "SANDBOX_CLIENT_NODE_MODULES_VOLUME": _dependency_volume(
                 "client",
                 [record.worktree / "client/package-lock.json"],
+                template_id,
             ),
             "SANDBOX_TELLUS_NODE_MODULES_VOLUME": _dependency_volume(
                 "tellus",
                 [record.worktree / "client/tellus/package-lock.json"],
+                template_id,
             ),
             "SANDBOX_OCEANLAB_NODE_MODULES_VOLUME": _dependency_volume(
                 "oceanlab",
                 [record.worktree / "client/oceanlab/package-lock.json"],
+                template_id,
             ),
         }
     )
@@ -252,8 +282,19 @@ def ensure_container(record: SessionRecord, *, test_services: bool = False) -> N
     if test_services:
         services.extend(["postgres", "redis"])
     services.append("workspace")
-    with state_lock("dependency-initialization", timeout_s=300):
-        environment = compose_environment(record)
+    environment = compose_environment(record)
+    # Content-addressed images can build concurrently; BuildKit deduplicates
+    # identical layers. Only initialization of shared dependency volumes needs
+    # the cross-session lock below.
+    build = subprocess.run(
+        compose_command(record, "build", "workspace", test_services=test_services),
+        env=environment,
+        check=False,
+        text=True,
+    )
+    if build.returncode:
+        raise DockerError("workspace image build failed")
+    with state_lock("dependency-initialization", timeout_s=600):
         for variable in (
             "SANDBOX_SERVER_VENV_VOLUME",
             "SANDBOX_CLIENT_NODE_MODULES_VOLUME",
@@ -269,24 +310,47 @@ def ensure_container(record: SessionRecord, *, test_services: bool = False) -> N
             )
             if inspected.returncode:
                 subprocess.run(["docker", "volume", "create", volume], check=True, stdout=subprocess.DEVNULL)
-        _run_compose(record, "up", *services, test_services=test_services)
-        deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
-            ready = _run_compose(
-                record,
-                "exec",
-                "--no-TTY",
-                "workspace",
-                "test",
-                "-f",
-                "/run/msandbox-ready",
-                check=False,
-                capture=True,
-                test_services=test_services,
-            )
-            if ready.returncode == 0:
-                return
-            time.sleep(0.25)
+        initialize = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--env",
+                "MSANDBOX_INITIALIZE_DEPENDENCIES=1",
+                "--volume",
+                f"{environment['SANDBOX_SERVER_VENV_VOLUME']}:/workspace/server/venv",
+                "--volume",
+                f"{environment['SANDBOX_CLIENT_NODE_MODULES_VOLUME']}:/workspace/client/node_modules",
+                "--volume",
+                f"{environment['SANDBOX_TELLUS_NODE_MODULES_VOLUME']}:/workspace/client/tellus/node_modules",
+                "--volume",
+                f"{environment['SANDBOX_OCEANLAB_NODE_MODULES_VOLUME']}:/workspace/client/oceanlab/node_modules",
+                environment["SANDBOX_IMAGE"],
+                "true",
+            ],
+            check=False,
+            text=True,
+        )
+        if initialize.returncode:
+            raise DockerError("workspace dependency initialization failed")
+    _run_compose(record, "up", "--no-build", *services, test_services=test_services)
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        ready = _run_compose(
+            record,
+            "exec",
+            "--no-TTY",
+            "workspace",
+            "test",
+            "-f",
+            "/run/msandbox-ready",
+            check=False,
+            capture=True,
+            test_services=test_services,
+        )
+        if ready.returncode == 0:
+            return
+        time.sleep(0.25)
     raise DockerError("workspace dependency initialization did not become ready within 180 seconds")
 
 
@@ -296,10 +360,42 @@ def stop_container(record: SessionRecord) -> None:
     _run_compose(record, "stop", "workspace", check=False)
 
 
-def remove_container_project(record: SessionRecord) -> None:
+def remove_container_project(record: SessionRecord, *, volumes: bool = False) -> None:
     if not shutil_which("docker"):
         return
-    _run_compose(record, "down", "--remove-orphans", check=False, test_services=True)
+    argv = ["down", "--remove-orphans"]
+    if volumes:
+        argv.append("--volumes")
+    _run_compose(record, *argv, check=False, test_services=True)
+
+
+def remove_orphaned_container_project(record: SessionRecord) -> None:
+    """Remove resources by the exact Compose label when manifests are unavailable."""
+    if not shutil_which("docker"):
+        return
+    label = f"label=com.docker.compose.project={record.compose_project}"
+    for resource in ("container", "volume", "network"):
+        listed = subprocess.run(
+            [
+                "docker",
+                resource,
+                "ls",
+                *(["--all"] if resource == "container" else []),
+                "--quiet",
+                "--filter",
+                label,
+            ],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        identifiers = (listed.stdout or "").split()
+        if not identifiers:
+            continue
+        command = ["docker", resource, "rm"]
+        if resource == "container":
+            command.append("--force")
+        subprocess.run([*command, *identifiers], check=False, capture_output=True)
 
 
 def container_running(record: SessionRecord) -> bool:

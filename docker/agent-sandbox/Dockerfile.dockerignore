@@ -1,5 +1,5 @@
 # BuildKit prefers "<dockerfile>.dockerignore" over the context-root
-# .dockerignore for a given Dockerfile. This image only ever COPYs 7 small
+# .dockerignore for a given Dockerfile. This image only ever COPYs a few small
 # manifest/script files (see the Dockerfile) — everything else in the repo,
 # including 1.7GB of GGUF models under server/agent/models and every
 # node_modules/venv tree, is dead weight shipped across virtiofs on every
@@ -13,4 +13,3 @@
 !client/oceanlab/package.json
 !client/oceanlab/package-lock.json
 !docker/agent-sandbox/entrypoint.sh
-!scripts/msandbox/container/msandbox-host-client

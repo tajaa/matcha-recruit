@@ -20,7 +20,7 @@ msandbox session exec payroll-fix -- git status --short
 One session consists of:
 
 - `~/.local/share/matcha-msandbox/worktrees/<id>/repo`, always detached;
-- a `matcha-ms-<id>` Compose project, content-addressed shared dependencies,
+- a `matcha-ms-<id>` Compose project, content-addressed read-only dependencies,
   and session-local writable tool caches;
 - an isolated home containing only the selected agent's copied auth file;
 - a host tmux session, so disconnecting the terminal does not stop the agent;
@@ -71,11 +71,13 @@ tests, lint/build, automation contracts, private data services, and affected
 native targets. `--all` selects all Linux targets. A required command reported
 as unavailable fails the gate; static review is never presented as a test run.
 
-Xcode remains host-only. `/usr/local/bin/msandbox-host` submits a strict JSON
-request containing only session ID, commit, target, and `build|test`. The
-LaunchAgent validates the registered worktree and runs one of `espresso`,
-`matchatutor`, `tellus`, or `gummfit` with per-session DerivedData. It cannot
-run signing, release, notarization, deployment, `open`, or arbitrary argv.
+Xcode remains host-only. There is deliberately no container-to-host request
+bridge: an Xcode project can contain shell build phases, so allowlisting the
+`xcodebuild` argv alone cannot make an agent-triggered host build safe. An
+operator explicitly running `msandbox test ... --pr` invokes only the
+registered `espresso`, `matchatutor`, `tellus`, or `gummfit` build/test actions
+with per-session DerivedData. Signing, release, notarization, deployment, and
+`open` are outside this validation path.
 
 ## Submit and free the worktree
 
@@ -86,8 +88,10 @@ msandbox test payroll-fix --pr
 msandbox session submit payroll-fix --draft
 ```
 
-Submission requires a clean tree and a passing, current PR report. It fetches
-the expected remote branch, pushes detached `HEAD` to
+Submission first stops the managed agent/container, then requires a clean tree
+and a passing PR/all report for the exact captured commit and tree fingerprint.
+It compares origin to the remote SHA recorded when the session was created and
+pushes that captured commit to
 `refs/heads/codex/payroll-fix` with a lease, opens or updates the PR, verifies
 the remote SHA, stops the agent/container, and removes the clean worktree.
 
@@ -114,16 +118,22 @@ The launcher is a real file at `~/.local/bin/msandbox`, not a symlink into the
 repository. It selects a copied release using `MSANDBOX_RUNTIME_ROOT`, so
 switching the main checkout cannot silently remove commands or alter session
 Compose behavior. Installation swaps the `current` link only after copying the
-complete release and installs the narrow Xcode host LaunchAgent on macOS.
+complete release. Legacy control-plane verbs are deliberately routed to the
+configured repository, while session/controller verbs use the copied release.
+On macOS, installation also unloads and removes the obsolete Xcode bridge
+LaunchAgent from earlier controller versions.
 
 Each session image is tagged from the immutable controller/Dockerfile,
 architecture, Playwright option, and that worktree's dependency manifests.
 Sessions with identical inputs share image and dependency caches; different
-lockfiles cannot race through a mutable `latest` image.
+lockfiles or controller toolchains cannot race through a mutable `latest`
+image. Dependency volumes are initialized under a host lock and mounted
+read-only into sessions; only per-session tool cache mounts remain writable.
 
 Persistent session state is reconciled against Git, Docker, and tmux on every
 list/operation. JSON is written by fsync plus atomic rename, and mutating
-operations use PID-owned locks with stale-owner recovery. If publication
+operations use kernel advisory locks that release automatically on process
+exit. If publication
 succeeds but cleanup cannot be proven safe, the session becomes
 `submitted_needs_release`; the PR remains available and the worktree remains
 untouched for manual inspection.

@@ -48,13 +48,15 @@ check_compose_contract() {
     SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
         docker compose --project-name matcha-agent-sandbox-audit \
         --file "$REPO_ROOT/docker-compose.sandbox.yml" config --quiet || return 1
-    mkdir -p "$compose_tmp/git/worktrees/audit" "$compose_tmp/home" \
-        "$compose_tmp/attachments" "$compose_tmp/bridge"
+    mkdir -p "$compose_tmp/git/objects" "$compose_tmp/isolated.git" \
+        "$compose_tmp/home" "$compose_tmp/attachments"
+    printf 'gitdir: /msandbox-git\n' > "$compose_tmp/workspace.git"
     SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
-        SANDBOX_GIT_COMMON_DIR="$compose_tmp/git" SANDBOX_GIT_ADMIN_NAME=audit \
+        SANDBOX_GIT_OBJECTS_DIR="$compose_tmp/git/objects" \
+        MSANDBOX_GIT_DIR="$compose_tmp/isolated.git" \
+        MSANDBOX_GIT_POINTER_FILE="$compose_tmp/workspace.git" \
         MSANDBOX_SESSION_ID=audit MSANDBOX_SESSION_HOME="$compose_tmp/home" \
         MSANDBOX_ATTACHMENTS_HOST_DIR="$compose_tmp/attachments" \
-        MSANDBOX_BRIDGE_HOST_DIR="$compose_tmp/bridge" \
         SANDBOX_SERVER_VENV_VOLUME=matcha-ms-audit-server \
         SANDBOX_CLIENT_NODE_MODULES_VOLUME=matcha-ms-audit-client \
         SANDBOX_TELLUS_NODE_MODULES_VOLUME=matcha-ms-audit-tellus \

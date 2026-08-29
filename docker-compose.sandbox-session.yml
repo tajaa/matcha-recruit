@@ -1,7 +1,9 @@
 # Per-session isolation overlay. Session worktrees always start detached, so
-# no refs/heads/* branch is owned by an msandbox worktree. Mount the common
-# Git directory at its exact host path so the linked worktree's existing .git
-# pointer works naturally. Do not export GIT_DIR/GIT_WORK_TREE globally:
+# no refs/heads/* branch is owned by an msandbox worktree. The container gets
+# a private Git directory and object store. Host objects are mounted read-only
+# at the absolute path recorded in the private store's alternates file. The
+# controller imports the private committed HEAD when the container stops. Do
+# not export GIT_DIR/GIT_WORK_TREE globally:
 # inherited overrides would redirect nested test repositories into Matcha's
 # common config.
 services:
@@ -10,12 +12,18 @@ services:
     environment:
       MSANDBOX_SESSION_ID: ${MSANDBOX_SESSION_ID:?session id is required}
       MSANDBOX_ATTACHMENTS_DIR: /attachments
-      MSANDBOX_BRIDGE_DIR: /msandbox-bridge
     volumes:
       - ${MSANDBOX_SESSION_HOME:?session home is required}:/home/agent
-      - ${SANDBOX_GIT_COMMON_DIR:?Git common dir is required}:${SANDBOX_GIT_COMMON_DIR}
+      - ${MSANDBOX_GIT_DIR:?isolated Git dir is required}:/msandbox-git
+      - ${MSANDBOX_GIT_POINTER_FILE:?isolated Git pointer is required}:/workspace/.git:ro
+      - ${SANDBOX_GIT_OBJECTS_DIR:?Git object dir is required}:${SANDBOX_GIT_OBJECTS_DIR}:ro
       - ${MSANDBOX_ATTACHMENTS_HOST_DIR:?attachment inbox is required}:/attachments:ro
-      - ${MSANDBOX_BRIDGE_HOST_DIR:?host bridge dir is required}:/msandbox-bridge
+      # Content-addressed dependency volumes are initialized by the host
+      # controller, then mounted read-only in every agent session.
+      - sandbox_server_venv:/workspace/server/venv:ro
+      - sandbox_client_node_modules:/workspace/client/node_modules:ro
+      - sandbox_tellus_node_modules:/workspace/client/tellus/node_modules:ro
+      - sandbox_oceanlab_node_modules:/workspace/client/oceanlab/node_modules:ro
       # Vite/Vitest write caches below node_modules. Keep those hotspots
       # session-local while sharing the immutable package installation.
       - session_client_vite_cache:/workspace/client/node_modules/.vite

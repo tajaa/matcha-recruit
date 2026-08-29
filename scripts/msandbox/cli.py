@@ -13,7 +13,6 @@ from .agent_adapters import attach_agent, deliver_attachments
 from .attachments import AttachmentError, import_clipboard, import_files
 from .docker_runtime import ensure_container, exec_in_session
 from .git_worktrees import detach_branch_owner, prune_stale_worktree_metadata, resolve_worktree_owner
-from .host_actions import install_host_service, serve_host_actions
 from .install import install_release, rollback_release
 from .models import SessionSpec
 from .sessions import (
@@ -125,10 +124,6 @@ def build_parser() -> argparse.ArgumentParser:
     checkout.add_argument("number", type=int)
     install = commands.add_parser("install")
     install.add_argument("--rollback")
-    host = commands.add_parser("host")
-    host_commands = host.add_subparsers(dest="host_command", required=True)
-    host_commands.add_parser("serve")
-    host_commands.add_parser("install")
     return result
 
 
@@ -176,15 +171,24 @@ def _checkout_pr(repo: Path, number: int) -> int:
         if not released.released:
             raise SessionError(f"cannot release {owner.path}: {released.reason}")
     dirty = subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain=v1"],
+        ["git", "-c", "core.hooksPath=/dev/null", "-C", str(repo), "status", "--porcelain=v1"],
         check=True,
         text=True,
         capture_output=True,
     ).stdout.strip()
     if dirty:
         raise SessionError("main checkout has uncommitted changes")
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.hooksPath",
+            "GIT_CONFIG_VALUE_0": "/dev/null",
+        }
+    )
     return subprocess.run(
         ["gh", "pr", "checkout", str(number), "--repo", _github_repo(repo)],
+        env=environment,
         check=False,
     ).returncode
 
@@ -296,12 +300,6 @@ def run(argv: list[str] | None = None) -> int:
     if args.command == "install":
         installed = rollback_release(args.rollback) if args.rollback else install_release(repo_root=repo)
         print(f"Installed msandbox {__version__}: {installed}")
-        return 0
-    if args.command == "host":
-        if args.host_command == "install":
-            print(install_host_service())
-            return 0
-        serve_host_actions()
         return 0
     return 2
 

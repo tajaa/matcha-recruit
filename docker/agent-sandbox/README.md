@@ -12,7 +12,7 @@ msandbox session list
 (`msandbox` — not `sandbox` — because `sandbox` is already taken by an
 unrelated devcontainer launcher elsewhere on this machine.)
 
-Parallel session, attachment, validation, PR-release, and Xcode-bridge
+Parallel session, attachment, validation, PR-release, and host-only Xcode
 reference: `docs/ops/MSANDBOX_SESSIONS.md`. The broader isolation/threat model
 and legacy AutoPR control plane remain in `docs/ops/AGENT_SANDBOX.md`.
 

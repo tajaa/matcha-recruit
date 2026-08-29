@@ -190,6 +190,8 @@ RUN case "${TARGETARCH}" in \
 # ---------------------------------------------------------------------------
 FROM system AS runtime
 
+ARG DEPENDENCY_TEMPLATE_ID=legacy
+
 ENV PATH=/opt/node/bin:/usr/local/aws-cli/v2/current/bin:${PATH} \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 
@@ -250,12 +252,12 @@ COPY client/oceanlab/package-lock.json /tmp/oceanlab/package-lock.json
 RUN { \
         sha256sum /tmp/server-requirements.txt /tmp/client/package-lock.json /tmp/tellus/package-lock.json /tmp/oceanlab/package-lock.json; \
         printf '%s\n' 'msandbox-test-tools:pytest,pytest-asyncio:v1'; \
+        printf '%s\n' "controller-template:${DEPENDENCY_TEMPLATE_ID}"; \
     } | sha256sum | awk '{print $1}' > /opt/bootstrap/.dependencies-sha \
     && chown -R "${USER_UID}:${USER_GID}" /opt/bootstrap
 
 COPY docker/agent-sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
-COPY scripts/msandbox/container/msandbox-host-client /usr/local/bin/msandbox-host
-RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint /usr/local/bin/msandbox-host \
+RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint \
     && printf '%s\n' \
         '# Keep the pinned sandbox toolchain visible when agents spawn login shells.' \
         'export PATH="/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH"' \

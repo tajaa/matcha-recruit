@@ -15,20 +15,52 @@ from .models import SessionRecord
 
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
+MAX_PENDING_PASTE_BYTES = 1024 * 1024
 
 
 def rewrite_bracketed_paste(record: SessionRecord, data: bytes) -> bytes:
-    start = data.find(PASTE_START)
-    end = data.find(PASTE_END, start + len(PASTE_START)) if start >= 0 else -1
-    if start < 0 or end < 0:
-        return data
-    payload = data[start + len(PASTE_START) : end]
-    paths = parse_pasted_file_payload(payload)
-    if paths is None:
-        return data
-    attachments = import_files(record, paths)
-    replacement = " ".join(str(item.container_path) for item in attachments).encode()
-    return data[: start + len(PASTE_START)] + replacement + data[end:]
+    rewritten, pending = rewrite_paste_stream(record, data)
+    return rewritten + pending
+
+
+def _partial_marker_suffix(data: bytes) -> int:
+    maximum = min(len(data), len(PASTE_START) - 1)
+    for length in range(maximum, 0, -1):
+        if data.endswith(PASTE_START[:length]):
+            return length
+    return 0
+
+
+def rewrite_paste_stream(record: SessionRecord, data: bytes) -> tuple[bytes, bytes]:
+    """Rewrite every complete paste and retain only an incomplete trailing frame."""
+    output = bytearray()
+    cursor = 0
+    while cursor < len(data):
+        start = data.find(PASTE_START, cursor)
+        if start < 0:
+            tail = data[cursor:]
+            keep = _partial_marker_suffix(tail)
+            output.extend(tail[:-keep] if keep else tail)
+            return bytes(output), tail[-keep:] if keep else b""
+        output.extend(data[cursor:start])
+        end = data.find(PASTE_END, start + len(PASTE_START))
+        if end < 0:
+            pending = data[start:]
+            if len(pending) > MAX_PENDING_PASTE_BYTES:
+                output.extend(pending)
+                return bytes(output), b""
+            return bytes(output), pending
+        frame_end = end + len(PASTE_END)
+        payload = data[start + len(PASTE_START) : end]
+        paths = parse_pasted_file_payload(payload)
+        if paths is None:
+            output.extend(data[start:frame_end])
+        else:
+            attachments = import_files(record, paths)
+            replacement = " ".join(str(item.container_path) for item in attachments).encode()
+            output.extend(PASTE_START + replacement + PASTE_END)
+        cursor = frame_end
+    return bytes(output), b""
 
 
 def attach_with_file_proxy(record: SessionRecord) -> int:
@@ -58,12 +90,13 @@ def attach_with_file_proxy(record: SessionRecord) -> int:
             if stdin_fd in readable:
                 incoming = os.read(stdin_fd, 65536)
                 if not incoming:
+                    if buffer:
+                        os.write(child_fd, buffer)
                     break
                 buffer += incoming
-                if PASTE_START in buffer and PASTE_END not in buffer:
-                    continue
-                os.write(child_fd, rewrite_bracketed_paste(record, buffer))
-                buffer = b""
+                outgoing, buffer = rewrite_paste_stream(record, buffer)
+                if outgoing:
+                    os.write(child_fd, outgoing)
     finally:
         termios.tcsetattr(stdin_fd, termios.TCSADRAIN, previous)
         try:

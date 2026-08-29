@@ -41,12 +41,13 @@ else
     exit 0
 fi
 
-git config user.name matcha-autopr-auditor
-git config user.email matcha-autopr-auditor@users.noreply.github.com
-git commit -m "fix: repair AutoPR audit $FINGERPRINT" >/dev/null
+git -c core.hooksPath=/dev/null \
+    -c user.name=matcha-autopr-auditor \
+    -c user.email=matcha-autopr-auditor@users.noreply.github.com \
+    commit -m "fix: repair AutoPR audit $FINGERPRINT" >/dev/null
 # Keep the repair checkout detached: the PR branch exists only on the remote,
 # so neither this runner nor a developer worktree can retain branch ownership.
-git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+git -c core.hooksPath=/dev/null push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
 BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/matcha-autopr-body.XXXXXX")"
 trap 'rm -f "$BODY_FILE"' EXIT

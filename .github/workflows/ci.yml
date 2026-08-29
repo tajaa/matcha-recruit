@@ -63,11 +63,45 @@ jobs:
         working-directory: client
 
       - name: Frontend unit tests
-        # The baseline currently has one known feature-catalog assertion
-        # failure. Run and publish it on every PR without blocking unrelated
-        # infrastructure work; msandbox's explicit --all gate remains strict.
-        continue-on-error: true
-        run: npm run test:run
+        # Main has one exact known assertion failure. Accept only that
+        # fingerprint; any additional or different failure makes CI red.
+        run: |
+          set +e
+          npm run test:run -- --reporter=json --outputFile="$RUNNER_TEMP/vitest.json" \
+            >"$RUNNER_TEMP/vitest.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/vitest.log"
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          python - "$RUNNER_TEMP/vitest.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          failed_results = [
+              result for result in report.get("testResults", [])
+              if result.get("status") == "failed"
+          ]
+          failed = [
+              (result["name"], assertion["fullName"])
+              for result in report.get("testResults", [])
+              for assertion in result.get("assertionResults", [])
+              if assertion.get("status") == "failed"
+          ]
+          expected = [(
+              "src/data/featureCatalog.test.ts",
+              "applyFeatureToggle disables dependent features without disabling unrelated prerequisites",
+          )]
+          normalized = [(name.replace("\\", "/"), title) for name, title in failed]
+          summary_matches = (
+              report.get("numFailedTests") == 1
+              and len(failed_results) == 1
+          )
+          if not summary_matches or len(normalized) != 1 or not normalized[0][0].endswith(expected[0][0]) or normalized[0][1] != expected[0][1]:
+              raise SystemExit(f"unexpected Vitest failures: {failed!r}")
+          print("Accepted the one exact main-branch Vitest baseline failure.")
+          PY
         working-directory: client
 
       - name: Tellus production build
@@ -126,18 +160,51 @@ jobs:
         run: python -m pip install -r requirements.txt pytest pytest-asyncio
         working-directory: server
       - name: Apply isolated test migrations
-        # Fresh-database migration ordering is currently red on main
-        # (7c1de748641e references companies before its creation). Keep this
-        # visible while allowing the dedicated repair PR to land separately.
-        continue-on-error: true
-        run: python -m alembic upgrade heads
+        id: migrations
+        # Fresh-database migration ordering is red on main. Accept only the
+        # exact known revision/relation failure; drift or a new failure is red.
+        run: |
+          set +e
+          python -m alembic upgrade heads >"$RUNNER_TEMP/migrations.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/migrations.log"
+          if [ "$rc" -eq 0 ]; then
+            echo 'schema_ready=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          grep -q '7c1de748641e' "$RUNNER_TEMP/migrations.log"
+          grep -q 'relation "companies" does not exist' "$RUNNER_TEMP/migrations.log"
+          echo 'schema_ready=false' >> "$GITHUB_OUTPUT"
+          echo "Accepted the exact main-branch fresh-migration baseline failure."
         working-directory: server
       - name: Server test suite
-        # Main also contains a stale internal_mobility test import. This is a
-        # diagnostic baseline until that product repair lands; msandbox local
-        # validation still reports it as a hard failure.
-        continue-on-error: true
-        run: python -m pytest -q tests app/oceanlab/tests
+        # The known migration failure leaves an incomplete schema. Until it is
+        # repaired, still collect all other 7k+ tests to catch import errors;
+        # once migrations pass, execute them normally.
+        run: |
+          args=(-q tests app/oceanlab/tests --ignore=tests/employees/test_internal_mobility_routes.py)
+          if [ '${{ steps.migrations.outputs.schema_ready }}' = true ]; then
+            python -m pytest "${args[@]}"
+          else
+            python -m pytest --collect-only "${args[@]}"
+          fi
+        working-directory: server
+      - name: Internal mobility test baseline
+        # Run this file separately. If its stale import is repaired, its tests
+        # execute normally; otherwise accept only the exact main failure.
+        run: |
+          set +e
+          python -m pytest -q tests/employees/test_internal_mobility_routes.py \
+            >"$RUNNER_TEMP/pytest-internal-mobility.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/pytest-internal-mobility.log"
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          test "$(grep -c '^ERROR tests/employees/test_internal_mobility_routes.py$' "$RUNNER_TEMP/pytest-internal-mobility.log")" -eq 1
+          grep -q "cannot import name 'internal_mobility' from 'app.matcha.routes'" "$RUNNER_TEMP/pytest-internal-mobility.log"
+          grep -q 'Interrupted: 1 error during collection' "$RUNNER_TEMP/pytest-internal-mobility.log"
+          echo "Accepted the exact main-branch server collection baseline failure."
         working-directory: server
 
   native-builds:
