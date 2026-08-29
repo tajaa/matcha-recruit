@@ -85,6 +85,9 @@ EOF
 cat > "$TMP_DIR/coverage.json" <<'EOF'
 {"decision":"covered","confidence":"high","covering_pr":334,"covering_head_sha":"owner-sha"}
 EOF
+cat > "$TMP_DIR/decision.json" <<'EOF'
+{"criticality":{"level":"yellow"},"confidence_score":70,"confidence_band":"medium"}
+EOF
 cat > "$TMP_DIR/bin/gh-record" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AUTOPR_TEST_CALLS"
@@ -98,7 +101,8 @@ chmod +x "$TMP_DIR/bin/gh-record"
 ln -sf "$TMP_DIR/bin/gh-record" "$TMP_DIR/bin/gh"
 : > "$TMP_DIR/record-calls"
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_CALLS="$TMP_DIR/record-calls" GITHUB_REPOSITORY=x/x \
-  "$REPO_ROOT/scripts/error-autofix/record-coverage.sh" "$TMP_DIR/incident.json" "$TMP_DIR/coverage.json" >/dev/null 2>&1
+  "$REPO_ROOT/scripts/error-autofix/record-coverage.sh" "$TMP_DIR/incident.json" \
+    "$TMP_DIR/coverage.json" "$TMP_DIR/decision.json" >/dev/null 2>&1
 ! grep -q '^pr comment ' "$TMP_DIR/record-calls"
 grep -q '^pr edit 334 .*--add-label covers-prod-error' "$TMP_DIR/record-calls"
 printf 'PASS: production coverage recording is idempotent by exact comment marker\n'

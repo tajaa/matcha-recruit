@@ -20,12 +20,16 @@ cat > "$TMP_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
   [ "${AUTOPR_TEST_LIST_FAIL:-0}" = 0 ] || exit 1
-  printf '%s\n' "${AUTOPR_TEST_RUNS:-[]}"
+  if [[ "$*" == *"silent-error-autofix.yml"* ]]; then
+    printf '%s\n' "${AUTOPR_TEST_ERROR_RUNS:-[]}"
+  else
+    printf '%s\n' "${AUTOPR_TEST_KANBAN_RUNS:-[]}"
+  fi
   exit 0
 fi
 if [ "$1 $2" = "workflow run" ]; then
   [ "${AUTOPR_TEST_DISPATCH_FAIL:-0}" = 0 ] || exit 1
-  printf 'dispatched\n' >> "$AUTOPR_TEST_DISPATCHES"
+  printf '%s\n' "$3" >> "$AUTOPR_TEST_DISPATCHES"
   exit 0
 fi
 exit 1
@@ -61,33 +65,46 @@ check "stopped primary sandbox skips before dispatch" \
   $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
     && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
-AUTOPR_TEST_RUNS='[]' run_dispatcher
-check "idle workflow dispatches once" \
-  $([ "$(wc -l < "$TMP_DIR/dispatches" | tr -d '[:space:]')" = 1 ] && echo 0 || echo 1)
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "stale error lane gets the first idle slot" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "silent-error-autofix.yml" ] && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
-AUTOPR_TEST_RUNS='[{"databaseId":7,"status":"in_progress","event":"workflow_dispatch","createdAt":"2026-08-27T00:00:00Z","url":"x"}]' run_dispatcher
-check "active workflow skips dispatch" \
-  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'active-workflow' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+recent="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+AUTOPR_TEST_ERROR_RUNS="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]" \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "recent error pass advances the Kanban lane" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[{"databaseId":7,"status":"in_progress","event":"workflow_dispatch","createdAt":"2026-08-27T00:00:00Z","updatedAt":"2026-08-27T00:00:00Z","url":"x"}]' \
+  run_dispatcher
+check "active work in either lane skips dispatch" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'active-autopr-workflow' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_LIST_FAIL=1 run_dispatcher || list_rc=$?
 check "run-list failure fails closed" \
   $([ "${list_rc:-0}" != 0 ] && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 
-AUTOPR_TEST_DISPATCH_FAIL=1 AUTOPR_TEST_RUNS='[]' run_dispatcher || dispatch_rc=$?
+AUTOPR_TEST_DISPATCH_FAIL=1 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher || dispatch_rc=$?
 check "dispatch failure is visible and nonzero" \
-  $([ "${dispatch_rc:-0}" != 0 ] && grep -q 'dispatch-failed' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+  $([ "${dispatch_rc:-0}" != 0 ] && grep -q 'silent-error-autofix.yml-dispatch-failed' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
 mkdir "$TMP_DIR/lock"
-AUTOPR_TEST_RUNS='[]' run_dispatcher
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
 check "local lock produces a harmless skip" \
   $(grep -q 'local-lock' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 rmdir "$TMP_DIR/lock"
 
 rendered="$TMP_DIR/com.matcha.kanban-autopr-dispatch.plist"
 sed -e "s|__DISPATCHER_PATH__|$DISPATCHER|g" -e "s|__USER_HOME__|$TMP_DIR|g" "$TEMPLATE" > "$rendered"
-plutil -lint "$rendered" >/dev/null
+if command -v plutil >/dev/null 2>&1; then
+  plutil -lint "$rendered" >/dev/null
+else
+  python3 -c 'import plistlib, sys; plistlib.load(open(sys.argv[1], "rb"))' "$rendered"
+fi
 check "LaunchAgent plist is valid and uses the required timer" \
   $(grep -q '<integer>300</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
 check "LaunchAgent PATH can reach the Docker Desktop CLI used by msandbox" \

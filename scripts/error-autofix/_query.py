@@ -141,6 +141,11 @@ def _excerpt(context):
     return None
 
 
+def _incident_priority(item):
+    """Newest actionable incident first; recurrence advances ``last_seen``."""
+    return item["last_seen"], item["level"] == "CRITICAL", item["occurrences"]
+
+
 async def _fetch_rows(conn, hours, limit):
     server_rows = await conn.fetch(
         """
@@ -290,7 +295,11 @@ async def main():
     client, skipped_client, suppressed_correlated = _group_client(client_rows, request_pairs)
     incidents = sorted(
         [*server.values(), *client.values()],
-        key=lambda item: (item["days_seen"], item["occurrences"], item["last_seen"]),
+        # This is an incident-response queue: a genuinely new production
+        # failure must not sit behind a day-old high-count fingerprint (or be
+        # pushed out of the final limit entirely). Hot recurring failures
+        # still rise because every occurrence advances last_seen.
+        key=_incident_priority,
         reverse=True,
     )[:limit]
     json.dump({

@@ -51,6 +51,29 @@ def test_employee_portal_accepts_food_handler_documents():
     assert "food_handler_card" in _VALID_DOC_TYPES
 
 
+def test_empty_gemini_role_classification_degrades_without_error(monkeypatch, caplog):
+    response = SimpleNamespace(text=None)
+    client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=mock.Mock(return_value=response))
+    )
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.core.services.genai_client.get_genai_client",
+        lambda **_kwargs: client,
+    )
+
+    with caplog.at_level("WARNING", logger=credential_template_service.__name__):
+        role = asyncio.run(credential_template_service._classify_role_via_gemini(
+            None,
+            "Barista",
+            [{"key": "non_clinical", "label": "Non-clinical"}],
+        ))
+
+    assert role is None
+    assert "returned no role classification" in caplog.text
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+
+
 class UploadedBlockingRequirementConn:
     def __init__(self):
         self.query = ""

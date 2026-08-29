@@ -69,3 +69,24 @@ def test_client_grouping_counts_days_and_suppresses_matching_server_api_error():
     grouped, _, correlated = query._group_client([api_row], {("rid-2", query._path("/employees/123"))})
     assert grouped == {}
     assert correlated == 1
+
+
+def test_incident_priority_is_newest_first():
+    older_hot = {
+        "last_seen": "2026-08-28T20:00:00Z",
+        "level": "CRITICAL",
+        "occurrences": 500,
+    }
+    new_single = {
+        "last_seen": "2026-08-28T21:00:41Z",
+        "level": "ERROR",
+        "occurrences": 1,
+    }
+
+    incidents = sorted(
+        [older_hot, new_single],
+        key=query._incident_priority,
+        reverse=True,
+    )
+
+    assert incidents == [new_single, older_hot]

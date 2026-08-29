@@ -119,6 +119,11 @@ everything else.
 This is why level choice matters: an `exception` inside a hot loop can burn the
 hourly cap and mask a real alert.
 
+That first email reports the raw production error immediately. The separate
+silent-error AutoPR lane sends a second, idempotent email to
+`aaron@hey-matcha.com` only after it has published or linked a reviewable fix PR;
+the message includes the criticality color, confidence score, and PR link.
+
 ## CloudWatch Logs Insights queries
 
 Once shipping is on (`deploy/cloudwatch/README.md`):
