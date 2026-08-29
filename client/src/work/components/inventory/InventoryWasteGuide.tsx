@@ -15,6 +15,23 @@ const STEPS: Step[] = [
   { key: 'par', label: 'PAR', title: 'Use predictive PARs with guardrails', description: 'Review an item recommendation, apply it deliberately, or enroll a stable item in automatic updates.', location: 'Inventory → select an item → Predictive par; portfolio controls: Inventory → Forecast', bullets: ['Forecasting needs committed sales and mappings before it can recommend a PAR.', 'Maximum drift blocks a surprising automatic change.', 'PAR history explains every applied update.'], icon: SlidersHorizontal, destination: (base) => `${base}/inventory/forecast#waste-par` },
 ]
 
+const WASTE_GUIDE_STORAGE_KEY = 'matcha-inventory-waste-guide-v1'
+
+function guideWasSeen(autoOpenKey: string) {
+  const key = `${WASTE_GUIDE_STORAGE_KEY}:${autoOpenKey}`
+  try {
+    return localStorage.getItem(key) === '1' || sessionStorage.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markGuideSeen(autoOpenKey: string) {
+  const key = `${WASTE_GUIDE_STORAGE_KEY}:${autoOpenKey}`
+  try { localStorage.setItem(key, '1') } catch { /* storage may be blocked */ }
+  try { sessionStorage.setItem(key, '1') } catch { /* storage may be blocked */ }
+}
+
 export default function InventoryWasteGuide({ open, onClose, initialStep = 0, autoOpenKey }: { open: boolean; onClose: () => void; initialStep?: number; autoOpenKey?: string }) {
   const base = useWorkBase()
   const navigate = useNavigate()
@@ -24,10 +41,7 @@ export default function InventoryWasteGuide({ open, onClose, initialStep = 0, au
   const [step, setStep] = useState(routeStep)
   const [autoDismissed, setAutoDismissed] = useState(false)
   const steps = useMemo<WizardStep[]>(() => STEPS.map(({ key, label }) => ({ key, label })), [])
-  // This guide intentionally reopens on every dashboard visit. Managers must
-  // actively skip it for the current visit rather than silently missing a
-  // newly introduced inventory-waste control.
-  const shouldAutoOpen = Boolean(autoOpenKey) && !autoDismissed
+  const shouldAutoOpen = autoOpenKey !== undefined && !autoDismissed && !guideWasSeen(autoOpenKey)
   const current = STEPS[step]
   const Icon = current.icon
 
@@ -37,7 +51,11 @@ export default function InventoryWasteGuide({ open, onClose, initialStep = 0, au
     const anchor = document.getElementById(location.hash.slice(1))
     if (anchor) requestAnimationFrame(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }, [location.hash])
-  function close() { setAutoDismissed(true); onClose() }
+  function close() {
+    if (autoOpenKey) markGuideSeen(autoOpenKey)
+    setAutoDismissed(true)
+    onClose()
+  }
   const isAtCurrentSection = `${location.pathname}${location.hash}` === STEPS[step].destination(base)
   function moveTo(nextStep: number) {
     const destination = STEPS[nextStep].destination(base)
