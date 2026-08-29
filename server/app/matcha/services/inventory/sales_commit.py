@@ -128,7 +128,14 @@ async def commit_sales_import(
         )
         if not owned:
             raise ValueError("location not found")
-    if business_date and not force:
+    # An all-ignored review is discarded below, so it must not contend with a
+    # prior committed import for the same period.
+    all_ignored_submission = bool(lines) and all(
+        line.get("status") == "ignored"
+        and (not line.get("new_mapping") or line["new_mapping"].get("kind") == "ignore")
+        for line in lines
+    )
+    if business_date and not force and not all_ignored_submission:
         duplicate = await conn.fetchval(
             """
             SELECT id FROM inventory_sales_imports
@@ -277,6 +284,9 @@ async def commit_sales_import(
         return {"import_id": import_id, "total": len(lines), "mapped": mapped,
                 "unmapped": len(errors), "items_affected": 0, "errors": errors}
 
+    all_ignored = bool(normalized_lines) and all(
+        line["status"] == "ignored" for line in normalized_lines
+    )
     async with conn.transaction():
         for line in normalized_lines:
             new_mapping = line.get("new_mapping")
@@ -312,20 +322,25 @@ async def commit_sales_import(
                         sales_line["id"], component["item_id"],
                         component["quantity_per_sale"], component.get("unit"),
                     )
-        await movements_service.record_movements(
-            conn, company_id=company_id, channel_id=None, source_message_id=None,
-            recorded_by=user_id, kind="sale",
-            lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}
-                   for item_id, quantity in depletion.items()],
-            narrative=f"Sales depletion — {business_date.isoformat()}" if business_date else "Sales depletion",
-            note=filename, sales_import_id=import_id,
-        )
+        if not all_ignored:
+            await movements_service.record_movements(
+                conn, company_id=company_id, channel_id=None, source_message_id=None,
+                recorded_by=user_id, kind="sale",
+                lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}
+                       for item_id, quantity in depletion.items()],
+                narrative=f"Sales depletion — {business_date.isoformat()}" if business_date else "Sales depletion",
+                note=filename, sales_import_id=import_id,
+            )
         await conn.execute(
             """
             UPDATE inventory_sales_imports
-            SET status='committed', mapped_count=$2, committed_by=$3, committed_at=NOW()
+            SET status=$2, mapped_count=$3,
+                committed_by=CASE WHEN $2='committed' THEN $4 ELSE NULL END,
+                committed_at=CASE WHEN $2='committed' THEN NOW() ELSE NULL END
             WHERE id=$1
-            """, import_id, mapped, user_id,
+            """, import_id,
+            "discarded" if all_ignored else "committed",
+            mapped, user_id,
         )
     return {"import_id": import_id, "total": len(lines), "mapped": mapped,
             "unmapped": 0, "items_affected": len(depletion), "errors": []}

@@ -175,3 +175,45 @@ def test_foreign_mapping_id_is_rejected_without_persisting_it():
     assert result['errors'] == [{'row': 1, 'item': 'Vanilla latte', 'error': 'sales mapping not found'}]
     sales_line_args = next(args for query, args in conn.executed if 'INSERT INTO inventory_sales_lines' in query)
     assert sales_line_args[6] is None
+
+
+def test_all_ignored_sales_discard_the_import_without_checking_the_committed_period(monkeypatch):
+    class DuplicatePeriodConn(FakeConn):
+        async def fetchval(self, query, *args):
+            if "status='committed'" in query:
+                raise AssertionError('all-ignored reviews must not check the committed period')
+            return await super().fetchval(query, *args)
+
+    conn = DuplicatePeriodConn()
+    saved = []
+    movement_calls = []
+
+    async def validate_mapping(*_args, **_kwargs):
+        return None
+
+    async def upsert_mapping(*_args, **kwargs):
+        saved.append(kwargs)
+        return {'id': 'ignored-mapping', 'components': []}
+
+    async def record_movements(*_args, **_kwargs):
+        movement_calls.append(True)
+
+    monkeypatch.setattr(sales_commit.sales_mappings, 'validate_mapping', validate_mapping)
+    monkeypatch.setattr(sales_commit.sales_mappings, 'upsert_mapping', upsert_mapping)
+    monkeypatch.setattr(sales_commit.movements_service, 'record_movements', record_movements)
+
+    result = _run(sales_commit.commit_sales_import(
+        conn, company_id='company-1', user_id='user-1', location_id=None,
+        business_date='2026-08-25', source='upload', filename='sales.csv',
+        gmail_message_id=None, force=False,
+        lines=[{
+            'sold_name': 'Vanilla latte', 'quantity': 1, 'status': 'ignored',
+            'new_mapping': {'kind': 'ignore', 'components': []},
+        }],
+    ))
+
+    assert result['unmapped'] == 0
+    assert saved[0]['kind'] == 'ignore'
+    assert movement_calls == []
+    status_update = next(args for query, args in conn.executed if 'SET status=$2' in query)
+    assert status_update[1] == 'discarded'
