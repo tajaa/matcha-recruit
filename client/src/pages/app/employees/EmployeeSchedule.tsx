@@ -791,61 +791,113 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
   )
 }
 
+type TemplateBlockDraft = {
+  id: number
+  role: string
+  start: string
+  end: string
+  breakMinutes: string
+  required: string
+  days: number[]
+}
+
+const MAX_TEMPLATE_BLOCKS = 40
+
+function newTemplateBlock(id: number): TemplateBlockDraft {
+  return {
+    id,
+    role: '',
+    start: '09:00',
+    end: '17:00',
+    breakMinutes: '0',
+    required: '1',
+    days: [1, 2, 3, 4, 5],
+  }
+}
+
 function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('')
-  const [role, setRole] = useState('')
-  const [start, setStart] = useState('09:00')
-  const [end, setEnd] = useState('17:00')
-  const [breakMinutes, setBreakMinutes] = useState('0')
-  const [required, setRequired] = useState('1')
-  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
+  const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => [newTemplateBlock(1)])
   const [busy, setBusy] = useState(false)
+  const blocksValid = blocks.every((block) => block.days.length > 0)
 
-  function toggleDay(d: number) {
-    setDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b))
+  function updateBlock(id: number, patch: Partial<TemplateBlockDraft>) {
+    setBlocks((current) => current.map((block) => block.id === id ? { ...block, ...patch } : block))
   }
+
+  function toggleDay(id: number, day: number) {
+    const block = blocks.find((item) => item.id === id)
+    if (!block) return
+    updateBlock(id, {
+      days: block.days.includes(day)
+        ? block.days.filter((item) => item !== day)
+        : [...block.days, day].sort((a, b) => a - b),
+    })
+  }
+
+  function addBlock() {
+    setBlocks((current) => {
+      if (current.length >= MAX_TEMPLATE_BLOCKS) return current
+      const nextId = Math.max(...current.map((block) => block.id)) + 1
+      return [...current, newTemplateBlock(nextId)]
+    })
+  }
+
   async function save() {
-    if (!name.trim()) return
+    if (!name.trim() || blocks.length === 0 || !blocksValid) return
     setBusy(true)
     try {
       await createWeekTemplate({
         name: name.trim(),
         location_id: locationId,
-        blocks: [{
-          name: name.trim(),
-          role: role.trim() || null,
-          start_time: `${start}:00`, end_time: `${end}:00`,
-          break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
-          required_staff: Math.max(1, Math.round(Number(required) || 1)),
-          days_of_week: days,
-        }],
+        blocks: blocks.map((block, index) => ({
+          name: block.role.trim() || `Shift ${index + 1}`,
+          role: block.role.trim() || null,
+          start_time: `${block.start}:00`, end_time: `${block.end}:00`,
+          break_minutes: Math.max(0, Math.round(Number(block.breakMinutes) || 0)),
+          required_staff: Math.max(1, Math.round(Number(block.required) || 1)),
+          days_of_week: block.days,
+        })),
       })
       onDone()
     } finally { setBusy(false) }
   }
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Name</span><input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Role</span><input value={role} onChange={(e) => setRole(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Start</span><input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-1`} /></label>
-      </div>
-      <div className="grid max-w-sm grid-cols-2 gap-2">
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Planned break (minutes)</span><input type="number" min="0" step="5" value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-1`} /></label>
-      </div>
-      <div>
-        <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
-        <div className="flex gap-1 mt-1">
-          {WEEKDAY_LABELS.map((lbl, i) => (
-            <button key={i} onClick={() => toggleDay(i)} className={`w-9 py-1 rounded-md text-xs border ${days.includes(i) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
-          ))}
-        </div>
+    <div className="space-y-4">
+      <label className="block max-w-md"><span className="text-[10px] text-zinc-500 uppercase">Template name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Standard operating week" className={`${inputCls} mt-1`} /></label>
+      <div className="space-y-3">
+        {blocks.map((block, index) => (
+          <div key={block.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-300">Shift {index + 1}</span>
+              {blocks.length > 1 && <button type="button" onClick={() => setBlocks((current) => current.filter((item) => item.id !== block.id))} className="text-xs text-zinc-500 hover:text-red-400">Remove shift</button>}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Role</span><input value={block.role} onChange={(e) => updateBlock(block.id, { role: e.target.value })} className={`${inputCls} mt-1`} /></label>
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Start</span><input type="time" value={block.start} onChange={(e) => updateBlock(block.id, { start: e.target.value })} className={`${inputCls} mt-1`} /></label>
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={block.end} onChange={(e) => updateBlock(block.id, { end: e.target.value })} className={`${inputCls} mt-1`} /></label>
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={block.required} onChange={(e) => updateBlock(block.id, { required: e.target.value })} className={`${inputCls} mt-1`} /></label>
+            </div>
+            <div className="grid max-w-sm grid-cols-2 gap-2">
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Planned break (minutes)</span><input type="number" min="0" step="5" value={block.breakMinutes} onChange={(e) => updateBlock(block.id, { breakMinutes: e.target.value })} className={`${inputCls} mt-1`} /></label>
+            </div>
+            <div>
+              <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
+              <div className="flex gap-1 mt-1">
+                {WEEKDAY_LABELS.map((lbl, day) => (
+                  <button type="button" key={day} aria-label={`${lbl} for shift ${index + 1}`} aria-pressed={block.days.includes(day)} onClick={() => toggleDay(block.id, day)} className={`w-9 py-1 rounded-md text-xs border ${block.days.includes(day) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
+                ))}
+              </div>
+              {block.days.length === 0 && <div className="mt-1 text-xs text-red-400">Select at least one day for this shift.</div>}
+            </div>
+          </div>
+        ))}
+        <button type="button" onClick={addBlock} disabled={blocks.length >= MAX_TEMPLATE_BLOCKS} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 disabled:cursor-not-allowed disabled:text-zinc-600"><Plus className="h-3.5 w-3.5" /> Add shift</button>
+        {blocks.length >= MAX_TEMPLATE_BLOCKS && <div className="text-xs text-zinc-500">Maximum 40 shifts per template.</div>}
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
+        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0 || !blocksValid} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>
