@@ -145,6 +145,15 @@ def _earliest_host_path_start(data: bytes, start: int = 0) -> int:
     return min(matches) if matches else -1
 
 
+def _partial_host_prefix_suffix(data: bytes) -> int:
+    maximum = min(len(data), max(len(prefix) for prefix in HOST_PATH_PREFIXES) - 1)
+    for length in range(maximum, 0, -1):
+        suffix = data[-length:]
+        if any(prefix.startswith(suffix) for prefix in HOST_PATH_PREFIXES):
+            return length
+    return 0
+
+
 def _existing_host_file_prefix(data: bytes) -> tuple[int, Path] | None:
     """Return the longest leading host file path, escaped or literal."""
     for end in range(len(data), 0, -1):
@@ -191,8 +200,10 @@ def _rewrite_plain_host_paths(
             cursor = frame_end
             continue
         if start < 0:
-            output.extend(data[cursor:])
-            return bytes(output), b""
+            tail = data[cursor:]
+            keep = _partial_host_prefix_suffix(tail)
+            output.extend(tail[:-keep] if keep else tail)
+            return bytes(output), tail[-keep:] if keep else b""
         output.extend(data[cursor:start])
         candidate = data[start:]
         match = _existing_host_file_prefix(candidate)

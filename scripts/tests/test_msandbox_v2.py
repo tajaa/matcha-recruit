@@ -567,6 +567,30 @@ class AttachmentTests(MsandboxTestCase):
         self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
         self.assertTrue(emitted.endswith(b" describe it\r"))
 
+    def test_plain_drag_rewrites_when_terminal_delivers_one_byte_at_a_time(self) -> None:
+        source = self.root / "Screenshot bytewise.png"
+        source.write_bytes(b"png")
+        payload = f"{source} whats in the screenshot\r".encode()
+        inbox = self.root / "legacy-inbox"
+        emitted = bytearray()
+        pending = b""
+
+        for byte in payload:
+            chunk, pending = rewrite_paste_stream_to_inbox(
+                pending + bytes([byte]),
+                inbox=inbox,
+                container_dir=Path("/workspace/.msandbox/attachments"),
+                lock_name="plain-drag-bytewise-test",
+                max_bytes=1024,
+                session_max_bytes=4096,
+            )
+            emitted.extend(chunk)
+
+        self.assertEqual(pending, b"")
+        self.assertNotIn(str(source).encode(), emitted)
+        self.assertIn(b"/workspace/.msandbox/attachments/", emitted)
+        self.assertTrue(emitted.endswith(b" whats in the screenshot\r"))
+
     def test_nonexistent_plain_host_path_is_forwarded_on_enter(self) -> None:
         payload = b"/Users/example/missing.png explain this\r"
 
