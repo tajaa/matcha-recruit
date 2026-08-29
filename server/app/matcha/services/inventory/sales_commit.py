@@ -18,6 +18,29 @@ class DuplicateSalesPeriodError(Exception):
     pass
 
 
+def _duplicate_result(import_id) -> dict:
+    return {"import_id": import_id, "total": 0, "mapped": 0, "unmapped": 0,
+            "items_affected": 0, "errors": [], "duplicate": True}
+
+
+async def _is_idempotent_terminal_import(conn, import_row) -> bool:
+    if import_row["status"] == "committed":
+        return True
+    if import_row["status"] != "discarded":
+        return False
+    return bool(await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM inventory_sales_lines WHERE import_id=$1
+        ) AND NOT EXISTS (
+            SELECT 1 FROM inventory_sales_lines
+            WHERE import_id=$1 AND status <> 'ignored'
+        )
+        """,
+        import_row["id"],
+    ))
+
+
 def _date_value(value):
     if value is None or isinstance(value, date):
         return value
@@ -69,9 +92,8 @@ async def commit_sales_import(
         )
         if existing_import is None:
             raise ValueError("sales import not found")
-        if existing_import["status"] == "committed":
-            return {"import_id": existing_import["id"], "total": 0, "mapped": 0,
-                    "unmapped": 0, "items_affected": 0, "errors": [], "duplicate": True}
+        if await _is_idempotent_terminal_import(conn, existing_import):
+            return _duplicate_result(existing_import["id"])
         if existing_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
         source = existing_import["source"]
@@ -88,9 +110,8 @@ async def commit_sales_import(
         )
         if existing_import and gmail_import and existing_import["id"] != gmail_import["id"]:
             raise ValueError("Sales import identity does not match the email draft.")
-        if gmail_import and gmail_import["status"] == "committed":
-            return {"import_id": gmail_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
-                    "items_affected": 0, "errors": [], "duplicate": True}
+        if gmail_import and await _is_idempotent_terminal_import(conn, gmail_import):
+            return _duplicate_result(gmail_import["id"])
         if gmail_import and gmail_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
         if gmail_import:
@@ -107,9 +128,8 @@ async def commit_sales_import(
             "WHERE company_id=$1 AND connection_id=$2 AND external_batch_id=$3",
             company_id, connection_id, external_batch_id,
         )
-        if batch_import and batch_import["status"] == "committed":
-            return {"import_id": batch_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
-                    "items_affected": 0, "errors": [], "duplicate": True}
+        if batch_import and await _is_idempotent_terminal_import(conn, batch_import):
+            return _duplicate_result(batch_import["id"])
         if batch_import and batch_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
         if batch_import:
@@ -128,7 +148,14 @@ async def commit_sales_import(
         )
         if not owned:
             raise ValueError("location not found")
-    if business_date and not force:
+    # An all-ignored review is discarded below, so it must not contend with a
+    # prior committed import for the same period.
+    all_ignored_submission = bool(lines) and all(
+        (line["new_mapping"].get("kind") == "ignore"
+         if line.get("new_mapping") else line.get("status") == "ignored")
+        for line in lines
+    )
+    if business_date and not force and not all_ignored_submission:
         duplicate = await conn.fetchval(
             """
             SELECT id FROM inventory_sales_imports
@@ -277,6 +304,9 @@ async def commit_sales_import(
         return {"import_id": import_id, "total": len(lines), "mapped": mapped,
                 "unmapped": len(errors), "items_affected": 0, "errors": errors}
 
+    all_ignored = bool(normalized_lines) and all(
+        line["status"] == "ignored" for line in normalized_lines
+    )
     async with conn.transaction():
         for line in normalized_lines:
             new_mapping = line.get("new_mapping")
@@ -312,20 +342,25 @@ async def commit_sales_import(
                         sales_line["id"], component["item_id"],
                         component["quantity_per_sale"], component.get("unit"),
                     )
-        await movements_service.record_movements(
-            conn, company_id=company_id, channel_id=None, source_message_id=None,
-            recorded_by=user_id, kind="sale",
-            lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}
-                   for item_id, quantity in depletion.items()],
-            narrative=f"Sales depletion — {business_date.isoformat()}" if business_date else "Sales depletion",
-            note=filename, sales_import_id=import_id,
-        )
+        if not all_ignored:
+            await movements_service.record_movements(
+                conn, company_id=company_id, channel_id=None, source_message_id=None,
+                recorded_by=user_id, kind="sale",
+                lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}
+                       for item_id, quantity in depletion.items()],
+                narrative=f"Sales depletion — {business_date.isoformat()}" if business_date else "Sales depletion",
+                note=filename, sales_import_id=import_id,
+            )
         await conn.execute(
             """
             UPDATE inventory_sales_imports
-            SET status='committed', mapped_count=$2, committed_by=$3, committed_at=NOW()
+            SET status=$2, mapped_count=$3,
+                committed_by=CASE WHEN $2='committed' THEN $4 ELSE NULL END,
+                committed_at=CASE WHEN $2='committed' THEN NOW() ELSE NULL END
             WHERE id=$1
-            """, import_id, mapped, user_id,
+            """, import_id,
+            "discarded" if all_ignored else "committed",
+            mapped, user_id,
         )
     return {"import_id": import_id, "total": len(lines), "mapped": mapped,
             "unmapped": 0, "items_affected": len(depletion), "errors": []}
