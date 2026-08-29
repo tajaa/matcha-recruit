@@ -302,7 +302,7 @@ def run(argv: list[str] | None = None) -> int:
         report = collect_garbage(repo, apply=args.apply)
         if report.skipped:
             print(f"Collected nothing: {report.skipped}")
-            return 0
+            return 1
         if not report:
             print("No unreachable sandbox images, volumes or containers.")
         for item in report.collected:

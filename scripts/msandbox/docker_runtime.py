@@ -14,7 +14,7 @@ from typing import Sequence
 
 from .git_worktrees import git_common_dir, session_git_dir, session_git_pointer
 from .models import PortSet, SessionRecord
-from .state import data_root, state_lock, state_root
+from .state import ARTIFACT_LIFECYCLE_LOCK, data_root, state_lock, state_root
 
 
 class DockerError(RuntimeError):
@@ -125,24 +125,27 @@ def build_identifier(sources: dict[str, Path], *, playwright: bool) -> str:
 
 def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tuple[Path, str, str]:
     """Create one immutable Docker context for this controller+lockfile set."""
-    sources = build_context_sources(record, runtime_root)
-    identifier = build_identifier(sources, playwright=record.playwright)
-    destination = data_root() / "build-contexts" / identifier
-    if not destination.is_dir():
-        with state_lock(f"build-context-{identifier}"):
-            if not destination.is_dir():
-                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                temporary = Path(
-                    tempfile.mkdtemp(prefix=f".{identifier}.", dir=destination.parent)
-                )
-                try:
-                    for relative, source in sources.items():
-                        target = temporary / relative
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(source, target)
-                    os.replace(temporary, destination)
-                finally:
-                    shutil.rmtree(temporary, ignore_errors=True)
+    # GC removes orphaned contexts. Serialize this short materialization step
+    # with its sweep so it cannot remove the temporary directory mid-copy.
+    with state_lock(ARTIFACT_LIFECYCLE_LOCK, timeout_s=600):
+        sources = build_context_sources(record, runtime_root)
+        identifier = build_identifier(sources, playwright=record.playwright)
+        destination = data_root() / "build-contexts" / identifier
+        if not destination.is_dir():
+            with state_lock(f"build-context-{identifier}"):
+                if not destination.is_dir():
+                    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    temporary = Path(
+                        tempfile.mkdtemp(prefix=f".{identifier}.", dir=destination.parent)
+                    )
+                    try:
+                        for relative, source in sources.items():
+                            target = temporary / relative
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(source, target)
+                        os.replace(temporary, destination)
+                    finally:
+                        shutil.rmtree(temporary, ignore_errors=True)
     return destination, f"{IMAGE_REPOSITORY}:{identifier}", identifier
 
 

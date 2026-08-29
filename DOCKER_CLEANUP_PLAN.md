@@ -55,7 +55,12 @@ Reachability is conservative by design:
 - Dependency volumes match by recomputed name, never by Compose label — a
   shared content-addressed volume keeps the label of whichever project created
   it first.
-- If any live session's build inputs are unreadable, GC collects nothing.
+- Running containers without readable session state still protect their image,
+  volumes, and bind-mounted host directories.
+- If session/runtime state, live build inputs, or Docker inventory is
+  incomplete, GC collects nothing and exits nonzero.
+- Session registration and build-context creation share a lifecycle lock with
+  GC, preventing a concurrent sweep from acting on a stale reachability snapshot.
 
 **Dockerfile slim** — the four bootstrap `COPY`s take `--chown=`; the trailing
 recursive chown became a two-path non-recursive one. Verified: ownership is
@@ -66,10 +71,11 @@ still works, and the venv `activate` path rewrite still applies.
 a pure `build_identifier`, so GC can compute candidate tags without
 materializing a context directory for each one.
 
-**Tests** — 6 new cases in `scripts/tests/test_msandbox_v2.py` (36 pass), plus
+**Tests** — 10 new cases in `scripts/tests/test_msandbox_v2.py` (40 pass), plus
 the 14-case lifecycle suite. They cover the protected lanes surviving with zero
-session records, the per-release rollback tags, the shared-label hazard, and GC
-refusing to act on incomplete reachability.
+session records, per-release rollback tags, the shared-label hazard, malformed
+session state, Docker inventory failures, mounted orphan homes, lifecycle-lock
+coverage, and GC refusing to act on incomplete reachability.
 
 ## Two traps found the hard way
 

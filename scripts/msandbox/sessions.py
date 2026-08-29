@@ -40,7 +40,14 @@ from .git_worktrees import (
     sync_session_git_to_host,
 )
 from .models import PullRequest, ReleaseResult, SessionRecord, SessionSpec, utc_now
-from .state import SCHEMA_VERSION, data_root, list_sessions, save_session, state_lock
+from .state import (
+    ARTIFACT_LIFECYCLE_LOCK,
+    SCHEMA_VERSION,
+    data_root,
+    list_sessions,
+    save_session,
+    state_lock,
+)
 
 
 class SessionError(RuntimeError):
@@ -176,8 +183,12 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
         )
         try:
             initialize_session_git(repo, worktree_path, session_id, info.head)
-            _copy_auth_templates(record)
-            save_session(record)
+            # The home exists before the first SessionRecord otherwise. Keep
+            # registration atomic with GC so a concurrent sweep cannot erase a
+            # newly copied login before it knows the session is live.
+            with state_lock(ARTIFACT_LIFECYCLE_LOCK, timeout_s=600):
+                _copy_auth_templates(record)
+                save_session(record)
             if spec.start:
                 start_session(record, extra_agent_args)
         except Exception:

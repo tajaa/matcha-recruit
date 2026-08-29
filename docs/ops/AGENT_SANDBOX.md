@@ -101,6 +101,11 @@ orphaned `build-contexts/` and `homes/` directories. It is dry-run by default;
 build, which is exactly when the superseded image became garbage; set
 `MSANDBOX_SKIP_GC=1` to suppress that.
 
+GC exits nonzero without mutating anything when session/runtime state or Docker
+inventory is incomplete. Session registration and build-context materialization
+share a lifecycle lock with the sweep, so a newly created artifact cannot appear
+after reachability was calculated and be collected by the same pass.
+
 Reachability is deliberately conservative:
 
 - `matcha-agent-sandbox-workspace:latest` is never collected — it is not
@@ -116,8 +121,10 @@ Reachability is deliberately conservative:
 - Dependency volumes are matched by recomputed name, never by Compose label: a
   shared content-addressed volume keeps the label of whichever project created
   it first, so a label-based sweep would delete one a live session needs.
-- If any live session's build inputs cannot be read, GC collects **nothing**
-  rather than guess.
+- Running containers without a readable session record still protect their
+  image, named volumes, and bind-mounted host directories.
+- If any session record, runtime root, live build input, or Docker inventory
+  cannot be read completely, GC collects **nothing** rather than guess.
 
 The build cache is separate from all of that and governed by
 `~/.docker/daemon.json` (`builder.gc.defaultKeepStorage`, currently 8GB). Trim

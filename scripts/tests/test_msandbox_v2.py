@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -40,7 +43,14 @@ from scripts.msandbox.sessions import (
     stop_session,
     submit_session,
 )
-from scripts.msandbox.state import SCHEMA_VERSION, list_sessions, load_session, save_session, state_lock
+from scripts.msandbox.state import (
+    ARTIFACT_LIFECYCLE_LOCK,
+    SCHEMA_VERSION,
+    list_sessions,
+    load_session,
+    save_session,
+    state_lock,
+)
 from scripts.msandbox.validation import build_test_plan, changed_paths, run_test_plan
 
 
@@ -146,6 +156,27 @@ class StateTests(MsandboxTestCase):
 
 
 class WorktreeTests(MsandboxTestCase):
+    def test_initial_session_registration_holds_artifact_lifecycle_lock(self) -> None:
+        active_locks: list[str] = []
+
+        @contextmanager
+        def tracked_lock(scope: str, *args, **kwargs):
+            with state_lock(scope, *args, **kwargs):
+                active_locks.append(scope)
+                try:
+                    yield
+                finally:
+                    active_locks.remove(scope)
+
+        def assert_registration_locked(_record: SessionRecord) -> None:
+            self.assertIn(ARTIFACT_LIFECYCLE_LOCK, active_locks)
+
+        with mock.patch("scripts.msandbox.sessions.state_lock", tracked_lock), mock.patch(
+            "scripts.msandbox.sessions._copy_auth_templates",
+            side_effect=assert_registration_locked,
+        ):
+            create_session(self.repo, SessionSpec("locked", "codex", "main", start=False))
+
     def test_sessions_are_parallel_and_detached(self) -> None:
         first = create_session(self.repo, SessionSpec("first", "codex", "main", start=False))
         second = create_session(self.repo, SessionSpec("second", "codex", "main", start=False))
@@ -562,12 +593,17 @@ class HostAndInstallTests(MsandboxTestCase):
         )
         self.assertEqual(bare.stdout.strip(), "legacy:")
         # `gc` is a v2 verb, so it must not fall through to the legacy script.
+        garbage_environment = dict(os.environ)
+        garbage_environment["PATH"] = str(Path(sys.executable).parent)
         garbage = subprocess.run(
             [str(bin_dir / "msandbox"), "gc"],
-            check=True,
+            check=False,
             text=True,
             capture_output=True,
+            env=garbage_environment,
         )
+        self.assertEqual(garbage.returncode, 1)
+        self.assertIn("docker is not available", garbage.stdout)
         self.assertNotIn("legacy:", garbage.stdout)
 
 
@@ -644,21 +680,39 @@ class FakeDocker:
         volumes: tuple[str, ...] = (),
         containers: tuple[tuple[str, str, str, str], ...] = (),
         mounts: dict[str, tuple[str, ...]] | None = None,
+        binds: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         self.images = list(images)
         self.volumes = list(volumes)
         self.containers = list(containers)
         self.mounts = dict(mounts or {})
+        self.binds = dict(binds or {})
         self.removed: list[tuple[str, ...]] = []
 
     def __call__(self, *argv: str) -> subprocess.CompletedProcess[str]:
         out = ""
         if argv[:2] == ("ps", "--all"):
             out = "\n".join("\t".join(row) for row in self.containers)
-        elif argv[0] == "inspect":
-            names = argv[3:]
-            out = "\n".join(
-                volume for name in names for volume in self.mounts.get(name, ())
+        elif argv[:2] == ("container", "inspect"):
+            out = json.dumps(
+                [
+                    {
+                        "Name": f"/{name}",
+                        "Mounts": [
+                            {
+                                "Type": "volume",
+                                "Name": volume,
+                                "Source": f"/var/lib/docker/volumes/{volume}/_data",
+                            }
+                            for volume in self.mounts.get(name, ())
+                        ]
+                        + [
+                            {"Type": "bind", "Name": "", "Source": source}
+                            for source in self.binds.get(name, ())
+                        ],
+                    }
+                    for name in argv[2:]
+                ]
             )
         elif argv[0] == "images":
             out = "\n".join(self.images)
@@ -834,6 +888,91 @@ class DockerGcTests(MsandboxTestCase):
         self.assertIsNotNone(report.skipped)
         self.assertEqual(docker.removed, [])
         self.assertIn("matcha-agent-sandbox-workspace:deadbeef", docker.images)
+
+    def test_invalid_session_record_makes_reachability_incomplete(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        invalid = self.root / "state/sessions/live-corrupt/session.json"
+        invalid.parent.mkdir(parents=True)
+        invalid.write_text("{not-json\n", encoding="utf-8")
+        home = self.root / "data/homes/live-corrupt"
+        home.mkdir(parents=True)
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            volumes=("matcha-ms-dead-9999_sandbox_npm_cache",),
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertIn("invalid session record", report.skipped or "")
+        self.assertEqual(docker.removed, [])
+        self.assertTrue(home.is_dir())
+
+    def test_docker_inventory_failure_aborts_before_host_cleanup(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        home = self.root / "data/homes/orphan"
+        home.mkdir(parents=True)
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            containers=(
+                (
+                    "matcha-ms-dead-workspace-1",
+                    "exited",
+                    "matcha-agent-sandbox-workspace:deadbeef",
+                    "matcha-ms-dead",
+                ),
+            ),
+        )
+
+        def failed_inventory(*argv: str) -> subprocess.CompletedProcess[str]:
+            if argv[0] == "images":
+                return subprocess.CompletedProcess(list(argv), 1, "", "daemon unavailable")
+            return docker(*argv)
+
+        with mock.patch(
+            "scripts.msandbox.docker_gc._docker", side_effect=failed_inventory
+        ), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertIn("Docker inventory is incomplete", report.skipped or "")
+        self.assertEqual(docker.removed, [])
+        self.assertTrue(home.is_dir())
+
+    def test_running_orphan_container_protects_its_bind_mounted_home(self) -> None:
+        self.sandbox_tree(self.repo, "repo")
+        running_home = self.root / "data/homes/running-orphan"
+        stale_home = self.root / "data/homes/stale-orphan"
+        running_home.mkdir(parents=True)
+        stale_home.mkdir(parents=True)
+        container = "matcha-ms-running-orphan-workspace-1"
+        mounted_volume = "matcha-ms-running-orphan_sandbox_npm_cache"
+        docker = FakeDocker(
+            images=("matcha-agent-sandbox-workspace:deadbeef",),
+            volumes=(mounted_volume,),
+            containers=(
+                (
+                    container,
+                    "running",
+                    "matcha-agent-sandbox-workspace:deadbeef",
+                    "matcha-ms-running-orphan",
+                ),
+            ),
+            mounts={container: (mounted_volume,)},
+            binds={container: (str(running_home),)},
+        )
+        with mock.patch("scripts.msandbox.docker_gc._docker", docker), mock.patch(
+            "scripts.msandbox.docker_gc.shutil.which", return_value="/usr/bin/docker"
+        ):
+            report = collect_garbage(self.repo, apply=True)
+        self.assertTrue(running_home.is_dir())
+        self.assertFalse(stale_home.exists())
+        self.assertIn(mounted_volume, docker.volumes)
+        self.assertIn("matcha-agent-sandbox-workspace:deadbeef", docker.images)
+        self.assertIn(
+            ("session-home", "stale-orphan"),
+            {(item.kind, item.name) for item in report.collected},
+        )
 
 
 if __name__ == "__main__":
