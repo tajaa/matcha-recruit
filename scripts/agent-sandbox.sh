@@ -109,7 +109,7 @@ EOF
 
 sanitize_attachment_name() {
     local source_name="$1" safe_name
-    safe_name="$(printf '%s' "$source_name" | tr -cs '[:alnum:]._- ' '_' | cut -c1-160)"
+    safe_name="$(printf '%s' "$source_name" | tr -cs '[:alnum:]. _-' '_' | cut -c1-160)"
     safe_name="${safe_name#.}"
     [ -n "$safe_name" ] || safe_name=attachment
     printf '%s\n' "$safe_name"
