@@ -56,7 +56,29 @@ async def generate_review_suggestion(
     week_template_id: UUID,
 ) -> dict:
     """Build one proposal without applying or publishing any schedule data."""
+    week_end = week_start + timedelta(days=7)
+    week_start_at = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
+    week_end_at = datetime.combine(week_end, time.min, tzinfo=timezone.utc)
     async with connection_or_direct() as conn:
+        # Applying a proposal does not permanently reserve its week: managers
+        # can delete or cancel every resulting draft before publishing. Keep
+        # the run state aligned with the editor's visible schedule so that
+        # orphaned applied runs do not block a replacement suggestion.
+        await conn.execute(
+            """
+            UPDATE schedule_generation_runs r
+            SET status='stale', updated_at=NOW()
+            WHERE r.company_id=$1 AND r.location_id=$2 AND r.week_start=$3
+              AND r.status='applied'
+              AND NOT EXISTS (
+                  SELECT 1 FROM schedule_shifts s
+                  WHERE s.company_id=$1 AND s.location_id=$2
+                    AND s.status IN ('draft', 'published')
+                    AND s.starts_at >= $4 AND s.starts_at < $5
+              )
+            """,
+            company_id, location_id, week_start, week_start_at, week_end_at,
+        )
         existing = await conn.fetchrow(
             """SELECT id, status FROM schedule_generation_runs
                WHERE company_id=$1 AND location_id=$2 AND week_start=$3

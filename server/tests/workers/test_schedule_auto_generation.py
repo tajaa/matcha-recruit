@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.matcha.services.scheduling import schedule_automation, week_builder
 from app.matcha.services.scheduling.schedule_automation import next_run_at, target_week_start
 from app.workers.tasks import schedule_auto_generation as worker
 
@@ -25,6 +26,33 @@ class _Conn:
 
     async def close(self):
         self.closed = True
+
+
+class _AsyncContext:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _SuggestionConn:
+    def __init__(self):
+        self.stale_query = None
+
+    async def execute(self, query, *args):
+        if "SET status='stale'" in query:
+            self.stale_query = (query, args)
+            return "UPDATE 1"
+        raise AssertionError(f"unexpected execute query: {query}")
+
+    async def fetchrow(self, query, *_args):
+        if "FROM schedule_generation_runs" in query:
+            return None
+        raise AssertionError(f"unexpected fetchrow query: {query}")
 
 
 def test_weekly_next_run_uses_location_wall_clock():
@@ -116,3 +144,39 @@ async def test_stale_queued_version_is_a_noop(monkeypatch):
     generate.assert_not_awaited()
     assert conn.execute_calls == []
     assert conn.closed is True
+
+
+@pytest.mark.asyncio
+async def test_removed_applied_week_does_not_block_replacement_suggestion(monkeypatch):
+    company_id, location_id, template_id = uuid4(), uuid4(), uuid4()
+    conn = _SuggestionConn()
+    monkeypatch.setattr(schedule_automation, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(
+        week_builder,
+        "get_week_build_readiness",
+        AsyncMock(return_value={"status": "ok", "ready": True}),
+    )
+    generation_id = uuid4()
+    monkeypatch.setattr(
+        week_builder,
+        "propose_week_draft",
+        AsyncMock(return_value={"status": "ready", "generation_run_id": str(generation_id)}),
+    )
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=company_id,
+        location_id=location_id,
+        week_start=date(2026, 8, 30),
+        week_template_id=template_id,
+    )
+
+    assert result == {
+        "status": "generated",
+        "message": "Huume prepared a schedule suggestion for manager review.",
+        "generation_run_id": str(generation_id),
+    }
+    assert conn.stale_query is not None
+    assert conn.stale_query[1][-2:] == (
+        datetime(2026, 8, 30, tzinfo=timezone.utc),
+        datetime(2026, 9, 6, tzinfo=timezone.utc),
+    )
