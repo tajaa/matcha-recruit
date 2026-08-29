@@ -5,44 +5,48 @@ or OpenCode) against this repo with broad/no-approval execution, without
 giving it the macOS home directory, browser profiles, Keychain, host SSH
 agent, or the host Docker socket.
 
-Quickstart, from anywhere (`~/.local/bin/msandbox` is a symlink to
-`scripts/agent-sandbox.sh` — named `msandbox`, not `sandbox`, because
-`~/Documents/github/claude-sandbox/sandbox` already owns that name as a
-generic devcontainer launcher for other projects):
+Quickstart, from anywhere. `msandbox install` creates a versioned controller
+under `~/.local/share/matcha-msandbox/releases/`; the launcher no longer points
+into whichever branch happens to be checked out:
 
 ```bash
-msandbox                # start sandbox + AutoPR master switch (incl. self-hosted runner), then open shell
-msandbox stop           # stop only when no agent work is active (also boots out the runner)
-msandbox stop --force   # explicit interrupt/cancel override
-msandbox off            # immediately stop the sandbox, AutoPR, dashboard, and the self-hosted runner
+msandbox install
+msandbox session create payroll-fix --agent codex --dev
+msandbox session create inventory-pr --agent opencode --pr 348
+msandbox session create ios-review --agent claude
+msandbox session list
 ```
-From that shell: `codex`, `claude`, or `opencode` are already on `PATH` and
-already logged in once you've run `login` (below) — or drive the rest from
-outside the container instead:
+
+Every session owns a detached Git worktree, Compose project, home directory,
+tmux TUI, attachment inbox, and validation record. Multiple sessions of the
+same agent can run simultaneously. See `docs/ops/MSANDBOX_SESSIONS.md` for the
+complete session, attachment, testing, PR-submission, and recovery workflows.
+
 ```bash
 msandbox build --playwright   # rebuild with Chromium, or after Dockerfile changes
-msandbox login codex          # or: login claude / login opencode / login gh
-msandbox dev                  # backend/worker/frontend/Tell-Us/Oceanlab in tmux
-msandbox codex                # in another terminal — or `claude` / `opencode`
-msandbox exec command args    # exact-argv, non-TTY automation path
-msandbox doctor               # isolation + capability self-check
+msandbox doctor payroll-fix
+msandbox test payroll-fix --pr --xcode affected
+msandbox attach payroll-fix ./shot.png --send
+msandbox paste payroll-fix --send
+msandbox session submit payroll-fix --draft
 msandbox audit                # read-only AutoPR repo + machine-state audit
-msandbox attach ./shot.png    # import a dragged image/PDF/file; prints its in-sandbox path
-msandbox paste                # import the Finder file or screenshot currently on the clipboard
 ```
 
-The normal host development stack can stay running at the same time:
+The legacy single-workspace/AutoPR control-plane commands remain compatible:
+
 ```bash
-./scripts/dev-remote.sh       # host: http://localhost:5174
-msandbox codex                # container: $HOST_DEV_FRONTEND_URL
+msandbox system up
+msandbox system status
+msandbox system down
+msandbox login codex
 ```
-The repository bind mount means host Vite/uvicorn watchers see edits made by
-the sandboxed agent. From inside the container, `localhost` correctly refers to
-the container itself; `HOST_DEV_*_URL` uses Docker Desktop's
-`host.docker.internal` gateway to reach the host-run stack.
 
-`msandbox` is just `./scripts/agent-sandbox.sh` under a short name; both work
-identically. Run `msandbox help` for the full command list.
+Bare `msandbox` preserves the legacy one-command path: it builds if needed,
+starts the global workspace and AutoPR control plane, then opens a workspace
+shell. The dashboard is available with `tmux attach -t matcha-autopr`.
+Use `msandbox session list` to list independent v2 sessions explicitly.
+`scripts/agent-sandbox.sh` remains the repository compatibility entrypoint
+used by existing automation.
 
 ## What's isolated, and what isn't
 
@@ -59,6 +63,11 @@ that's a design choice made in this plan, documented below rather than hidden.
   entrypoint's one-time volume setup before it drops to the unprivileged
   `agent` user); `no-new-privileges`
 - published ports bind to `127.0.0.1` only
+- the repository's common Git config, hooks, refs, and objects are not writable.
+  Each container uses private Git metadata/objects with host objects exposed
+  only as a read-only alternate; the controller imports its committed HEAD
+  when the session stops. Host publication also disables hooks explicitly.
+- no container-to-host command or Xcode bridge exists
 
 **Deliberately reachable** (by design — see `docker-compose.sandbox.yml`):
 - the repo bind mount, including `secrets/roonMT-arm.pem` and `server/.env`
@@ -99,17 +108,22 @@ a Linux container. An agent in the sandbox can still edit Swift and
 ./scripts/xcode-build.sh espresso build
 ./scripts/xcode-build.sh matchatutor test
 ```
+For a registered session, prefer an explicit host invocation such as
+`msandbox test ios-review --pr`; containers cannot trigger it. This is an
+operator trust boundary because Xcode projects may contain shell build phases.
 See `scripts/xcode-build.sh` for the full target list and the existing
 `release.sh` / `release-appstore.sh` / `run-prod.sh` for signing/notarization
 and prod-tunneled runs — this wrapper doesn't reimplement those.
 
-## Command reference (`scripts/agent-sandbox.sh`)
+## Legacy/control-plane command reference (`scripts/agent-sandbox.sh`)
+
+The session-oriented command reference is in `MSANDBOX_SESSIONS.md`.
 
 | Command | What it does |
 |---|---|
 | `build [--playwright]` | Build the workspace image |
 | `start` / `stop` / `off` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work unless `--force` is explicit; `off` is the explicit immediate shutdown. `start` bootstraps the self-hosted `com.matcha.github-actions-runner` LaunchAgent; `stop`/`off` boot it out so a stray `workflow_dispatch` has nowhere to run. Set `AUTOPR_MANAGE_RUNNER=0` if the runner is administered separately. |
-| `autopr-ready` | Silent readiness probe used by the dispatcher/workflow; succeeds only when the ON marker and primary workspace are both present |
+| `autopr-ready` | Silent readiness probe used by the dispatcher/workflow |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
 | `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |
 | `dev [args]` | `AGENT_SANDBOX=1 ./scripts/dev-remote.sh` inside the container |

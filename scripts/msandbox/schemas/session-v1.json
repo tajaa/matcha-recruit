@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matcha.local/schemas/msandbox/session-v1.json",
+  "title": "Matcha msandbox session",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "agent",
+    "phase",
+    "repo_root",
+    "worktree_path",
+    "git_admin_name",
+    "compose_project",
+    "tmux_session",
+    "base_ref",
+    "base_sha"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+    "name": {"type": "string", "minLength": 1},
+    "agent": {"enum": ["codex", "opencode", "claude"]},
+    "phase": {
+      "enum": [
+        "created",
+        "running",
+        "stopped",
+        "submitting",
+        "submitted_needs_release",
+        "released",
+        "orphaned"
+      ]
+    },
+    "repo_root": {"type": "string"},
+    "worktree_path": {"type": "string"},
+    "git_admin_name": {"type": "string"},
+    "compose_project": {"type": "string"},
+    "tmux_session": {"type": "string"},
+    "base_ref": {"type": "string"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "target_branch": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

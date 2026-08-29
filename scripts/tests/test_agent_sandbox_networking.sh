@@ -6,6 +6,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.sandbox.yml"
 AUTOPR_COMPOSE_FILE="$REPO_ROOT/docker-compose.autopr-sandbox.yml"
+SESSION_COMPOSE_FILE="$REPO_ROOT/docker-compose.sandbox-session.yml"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/aws"
@@ -21,6 +22,7 @@ render_compose > "$TMP_DIR/default.json"
 python3 - "$TMP_DIR/default.json" <<'PY'
 import json
 import sys
+from pathlib import Path
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     workspace = json.load(handle)["services"]["workspace"]
@@ -76,6 +78,56 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 assert workspace.get("ports", []) == []
 PY
 echo "PASS: AutoPR overlay still publishes no host ports"
+
+mkdir -p "$TMP_DIR/worktree" "$TMP_DIR/git/objects" "$TMP_DIR/isolated.git" \
+    "$TMP_DIR/home" "$TMP_DIR/attachments"
+printf 'gitdir: /msandbox-git\n' > "$TMP_DIR/workspace.git"
+SANDBOX_WORKSPACE_DIR="$TMP_DIR/worktree" \
+    SANDBOX_GIT_OBJECTS_DIR="$TMP_DIR/git/objects" \
+    MSANDBOX_GIT_DIR="$TMP_DIR/isolated.git" \
+    MSANDBOX_GIT_POINTER_FILE="$TMP_DIR/workspace.git" \
+    SANDBOX_GIT_ADMIN_NAME=test MSANDBOX_SESSION_ID=test \
+    MSANDBOX_SESSION_HOME="$TMP_DIR/home" \
+    MSANDBOX_ATTACHMENTS_HOST_DIR="$TMP_DIR/attachments" \
+    SANDBOX_SERVER_VENV_VOLUME=matcha-ms-test-server \
+    SANDBOX_CLIENT_NODE_MODULES_VOLUME=matcha-ms-test-client \
+    SANDBOX_TELLUS_NODE_MODULES_VOLUME=matcha-ms-test-tellus \
+    SANDBOX_OCEANLAB_NODE_MODULES_VOLUME=matcha-ms-test-oceanlab \
+    render_compose --file "$SESSION_COMPOSE_FILE" > "$TMP_DIR/session.json"
+python3 - "$TMP_DIR/session.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    workspace = json.load(handle)["services"]["workspace"]
+
+assert workspace.get("ports", []) == []
+assert "GIT_DIR" not in workspace["environment"]
+assert "GIT_WORK_TREE" not in workspace["environment"]
+mounts = {volume["target"]: volume for volume in workspace["volumes"]}
+assert mounts["/attachments"]["read_only"] is True
+assert Path(mounts["/home/agent"]["source"]).name == "home"
+objects = next(volume for volume in workspace["volumes"] if volume["source"].endswith("/git/objects"))
+assert objects["source"] == objects["target"]
+assert objects["read_only"] is True
+assert mounts["/msandbox-git"].get("read_only", False) is False
+assert mounts["/workspace/.git"]["read_only"] is True
+assert not any(volume["source"].endswith("/git") for volume in workspace["volumes"])
+assert "/msandbox-bridge" not in mounts
+for target in (
+    "/workspace/server/venv",
+    "/workspace/client/node_modules",
+    "/workspace/client/tellus/node_modules",
+    "/workspace/client/oceanlab/node_modules",
+):
+    assert mounts[target]["read_only"] is True, target
+PY
+echo "PASS: sessions use private Git metadata with host objects as a read-only alternate"
+
+grep -qF '/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH' \
+    "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
+echo "PASS: login shells restore the pinned Node and AWS toolchains"
 
 grep -qF 'VITE_HOST_ARGS="--host 127.0.0.1"' "$REPO_ROOT/scripts/dev-remote.sh"
 grep -qF 'VITE_HOST_ARGS="--host 0.0.0.0"' "$REPO_ROOT/scripts/dev-remote.sh"

@@ -1,0 +1,32 @@
+schema_version = 1
+
+[paths]
+server = ["server/"]
+client = ["client/"]
+tellus = ["client/tellus/"]
+oceanlab = ["client/oceanlab/"]
+automation = ["scripts/", "docker/", "docker-compose", ".github/workflows/"]
+
+[xcode.espresso]
+path = "platforms/desktop/Espresso/"
+project = "platforms/desktop/Espresso/Matcha.xcodeproj"
+scheme = "Matcha"
+actions = ["build"]
+
+[xcode.matchatutor]
+path = "platforms/ios/MatchaTutor/"
+project = "platforms/ios/MatchaTutor/MatchaTutor.xcodeproj"
+scheme = "MatchaTutor"
+actions = ["build", "test"]
+
+[xcode.tellus]
+path = "platforms/ios/TellUs/"
+project = "platforms/ios/TellUs/TellUs.xcodeproj"
+scheme = "TellUs"
+actions = ["build", "test"]
+
+[xcode.gummfit]
+path = "platforms/ios/Gummfit/"
+project = "platforms/ios/Gummfit/Gummfit.xcodeproj"
+scheme = "Gummfit"
+actions = ["build", "test"]

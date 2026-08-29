@@ -1,0 +1,38 @@
+# Isolated test data services. Parallel PR sessions must not share schemas,
+# migrations, Redis keys, or published host ports by default.
+services:
+  workspace:
+    environment:
+      DATABASE_URL: postgresql://matcha:matcha_test@postgres:5432/matcha_test
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: matcha
+      POSTGRES_PASSWORD: matcha_test
+      POSTGRES_DB: matcha_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matcha -d matcha_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - sandbox_test_postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  sandbox_test_postgres:

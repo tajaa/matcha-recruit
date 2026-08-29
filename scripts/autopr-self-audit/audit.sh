@@ -35,6 +35,7 @@ check_core_shell_syntax() {
         "$REPO_ROOT/scripts/autopr-scope" \
         -type f -name '*.sh' -print | sort)
     bash -n "$REPO_ROOT/scripts/agent-sandbox.sh"
+    python3 -m compileall -q "$REPO_ROOT/scripts/msandbox"
 }
 
 check_compose_contract() {
@@ -46,12 +47,29 @@ check_compose_contract() {
     : > "$compose_tmp/auth.json"
     SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
         docker compose --project-name matcha-agent-sandbox-audit \
-        --file "$REPO_ROOT/docker-compose.sandbox.yml" config --quiet
+        --file "$REPO_ROOT/docker-compose.sandbox.yml" config --quiet || return 1
+    mkdir -p "$compose_tmp/git/objects" "$compose_tmp/isolated.git" \
+        "$compose_tmp/home" "$compose_tmp/attachments"
+    printf 'gitdir: /msandbox-git\n' > "$compose_tmp/workspace.git"
+    SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
+        SANDBOX_GIT_OBJECTS_DIR="$compose_tmp/git/objects" \
+        MSANDBOX_GIT_DIR="$compose_tmp/isolated.git" \
+        MSANDBOX_GIT_POINTER_FILE="$compose_tmp/workspace.git" \
+        MSANDBOX_SESSION_ID=audit MSANDBOX_SESSION_HOME="$compose_tmp/home" \
+        MSANDBOX_ATTACHMENTS_HOST_DIR="$compose_tmp/attachments" \
+        SANDBOX_SERVER_VENV_VOLUME=matcha-ms-audit-server \
+        SANDBOX_CLIENT_NODE_MODULES_VOLUME=matcha-ms-audit-client \
+        SANDBOX_TELLUS_NODE_MODULES_VOLUME=matcha-ms-audit-tellus \
+        SANDBOX_OCEANLAB_NODE_MODULES_VOLUME=matcha-ms-audit-oceanlab \
+        docker compose --project-name matcha-msandbox-session-audit \
+        --file "$REPO_ROOT/docker-compose.sandbox.yml" \
+        --file "$REPO_ROOT/docker-compose.sandbox-session.yml" \
+        --file "$REPO_ROOT/docker-compose.sandbox-test.yml" config --quiet || return 1
     SANDBOX_WORKSPACE_DIR="$compose_tmp/workspace" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
         SANDBOX_OPENCODE_AUTH_FILE="$compose_tmp/auth.json" \
         docker compose --project-name matcha-autopr-audit \
         --file "$REPO_ROOT/docker-compose.sandbox.yml" \
-        --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" config --quiet
+        --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" config --quiet || return 1
 }
 
 check_local_schema_state() {
@@ -90,6 +108,7 @@ check_local_schema_state() {
 
 check_control_plane_state() {
     command -v docker >/dev/null 2>&1 || return 77
+    docker info >/dev/null 2>&1 || return 77
     "$REPO_ROOT/scripts/agent-sandbox.sh" autopr-ready || {
         echo "AutoPR control plane is not fully ready. Run msandbox status, then msandbox start."
         return 1
@@ -109,9 +128,32 @@ check_contract_tests() {
         test_error_autofix.sh \
         test_autopr_scope.sh \
         test_autopr_coverage_lifecycle.sh \
-        test_msandbox_attachments.sh; do
+        test_msandbox_attachments.sh \
+        test_msandbox_sessions.sh \
+        test_msandbox_worktrees.sh; do
         bash "$REPO_ROOT/scripts/tests/$test_file" || return 1
     done
+}
+
+check_built_toolchain() {
+    command -v docker >/dev/null 2>&1 || return 77
+    docker image inspect matcha-agent-sandbox-workspace:latest >/dev/null 2>&1 || return 77
+    docker run --rm --entrypoint bash matcha-agent-sandbox-workspace:latest -lc \
+        'node --version && npm --version && npx --version && /opt/bootstrap/server-venv/bin/python -m pytest --version'
+}
+
+check_installed_controller() {
+    local installed
+    installed="$(command -v msandbox || true)"
+    [ -n "$installed" ] || return 77
+    case "$(readlink "$installed" 2>/dev/null || true)" in
+        *'/Documents/github/matcha/'*)
+            echo "Installed msandbox still points into the mutable repository checkout: $installed"
+            echo "Operator action: run msandbox install after merging the v2 controller."
+            return 1
+            ;;
+    esac
+    msandbox --version
 }
 
 run_check() {
@@ -141,6 +183,8 @@ run_check contract_tests "AutoPR and msandbox contract tests" repo check_contrac
 run_check git_patch_hygiene "Patch whitespace and conflict markers" repo git diff --check
 run_check local_schema "Local dev migration alignment" operator check_local_schema_state
 run_check control_plane "msandbox control-plane readiness" operator check_control_plane_state
+run_check built_toolchain "Built sandbox login-shell test toolchain" operator check_built_toolchain
+run_check installed_controller "Versioned msandbox installation" operator check_installed_controller
 
 repairable_failures="$(jq '[.[] | select(.status == "fail" and .repairability == "repo")] | length' "$RESULTS_FILE")"
 operator_failures="$(jq '[.[] | select(.status == "fail" and .repairability == "operator")] | length' "$RESULTS_FILE")"

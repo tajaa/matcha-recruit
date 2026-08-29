@@ -112,6 +112,9 @@ run_msandbox() {
     env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
         AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AUTOPR_GH_BIN="$TMP_DIR/bin/gh" \
         AUTOPR_STATE_DIR="$TMP_DIR/state" \
+        MSANDBOX_STATE_DIR="$TMP_DIR/v2-state" \
+        MSANDBOX_DATA_DIR="$TMP_DIR/v2-data" \
+        MSANDBOX_CONFIG_DIR="$TMP_DIR/v2-config" \
         AUTOPR_DISPATCH_INSTALL_ROOT="$TMP_DIR/runtime" \
         AUTOPR_LAUNCH_AGENT_PLIST="$TMP_DIR/launch-agent.plist" \
         AUTOPR_LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" \
@@ -160,15 +163,20 @@ check "activity detection includes the error and self-audit worker sandboxes" \
     $(printf '%s' "$audit_activity" | grep -q \
       'ACTIVE — an AutoPR coding agent is running' && echo 0 || echo 1)
 
-set +e
-AUTOPR_TEST_ACTIVE=1 run_msandbox >/dev/null 2>&1
-active_entry_rc=$?
-set -e
-check "bare msandbox refuses a second shell during active agent work" \
-    $([ "$active_entry_rc" != 0 ] \
+bare_output="$(run_msandbox)"
+check "bare msandbox starts the workspace and AutoPR dashboard" \
+    $(printf '%s' "$bare_output" | grep -q 'tmux attach -t matcha-autopr' \
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && [ -f "$TMP_DIR/tmux.session" ] \
       && echo 0 || echo 1)
+
+set +e
+AUTOPR_TEST_ACTIVE=1 run_msandbox codex >/dev/null 2>&1
+active_entry_rc=$?
+set -e
+check "legacy single-workspace shorthand still refuses to collide with active work" \
+    $([ "$active_entry_rc" != 0 ] && echo 0 || echo 1)
 
 set +e
 AUTOPR_TEST_ACTIVE=1 run_msandbox stop >/dev/null 2>&1

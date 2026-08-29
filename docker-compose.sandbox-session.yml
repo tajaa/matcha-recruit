@@ -1,0 +1,48 @@
+# Per-session isolation overlay. Session worktrees always start detached, so
+# no refs/heads/* branch is owned by an msandbox worktree. The container gets
+# a private Git directory and object store. Host objects are mounted read-only
+# at the absolute path recorded in the private store's alternates file. The
+# controller imports the private committed HEAD when the container stops. Do
+# not export GIT_DIR/GIT_WORK_TREE globally:
+# inherited overrides would redirect nested test repositories into Matcha's
+# common config.
+services:
+  workspace:
+    ports: !reset []
+    environment:
+      MSANDBOX_SESSION_ID: ${MSANDBOX_SESSION_ID:?session id is required}
+      MSANDBOX_ATTACHMENTS_DIR: /attachments
+    volumes:
+      - ${MSANDBOX_SESSION_HOME:?session home is required}:/home/agent
+      - ${MSANDBOX_GIT_DIR:?isolated Git dir is required}:/msandbox-git
+      - ${MSANDBOX_GIT_POINTER_FILE:?isolated Git pointer is required}:/workspace/.git:ro
+      - ${SANDBOX_GIT_OBJECTS_DIR:?Git object dir is required}:${SANDBOX_GIT_OBJECTS_DIR}:ro
+      - ${MSANDBOX_ATTACHMENTS_HOST_DIR:?attachment inbox is required}:/attachments:ro
+      # Content-addressed dependency volumes are initialized by the host
+      # controller, then mounted read-only in every agent session.
+      - sandbox_server_venv:/workspace/server/venv:ro
+      - sandbox_client_node_modules:/workspace/client/node_modules:ro
+      - sandbox_tellus_node_modules:/workspace/client/tellus/node_modules:ro
+      - sandbox_oceanlab_node_modules:/workspace/client/oceanlab/node_modules:ro
+      # Vite/Vitest write caches below node_modules. Keep those hotspots
+      # session-local while sharing the immutable package installation.
+      - session_client_vite_cache:/workspace/client/node_modules/.vite
+      - session_tellus_vite_cache:/workspace/client/tellus/node_modules/.vite
+      - session_oceanlab_vite_cache:/workspace/client/oceanlab/node_modules/.vite
+
+volumes:
+  sandbox_server_venv:
+    external: true
+    name: ${SANDBOX_SERVER_VENV_VOLUME:?server dependency volume is required}
+  sandbox_client_node_modules:
+    external: true
+    name: ${SANDBOX_CLIENT_NODE_MODULES_VOLUME:?client dependency volume is required}
+  sandbox_tellus_node_modules:
+    external: true
+    name: ${SANDBOX_TELLUS_NODE_MODULES_VOLUME:?Tellus dependency volume is required}
+  sandbox_oceanlab_node_modules:
+    external: true
+    name: ${SANDBOX_OCEANLAB_NODE_MODULES_VOLUME:?Oceanlab dependency volume is required}
+  session_client_vite_cache:
+  session_tellus_vite_cache:
+  session_oceanlab_vite_cache:
