@@ -148,7 +148,8 @@ cat > "$TMP_DIR/investigate-incident.json" <<'EOF'
 {"message":"boom","traceback":"File \"/app/app/example.py\", line 1","stable_key":"abc123abc123"}
 EOF
 PATH="$TMP_DIR/bin:$PATH" OPENCODE_STUB_REPORT="$MODEL_OUTPUT_DIR/investigation.md" \
-    OPENCODE_STUB_DECISION="$MODEL_OUTPUT_DIR/investigation.json" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    OPENCODE_STUB_DECISION="$MODEL_OUTPUT_DIR/investigation.json" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_ACTIONS=false \
     "$AUTOFIX_DIR/investigate.sh" "$TMP_DIR/investigate-incident.json" \
     "$MODEL_OUTPUT_DIR/investigation.md" "$MODEL_OUTPUT_DIR/investigation.json" >/dev/null 2>&1
 check "investigate.sh terminates --file args before passing one prompt" $?
