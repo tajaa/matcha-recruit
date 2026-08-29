@@ -7,6 +7,7 @@ number and its citation. A provider failure degrades to that evidence safely.
 import json
 import logging
 import re
+import time
 from datetime import date
 from typing import Optional
 from uuid import UUID
@@ -14,6 +15,7 @@ from uuid import UUID
 import httpx
 
 from app.config import get_settings
+from app.core.services.ai_usage import record_openai_response
 
 from . import lots, rollup
 
@@ -41,6 +43,7 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
     settings = get_settings()
     if not settings.openai_api_key or not settings.openai_luna_model:
         return None
+    model = settings.openai_luna_model
     prompt = (
         "You are a concise inventory-waste analyst. Answer the manager's question "
         "qualitatively using only the supplied deterministic tool results. Do not "
@@ -50,17 +53,39 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
         f"Question: {question[:1000]}\n\n"
         f"Tool results: {json.dumps(sources, default=str, separators=(',', ':'))}"
     )
+    started = time.monotonic()
+    usage_recorded = False
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 "https://api.openai.com/v1/responses",
                 headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                json={"model": settings.openai_luna_model, "input": prompt},
+                json={"model": model, "input": prompt},
             )
             response.raise_for_status()
-        text = _response_text(response.json())
+        payload = response.json()
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        input_details = usage.get("input_tokens_details")
+        output_details = usage.get("output_tokens_details")
+        await record_openai_response(
+            model=model,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            thinking_tokens=output_details.get("reasoning_tokens") if isinstance(output_details, dict) else None,
+            cached_tokens=input_details.get("cached_tokens") if isinstance(input_details, dict) else None,
+        )
+        usage_recorded = True
+        text = _response_text(payload)
         return text if text and not _NUMERIC_NARRATION.search(text) else None
-    except (httpx.HTTPError, ValueError, TypeError):
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        if not usage_recorded:
+            await record_openai_response(
+                model=model,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=str(exc),
+            )
         logger.warning("inventory waste Luna narration failed", exc_info=True)
         return None
 

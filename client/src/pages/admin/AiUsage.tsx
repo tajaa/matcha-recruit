@@ -157,7 +157,7 @@ function Bars({ points }: { points: AiUsagePoint[] }) {
   )
 }
 
-function RollupTable<T extends { calls: number; cost_usd: number | null; input_tokens: number; output_tokens: number; thinking_tokens: number; error_rate: number; p95_latency_ms: number | null }>({
+function RollupTable<T extends { calls: number; cost_usd: number | null; input_tokens: number; output_tokens: number; thinking_tokens: number; error_rate: number; p95_latency_ms: number | null; provider?: string }>({
   rows,
   labelKey,
   labelHeader,
@@ -198,7 +198,10 @@ function RollupTable<T extends { calls: number; cost_usd: number | null; input_t
                 onClick={() => onSelect(label)}
                 className={`cursor-pointer transition-colors ${selected ? 'bg-zinc-800 ring-1 ring-inset ring-emerald-700/40' : 'hover:bg-zinc-800/20'}`}
               >
-                <td className="py-2 px-3 font-mono text-zinc-200">{label}</td>
+                <td className="py-2 px-3 font-mono text-zinc-200">
+                  {r.provider && <span className="text-zinc-500">{r.provider} / </span>}
+                  {label}
+                </td>
                 <td className="py-2 px-3 text-right text-zinc-300">{r.calls}</td>
                 <td className="py-2 px-3 text-right text-zinc-100">{fmtCost(r.cost_usd)}</td>
                 <td className="py-2 px-3 text-right text-zinc-400">{fmtTokens(r.input_tokens)}</td>
@@ -232,7 +235,7 @@ function CallLogRow({ call, isOpen, onToggle }: { call: AiUsageCall; isOpen: boo
             {call.status}
           </span>
           <span className="min-w-0 flex-1 font-mono text-zinc-200 truncate">
-            {call.feature} <span className="text-zinc-600">·</span> {call.model}
+            {call.feature} <span className="text-zinc-600">·</span> {call.provider} / {call.model}
           </span>
           <span className="shrink-0 text-[11px] text-zinc-500 w-20 text-right">{call.method}</span>
           <span className="shrink-0 text-[11px] text-zinc-400 w-14 text-right">{fmtTokens(call.input_tokens)}</span>
@@ -364,7 +367,7 @@ export default function AiUsage() {
             <h1 className="text-xl font-semibold text-zinc-100">AI Usage</h1>
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Model calls across every feature — Gemini today, provider-general by design.
+            Model calls across every feature and provider, including Gemini and OpenAI.
           </p>
         </div>
         <button
