@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../components/ui'
-import type { ScheduleRequest, Shift } from '../../types/employeeSchedule'
+import { toISODate, type ScheduleRequest, type Shift } from '../../types/employeeSchedule'
 import PortalSchedule from './PortalSchedule'
 
 const {
@@ -153,5 +153,26 @@ describe('PortalSchedule notes', () => {
 
     await screen.findByRole('heading', { name: 'My shifts' })
     expect(screen.queryByText(/Schedule note:/)).not.toBeInTheDocument()
+  })
+})
+
+describe('PortalSchedule time-off requests', () => {
+  it('warns and blocks time off for a visible week with published shifts', async () => {
+    const selectedDate = new Date()
+    selectedDate.setUTCDate(selectedDate.getUTCDate() + 1)
+    const date = selectedDate.toISOString().slice(0, 10)
+    fetchMyTeamScheduleMock.mockResolvedValue({
+      shifts: [{ ...employeeAShift, starts_at: `${date}T09:00:00Z`, ends_at: `${date}T17:00:00Z` }],
+    })
+
+    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: /request time off/i }))
+    for (const input of screen.getAllByDisplayValue(toISODate(new Date()))) {
+      fireEvent.change(input, { target: { value: date } })
+    }
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Time-off requests cannot be submitted for a week with published shifts.')
+    expect(screen.getByRole('button', { name: 'Submit request' })).toBeDisabled()
   })
 })

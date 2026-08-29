@@ -149,7 +149,7 @@ export default function PortalSchedule() {
 
       <AvailabilityEditor />
 
-      <UnavailableForm onDone={load} />
+      <UnavailableForm teamShifts={teamShifts} onDone={load} />
 
       {offers.length > 0 && (
         <section>
@@ -396,13 +396,20 @@ function AvailabilityEditor() {
   )
 }
 
-function UnavailableForm({ onDone }: { onDone: () => void }) {
+function UnavailableForm({ teamShifts, onDone }: { teamShifts: Shift[]; onDone: () => void }) {
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [from, setFrom] = useState(todayISO())
   const [to, setTo] = useState(todayISO())
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  const selectedWeekHasPublishedShifts = teamShifts.some((shift) => {
+    const shiftDate = shift.starts_at.slice(0, 10)
+    const shiftStart = new Date(`${shiftDate}T00:00:00Z`)
+    const weekStart = addDays(toISODate(shiftStart), -shiftStart.getUTCDay())
+    const weekEnd = addDays(weekStart, 6)
+    return weekStart <= to && weekEnd >= from
+  })
 
   async function submit() {
     setBusy(true)
@@ -433,8 +440,9 @@ function UnavailableForm({ onDone }: { onDone: () => void }) {
             <label className="block"><span className="text-[10px] text-zinc-500 uppercase">From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} mt-1`} /></label>
             <label className="block"><span className="text-[10px] text-zinc-500 uppercase">To</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inputCls} mt-1`} /></label>
           </div>
+          {selectedWeekHasPublishedShifts && <p role="alert" className="text-xs text-amber-300">Time-off requests cannot be submitted for a week with published shifts. Choose a different week.</p>}
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="Reason (optional)" className={`${inputCls}`} />
-          <button onClick={submit} disabled={busy || to < from} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Submit request</button>
+          <button onClick={submit} disabled={busy || to < from || selectedWeekHasPublishedShifts} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Submit request</button>
         </div>
       )}
     </section>
