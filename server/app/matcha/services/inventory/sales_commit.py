@@ -18,6 +18,29 @@ class DuplicateSalesPeriodError(Exception):
     pass
 
 
+def _duplicate_result(import_id) -> dict:
+    return {"import_id": import_id, "total": 0, "mapped": 0, "unmapped": 0,
+            "items_affected": 0, "errors": [], "duplicate": True}
+
+
+async def _is_idempotent_terminal_import(conn, import_row) -> bool:
+    if import_row["status"] == "committed":
+        return True
+    if import_row["status"] != "discarded":
+        return False
+    return bool(await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM inventory_sales_lines WHERE import_id=$1
+        ) AND NOT EXISTS (
+            SELECT 1 FROM inventory_sales_lines
+            WHERE import_id=$1 AND status <> 'ignored'
+        )
+        """,
+        import_row["id"],
+    ))
+
+
 def _date_value(value):
     if value is None or isinstance(value, date):
         return value
@@ -69,9 +92,8 @@ async def commit_sales_import(
         )
         if existing_import is None:
             raise ValueError("sales import not found")
-        if existing_import["status"] == "committed":
-            return {"import_id": existing_import["id"], "total": 0, "mapped": 0,
-                    "unmapped": 0, "items_affected": 0, "errors": [], "duplicate": True}
+        if await _is_idempotent_terminal_import(conn, existing_import):
+            return _duplicate_result(existing_import["id"])
         if existing_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
         source = existing_import["source"]
@@ -88,9 +110,8 @@ async def commit_sales_import(
         )
         if existing_import and gmail_import and existing_import["id"] != gmail_import["id"]:
             raise ValueError("Sales import identity does not match the email draft.")
-        if gmail_import and gmail_import["status"] == "committed":
-            return {"import_id": gmail_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
-                    "items_affected": 0, "errors": [], "duplicate": True}
+        if gmail_import and await _is_idempotent_terminal_import(conn, gmail_import):
+            return _duplicate_result(gmail_import["id"])
         if gmail_import and gmail_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
         if gmail_import:
@@ -107,9 +128,8 @@ async def commit_sales_import(
             "WHERE company_id=$1 AND connection_id=$2 AND external_batch_id=$3",
             company_id, connection_id, external_batch_id,
         )
-        if batch_import and batch_import["status"] == "committed":
-            return {"import_id": batch_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
-                    "items_affected": 0, "errors": [], "duplicate": True}
+        if batch_import and await _is_idempotent_terminal_import(conn, batch_import):
+            return _duplicate_result(batch_import["id"])
         if batch_import and batch_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
         if batch_import:
@@ -131,8 +151,8 @@ async def commit_sales_import(
     # An all-ignored review is discarded below, so it must not contend with a
     # prior committed import for the same period.
     all_ignored_submission = bool(lines) and all(
-        line.get("status") == "ignored"
-        and (not line.get("new_mapping") or line["new_mapping"].get("kind") == "ignore")
+        (line["new_mapping"].get("kind") == "ignore"
+         if line.get("new_mapping") else line.get("status") == "ignored")
         for line in lines
     )
     if business_date and not force and not all_ignored_submission:
