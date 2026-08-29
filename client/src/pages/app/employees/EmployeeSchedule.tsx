@@ -8,7 +8,8 @@ import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
+  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, updateWeekTemplate, deleteWeekTemplate,
+  addTemplateBlock, updateTemplateBlock, deleteTemplateBlock,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
   fetchEligibilityCases, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
@@ -731,6 +732,7 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<WeekTemplate | null>(null)
 
   const load = useCallback(async () => {
     if (!locationId) {
@@ -749,23 +751,24 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-zinc-200">Shift templates</h3>
-        <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
+        <button onClick={() => { setEditing(null); setAdding(true) }} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
       </div>
-      {adding && <Card className="p-4"><TemplateForm locationId={locationId} onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
+      {adding && <Card className="p-4"><TemplateForm key={editing?.id ?? 'new'} locationId={locationId} template={editing ?? undefined} onDone={() => { setAdding(false); setEditing(null); load() }} onCancel={() => { setAdding(false); setEditing(null) }} /></Card>}
       {templates.length === 0 && !adding ? (
         <p className="text-sm text-zinc-600">No templates yet — create one to generate recurring shifts.</p>
       ) : (
         <div className="space-y-2">
-          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} />)}
+          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} onEdit={() => { setEditing(t); setAdding(true) }} />)}
         </div>
       )}
     </div>
   )
 }
 
-function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void }) {
+function TemplateRow({ tpl, onChanged, onGenerated, onEdit }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void; onEdit: () => void }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
   const today = toISODate(new Date())
   const [from, setFrom] = useState(today)
@@ -774,7 +777,7 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
 
   async function remove() {
     setBusy(true)
-    try { await deleteWeekTemplate(tpl.id); onChanged() } finally { setBusy(false) }
+    try { await deleteWeekTemplate(tpl.id); setConfirmDelete(false); onChanged() } finally { setBusy(false) }
   }
   async function generate() {
     setGenBusy(true)
@@ -807,8 +810,19 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
           </div>
         </div>
         <button onClick={() => setGenOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"><Sparkles className="h-3.5 w-3.5" /> Generate</button>
-        <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
+        <button onClick={onEdit} disabled={busy} aria-label={`Edit ${tpl.name}`} className="text-zinc-500 hover:text-zinc-100 p-1"><Pencil className="h-4 w-4" /></button>
+        <button onClick={() => setConfirmDelete(true)} disabled={busy} aria-label={`Delete ${tpl.name}`} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
       </div>
+      {confirmDelete && (
+        <div role="alertdialog" aria-modal="true" aria-labelledby={`delete-template-${tpl.id}`} className="mt-3 rounded-lg border border-red-900/60 bg-red-950/20 p-3">
+          <p id={`delete-template-${tpl.id}`} className="text-sm text-zinc-200">Delete “{tpl.name}”?</p>
+          <p className="mt-1 text-xs text-zinc-500">Its shift blocks will be removed. Previously generated shifts will remain.</p>
+          <div className="mt-3 flex items-center gap-2">
+            <button onClick={() => setConfirmDelete(false)} disabled={busy} className="text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
+            <button onClick={remove} disabled={busy} className="inline-flex items-center gap-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Delete template</button>
+          </div>
+        </div>
+      )}
       {genOpen && (
         <div className="mt-3 flex items-end gap-2 flex-wrap border-t border-zinc-800 pt-3">
           <label className="block"><span className="text-[10px] text-zinc-500 uppercase">From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} mt-1`} /></label>
@@ -821,7 +835,7 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
 }
 
 type TemplateBlockDraft = {
-  id: number
+  id: number | string
   role: string
   start: string
   end: string
@@ -844,17 +858,27 @@ function newTemplateBlock(id: number): TemplateBlockDraft {
   }
 }
 
-function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; onDone: () => void; onCancel: () => void }) {
-  const [name, setName] = useState('')
-  const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => [newTemplateBlock(1)])
+function TemplateForm({ locationId, template, onDone, onCancel }: { locationId: string; template?: WeekTemplate; onDone: () => void; onCancel: () => void }) {
+  const [name, setName] = useState(() => template?.name ?? '')
+  const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => template
+    ? template.blocks.map((block) => ({
+      id: block.id,
+      role: block.role ?? '',
+      start: block.start_time.slice(0, 5),
+      end: block.end_time.slice(0, 5),
+      breakMinutes: String(block.break_minutes),
+      required: String(block.required_staff),
+      days: block.days_of_week,
+    }))
+    : [newTemplateBlock(1)])
   const [busy, setBusy] = useState(false)
   const blocksValid = blocks.every((block) => block.days.length > 0)
 
-  function updateBlock(id: number, patch: Partial<TemplateBlockDraft>) {
+  function updateBlock(id: number | string, patch: Partial<TemplateBlockDraft>) {
     setBlocks((current) => current.map((block) => block.id === id ? { ...block, ...patch } : block))
   }
 
-  function toggleDay(id: number, day: number) {
+  function toggleDay(id: number | string, day: number) {
     const block = blocks.find((item) => item.id === id)
     if (!block) return
     updateBlock(id, {
@@ -867,7 +891,7 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
   function addBlock() {
     setBlocks((current) => {
       if (current.length >= MAX_TEMPLATE_BLOCKS) return current
-      const nextId = Math.max(...current.map((block) => block.id)) + 1
+      const nextId = Math.max(0, ...current.map((block) => typeof block.id === 'number' ? block.id : 0)) + 1
       return [...current, newTemplateBlock(nextId)]
     })
   }
@@ -876,18 +900,28 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
     if (!name.trim() || blocks.length === 0 || !blocksValid) return
     setBusy(true)
     try {
-      await createWeekTemplate({
-        name: name.trim(),
-        location_id: locationId,
-        blocks: blocks.map((block, index) => ({
-          name: block.role.trim() || `Shift ${index + 1}`,
-          role: block.role.trim() || null,
-          start_time: `${block.start}:00`, end_time: `${block.end}:00`,
-          break_minutes: Math.max(0, Math.round(Number(block.breakMinutes) || 0)),
-          required_staff: Math.max(1, Math.round(Number(block.required) || 1)),
-          days_of_week: block.days,
-        })),
+      const blockPayload = (block: TemplateBlockDraft, index: number) => ({
+        name: block.role.trim() || `Shift ${index + 1}`,
+        role: block.role.trim() || null,
+        start_time: `${block.start}:00`, end_time: `${block.end}:00`,
+        break_minutes: Math.max(0, Math.round(Number(block.breakMinutes) || 0)),
+        required_staff: Math.max(1, Math.round(Number(block.required) || 1)),
+        days_of_week: block.days,
       })
+      if (!template) {
+        await createWeekTemplate({ name: name.trim(), location_id: locationId, blocks: blocks.map(blockPayload) })
+      } else {
+        await updateWeekTemplate(template.id, { name: name.trim() })
+        await Promise.all(blocks.map((block, index) => (
+          typeof block.id === 'string'
+            ? updateTemplateBlock(template.id, block.id, blockPayload(block, index))
+            : addTemplateBlock(template.id, blockPayload(block, index))
+        )))
+        const retainedBlockIds = new Set(blocks.filter((block) => typeof block.id === 'string').map((block) => block.id))
+        await Promise.all(template.blocks
+          .filter((block) => !retainedBlockIds.has(block.id))
+          .map((block) => deleteTemplateBlock(template.id, block.id)))
+      }
       onDone()
     } finally { setBusy(false) }
   }
@@ -926,7 +960,7 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
         {blocks.length >= MAX_TEMPLATE_BLOCKS && <div className="text-xs text-zinc-500">Maximum 40 shifts per template.</div>}
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0 || !blocksValid} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
+        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0 || !blocksValid} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {template ? 'Save changes' : 'Save template'}</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>
