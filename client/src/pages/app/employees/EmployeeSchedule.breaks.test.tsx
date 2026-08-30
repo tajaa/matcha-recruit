@@ -166,7 +166,33 @@ describe('EmployeeSchedule break planning', () => {
     fireEvent.change(screen.getByLabelText('Start'), { target: { value: '09:00' } })
     fireEvent.change(screen.getByLabelText('Staff needed'), { target: { value: '0' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect(await screen.findByText('Staff needed must be a whole number of 1 or more')).toBeInTheDocument()
+    expect(await screen.findByText('Staff needed must be a whole number from 1 to 99')).toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects shift counts above the API maximums', async () => {
+    renderSchedule()
+
+    const dayHeading = await screen.findByText('Sun 8/30')
+    const addButton = dayHeading.parentElement?.querySelector('button')
+    expect(addButton).not.toBeNull()
+    fireEvent.click(addButton!)
+
+    const staffInput = screen.getByLabelText('Staff needed')
+    const breakInput = screen.getByText('Planned break (minutes)').closest('label')?.querySelector('input')
+    expect(breakInput).not.toBeNull()
+    expect(staffInput).toHaveAttribute('max', '99')
+    expect(breakInput!).toHaveAttribute('max', '1440')
+
+    fireEvent.change(staffInput, { target: { value: '100' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Staff needed must be a whole number from 1 to 99')).toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
+
+    fireEvent.change(staffInput, { target: { value: '1' } })
+    fireEvent.change(breakInput!, { target: { value: '1441' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Planned break must be a whole number from 0 to 1440 minutes')).toBeInTheDocument()
     expect(createShiftMock).not.toHaveBeenCalled()
   })
 
