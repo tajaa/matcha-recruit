@@ -26,6 +26,8 @@ class DockerError(RuntimeError):
 # legacy/AutoPR lane's image (docker-compose.sandbox.yml) and must never be
 # treated as a collectable build.
 IMAGE_REPOSITORY = "matcha-agent-sandbox-workspace"
+BUILDER_NAME = "matcha-msandbox"
+DEFAULT_BUILD_CACHE_MAX = "2GB"
 
 
 def compose_project(session_id: str) -> str:
@@ -297,6 +299,100 @@ def require_docker() -> None:
         raise DockerError("Docker is not running or is not accessible")
 
 
+def _image_exists(image: str) -> bool:
+    return (
+        subprocess.run(
+            ["docker", "image", "inspect", image],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
+def _ensure_builder() -> str:
+    """Use a private cache so pruning msandbox never evicts other projects."""
+    with state_lock("docker-builder", timeout_s=600):
+        inspected = subprocess.run(
+            ["docker", "buildx", "inspect", BUILDER_NAME],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if inspected.returncode == 0:
+            return BUILDER_NAME
+        created = subprocess.run(
+            [
+                "docker",
+                "buildx",
+                "create",
+                "--name",
+                BUILDER_NAME,
+                "--driver",
+                "docker-container",
+                "--driver-opt",
+                "default-load=true",
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if created.returncode:
+            detail = (created.stderr or created.stdout or "unknown Docker error").strip()
+            raise DockerError(f"could not create the isolated msandbox builder: {detail}")
+    return BUILDER_NAME
+
+
+def _prune_builder_cache() -> None:
+    limit = os.environ.get("MSANDBOX_BUILD_CACHE_MAX", DEFAULT_BUILD_CACHE_MAX)
+    subprocess.run(
+        [
+            "docker",
+            "buildx",
+            "prune",
+            "--builder",
+            BUILDER_NAME,
+            "--force",
+            "--max-used-space",
+            limit,
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _ensure_workspace_image(
+    record: SessionRecord,
+    environment: dict[str, str],
+    *,
+    test_services: bool,
+) -> bool:
+    """Build a missing content-addressed image once; return whether it was built."""
+    if _image_exists(environment["SANDBOX_IMAGE"]):
+        return False
+    builder = _ensure_builder()
+    build = subprocess.run(
+        compose_command(
+            record,
+            "build",
+            "--builder",
+            builder,
+            "workspace",
+            test_services=test_services,
+        ),
+        env=environment,
+        check=False,
+        text=True,
+    )
+    if build.returncode:
+        raise DockerError("workspace image build failed")
+    _prune_builder_cache()
+    return True
+
+
 def ensure_container(record: SessionRecord, *, test_services: bool = False) -> None:
     require_docker()
     services = ["--detach"]
@@ -304,23 +400,17 @@ def ensure_container(record: SessionRecord, *, test_services: bool = False) -> N
         services.extend(["postgres", "redis"])
     services.append("workspace")
     environment = compose_environment(record)
-    # Content-addressed images can build concurrently; BuildKit deduplicates
-    # identical layers. Only initialization of shared dependency volumes needs
-    # the cross-session lock below.
-    build = subprocess.run(
-        compose_command(record, "build", "workspace", test_services=test_services),
-        env=environment,
-        check=False,
-        text=True,
-    )
-    if build.returncode:
-        raise DockerError("workspace image build failed")
+    # The tag is a hash of every build input, so an existing tag is the exact
+    # requested image. Rebuilding it only emits a new provenance manifest and
+    # makes Compose recreate an otherwise identical running container.
+    built = _ensure_workspace_image(record, environment, test_services=test_services)
     # A successful build is the exact moment the image it supersedes became
     # garbage, so reclaim here rather than waiting for someone to remember.
     # Imported late: docker_gc reads this module's primitives.
     from .docker_gc import collect_garbage_quietly
 
-    collect_garbage_quietly(record)
+    if built:
+        collect_garbage_quietly(record)
     with state_lock("dependency-initialization", timeout_s=600):
         for variable in (
             "SANDBOX_SERVER_VENV_VOLUME",

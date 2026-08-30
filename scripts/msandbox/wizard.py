@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import select
 import shutil
 import subprocess
 import sys
 import tempfile
+import termios
+import tty
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Sequence, TextIO, TypeVar
@@ -29,6 +32,115 @@ ChoiceValue = TypeVar("ChoiceValue")
 Reader = Callable[[str], str]
 
 
+def _cancel_choice_index(choices: Sequence[tuple[str, ChoiceValue]]) -> int | None:
+    """Return the safe escape choice, regardless of where it appears."""
+    for word in ("back", "cancel", "exit"):
+        for index, (label, _) in enumerate(choices):
+            if label.strip().lower().split(maxsplit=1)[0].rstrip("—:-") == word:
+                return index
+    return None
+
+
+def _interpret_terminal_key(data: bytes) -> str | None:
+    if data in (b"\r", b"\n"):
+        return "enter"
+    if data in (b"k", b"K") or (
+        data.startswith((b"\x1b[", b"\x1bO")) and data.endswith(b"A")
+    ):
+        return "up"
+    if data in (b"j", b"J") or (
+        data.startswith((b"\x1b[", b"\x1bO")) and data.endswith(b"B")
+    ):
+        return "down"
+    if data in (b"q", b"Q", b"\x1b"):
+        return "cancel"
+    if data == b"\x04":
+        return "eof"
+    if len(data) == 1 and data.isdigit():
+        return data.decode("ascii")
+    return None
+
+
+def _read_terminal_key(descriptor: int) -> str | None:
+    data = os.read(descriptor, 1)
+    if data == b"\x1b":
+        # Kitty sends arrows as a short escape sequence. Collect only bytes
+        # that are already waiting so a bare Escape remains responsive.
+        while len(data) < 16 and select.select([descriptor], [], [], 0.04)[0]:
+            byte = os.read(descriptor, 1)
+            data += byte
+            if len(data) >= 3 and (byte.isalpha() or byte == b"~"):
+                break
+    return _interpret_terminal_key(data)
+
+
+def _can_use_terminal_menu(reader: Reader, output: TextIO) -> bool:
+    return (
+        reader is input
+        and sys.stdin.isatty()
+        and bool(getattr(output, "isatty", lambda: False)())
+    )
+
+
+def _choose_terminal(
+    title: str,
+    choices: Sequence[tuple[str, ChoiceValue]],
+    *,
+    output: TextIO,
+    default: int,
+) -> ChoiceValue:
+    descriptor = sys.stdin.fileno()
+    previous_attributes = termios.tcgetattr(descriptor)
+    selected = default - 1
+    numeric = ""
+    cancel_index = _cancel_choice_index(choices)
+    output.write("\x1b[?1049h\x1b[?25l")
+    output.flush()
+    try:
+        tty.setcbreak(descriptor)
+        while True:
+            output.write("\x1b[H\x1b[2J")
+            output.write(f"{title}\n\n")
+            for index, (label, _) in enumerate(choices, start=1):
+                marker = "❯" if index - 1 == selected else " "
+                output.write(f" {marker} {index}. {label}\n")
+            number_hint = f" • selection {numeric}" if numeric else ""
+            output.write(f"\n↑/↓ or j/k • Enter • number + Enter • q to go back{number_hint}")
+            output.flush()
+
+            key = _read_terminal_key(descriptor)
+            if key == "up":
+                selected = (selected - 1) % len(choices)
+                numeric = ""
+            elif key == "down":
+                selected = (selected + 1) % len(choices)
+                numeric = ""
+            elif key == "enter":
+                return choices[selected][1]
+            elif key == "cancel":
+                if cancel_index is not None:
+                    return choices[cancel_index][1]
+                output.write("\a")
+                output.flush()
+            elif key == "eof":
+                raise EOFError
+            elif key is not None and key.isdigit():
+                candidate = numeric + key
+                if candidate.startswith("0") or int(candidate) > len(choices):
+                    candidate = key
+                if candidate != "0" and int(candidate) <= len(choices):
+                    numeric = candidate
+                    selected = int(candidate) - 1
+                else:
+                    numeric = ""
+                    output.write("\a")
+                    output.flush()
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, previous_attributes)
+        output.write("\x1b[?25h\x1b[?1049l")
+        output.flush()
+
+
 def choose(
     title: str,
     choices: Sequence[tuple[str, ChoiceValue]],
@@ -41,6 +153,14 @@ def choose(
         raise ValueError("a wizard choice list cannot be empty")
     if not 1 <= default <= len(choices):
         raise ValueError("wizard default choice is out of range")
+    if _can_use_terminal_menu(reader, output):
+        try:
+            return _choose_terminal(title, choices, output=output, default=default)
+        except termios.error:
+            # Redirected or unusual pseudo-terminals retain the portable
+            # numbered prompt below.
+            pass
+    cancel_index = _cancel_choice_index(choices)
     while True:
         print(f"\n{title}\n", file=output)
         for index, (label, _) in enumerate(choices, start=1):
@@ -49,6 +169,8 @@ def choose(
         raw = reader(f"\nChoice [{default}]: ").strip()
         if not raw:
             return choices[default - 1][1]
+        if raw.lower() in ("q", "quit") and cancel_index is not None:
+            return choices[cancel_index][1]
         if raw.isdigit() and 1 <= int(raw) <= len(choices):
             return choices[int(raw) - 1][1]
         print(f"Enter a number from 1 to {len(choices)}.", file=output)

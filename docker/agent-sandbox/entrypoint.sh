@@ -49,17 +49,17 @@ sync_dependency_tree /opt/bootstrap/client-node_modules /workspace/client/node_m
 sync_dependency_tree /opt/bootstrap/tellus-node_modules /workspace/client/tellus/node_modules node
 sync_dependency_tree /opt/bootstrap/oceanlab-node_modules /workspace/client/oceanlab/node_modules node
 
-if [[ "${MSANDBOX_INITIALIZE_DEPENDENCIES:-0}" == "1" ]]; then
-    exec "$@"
-fi
-
-# These are session-local nested volumes. Docker creates a brand-new named
-# volume as root, while the shared parent dependency tree may already match
-# its template and skip the recursive chown above.
+# Create the nested mountpoints while the initializer owns the writable shared
+# dependency volumes. Docker cannot create them later after those parent
+# volumes have been mounted read-only into an agent session.
 install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
     /workspace/client/node_modules/.vite \
     /workspace/client/tellus/node_modules/.vite \
     /workspace/client/oceanlab/node_modules/.vite
+
+if [[ "${MSANDBOX_INITIALIZE_DEPENDENCIES:-0}" == "1" ]]; then
+    exec "$@"
+fi
 
 # State dirs for all three agents plus git/gh config, all inside the
 # sandbox_home named volume. /home/agent/.aws is a read-only bind mount from

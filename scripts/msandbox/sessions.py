@@ -44,6 +44,7 @@ from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
     SCHEMA_VERSION,
     data_root,
+    delete_session_state,
     list_sessions,
     save_session,
     state_lock,
@@ -236,6 +237,7 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
                     stderr=subprocess.DEVNULL,
                 )
                 remove_session_git(record.id)
+                delete_session_state(record.id)
             else:
                 record.phase = "orphaned"
                 save_session(record)

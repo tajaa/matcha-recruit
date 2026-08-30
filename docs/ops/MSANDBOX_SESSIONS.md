@@ -148,6 +148,12 @@ session/controller verbs use the copied release.
 On macOS, installation also unloads and removes the obsolete Xcode bridge
 LaunchAgent from earlier controller versions.
 
+Installation retains the active controller plus one rollback release. Rollback
+source inputs are small and immutable; its Docker image is rebuilt on demand
+instead of reserving another multi-gigabyte image indefinitely. Session images
+are built once per content hash in a dedicated `matcha-msandbox` BuildKit cache,
+which is capped at 2 GB by default (`MSANDBOX_BUILD_CACHE_MAX` overrides it).
+
 Each session image is tagged from the immutable controller/Dockerfile,
 architecture, Playwright option, and that worktree's dependency manifests.
 Sessions with identical inputs share image and dependency caches; different
