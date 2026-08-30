@@ -20,7 +20,9 @@ from scripts.msandbox.attachments import AttachmentError, import_files, parse_pa
 from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
 from scripts.msandbox.docker_runtime import (
     BUILDER_NAME,
+    BUILDER_BOOTSTRAP_TIMEOUT_S,
     DEFAULT_BUILD_CACHE_MAX,
+    _ensure_builder,
     _ensure_workspace_image,
     _prune_builder_cache,
     allocate_port_block,
@@ -33,6 +35,8 @@ from scripts.msandbox.git_worktrees import (
     branch_publish_state,
     create_detached_worktree,
     detach_branch_owner,
+    fetch_origin,
+    github_https_url,
     list_worktrees,
     push_detached_head,
     remove_session_worktree,
@@ -228,6 +232,23 @@ class WorktreeTests(MsandboxTestCase):
         self.assertEqual(list((self.root / "data/git-sessions").glob("*")), [])
         remove.assert_called_once_with(mock.ANY, volumes=True)
 
+    def test_cancelled_pristine_startup_removes_all_session_state(self) -> None:
+        with (
+            mock.patch(
+                "scripts.msandbox.sessions.start_session",
+                side_effect=KeyboardInterrupt,
+            ),
+            mock.patch("scripts.msandbox.sessions.stop_agent"),
+            mock.patch("scripts.msandbox.sessions.remove_container_project") as remove,
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            create_session(self.repo, SessionSpec("cancelled-start", "codex", "main"))
+
+        self.assertEqual(list_sessions(include_released=True), [])
+        self.assertEqual(len(list_worktrees(self.repo)), 1)
+        self.assertEqual(list((self.root / "data/git-sessions").glob("*")), [])
+        remove.assert_called_once_with(mock.ANY, volumes=True)
+
     def test_sessions_are_parallel_and_detached(self) -> None:
         first = create_session(self.repo, SessionSpec("first", "codex", "main", start=False))
         second = create_session(self.repo, SessionSpec("second", "codex", "main", start=False))
@@ -240,6 +261,23 @@ class WorktreeTests(MsandboxTestCase):
             any(item.branch for item in worktrees if item.path.resolve() != self.repo.resolve()),
             worktrees,
         )
+
+    def test_github_ssh_remote_is_scoped_to_https_for_network_operations(self) -> None:
+        self.assertEqual(
+            github_https_url("git@github.com:tajaa/matcha-recruit.git"),
+            "https://github.com/tajaa/matcha-recruit.git",
+        )
+        origin = subprocess.CompletedProcess(
+            [], 0, "git@github.com:tajaa/matcha-recruit.git\n", ""
+        )
+        fetched = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch(
+            "scripts.msandbox.git_worktrees._git", side_effect=(origin, fetched)
+        ) as run:
+            fetch_origin(self.repo, "main")
+        command = run.call_args_list[1].args
+        self.assertIn("url.https://github.com/.insteadOf=git@github.com:", command)
+        self.assertEqual(command[-4:], ("fetch", "--prune", "origin", "main"))
 
     def test_isolated_git_config_and_objects_sync_without_mutating_common_config(self) -> None:
         record = create_session(
@@ -821,6 +859,30 @@ class HostAndInstallTests(MsandboxTestCase):
                 0,
             )
 
+    def test_wizard_keeps_action_errors_visible_until_acknowledged(self) -> None:
+        prompts: list[str] = []
+
+        def acknowledge(prompt: str) -> str:
+            prompts.append(prompt)
+            return ""
+
+        with mock.patch(
+            "scripts.msandbox.wizard.list_sessions", return_value=[]
+        ), mock.patch(
+            "scripts.msandbox.wizard.choose",
+            side_effect=(("new", None), ("exit", None)),
+        ), mock.patch(
+            "scripts.msandbox.wizard._new_session",
+            side_effect=RuntimeError("fetch failed"),
+        ):
+            output = io.StringIO()
+            self.assertEqual(
+                run_wizard(self.repo, reader=acknowledge, output=output),
+                0,
+            )
+        self.assertIn("Could not complete that action: fetch failed", output.getvalue())
+        self.assertEqual(prompts, ["\nPress Enter to return to Matcha Sandbox..."])
+
     def test_shell_handoff_atomically_replaces_a_session_symlink(self) -> None:
         record = self.record()
         home = self.root / "data/homes/session-1"
@@ -877,6 +939,9 @@ class HostAndInstallTests(MsandboxTestCase):
             ),
         ):
             first = compose_environment(record)
+            record.playwright = True
+            browser = compose_environment(record)
+            record.playwright = False
             entrypoint = runtime_root / "docker/agent-sandbox/entrypoint.sh"
             entrypoint.write_text(
                 entrypoint.read_text(encoding="utf-8") + "\n# toolchain revision\n",
@@ -885,6 +950,12 @@ class HostAndInstallTests(MsandboxTestCase):
             toolchain_changed = compose_environment(record)
             (fixture / "client/package.json").write_text("{}\n", encoding="utf-8")
             second = compose_environment(record)
+        self.assertEqual(browser["SANDBOX_BASE_IMAGE"], first["SANDBOX_IMAGE"])
+        self.assertNotEqual(browser["SANDBOX_IMAGE"], first["SANDBOX_IMAGE"])
+        self.assertEqual(
+            browser["SANDBOX_CLIENT_NODE_MODULES_VOLUME"],
+            first["SANDBOX_CLIENT_NODE_MODULES_VOLUME"],
+        )
         self.assertNotEqual(first["SANDBOX_IMAGE"], toolchain_changed["SANDBOX_IMAGE"])
         self.assertNotEqual(
             first["SANDBOX_CLIENT_NODE_MODULES_VOLUME"],
@@ -1046,6 +1117,80 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(command[command.index("--builder") + 1], BUILDER_NAME)
         prune.assert_called_once_with()
 
+    def test_missing_image_falls_back_to_builtin_builder(self) -> None:
+        environment = {"SANDBOX_IMAGE": "matcha-agent-sandbox-workspace:content"}
+        record = self.record()
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch(
+            "scripts.msandbox.docker_runtime._image_exists", return_value=False
+        ), mock.patch(
+            "scripts.msandbox.docker_runtime._ensure_builder", return_value=None
+        ), mock.patch(
+            "scripts.msandbox.docker_runtime.subprocess.run", return_value=completed
+        ) as run, mock.patch(
+            "scripts.msandbox.docker_runtime._prune_builder_cache"
+        ) as prune:
+            built = _ensure_workspace_image(
+                record, environment, test_services=False
+            )
+        self.assertTrue(built)
+        command = run.call_args.args[0]
+        self.assertIn("build", command)
+        self.assertNotIn("--builder", command)
+        prune.assert_not_called()
+
+    def test_browser_image_layers_onto_existing_workspace(self) -> None:
+        context = self.root / "browser-context"
+        overlay = context / "docker/agent-sandbox/Dockerfile.browser"
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text("ARG SANDBOX_BASE_IMAGE\n", encoding="utf-8")
+        environment = {
+            "SANDBOX_IMAGE": "matcha-agent-sandbox-workspace:browser",
+            "SANDBOX_BASE_IMAGE": "matcha-agent-sandbox-workspace:base",
+            "SANDBOX_BUILD_CONTEXT": str(context),
+        }
+        record = self.record()
+        record.playwright = True
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch(
+            "scripts.msandbox.docker_runtime._image_exists",
+            side_effect=(False, True),
+        ), mock.patch(
+            "scripts.msandbox.docker_runtime._ensure_builder", return_value=BUILDER_NAME
+        ), mock.patch(
+            "scripts.msandbox.docker_runtime.subprocess.run", return_value=completed
+        ) as run, mock.patch(
+            "scripts.msandbox.docker_runtime._prune_builder_cache"
+        ) as prune:
+            built = _ensure_workspace_image(
+                record, environment, test_services=False
+            )
+        self.assertTrue(built)
+        self.assertEqual(run.call_count, 1)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ["docker", "buildx", "build"])
+        self.assertNotIn("--builder", command)
+        self.assertIn(
+            "SANDBOX_BASE_IMAGE=matcha-agent-sandbox-workspace:base",
+            command,
+        )
+        self.assertIn("matcha-agent-sandbox-workspace:browser", command)
+        prune.assert_called_once_with()
+
+    def test_private_builder_bootstrap_timeout_falls_back(self) -> None:
+        inspected = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch(
+            "scripts.msandbox.docker_runtime.subprocess.run",
+            side_effect=(
+                inspected,
+                subprocess.TimeoutExpired([], BUILDER_BOOTSTRAP_TIMEOUT_S),
+            ),
+        ) as run, mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            builder = _ensure_builder()
+        self.assertIsNone(builder)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("built-in builder", stderr.getvalue())
+
     def test_private_builder_cache_has_a_small_default_ceiling(self) -> None:
         with mock.patch(
             "scripts.msandbox.docker_runtime.subprocess.run"
@@ -1201,6 +1346,10 @@ class DockerGcTests(MsandboxTestCase):
         directory = root / "docker/agent-sandbox"
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "Dockerfile").write_text(f"FROM scratch # {marker}\n", encoding="utf-8")
+        (directory / "Dockerfile.browser").write_text(
+            f"ARG SANDBOX_BASE_IMAGE\nFROM ${{SANDBOX_BASE_IMAGE}} # {marker}\n",
+            encoding="utf-8",
+        )
         (directory / "Dockerfile.dockerignore").write_text("*\n", encoding="utf-8")
         (directory / "entrypoint.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         return root
@@ -1226,7 +1375,7 @@ class DockerGcTests(MsandboxTestCase):
         # One tag per (root, playwright) pair, plus the protected :latest.
         self.assertIn("matcha-agent-sandbox-workspace:latest", live.images)
         self.assertEqual(len(live.images), 3)
-        self.assertEqual(len(live.volumes), 8)
+        self.assertEqual(len(live.volumes), 4)
         self.assertIn(record.compose_project, live.projects)
         self.assertTrue(live.covers_volume(f"{record.compose_project}_sandbox_npm_cache"))
         self.assertFalse(live.covers_volume("matcha-ms-dead-9999_sandbox_npm_cache"))

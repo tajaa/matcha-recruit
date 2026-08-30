@@ -187,9 +187,24 @@ def reachable(repo: Path) -> Reachable:
         result.projects.add(record.compose_project)
         for root in roots:
             sources = build_context_sources(record, root)
+            try:
+                dependency_identifier = build_identifier(sources, playwright=False)
+                for prefix, manifest in DEPENDENCY_MANIFESTS:
+                    result.volumes.add(
+                        _dependency_volume(
+                            prefix,
+                            [record.worktree / manifest],
+                            dependency_identifier,
+                        )
+                    )
+            except (DockerError, OSError) as exc:
+                result.complete = False
+                result.reason = f"{record.id}: cannot name dependencies: {exc}"
+                return result
             # A session can flip to Playwright mid-life (`msandbox test
             # --browser` sets record.playwright and rebuilds), so both variants
-            # of the same worktree stay reachable.
+            # of the image stay reachable. Browser support is an additive image
+            # layer and shares the exact same dependency volumes with its base.
             for playwright in (False, True):
                 try:
                     identifier = build_identifier(sources, playwright=playwright)
@@ -199,15 +214,6 @@ def reachable(repo: Path) -> Reachable:
                     return result
                 result.images.add(f"{IMAGE_REPOSITORY}:{identifier}")
                 result.build_contexts.add(identifier)
-                try:
-                    for prefix, manifest in DEPENDENCY_MANIFESTS:
-                        result.volumes.add(
-                            _dependency_volume(prefix, [record.worktree / manifest], identifier)
-                        )
-                except OSError as exc:
-                    result.complete = False
-                    result.reason = f"{record.id}: cannot read dependency manifest: {exc}"
-                    return result
     return result
 
 

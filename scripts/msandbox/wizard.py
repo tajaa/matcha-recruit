@@ -176,6 +176,14 @@ def choose(
         print(f"Enter a number from 1 to {len(choices)}.", file=output)
 
 
+def _acknowledge(reader: Reader, output: TextIO) -> None:
+    """Keep action output visible before the full-screen menu redraws."""
+    try:
+        reader("\nPress Enter to return to Matcha Sandbox...")
+    except EOFError:
+        print(file=output)
+
+
 def next_session_name(
     agent: str,
     records: Sequence[SessionRecord],
@@ -516,3 +524,4 @@ def run_wizard(
             return 0
         except (KeyError, RuntimeError, OSError) as exc:
             print(f"\nCould not complete that action: {exc}", file=output)
+            _acknowledge(reader, output)

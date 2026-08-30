@@ -7,6 +7,7 @@ import time
 import hashlib
 import platform
 import shutil
+import sys
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
@@ -28,6 +29,8 @@ class DockerError(RuntimeError):
 IMAGE_REPOSITORY = "matcha-agent-sandbox-workspace"
 BUILDER_NAME = "matcha-msandbox"
 DEFAULT_BUILD_CACHE_MAX = "2GB"
+BUILDER_BOOTSTRAP_TIMEOUT_S = 45
+BROWSER_DOCKERFILE = "docker/agent-sandbox/Dockerfile.browser"
 
 
 def compose_project(session_id: str) -> str:
@@ -98,6 +101,7 @@ def build_context_sources(record: SessionRecord, runtime_root: Path) -> dict[str
     """The exact file set whose bytes name this session's image."""
     return {
         "docker/agent-sandbox/Dockerfile": runtime_root / "docker/agent-sandbox/Dockerfile",
+        BROWSER_DOCKERFILE: runtime_root / BROWSER_DOCKERFILE,
         "docker/agent-sandbox/Dockerfile.dockerignore": runtime_root
         / "docker/agent-sandbox/Dockerfile.dockerignore",
         "docker/agent-sandbox/entrypoint.sh": runtime_root / "docker/agent-sandbox/entrypoint.sh",
@@ -118,6 +122,9 @@ def build_identifier(sources: dict[str, Path], *, playwright: bool) -> str:
     digest.update(platform.machine().encode())
     digest.update(f"playwright={playwright}".encode())
     for relative, source in sources.items():
+        # Browser overlay changes must not invalidate the multi-gigabyte base.
+        if relative == BROWSER_DOCKERFILE and not playwright:
+            continue
         if not source.is_file():
             raise DockerError(f"sandbox build input is missing: {source}")
         digest.update(relative.encode())
@@ -190,7 +197,10 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
     # Build inputs are copied to a content-addressed context. This prevents two
     # parallel PRs with different lockfiles from racing on one mutable `latest`
     # image, and keeps the controller/Dockerfile stable across branch switches.
-    build_context, image, template_id = _materialize_build_context(record, runtime_root)
+    build_context, image, _ = _materialize_build_context(record, runtime_root)
+    dependency_template_id = build_identifier(
+        build_context_sources(record, runtime_root), playwright=False
+    )
     environment = dict(os.environ)
     environment.update(
         {
@@ -201,7 +211,7 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
             "SANDBOX_GIT_OBJECTS_DIR": str(objects_dir),
             "MSANDBOX_GIT_DIR": str(isolated_git_dir.resolve()),
             "MSANDBOX_GIT_POINTER_FILE": str(isolated_git_pointer.resolve()),
-            "SANDBOX_DEPENDENCY_TEMPLATE_ID": template_id,
+            "SANDBOX_DEPENDENCY_TEMPLATE_ID": dependency_template_id,
             "MSANDBOX_SESSION_ID": record.id,
             "MSANDBOX_SESSION_HOME": str(home),
             "MSANDBOX_ATTACHMENTS_HOST_DIR": str(attachments),
@@ -211,27 +221,31 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
             "INSTALL_PLAYWRIGHT_BROWSERS": "true" if record.playwright else "false",
         }
     )
+    if record.playwright:
+        environment["SANDBOX_BASE_IMAGE"] = (
+            f"{IMAGE_REPOSITORY}:{dependency_template_id}"
+        )
     environment.update(
         {
             "SANDBOX_SERVER_VENV_VOLUME": _dependency_volume(
                 "server",
                 [record.worktree / "server/requirements.txt"],
-                template_id,
+                dependency_template_id,
             ),
             "SANDBOX_CLIENT_NODE_MODULES_VOLUME": _dependency_volume(
                 "client",
                 [record.worktree / "client/package-lock.json"],
-                template_id,
+                dependency_template_id,
             ),
             "SANDBOX_TELLUS_NODE_MODULES_VOLUME": _dependency_volume(
                 "tellus",
                 [record.worktree / "client/tellus/package-lock.json"],
-                template_id,
+                dependency_template_id,
             ),
             "SANDBOX_OCEANLAB_NODE_MODULES_VOLUME": _dependency_volume(
                 "oceanlab",
                 [record.worktree / "client/oceanlab/package-lock.json"],
-                template_id,
+                dependency_template_id,
             ),
         }
     )
@@ -311,8 +325,16 @@ def _image_exists(image: str) -> bool:
     )
 
 
-def _ensure_builder() -> str:
-    """Use a private cache so pruning msandbox never evicts other projects."""
+def _ensure_builder() -> str | None:
+    """Start the private builder, falling back before a registry pull can hang.
+
+    A docker-container builder has one important advantage: its cache can be
+    bounded without touching unrelated Docker projects. Its first boot also
+    has to pull ``moby/buildkit`` though. Docker provides no useful timeout for
+    that implicit pull, so a slow registry used to wedge session creation
+    indefinitely. Docker Desktop's built-in builder is a safe functional
+    fallback; it merely loses private-cache pruning for that build.
+    """
     with state_lock("docker-builder", timeout_s=600):
         inspected = subprocess.run(
             ["docker", "buildx", "inspect", BUILDER_NAME],
@@ -320,29 +342,60 @@ def _ensure_builder() -> str:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if inspected.returncode == 0:
-            return BUILDER_NAME
-        created = subprocess.run(
-            [
-                "docker",
-                "buildx",
-                "create",
-                "--name",
-                BUILDER_NAME,
-                "--driver",
-                "docker-container",
-                "--driver-opt",
-                "default-load=true",
-            ],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if created.returncode:
-            detail = (created.stderr or created.stdout or "unknown Docker error").strip()
-            raise DockerError(f"could not create the isolated msandbox builder: {detail}")
-    return BUILDER_NAME
+        if inspected.returncode != 0:
+            created = subprocess.run(
+                [
+                    "docker",
+                    "buildx",
+                    "create",
+                    "--name",
+                    BUILDER_NAME,
+                    "--driver",
+                    "docker-container",
+                    "--driver-opt",
+                    "default-load=true",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if created.returncode:
+                detail = (created.stderr or created.stdout or "unknown Docker error").strip()
+                print(
+                    f"Warning: isolated msandbox builder is unavailable ({detail}); "
+                    "using Docker Desktop's built-in builder.",
+                    file=sys.stderr,
+                )
+                return None
+        try:
+            bootstrapped = subprocess.run(
+                ["docker", "buildx", "inspect", "--bootstrap", BUILDER_NAME],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=BUILDER_BOOTSTRAP_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                "Warning: isolated msandbox builder did not start within "
+                f"{BUILDER_BOOTSTRAP_TIMEOUT_S}s; using Docker Desktop's "
+                "built-in builder.",
+                file=sys.stderr,
+            )
+            return None
+        if bootstrapped.returncode:
+            detail = (
+                bootstrapped.stderr or bootstrapped.stdout or "unknown Docker error"
+            ).strip()
+            print(
+                f"Warning: isolated msandbox builder failed to start ({detail}); "
+                "using Docker Desktop's built-in builder.",
+                file=sys.stderr,
+            )
+            return None
+        return BUILDER_NAME
 
 
 def _prune_builder_cache() -> None:
@@ -374,22 +427,61 @@ def _ensure_workspace_image(
     if _image_exists(environment["SANDBOX_IMAGE"]):
         return False
     builder = _ensure_builder()
-    build = subprocess.run(
-        compose_command(
-            record,
-            "build",
-            "--builder",
-            builder,
-            "workspace",
-            test_services=test_services,
-        ),
-        env=environment,
-        check=False,
-        text=True,
-    )
-    if build.returncode:
-        raise DockerError("workspace image build failed")
-    _prune_builder_cache()
+    builder_args = ["--builder", builder] if builder is not None else []
+
+    def build_full(build_environment: dict[str, str]) -> None:
+        build = subprocess.run(
+            compose_command(
+                record,
+                "build",
+                *builder_args,
+                "workspace",
+                test_services=test_services,
+            ),
+            env=build_environment,
+            check=False,
+            text=True,
+        )
+        if build.returncode:
+            raise DockerError("workspace base image build failed")
+
+    if not record.playwright:
+        build_full(environment)
+    else:
+        base_image = environment.get("SANDBOX_BASE_IMAGE")
+        if not base_image:
+            raise DockerError("browser workspace base image is not configured")
+        if not _image_exists(base_image):
+            base_environment = dict(environment)
+            base_environment["SANDBOX_IMAGE"] = base_image
+            base_environment["INSTALL_PLAYWRIGHT_BROWSERS"] = "false"
+            build_full(base_environment)
+        context = Path(environment["SANDBOX_BUILD_CONTEXT"])
+        overlay = subprocess.run(
+            [
+                "docker",
+                "buildx",
+                "build",
+                # The docker-container builder has a private image store and
+                # would try to pull this local-only Matcha base from Docker
+                # Hub. The built-in driver sees daemon images directly.
+                "--load",
+                "--file",
+                str(context / BROWSER_DOCKERFILE),
+                "--build-arg",
+                f"SANDBOX_BASE_IMAGE={base_image}",
+                "--tag",
+                environment["SANDBOX_IMAGE"],
+                str(context),
+            ],
+            env=environment,
+            check=False,
+            text=True,
+        )
+        if overlay.returncode:
+            raise DockerError("browser workspace image build failed")
+    if builder is not None:
+        _prune_builder_cache()
     return True
 
 

@@ -195,7 +195,11 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
                 save_session(record)
             if spec.start:
                 start_session(record, extra_agent_args)
-        except Exception:
+        # Ctrl-C during a slow first image build needs the same transactional
+        # cleanup as an ordinary startup failure. KeyboardInterrupt inherits
+        # directly from BaseException, so catching Exception left a pristine
+        # worktree and a forever-"created" session behind.
+        except BaseException:
             stop_agent(record, force=True)
             try:
                 remove_container_project(record, volumes=True)

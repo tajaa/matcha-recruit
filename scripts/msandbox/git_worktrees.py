@@ -25,6 +25,34 @@ def _git(repo: Path, *argv: str, check: bool = True) -> subprocess.CompletedProc
     return result
 
 
+def github_https_url(url: str) -> str:
+    """Translate GitHub SSH remotes to HTTPS without changing shared config."""
+    if url.startswith("git@github.com:"):
+        return "https://github.com/" + url.removeprefix("git@github.com:")
+    if url.startswith("ssh://git@github.com/"):
+        return "https://github.com/" + url.removeprefix("ssh://git@github.com/")
+    return url
+
+
+def _network_git(
+    repo: Path, *argv: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run host GitHub traffic over authenticated HTTPS.
+
+    Some local networks block SSH port 22. A command-scoped ``insteadOf``
+    rewrite preserves origin's configured fetch/push refspecs while avoiding a
+    mutation of the repository's common Git configuration.
+    """
+    origin = _git(repo, "remote", "get-url", "origin").stdout.strip()
+    https = github_https_url(origin)
+    prefix: tuple[str, ...] = ()
+    if https != origin and origin.startswith("git@github.com:"):
+        prefix = ("-c", "url.https://github.com/.insteadOf=git@github.com:")
+    elif https != origin and origin.startswith("ssh://git@github.com/"):
+        prefix = ("-c", "url.https://github.com/.insteadOf=ssh://git@github.com/")
+    return _git(repo, *prefix, *argv, check=check)
+
+
 def resolve_ref(repo: Path, ref: str) -> str:
     return _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").stdout.strip()
 
@@ -75,7 +103,17 @@ def initialize_session_git(
         _git(git_dir, "config", "core.bare", "false")
         _git(git_dir, "config", "core.worktree", "/workspace")
         origin = _git(repo, "remote", "get-url", "origin").stdout.strip()
-        _git(git_dir, "config", "remote.origin.url", origin)
+        isolated_origin = github_https_url(origin)
+        _git(git_dir, "config", "remote.origin.url", isolated_origin)
+        if isolated_origin != origin:
+            # Session homes receive gh's hosts.yml. Scope its credential helper
+            # to the private Git directory rather than mutating common config.
+            _git(
+                git_dir,
+                "config",
+                "credential.https://github.com.helper",
+                "!gh auth git-credential",
+            )
         for key in ("user.name", "user.email"):
             value = _git(repo, "config", "--get", key, check=False).stdout.strip()
             if value:
@@ -211,7 +249,7 @@ def resolve_worktree_owner(repo: Path, branch: str) -> WorktreeOwner | None:
 
 def remote_branch_sha(repo: Path, branch: str) -> str | None:
     """Read the branch directly from origin instead of trusting a tracking ref."""
-    result = _git(
+    result = _network_git(
         repo,
         "ls-remote",
         "--exit-code",
@@ -280,7 +318,7 @@ def fetch_origin(repo: Path, ref: str | None = None) -> None:
     argv = ["fetch", "--prune", "origin"]
     if ref:
         argv.append(ref)
-    _git(repo, *argv)
+    _network_git(repo, *argv)
 
 
 def push_detached_head(
@@ -300,7 +338,7 @@ def push_detached_head(
         "origin",
         destination,
     ]
-    _git(worktree, *argv)
+    _network_git(worktree, *argv)
     fetch_origin(repo, branch)
     remote = resolve_ref(repo, f"refs/remotes/origin/{branch}")
     if remote != head:

@@ -153,13 +153,27 @@ source inputs are small and immutable; its Docker image is rebuilt on demand
 instead of reserving another multi-gigabyte image indefinitely. Session images
 are built once per content hash in a dedicated `matcha-msandbox` BuildKit cache,
 which is capped at 2 GB by default (`MSANDBOX_BUILD_CACHE_MAX` overrides it).
+The controller gives that private builder 45 seconds to start. If Docker Hub
+cannot supply its BuildKit image in time, the build continues with Docker
+Desktop's built-in builder instead of leaving session creation hung. Cancelling
+a first build also removes the pristine session worktree and resources.
 
 Each session image is tagged from the immutable controller/Dockerfile,
 architecture, Playwright option, and that worktree's dependency manifests.
+The Playwright variant layers Chromium and its system libraries onto the exact
+non-browser image; it does not rebuild agent CLIs or dependency trees and both
+variants share the same content-addressed dependency volumes.
 Sessions with identical inputs share image and dependency caches; different
 lockfiles or controller toolchains cannot race through a mutable `latest`
 image. Dependency volumes are initialized under a host lock and mounted
 read-only into sessions; only per-session tool cache mounts remain writable.
+
+Host fetch, verification, and publication rewrite GitHub SSH remotes to HTTPS
+for that command only. This works on networks that block SSH port 22 while
+leaving the repository's common Git configuration untouched. Private session
+Git directories use the copied `gh` credentials for the same HTTPS remote.
+Wizard action failures remain visible until Enter is pressed instead of being
+covered immediately by the next full-screen menu.
 
 Persistent session state is reconciled against Git, Docker, and tmux on every
 list/operation. JSON is written by fsync plus atomic rename, and mutating
