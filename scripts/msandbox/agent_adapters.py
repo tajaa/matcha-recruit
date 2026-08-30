@@ -16,13 +16,31 @@ class AgentError(RuntimeError):
     pass
 
 
-def agent_argv(agent: str, extra: Sequence[str] = ()) -> list[str]:
+def agent_argv(
+    agent: str,
+    extra: Sequence[str] = (),
+    *,
+    permission_mode: str = "standard",
+) -> list[str]:
+    if permission_mode not in ("standard", "autonomous"):
+        raise AgentError(f"unsupported permission mode: {permission_mode}")
     if agent == "codex":
-        return ["codex", "--dangerously-bypass-approvals-and-sandbox", *extra]
+        autonomous = (
+            ["--dangerously-bypass-approvals-and-sandbox"]
+            if permission_mode == "autonomous"
+            else []
+        )
+        return ["codex", *autonomous, *extra]
     if agent == "claude":
-        return ["claude", "--dangerously-skip-permissions", *extra]
+        autonomous = (
+            ["--dangerously-skip-permissions"]
+            if permission_mode == "autonomous"
+            else []
+        )
+        return ["claude", *autonomous, *extra]
     if agent == "opencode":
-        return ["opencode", *extra]
+        autonomous = ["--auto"] if permission_mode == "autonomous" else []
+        return ["opencode", *autonomous, *extra]
     raise AgentError(f"unsupported agent: {agent}")
 
 
@@ -77,7 +95,7 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         "--user",
         f"{os.getuid()}:{os.getgid()}",
         "workspace",
-        *agent_argv(record.agent, extra),
+        *agent_argv(record.agent, extra, permission_mode=record.permission_mode),
     )
     compose_env = compose_environment(record)
     forwarded = [

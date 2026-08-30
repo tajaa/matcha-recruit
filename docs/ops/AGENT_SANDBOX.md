@@ -1,7 +1,8 @@
 # Agent sandbox
 
 An isolated Docker workspace for running a coding agent (Codex, Claude Code,
-or OpenCode) against this repo with broad/no-approval execution, without
+or OpenCode) against this repo with standard or explicitly selected autonomous
+execution, without
 giving it the macOS home directory, browser profiles, Keychain, host SSH
 agent, or the host Docker socket.
 
@@ -11,10 +12,7 @@ into whichever branch happens to be checked out:
 
 ```bash
 msandbox install
-msandbox session create payroll-fix --agent codex --dev
-msandbox session create inventory-pr --agent opencode --pr 348
-msandbox session create ios-review --agent claude
-msandbox session list
+msandbox                # interactive wizard; no subcommands to remember
 ```
 
 Every session owns a detached Git worktree, Compose project, home directory,
@@ -41,18 +39,21 @@ msandbox system down
 msandbox login codex
 ```
 
-Bare `msandbox` preserves the legacy one-command path: it builds if needed,
-starts the global workspace and AutoPR control plane, then opens a workspace
-shell. The dashboard is available with `tmux attach -t matcha-autopr`.
-Use `msandbox session list` to list independent v2 sessions explicitly.
-`scripts/agent-sandbox.sh` remains the repository compatibility entrypoint
-used by existing automation.
+Bare `msandbox` opens a small standard-library wizard. New sessions default to
+Standard permissions; Autonomous must be explicitly chosen on every creation.
+The wizard can enter the legacy workspace, open the AutoPR dashboard, resume
+agents, run validation, publish/release sessions, and preview safe cleanup.
+Typing bare `msandbox` inside a wizard-opened shell returns to the host wizard
+through a reserved shell exit status. No host command, Docker, or tmux socket is
+mounted into the container. `scripts/agent-sandbox.sh` remains the repository
+compatibility entrypoint used by existing automation.
 
 ## What's isolated, and what isn't
 
 The boundary here is **host-machine isolation, not blast-radius isolation.**
-Once inside, an agent running with full/no-approval execution can do a lot —
-that's a design choice made in this plan, documented below rather than hidden.
+An agent running in explicitly selected Autonomous mode can do a lot inside
+that boundary, so the choice is recorded and shown whenever the session is
+listed or resumed.
 
 **Always blocked**, regardless of config:
 - macOS home directory, browser profiles, Keychain, host SSH agent
@@ -231,8 +232,8 @@ images directly; PDF and other document paths remain ordinary readable
 workspace files. This bridge is deliberately explicit because mounting the
 whole macOS temp tree or home directory would undo the sandbox boundary.
 
-Finder drags into a named session, `msandbox codex|claude|opencode`, or an
-interactive shell opened by bare `msandbox` are intercepted on the host. A
+Finder drags into a named session, `msandbox codex|claude|opencode`, or a
+wizard-opened legacy shell are intercepted on the host. A
 complete bracketed paste containing only readable regular files is copied into
 the bounded inbox and rewritten to its container path; normal pasted text is
 unchanged. Restart an interactive shell that predates this proxy before

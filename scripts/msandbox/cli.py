@@ -29,6 +29,7 @@ from .sessions import (
 )
 from .state import ensure_roots, list_sessions, load_session, save_session
 from .validation import build_test_plan, run_test_plan
+from .wizard import run_wizard
 
 
 def default_repo() -> Path:
@@ -50,10 +51,13 @@ def _session_table(records: list) -> None:
     if not records:
         print("No active msandbox sessions.")
         return
-    print(f"{'NAME':24} {'AGENT':10} {'STATE':24} {'PR':7} WORKTREE")
+    print(f"{'NAME':24} {'AGENT':10} {'PERMISSIONS':12} {'STATE':24} {'PR':7} WORKTREE")
     for record in records:
         pr = f"#{record.pr_number}" if record.pr_number else "-"
-        print(f"{record.name[:24]:24} {record.agent:10} {record.phase:24} {pr:7} {record.worktree_path}")
+        print(
+            f"{record.name[:24]:24} {record.agent:10} {record.permission_mode:12} "
+            f"{record.phase:24} {pr:7} {record.worktree_path}"
+        )
 
 
 def _add_session_subcommands(parent: argparse._SubParsersAction) -> None:
@@ -66,6 +70,11 @@ def _add_session_subcommands(parent: argparse._SubParsersAction) -> None:
     create.add_argument("--pr", type=int)
     create.add_argument("--dev", action="store_true")
     create.add_argument("--playwright", action="store_true")
+    create.add_argument(
+        "--autonomous",
+        action="store_true",
+        help="explicitly bypass the selected agent's approval checks",
+    )
     create.add_argument("--no-start", action="store_true")
     create.add_argument("--no-attach", action="store_true")
     session_list = commands.add_parser("list")
@@ -127,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     checkout.add_argument("number", type=int)
     install = commands.add_parser("install")
     install.add_argument("--rollback")
+    commands.add_parser("wizard", help="open the interactive session manager")
     return result
 
 
@@ -201,21 +211,26 @@ def run(argv: list[str] | None = None) -> int:
     ensure_roots()
     repo = args.repo.resolve()
     if args.command is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            return run_wizard(repo)
         _session_table([reconcile_session(item) for item in list_sessions()])
-        print("\nCreate one with: msandbox session create NAME --agent codex")
+        print("\nRun `msandbox` in an interactive terminal to open the wizard.")
         return 0
+    if args.command == "wizard":
+        return run_wizard(repo)
     if args.command == "session":
         if args.session_command == "create":
             record = create_session(
                 repo,
                 SessionSpec(
-                    args.name,
-                    args.agent,
-                    args.base,
-                    args.pr,
-                    args.dev,
-                    args.playwright,
-                    not args.no_start,
+                    name=args.name,
+                    agent=args.agent,
+                    base_ref=args.base,
+                    pr_number=args.pr,
+                    dev=args.dev,
+                    playwright=args.playwright,
+                    start=not args.no_start,
+                    permission_mode="autonomous" if args.autonomous else "standard",
                 ),
                 (),
             )

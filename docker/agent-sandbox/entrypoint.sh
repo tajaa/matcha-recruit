@@ -75,14 +75,6 @@ install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
     /home/agent/.cache \
     /home/agent/.npm
 
-if [[ ! -f /home/agent/.config/opencode/opencode.json ]]; then
-    printf '%s\n' \
-        '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow"}}' \
-        > /home/agent/.config/opencode/opencode.json
-    chown "${AGENT_UID}:${AGENT_GID}" /home/agent/.config/opencode/opencode.json
-    chmod 0600 /home/agent/.config/opencode/opencode.json
-fi
-
 # `docker compose up` returns as soon as the container process starts, while
 # first-use dependency-volume synchronization can still be running. The host
 # controller waits for this marker before it lets an agent or test command in.

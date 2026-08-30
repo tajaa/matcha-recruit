@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 
 AgentName = Literal["codex", "opencode", "claude"]
+PermissionMode = Literal["standard", "autonomous"]
 SessionPhase = Literal[
     "created",
     "running",
@@ -32,6 +33,7 @@ class SessionSpec:
     dev: bool = False
     playwright: bool = False
     start: bool = True
+    permission_mode: PermissionMode = "standard"
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,7 @@ class SessionRecord:
     base_ref: str
     base_sha: str
     target_branch: str | None
+    permission_mode: PermissionMode = "standard"
     start_sha: str | None = None
     expected_remote_sha: str | None = None
     synchronized_sha: str | None = None
@@ -97,6 +100,12 @@ class SessionRecord:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "SessionRecord":
         data = dict(raw)
+        # Sessions created before permission modes were recorded always used
+        # bypass flags/permissive OpenCode config. Preserve and label that
+        # behavior instead of silently presenting an old session as Standard.
+        data.setdefault("permission_mode", "autonomous")
+        if data["permission_mode"] not in ("standard", "autonomous"):
+            raise ValueError(f"invalid permission mode: {data['permission_mode']!r}")
         ports = data.get("ports")
         if ports:
             data["ports"] = PortSet(**ports)

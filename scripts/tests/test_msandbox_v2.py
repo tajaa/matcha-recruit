@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import shlex
@@ -14,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
+from scripts.msandbox.agent_adapters import agent_argv
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
 from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
 from scripts.msandbox.docker_runtime import (
@@ -63,6 +65,12 @@ from scripts.msandbox.state import (
     state_lock,
 )
 from scripts.msandbox.validation import build_test_plan, changed_paths, run_test_plan
+from scripts.msandbox.wizard import (
+    _install_session_shell_handoff,
+    _new_session,
+    next_session_name,
+    run_wizard,
+)
 
 
 def git(repo: Path, *args: str) -> str:
@@ -141,6 +149,14 @@ class StateTests(MsandboxTestCase):
         self.assertEqual(loaded.id, record.id)
         self.assertEqual([item.id for item in list_sessions()], [record.id])
         self.assertEqual((self.root / "state/sessions/session-1/session.json").stat().st_mode & 0o777, 0o600)
+
+    def test_legacy_records_are_labeled_autonomous(self) -> None:
+        raw = self.record().to_dict()
+        raw.pop("permission_mode")
+        self.assertEqual(SessionRecord.from_dict(raw).permission_mode, "autonomous")
+
+    def test_new_session_specs_default_to_standard_permissions(self) -> None:
+        self.assertEqual(SessionSpec("safe", "codex").permission_mode, "standard")
 
     def test_kernel_lock_survives_its_owner_file_and_is_reacquirable(self) -> None:
         lock = self.root / "state/locks/repo.lock"
@@ -671,6 +687,87 @@ class AttachmentTests(MsandboxTestCase):
 
 
 class HostAndInstallTests(MsandboxTestCase):
+    def test_agent_permission_profiles_are_explicit(self) -> None:
+        self.assertEqual(agent_argv("codex"), ["codex"])
+        self.assertEqual(
+            agent_argv("codex", permission_mode="autonomous"),
+            ["codex", "--dangerously-bypass-approvals-and-sandbox"],
+        )
+        self.assertEqual(agent_argv("claude"), ["claude"])
+        self.assertEqual(
+            agent_argv("claude", permission_mode="autonomous"),
+            ["claude", "--dangerously-skip-permissions"],
+        )
+        self.assertEqual(agent_argv("opencode"), ["opencode"])
+        self.assertEqual(
+            agent_argv("opencode", permission_mode="autonomous"),
+            ["opencode", "--auto"],
+        )
+
+    def test_wizard_requires_an_explicit_autonomous_choice(self) -> None:
+        record = self.record()
+        record.phase = "running"
+        answers = iter(("", "2", "", "", "", ""))
+        with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]), mock.patch(
+            "scripts.msandbox.wizard.create_session", return_value=record
+        ) as create, mock.patch("scripts.msandbox.wizard.attach_agent") as attach:
+            _new_session(
+                self.repo,
+                reader=lambda _prompt: next(answers),
+                output=io.StringIO(),
+            )
+        spec = create.call_args.args[1]
+        self.assertEqual(spec.permission_mode, "autonomous")
+        self.assertTrue(spec.dev)
+        self.assertFalse(spec.playwright)
+        attach.assert_called_once_with(record)
+
+    def test_wizard_defaults_to_standard_permissions(self) -> None:
+        record = self.record()
+        record.phase = "running"
+        answers = iter(("", "", "", "", "", ""))
+        with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]), mock.patch(
+            "scripts.msandbox.wizard.create_session", return_value=record
+        ) as create, mock.patch("scripts.msandbox.wizard.attach_agent"):
+            _new_session(
+                self.repo,
+                reader=lambda _prompt: next(answers),
+                output=io.StringIO(),
+            )
+        self.assertEqual(create.call_args.args[1].permission_mode, "standard")
+
+    def test_wizard_generates_names_and_can_exit_without_side_effects(self) -> None:
+        first = self.record("one")
+        first.name = "codex"
+        second = self.record("two")
+        second.name = "codex-2"
+        self.assertEqual(next_session_name("codex", [first, second]), "codex-3")
+        with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]):
+            self.assertEqual(
+                run_wizard(
+                    self.repo,
+                    reader=lambda _prompt: "5",
+                    output=io.StringIO(),
+                ),
+                0,
+            )
+
+    def test_shell_handoff_atomically_replaces_a_session_symlink(self) -> None:
+        record = self.record()
+        home = self.root / "data/homes/session-1"
+        home.mkdir(parents=True)
+        victim = self.root / "victim"
+        victim.write_text("untouched\n", encoding="utf-8")
+        destination = home / ".msandbox-wizard.bash"
+        destination.symlink_to(victim)
+
+        container_path = _install_session_shell_handoff(record)
+
+        self.assertEqual(container_path, "/home/agent/.msandbox-wizard.bash")
+        self.assertFalse(destination.is_symlink())
+        self.assertIn("exit 86", destination.read_text(encoding="utf-8"))
+        self.assertEqual(victim.read_text(encoding="utf-8"), "untouched\n")
+
     def test_xcode_boundary_rejects_arbitrary_targets_and_paths(self) -> None:
         record = self.record()
         with self.assertRaises(HostActionError):
@@ -737,6 +834,7 @@ class HostAndInstallTests(MsandboxTestCase):
         release = install_release(repo_root=project_root, bin_dir=bin_dir)
         launcher = bin_dir / "msandbox"
         self.assertTrue((release / "scripts/msandbox/cli.py").is_file())
+        self.assertTrue((release / "scripts/msandbox/wizard-shell.bash").is_file())
         self.assertTrue((release / "server/requirements.txt").is_file())
         self.assertTrue((release / "client/package-lock.json").is_file())
         self.assertFalse(launcher.is_symlink())
@@ -800,7 +898,8 @@ class HostAndInstallTests(MsandboxTestCase):
             text=True,
             capture_output=True,
         )
-        self.assertEqual(bare.stdout.strip(), "legacy:")
+        self.assertIn("No active msandbox sessions", bare.stdout)
+        self.assertNotIn("legacy:", bare.stdout)
         # `gc` is a v2 verb, so it must not fall through to the legacy script.
         garbage_environment = dict(os.environ)
         garbage_environment["PATH"] = str(Path(sys.executable).parent)

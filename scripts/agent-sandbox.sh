@@ -22,8 +22,11 @@ run_v2_controller() {
         exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
 }
 
+if [ "$#" = 0 ]; then
+    run_v2_controller
+fi
 case "${1:-}" in
-    session|worktree|pr|test|install|host|gc)
+    wizard|session|worktree|pr|test|install|host|gc)
         run_v2_controller "$@"
         ;;
     attach)
@@ -116,12 +119,13 @@ usage() {
     cat <<'EOF'
 Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
 
-Bare `msandbox` builds if needed, starts the legacy workspace and AutoPR
-control plane, then opens a shell. The dashboard is available with
-`tmux attach -t matcha-autopr`.
+Bare `msandbox` opens the interactive host-side wizard. It can create or
+resume isolated sessions, enter the legacy workspace, open the AutoPR
+dashboard, run validation, and safely reclaim unreachable resources.
 
 Commands:
   session create NAME --agent AGENT   Create an isolated detached worktree session.
+    --autonomous                      Explicitly bypass that agent's approval checks.
   session list                        List concurrent Codex/OpenCode/Claude sessions.
   session attach|shell|exec|stop      Work with one named session.
   session submit NAME --draft         Validate, publish, open PR, and release worktree.
@@ -852,7 +856,9 @@ case "$command_name" in
         require_docker
         guard_interactive_entry "open another sandbox shell" || exit 3
         start_primary_and_enable_autopr
-        if [[ $# -gt 0 ]]; then
+        if [[ "${MSANDBOX_WIZARD_SHELL:-0}" == 1 && $# -eq 0 ]]; then
+            exec_workspace_with_file_proxy bash --rcfile /workspace/scripts/msandbox/wizard-shell.bash
+        elif [[ $# -gt 0 ]]; then
             # Not a login shell: Debian's /etc/profile resets PATH for login
             # shells, dropping /opt/node/bin (where codex/claude/opencode
             # live) and /usr/local/aws-cli — a plain -c preserves the image's

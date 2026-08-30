@@ -6,8 +6,27 @@ detached `HEAD`; its intended PR branch is metadata until publication.
 
 ## Create and resume work
 
+Run `msandbox` in a terminal to open the dependency-free interactive wizard.
+It lists live sessions and offers New session, Legacy workspace, AutoPR
+dashboard, validation, publication, release, and safe garbage collection.
+Names are generated automatically, and leaving an agent returns to the wizard.
+Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
+exposing a host Docker or tmux socket to the container.
+
+Every new session explicitly chooses an agent, a permission mode, development
+ports/browser capability, and main or a PR as its starting point. Standard is
+always the default. Autonomous must be selected for that session and is stored
+in its record. The controller maps Autonomous to Codex's
+`--dangerously-bypass-approvals-and-sandbox`, Claude's
+`--dangerously-skip-permissions`, or OpenCode's `--auto`. Existing records
+created before permission modes were added are
+correctly labeled Autonomous because that was their historical behavior.
+
+The command interface remains available for automation and advanced use:
+
 ```bash
 msandbox session create payroll-fix --agent codex
+msandbox session create autonomous-fix --agent codex --autonomous
 msandbox session create site-editor --agent opencode --dev
 msandbox session create ios-fix --agent claude --pr 351
 
@@ -50,8 +69,8 @@ rewritten to `/attachments/...`. All ordinary pasted text is forwarded without
 interpretation. Clipboard screenshots can always be delivered with
 `msandbox paste SESSION --send`.
 
-The legacy `msandbox codex|claude|opencode` commands and the interactive shell
-opened by bare `msandbox` use the same host-side interception, rewriting into
+The legacy `msandbox codex|claude|opencode` commands and wizard-opened legacy
+workspace use the same host-side interception, rewriting into
 `/workspace/.msandbox/attachments/...`. An interactive shell that was already
 open before the proxy was added must be restarted once.
 
@@ -124,7 +143,8 @@ repository. It selects a copied release using `MSANDBOX_RUNTIME_ROOT`, so
 switching the main checkout cannot silently remove commands or alter session
 Compose behavior. Installation swaps the `current` link only after copying the
 complete release. Legacy control-plane verbs are deliberately routed to the
-configured repository, while session/controller verbs use the copied release.
+configured repository, while bare `msandbox`, the wizard, and
+session/controller verbs use the copied release.
 On macOS, installation also unloads and removes the obsolete Xcode bridge
 LaunchAgent from earlier controller versions.
 

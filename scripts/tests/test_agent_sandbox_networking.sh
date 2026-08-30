@@ -125,6 +125,13 @@ for target in (
 PY
 echo "PASS: sessions use private Git metadata with host objects as a read-only alternate"
 
+if grep -qF '/home/agent/.config/opencode/opencode.json' \
+    "$REPO_ROOT/docker/agent-sandbox/Dockerfile"; then
+    echo "FAIL: Dockerfile must not bake autonomous OpenCode permissions" >&2
+    exit 1
+fi
+echo "PASS: agent bypass settings require an explicit per-session permission mode"
+
 grep -qF '/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH' \
     "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
 echo "PASS: login shells restore the pinned Node and AWS toolchains"

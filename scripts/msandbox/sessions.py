@@ -122,6 +122,8 @@ def _github_repo(repo: Path) -> str:
 
 def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str] = ()) -> SessionRecord:
     repo = repo.resolve()
+    if spec.permission_mode not in ("standard", "autonomous"):
+        raise SessionError(f"unsupported permission mode: {spec.permission_mode}")
     slug = slugify(spec.name)
     with state_lock(f"repo-{repo.name}"):
         active_sessions = list_sessions()
@@ -173,6 +175,7 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
             base_ref=spec.base_ref,
             base_sha=comparison_base_sha,
             target_branch=target_branch,
+            permission_mode=spec.permission_mode,
             start_sha=info.head,
             expected_remote_sha=expected_remote_sha,
             synchronized_sha=info.head,
