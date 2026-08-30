@@ -5,6 +5,7 @@ import { trainingApi, type TrainingRequirement } from '../../../api/training/tra
 import { Card } from '../../ui'
 import type { AssignmentNotePayload, ShiftAssignment, RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
 import { addDays, fmtTime } from '../../../types/employeeSchedule'
+import { MAX_BREAK_MINUTES, MAX_REQUIRED_STAFF, validateShiftFields } from './shiftValidation'
 
 export type NewShiftDefaults = {
   date: string
@@ -57,6 +58,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const [kind, setKind] = useState<'work' | 'training'>(shift?.kind ?? 'work')
   const [requirementId, setRequirementId] = useState(shift?.training_requirement_id ?? '')
   const [requirements, setRequirements] = useState<TrainingRequirement[]>([])
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!trainingEnabled || editing) return
@@ -68,7 +70,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const overnight = end <= start
   const assignments = shift?.assignments ?? []
 
-  function payload(): ShiftPayload {
+  function payload(requiredStaffValue: number, breakMinutesValue: number): ShiftPayload {
     const endDate = overnight ? addDays(date, 1) : date
     return {
       starts_at: `${date}T${start}:00Z`,
@@ -77,8 +79,8 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       job_id: jobId || null,
       department: department.trim() || null,
       location_id: locationId || null,
-      break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
-      required_staff: Math.max(1, Math.round(Number(requiredStaff) || 1)),
+      break_minutes: breakMinutesValue,
+      required_staff: requiredStaffValue,
       notes: notes.trim() || null,
       ...(editing ? {} : {
         kind,
@@ -89,10 +91,19 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   }
 
   async function save() {
-    if (!date || !start || !end) return
-    if (!editing && kind === 'training' && !requirementId) return
-    if (editing) await onUpdate(payload())
-    else await onCreate(payload())
+    const validation = validateShiftFields({ date, start, end, requiredStaff, breakMinutes })
+    if (!validation.valid) {
+      setValidationError(validation.error)
+      return
+    }
+    if (!editing && kind === 'training' && !requirementId) {
+      setValidationError('Select a training requirement for this session')
+      return
+    }
+    setValidationError(null)
+    const nextPayload = payload(validation.requiredStaff, validation.breakMinutes)
+    if (editing) await onUpdate(nextPayload)
+    else await onCreate(nextPayload)
   }
 
   return (
@@ -105,23 +116,24 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         <button onClick={onClose} className="text-zinc-600 hover:text-zinc-200" aria-label="Close shift inspector"><X className="h-4 w-4" /></button>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <label className="text-[10px] uppercase tracking-wide text-zinc-600">Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={readOnly} className={input} /></label>
+        <label className="text-[10px] uppercase tracking-wide text-zinc-600">Date<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} disabled={readOnly} className={input} /></label>
         <label className="text-[10px] uppercase tracking-wide text-zinc-600">Role<input value={role} onChange={(event) => setRole(event.target.value)} disabled={readOnly} className={input} placeholder="Opener" /></label>
-        <label className="text-[10px] uppercase tracking-wide text-zinc-600">Start<input type="time" value={start} onChange={(event) => setStart(event.target.value)} disabled={readOnly} className={input} /></label>
-        <label className="text-[10px] uppercase tracking-wide text-zinc-600">End<input type="time" value={end} onChange={(event) => setEnd(event.target.value)} disabled={readOnly} className={input} /></label>
+        <label className="text-[10px] uppercase tracking-wide text-zinc-600">Start<input type="time" required value={start} onChange={(event) => setStart(event.target.value)} disabled={readOnly} className={input} /></label>
+        <label className="text-[10px] uppercase tracking-wide text-zinc-600">End<input type="time" required value={end} onChange={(event) => setEnd(event.target.value)} disabled={readOnly} className={input} /></label>
       </div>
       <div className="mt-3 space-y-2">
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Department<input value={department} onChange={(event) => setDepartment(event.target.value)} disabled={readOnly} className={input} /></label>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Job<select value={jobId} onChange={(event) => setJobId(event.target.value)} disabled={readOnly} className={input}><option value="">No job — anyone can be assigned</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Location<div className={`${input} text-zinc-400`}>{locationName}</div></label>
         <div className="grid grid-cols-2 gap-2">
-          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Planned break (minutes)<input type="number" min="0" step="5" value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>
-          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Staff needed<input type="number" min="1" value={requiredStaff} onChange={(event) => setRequiredStaff(event.target.value)} disabled={readOnly} className={input} /></label>
+          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Planned break (minutes)<input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>
+          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Staff needed<input type="number" min="1" max={MAX_REQUIRED_STAFF} step="1" required value={requiredStaff} onChange={(event) => setRequiredStaff(event.target.value)} disabled={readOnly} className={input} /></label>
         </div>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Notes<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={readOnly} className={input} /></label>
         {!editing && trainingEnabled && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Kind<select value={kind} onChange={(event) => setKind(event.target.value as 'work' | 'training')} disabled={readOnly} className={input}><option value="work">Work</option><option value="training">Training</option></select></label>}
         {!editing && trainingEnabled && kind === 'training' && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Training requirement<select value={requirementId} onChange={(event) => setRequirementId(event.target.value)} disabled={readOnly} className={input}><option value="">Select requirement...</option>{requirements.map((requirement) => <option key={requirement.id} value={requirement.id}>{requirement.title}</option>)}</select></label>}
       </div>
+      {validationError && <p role="alert" className="mt-3 text-xs text-red-400">{validationError}</p>}
       {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} onSaved={onAssignmentUpdated} />)}</span>}</div>}
       <div className="mt-4 flex items-center gap-2">
         {!readOnly && <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}{editing ? 'Save changes' : 'Create draft'}</button>}

@@ -6,6 +6,7 @@ import { ApiError } from '../../../api/client'
 import EmployeeSchedule from './EmployeeSchedule'
 
 const {
+  createShiftMock,
   createWeekTemplateMock,
   deleteWeekTemplateMock,
   fetchWeekMock,
@@ -17,6 +18,7 @@ const {
   useMeMock,
   getScheduleSuggestionStatusMock,
 } = vi.hoisted(() => ({
+  createShiftMock: vi.fn(),
   createWeekTemplateMock: vi.fn(),
   deleteWeekTemplateMock: vi.fn(),
   fetchWeekMock: vi.fn(),
@@ -44,7 +46,7 @@ vi.mock('../../../api/employees/scheduleAssistant', () => ({
 }))
 vi.mock('../../../api/employees/employeeSchedule', () => ({
   assignEmployee: vi.fn(),
-  createShift: vi.fn(),
+  createShift: createShiftMock,
   createWeekTemplate: createWeekTemplateMock,
   deleteShift: vi.fn(),
   deleteWeekTemplate: deleteWeekTemplateMock,
@@ -64,8 +66,8 @@ vi.mock('../../../api/employees/employeeSchedule', () => ({
 
 const shift = {
   id: 'shift-1',
-  starts_at: '2026-08-23T09:00:00Z',
-  ends_at: '2026-08-23T17:00:00Z',
+  starts_at: '2026-08-30T09:00:00Z',
+  ends_at: '2026-08-30T17:00:00Z',
   assignments: [],
   role: 'Box Office',
   department: null,
@@ -83,7 +85,7 @@ const shift = {
   published_at: null,
 }
 
-function renderSchedule(initialEntry = '/ops/schedule') {
+function renderSchedule(initialEntry = '/ops/schedule?date=2026-08-30') {
   return render(
     <ToastProvider>
       <MemoryRouter initialEntries={[initialEntry]}>
@@ -107,7 +109,7 @@ describe('EmployeeSchedule break planning', () => {
       loading: false,
     })
     fetchWeekMock.mockResolvedValue({
-      week_start: '2026-08-23',
+      week_start: '2026-08-30',
       location_id: 'loc-1',
       shifts: [shift],
       roster: [],
@@ -115,6 +117,7 @@ describe('EmployeeSchedule break planning', () => {
       summary: { total_shifts: 1, published: 0, draft: 1, open_shifts: 1, assigned: 0 },
     })
     fetchWeekTemplatesMock.mockResolvedValue({ week_templates: [] })
+    createShiftMock.mockReset()
     updateShiftMock.mockImplementation(async (_id: string, payload: { break_minutes?: number }) => ({
       ...shift,
       break_minutes: payload.break_minutes ?? shift.break_minutes,
@@ -143,6 +146,54 @@ describe('EmployeeSchedule break planning', () => {
       'shift-1',
       expect.objectContaining({ break_minutes: 30 }),
     ))
+  })
+
+  it('validates required shift fields before sending malformed timestamps or counts', async () => {
+    renderSchedule()
+
+    const dayHeading = await screen.findByText('Sun 8/30')
+    const addButton = dayHeading.parentElement?.querySelector('button')
+    expect(addButton).not.toBeNull()
+    fireEvent.click(addButton!)
+
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Start and end times are required')).toBeInTheDocument()
+    expect(screen.getByText('Select start and end times')).toBeInTheDocument()
+    expect(screen.queryByText(/NaNh/)).not.toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: '09:00' } })
+    fireEvent.change(screen.getByLabelText('Staff needed'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Staff needed must be a whole number from 1 to 99')).toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects shift counts above the API maximums', async () => {
+    renderSchedule()
+
+    const dayHeading = await screen.findByText('Sun 8/30')
+    const addButton = dayHeading.parentElement?.querySelector('button')
+    expect(addButton).not.toBeNull()
+    fireEvent.click(addButton!)
+
+    const staffInput = screen.getByLabelText('Staff needed')
+    const breakInput = screen.getByText('Planned break (minutes)').closest('label')?.querySelector('input')
+    expect(breakInput).not.toBeNull()
+    expect(staffInput).toHaveAttribute('max', '99')
+    expect(breakInput!).toHaveAttribute('max', '1440')
+
+    fireEvent.change(staffInput, { target: { value: '100' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Staff needed must be a whole number from 1 to 99')).toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
+
+    fireEvent.change(staffInput, { target: { value: '1' } })
+    fireEvent.change(breakInput!, { target: { value: '1441' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Planned break must be a whole number from 0 to 1440 minutes')).toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
   })
 
   it('stores planned break minutes on a reusable template block', async () => {
@@ -306,7 +357,7 @@ describe('EmployeeSchedule break planning', () => {
   })
 
   it('refreshes prepared suggestions when returning from auto schedules', async () => {
-    renderSchedule('/ops/schedule?tab=auto-schedules')
+    renderSchedule('/ops/schedule?tab=auto-schedules&date=2026-08-30')
     expect(await screen.findByText('Auto schedule settings')).toBeInTheDocument()
     expect(getScheduleSuggestionStatusMock).not.toHaveBeenCalled()
 
