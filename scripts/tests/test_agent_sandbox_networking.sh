@@ -142,6 +142,10 @@ grep -qF 'EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:+${EXTRA_ALLOWED_HOSTS},}ho
     "$REPO_ROOT/scripts/dev-remote.sh"
 grep -qF '${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate' \
     "$REPO_ROOT/scripts/dev-remote.sh"
+grep -qF "printf -v SERVER_ROOT_Q '%q' \"\$PROJECT_ROOT/server\"" \
+    "$REPO_ROOT/scripts/dev-remote.sh"
+[ "$(grep -c 'cd \$SERVER_ROOT_Q &&' "$REPO_ROOT/scripts/dev-remote.sh")" -eq 2 ]
+[ "$(grep -c 'cd \$CLIENT_ROOT_Q &&' "$REPO_ROOT/scripts/dev-remote.sh")" -eq 1 ]
 for config in \
     "$REPO_ROOT/client/vite.config.ts" \
     "$REPO_ROOT/client/tellus/vite.config.ts" \

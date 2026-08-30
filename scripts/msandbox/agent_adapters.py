@@ -104,8 +104,25 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         if key.startswith(("SANDBOX_", "MSANDBOX_"))
     ]
     command = ["env", *forwarded, *compose]
+    # A long-lived host tmux server can retain PWD from an older, pruned
+    # controller release. tmux's -c records the requested session path, but
+    # zsh can still inherit the deleted server cwd. Repair it in the command
+    # itself before Docker Compose starts so neither this pane nor terminals
+    # opened from it propagate an unreachable directory.
+    shell_command = (
+        f"cd {shlex.quote(str(record.worktree))} && exec {shlex.join(command)}"
+    )
     result = subprocess.run(
-        ["tmux", "new-session", "-d", "-s", record.tmux_session, shlex.join(command)],
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            record.tmux_session,
+            "-c",
+            str(record.worktree),
+            shell_command,
+        ],
         env=compose_env,
         check=False,
         text=True,

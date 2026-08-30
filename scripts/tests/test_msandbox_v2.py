@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-from scripts.msandbox.agent_adapters import agent_argv
+from scripts.msandbox.agent_adapters import agent_argv, launch_agent
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
 from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
 from scripts.msandbox.docker_runtime import (
@@ -809,6 +809,50 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(
             agent_argv("opencode", permission_mode="autonomous"),
             ["opencode", "--auto"],
+        )
+
+    def test_agent_tmux_repairs_a_pruned_controller_working_directory(self) -> None:
+        record = self.record()
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            mock.patch("scripts.msandbox.agent_adapters.shutil.which", return_value="/bin/tmux"),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.tmux_running",
+                side_effect=(False, True),
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.compose_command",
+                return_value=["docker", "compose", "exec", "workspace", "codex"],
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.compose_environment",
+                return_value={"SANDBOX_IMAGE": "workspace:test"},
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.time.monotonic",
+                side_effect=(0.0, 2.0),
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.subprocess.run",
+                return_value=completed,
+            ) as run,
+        ):
+            launch_agent(record)
+
+        new_session = next(
+            call.args[0]
+            for call in run.call_args_list
+            if call.args[0][:2] == ["tmux", "new-session"]
+        )
+        self.assertEqual(
+            new_session[5:7],
+            ["-c", str(record.worktree)],
+        )
+        self.assertTrue(
+            new_session[-1].startswith(
+                f"cd {shlex.quote(str(record.worktree))} && exec env "
+            ),
+            new_session[-1],
         )
 
     def test_wizard_requires_an_explicit_autonomous_choice(self) -> None:

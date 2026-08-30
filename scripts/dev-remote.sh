@@ -8,6 +8,11 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="matcha-dev-remote"
+printf -v PROJECT_ROOT_Q '%q' "$PROJECT_ROOT"
+printf -v SERVER_ROOT_Q '%q' "$PROJECT_ROOT/server"
+printf -v CLIENT_ROOT_Q '%q' "$PROJECT_ROOT/client"
+printf -v TELLUS_ROOT_Q '%q' "$PROJECT_ROOT/client/tellus"
+printf -v OCEANLAB_ROOT_Q '%q' "$PROJECT_ROOT/client/oceanlab"
 KEY_FILE="$PROJECT_ROOT/secrets/roonMT-arm.pem"
 REMOTE_HOST="ec2-user@3.101.83.217"
 REMOTE_PORT="5432"
@@ -375,7 +380,7 @@ fi
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "$GS_OFF ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
@@ -383,22 +388,22 @@ tmux set-option -t "$SESSION_NAME" mouse on
 
 # Pane 1: Local service logs/status (replaces the old EC2 SSH tunnel) - 30% width
 tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
-    "$STATUS_PANE"
+    "cd $PROJECT_ROOT_Q && $STATUS_PANE"
 
 sleep 1
 
 # Pane 2: Worker - Split below tunnel
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
-    "$GS_OFF ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
-    "$GS_OFF ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- $VITE_HOST_ARGS --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+    "$GS_OFF cd $CLIENT_ROOT_Q && ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- $VITE_HOST_ARGS --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
 if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
     tmux split-window -t "$SESSION_NAME:dev.3" -v -c "$PROJECT_ROOT" \
-        "$GS_OFF echo 'Starting Qwen chat model on port $CHAT_PORT...'; llama-server -m $CHAT_MODEL_PATH --mmproj $CHAT_MMPROJ_PATH -ngl 99 --ctx-size 4096 --port $CHAT_PORT; echo -e '\n${RED}Chat model exited.${NC}'; read"
+        "$GS_OFF cd $PROJECT_ROOT_Q && echo 'Starting Qwen chat model on port $CHAT_PORT...'; llama-server -m $CHAT_MODEL_PATH --mmproj $CHAT_MMPROJ_PATH -ngl 99 --ctx-size 4096 --port $CHAT_PORT; echo -e '\n${RED}Chat model exited.${NC}'; read"
 fi
 
 # Extra window: Tell-Us frontend (separate Vite app served at /tellus/). Its own
@@ -407,14 +412,14 @@ fi
 # http://localhost:$FRONTEND_PORT/tellus/ works; the direct port works too.
 if [ -n "$TELLUS_PORT" ]; then
     tmux new-window -t "$SESSION_NAME" -n "tellus" -c "$PROJECT_ROOT/client/tellus" \
-        "$GS_OFF ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $TELLUS_PORT --strictPort; echo -e '\n${RED}Tell-Us frontend exited.${NC}'; read"
+        "$GS_OFF cd $TELLUS_ROOT_Q && ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $TELLUS_PORT --strictPort; echo -e '\n${RED}Tell-Us frontend exited.${NC}'; read"
 fi
 
 # Extra window: Oceanlab frontend (separate Vite app served at /oceanlab/).
 # Same pattern as the Tell-Us window above.
 if [ -n "$OCEANLAB_PORT" ]; then
     tmux new-window -t "$SESSION_NAME" -n "oceanlab" -c "$PROJECT_ROOT/client/oceanlab" \
-        "$GS_OFF ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $OCEANLAB_PORT --strictPort; echo -e '\n${RED}Oceanlab frontend exited.${NC}'; read"
+        "$GS_OFF cd $OCEANLAB_ROOT_Q && ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $OCEANLAB_PORT --strictPort; echo -e '\n${RED}Oceanlab frontend exited.${NC}'; read"
 fi
 
 # Select the server pane as active
