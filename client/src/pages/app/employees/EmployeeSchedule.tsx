@@ -30,6 +30,11 @@ import { useMe } from '../../../hooks/useMe'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../../components/shared/LocationPicker'
 import AutoSchedulesTab from '../../../components/employees/AutoSchedulesTab'
+import {
+  MAX_BREAK_MINUTES,
+  MAX_REQUIRED_STAFF,
+  validateShiftFields,
+} from '../../../components/employees/schedule-editor/shiftValidation'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../../api/employees/scheduleAssistant'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
@@ -608,7 +613,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const overnight = end <= start
   const durationHours = spanHours(start, end)
 
-  function buildPayload(): ShiftPayload {
+  function buildPayload(requiredStaff: number, plannedBreak: number): ShiftPayload {
     const startDay = editing ? shift!.starts_at.slice(0, 10) : day
     const endDay = overnight ? addDays(startDay, 1) : startDay
     const payload: ShiftPayload = {
@@ -616,8 +621,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       notes: notes.trim() || null,
-      break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
-      required_staff: Math.max(1, Math.round(Number(required) || 1)),
+      break_minutes: plannedBreak,
+      required_staff: requiredStaff,
     }
     if (!editing && kind === 'training' && requirementId) {
       payload.kind = 'training'
@@ -628,18 +633,15 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   }
 
   async function save() {
-    if (!start || !end) {
-      toast('Start and end times are required', 'error')
-      return
-    }
-    const requiredStaff = Number(required)
-    if (required.trim() === '' || !Number.isInteger(requiredStaff) || requiredStaff < 1) {
-      toast('Staff needed must be a whole number of 1 or more', 'error')
-      return
-    }
-    const plannedBreak = Number(breakMinutes)
-    if (breakMinutes.trim() === '' || !Number.isInteger(plannedBreak) || plannedBreak < 0) {
-      toast('Planned break must be a whole number of 0 minutes or more', 'error')
+    const validation = validateShiftFields({
+      date: editing ? shift!.starts_at.slice(0, 10) : day,
+      start,
+      end,
+      requiredStaff: required,
+      breakMinutes,
+    })
+    if (!validation.valid) {
+      toast(validation.error, 'error')
       return
     }
     if (!editing && kind === 'training' && !requirementId) {
@@ -648,7 +650,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
     }
     setBusy(true)
     try {
-      const payload = buildPayload()
+      const payload = buildPayload(validation.requiredStaff, validation.breakMinutes)
       if (editing) {
         // PUT is a true PATCH, but every field here is one the form owns, so
         // sending the lot is the same write. `status` is deliberately NOT sent —
@@ -708,11 +710,11 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
-        <input type="number" min="1" step="1" required value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="number" min="1" max={MAX_REQUIRED_STAFF} step="1" required value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
-        <input type="number" min="0" step="5" required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
         <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Used by scheduling-law checks when employees are assigned.</span>
       </label>
       <label className="block">
