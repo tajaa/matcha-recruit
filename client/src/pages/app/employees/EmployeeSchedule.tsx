@@ -560,7 +560,8 @@ function fmtClock(hhmm: string): string {
 }
 
 /** Length of the window in hours, wrapping past midnight the same way save() does. */
-function spanHours(start: string, end: string): number {
+function spanHours(start: string, end: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return null
   const [sh, sm] = start.split(':').map(Number)
   const [eh, em] = end.split(':').map(Number)
   const mins = (eh * 60 + em) - (sh * 60 + sm)
@@ -605,6 +606,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   }, [editing, trainingEnabled])
 
   const overnight = end <= start
+  const durationHours = spanHours(start, end)
 
   function buildPayload(): ShiftPayload {
     const startDay = editing ? shift!.starts_at.slice(0, 10) : day
@@ -626,6 +628,20 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   }
 
   async function save() {
+    if (!start || !end) {
+      toast('Start and end times are required', 'error')
+      return
+    }
+    const requiredStaff = Number(required)
+    if (required.trim() === '' || !Number.isInteger(requiredStaff) || requiredStaff < 1) {
+      toast('Staff needed must be a whole number of 1 or more', 'error')
+      return
+    }
+    const plannedBreak = Number(breakMinutes)
+    if (breakMinutes.trim() === '' || !Number.isInteger(plannedBreak) || plannedBreak < 0) {
+      toast('Planned break must be a whole number of 0 minutes or more', 'error')
+      return
+    }
     if (!editing && kind === 'training' && !requirementId) {
       toast('Select a training requirement for this session', 'error')
       return
@@ -669,15 +685,19 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
     <div className="space-y-1.5">
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Start</span>
-        <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="time" required value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">End</span>
-        <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="time" required value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <div className="text-[11px] text-zinc-400 font-medium">
-        {fmtClock(start)}–{fmtClock(end)}
-        <span className="text-zinc-600"> · {spanHours(start, end)}h{overnight ? ' · next day' : ''}</span>
+        {durationHours === null ? 'Select start and end times' : (
+          <>
+            {fmtClock(start)}–{fmtClock(end)}
+            <span className="text-zinc-600"> · {durationHours}h{overnight ? ' · next day' : ''}</span>
+          </>
+        )}
       </div>
       <label className="block">
         {/* Labelled rather than placeholder-only: "Role (optional)" clips to
@@ -688,11 +708,11 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
-        <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="number" min="1" step="1" required value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
-        <input type="number" min="0" step="5" value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="number" min="0" step="5" required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
         <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Used by scheduling-law checks when employees are assigned.</span>
       </label>
       <label className="block">
