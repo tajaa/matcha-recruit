@@ -125,6 +125,13 @@ for target in (
 PY
 echo "PASS: sessions use private Git metadata with host objects as a read-only alternate"
 
+if grep -qF '/home/agent/.config/opencode/opencode.json' \
+    "$REPO_ROOT/docker/agent-sandbox/Dockerfile"; then
+    echo "FAIL: Dockerfile must not bake autonomous OpenCode permissions" >&2
+    exit 1
+fi
+echo "PASS: agent bypass settings require an explicit per-session permission mode"
+
 grep -qF '/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH' \
     "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
 echo "PASS: login shells restore the pinned Node and AWS toolchains"
@@ -135,6 +142,10 @@ grep -qF 'EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:+${EXTRA_ALLOWED_HOSTS},}ho
     "$REPO_ROOT/scripts/dev-remote.sh"
 grep -qF '${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate' \
     "$REPO_ROOT/scripts/dev-remote.sh"
+grep -qF "printf -v SERVER_ROOT_Q '%q' \"\$PROJECT_ROOT/server\"" \
+    "$REPO_ROOT/scripts/dev-remote.sh"
+[ "$(grep -c 'cd \$SERVER_ROOT_Q &&' "$REPO_ROOT/scripts/dev-remote.sh")" -eq 2 ]
+[ "$(grep -c 'cd \$CLIENT_ROOT_Q &&' "$REPO_ROOT/scripts/dev-remote.sh")" -eq 1 ]
 for config in \
     "$REPO_ROOT/client/vite.config.ts" \
     "$REPO_ROOT/client/tellus/vite.config.ts" \

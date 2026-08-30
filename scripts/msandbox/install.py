@@ -17,6 +17,9 @@ class InstallError(RuntimeError):
     pass
 
 
+RELEASES_TO_KEEP = 2
+
+
 def source_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -101,7 +104,7 @@ def _write_launcher(destination: Path, repo_root: Path, bin_dir: Path) -> None:
                 f"repo_root={shlex.quote(str(repo_root))}\n"
                 "run_v2() { cd \"$runtime_root\" || exit 1; exec python3 -m scripts.msandbox \"$@\"; }\n"
                 "case \"${1:-}\" in\n"
-                "  --version|--repo|session|worktree|pr|test|install|gc) run_v2 \"$@\" ;;\n"
+                "  ''|--version|--repo|wizard|session|worktree|pr|test|install|gc) run_v2 \"$@\" ;;\n"
                 "  attach) if [ \"$#\" -gt 1 ] && [ ! -e \"${2:-}\" ]; then run_v2 \"$@\"; fi ;;\n"
                 "  paste|doctor) if [ \"$#\" -gt 1 ]; then run_v2 \"$@\"; fi ;;\n"
                 "esac\n"
@@ -135,11 +138,66 @@ def _remove_legacy_host_service() -> None:
     (Path.home() / f"Library/LaunchAgents/{label}.plist").unlink(missing_ok=True)
 
 
+def _active_release(releases: Path) -> Path | None:
+    current = data_root() / "current"
+    if not current.exists() and not current.is_symlink():
+        return None
+    if not current.is_symlink():
+        raise InstallError(f"unsafe msandbox current release pointer: {current}")
+    try:
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(releases.resolve())
+    except (OSError, ValueError) as exc:
+        raise InstallError(f"unsafe msandbox current release pointer: {current}") from exc
+    if not resolved.is_dir():
+        raise InstallError(f"msandbox current release is missing: {resolved}")
+    manifest_path = resolved / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise InstallError(f"invalid msandbox current release: {resolved}") from exc
+    if manifest.get("release") != resolved.name:
+        raise InstallError(f"msandbox current release manifest mismatch: {resolved}")
+    return resolved
+
+
+def _prune_installed_releases(releases: Path, keep: set[Path]) -> None:
+    """Keep one rollback controller; images are rebuilt only if rolled back."""
+    keep = {path.resolve() for path in keep}
+    candidates: list[Path] = []
+    for entry in releases.iterdir():
+        if entry.name.startswith("."):
+            continue
+        manifest_path = entry / "manifest.json"
+        if entry.is_symlink() or not entry.is_dir() or not manifest_path.is_file():
+            raise InstallError(f"unsafe installed msandbox release: {entry}")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise InstallError(f"invalid msandbox release manifest: {entry}") from exc
+        if manifest.get("release") != entry.name:
+            raise InstallError(f"msandbox release manifest mismatch: {entry}")
+        candidates.append(entry)
+    for entry in sorted(
+        candidates,
+        key=lambda candidate: (candidate.stat().st_mtime_ns, candidate.name),
+        reverse=True,
+    ):
+        if len(keep) >= RELEASES_TO_KEEP:
+            break
+        keep.add(entry.resolve())
+    for entry in candidates:
+        if entry.resolve() in keep:
+            continue
+        shutil.rmtree(entry)
+
+
 def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | None = None) -> Path:
     ensure_roots()
     root = (repo_root or source_root()).resolve()
     release_id = _release_id(root)
     releases = data_root() / "releases"
+    previous = _active_release(releases)
     destination = releases / release_id
     if destination.exists():
         manifest_path = destination / "manifest.json"
@@ -190,6 +248,13 @@ def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | No
             os.replace(temporary, destination)
         finally:
             shutil.rmtree(temporary, ignore_errors=True)
+
+    keep = {destination}
+    if previous is not None:
+        keep.add(previous)
+    if len(keep) > RELEASES_TO_KEEP:
+        raise InstallError("msandbox release retention invariant failed")
+    _prune_installed_releases(releases, keep)
 
     current = data_root() / "current"
     next_link = data_root() / ".current.next"

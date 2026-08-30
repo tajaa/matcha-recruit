@@ -16,13 +16,31 @@ class AgentError(RuntimeError):
     pass
 
 
-def agent_argv(agent: str, extra: Sequence[str] = ()) -> list[str]:
+def agent_argv(
+    agent: str,
+    extra: Sequence[str] = (),
+    *,
+    permission_mode: str = "standard",
+) -> list[str]:
+    if permission_mode not in ("standard", "autonomous"):
+        raise AgentError(f"unsupported permission mode: {permission_mode}")
     if agent == "codex":
-        return ["codex", "--dangerously-bypass-approvals-and-sandbox", *extra]
+        autonomous = (
+            ["--dangerously-bypass-approvals-and-sandbox"]
+            if permission_mode == "autonomous"
+            else []
+        )
+        return ["codex", *autonomous, *extra]
     if agent == "claude":
-        return ["claude", "--dangerously-skip-permissions", *extra]
+        autonomous = (
+            ["--dangerously-skip-permissions"]
+            if permission_mode == "autonomous"
+            else []
+        )
+        return ["claude", *autonomous, *extra]
     if agent == "opencode":
-        return ["opencode", *extra]
+        autonomous = ["--auto"] if permission_mode == "autonomous" else []
+        return ["opencode", *autonomous, *extra]
     raise AgentError(f"unsupported agent: {agent}")
 
 
@@ -77,7 +95,7 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         "--user",
         f"{os.getuid()}:{os.getgid()}",
         "workspace",
-        *agent_argv(record.agent, extra),
+        *agent_argv(record.agent, extra, permission_mode=record.permission_mode),
     )
     compose_env = compose_environment(record)
     forwarded = [
@@ -86,8 +104,25 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         if key.startswith(("SANDBOX_", "MSANDBOX_"))
     ]
     command = ["env", *forwarded, *compose]
+    # A long-lived host tmux server can retain PWD from an older, pruned
+    # controller release. tmux's -c records the requested session path, but
+    # zsh can still inherit the deleted server cwd. Repair it in the command
+    # itself before Docker Compose starts so neither this pane nor terminals
+    # opened from it propagate an unreachable directory.
+    shell_command = (
+        f"cd {shlex.quote(str(record.worktree))} && exec {shlex.join(command)}"
+    )
     result = subprocess.run(
-        ["tmux", "new-session", "-d", "-s", record.tmux_session, shlex.join(command)],
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            record.tmux_session,
+            "-c",
+            str(record.worktree),
+            shell_command,
+        ],
         env=compose_env,
         check=False,
         text=True,

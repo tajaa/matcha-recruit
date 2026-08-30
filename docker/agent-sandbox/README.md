@@ -5,9 +5,12 @@ home directory, browser profiles, Keychain, SSH agent, or Docker socket.
 
 ```bash
 msandbox install
-msandbox session create my-fix --agent codex
-msandbox session list
+msandbox
 ```
+
+The interactive wizard creates and resumes sessions without requiring command
+memorization. Standard permissions are the default; Autonomous must be chosen
+explicitly for each session. The CLI remains available for automation.
 
 (`msandbox` — not `sandbox` — because `sandbox` is already taken by an
 unrelated devcontainer launcher elsewhere on this machine.)

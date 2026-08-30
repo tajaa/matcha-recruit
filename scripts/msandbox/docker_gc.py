@@ -83,7 +83,16 @@ class Reachable:
     def covers_volume(self, name: str) -> bool:
         if name in self.volumes:
             return True
-        return any(name.startswith(f"{project}_") for project in self.projects)
+        for project in self.projects:
+            if not name.startswith(f"{project}_"):
+                continue
+            # Login homes are durable; npm download caches are not. A mounted
+            # cache is protected separately by the container inventory, while
+            # an unmounted protected-lane cache should not live forever.
+            if project in PROTECTED_PROJECTS and name.endswith("_sandbox_npm_cache"):
+                continue
+            return True
+        return False
 
 
 @dataclass
@@ -138,32 +147,14 @@ def _lines(result: subprocess.CompletedProcess[str], description: str) -> list[s
 
 
 def runtime_roots(repo: Path) -> list[Path]:
-    """Every root whose Dockerfile could name an image that must be kept.
+    """The active controller root whose image must remain immediately usable.
 
-    The installed launcher exports MSANDBOX_RUNTIME_ROOT pointing at a release
-    under data_root()/releases (install.py), and `msandbox install --rollback`
-    can activate any release still on disk. Each carries its own copy of
-    docker/agent-sandbox, so each names a different content-addressed tag.
-    Collecting against a single root would delete a rollback target's image.
+    Rollback releases retain all build inputs and can rebuild their image on
+    demand. Keeping every historical multi-GB image made rollback metadata an
+    unbounded Docker retention policy.
     """
-    candidates = [repo]
     current = os.environ.get("MSANDBOX_RUNTIME_ROOT")
-    if current:
-        candidates.append(Path(current))
-    releases = data_root() / "releases"
-    if releases.is_dir():
-        try:
-            release_entries = sorted(releases.iterdir())
-        except OSError as exc:
-            raise DockerError(f"cannot enumerate installed releases in {releases}: {exc}") from exc
-        for entry in release_entries:
-            # The installer uses dot-prefixed temporary directories before an
-            # atomic rename. They are not rollback targets yet.
-            if entry.name.startswith("."):
-                continue
-            if entry.is_symlink() or not entry.is_dir():
-                raise DockerError(f"unsafe installed release entry: {entry}")
-            candidates.append(entry)
+    candidates = [Path(current)] if current else [repo]
     roots: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
@@ -196,9 +187,24 @@ def reachable(repo: Path) -> Reachable:
         result.projects.add(record.compose_project)
         for root in roots:
             sources = build_context_sources(record, root)
+            try:
+                dependency_identifier = build_identifier(sources, playwright=False)
+                for prefix, manifest in DEPENDENCY_MANIFESTS:
+                    result.volumes.add(
+                        _dependency_volume(
+                            prefix,
+                            [record.worktree / manifest],
+                            dependency_identifier,
+                        )
+                    )
+            except (DockerError, OSError) as exc:
+                result.complete = False
+                result.reason = f"{record.id}: cannot name dependencies: {exc}"
+                return result
             # A session can flip to Playwright mid-life (`msandbox test
             # --browser` sets record.playwright and rebuilds), so both variants
-            # of the same worktree stay reachable.
+            # of the image stay reachable. Browser support is an additive image
+            # layer and shares the exact same dependency volumes with its base.
             for playwright in (False, True):
                 try:
                     identifier = build_identifier(sources, playwright=playwright)
@@ -208,15 +214,6 @@ def reachable(repo: Path) -> Reachable:
                     return result
                 result.images.add(f"{IMAGE_REPOSITORY}:{identifier}")
                 result.build_contexts.add(identifier)
-                try:
-                    for prefix, manifest in DEPENDENCY_MANIFESTS:
-                        result.volumes.add(
-                            _dependency_volume(prefix, [record.worktree / manifest], identifier)
-                        )
-                except OSError as exc:
-                    result.complete = False
-                    result.reason = f"{record.id}: cannot read dependency manifest: {exc}"
-                    return result
     return result
 
 
@@ -295,6 +292,14 @@ def _host_path_is_mounted(path: Path, mounted: set[Path]) -> bool:
     return any(
         candidate == source or candidate in source.parents or source in candidate.parents
         for source in mounted
+    )
+
+
+def _collectable_volume(name: str) -> bool:
+    if name.startswith(SESSION_PREFIX):
+        return True
+    return name.endswith("_sandbox_npm_cache") and any(
+        name.startswith(f"{project}_") for project in PROTECTED_PROJECTS
     )
 
 
@@ -383,7 +388,7 @@ def _collect_garbage_locked(repo: Path, *, apply: bool) -> GcReport:
             for volume in mounts_by_container[name].volumes
         }
         for volume in volumes:
-            if not volume.startswith(SESSION_PREFIX):
+            if not _collectable_volume(volume):
                 continue
             if live.covers_volume(volume) or volume in mounted:
                 continue

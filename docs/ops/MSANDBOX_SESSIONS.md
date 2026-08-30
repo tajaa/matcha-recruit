@@ -6,8 +6,27 @@ detached `HEAD`; its intended PR branch is metadata until publication.
 
 ## Create and resume work
 
+Run `msandbox` in a terminal to open the dependency-free interactive wizard.
+It lists live sessions and offers New session, Legacy workspace, AutoPR
+dashboard, validation, publication, release, and safe garbage collection.
+Names are generated automatically, and leaving an agent returns to the wizard.
+Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
+exposing a host Docker or tmux socket to the container.
+
+Every new session explicitly chooses an agent, a permission mode, development
+ports/browser capability, and main or a PR as its starting point. Standard is
+always the default. Autonomous must be selected for that session and is stored
+in its record. The controller maps Autonomous to Codex's
+`--dangerously-bypass-approvals-and-sandbox`, Claude's
+`--dangerously-skip-permissions`, or OpenCode's `--auto`. Existing records
+created before permission modes were added are
+correctly labeled Autonomous because that was their historical behavior.
+
+The command interface remains available for automation and advanced use:
+
 ```bash
 msandbox session create payroll-fix --agent codex
+msandbox session create autonomous-fix --agent codex --autonomous
 msandbox session create site-editor --agent opencode --dev
 msandbox session create ios-fix --agent claude --pr 351
 
@@ -50,8 +69,8 @@ rewritten to `/attachments/...`. All ordinary pasted text is forwarded without
 interpretation. Clipboard screenshots can always be delivered with
 `msandbox paste SESSION --send`.
 
-The legacy `msandbox codex|claude|opencode` commands and the interactive shell
-opened by bare `msandbox` use the same host-side interception, rewriting into
+The legacy `msandbox codex|claude|opencode` commands and wizard-opened legacy
+workspace use the same host-side interception, rewriting into
 `/workspace/.msandbox/attachments/...`. An interactive shell that was already
 open before the proxy was added must be restarted once.
 
@@ -124,16 +143,37 @@ repository. It selects a copied release using `MSANDBOX_RUNTIME_ROOT`, so
 switching the main checkout cannot silently remove commands or alter session
 Compose behavior. Installation swaps the `current` link only after copying the
 complete release. Legacy control-plane verbs are deliberately routed to the
-configured repository, while session/controller verbs use the copied release.
+configured repository, while bare `msandbox`, the wizard, and
+session/controller verbs use the copied release.
 On macOS, installation also unloads and removes the obsolete Xcode bridge
 LaunchAgent from earlier controller versions.
 
+Installation retains the active controller plus one rollback release. Rollback
+source inputs are small and immutable; its Docker image is rebuilt on demand
+instead of reserving another multi-gigabyte image indefinitely. Session images
+are built once per content hash in a dedicated `matcha-msandbox` BuildKit cache,
+which is capped at 2 GB by default (`MSANDBOX_BUILD_CACHE_MAX` overrides it).
+The controller gives that private builder 45 seconds to start. If Docker Hub
+cannot supply its BuildKit image in time, the build continues with Docker
+Desktop's built-in builder instead of leaving session creation hung. Cancelling
+a first build also removes the pristine session worktree and resources.
+
 Each session image is tagged from the immutable controller/Dockerfile,
 architecture, Playwright option, and that worktree's dependency manifests.
+The Playwright variant layers Chromium and its system libraries onto the exact
+non-browser image; it does not rebuild agent CLIs or dependency trees and both
+variants share the same content-addressed dependency volumes.
 Sessions with identical inputs share image and dependency caches; different
 lockfiles or controller toolchains cannot race through a mutable `latest`
 image. Dependency volumes are initialized under a host lock and mounted
 read-only into sessions; only per-session tool cache mounts remain writable.
+
+Host fetch, verification, and publication rewrite GitHub SSH remotes to HTTPS
+for that command only. This works on networks that block SSH port 22 while
+leaving the repository's common Git configuration untouched. Private session
+Git directories use the copied `gh` credentials for the same HTTPS remote.
+Wizard action failures remain visible until Enter is pressed instead of being
+covered immediately by the next full-screen menu.
 
 Persistent session state is reconciled against Git, Docker, and tmux on every
 list/operation. JSON is written by fsync plus atomic rename, and mutating

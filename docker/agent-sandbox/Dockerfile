@@ -277,15 +277,6 @@ RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint \
         /home/agent/.npm \
     && chown -R "${USER_UID}:${USER_GID}" /home/agent
 
-# OpenCode's own permission model is redundant once the container is the
-# security boundary — allow everything so it behaves like Codex's
-# --dangerously-bypass-approvals-and-sandbox and Claude's
-# --dangerously-skip-permissions.
-RUN printf '%s\n' \
-        '{"$schema":"https://opencode.ai/config.json","permission":{"edit":"allow","bash":"allow","webfetch":"allow"}}' \
-        > /home/agent/.config/opencode/opencode.json \
-    && chown "${USER_UID}:${USER_GID}" /home/agent/.config/opencode/opencode.json
-
 # Docker Desktop's virtualized Apple-silicon CPU can advertise ARM crypto
 # capabilities that cryptography's bundled OpenSSL cannot safely execute,
 # causing AES setup to terminate Python with SIGILL. Disable that runtime

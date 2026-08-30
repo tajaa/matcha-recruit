@@ -44,6 +44,7 @@ from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
     SCHEMA_VERSION,
     data_root,
+    delete_session_state,
     list_sessions,
     save_session,
     state_lock,
@@ -122,6 +123,8 @@ def _github_repo(repo: Path) -> str:
 
 def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str] = ()) -> SessionRecord:
     repo = repo.resolve()
+    if spec.permission_mode not in ("standard", "autonomous"):
+        raise SessionError(f"unsupported permission mode: {spec.permission_mode}")
     slug = slugify(spec.name)
     with state_lock(f"repo-{repo.name}"):
         active_sessions = list_sessions()
@@ -173,6 +176,7 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
             base_ref=spec.base_ref,
             base_sha=comparison_base_sha,
             target_branch=target_branch,
+            permission_mode=spec.permission_mode,
             start_sha=info.head,
             expected_remote_sha=expected_remote_sha,
             synchronized_sha=info.head,
@@ -191,7 +195,11 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
                 save_session(record)
             if spec.start:
                 start_session(record, extra_agent_args)
-        except Exception:
+        # Ctrl-C during a slow first image build needs the same transactional
+        # cleanup as an ordinary startup failure. KeyboardInterrupt inherits
+        # directly from BaseException, so catching Exception left a pristine
+        # worktree and a forever-"created" session behind.
+        except BaseException:
             stop_agent(record, force=True)
             try:
                 remove_container_project(record, volumes=True)
@@ -233,6 +241,7 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
                     stderr=subprocess.DEVNULL,
                 )
                 remove_session_git(record.id)
+                delete_session_state(record.id)
             else:
                 record.phase = "orphaned"
                 save_session(record)
