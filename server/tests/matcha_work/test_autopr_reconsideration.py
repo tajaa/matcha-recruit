@@ -20,8 +20,10 @@ class _AsyncContext:
 
 
 class _ReconsiderationConn:
-    def __init__(self, progress_note):
+    def __init__(self, progress_note, *, board_column="todo", status="pending"):
         self.progress_note = progress_note
+        self.board_column = board_column
+        self.status = status
         self.insert_args = None
         self.activity_id = uuid4()
         self.created_at = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
@@ -33,7 +35,12 @@ class _ReconsiderationConn:
         if "SELECT id, progress_note" in query:
             if self.progress_note is None:
                 return None
-            return {"id": args[0], "progress_note": self.progress_note}
+            return {
+                "id": args[0],
+                "progress_note": self.progress_note,
+                "board_column": self.board_column,
+                "status": self.status,
+            }
         if "INSERT INTO mw_task_history" in query:
             self.insert_args = args
             return {"id": self.activity_id, "created_at": self.created_at}
@@ -117,6 +124,41 @@ async def test_reconsideration_rejects_non_no_spec_task(monkeypatch):
             expected_progress_note=current,
             body="New evidence",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("board_column", "status"),
+    [
+        ("in_progress", "pending"),
+        ("review", "pending"),
+        ("done", "completed"),
+        ("todo", "cancelled"),
+    ],
+)
+async def test_reconsideration_rejects_ineligible_task_state(
+    monkeypatch, board_column, status
+):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = (
+        "🤖 AUTO SETUP · NO PR: ALREADY FIXED · "
+        "[autopr:no-spec 2026-08-30T20:00:00Z] already_fixed"
+    )
+    conn = _ReconsiderationConn(
+        current, board_column=board_column, status=status
+    )
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    with pytest.raises(svc.AutoPRReconsiderationConflict, match="Todo or Changes"):
+        await svc.request_autopr_reconsideration(
+            project_id=uuid4(),
+            task_id=uuid4(),
+            actor_user_id=uuid4(),
+            expected_progress_note=current,
+            body="New evidence",
+        )
+    assert conn.insert_args is None
 
 
 @pytest.mark.asyncio

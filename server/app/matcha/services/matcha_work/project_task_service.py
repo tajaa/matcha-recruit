@@ -195,7 +195,7 @@ async def request_autopr_reconsideration(
         async with conn.transaction():
             task = await conn.fetchrow(
                 """
-                SELECT id, progress_note
+                SELECT id, progress_note, board_column, status
                 FROM mw_tasks
                 WHERE id = $1 AND project_id = $2
                 FOR UPDATE
@@ -204,6 +204,15 @@ async def request_autopr_reconsideration(
             )
             if not task:
                 return None
+
+            if (
+                task["status"] == "cancelled"
+                or task["board_column"] not in ("todo", "changes_requested")
+            ):
+                raise AutoPRReconsiderationConflict(
+                    "AutoPR reconsideration is only available while the ticket "
+                    "is in Todo or Changes Requested"
+                )
 
             current_note_raw = task["progress_note"] or ""
             current_note = current_note_raw.strip()

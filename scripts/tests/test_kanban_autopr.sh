@@ -183,6 +183,58 @@ unset GITHUB_ACTIONS
 unset -f curl mw_login
 
 ################################################################################
+# An explicit reconsideration is durable work authorization. The collector
+# must keep it runnable after reassignment, but only in the two lanes where the
+# API permits a reconsideration request.
+################################################################################
+mkdir -p "$TMP_DIR/collect-bin" "$TMP_DIR/collect-runner"
+cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
+{
+  "project": {"title": "Collector test"},
+  "elements": [],
+  "tasks": [
+    {"id":"11111111-0000-4000-8000-000000000001","title":"Reassigned reconsideration","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_reconsideration_pending":true},
+    {"id":"22222222-0000-4000-8000-000000000002","title":"Ordinary reassigned work","assigned_email":"human@example.com","board_column":"todo","status":"pending"},
+    {"id":"33333333-0000-4000-8000-000000000003","title":"Moved reconsideration","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_reconsideration_pending":true},
+    {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"}
+  ]
+}
+EOF
+cat > "$TMP_DIR/collect-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+output_file=""
+write_status=0
+url=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output_file="$2"; shift 2 ;;
+        -w) write_status=1; shift 2 ;;
+        http://*|https://*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+if [[ "$url" == */auth/login ]]; then
+    printf '{"access_token":"stub-token"}'
+    exit 0
+fi
+cp "$AUTOPR_TEST_BUNDLE_FILE" "$output_file"
+[ "$write_status" = "0" ] || printf 200
+EOF
+chmod +x "$TMP_DIR/collect-bin/curl"
+collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
+    RUNNER_TEMP="$TMP_DIR/collect-runner" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_BUNDLE_FILE="$TMP_DIR/collect-bundle.json" \
+    "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
+collect_rc=$?
+check "collector honors reassigned reconsideration only in an eligible lane" \
+    $([ "$collect_rc" = "0" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "2" ] \
+      && printf '%s' "$collected" | jq -e \
+        'map(.id8) == ["11111111", "44444444"]' >/dev/null \
+      && echo 0 || echo 1)
+
+################################################################################
 # investigate.sh packages checklist, history/discussion, GitHub feedback, and
 # downloaded card files into one context passed to the model.
 ################################################################################

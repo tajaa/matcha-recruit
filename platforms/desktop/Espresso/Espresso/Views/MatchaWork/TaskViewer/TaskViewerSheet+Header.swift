@@ -9,12 +9,20 @@ extension TaskViewerSheet {
 
     // MARK: - Automation provenance
 
+    /// The sheet is opened with a task snapshot, while project WebSocket
+    /// updates continue to mutate the view model. AutoPR state must follow the
+    /// live row so a completed reconsideration does not remain visually queued
+    /// until the sheet is closed and reopened.
+    var liveAutoPRTask: MWProjectTask {
+        viewModel.tasks.first(where: { $0.id == task.id }) ?? task
+    }
+
     /// AutoPR writes its durable ticket state into `progress_note`. The board
     /// card already previews that field, but the detail sheet must repeat it:
     /// opening a ticket should never hide the fact that an autonomous system
     /// selected it, nor the reason it did or did not create a PR.
     var autoSetupProgressNote: String? {
-        let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let note = liveAutoPRTask.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard note.hasPrefix("🤖 AUTO SETUP") || note.lowercased().hasPrefix("from auto setup") else {
             return nil
         }
@@ -92,13 +100,19 @@ extension TaskViewerSheet {
 
     var canRequestAutoPRReconsideration: Bool {
         guard let note = autoSetupProgressNote else { return false }
-        return note.contains("[autopr:no-spec ")
+        let liveTask = liveAutoPRTask
+        return liveTask.status != "cancelled"
+            && ["todo", "changes_requested"].contains(liveTask.boardColumn)
+            && note.contains("[autopr:no-spec ")
             && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
                 .contains(where: note.contains)
     }
 
     var autoPRReconsiderationIsPending: Bool {
-        didSubmitAutoPRContext || task.autoprReconsiderationPending == true
+        let liveTask = liveAutoPRTask
+        let submittedDecisionIsCurrent = didSubmitAutoPRContext
+            && liveTask.progressNote == task.progressNote
+        return submittedDecisionIsCurrent || liveTask.autoprReconsiderationPending == true
     }
 
     @ViewBuilder
