@@ -11,12 +11,13 @@ import sys
 import tempfile
 import termios
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 from scripts.msandbox.agent_adapters import agent_argv, launch_agent
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
+from scripts.msandbox.cli import run as run_cli
 from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
 from scripts.msandbox.docker_runtime import (
     BUILDER_NAME,
@@ -168,6 +169,58 @@ class StateTests(MsandboxTestCase):
 
     def test_new_session_specs_default_to_standard_permissions(self) -> None:
         self.assertEqual(SessionSpec("safe", "codex").permission_mode, "standard")
+
+    def test_cli_reports_and_stops_all_running_sessions_without_releasing_them(self) -> None:
+        first = self.record("session-1")
+        second = self.record("session-2")
+        second.name = "other"
+        first.phase = "running"
+        second.phase = "stopped"
+        with (
+            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch(
+                "scripts.msandbox.cli.reconcile_session", side_effect=lambda item: item
+            ),
+        ):
+            self.assertEqual(
+                run_cli(["--repo", str(self.repo), "session", "has-running"]), 0
+            )
+
+        first.phase = "stopped"
+        with (
+            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch(
+                "scripts.msandbox.cli.reconcile_session", side_effect=lambda item: item
+            ),
+        ):
+            self.assertEqual(
+                run_cli(["--repo", str(self.repo), "session", "has-running"]), 1
+            )
+
+        output = io.StringIO()
+        with (
+            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch("scripts.msandbox.cli.stop_session") as stop,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(
+                run_cli(
+                    [
+                        "--repo",
+                        str(self.repo),
+                        "session",
+                        "stop",
+                        "--all",
+                        "--force",
+                    ]
+                ),
+                0,
+            )
+        self.assertEqual(
+            stop.call_args_list,
+            [mock.call(first, force=True), mock.call(second, force=True)],
+        )
+        self.assertIn("Stopped 2 independent msandbox session(s).", output.getvalue())
 
     def test_kernel_lock_survives_its_owner_file_and_is_reacquirable(self) -> None:
         lock = self.root / "state/locks/repo.lock"
@@ -746,6 +799,7 @@ class AttachmentTests(MsandboxTestCase):
         self.assertIn("exec_workspace_with_file_proxy claude", launcher)
         self.assertIn("exec_workspace_with_file_proxy opencode", launcher)
         self.assertGreaterEqual(launcher.count("exec_workspace_with_file_proxy bash"), 2)
+        self.assertIn("call_v2_controller session stop --all --force", launcher)
 
 
 class HostAndInstallTests(MsandboxTestCase):

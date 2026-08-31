@@ -186,7 +186,7 @@ The session-oriented command reference is in `MSANDBOX_SESSIONS.md`.
 | Command | What it does |
 |---|---|
 | `build [--playwright]` | Build the workspace image |
-| `start` / `stop` / `off` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work unless `--force` is explicit; `off` is the explicit immediate shutdown. `start` bootstraps the self-hosted `com.matcha.github-actions-runner` LaunchAgent; `stop`/`off` boot it out so a stray `workflow_dispatch` has nowhere to run. Set `AUTOPR_MANAGE_RUNNER=0` if the runner is administered separately. |
+| `start` / `stop` / `off` / `status` | Master lifecycle with a required health summary; stop refuses active/unknown agent work, including independent v2 sessions, unless `--force` is explicit; `off` is the explicit immediate shutdown of the system plane and all independent session containers/tmux processes while preserving their worktrees. `start` bootstraps the self-hosted `com.matcha.github-actions-runner` LaunchAgent; `stop`/`off` boot it out so a stray `workflow_dispatch` has nowhere to run. Set `AUTOPR_MANAGE_RUNNER=0` if the runner is administered separately. |
 | `autopr-ready` | Silent readiness probe used by the dispatcher/workflow |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
 | `exec <cmd> [args...]` | Non-interactive exact-argv command; used by trusted automation wrappers |

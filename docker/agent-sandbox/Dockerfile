@@ -101,7 +101,7 @@ ENV PATH=/opt/node/bin:${PATH}
 # with a single COPY --from=agents /opt/node /opt/node.
 # ---------------------------------------------------------------------------
 FROM node AS agents
-ARG CODEX_VERSION=0.150.1
+ARG CODEX_VERSION=0.151.0
 ARG CLAUDE_CODE_VERSION=2.1.243
 ARG OPENCODE_VERSION=1.18.22
 RUN --mount=type=cache,target=/root/.npm,id=npm-agents \
@@ -265,6 +265,15 @@ RUN { \
 
 COPY docker/agent-sandbox/entrypoint.sh /usr/local/bin/agent-sandbox-entrypoint
 RUN chmod 0755 /usr/local/bin/agent-sandbox-entrypoint \
+    && install -d -m 0755 /etc/codex \
+    && printf '%s\n' \
+        '# The sandbox image centrally manages its immutable Codex CLI.' \
+        'check_for_update_on_startup = false' \
+        '' \
+        '[features]' \
+        'in_app_updates = false' \
+        > /etc/codex/requirements.toml \
+    && chmod 0644 /etc/codex/requirements.toml \
     && printf '%s\n' \
         '# Keep the pinned sandbox toolchain visible when agents spawn login shells.' \
         'export PATH="/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH"' \
