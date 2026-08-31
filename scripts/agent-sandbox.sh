@@ -22,8 +22,14 @@ run_v2_controller() {
         exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
 }
 
+OPEN_V2_WIZARD_AFTER_START=0
 if [ "$#" = 0 ]; then
-    run_v2_controller
+    # Bare `msandbox` is the one-command system entrypoint. Bring up the
+    # primary workspace and the fail-closed AutoPR control plane before
+    # handing control to the v2 wizard; otherwise the wizard routing can
+    # accidentally leave autonomous drafting disabled and unobserved.
+    OPEN_V2_WIZARD_AFTER_START=1
+    set -- start
 fi
 case "${1:-}" in
     wizard|session|worktree|pr|test|install|host|gc)
@@ -119,9 +125,10 @@ usage() {
     cat <<'EOF'
 Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
 
-Bare `msandbox` opens the interactive host-side wizard. It can create or
-resume isolated sessions, enter the legacy workspace, open the AutoPR
-dashboard, run validation, and safely reclaim unreachable resources.
+Bare `msandbox` starts the primary sandbox and AutoPR control plane as one
+fail-closed operation, then opens the interactive host-side wizard. The wizard
+can create or resume isolated sessions, enter the legacy workspace, open the
+AutoPR dashboard, run validation, and safely reclaim unreachable resources.
 
 Commands:
   session create NAME --agent AGENT   Create an isolated detached worktree session.
@@ -846,6 +853,9 @@ case "$command_name" in
     start)
         require_docker
         if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
+        if [ "$OPEN_V2_WIZARD_AFTER_START" = 1 ]; then
+            run_v2_controller
+        fi
         ;;
     dev)
         require_docker

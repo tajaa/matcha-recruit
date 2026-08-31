@@ -6,9 +6,12 @@ detached `HEAD`; its intended PR branch is metadata until publication.
 
 ## Create and resume work
 
-Run `msandbox` in a terminal to open the dependency-free interactive wizard.
-It lists live sessions and offers New session, Legacy workspace, AutoPR
-dashboard, validation, publication, release, and safe garbage collection.
+Run `msandbox` in a terminal to start the primary sandbox and AutoPR control
+plane together, then open the dependency-free interactive wizard. Startup is
+fail-closed: the wizard does not open unless the AutoPR timer and four-pane
+dashboard are healthy. The wizard lists live sessions and offers New session,
+Legacy workspace, AutoPR dashboard, validation, publication, release, and safe
+garbage collection.
 Names are generated automatically, and leaving an agent returns to the wizard.
 Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
 exposing a host Docker or tmux socket to the container.
@@ -143,8 +146,9 @@ repository. It selects a copied release using `MSANDBOX_RUNTIME_ROOT`, so
 switching the main checkout cannot silently remove commands or alter session
 Compose behavior. Installation swaps the `current` link only after copying the
 complete release. Legacy control-plane verbs are deliberately routed to the
-configured repository, while bare `msandbox`, the wizard, and
-session/controller verbs use the copied release.
+configured repository. Bare `msandbox` invokes that checkout's `system up`
+first and opens the copied-release wizard only after it succeeds; explicit
+wizard and session/controller verbs use the copied release directly.
 On macOS, installation also unloads and removes the obsolete Xcode bridge
 LaunchAgent from earlier controller versions.
 

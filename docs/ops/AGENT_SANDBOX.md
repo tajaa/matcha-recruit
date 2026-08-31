@@ -12,7 +12,7 @@ into whichever branch happens to be checked out:
 
 ```bash
 msandbox install
-msandbox                # interactive wizard; no subcommands to remember
+msandbox                # start sandbox + AutoPR together, then open the wizard
 ```
 
 Every session owns a detached Git worktree, Compose project, home directory,
@@ -39,8 +39,11 @@ msandbox system down
 msandbox login codex
 ```
 
-Bare `msandbox` opens a small standard-library wizard. New sessions default to
-Standard permissions; Autonomous must be explicitly chosen on every creation.
+Bare `msandbox` first starts the primary sandbox and the complete AutoPR control
+plane as one fail-closed operation, then opens a small standard-library wizard.
+If the timer, dashboard, or primary sandbox is unhealthy, the wizard does not
+open and autonomous drafting remains disabled. New sessions default to Standard
+permissions; Autonomous must be explicitly chosen on every creation.
 The wizard can enter the legacy workspace, open the AutoPR dashboard, resume
 agents, run validation, publish/release sessions, and preview safe cleanup.
 Typing bare `msandbox` inside a wizard-opened shell returns to the host wizard
