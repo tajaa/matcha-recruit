@@ -37,7 +37,13 @@ msandbox session list
 msandbox session attach payroll-fix
 msandbox session shell site-editor
 msandbox session exec payroll-fix -- git status --short
+msandbox session stop payroll-fix
 ```
+
+`msandbox stop` refuses while any independent session or AutoPR agent is running;
+`msandbox stop --force` and `msandbox off` stop every independent session as well as
+the system plane. Stopping preserves session worktrees, isolated Git state, and
+uncommitted files so a session can be resumed later with `msandbox session start`.
 
 One session consists of:
 
@@ -171,6 +177,10 @@ Sessions with identical inputs share image and dependency caches; different
 lockfiles or controller toolchains cannot race through a mutable `latest`
 image. Dependency volumes are initialized under a host lock and mounted
 read-only into sessions; only per-session tool cache mounts remain writable.
+The agent CLIs are deliberately pinned in the image. Codex startup checks and
+in-app updates are disabled through `/etc/codex/requirements.toml`; update the
+Dockerfile pin and rebuild/install the controller instead of accepting an
+interactive updater that cannot write to the read-only `/opt/node` toolchain.
 
 Host fetch, verification, and publication rewrite GitHub SSH remotes to HTTPS
 for that command only. This works on networks that block SSH port 22 while

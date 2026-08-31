@@ -79,11 +79,19 @@ def _add_session_subcommands(parent: argparse._SubParsersAction) -> None:
     create.add_argument("--no-attach", action="store_true")
     session_list = commands.add_parser("list")
     session_list.add_argument("--all", action="store_true")
+    commands.add_parser("has-running", help=argparse.SUPPRESS)
     for name in ("attach", "shell", "stop", "start", "release"):
         command = commands.add_parser(name)
-        command.add_argument("session")
         if name == "stop":
+            command.add_argument("session", nargs="?")
+            command.add_argument(
+                "--all",
+                action="store_true",
+                help="stop every independent session without releasing its worktree",
+            )
             command.add_argument("--force", action="store_true")
+        else:
+            command.add_argument("session")
         if name == "release":
             command.add_argument("--keep-worktree", action="store_true")
     execute = commands.add_parser("exec")
@@ -245,6 +253,26 @@ def run(argv: list[str] | None = None) -> int:
                 [reconcile_session(item) for item in list_sessions(include_released=args.all)]
             )
             return 0
+        if args.session_command == "has-running":
+            records = [reconcile_session(item) for item in list_sessions()]
+            return 0 if any(item.phase == "running" for item in records) else 1
+        if args.session_command == "stop" and args.all:
+            if args.session:
+                raise SessionError("session stop accepts either SESSION or --all, not both")
+            failures: list[str] = []
+            stopped = 0
+            for record in list_sessions():
+                try:
+                    stop_session(record, force=args.force)
+                    stopped += 1
+                except Exception as exc:  # Keep stopping the remaining independent sessions.
+                    failures.append(f"{record.name}: {exc}")
+            print(f"Stopped {stopped} independent msandbox session(s).")
+            if failures:
+                raise SessionError("could not stop every session: " + "; ".join(failures))
+            return 0
+        if args.session_command == "stop" and not args.session:
+            raise SessionError("session stop requires SESSION or --all")
         record = load_session(args.session)
         if args.session_command == "attach":
             return attach_agent(record)
