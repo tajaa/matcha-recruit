@@ -61,6 +61,8 @@ printf -v health_cmd '%q' "$SCRIPT_DIR/watch-health.sh"
 printf -v pr_cmd '%q' "$SCRIPT_DIR/watch-pr.sh"
 
 "$TMUX_BIN" new-session -d -s "$SESSION" -n autopr "$dashboard_cmd"
+"$TMUX_BIN" set-option -t "$SESSION" history-limit 100000 >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" mouse on >/dev/null
 main_pane="$("$TMUX_BIN" display-message -p -t "$SESSION:autopr" '#{pane_id}')"
 work_pane="$("$TMUX_BIN" split-window -h -p 50 -P -F '#{pane_id}' -t "$main_pane" "$work_cmd")"
 pr_pane="$("$TMUX_BIN" split-window -v -p 50 -P -F '#{pane_id}' -t "$main_pane" "$pr_cmd")"

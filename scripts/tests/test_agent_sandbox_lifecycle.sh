@@ -165,7 +165,9 @@ check "activity detection includes the error and self-audit worker sandboxes" \
 
 bare_output="$(run_msandbox)"
 check "bare msandbox reports sessions after preserving the interlocked control plane" \
-    $(printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
+    $(printf '%s' "$bare_output" | grep -q 'msandbox + AutoPR ready' \
+      && printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
+      && ! printf '%s' "$bare_output" | grep -q 'MSANDBOX STARTED' \
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ -f "$TMP_DIR/tmux.session" ] \
@@ -215,7 +217,9 @@ check "msandbox off immediately shuts down the dashboard, runner, and both sandb
 
 bare_output="$(run_msandbox)"
 check "bare msandbox starts the primary sandbox and complete AutoPR control plane" \
-    $(printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
+    $(printf '%s' "$bare_output" | grep -q 'msandbox + AutoPR ready' \
+      && printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
+      && ! printf '%s' "$bare_output" | grep -q 'MSANDBOX STARTED' \
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ -f "$TMP_DIR/launchagent.loaded" ] \

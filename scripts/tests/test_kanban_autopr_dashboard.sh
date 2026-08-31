@@ -64,6 +64,10 @@ check "tmux panes receive operator-facing titles" \
     && grep -q 'live Codex work' "$TMP_DIR/tmux.log" \
     && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
     && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+check "tmux observer preserves a large mouse-scrollable history" \
+  $(grep -q '^set-option -t matcha-autopr history-limit 100000' "$TMP_DIR/tmux.log" \
+    && grep -q '^set-option -t matcha-autopr mouse on' "$TMP_DIR/tmux.log" \
+    && echo 0 || echo 1)
 
 : > "$TMP_DIR/broken-session"
 AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
@@ -197,6 +201,17 @@ check "live-work pane shows model activity and redacts common credentials" \
     && grep -q '\[REDACTED PRIVATE KEY\]' "$TMP_DIR/work-pane.out" \
     && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-pane.out" \
     && ! grep -q 'this-token-must-not-render' "$TMP_DIR/work-pane.out" \
+    && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_MAX_ITERATIONS=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-history.out"
+check "interactive live-work pane appends sanitized output without clearing history" \
+  $(grep -q 'append-only history' "$TMP_DIR/work-history.out" \
+    && grep -q 'Scroll with mouse/trackpad or Ctrl-b \[' "$TMP_DIR/work-history.out" \
+    && grep -q 'Codex: reading project files' "$TMP_DIR/work-history.out" \
+    && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-history.out" \
+    && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-history.out" \
+    && ! grep -qF '|| clear' "$AUTOPR_DIR/watch-work.sh" \
     && echo 0 || echo 1)
 
 cat > "$TMP_DIR/msandbox-health" <<'EOF'
