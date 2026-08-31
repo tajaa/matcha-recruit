@@ -1,5 +1,6 @@
 """DB service for the inventory order queue."""
 
+import json
 from datetime import date
 from typing import Optional
 from uuid import UUID

@@ -47,6 +47,7 @@ from .labor_relations import router as labor_relations_router
 from .ems import router as ems_router
 from .inventory import router as inventory_router
 from .inventory_forecast import router as inventory_forecast_router
+from .inventory_buying import router as inventory_buying_router
 from .inventory_pos import router as inventory_pos_router
 from .safety_meetings import router as safety_meetings_router
 from .ops_permissions import router as ops_permissions_router
@@ -165,6 +166,12 @@ matcha_router.include_router(
     inventory_forecast_router,
     prefix="/inventory/forecast",
     tags=["inventory-forecast"],
+    dependencies=[Depends(require_all_features("matcha_ops", "inventory", "sales_intake", "inventory_forecasting"))],
+)
+matcha_router.include_router(
+    inventory_buying_router,
+    prefix="/inventory/buying",
+    tags=["inventory-buying"],
     dependencies=[Depends(require_all_features("matcha_ops", "inventory", "sales_intake", "inventory_forecasting"))],
 )
 from .inventory_waste import router as inventory_waste_router

@@ -299,6 +299,7 @@ async def commit_receipt_lines(
     received_on = received_on or date.today()
     from app.matcha.services.inventory import movements as movements_service
     from app.matcha.services.inventory import orders as orders_service
+    from app.matcha.services.inventory import buying_store
 
     if location_id is not None:
         ok = await conn.fetchval(
@@ -344,6 +345,7 @@ async def commit_receipt_lines(
                     if row is None:
                         raise ValueError("order not open")
                     movement_ids.append(str(row["receipt_movement_id"]))
+                    item_id = row["item_id"]
                     # mark_received already writes this receipt's advisory lot.
                 else:
                     if item_id is not None:
@@ -372,8 +374,14 @@ async def commit_receipt_lines(
                         conn, company_id=company_id, item_id=item_id, location_id=location_id,
                         received_movement_id=inserted[0]["id"], quantity=quantity,
                         received_on=received_on, expires_on=line.get("expires_on"), lot_code=None,
-                        unit_cost=None, created_by=user_id,
+                        unit_cost=line.get("unit_price"), created_by=user_id,
                     )
+                await buying_store.record_reviewed_receipt_price(
+                    conn, company_id=company_id, user_id=user_id, item_id=item_id,
+                    location_id=location_id, vendor=vendor, vendor_sku=line.get("vendor_sku"),
+                    pack_size=line.get("pack_size"), unit_price=line.get("unit_price"),
+                    quantity=quantity, observed_on=received_on, invoice_number=invoice_number,
+                )
                 created += 1
         except Exception:
             logger.warning("receipt line %d commit failed", n, exc_info=True)

@@ -6,6 +6,8 @@ against a fake connection. No real DB, no real Gemini call.
 """
 
 import asyncio
+from datetime import date
+from uuid import UUID
 
 from app.matcha.services.inventory import receipts
 
@@ -221,3 +223,51 @@ class TestResolveLines:
         query = conn.fetchval_calls[0][0]
         assert "ORDER BY created_at DESC, id DESC" in query
         assert "status IN ('queued', 'ordered')" in query
+
+
+class _Transaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+class _CommitConn:
+    def transaction(self):
+        return _Transaction()
+
+    async def fetchval(self, query, *_args):
+        if "inventory_items" in query:
+            return 1
+        return None
+
+
+def test_reviewed_receipt_preserves_supplier_price_evidence(monkeypatch):
+    item_id = UUID("10000000-0000-0000-0000-000000000001")
+    movement_id = UUID("20000000-0000-0000-0000-000000000001")
+    evidence = []
+
+    async def fake_record_movements(*_args, **_kwargs):
+        return [{"id": movement_id}]
+
+    async def fake_record_lot(*_args, **_kwargs):
+        return None
+
+    async def fake_record_evidence(*_args, **kwargs):
+        evidence.append(kwargs)
+
+    monkeypatch.setattr("app.matcha.services.inventory.movements.record_movements", fake_record_movements)
+    monkeypatch.setattr("app.matcha.services.inventory.receipts.lots_service.record_lot", fake_record_lot)
+    monkeypatch.setattr("app.matcha.services.inventory.buying_store.record_reviewed_receipt_price", fake_record_evidence)
+    result = _run(receipts.commit_receipt_lines(
+        _CommitConn(), company_id=UUID("30000000-0000-0000-0000-000000000001"),
+        user_id=UUID("40000000-0000-0000-0000-000000000001"), location_id=None,
+        vendor="Supplier A", invoice_number="INV-9", force=False, received_on=date(2026, 8, 31),
+        lines=[{"item_id": item_id, "quantity": 6.0, "vendor_sku": "OA-6", "pack_size": "6/case", "unit_price": 5.25}],
+    ))
+    assert result["created"] == 1
+    assert evidence[0]["item_id"] == item_id
+    assert evidence[0]["vendor"] == "Supplier A"
+    assert evidence[0]["unit_price"] == 5.25
+    assert evidence[0]["invoice_number"] == "INV-9"
