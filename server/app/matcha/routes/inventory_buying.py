@@ -39,7 +39,8 @@ async def put_supplier_item(item_id: UUID, body: SupplierItemUpsert,
     async with get_connection() as conn:
         try:
             return await buying_store.upsert_supplier_item(
-                conn, company_id=company_id, item_id=item_id, user_id=user.id, values=body.model_dump(),
+                conn, company_id=company_id, item_id=item_id, user_id=user.id,
+                values=body.model_dump(exclude_unset=True),
             )
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc

@@ -22,7 +22,7 @@ export default function InventoryBuying() {
   const [loading, setLoading] = useState(true)
   const [stagingId, setStagingId] = useState<string | null>(null)
   const [supplierName, setSupplierName] = useState('')
-  const [term, setTerm] = useState({ supplierId: '', itemId: '', unitPrice: '', leadDays: '', unitsPerPack: '1', minimum: '0', freight: '' })
+  const [term, setTerm] = useState({ supplierId: '', itemId: '', unitPrice: '', leadDays: '', unitsPerPack: '', minimum: '', freight: '' })
 
   useEffect(() => {
     Promise.all([listChannelLocations(), listItems(), listInventorySuppliers()])
@@ -61,11 +61,12 @@ export default function InventoryBuying() {
     try {
       await putInventorySupplierItem(term.itemId, {
         supplier_id: term.supplierId, location_id: locationId || null,
-        units_per_pack: Number(term.unitsPerPack) || 1, minimum_order_quantity: Number(term.minimum) || 0,
+        units_per_pack: term.unitsPerPack === '' ? undefined : Number(term.unitsPerPack),
+        minimum_order_quantity: term.minimum === '' ? undefined : Number(term.minimum),
         unit_price: term.unitPrice === '' ? undefined : Number(term.unitPrice),
         freight_flat: term.freight === '' ? undefined : Number(term.freight),
         lead_time_days: term.leadDays === '' ? undefined : Number(term.leadDays),
-        price_observed_on: term.unitPrice === '' ? undefined : new Date().toISOString().slice(0, 10), active: true,
+        price_observed_on: term.unitPrice === '' ? undefined : new Date().toISOString().slice(0, 10),
       })
       toast('Supplier terms saved', 'success'); await refresh()
     } catch { toast('Could not save supplier terms', 'error') }

@@ -341,6 +341,8 @@ async def commit_receipt_lines(
                     row = await orders_service.mark_received(
                         conn, order_id=order_id, company_id=company_id,
                         user_id=user_id, quantity=quantity, note=note,
+                        received_on=received_on, expires_on=line.get("expires_on"),
+                        unit_cost=line.get("unit_price"), location_id=location_id,
                     )
                     if row is None:
                         raise ValueError("order not open")

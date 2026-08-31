@@ -7,9 +7,10 @@ against a fake connection. No real DB, no real Gemini call.
 
 import asyncio
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
-from app.matcha.services.inventory import receipts
+from app.matcha.services.inventory import orders, receipts
 
 
 def _run(coro):
@@ -238,7 +239,7 @@ class _CommitConn:
         return _Transaction()
 
     async def fetchval(self, query, *_args):
-        if "inventory_items" in query:
+        if "inventory_items" in query or "business_locations" in query:
             return 1
         return None
 
@@ -271,3 +272,71 @@ def test_reviewed_receipt_preserves_supplier_price_evidence(monkeypatch):
     assert evidence[0]["vendor"] == "Supplier A"
     assert evidence[0]["unit_price"] == 5.25
     assert evidence[0]["invoice_number"] == "INV-9"
+
+
+def test_matched_order_receipt_passes_reviewed_lot_metadata(monkeypatch):
+    item_id = UUID("10000000-0000-0000-0000-000000000001")
+    order_id = UUID("20000000-0000-0000-0000-000000000001")
+    movement_id = UUID("30000000-0000-0000-0000-000000000001")
+    location_id = UUID("40000000-0000-0000-0000-000000000001")
+    received = []
+
+    async def fake_mark_received(*_args, **kwargs):
+        received.append(kwargs)
+        return {"receipt_movement_id": movement_id, "item_id": item_id}
+
+    async def fake_record_evidence(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(orders, "mark_received", fake_mark_received)
+    monkeypatch.setattr("app.matcha.services.inventory.buying_store.record_reviewed_receipt_price", fake_record_evidence)
+    result = _run(receipts.commit_receipt_lines(
+        _CommitConn(), company_id=UUID("50000000-0000-0000-0000-000000000001"),
+        user_id=UUID("60000000-0000-0000-0000-000000000001"), location_id=location_id,
+        vendor="Supplier A", invoice_number="INV-10", force=False, received_on=date(2026, 8, 30),
+        lines=[{
+            "order_id": order_id, "quantity": 6.0, "unit_price": 5.25,
+            "expires_on": date(2026, 9, 30),
+        }],
+    ))
+
+    assert result["created"] == 1
+    assert received[0]["received_on"] == date(2026, 8, 30)
+    assert received[0]["expires_on"] == date(2026, 9, 30)
+    assert received[0]["unit_cost"] == 5.25
+    assert received[0]["location_id"] == location_id
+
+
+class _ReceiveOrderConn:
+    async def fetchrow(self, query, *_args):
+        if "SELECT * FROM inventory_orders" in query:
+            return {"item_id": UUID("70000000-0000-0000-0000-000000000001"),
+                    "channel_id": None, "quantity": Decimal("6")}
+        return {"suggestion": None}
+
+
+def test_mark_received_records_reviewed_lot_metadata(monkeypatch):
+    movement_id = UUID("80000000-0000-0000-0000-000000000001")
+    location_id = UUID("90000000-0000-0000-0000-000000000001")
+    lot_calls = []
+
+    async def fake_record_movements(*_args, **_kwargs):
+        return [{"id": movement_id}]
+
+    async def fake_record_lot(*_args, **kwargs):
+        lot_calls.append(kwargs)
+
+    monkeypatch.setattr(orders.movements_service, "record_movements", fake_record_movements)
+    monkeypatch.setattr(orders.lots_service, "record_lot", fake_record_lot)
+    _run(orders.mark_received(
+        _ReceiveOrderConn(), order_id=UUID("a0000000-0000-0000-0000-000000000001"),
+        company_id=UUID("b0000000-0000-0000-0000-000000000001"),
+        user_id=UUID("c0000000-0000-0000-0000-000000000001"), quantity=6,
+        received_on=date(2026, 8, 30), expires_on=date(2026, 9, 30),
+        unit_cost=Decimal("5.25"), location_id=location_id,
+    ))
+
+    assert lot_calls[0]["received_on"] == date(2026, 8, 30)
+    assert lot_calls[0]["expires_on"] == date(2026, 9, 30)
+    assert lot_calls[0]["unit_cost"] == Decimal("5.25")
+    assert lot_calls[0]["location_id"] == location_id

@@ -11,6 +11,9 @@ from app.matcha.services.inventory import buying, forecast_store, network
 from app.matcha.services.inventory.matching import normalize_name
 
 
+BUYING_FINGERPRINT_VERSION = 1
+
+
 def _jsonable(value):
     if isinstance(value, (date, Decimal, UUID)):
         return value.isoformat() if isinstance(value, date) else str(value)
@@ -19,6 +22,20 @@ def _jsonable(value):
     if isinstance(value, list):
         return [_jsonable(item) for item in value]
     return value
+
+
+def _input_fingerprint(*, forecast_run_id: UUID, shortages: list[dict], attention: list[dict],
+                       transfers: list[dict], offers: list[dict], today: date) -> str:
+    payload = _jsonable({
+        "version": BUYING_FINGERPRINT_VERSION,
+        "decision_date": today,
+        "forecast": forecast_run_id,
+        "shortages": shortages,
+        "attention": attention,
+        "transfers": transfers,
+        "offers": offers,
+    })
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 async def list_suppliers(conn, *, company_id: UUID) -> list[dict]:
@@ -51,20 +68,29 @@ async def upsert_supplier_item(conn, *, company_id: UUID, item_id: UUID, user_id
         raise ValueError("location not found")
     if location_id and item["location_id"] and item["location_id"] != location_id:
         raise ValueError("item belongs to another location")
+    patch_keys = json.dumps(sorted(values))
     row = await conn.fetchrow(
         """INSERT INTO inventory_supplier_items
              (company_id,supplier_id,item_id,location_id,vendor_sku,purchase_unit,pack_size_label,units_per_pack,
               minimum_order_quantity,unit_price,freight_flat,lead_time_days,price_observed_on,preferred,active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-           ON CONFLICT(supplier_id,item_id,location_id) DO UPDATE SET vendor_sku=EXCLUDED.vendor_sku,
-             purchase_unit=EXCLUDED.purchase_unit,pack_size_label=EXCLUDED.pack_size_label,units_per_pack=EXCLUDED.units_per_pack,
-             minimum_order_quantity=EXCLUDED.minimum_order_quantity,unit_price=EXCLUDED.unit_price,freight_flat=EXCLUDED.freight_flat,
-             lead_time_days=EXCLUDED.lead_time_days,price_observed_on=EXCLUDED.price_observed_on,
-             preferred=EXCLUDED.preferred,active=EXCLUDED.active,updated_at=NOW() RETURNING *""",
+           ON CONFLICT(supplier_id,item_id,location_id) DO UPDATE SET
+             vendor_sku=CASE WHEN $16::jsonb ? 'vendor_sku' THEN EXCLUDED.vendor_sku ELSE inventory_supplier_items.vendor_sku END,
+             purchase_unit=CASE WHEN $16::jsonb ? 'purchase_unit' THEN EXCLUDED.purchase_unit ELSE inventory_supplier_items.purchase_unit END,
+             pack_size_label=CASE WHEN $16::jsonb ? 'pack_size_label' THEN EXCLUDED.pack_size_label ELSE inventory_supplier_items.pack_size_label END,
+             units_per_pack=CASE WHEN $16::jsonb ? 'units_per_pack' THEN EXCLUDED.units_per_pack ELSE inventory_supplier_items.units_per_pack END,
+             minimum_order_quantity=CASE WHEN $16::jsonb ? 'minimum_order_quantity' THEN EXCLUDED.minimum_order_quantity ELSE inventory_supplier_items.minimum_order_quantity END,
+             unit_price=CASE WHEN $16::jsonb ? 'unit_price' THEN EXCLUDED.unit_price ELSE inventory_supplier_items.unit_price END,
+             freight_flat=CASE WHEN $16::jsonb ? 'freight_flat' THEN EXCLUDED.freight_flat ELSE inventory_supplier_items.freight_flat END,
+             lead_time_days=CASE WHEN $16::jsonb ? 'lead_time_days' THEN EXCLUDED.lead_time_days ELSE inventory_supplier_items.lead_time_days END,
+             price_observed_on=CASE WHEN $16::jsonb ? 'price_observed_on' THEN EXCLUDED.price_observed_on ELSE inventory_supplier_items.price_observed_on END,
+             preferred=CASE WHEN $16::jsonb ? 'preferred' THEN EXCLUDED.preferred ELSE inventory_supplier_items.preferred END,
+             active=CASE WHEN $16::jsonb ? 'active' THEN EXCLUDED.active ELSE inventory_supplier_items.active END,
+             updated_at=NOW() RETURNING *""",
         company_id, values["supplier_id"], item_id, location_id, values.get("vendor_sku"), values.get("purchase_unit"),
         values.get("pack_size_label"), values.get("units_per_pack", 1), values.get("minimum_order_quantity", 0),
         values.get("unit_price"), values.get("freight_flat"), values.get("lead_time_days"),
-        values.get("price_observed_on"), values.get("preferred", False), values.get("active", True),
+        values.get("price_observed_on"), values.get("preferred", False), values.get("active", True), patch_keys,
     )
     if values.get("unit_price") is not None:
         await conn.execute(
@@ -90,7 +116,15 @@ async def record_reviewed_receipt_price(conn, *, company_id: UUID, user_id: UUID
            ON CONFLICT(supplier_id,item_id,location_id) DO UPDATE SET
              vendor_sku=COALESCE(EXCLUDED.vendor_sku,inventory_supplier_items.vendor_sku),
              pack_size_label=COALESCE(EXCLUDED.pack_size_label,inventory_supplier_items.pack_size_label),
-             unit_price=EXCLUDED.unit_price,price_observed_on=EXCLUDED.price_observed_on,updated_at=NOW()
+             unit_price=CASE
+               WHEN inventory_supplier_items.price_observed_on IS NULL
+                 OR EXCLUDED.price_observed_on >= inventory_supplier_items.price_observed_on
+               THEN EXCLUDED.unit_price ELSE inventory_supplier_items.unit_price END,
+             price_observed_on=CASE
+               WHEN inventory_supplier_items.price_observed_on IS NULL
+                 OR EXCLUDED.price_observed_on >= inventory_supplier_items.price_observed_on
+               THEN EXCLUDED.price_observed_on ELSE inventory_supplier_items.price_observed_on END,
+             updated_at=NOW()
            RETURNING id""",
         company_id, supplier["id"], item_id, location_id, vendor_sku, pack_size, unit_price, observed_on,
     )
@@ -149,10 +183,11 @@ async def build_plan(conn, *, company_id: UUID, forecast_run_id: UUID,
     offers = await _offers(conn, company_id=company_id, location_id=location_id or run["location_id"])
     raw = buying.build_buying_plan(forecast_run_id=forecast_run_id, forecast_start=run["forecast_start"],
                                    shortages=shortages, attention=attention, offers=offers, transfers=transfers, today=today)
-    fingerprint_payload = _jsonable({"forecast": forecast_run_id, "shortages": shortages, "attention": attention,
-                                    "transfers": transfers, "offers": offers})
     raw["location_id"] = location_id or run["location_id"]
-    raw["input_fingerprint"] = hashlib.sha256(json.dumps(fingerprint_payload, sort_keys=True).encode()).hexdigest()
+    raw["input_fingerprint"] = _input_fingerprint(
+        forecast_run_id=forecast_run_id, shortages=shortages, attention=attention,
+        transfers=transfers, offers=offers, today=today,
+    )
     return raw
 
 

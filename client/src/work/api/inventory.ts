@@ -666,7 +666,7 @@ export type BuyingPlan = {
 
 export function listInventorySuppliers() { return api.get<{ suppliers: InventorySupplier[] }>('/inventory/buying/suppliers') }
 export function createInventorySupplier(body: { name: string; contact_email?: string; contact_phone?: string; payment_terms?: string }) { return api.post<InventorySupplier>('/inventory/buying/suppliers', body) }
-export function putInventorySupplierItem(itemId: string, body: { supplier_id: string; location_id?: string | null; vendor_sku?: string; purchase_unit?: string; pack_size_label?: string; units_per_pack: number; minimum_order_quantity: number; unit_price?: number; freight_flat?: number; lead_time_days?: number; price_observed_on?: string; preferred?: boolean; active?: boolean }) { return api.put(`/inventory/buying/supplier-items/${itemId}`, body) }
+export function putInventorySupplierItem(itemId: string, body: { supplier_id: string; location_id?: string | null; vendor_sku?: string; purchase_unit?: string; pack_size_label?: string; units_per_pack?: number; minimum_order_quantity?: number; unit_price?: number; freight_flat?: number; lead_time_days?: number; price_observed_on?: string; preferred?: boolean; active?: boolean }) { return api.put(`/inventory/buying/supplier-items/${itemId}`, body) }
 export function createBuyingRun(body: { forecast_run_id: string; location_id?: string | null }) { return api.post<BuyingPlan>('/inventory/buying/runs', body) }
 export function stageBuyingLine(lineId: string) { return api.post<{ order_id: string; status: string }>(`/inventory/buying/lines/${lineId}/stage`, {}) }
 export function downloadBuyingPlan(forecastRunId: string, locationId?: string) {
