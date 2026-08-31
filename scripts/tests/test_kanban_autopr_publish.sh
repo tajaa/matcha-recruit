@@ -110,6 +110,9 @@ cat > "$TMP_DIR/verification.md" <<'EOF'
 
 Not run.
 EOF
+cat > "$TMP_DIR/publication-copy.json" <<'EOF'
+{"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Needs the canonical term before labels and tests can be updated safely."}
+EOF
 
 "$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-decision.json" "$TMP_DIR/decision.json"
 (
@@ -117,7 +120,7 @@ EOF
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md"
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 )
 
 PASS=0
@@ -128,8 +131,8 @@ check() {
   else echo "FAIL: $desc"; FAIL=$((FAIL + 1)); fi
 }
 
-check "questions-only publication uses an empty commit" \
-  $(git -C "$TEST_REPO" log -1 --pretty=%s | grep -q '(questions)' && echo 0 || echo 1)
+check "questions-only publication uses Luna's subject for an empty commit" \
+  $([ "$(git -C "$TEST_REPO" log -1 --pretty=%s)" = 'fix: clarify canonical terminology' ] && echo 0 || echo 1)
 check "question draft body contains answers and feedback trailers" \
   $(grep -q '## Answers needed' "$TMP_DIR/pr-body.md" \
     && grep -q 'matcha-feedback-comment-id: none' "$TMP_DIR/pr-body.md" \
@@ -140,7 +143,7 @@ check "publisher does not checkpoint feedback that investigation never consumed"
 check "question draft title exposes criticality and confidence" \
   $(grep -q '🔴 \[C42\] \[QUESTIONS\] fix: Clarify terminology' "$TMP_DIR/gh.log" && echo 0 || echo 1)
 check "card remains Changes Requested with a visible auto-setup note" \
-  $(jq -e '.board_column == "changes_requested" and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+  $(jq -e '.board_column == "changes_requested" and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")) and (.progress_note | endswith("note: Needs the canonical term before labels and tests can be updated safely."))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 check "publisher replies to the triggering additional-context note" \
   $(jq -e '.kind == "note" and .reply_to == "eeeeeeee-0000-4000-8000-000000000001" and (.body | contains("still needs human answers in PR #501"))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
 
@@ -149,6 +152,9 @@ cat > "$TMP_DIR/rework-card.json" <<'EOF'
 EOF
 cat > "$TMP_DIR/raw-no-safe.json" <<'EOF'
 {"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"clear boundary"},"evidence_quality":{"score":20,"reason":"review confirms it"},"code_localization":{"score":20,"reason":"migration identified"},"verification_strength":{"score":15,"reason":"no product diff allowed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"orange","reasons":["migration requires human review"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"migration_required"}
+EOF
+cat > "$TMP_DIR/no-safe-publication-copy.json" <<'EOF'
+{"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Requires a human-reviewed migration, which AutoPR is not allowed to draft."}
 EOF
 "$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-no-safe.json" "$TMP_DIR/no-safe.json"
 jq '. + {feedback_checkpoint:{comment_id:"answer-1",review_id:""}}' \
@@ -162,7 +168,7 @@ existing_pr='[{"number":501,"body":"<!-- matcha-feedback-comment-id: answer-1 --
     AUTOPR_TEST_EXISTING_PRS="$existing_pr" AUTOPR_TEST_LABELS=$'criticality:red\nconfidence:low\nautopr-awaiting-input' \
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md"
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
 )
 
 check "rework no-safe-action reconciles the existing PR title and labels" \
@@ -171,7 +177,7 @@ check "rework no-safe-action reconciles the existing PR title and labels" \
     && grep -q -- '--add-label criticality:orange' "$TMP_DIR/gh.log" \
     && echo 0 || echo 1)
 check "rework no-safe-action keeps accurate PR and triage card provenance" \
-  $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | startswith("🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED")) and (.progress_note | contains("PR #501 · 🟠 C100 · [autopr:no-spec")) and (.progress_note | endswith("migration_required · Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+  $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | startswith("🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED")) and (.progress_note | contains("PR #501 · 🟠 C100 · [autopr:no-spec")) and (.progress_note | contains("note: Requires a human-reviewed migration, which AutoPR is not allowed to draft.")) and (.progress_note | endswith("Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/card-patch.json"
 set +e
@@ -181,7 +187,7 @@ set +e
     AUTOPR_TEST_EXISTING_PRS="$existing_pr" AUTOPR_TEST_LABELS='criticality:red' AUTOPR_TEST_LABEL_FAIL=1 \
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md"
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
 ) >/dev/null 2>&1
 label_failure_rc=$?
 set -e

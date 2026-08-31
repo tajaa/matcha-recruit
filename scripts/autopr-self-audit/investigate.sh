@@ -15,13 +15,13 @@ for output_file in "$REPORT_FILE" "$DECISION_FILE"; do
     rm -f "$output_file"
 done
 
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-opencode-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
 [ -x "$SANDBOX_RUNNER" ] || { echo "sandbox runner is unavailable: $SANDBOX_RUNNER" >&2; exit 1; }
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 live_log_ready=false
 if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
     if (umask 077; {
-        printf 'MATCHA AUTOPR SELF AUDIT · OPENCODE LIVE STREAM\n'
+        printf 'MATCHA AUTOPR SELF AUDIT · CODEX LIVE STREAM\n'
         printf 'run %s · fingerprint %s · started %s\n\n' \
             "${GITHUB_RUN_ID:-local}" "$(jq -r '.fingerprint' "$AUDIT_FILE")" \
             "$(date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -32,6 +32,8 @@ fi
 
 run_model() {
     env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        AUTOPR_CODEX_MODEL=gpt-5.6-sol \
+        AUTOPR_CODEX_REASONING_EFFORT=medium \
         "$SANDBOX_RUNNER" "$SCRIPT_DIR/_prompt.txt" "$REPORT_FILE" "$DECISION_FILE.raw" \
         -f "$AUDIT_FILE"
 }

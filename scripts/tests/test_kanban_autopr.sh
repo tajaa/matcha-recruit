@@ -46,10 +46,12 @@ check "future frontend images expose a small stable build manifest" \
 check "model process is stripped of production SSH credentials" \
     $(grep -qF 'env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
 
-check "workflow forces OpenCode through the dedicated AutoPR msandbox" \
+check "workflow forces Codex through the dedicated AutoPR msandbox" \
     $(grep -qF 'AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh' "$workflow" \
       && grep -qF 'AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox' "$workflow" \
-      && grep -qF 'run-opencode-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'run-codex-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-sol' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'AUTOPR_CODEX_REASONING_EFFORT=medium' "$AUTOPR_DIR/investigate.sh" \
       && echo 0 || echo 1)
 
 check "workflow and dispatcher require the msandbox master switch" \
@@ -72,16 +74,16 @@ check "msandbox start and stop own the AutoPR lifecycle" \
       && grep -qF 'msandbox stop --force' "$REPO_ROOT/scripts/agent-sandbox.sh" \
       && echo 0 || echo 1)
 
-check "msandbox mounts only a staged read-only AutoPR OpenCode auth file" \
-    $(grep -qF 'SANDBOX_OPENCODE_AUTH_FILE' "$REPO_ROOT/scripts/agent-sandbox.sh" \
+check "msandbox mounts only a staged read-only AutoPR Codex auth file" \
+    $(grep -qF 'SANDBOX_CODEX_AUTH_FILE' "$REPO_ROOT/scripts/agent-sandbox.sh" \
       && grep -qF 'docker-compose.autopr-sandbox.yml' "$REPO_ROOT/scripts/agent-sandbox.sh" \
       && grep -qF 'auth.json:ro' "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
-      && grep -qF 'cp "$HOST_OPENCODE_AUTH_FILE" "$SANDBOX_OPENCODE_AUTH_FILE"' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
+      && grep -qF 'cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
       && echo 0 || echo 1)
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     autopr_ports="$(SANDBOX_WORKSPACE_DIR="$TMP_DIR" SANDBOX_AWS_DIR="$TMP_DIR" \
-      SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
+      SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
       docker compose --project-name matcha-kanban-autopr-sandbox \
         --file "$REPO_ROOT/docker-compose.sandbox.yml" \
         --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" \
@@ -94,10 +96,18 @@ else
         && echo 0 || echo 1)
 fi
 
-check "sandbox bridge uses a clean clone and empty AWS mount" \
-    $(grep -qF 'git clone --quiet --no-hardlinks --no-checkout' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
-      && grep -qF 'SANDBOX_AWS_DIR="$EMPTY_AWS_DIR"' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
-      && grep -qF 'git -C "$REPO_ROOT" apply --check --binary' "$AUTOPR_DIR/run-opencode-sandboxed.sh" \
+check "sandbox bridge uses a clean clone, empty AWS mount, and explicit Codex config" \
+    $(grep -qF 'git clone --quiet --no-hardlinks --no-checkout' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF 'SANDBOX_AWS_DIR="$EMPTY_AWS_DIR"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF 'git -C "$REPO_ROOT" apply --check --binary' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF -- '--ignore-user-config --model "$CODEX_MODEL"' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && echo 0 || echo 1)
+
+check "workflow delegates bounded publication prose to Luna medium" \
+    $(grep -qF 'write-publication-copy.sh' "$workflow" \
+      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-luna' "$AUTOPR_DIR/write-publication-copy.sh" \
+      && grep -qF 'AUTOPR_CODEX_REASONING_EFFORT=medium' "$AUTOPR_DIR/write-publication-copy.sh" \
+      && grep -qF 'AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1' "$AUTOPR_DIR/write-publication-copy.sh" \
       && echo 0 || echo 1)
 
 check "published PR and card carry production build provenance" \
@@ -290,23 +300,26 @@ esac
 EOF
 chmod +x "$TMP_DIR/bin/gh"
 
-cat > "$TMP_DIR/bin/opencode" <<'EOF'
+cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
-printf 'OpenCode: inspecting card context\n'
-while [ "$#" -gt 0 ]; do
-    if [ "$1" = "-f" ]; then
-        printf '%s\n' "$2" >> "$OPENCODE_STUB_FILES"
-        [ "$(basename "$2")" != "context.json" ] || cp "$2" "$OPENCODE_STUB_CONTEXT"
-        shift 2
-    else
-        shift
-    fi
-done
-if [ "${OPENCODE_STUB_FAIL:-0}" = 1 ]; then
-    printf 'OpenCode: simulated failure\n'
+printf 'Codex: inspecting card context\n'
+printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+prompt="${!#}"
+printf '%s\n' "$prompt" | sed -n \
+    '/^AUTOPR_INPUTS_BEGIN$/,/^AUTOPR_INPUTS_END$/ { s/^- //p; }' > "$CODEX_STUB_FILES"
+while IFS= read -r input_path; do
+    case "$(basename "$input_path")" in
+        *context.json) cp "$input_path" "$CODEX_STUB_CONTEXT" ;;
+    esac
+done < "$CODEX_STUB_FILES"
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+if [ "${CODEX_STUB_FAIL:-0}" = 1 ]; then
+    printf 'Codex: simulated failure\n'
     exit 17
 fi
-cat > "$OPENCODE_STUB_REPORT" <<'REPORT'
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")"
+cat > "$report_path" <<'REPORT'
 ### Summary
 stub
 ### Changes
@@ -316,7 +329,7 @@ stub
 ### Confidence
 high
 REPORT
-cat > "$OPENCODE_STUB_DECISION" <<'DECISION'
+cat > "$decision_path" <<'DECISION'
 {
   "schema_version": 1,
   "outcome": "implementation",
@@ -334,27 +347,33 @@ cat > "$OPENCODE_STUB_DECISION" <<'DECISION'
 }
 DECISION
 EOF
-chmod +x "$TMP_DIR/bin/opencode"
+chmod +x "$TMP_DIR/bin/codex"
 
 cat > "$TMP_DIR/card.json" <<'EOF'
-{"task_id":"f296d090-0000-4000-8000-000000000001","id8":"f296d090","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Standardize terminology","mode":"rework","review_note":"No change, including screenshot"}
+{"task_id":"f296d090-0000-4000-8000-000000000001","id8":"f296d090","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Standardize terminology","category":"fix","mode":"rework","review_note":"No change, including screenshot"}
 EOF
 
 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/runner" \
-GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode_files" \
-OPENCODE_STUB_CONTEXT="$TMP_DIR/context.json" OPENCODE_STUB_REPORT="$TMP_DIR/report.md" \
-OPENCODE_STUB_DECISION="$TMP_DIR/decision.json" AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/codex-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/context.json" CODEX_STUB_ARGS="$TMP_DIR/codex-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
-    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > /dev/null 2>&1
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > "$TMP_DIR/investigate-command.log" 2>&1
 investigate_rc=$?
+[ "$investigate_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/investigate-command.log"
 
 context_ok=1
 if [ "$investigate_rc" = "0" ] \
     && jq -e '.subtasks[0].round_index == 6 and .history[0].metadata.body == "The screenshot still says note" and .downloaded_attachments[0].id == "file-1" and (.files[0] | has("storage_url") | not)' "$TMP_DIR/context.json" > /dev/null \
-    && grep -q '/attachments/01-screen.png' "$TMP_DIR/opencode_files" \
-    && grep -q '/feedback.json' "$TMP_DIR/opencode_files"; then
+    && grep -q '01-screen.png' "$TMP_DIR/codex-files" \
+    && grep -q 'feedback.json' "$TMP_DIR/codex-files"; then
     context_ok=0
 fi
+[ "$context_ok" = 0 ] || {
+    printf '%s\n' 'Captured Codex inputs:'
+    sed -n '1,20p' "$TMP_DIR/codex-files"
+    jq . "$TMP_DIR/context.json" 2>/dev/null || true
+}
 check "rework investigation receives discussion, checklist, PR feedback, and screenshot" "$context_ok"
 
 check "investigation context reserves bounded production diagnostics" \
@@ -363,45 +382,51 @@ check "investigation context reserves bounded production diagnostics" \
 check "investigation normalizes validated confidence and triage" \
     $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
 
-check "investigation mirrors OpenCode output to the local live-work log" \
-    $(grep -q 'OPENCODE LIVE STREAM' "$TMP_DIR/live-work.log" \
-      && grep -q 'OpenCode: inspecting card context' "$TMP_DIR/live-work.log" \
+check "investigation invokes Sol medium and mirrors Codex output to the live-work log" \
+    $(grep -q 'CODEX LIVE STREAM' "$TMP_DIR/live-work.log" \
+      && grep -q 'Codex: inspecting card context' "$TMP_DIR/live-work.log" \
+      && grep -qx 'gpt-5.6-sol' "$TMP_DIR/codex-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/codex-args" \
       && grep -q '\[COMPLETE\]' "$TMP_DIR/live-work.log" && echo 0 || echo 1)
 
 # The real failure that blocked the first LaunchAgent-dispatched run happened
-# before OpenCode: Bash 3.2 + `set -u` rejected an empty attachment array.
+# before Codex: Bash 3.2 + `set -u` rejected an empty attachment array.
 jq '.mode = "investigate"' "$TMP_DIR/card.json" > "$TMP_DIR/card-no-files.json"
 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
-GITHUB_REPOSITORY="tajaa/matcha-recruit" OPENCODE_STUB_FILES="$TMP_DIR/opencode-no-files" \
-OPENCODE_STUB_CONTEXT="$TMP_DIR/context-no-files.json" OPENCODE_STUB_REPORT="$TMP_DIR/report-no-files.md" \
-OPENCODE_STUB_DECISION="$TMP_DIR/decision-no-files.json" AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/codex-no-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/context-no-files.json" CODEX_STUB_ARGS="$TMP_DIR/codex-no-files-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
     "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
 no_files_rc=$?
+[ "$no_files_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/live-no-files.log"
+no_files_count="$(wc -l < "$TMP_DIR/codex-no-files" | tr -d '[:space:]')"
 check "investigation accepts a card with no attachments on macOS Bash" \
     $([ "$no_files_rc" = 0 ] \
-      && [ "$(wc -l < "$TMP_DIR/opencode-no-files" | tr -d '[:space:]')" = 1 ] \
+      && [ "$no_files_count" = 1 ] \
       && jq -e '.downloaded_attachments == []' "$TMP_DIR/context-no-files.json" >/dev/null \
       && echo 0 || echo 1)
+[ "$no_files_rc" != 0 ] || [ "$no_files_count" = 1 ] \
+    || printf 'Expected one Codex input without attachments, got %s\n' "$no_files_count"
 
-OPENCODE_STUB_FAIL=1 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" \
+CODEX_STUB_FAIL=1 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" \
 MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
-OPENCODE_STUB_FILES="$TMP_DIR/opencode-failed-files" OPENCODE_STUB_CONTEXT="$TMP_DIR/context-failed.json" \
-OPENCODE_STUB_REPORT="$TMP_DIR/report-failed.md" OPENCODE_STUB_DECISION="$TMP_DIR/decision-failed.json" \
+CODEX_STUB_FILES="$TMP_DIR/codex-failed-files" CODEX_STUB_CONTEXT="$TMP_DIR/context-failed.json" \
+CODEX_STUB_ARGS="$TMP_DIR/codex-failed-args" \
 AUTOPR_LIVE_LOG="$TMP_DIR/live-failed.log" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-failed.md" \
     "$TMP_DIR/decision-failed.json" > /dev/null 2>&1
-failed_opencode_rc=$?
-check "live tee preserves a failing OpenCode exit status" \
-    $([ "$failed_opencode_rc" != 0 ] \
-      && grep -q '\[FAILED\] OpenCode exited 17' "$TMP_DIR/live-failed.log" \
+failed_codex_rc=$?
+check "live tee preserves a failing Codex exit status" \
+    $([ "$failed_codex_rc" != 0 ] \
+      && grep -q '\[FAILED\] Codex exited 17' "$TMP_DIR/live-failed.log" \
       && echo 0 || echo 1)
 
 ################################################################################
 # The msandbox bridge operates on a tracked-only clone and returns one patch.
-# The direct seam below substitutes only for Docker/OpenCode; clone/input/
+# The direct seam below substitutes only for Docker/Codex; clone/input/
 # output/patch behavior is the same path production uses.
 ################################################################################
 SANDBOX_TEST_REPO="$TMP_DIR/sandbox-source"
@@ -414,20 +439,19 @@ git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts
 git -C "$SANDBOX_TEST_REPO" commit --quiet -m base
 printf 'host-only-secret\n' > "$SANDBOX_TEST_REPO/secrets/private.pem"
 
-cat > "$TMP_DIR/bin/opencode" <<'EOF'
+cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 prompt="${!#}"
 report_path="$(printf '%s\n' "$prompt" | sed -n 's/^REPORT=//p')"
 decision_path="$(printf '%s\n' "$prompt" | sed -n 's/^DECISION=//p')"
-first_input=""
-while [ "$#" -gt 0 ]; do
-    if [ "$1" = -f ]; then
-        [ -n "$first_input" ] || first_input="$2"
-        shift 2
-    else
-        shift
-    fi
+first_input="$(printf '%s\n' "$prompt" | sed -n \
+    '/^AUTOPR_INPUTS_BEGIN$/,/^AUTOPR_INPUTS_END$/ { s/^- //p; }' | head -1)"
+workspace=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"
 done
+cd "$workspace"
 [ ! -e secrets/private.pem ] || exit 31
 [ -z "$(git remote)" ] || exit 32
 cp "$first_input" "$AUTOPR_SANDBOX_CAPTURE_CONTEXT"
@@ -436,7 +460,7 @@ printf '%s\n' '### Summary' sandbox '### Changes' sandbox '### Blast radius' non
 printf '%s\n' '{"schema_version":1,"outcome":"implementation"}' > "$decision_path"
 printf 'export const sandboxProbe = true;\n' > client/src/sandbox-probe.ts
 EOF
-chmod +x "$TMP_DIR/bin/opencode"
+chmod +x "$TMP_DIR/bin/codex"
 
 printf '%s\n' 'REPORT=REPORT_PATH' 'DECISION=DECISION_PATH' > "$TMP_DIR/sandbox-prompt.txt"
 printf 'attachment\n' > "$TMP_DIR/sandbox-attachment.txt"
@@ -447,7 +471,7 @@ PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
 AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
 AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
-  "$AUTOPR_DIR/run-opencode-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
   "$TMP_DIR/sandbox-report.md" "$TMP_DIR/sandbox-decision.json" \
   -f "$TMP_DIR/sandbox-context.json" -f "$TMP_DIR/sandbox-attachment.txt" \
   >"$TMP_DIR/sandbox-bridge.log" 2>&1
@@ -474,7 +498,7 @@ AUTOPR_SANDBOX_MAX_CHANGED_FILES=0 \
 AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
 AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
-  "$AUTOPR_DIR/run-opencode-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
   "$TMP_DIR/sandbox-report-capped.md" "$TMP_DIR/sandbox-decision-capped.json" \
   -f "$TMP_DIR/sandbox-context.json" -f "$TMP_DIR/sandbox-attachment.txt" \
   >/dev/null 2>&1
@@ -482,6 +506,71 @@ sandbox_cap_rc=$?
 check "msandbox bridge enforces the mechanical changed-file cap before apply" \
     $([ "$sandbox_cap_rc" != 0 ] \
       && [ ! -e "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" ] \
+      && echo 0 || echo 1)
+
+################################################################################
+# Publication copy is a separate Luna-medium task. Its prose is validated and
+# the sandbox bridge must reject any attempt by this writing-only pass to edit.
+################################################################################
+cat > "$TMP_DIR/bin/codex" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+workspace=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"
+done
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")"
+printf '%s\n' '### Publication copy' 'stub' > "$report_path"
+if [[ "$prompt" == *'one commit subject for a completed Matcha AutoPR code change'* ]]; then
+    printf '%s\n' '{"schema_version":1,"commit_subject":"fix: standardize terminology"}' > "$decision_path"
+else
+    printf '%s\n' '{"schema_version":1,"commit_subject":"fix: standardize terminology","card_note":"Needs the canonical term before the draft can be completed safely."}' > "$decision_path"
+fi
+[ "${CODEX_STUB_EDIT:-0}" != 1 ] || printf 'unexpected\n' > "$workspace/client/src/luna-edit.ts"
+EOF
+chmod +x "$TMP_DIR/bin/codex"
+printf '%s\n' '## Verification' '' 'Focused checks passed.' > "$TMP_DIR/publication-verification.md"
+
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/luna-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/decision.json" \
+  "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/publication-copy.json" \
+  >"$TMP_DIR/publication-command.log" 2>&1
+publication_copy_rc=$?
+[ "$publication_copy_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/publication-command.log"
+check "publication writer uses Luna medium and validates its bounded output" \
+    $([ "$publication_copy_rc" = 0 ] \
+      && jq -e '.commit_subject == "fix: standardize terminology" and (.card_note | contains("canonical term"))' "$TMP_DIR/publication-copy.json" >/dev/null \
+      && grep -qx 'gpt-5.6-luna' "$TMP_DIR/luna-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/luna-args" \
+      && echo 0 || echo 1)
+
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/commit-luna-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-commit-subject.sh" fix "$TMP_DIR/commit-subject.json" \
+  -f "$TMP_DIR/card.json" -f "$TMP_DIR/decision.json" -f "$TMP_DIR/report.md" \
+  -f "$TMP_DIR/publication-verification.md" >/dev/null 2>&1
+commit_subject_rc=$?
+check "commit-subject writer uses Luna medium and validates its bounded output" \
+    $([ "$commit_subject_rc" = 0 ] \
+      && jq -e '.commit_subject == "fix: standardize terminology"' "$TMP_DIR/commit-subject.json" >/dev/null \
+      && grep -qx 'gpt-5.6-luna' "$TMP_DIR/commit-luna-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/commit-luna-args" \
+      && echo 0 || echo 1)
+
+CODEX_STUB_EDIT=1 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/luna-edit-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/decision.json" \
+  "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/publication-copy-edit.json" \
+  >/dev/null 2>&1
+publication_edit_rc=$?
+check "publication writer rejects Luna repository edits before applying them" \
+    $([ "$publication_edit_rc" != 0 ] \
+      && [ ! -e "$REPO_ROOT/client/src/luna-edit.ts" ] \
       && echo 0 || echo 1)
 
 cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"

@@ -22,8 +22,14 @@ run_v2_controller() {
         exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
 }
 
+OPEN_V2_WIZARD_AFTER_START=0
 if [ "$#" = 0 ]; then
-    run_v2_controller
+    # Bare `msandbox` is the one-command system entrypoint. Bring up the
+    # primary workspace and the fail-closed AutoPR control plane before
+    # handing control to the v2 wizard; otherwise the wizard routing can
+    # accidentally leave autonomous drafting disabled and unobserved.
+    OPEN_V2_WIZARD_AFTER_START=1
+    set -- start
 fi
 case "${1:-}" in
     wizard|session|worktree|pr|test|install|host|gc)
@@ -102,14 +108,14 @@ configure_autopr_lane() {
     export SANDBOX_WORKSPACE_DIR="${SANDBOX_WORKSPACE_DIR:-$bootstrap_root/workspace}"
     export SANDBOX_AWS_DIR="${SANDBOX_AWS_DIR:-$bootstrap_root/empty-aws}"
     mkdir -p "$SANDBOX_WORKSPACE_DIR" "$SANDBOX_AWS_DIR"
-    # The trusted bridge stages exactly one mode-600 OpenCode auth.json before
+    # The trusted bridge stages exactly one mode-600 Codex auth.json before
     # setting this flag. Keep it out of ordinary interactive msandbox runs.
-    [ -n "${SANDBOX_OPENCODE_AUTH_FILE:-}" ] || {
-        echo "AutoPR sandbox requires SANDBOX_OPENCODE_AUTH_FILE from its trusted bridge." >&2
+    [ -n "${SANDBOX_CODEX_AUTH_FILE:-}" ] || {
+        echo "AutoPR sandbox requires SANDBOX_CODEX_AUTH_FILE from its trusted bridge." >&2
         exit 1
     }
-    [ -r "$SANDBOX_OPENCODE_AUTH_FILE" ] || {
-        echo "AutoPR OpenCode auth file is not readable: $SANDBOX_OPENCODE_AUTH_FILE" >&2
+    [ -r "$SANDBOX_CODEX_AUTH_FILE" ] || {
+        echo "AutoPR Codex auth file is not readable: $SANDBOX_CODEX_AUTH_FILE" >&2
         exit 1
     }
     COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE" --file "$AUTOPR_COMPOSE_FILE")
@@ -119,9 +125,10 @@ usage() {
     cat <<'EOF'
 Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
 
-Bare `msandbox` opens the interactive host-side wizard. It can create or
-resume isolated sessions, enter the legacy workspace, open the AutoPR
-dashboard, run validation, and safely reclaim unreachable resources.
+Bare `msandbox` starts the primary sandbox and AutoPR control plane as one
+fail-closed operation, then opens the interactive host-side wizard. The wizard
+can create or resume isolated sessions, enter the legacy workspace, open the
+AutoPR dashboard, run validation, and safely reclaim unreachable resources.
 
 Commands:
   session create NAME --agent AGENT   Create an isolated detached worktree session.
@@ -845,6 +852,17 @@ case "$command_name" in
         ;;
     start)
         require_docker
+        if [ "$OPEN_V2_WIZARD_AFTER_START" = 1 ]; then
+            startup_log="$(mktemp "${TMPDIR:-/tmp}/msandbox-start.XXXXXX")"
+            if ! start_primary_and_enable_autopr >"$startup_log" 2>&1; then
+                cat "$startup_log" >&2
+                rm -f -- "$startup_log"
+                exit 1
+            fi
+            rm -f -- "$startup_log"
+            printf 'msandbox + AutoPR ready · dashboard: tmux attach -t %s\n' "$AUTOPR_TMUX_SESSION"
+            run_v2_controller
+        fi
         if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
         ;;
     dev)

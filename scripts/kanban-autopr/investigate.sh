@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ask OpenCode to implement (todo) or address feedback on (rework) one
+# Ask Codex to implement (todo) or address feedback on (rework) one
 # kanban card, and write a structured report. Leaves any fix unstaged in the
 # working tree; never commits.
 #
@@ -134,7 +134,7 @@ while IFS= read -r file; do
     [ "$declared_size" -le "$MAX_SINGLE_ATTACHMENT_BYTES" ] 2>/dev/null || continue
     [ $((downloaded_bytes + declared_size)) -le "$MAX_ATTACHMENT_BYTES" ] 2>/dev/null || continue
 
-    safe_name="$(printf '%s' "$filename" | tr -cs '[:alnum:]._- ' '_' | cut -c1-120)"
+    safe_name="$(printf '%s' "$filename" | tr -cs '[:alnum:]_. -' '_' | cut -c1-120)"
     [ -n "$safe_name" ] || safe_name="attachment"
     local_path="$ATTACHMENT_DIR/$(printf '%02d' $((downloaded_count + 1)))-$safe_name"
 
@@ -175,7 +175,7 @@ jq -n \
 # Put the structured brief first, then the locally downloaded evidence. macOS
 # still ships Bash 3.2, where expanding an empty array under `set -u` raises an
 # "unbound variable" error. Branch explicitly so cards without attachments
-# reach OpenCode instead of failing before the investigation starts.
+# reach Codex instead of failing before the investigation starts.
 if [ "${#ATTACH_ARGS[@]}" -gt 0 ]; then
     ATTACH_ARGS=(-f "$CONTEXT_FILE" "${ATTACH_ARGS[@]}")
 else
@@ -211,16 +211,16 @@ fi
 # explicit local test seam and is rejected inside GitHub Actions. Mirror the
 # sandboxed model's terminal output to one local, mode-600 observer log: GitHub
 # does not expose an in-progress step's stdout, while the operator explicitly
-# needs to see OpenCode/OpenAI investigate and edit the task live in tmux.
+# needs to see Codex investigate and edit the task live in tmux.
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$SCRIPT_DIR/run-opencode-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$SCRIPT_DIR/run-codex-sandboxed.sh}"
 TEST_DIRECT="${AUTOPR_SANDBOX_TEST_DIRECT:-0}"
 [ "$TEST_DIRECT" != 1 ] || [ "${GITHUB_ACTIONS:-}" != true ] \
-    || die "direct OpenCode execution is forbidden in GitHub Actions"
+    || die "direct Codex execution is forbidden in GitHub Actions"
 live_log_ready=false
 if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
     if (umask 077; {
-        printf 'MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM\n'
+        printf 'MATCHA KANBAN AUTOPR · CODEX LIVE STREAM\n'
         printf 'run %s · task %s · mode %s · execution %s · started %s\n\n' \
             "${GITHUB_RUN_ID:-local}" "$ID8" "$MODE" \
             "$([ "$TEST_DIRECT" = 1 ] && printf test-direct || printf msandbox)" \
@@ -230,35 +230,28 @@ if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
     fi
 fi
 
-run_opencode() {
-    if [ "$TEST_DIRECT" = 1 ]; then
-        local prompt_text
-        prompt_text="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" \
-            -e "s#DECISION_PATH#$RAW_DECISION_FILE#g" "$PROMPT_FILE")"
-        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-            opencode run --auto --model openai/gpt-5.6-terra --variant high \
-            "${ATTACH_ARGS[@]}" -- "$prompt_text"
-    else
-        [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
-        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-            "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
-            "${ATTACH_ARGS[@]}"
-    fi
+run_codex() {
+    [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
+    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        AUTOPR_CODEX_MODEL=gpt-5.6-sol \
+        AUTOPR_CODEX_REASONING_EFFORT=medium \
+        "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
+        "${ATTACH_ARGS[@]}"
 }
 
 if [ "$live_log_ready" = true ]; then
-    run_opencode 2>&1 | tee -a "$LIVE_LOG"
-    opencode_rc="${PIPESTATUS[0]}"
+    run_codex 2>&1 | tee -a "$LIVE_LOG"
+    codex_rc="${PIPESTATUS[0]}"
 else
-    run_opencode
-    opencode_rc=$?
+    run_codex
+    codex_rc=$?
 fi
-if [ "$opencode_rc" -ne 0 ]; then
-    [ "$live_log_ready" != true ] || printf '\n[FAILED] OpenCode exited %s at %s\n' \
-        "$opencode_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
-    die "OpenCode investigation exited $opencode_rc"
+if [ "$codex_rc" -ne 0 ]; then
+    [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
+        "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+    die "Codex investigation exited $codex_rc"
 fi
-[ "$live_log_ready" != true ] || printf '\n[COMPLETE] OpenCode finished at %s\n' \
+[ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \
     "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
 
 if [ ! -s "$REPORT_FILE" ]; then
@@ -271,7 +264,7 @@ for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; 
     fi
 done
 
-# OpenCode's JSON is data, not authority. Keep the normalized result outside
+# Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
 "$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized"

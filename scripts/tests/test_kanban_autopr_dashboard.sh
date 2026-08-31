@@ -61,9 +61,13 @@ check "tmux observer creates one session with four panes" \
     && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
   $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
-    && grep -q 'live OpenCode / OpenAI work' "$TMP_DIR/tmux.log" \
+    && grep -q 'live Codex work' "$TMP_DIR/tmux.log" \
     && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
     && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+check "tmux observer preserves a large mouse-scrollable history" \
+  $(grep -q '^set-option -t matcha-autopr history-limit 100000' "$TMP_DIR/tmux.log" \
+    && grep -q '^set-option -t matcha-autopr mouse on' "$TMP_DIR/tmux.log" \
+    && echo 0 || echo 1)
 
 : > "$TMP_DIR/broken-session"
 AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
@@ -176,27 +180,38 @@ fi
 EOF
 chmod +x "$TMP_DIR/gh-work"
 cat > "$TMP_DIR/live-work.log" <<'EOF'
-MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM
-OpenCode: reading project files
-OpenCode: editing the scheduling guard
+MATCHA KANBAN AUTOPR · CODEX LIVE STREAM
+Codex: reading project files
+Codex: editing the scheduling guard
 Bearer this-token-must-not-render
 sk-abcdefghijklmnopqrstuvwxyz123456
 -----BEGIN TEST PRIVATE KEY-----
 private-key-body-must-not-render
 -----END TEST PRIVATE KEY-----
-OpenCode: running focused tests
+Codex: running focused tests
 EOF
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
 check "live-work pane shows model activity and redacts common credentials" \
-  $(grep -q 'LIVE OPENCODE / OPENAI WORK' "$TMP_DIR/work-pane.out" \
+  $(grep -q 'LIVE CODEX WORK' "$TMP_DIR/work-pane.out" \
     && grep -q 'STEP build · Investigate' "$TMP_DIR/work-pane.out" \
     && grep -q 'editing the scheduling guard' "$TMP_DIR/work-pane.out" \
     && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-pane.out" \
     && grep -q '\[REDACTED PRIVATE KEY\]' "$TMP_DIR/work-pane.out" \
     && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-pane.out" \
     && ! grep -q 'this-token-must-not-render' "$TMP_DIR/work-pane.out" \
+    && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_MAX_ITERATIONS=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-history.out"
+check "interactive live-work pane appends sanitized output without clearing history" \
+  $(grep -q 'append-only history' "$TMP_DIR/work-history.out" \
+    && grep -q 'Scroll with mouse/trackpad or Ctrl-b \[' "$TMP_DIR/work-history.out" \
+    && grep -q 'Codex: reading project files' "$TMP_DIR/work-history.out" \
+    && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-history.out" \
+    && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-history.out" \
+    && ! grep -qF '|| clear' "$AUTOPR_DIR/watch-work.sh" \
     && echo 0 || echo 1)
 
 cat > "$TMP_DIR/msandbox-health" <<'EOF'

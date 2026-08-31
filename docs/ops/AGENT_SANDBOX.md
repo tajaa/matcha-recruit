@@ -12,7 +12,7 @@ into whichever branch happens to be checked out:
 
 ```bash
 msandbox install
-msandbox                # interactive wizard; no subcommands to remember
+msandbox                # start sandbox + AutoPR together, then open the wizard
 ```
 
 Every session owns a detached Git worktree, Compose project, home directory,
@@ -39,8 +39,11 @@ msandbox system down
 msandbox login codex
 ```
 
-Bare `msandbox` opens a small standard-library wizard. New sessions default to
-Standard permissions; Autonomous must be explicitly chosen on every creation.
+Bare `msandbox` first starts the primary sandbox and the complete AutoPR control
+plane as one fail-closed operation, then opens a small standard-library wizard.
+If the timer, dashboard, or primary sandbox is unhealthy, the wizard does not
+open and autonomous drafting remains disabled. New sessions default to Standard
+permissions; Autonomous must be explicitly chosen on every creation.
 The wizard can enter the legacy workspace, open the AutoPR dashboard, resume
 agents, run validation, publish/release sessions, and preview safe cleanup.
 Typing bare `msandbox` inside a wizard-opened shell returns to the host wizard
@@ -266,8 +269,8 @@ inputs, not options exposed to the model.
 
 ## Kanban AutoPR lane
 
-The Kanban worker does not run OpenCode in the normal interactive workspace.
-`scripts/kanban-autopr/run-opencode-sandboxed.sh` creates a tracked-files-only
+The Kanban worker does not run Codex in the normal interactive workspace.
+`scripts/kanban-autopr/run-codex-sandboxed.sh` creates a tracked-files-only
 clone of the selected task branch, removes its remote, and mounts that clone in
 a dedicated msandbox project. Untracked `.env` files, PEM files, the Actions
 checkout, host home, Docker socket, GitHub token, Matcha bot password,
@@ -310,13 +313,15 @@ The dispatcher, GitHub workflow, and dedicated model launcher independently
 require the marker, running primary workspace, loaded timer, and four live
 dashboard panes.
 
-No second OpenCode login is required for the Kanban worker. Before each run,
-the trusted bridge copies the Mac's existing `~/.local/share/opencode/auth.json`
+No second Codex login is required for the Kanban worker. Before each run,
+the trusted bridge copies the Mac's existing `~/.codex/auth.json`
 to a private mode-700 runtime directory and bind-mounts that **single file**
-read-only into the dedicated container. OpenCode needs an auth credential to
-call its provider; this keeps the rest of the host OpenCode home (history,
-logs, database, and other state) out of the model's reach. Set
-`AUTOPR_HOST_OPENCODE_AUTH_FILE` only if the working host auth file lives
+read-only into the dedicated container. Codex needs that credential to use the
+host's ChatGPT login; this keeps the rest of the host Codex home (configuration,
+history, logs, and other state) out of the model's reach. Every invocation uses
+`--ignore-user-config`, is ephemeral, and explicitly selects either Sol-medium
+for code work or Luna-medium for bounded publication copy. Set
+`AUTOPR_HOST_CODEX_AUTH_FILE` only if the working host auth file lives
 elsewhere.
 
 ## AutoPR self-audit lane
@@ -330,7 +335,7 @@ repository graph and checks the control plane, but classifies those as operator
 actions. It never applies DDL, starts a service, or creates a fake code fix for
 machine drift.
 
-For a repository failure, OpenCode runs in its own
+For a repository failure, Codex Sol-medium runs in its own
 `matcha-autopr-self-audit-sandbox` tracked-files-only clone. Its publisher
 allows only the existing AutoPR/msandbox scripts, sandbox definitions, their
 contract tests, and corresponding docs. The self-audit scripts and workflow
@@ -338,6 +343,9 @@ are a sealed capsule: the model cannot rewrite its own prompt, verifier,
 publisher, or workflow. Verification must turn every original repairable
 failure green without adding another one before the trusted host opens a draft
 PR. It never merges or deploys.
+After verification, a separate writing-only Codex Luna-medium pass supplies the
+validated `fix:` commit subject and PR title; the bridge rejects any code diff from
+that pass.
 
 ## Validation checklist
 

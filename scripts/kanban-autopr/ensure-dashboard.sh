@@ -15,7 +15,8 @@ acquire_session_lock() {
         # Reclaim only an abandoned lock. Normal dashboard creation takes a
         # fraction of a second, while five seconds of bounded waiting covers a
         # simultaneous installer/LaunchAgent start without hiding a deadlock.
-        lock_mtime="$(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+        lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)"
+        [[ "$lock_mtime" =~ ^[0-9]+$ ]] || lock_mtime=0
         now="$(date +%s)"
         if [ $((now - lock_mtime)) -gt 60 ] 2>/dev/null; then
             rmdir "$LOCK_DIR" 2>/dev/null || true
@@ -60,6 +61,8 @@ printf -v health_cmd '%q' "$SCRIPT_DIR/watch-health.sh"
 printf -v pr_cmd '%q' "$SCRIPT_DIR/watch-pr.sh"
 
 "$TMUX_BIN" new-session -d -s "$SESSION" -n autopr "$dashboard_cmd"
+"$TMUX_BIN" set-option -t "$SESSION" history-limit 100000 >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" mouse on >/dev/null
 main_pane="$("$TMUX_BIN" display-message -p -t "$SESSION:autopr" '#{pane_id}')"
 work_pane="$("$TMUX_BIN" split-window -h -p 50 -P -F '#{pane_id}' -t "$main_pane" "$work_cmd")"
 pr_pane="$("$TMUX_BIN" split-window -v -p 50 -P -F '#{pane_id}' -t "$main_pane" "$pr_cmd")"
@@ -70,7 +73,7 @@ health_pane="$("$TMUX_BIN" split-window -v -p 50 -P -F '#{pane_id}' -t "$work_pa
 "$TMUX_BIN" set-option -t "$SESSION" pane-border-status top >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" pane-border-format '#{pane_title}' >/dev/null
 "$TMUX_BIN" select-pane -t "$main_pane" -T '24h queue + PR dashboard'
-"$TMUX_BIN" select-pane -t "$work_pane" -T 'live OpenCode / OpenAI work'
+"$TMUX_BIN" select-pane -t "$work_pane" -T 'live Codex work'
 "$TMUX_BIN" select-pane -t "$health_pane" -T 'timer + runner health'
 "$TMUX_BIN" select-pane -t "$pr_pane" -T 'active PR + live diff'
 "$TMUX_BIN" select-pane -t "$main_pane"

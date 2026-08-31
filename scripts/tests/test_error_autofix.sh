@@ -101,22 +101,20 @@ PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" "$AUTOFIX_DIR/collect.sh" 
 check "collect.sh rejects --hours with no value instead of crashing on \$2" $([ "$?" != "0" ] && echo 0 || echo 1)
 
 ################################################################################
-# investigate.sh — repeated --file options must be terminated before the prompt
+# investigate.sh — Codex receives isolated inputs plus one prompt
 ################################################################################
-cat > "$TMP_DIR/bin/opencode" <<'EOF'
+cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
-seen_separator=0
-message_count=0
-for arg in "$@"; do
-    if [ "$arg" = "--" ]; then
-        seen_separator=1
-    elif [ "$seen_separator" = "1" ]; then
-        message_count=$((message_count + 1))
-        [[ "$arg" == Investigate\ the\ attached\ production\ incident* ]] || exit 8
-    fi
-done
-[ "$seen_separator" = "1" ] && [ "$message_count" = "1" ] || exit 9
-cat > "$OPENCODE_STUB_REPORT" <<'REPORT'
+printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+prompt="${!#}"
+[[ "$prompt" == *'Investigate the attached production incident'* ]] || exit 8
+[ "$(printf '%s\n' "$prompt" | sed -n \
+    '/^AUTOPR_INPUTS_BEGIN$/,/^AUTOPR_INPUTS_END$/ { s/^- //p; }' \
+    | wc -l | tr -d '[:space:]')" = 1 ] || exit 9
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")"
+cat > "$report_path" <<'REPORT'
 ### Root cause
 stub
 ### Fix
@@ -126,7 +124,7 @@ stub
 ### Confidence
 high
 REPORT
-cat > "$OPENCODE_STUB_DECISION" <<'DECISION'
+cat > "$decision_path" <<'DECISION'
 {
   "schema_version": 1,
   "outcome": "no_safe_fix",
@@ -143,19 +141,23 @@ cat > "$OPENCODE_STUB_DECISION" <<'DECISION'
 }
 DECISION
 EOF
-chmod +x "$TMP_DIR/bin/opencode"
+chmod +x "$TMP_DIR/bin/codex"
 cat > "$TMP_DIR/investigate-incident.json" <<'EOF'
 {"message":"boom","traceback":"File \"/app/app/example.py\", line 1","stable_key":"abc123abc123"}
 EOF
-PATH="$TMP_DIR/bin:$PATH" OPENCODE_STUB_REPORT="$MODEL_OUTPUT_DIR/investigation.md" \
-    OPENCODE_STUB_DECISION="$MODEL_OUTPUT_DIR/investigation.json" \
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/codex-args" \
     AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_ACTIONS=false \
     "$AUTOFIX_DIR/investigate.sh" "$TMP_DIR/investigate-incident.json" \
     "$MODEL_OUTPUT_DIR/investigation.md" "$MODEL_OUTPUT_DIR/investigation.json" >/dev/null 2>&1
-check "investigate.sh terminates --file args before passing one prompt" $?
+investigate_rc=$?
+check "investigate.sh passes isolated evidence to Codex" "$investigate_rc"
 check "investigate.sh normalizes validated confidence and triage" \
     $(jq -e '.confidence_score == 75 and .confidence_band == "high" and .criticality.level == "yellow"' \
       "$MODEL_OUTPUT_DIR/investigation.json" >/dev/null 2>&1 && echo 0 || echo 1)
+check "investigate.sh uses Sol with medium reasoning for code fixes" \
+    $(grep -qx 'gpt-5.6-sol' "$TMP_DIR/codex-args" \
+      && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/codex-args" \
+      && echo 0 || echo 1)
 
 ################################################################################
 # Fallback workflow evidence must remain actionable, rather than being replaced
@@ -174,8 +176,17 @@ failure_block="$(sed -n '/Fail incomplete investigation/,/Verify (baseline vs br
 check "incomplete investigation fails without publishing a no-fix issue" \
     $([[ "$failure_block" == *'exit 1'* && "$failure_block" != *'publish.sh'* ]] && echo 0 || echo 1)
 
-check "investigate.sh uses Terra with high reasoning for code fixes" \
-    $(grep -qF 'openai/gpt-5.6-terra --variant high' "$AUTOFIX_DIR/investigate.sh" && echo 0 || echo 1)
+check "reconcile.sh uses sandboxed Sol with medium reasoning" \
+    $(grep -qF 'AUTOFIX_RECONCILE_MODEL:-gpt-5.6-sol' "$AUTOFIX_DIR/reconcile.sh" \
+      && grep -qF 'AUTOPR_CODEX_REASONING_EFFORT=medium' "$AUTOFIX_DIR/reconcile.sh" \
+      && grep -qF 'run-codex-sandboxed.sh' "$AUTOFIX_DIR/reconcile.sh" \
+      && echo 0 || echo 1)
+
+check "workflow delegates error-fix commit subjects to Luna medium" \
+    $(grep -qF 'write-commit-subject.sh fix' "$workflow" \
+      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-luna' "$REPO_ROOT/scripts/kanban-autopr/write-commit-subject.sh" \
+      && ! grep -qF 'git commit -m "fix: $EXC in $PATH_"' "$AUTOFIX_DIR/publish.sh" \
+      && echo 0 || echo 1)
 
 check "publish.sh permits guarded TypeScript/TSX client fixes" \
     $(grep -qF 'client/src/.*\.(ts|tsx)' "$AUTOFIX_DIR/publish.sh" && echo 0 || echo 1)
