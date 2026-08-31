@@ -61,7 +61,7 @@ check "tmux observer creates one session with four panes" \
     && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
   $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
-    && grep -q 'live OpenCode / OpenAI work' "$TMP_DIR/tmux.log" \
+    && grep -q 'live Codex work' "$TMP_DIR/tmux.log" \
     && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
     && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
 
@@ -176,21 +176,21 @@ fi
 EOF
 chmod +x "$TMP_DIR/gh-work"
 cat > "$TMP_DIR/live-work.log" <<'EOF'
-MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM
-OpenCode: reading project files
-OpenCode: editing the scheduling guard
+MATCHA KANBAN AUTOPR · CODEX LIVE STREAM
+Codex: reading project files
+Codex: editing the scheduling guard
 Bearer this-token-must-not-render
 sk-abcdefghijklmnopqrstuvwxyz123456
 -----BEGIN TEST PRIVATE KEY-----
 private-key-body-must-not-render
 -----END TEST PRIVATE KEY-----
-OpenCode: running focused tests
+Codex: running focused tests
 EOF
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
 check "live-work pane shows model activity and redacts common credentials" \
-  $(grep -q 'LIVE OPENCODE / OPENAI WORK' "$TMP_DIR/work-pane.out" \
+  $(grep -q 'LIVE CODEX WORK' "$TMP_DIR/work-pane.out" \
     && grep -q 'STEP build · Investigate' "$TMP_DIR/work-pane.out" \
     && grep -q 'editing the scheduling guard' "$TMP_DIR/work-pane.out" \
     && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-pane.out" \

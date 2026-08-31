@@ -2,14 +2,14 @@
 # Run the model in a dedicated msandbox against a disposable, tracked-files-
 # only clone. The trusted host owns evidence collection and publication; this
 # script is the sole bridge that copies bounded inputs in and a patch/report
-# out. OpenCode never receives the Actions checkout, its untracked secrets, or
+# out. Codex never receives the Actions checkout, its untracked secrets, or
 # any host/GitHub/Matcha/production credential.
 #
 # Usage:
-#   run-opencode-sandboxed.sh PROMPT_TEMPLATE REPORT DECISION -f INPUT...
+#   run-codex-sandboxed.sh PROMPT_TEMPLATE REPORT DECISION -f INPUT...
 set -euo pipefail
 
-PROMPT_TEMPLATE="${1:?usage: run-opencode-sandboxed.sh PROMPT_TEMPLATE REPORT DECISION -f INPUT...}"
+PROMPT_TEMPLATE="${1:?usage: run-codex-sandboxed.sh PROMPT_TEMPLATE REPORT DECISION -f INPUT...}"
 REPORT_FILE="${2:?missing report path}"
 DECISION_FILE="${3:?missing decision path}"
 shift 3
@@ -18,14 +18,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AUTOPR_SANDBOX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$REPO_ROOT/scripts/agent-sandbox.sh}"
 SANDBOX_PROJECT="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
-RUNTIME_ROOT="${AUTOPR_SANDBOX_RUNTIME_ROOT:-$REPO_ROOT/.git/matcha-kanban-autopr-sandbox}"
+GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
+RUNTIME_ROOT="${AUTOPR_SANDBOX_RUNTIME_ROOT:-$GIT_DIR/matcha-kanban-autopr-sandbox}"
 SANDBOX_WORKSPACE="$RUNTIME_ROOT/workspace"
 EMPTY_AWS_DIR="$RUNTIME_ROOT/empty-aws"
-AUTH_DIR="$RUNTIME_ROOT/opencode-auth"
-SANDBOX_OPENCODE_AUTH_FILE="$AUTH_DIR/auth.json"
-HOST_OPENCODE_AUTH_FILE="${AUTOPR_HOST_OPENCODE_AUTH_FILE:-$HOME/.local/share/opencode/auth.json}"
+AUTH_DIR="$RUNTIME_ROOT/codex-auth"
+SANDBOX_CODEX_AUTH_FILE="$AUTH_DIR/auth.json"
+HOST_CODEX_AUTH_FILE="${AUTOPR_HOST_CODEX_AUTH_FILE:-$HOME/.codex/auth.json}"
 IO_DIR="$SANDBOX_WORKSPACE/.git/autopr-io"
 MODEL_CONTAINER_ROOT="/workspace"
+CODEX_MODEL="${AUTOPR_CODEX_MODEL:-gpt-5.6-sol}"
+CODEX_REASONING_EFFORT="${AUTOPR_CODEX_REASONING_EFFORT:-medium}"
+REQUIRE_EMPTY_PATCH="${AUTOPR_CODEX_REQUIRE_EMPTY_PATCH:-0}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
@@ -48,16 +52,16 @@ if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
     MODEL_CONTAINER_ROOT="$SANDBOX_WORKSPACE"
 else
     [ -x "$MSANDBOX_BIN" ] || die "msandbox is not executable: $MSANDBOX_BIN"
-    # AutoPR already runs successfully with Finch's local OpenCode account.
+    # AutoPR uses the runner user's existing Codex/ChatGPT login.
     # Copy only its auth.json into a private runtime directory, then bind it
-    # read-only into the container. Do not mount the host OpenCode home: its
+    # read-only into the container. Do not mount the host Codex home: its
     # history, logs, database, and every unrelated credential stay outside.
-    [ -r "$HOST_OPENCODE_AUTH_FILE" ] \
-        || die "missing host OpenCode auth file: $HOST_OPENCODE_AUTH_FILE"
+    [ -r "$HOST_CODEX_AUTH_FILE" ] \
+        || die "missing host Codex auth file: $HOST_CODEX_AUTH_FILE"
     mkdir -p "$AUTH_DIR"
     chmod 700 "$AUTH_DIR"
-    cp "$HOST_OPENCODE_AUTH_FILE" "$SANDBOX_OPENCODE_AUTH_FILE"
-    chmod 600 "$SANDBOX_OPENCODE_AUTH_FILE"
+    cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"
+    chmod 600 "$SANDBOX_CODEX_AUTH_FILE"
 fi
 
 # Stop only the dedicated AutoPR container before replacing its bind-mounted
@@ -68,7 +72,7 @@ if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" != 1 ]; then
         AGENT_SANDBOX_AUTOPR=1 \
         SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
         SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
-        SANDBOX_OPENCODE_AUTH_FILE="$SANDBOX_OPENCODE_AUTH_FILE" \
+        SANDBOX_CODEX_AUTH_FILE="$SANDBOX_CODEX_AUTH_FILE" \
         "$MSANDBOX_BIN" stop >/dev/null 2>&1 || true
 fi
 
@@ -81,7 +85,14 @@ rm -rf -- "$SANDBOX_WORKSPACE"
 # repository and cannot push. The trusted host later applies one binary patch.
 git clone --quiet --no-hardlinks --no-checkout "$REPO_ROOT" "$SANDBOX_WORKSPACE"
 MODEL_BASE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse main^{commit})"
+if git -C "$REPO_ROOT" rev-parse --verify main^{commit} >/dev/null 2>&1; then
+    MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse main^{commit})"
+elif git -C "$REPO_ROOT" rev-parse --verify origin/main^{commit} >/dev/null 2>&1; then
+    MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse origin/main^{commit})"
+else
+    # Disposable/local test worktrees may intentionally have no main ref.
+    MAIN_SHA="$MODEL_BASE_SHA"
+fi
 git -C "$SANDBOX_WORKSPACE" checkout --quiet --detach "$MODEL_BASE_SHA"
 git -C "$SANDBOX_WORKSPACE" branch --force main "$MAIN_SHA" >/dev/null
 git -C "$SANDBOX_WORKSPACE" remote remove origin
@@ -89,7 +100,7 @@ git -C "$SANDBOX_WORKSPACE" config core.hooksPath /dev/null
 
 mkdir -p "$IO_DIR/input" "$IO_DIR/output"
 
-MODEL_INPUT_ARGS=()
+MODEL_INPUT_LIST=""
 PATH_MAP='{}'
 CONTEXT_COPY=""
 input_index=0
@@ -101,18 +112,19 @@ while [ "$#" -gt 0 ]; do
     [ -f "$input_path" ] || die "missing model input: $input_path"
 
     input_index=$((input_index + 1))
-    safe_name="$(basename "$input_path" | tr -cs '[:alnum:]._- ' '_' | cut -c1-120)"
+    safe_name="$(printf '%s' "$(basename "$input_path")" | tr -cs '[:alnum:]_. -' '_' | cut -c1-120)"
     [ -n "$safe_name" ] || safe_name="input"
     copied_path="$IO_DIR/input/$(printf '%02d' "$input_index")-$safe_name"
     model_path="$MODEL_CONTAINER_ROOT/.git/autopr-io/input/$(basename "$copied_path")"
     cp "$input_path" "$copied_path"
-    MODEL_INPUT_ARGS+=(-f "$model_path")
+    MODEL_INPUT_LIST="${MODEL_INPUT_LIST}
+- $model_path"
     PATH_MAP="$(jq -c --arg old "$input_path" --arg new "$model_path" '. + {($old): $new}' <<< "$PATH_MAP")"
     [ -n "$CONTEXT_COPY" ] || CONTEXT_COPY="$copied_path"
 done
 
 # Keep context.json's attachment paths truthful inside the container. The
-# files are also passed with -f, but this mapping lets the model correlate a
+# files are also enumerated in the prompt, and this mapping lets the model correlate a
 # discussion attachment id with the exact readable path without guessing.
 if jq -e '.downloaded_attachments | type == "array"' "$CONTEXT_COPY" >/dev/null 2>&1; then
     jq --argjson paths "$PATH_MAP" '
@@ -127,33 +139,39 @@ fi
 
 MODEL_REPORT="$MODEL_CONTAINER_ROOT/.git/autopr-io/output/report.md"
 MODEL_DECISION="$MODEL_CONTAINER_ROOT/.git/autopr-io/output/decision.json"
-PROMPT_TEXT="$(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
+PROMPT_TEXT="Read every input file listed below before acting. These are the only attached inputs available to you.
+AUTOPR_INPUTS_BEGIN${MODEL_INPUT_LIST}
+AUTOPR_INPUTS_END
+
+$(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
     -e "s#DECISION_PATH#$MODEL_DECISION#g" "$PROMPT_TEMPLATE")"
 
+CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --ephemeral
+    --ignore-user-config --model "$CODEX_MODEL"
+    -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\""
+    -C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
+
 if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
-    (cd "$SANDBOX_WORKSPACE" && \
-        opencode run --auto --model openai/gpt-5.6-terra --variant high \
-            "${MODEL_INPUT_ARGS[@]}" -- "$PROMPT_TEXT")
+    codex "${CODEX_ARGS[@]}"
 else
     env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
         AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
         AGENT_SANDBOX_AUTOPR=1 \
         SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
         SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
-        SANDBOX_OPENCODE_AUTH_FILE="$SANDBOX_OPENCODE_AUTH_FILE" \
+        SANDBOX_CODEX_AUTH_FILE="$SANDBOX_CODEX_AUTH_FILE" \
         "$MSANDBOX_BIN" exec \
-        opencode run --auto --model openai/gpt-5.6-terra --variant high \
-        "${MODEL_INPUT_ARGS[@]}" -- "$PROMPT_TEXT"
+        codex "${CODEX_ARGS[@]}"
 fi
 
 HOST_REPORT="$IO_DIR/output/report.md"
 HOST_DECISION="$IO_DIR/output/decision.json"
-[ -s "$HOST_REPORT" ] || die "OpenCode produced no report inside msandbox"
-[ -s "$HOST_DECISION" ] || die "OpenCode produced no decision inside msandbox"
+[ -s "$HOST_REPORT" ] || die "Codex produced no report inside msandbox"
+[ -s "$HOST_DECISION" ] || die "Codex produced no decision inside msandbox"
 [ "$(wc -c < "$HOST_REPORT" | tr -d '[:space:]')" -le "$MAX_REPORT_BYTES" ] \
-    || die "OpenCode report exceeds $MAX_REPORT_BYTES bytes"
+    || die "Codex report exceeds $MAX_REPORT_BYTES bytes"
 [ "$(wc -c < "$HOST_DECISION" | tr -d '[:space:]')" -le "$MAX_DECISION_BYTES" ] \
-    || die "OpenCode decision exceeds $MAX_DECISION_BYTES bytes"
+    || die "Codex decision exceeds $MAX_DECISION_BYTES bytes"
 cp "$HOST_REPORT" "$REPORT_FILE"
 cp "$HOST_DECISION" "$DECISION_FILE"
 
@@ -177,6 +195,10 @@ PATCH_BYTES="$(wc -c < "$PATCH_FILE" | tr -d '[:space:]')"
 if git -C "$SANDBOX_WORKSPACE" diff --raw "$MODEL_BASE_SHA" -- . \
     | awk '$1 ~ /^:(120000|160000)$/ || $2 ~ /^(120000|160000)$/ {found=1} END {exit !found}'; then
     die "sandbox patch contains a symlink or submodule change"
+fi
+
+if [ "$REQUIRE_EMPTY_PATCH" = 1 ] && [ -s "$PATCH_FILE" ]; then
+    die "Codex writing task unexpectedly changed repository files"
 fi
 
 if [ -s "$PATCH_FILE" ]; then

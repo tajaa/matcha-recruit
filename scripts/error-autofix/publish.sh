@@ -3,7 +3,7 @@
 # a body assembled from the incident + report + verification table) or, if
 # there is no diff, open/update a tracking issue instead.
 #
-# Usage: ./publish.sh incident.json decision.json report.md verification.md
+# Usage: ./publish.sh incident.json decision.json report.md verification.md [commit-subject.json]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +17,7 @@ INCIDENT_FILE="${1:?usage: publish.sh incident.json decision.json report.md veri
 DECISION_FILE="${2:?usage: publish.sh incident.json decision.json report.md verification.md}"
 REPORT_FILE="${3:?usage: publish.sh incident.json decision.json report.md verification.md}"
 VERIFICATION_FILE="${4:?usage: publish.sh incident.json decision.json report.md verification.md}"
+COMMIT_SUBJECT_FILE="${5:-}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 KEY="$(jq -r '.stable_key' "$INCIDENT_FILE")"
@@ -156,9 +157,16 @@ $TRACEBACK
 fi
 
 # ---- diff exists: open (or update) the PR ----
+[ -n "$COMMIT_SUBJECT_FILE" ] && [ -s "$COMMIT_SUBJECT_FILE" ] \
+    || die "safe fix is missing its Luna commit subject"
+COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$COMMIT_SUBJECT_FILE")" \
+    || die "commit subject output is invalid"
+[[ "$COMMIT_SUBJECT" == fix:\ * && "$COMMIT_SUBJECT" != *$'\n'* && "$COMMIT_SUBJECT" != *$'\r'* ]] \
+    || die "commit subject must be one line starting with fix:"
+[ "${#COMMIT_SUBJECT}" -le 72 ] || die "commit subject exceeds 72 characters"
 git config user.name "matcha-error-bot"
 git config user.email "matcha-error-bot@users.noreply.github.com"
-git commit -m "fix: $EXC in $PATH_" >/dev/null
+git commit -m "$COMMIT_SUBJECT" >/dev/null
 git push --force-with-lease --set-upstream origin "$BRANCH"
 
 NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"

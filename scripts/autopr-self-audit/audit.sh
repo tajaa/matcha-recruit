@@ -66,7 +66,7 @@ check_compose_contract() {
         --file "$REPO_ROOT/docker-compose.sandbox-session.yml" \
         --file "$REPO_ROOT/docker-compose.sandbox-test.yml" config --quiet || return 1
     SANDBOX_WORKSPACE_DIR="$compose_tmp/workspace" SANDBOX_AWS_DIR="$compose_tmp/empty-aws" \
-        SANDBOX_OPENCODE_AUTH_FILE="$compose_tmp/auth.json" \
+        SANDBOX_CODEX_AUTH_FILE="$compose_tmp/auth.json" \
         docker compose --project-name matcha-autopr-audit \
         --file "$REPO_ROOT/docker-compose.sandbox.yml" \
         --file "$REPO_ROOT/docker-compose.autopr-sandbox.yml" config --quiet || return 1

@@ -7,7 +7,8 @@ incident as the autofix draft. Exact diff identity is not required: a broader
 or safer implementation can supersede the draft, but merely touching the same
 file or feature cannot.
 
-Write exactly one JSON object to RESULT_PATH, with no markdown:
+Write a brief Markdown receipt with the heading `### Reconciliation` to
+REPORT_PATH. Write exactly one JSON object to DECISION_PATH, with no markdown:
 
 {"decision":"superseded|no_match|uncertain","confidence":"high|medium|low","replacing_pr":123,"reason":"short factual explanation"}
 

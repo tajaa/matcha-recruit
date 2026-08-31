@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 # The Mac dispatcher is the only clock. This lane audits the automation
-# itself, then lets OpenCode repair only a sealed allowlist inside msandbox.
+# itself, then lets Codex repair only a sealed allowlist inside msandbox.
 # Every publication is a draft PR; no self-audit change is auto-merged.
 permissions:
   contents: write
@@ -111,6 +111,20 @@ jobs:
           EOF
           cat "$RUNNER_TEMP/autopr-audit-report.md" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Write commit subject
+        if: steps.decision.outputs.safe == 'true'
+        timeout-minutes: 5
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-autopr-self-audit-sandbox
+          AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox
+        run: |
+          ./scripts/kanban-autopr/write-commit-subject.sh fix "$RUNNER_TEMP/autopr-audit-commit-subject.json" \
+            -f "$RUNNER_TEMP/autopr-audit.json" \
+            -f "$RUNNER_TEMP/autopr-audit-decision.json" \
+            -f "$RUNNER_TEMP/autopr-audit-report.md" \
+            -f "$RUNNER_TEMP/autopr-audit-verification.md"
+
       - name: Publish draft repair PR
         if: steps.investigate.outcome == 'success'
         env:
@@ -120,7 +134,8 @@ jobs:
             "$RUNNER_TEMP/autopr-audit.json" \
             "$RUNNER_TEMP/autopr-audit-decision.json" \
             "$RUNNER_TEMP/autopr-audit-report.md" \
-            "$RUNNER_TEMP/autopr-audit-verification.md"
+            "$RUNNER_TEMP/autopr-audit-verification.md" \
+            "$RUNNER_TEMP/autopr-audit-commit-subject.json"
 
       - name: Cleanup
         if: always()
@@ -129,7 +144,7 @@ jobs:
             AGENT_SANDBOX_AUTOPR=1 \
             SANDBOX_WORKSPACE_DIR="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/workspace" \
             SANDBOX_AWS_DIR="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/empty-aws" \
-            SANDBOX_OPENCODE_AUTH_FILE="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/opencode-auth/auth.json" \
+            SANDBOX_CODEX_AUTH_FILE="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/codex-auth/auth.json" \
             ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
           git reset --hard >/dev/null 2>&1 || true
           git clean -fd >/dev/null 2>&1 || true

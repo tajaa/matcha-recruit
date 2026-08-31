@@ -33,12 +33,12 @@ esac
 EOF
 chmod +x "$TMP_DIR/bin/gh"
 
-cat > "$TMP_DIR/bin/opencode" <<'EOF'
+cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
-echo called > "$AUTOPR_TEST_OPENCODE_CALLED"
+echo called > "$AUTOPR_TEST_CODEX_CALLED"
 exit 99
 EOF
-chmod +x "$TMP_DIR/bin/opencode"
+chmod +x "$TMP_DIR/bin/codex"
 
 printf 'value = 2\n' > "$TEST_REPO/app.py"
 git -C "$TEST_REPO" diff --binary > "$TMP_DIR/exact.diff"
@@ -56,15 +56,15 @@ printf 'PASS: exact patch is covered without touching the real index\n'
 # signal; public PR content never receives authority to suppress publication.
 cp "$TMP_DIR/exact.diff" "$TMP_DIR/broader.diff"
 printf '\ndiff --git a/extra.py b/extra.py\nnew file mode 100644\nindex 0000000..257cc56\n--- /dev/null\n+++ b/extra.py\n@@ -0,0 +1 @@\n+broader = True\n' >> "$TMP_DIR/broader.diff"
-rm -f "$TMP_DIR/opencode-not-called"
+rm -f "$TMP_DIR/codex-not-called"
 PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_TOKEN=also-secret GITHUB_REPOSITORY=x/x \
-  AUTOPR_TEST_OPENCODE_CALLED="$TMP_DIR/opencode-not-called" \
+  AUTOPR_TEST_CODEX_CALLED="$TMP_DIR/codex-not-called" \
   AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/broader.diff" \
   bash "$TEST_REPO/scripts/autopr-scope/check-open-prs.sh" \
   --lane error --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
   --report "$TMP_DIR/report.md" --output "$TMP_DIR/broader-result.json"
 jq -e '.decision == "uncertain" and .covering_pr == null and .possible_duplicate == true' "$TMP_DIR/broader-result.json" >/dev/null
-[ ! -e "$TMP_DIR/opencode-not-called" ]
+[ ! -e "$TMP_DIR/codex-not-called" ]
 printf 'PASS: broader public patch requires human review without model execution\n'
 
 AUTOPR_SCOPE_DEDUPE_MODE=off PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \

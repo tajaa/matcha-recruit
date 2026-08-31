@@ -3,10 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-AUDIT_FILE="${1:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION}"
-DECISION_FILE="${2:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION}"
-REPORT_FILE="${3:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION}"
-VERIFICATION_FILE="${4:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION}"
+AUDIT_FILE="${1:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+DECISION_FILE="${2:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+REPORT_FILE="${3:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+VERIFICATION_FILE="${4:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+COMMIT_SUBJECT_FILE="${5:-}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 FINGERPRINT="$(jq -r '.fingerprint' "$AUDIT_FILE")"
 BRANCH="bot/autopr-audit-$FINGERPRINT"
@@ -41,10 +42,19 @@ else
     exit 0
 fi
 
+[ -n "$COMMIT_SUBJECT_FILE" ] && [ -s "$COMMIT_SUBJECT_FILE" ] \
+    || { echo "safe repair is missing its Luna commit subject" >&2; exit 1; }
+COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$COMMIT_SUBJECT_FILE")" \
+    || { echo "commit subject output is invalid" >&2; exit 1; }
+[[ "$COMMIT_SUBJECT" == fix:\ * && "$COMMIT_SUBJECT" != *$'\n'* && "$COMMIT_SUBJECT" != *$'\r'* ]] \
+    || { echo "commit subject must be one line starting with fix:" >&2; exit 1; }
+[ "${#COMMIT_SUBJECT}" -le 72 ] \
+    || { echo "commit subject exceeds 72 characters" >&2; exit 1; }
+
 git -c core.hooksPath=/dev/null \
     -c user.name=matcha-autopr-auditor \
     -c user.email=matcha-autopr-auditor@users.noreply.github.com \
-    commit -m "fix: repair AutoPR audit $FINGERPRINT" >/dev/null
+    commit -m "$COMMIT_SUBJECT" >/dev/null
 # Keep the repair checkout detached: the PR branch exists only on the remote,
 # so neither this runner nor a developer worktree can retain branch ownership.
 git -c core.hooksPath=/dev/null push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
@@ -67,9 +77,9 @@ trap 'rm -f "$BODY_FILE"' EXIT
 
 existing="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
 if [ -n "$existing" ]; then
-    gh pr edit "$existing" --repo "$REPO" --title "fix: repair AutoPR audit $FINGERPRINT" --body-file "$BODY_FILE"
+    gh pr edit "$existing" --repo "$REPO" --title "$COMMIT_SUBJECT" --body-file "$BODY_FILE"
 else
     gh pr create --repo "$REPO" --draft --head "$BRANCH" \
-        --title "fix: repair AutoPR audit $FINGERPRINT" --body-file "$BODY_FILE"
+        --title "$COMMIT_SUBJECT" --body-file "$BODY_FILE"
 fi
 gh pr edit "$BRANCH" --repo "$REPO" --add-label autopr-self-audit >/dev/null 2>&1 || true
