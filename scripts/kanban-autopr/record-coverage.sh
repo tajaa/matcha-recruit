@@ -14,6 +14,7 @@ PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
 PR="$(jq -r '.covering_pr' "$COVERAGE_FILE")"
 EXPECTED_SHA="$(jq -r '.covering_head_sha' "$COVERAGE_FILE")"
 REASON="$(jq -r '.reason' "$COVERAGE_FILE")"
+RECONSIDERATION_EVENT_ID="$(jq -r '.autopr_reconsideration_event_id // empty' "$CARD_FILE")"
 [[ "$TASK_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || die "task_id has unexpected shape"
 [[ "$PR" =~ ^[0-9]+$ ]] || die "coverage is missing a covering PR"
 
@@ -41,4 +42,12 @@ note="🤖 AUTO SETUP · ALREADY SCOPED · PR #$PR · source $source_label"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$url" --argjson number "$PR" --arg note "$note" \
         '{pr_url:$url,pr_number:$number,board_column:"in_progress",progress_note:$note}')" >/dev/null
+if [ -n "$RECONSIDERATION_EVENT_ID" ]; then
+    reply="AutoPR reviewed this additional context. The requested change is already covered by PR #$PR. $REASON"
+    if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" \
+        "$(jq -n --arg body "$reply" --arg reply_to "$RECONSIDERATION_EVENT_ID" \
+            '{kind:"note",body:$body,reply_to:$reply_to}')" >/dev/null); then
+        printf 'kanban-autopr: warning: could not post reconsideration coverage reply for task %s\n' "$TASK_ID" >&2
+    fi
+fi
 printf 'kanban-autopr: task %s is already scoped in PR #%s\n' "$TASK_ID" "$PR" >&2

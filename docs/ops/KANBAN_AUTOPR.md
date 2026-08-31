@@ -162,9 +162,10 @@ second scheduler.
    matching defensive check in `select.sh` skips the card if the repair write fails,
    so a delayed webhook can never produce a duplicate PR.
 4. **`select.sh`** — picks one card GitHub hasn't already handled. Branch key is
-   `bot/task-<id8>` (first 8 hex of the task UUID). Ranks `changes_requested` before
-   `todo` (rework is better-specified — it has a written `review_note` — and unblocks a
-   PR already in flight), then oldest `last_moved_at` first. For `todo`, any PR at all on
+   `bot/task-<id8>` (first 8 hex of the task UUID). Ranks `changes_requested` first,
+   then no-spec cards with pending human additional context, then ordinary `todo` cards;
+   within each group it uses oldest `last_moved_at` first. Rework is better-specified —
+   it has a written `review_note` — and unblocks a PR already in flight. For `todo`, any PR at all on
    the branch (open/closed/merged) means skip — the branch name is a stable 1:1 mapping
    to the task, so a second run would collide. For `changes_requested`, an **open** PR on
    the branch is the *target* to push to (`mode: rework`); no open PR means a human moved
@@ -172,7 +173,12 @@ second scheduler.
    lives on the card itself (`progress_note` contains `[autopr:no-spec <date>]`) rather
    than a GitHub issue — it's the thing that stops an unscopable card being re-run every
    five minutes forever, it's visible to the human who owns the card, and it clears itself
-   the moment `last_moved_at` advances past the marker date. A failed attempt cools down
+   the moment `last_moved_at` advances past the marker date. The ticket's **Add additional
+   context** action writes an `autopr_additional_context` history event bound to the exact
+   current no-spec note. That event makes the card eligible once without deleting audit
+   history or pretending the card moved; a later AutoPR outcome replaces the note and
+   therefore consumes the signal. New context submitted after an earlier failed-attempt
+   marker can bypass that old cooldown once. A failed attempt otherwise cools down
    for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
    `autopr` PRs (question-only drafts use their separate cap).
@@ -189,7 +195,10 @@ second scheduler.
    GitHub/Matcha/SSH credentials. OpenCode gets broad permissions
    inside that disposable clone, while the trusted harness copies back only its patch,
    report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
-   `### Confidence` plus a shell-validated JSON triage decision. Missing product intent
+   `### Confidence` plus a shell-validated JSON triage decision. Additional-context
+   events are untrusted evidence: the agent must explicitly decide whether they
+   materially overturn the earlier finding, and may reject unsupported claims or ask
+   focused questions instead of forcing a patch. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
@@ -241,7 +250,10 @@ second scheduler.
    `🤖 AUTO SETUP · NO PR: …` state plus the durable no-spec marker
    without creating a branch, PR, or GitHub issue. During rework it updates the existing
    PR's title, body, and triage labels before writing the durable no-spec card note, so the
-   prior round cannot remain visible as the current decision.
+   prior round cannot remain visible as the current decision. When a run was triggered
+   by additional context, the publisher also posts a threaded outcome reply to that
+   history event: PR drafted/updated, questions still needed, or the no-safe-action
+   decision still applies.
 
 ## Card ↔ PR linkage (`mw_tasks.pr_url` / `pr_number`)
 

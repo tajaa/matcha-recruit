@@ -183,6 +183,58 @@ unset GITHUB_ACTIONS
 unset -f curl mw_login
 
 ################################################################################
+# An explicit reconsideration is durable work authorization. The collector
+# must keep it runnable after reassignment, but only in the two lanes where the
+# API permits a reconsideration request.
+################################################################################
+mkdir -p "$TMP_DIR/collect-bin" "$TMP_DIR/collect-runner"
+cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
+{
+  "project": {"title": "Collector test"},
+  "elements": [],
+  "tasks": [
+    {"id":"11111111-0000-4000-8000-000000000001","title":"Reassigned reconsideration","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_reconsideration_pending":true},
+    {"id":"22222222-0000-4000-8000-000000000002","title":"Ordinary reassigned work","assigned_email":"human@example.com","board_column":"todo","status":"pending"},
+    {"id":"33333333-0000-4000-8000-000000000003","title":"Moved reconsideration","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_reconsideration_pending":true},
+    {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"}
+  ]
+}
+EOF
+cat > "$TMP_DIR/collect-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+output_file=""
+write_status=0
+url=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output_file="$2"; shift 2 ;;
+        -w) write_status=1; shift 2 ;;
+        http://*|https://*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+if [[ "$url" == */auth/login ]]; then
+    printf '{"access_token":"stub-token"}'
+    exit 0
+fi
+cp "$AUTOPR_TEST_BUNDLE_FILE" "$output_file"
+[ "$write_status" = "0" ] || printf 200
+EOF
+chmod +x "$TMP_DIR/collect-bin/curl"
+collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
+    RUNNER_TEMP="$TMP_DIR/collect-runner" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_BUNDLE_FILE="$TMP_DIR/collect-bundle.json" \
+    "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
+collect_rc=$?
+check "collector honors reassigned reconsideration only in an eligible lane" \
+    $([ "$collect_rc" = "0" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "2" ] \
+      && printf '%s' "$collected" | jq -e \
+        'map(.id8) == ["11111111", "44444444"]' >/dev/null \
+      && echo 0 || echo 1)
+
+################################################################################
 # investigate.sh packages checklist, history/discussion, GitHub feedback, and
 # downloaded card files into one context passed to the model.
 ################################################################################
@@ -497,6 +549,27 @@ PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 no_spec_rc=$?
 check "visible origin note still durably suppresses an unchanged no-spec card" \
     $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/reconsideration-cards.json" <<'EOF'
+[
+  {"task_id":"77777777-0000-4000-8000-000000000007","id8":"77777777","project_id":"p","title":"Reconsider me","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-01-02T00:00:00Z] already_fixed","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","autopr_reconsideration_at":"2026-01-03T00:00:00+00:00"},
+  {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Fresh work","board_column":"todo","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+reconsideration_cache="$TMP_DIR/reconsideration-cache"
+reconsidered="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$reconsideration_cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+check "pending additional context reopens an unchanged no-spec decision" \
+    $([ "$(printf '%s' "$reconsidered" | jq -r '.id8')" = "77777777" ] \
+      && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
+      && echo 0 || echo 1)
+
+after_reconsideration="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$reconsideration_cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+check "a failed reconsideration cools down instead of spinning every tick" \
+    $([ "$(printf '%s' "$after_reconsideration" | jq -r '.id8')" = "88888888" ] && echo 0 || echo 1)
 
 cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash

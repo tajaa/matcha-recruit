@@ -71,7 +71,11 @@ done
 if [[ "$url" == */auth/login ]]; then
   printf '{"access_token":"test-token"}'
 else
-  printf '%s' "$payload" > "$AUTOPR_TEST_CARD_PATCH"
+  if [[ "$url" == */activity ]]; then
+    printf '%s' "$payload" > "$AUTOPR_TEST_ACTIVITY"
+  else
+    printf '%s' "$payload" > "$AUTOPR_TEST_CARD_PATCH"
+  fi
   [ -z "$output_file" ] || printf '{"ok":true}' > "$output_file"
   printf 200
 fi
@@ -86,7 +90,7 @@ MATCHA_PROJECT_IDS=one
 MATCHA_ASSIGNEE_EMAIL=haley@oceaneca.com
 EOF
 cat > "$TMP_DIR/card.json" <<'EOF'
-{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"investigate","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
+{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"investigate","autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 cat > "$TMP_DIR/raw-decision.json" <<'EOF'
 {"schema_version":1,"outcome":"questions_only","confidence":{"requirements_clarity":{"score":20,"reason":"term is unclear"},"evidence_quality":{"score":10,"reason":"screenshots conflict"},"code_localization":{"score":5,"reason":"multiple labels"},"verification_strength":{"score":2,"reason":"choice changes tests"},"production_alignment":{"score":5,"reason":"production baseline known"}},"criticality":{"level":"red","reasons":["current core workflow is blocked"]},"questions":[{"id":"q1","question":"Which term is canonical?","why_blocking":"both labels refer to the same object","options":[{"key":"a","label":"Journal","impact":"changes all labels to Journal"},{"key":"b","label":"Note","impact":"changes all labels to Note"}],"default_assumption":"Use Journal"}],"safe_changes_present":false,"no_safe_action_reason":null}
@@ -112,7 +116,7 @@ EOF
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
-    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md"
 )
 
@@ -137,6 +141,8 @@ check "question draft title exposes criticality and confidence" \
   $(grep -q '🔴 \[C42\] \[QUESTIONS\] fix: Clarify terminology' "$TMP_DIR/gh.log" && echo 0 || echo 1)
 check "card remains Changes Requested with a visible auto-setup note" \
   $(jq -e '.board_column == "changes_requested" and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+check "publisher replies to the triggering additional-context note" \
+  $(jq -e '.kind == "note" and .reply_to == "eeeeeeee-0000-4000-8000-000000000001" and (.body | contains("still needs human answers in PR #501"))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
 
 cat > "$TMP_DIR/rework-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"rework","progress_note":"from auto setup · build 849 · prod 1111111 · PR #501 · 🔴 C42 · awaiting answers · Human note","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}

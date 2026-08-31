@@ -31,6 +31,7 @@ PROD_BUILD_NUMBER="$(jq -r '.production.build_number // empty' "$CARD_FILE")"
 PROD_BACKEND_SHA="$(jq -r '.production.containers.backend.git_sha // empty' "$CARD_FILE")"
 PROD_FRONTEND_SHA="$(jq -r '.production.containers.frontend.git_sha // empty' "$CARD_FILE")"
 EXISTING_PROGRESS_NOTE="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+RECONSIDERATION_EVENT_ID="$(jq -r '.autopr_reconsideration_event_id // empty' "$CARD_FILE")"
 OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
 CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
 CONFIDENCE_BAND="$(jq -r '.confidence_band' "$DECISION_FILE")"
@@ -95,6 +96,38 @@ progress_note_with_origin() {
         printf '%s · %s' "$marker" "$existing"
     else
         printf '%s' "$marker"
+    fi
+}
+
+report_summary() {
+    awk '
+      /^### Summary[[:space:]]*$/ { capture=1; next }
+      /^### / && capture { exit }
+      capture { print }
+    ' "$REPORT_FILE" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-1200
+}
+
+post_reconsideration_reply() {
+    local pr_number="${1:-}" summary message
+    [ -n "$RECONSIDERATION_EVENT_ID" ] || return 0
+    summary="$(report_summary)"
+    case "$OUTCOME" in
+        implementation)
+            message="AutoPR accepted this additional context and drafted PR #$pr_number."
+            ;;
+        partial_implementation|questions_only)
+            message="AutoPR reviewed this additional context but still needs human answers in PR #$pr_number."
+            ;;
+        no_safe_action)
+            message="AutoPR reconsidered this context, but the no-PR decision still applies ($NO_SAFE_ACTION_REASON)."
+            ;;
+        *) return 0 ;;
+    esac
+    [ -z "$summary" ] || message="$message $summary"
+    if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" \
+        "$(jq -n --arg body "$message" --arg reply "$RECONSIDERATION_EVENT_ID" \
+            '{kind:"note",body:$body,reply_to:$reply}')" >/dev/null); then
+        printf 'kanban-autopr: warning: could not post reconsideration result for task %s\n' "$TASK_ID" >&2
     fi
 }
 
@@ -266,6 +299,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
                 '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
+        post_reconsideration_reply "$existing_open_pr"
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
         origin_note="$(progress_note_with_origin \
@@ -273,6 +307,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
+        post_reconsideration_reply
         echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     fi
     exit 0
@@ -325,5 +360,6 @@ mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \
         --arg note "$origin_note" \
         '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
+post_reconsideration_reply "$published_pr"
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"

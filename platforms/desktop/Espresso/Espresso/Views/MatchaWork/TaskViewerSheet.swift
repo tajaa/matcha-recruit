@@ -47,6 +47,9 @@ struct TaskViewerSheet: View {
     @State var isSummarizing = false
     @State var newNote = ""
     @State var addingNote = false
+    @State var isAddingAutoPRContext = false
+    @State var didSubmitAutoPRContext = false
+    @State var autoPRContextError: String?
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.

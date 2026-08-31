@@ -266,16 +266,36 @@ extension ProjectDetailViewModel {
     @MainActor
     func replacePreservingAggregates(_ updated: MWProjectTask) {
         guard let i = tasks.firstIndex(where: { $0.id == updated.id }) else { return }
+        let previous = tasks[i]
         var merged = updated
-        if merged.reviewCycleCount == nil { merged.reviewCycleCount = tasks[i].reviewCycleCount }
-        if merged.subtaskTotal == nil { merged.subtaskTotal = tasks[i].subtaskTotal }
-        if merged.subtaskDone == nil { merged.subtaskDone = tasks[i].subtaskDone }
-        if merged.updateCount == nil { merged.updateCount = tasks[i].updateCount }
-        if merged.recentEventIds == nil { merged.recentEventIds = tasks[i].recentEventIds }
-        if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = tasks[i].assignedAvatarUrl }
-        if merged.createdBy == nil { merged.createdBy = tasks[i].createdBy }
-        if merged.createdByName == nil { merged.createdByName = tasks[i].createdByName }
-        if merged.createdByAvatarUrl == nil { merged.createdByAvatarUrl = tasks[i].createdByAvatarUrl }
+        if merged.reviewCycleCount == nil { merged.reviewCycleCount = previous.reviewCycleCount }
+        if merged.subtaskTotal == nil { merged.subtaskTotal = previous.subtaskTotal }
+        if merged.subtaskDone == nil { merged.subtaskDone = previous.subtaskDone }
+        if merged.updateCount == nil { merged.updateCount = previous.updateCount }
+        if merged.recentEventIds == nil { merged.recentEventIds = previous.recentEventIds }
+        if merged.progressNote != previous.progressNote {
+            // A reconsideration event is bound to one exact AutoPR decision.
+            // Single-task/WS payloads omit the list-only event fields, so a
+            // changed decision must consume the cached pending state instead
+            // of carrying it forward until the next full list refresh.
+            if merged.autoprReconsiderationPending == nil {
+                merged.autoprReconsiderationPending = false
+            }
+        } else {
+            if merged.autoprReconsiderationPending == nil {
+                merged.autoprReconsiderationPending = previous.autoprReconsiderationPending
+            }
+            if merged.autoprReconsiderationEventId == nil {
+                merged.autoprReconsiderationEventId = previous.autoprReconsiderationEventId
+            }
+            if merged.autoprReconsiderationAt == nil {
+                merged.autoprReconsiderationAt = previous.autoprReconsiderationAt
+            }
+        }
+        if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = previous.assignedAvatarUrl }
+        if merged.createdBy == nil { merged.createdBy = previous.createdBy }
+        if merged.createdByName == nil { merged.createdByName = previous.createdByName }
+        if merged.createdByAvatarUrl == nil { merged.createdByAvatarUrl = previous.createdByAvatarUrl }
         tasks[i] = merged
     }
 

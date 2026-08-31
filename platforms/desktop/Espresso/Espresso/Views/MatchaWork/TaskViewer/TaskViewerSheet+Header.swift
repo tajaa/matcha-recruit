@@ -9,12 +9,20 @@ extension TaskViewerSheet {
 
     // MARK: - Automation provenance
 
+    /// The sheet is opened with a task snapshot, while project WebSocket
+    /// updates continue to mutate the view model. AutoPR state must follow the
+    /// live row so a completed reconsideration does not remain visually queued
+    /// until the sheet is closed and reopened.
+    var liveAutoPRTask: MWProjectTask {
+        viewModel.tasks.first(where: { $0.id == task.id }) ?? task
+    }
+
     /// AutoPR writes its durable ticket state into `progress_note`. The board
     /// card already previews that field, but the detail sheet must repeat it:
     /// opening a ticket should never hide the fact that an autonomous system
     /// selected it, nor the reason it did or did not create a PR.
     var autoSetupProgressNote: String? {
-        let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let note = liveAutoPRTask.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard note.hasPrefix("🤖 AUTO SETUP") || note.lowercased().hasPrefix("from auto setup") else {
             return nil
         }
@@ -59,6 +67,7 @@ extension TaskViewerSheet {
                         .foregroundColor(appState.themeText)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                    autoPRReconsiderationControl
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -76,6 +85,7 @@ extension TaskViewerSheet {
                             .foregroundColor(appState.themeText.opacity(0.8))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                        autoPRReconsiderationControl
                     }
                 }
                 .padding(.vertical, 10)
@@ -84,6 +94,61 @@ extension TaskViewerSheet {
                 .background(status.color.opacity(0.08))
                 .cornerRadius(8)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.24), lineWidth: 1))
+            }
+        }
+    }
+
+    var canRequestAutoPRReconsideration: Bool {
+        guard let note = autoSetupProgressNote else { return false }
+        let liveTask = liveAutoPRTask
+        return liveTask.status != "cancelled"
+            && ["todo", "changes_requested"].contains(liveTask.boardColumn)
+            && note.contains("[autopr:no-spec ")
+            && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
+                .contains(where: note.contains)
+    }
+
+    var autoPRReconsiderationIsPending: Bool {
+        let liveTask = liveAutoPRTask
+        let submittedDecisionIsCurrent = didSubmitAutoPRContext
+            && liveTask.progressNote == task.progressNote
+        return submittedDecisionIsCurrent || liveTask.autoprReconsiderationPending == true
+    }
+
+    @ViewBuilder
+    var autoPRReconsiderationControl: some View {
+        if canRequestAutoPRReconsideration {
+            if autoPRReconsiderationIsPending {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Reconsideration queued")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(.mwInkStrong)
+                .padding(.top, 3)
+            } else if isAddingAutoPRContext {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Explain what AutoPR missed or attach evidence that changes this decision.")
+                        .font(.system(size: 10))
+                        .foregroundColor(appState.themeTextSecondary)
+                    noteComposer
+                }
+                .padding(.top, 3)
+            } else {
+                Button {
+                    replyingToNote = nil
+                    autoPRContextError = nil
+                    isAddingAutoPRContext = true
+                    Task { @MainActor in isNoteFieldFocused = true }
+                } label: {
+                    Label("Add additional context", systemImage: "arrowshape.turn.up.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.mwInkStrong)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 3)
+                .help("Give AutoPR new evidence and ask it to reconsider this decision")
             }
         }
     }

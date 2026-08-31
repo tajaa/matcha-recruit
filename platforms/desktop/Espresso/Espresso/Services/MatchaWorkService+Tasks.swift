@@ -233,6 +233,47 @@ extension MatchaWorkService {
         )
     }
 
+    struct AutoPRReconsiderationResponse: Decodable {
+        let ok: Bool
+        let activityId: String
+        let createdAt: String
+        let autoprReconsiderationPending: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case ok
+            case activityId = "activity_id"
+            case createdAt = "created_at"
+            case autoprReconsiderationPending = "autopr_reconsideration_pending"
+        }
+    }
+
+    /// Add evidence that challenges one exact AutoPR no-PR decision. The
+    /// expected note makes stale submissions fail with 409 instead of silently
+    /// attaching themselves to a newer agent finding.
+    func requestAutoPRReconsideration(
+        projectId: String,
+        taskId: String,
+        body: String?,
+        attachmentIds: [String]? = nil,
+        expectedProgressNote: String
+    ) async throws -> AutoPRReconsiderationResponse {
+        struct Req: Encodable {
+            let body: String?
+            let attachment_ids: [String]?
+            let expected_progress_note: String
+        }
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/reconsider",
+            body: Req(
+                body: body,
+                attachment_ids: (attachmentIds?.isEmpty ?? true) ? nil : attachmentIds,
+                expected_progress_note: expectedProgressNote
+            )
+        )
+    }
+
     /// Reviewer sends a task back for changes: server bounces review →
     /// changes_requested, stores the note, and emails the assignee. Returns the
     /// updated task.

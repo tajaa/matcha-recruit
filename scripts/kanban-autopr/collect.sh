@@ -2,9 +2,12 @@
 # Collect candidate kanban cards across every project in MATCHA_PROJECT_IDS
 # (comma-separated) assigned to MATCHA_ASSIGNEE_EMAIL and sitting in `todo`
 # or `changes_requested`, plus system-linked `in_progress` cards whose owner
-# PR may need lifecycle reconciliation. One bundle fetch per project (no company-wide list
-# endpoint — the bot's access is per-project mw_project_collaborators rows,
-# not a single company scope; see docs/ops/KANBAN_AUTOPR.md).
+# PR may need lifecycle reconciliation. A pending explicit reconsideration is
+# also eligible in `todo` / `changes_requested` even if assignment changed:
+# that user action is the durable one-run authorization. One bundle fetch per
+# project (no company-wide list endpoint — the bot's access is per-project
+# mw_project_collaborators rows, not a single company scope; see
+# docs/ops/KANBAN_AUTOPR.md).
 #
 # Usage: ./collect.sh > cards.json
 # Always exits 0; emits `[]` if nothing matches.
@@ -35,11 +38,19 @@ for project_id in "${PROJECT_IDS[@]}"; do
         --argjson elements "$elements" '
         .tasks // []
         | map(select(
-            .assigned_email == $email
-            and (
-              .board_column == "todo"
-              or .board_column == "changes_requested"
-              or (.board_column == "in_progress" and ((.progress_note // "") | startswith("🤖 AUTO SETUP · ALREADY SCOPED")))
+            (
+              (
+                (.autopr_reconsideration_pending // false)
+                and (.board_column == "todo" or .board_column == "changes_requested")
+              )
+              or (
+                .assigned_email == $email
+                and (
+                  .board_column == "todo"
+                  or .board_column == "changes_requested"
+                  or (.board_column == "in_progress" and ((.progress_note // "") | startswith("🤖 AUTO SETUP · ALREADY SCOPED")))
+                )
+              )
             )
             and .status != "cancelled"
           ))
@@ -68,6 +79,9 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 pr_url: $t.pr_url,
                 pr_number: $t.pr_number,
                 progress_note: $t.progress_note,
+                autopr_reconsideration_pending: ($t.autopr_reconsideration_pending // false),
+                autopr_reconsideration_event_id: $t.autopr_reconsideration_event_id,
+                autopr_reconsideration_at: $t.autopr_reconsideration_at,
                 # Keep attachment metadata available for ranking/debugging,
                 # but never put short-lived signed storage URLs in card.json.
                 attachments: (($t.attachments // []) | map(del(.storage_url)))

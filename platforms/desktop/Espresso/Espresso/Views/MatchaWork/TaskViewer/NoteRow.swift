@@ -23,6 +23,10 @@ struct NoteRow: View {
         (entry.metadata?["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var isAutoPRAdditionalContext: Bool {
+        entry.metadata?["kind"] == "autopr_additional_context"
+    }
+
     private var linkedFiles: [MWProjectFile] {
         guard let ids = entry.attachmentIds, !ids.isEmpty else { return [] }
         let idSet = Set(ids)
@@ -66,6 +70,16 @@ struct NoteRow: View {
                         )
                 }
                 VStack(alignment: .leading, spacing: 4) {
+                    if isAutoPRAdditionalContext {
+                        Label("ADDITIONAL CONTEXT", systemImage: "arrow.clockwise.circle.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .tracking(0.4)
+                            .foregroundColor(.mwInkStrong)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.mwInkStrong.opacity(0.14))
+                            .cornerRadius(3)
+                    }
                     // Quoted parent — shows what this note is replying to.
                     if let excerpt = replyParentExcerpt {
                         HStack(spacing: 5) {

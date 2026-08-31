@@ -19,6 +19,7 @@ auto-populated by send-back.
 
 import json
 import logging
+import re
 from datetime import date as _date, datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
@@ -108,6 +109,15 @@ _ALLOWED_OUTCOMES = {"open", "won", "lost"}
 # Sales follow-up activity kinds, logged onto the task history timeline.
 _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
+_AUTOPR_NO_SPEC_RE = re.compile(
+    r"\[autopr:no-spec [^\]]+\]\s+"
+    r"(already_fixed|migration_required|policy_blocked|external_dependency)(?:\s|$)"
+)
+
+
+class AutoPRReconsiderationConflict(ValueError):
+    """The AutoPR decision being answered is stale or no longer reconsiderable."""
+
 # History event types that count as a "viewable update" on a ticket — drives
 # the kanban card's unviewed-updates badge + the viewer's UPDATES checkoff list.
 # Keep in lock-step with the client's COUNTED_UPDATE_EVENTS (TicketUpdatesStore):
@@ -132,12 +142,18 @@ async def _broadcast_task_event_safe(project_id: UUID, event: str, payload: dict
 
 def _row_to_task(row: dict) -> dict:
     d = dict(row)
-    for key in ("id", "project_id", "created_by", "assigned_to"):
+    for key in (
+        "id", "project_id", "created_by", "assigned_to",
+        "autopr_reconsideration_event_id",
+    ):
         if d.get(key) is not None:
             d[key] = str(d[key])
     if d.get("due_date") is not None:
         d["due_date"] = d["due_date"].isoformat()
-    for key in ("completed_at", "created_at", "updated_at", "last_moved_at"):
+    for key in (
+        "completed_at", "created_at", "updated_at", "last_moved_at",
+        "autopr_reconsideration_at",
+    ):
         if d.get(key) is not None:
             d[key] = d[key].isoformat()
     # Sales-pipeline fields (present only once the salespipe0001 migration is
@@ -149,6 +165,102 @@ def _row_to_task(row: dict) -> dict:
     if d.get("deal_value") is not None:
         d["deal_value"] = float(d["deal_value"])
     return d
+
+
+async def request_autopr_reconsideration(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: UUID,
+    expected_progress_note: str,
+    body: Optional[str] = None,
+    attachment_ids: Optional[list[UUID]] = None,
+) -> Optional[dict]:
+    """Attach human evidence to one exact AutoPR no-safe-action decision.
+
+    The history event is the durable retry signal. It stores the full current
+    progress note in autopr_reconsideration_of; the task-list query only
+    exposes the event as pending while that value still equals the task's live
+    progress note. Any subsequent AutoPR outcome changes the note and consumes
+    this signal without deleting audit history or faking a board move.
+    """
+    text = (body or "").strip()
+    if not text and not attachment_ids:
+        raise ValueError("Additional context requires text or an attachment")
+    if len(text) > 10_000:
+        raise ValueError("Additional context must be 10,000 characters or fewer")
+
+    expected = (expected_progress_note or "").strip()
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                """
+                SELECT id, progress_note, board_column, status
+                FROM mw_tasks
+                WHERE id = $1 AND project_id = $2
+                FOR UPDATE
+                """,
+                task_id, project_id,
+            )
+            if not task:
+                return None
+
+            if (
+                task["status"] == "cancelled"
+                or task["board_column"] not in ("todo", "changes_requested")
+            ):
+                raise AutoPRReconsiderationConflict(
+                    "AutoPR reconsideration is only available while the ticket "
+                    "is in Todo or Changes Requested"
+                )
+
+            current_note_raw = task["progress_note"] or ""
+            current_note = current_note_raw.strip()
+            if not expected or current_note != expected:
+                raise AutoPRReconsiderationConflict(
+                    "The AutoPR decision changed; refresh the ticket and try again"
+                )
+            if not _AUTOPR_NO_SPEC_RE.search(current_note):
+                raise AutoPRReconsiderationConflict(
+                    "This ticket no longer has a reconsiderable AutoPR no-PR decision"
+                )
+
+            metadata: dict = {
+                "kind": "autopr_additional_context",
+                "body": text,
+                # Preserve the exact database value because the pending-event
+                # query intentionally binds this retry to that exact decision.
+                "autopr_reconsideration_of": current_note_raw,
+                "reply_to_name": "AUTO SETUP",
+                "reply_to_excerpt": current_note.replace("\n", " ")[:140],
+            }
+            if attachment_ids:
+                metadata["attachment_ids"] = [str(a) for a in attachment_ids]
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                RETURNING id, created_at
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                json.dumps(metadata),
+            )
+
+    await _notify_task_comment(
+        project_id=project_id,
+        task_id=task_id,
+        actor_user_id=actor_user_id,
+        body=text or "Added evidence for AutoPR reconsideration",
+    )
+    return {
+        "ok": True,
+        "activity_id": str(row["id"]),
+        "created_at": row["created_at"].isoformat(),
+        "autopr_reconsideration_pending": True,
+    }
 
 
 async def log_task_activity(
@@ -327,6 +439,9 @@ async def list_project_tasks(
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
+                   (autopr_ctx.id IS NOT NULL) AS autopr_reconsideration_pending,
+                   autopr_ctx.id AS autopr_reconsideration_event_id,
+                   autopr_ctx.created_at AS autopr_reconsideration_at,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first move. Counts a
                    -- review_rejected as a move too (review → changes_requested)
@@ -392,6 +507,16 @@ async def list_project_tasks(
             LEFT JOIN employees e2 ON e2.user_id = t.created_by
             LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
+            LEFT JOIN LATERAL (
+                SELECT h5.id, h5.created_at
+                FROM mw_task_history h5
+                WHERE h5.task_id = t.id
+                  AND h5.event_type = 'activity'
+                  AND h5.metadata->>'kind' = 'autopr_additional_context'
+                  AND h5.metadata->>'autopr_reconsideration_of' = t.progress_note
+                ORDER BY h5.created_at DESC
+                LIMIT 1
+            ) autopr_ctx ON TRUE
             WHERE t.project_id = $1 AND t.status != 'cancelled'
               {_done_clause}
             ORDER BY
