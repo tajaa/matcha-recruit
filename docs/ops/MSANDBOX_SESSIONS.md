@@ -16,6 +16,15 @@ Names are generated automatically, and leaving an agent returns to the wizard.
 Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
 exposing a host Docker or tmux socket to the container.
 
+AutoPR and independent sessions share one lifecycle even though their durable
+terminal sessions stay on the host side of the container boundary. From an
+attached agent, press `Ctrl-b s` and select `matcha-autopr`; use `Ctrl-b d` to
+detach. Running `tmux attach -t matcha-autopr` as a command inside the container
+addresses the container's isolated tmux server and is therefore not the switch
+operation. Direct `msandbox wizard`, `session create`, `session start`,
+`session attach`, and `session shell` entrypoints reassert the complete AutoPR
+plane before opening interactive work.
+
 Every new session explicitly chooses an agent, a permission mode, development
 ports/browser capability, and main or a PR as its starting point. Standard is
 always the default. Autonomous must be selected for that session and is stored

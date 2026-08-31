@@ -800,6 +800,7 @@ class AttachmentTests(MsandboxTestCase):
         self.assertIn("exec_workspace_with_file_proxy opencode", launcher)
         self.assertGreaterEqual(launcher.count("exec_workspace_with_file_proxy bash"), 2)
         self.assertIn("call_v2_controller session stop --all --force", launcher)
+        self.assertIn("ensure_v2_system_plane", launcher)
 
 
 class HostAndInstallTests(MsandboxTestCase):
@@ -1100,6 +1101,7 @@ class HostAndInstallTests(MsandboxTestCase):
         legacy = fixture / "scripts/agent-sandbox.sh"
         legacy.write_text(
             '#!/bin/sh\n'
+            'if [ "$*" = "autopr-ready" ]; then exit "${MSANDBOX_TEST_READY_RC:-0}"; fi\n'
             'if [ "$*" = "system up" ] && [ -n "${MSANDBOX_TEST_UP_MARKER:-}" ]; then : > "$MSANDBOX_TEST_UP_MARKER"; fi\n'
             'if [ "${MSANDBOX_TEST_FAIL_UP:-0}" = 1 ] && [ "$*" = "system up" ]; then exit 42; fi\n'
             'printf "legacy:%s\\n" "$*"\n',
@@ -1162,6 +1164,30 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(failed_bare.returncode, 42)
         self.assertNotIn("msandbox + AutoPR ready", failed_bare.stdout)
         self.assertNotIn("No active msandbox sessions", failed_bare.stdout)
+        interactive_environment = dict(os.environ)
+        interactive_marker = self.root / "interactive-system-up-called"
+        interactive_environment["MSANDBOX_TEST_READY_RC"] = "1"
+        interactive_environment["MSANDBOX_TEST_UP_MARKER"] = str(interactive_marker)
+        wizard = subprocess.run(
+            [str(bin_dir / "msandbox"), "wizard"],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=interactive_environment,
+        )
+        self.assertTrue(interactive_marker.is_file())
+        self.assertIn("legacy:system up", wizard.stdout)
+        interactive_marker.unlink()
+        missing = subprocess.run(
+            [str(bin_dir / "msandbox"), "session", "start", "missing"],
+            check=False,
+            text=True,
+            capture_output=True,
+            env=interactive_environment,
+        )
+        self.assertTrue(interactive_marker.is_file())
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("unknown msandbox session", missing.stderr)
         # `gc` is a v2 verb, so it must not fall through to the legacy script.
         garbage_environment = dict(os.environ)
         garbage_environment["PATH"] = str(Path(sys.executable).parent)

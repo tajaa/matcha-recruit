@@ -136,6 +136,19 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    subprocess.run(
+        [
+            "tmux",
+            "set-option",
+            "-t",
+            record.tmux_session,
+            "status-right",
+            "Ctrl-b s: sessions · Ctrl-b d: detach | %H:%M",
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     # Catch immediate failures such as a missing login, executable, or native
     # renderer instead of recording a dead pane as a running session.
     deadline = time.monotonic() + 1.0
