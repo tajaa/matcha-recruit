@@ -16,6 +16,7 @@ from .docker_runtime import ensure_container, exec_in_session
 from .git_worktrees import detach_branch_owner, prune_stale_worktree_metadata, resolve_worktree_owner
 from .install import install_release, rollback_release
 from .models import SessionSpec
+from .session_auth import refresh_github_auth
 from .sessions import (
     SessionError,
     _github_repo,
@@ -149,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _doctor(record) -> int:
+    refresh_github_auth(record)
     ensure_container(record)
     probes = [
         ("node direct", ["node", "--version"], False, False),
@@ -169,6 +171,26 @@ def _doctor(record) -> int:
             False,
         ),
         ("git detached HEAD", ["git", "symbolic-ref", "-q", "HEAD"], False, True),
+        (
+            "GitHub CLI auth",
+            ["gh", "auth", "status", "--hostname", "github.com"],
+            False,
+            False,
+        ),
+        (
+            "GitHub Actions API",
+            [
+                "gh",
+                "workflow",
+                "list",
+                "--repo",
+                _github_repo(record.repo_path),
+                "--limit",
+                "1",
+            ],
+            False,
+            False,
+        ),
     ]
     failed = 0
     for title, argv, login, invert in probes:
@@ -277,11 +299,13 @@ def run(argv: list[str] | None = None) -> int:
         if args.session_command == "attach":
             return attach_agent(record)
         if args.session_command == "shell":
+            refresh_github_auth(record)
             ensure_container(record)
             return exec_in_session(record, ["bash"], tty=True).returncode
         if args.session_command == "exec":
             if not args.argv:
                 raise SessionError("session exec requires a command after --")
+            refresh_github_auth(record)
             ensure_container(record)
             command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
             return exec_in_session(record, command, tty=False).returncode

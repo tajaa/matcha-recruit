@@ -47,6 +47,7 @@ from scripts.msandbox.git_worktrees import (
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
 from scripts.msandbox.install import InstallError, install_release, rollback_release
 from scripts.msandbox.models import PortSet, SessionRecord, SessionSpec, TestPlan, ValidationReference
+from scripts.msandbox.session_auth import SessionAuthError, refresh_github_auth
 from scripts.msandbox.pty_proxy import (
     PASTE_END,
     PASTE_START,
@@ -263,10 +264,60 @@ class WorktreeTests(MsandboxTestCase):
             self.assertIn(ARTIFACT_LIFECYCLE_LOCK, active_locks)
 
         with mock.patch("scripts.msandbox.sessions.state_lock", tracked_lock), mock.patch(
-            "scripts.msandbox.sessions._copy_auth_templates",
+            "scripts.msandbox.sessions.provision_session_auth",
             side_effect=assert_registration_locked,
         ):
             create_session(self.repo, SessionSpec("locked", "codex", "main", start=False))
+
+    def test_github_auth_materializes_keychain_token_and_repairs_git(self) -> None:
+        record = self.record()
+        private_git = session_git_dir(record.id)
+        private_git.mkdir(parents=True)
+        calls: list[list[str]] = []
+
+        def run(argv, **kwargs):
+            command = [str(item) for item in argv]
+            calls.append(command)
+            if command[:4] == ["git", "-C", str(self.repo), "remote"]:
+                return subprocess.CompletedProcess(argv, 0, "https://github.com/tajaa/matcha-recruit.git\n", "")
+            if command[1:4] == ["auth", "token", "--hostname"]:
+                return subprocess.CompletedProcess(argv, 0, "test-token\n", "")
+            if command[1:3] == ["auth", "login"]:
+                config = Path(kwargs["env"]["GH_CONFIG_DIR"])
+                config.mkdir(parents=True, exist_ok=True)
+                (config / "hosts.yml").write_text(
+                    "github.com:\n  user: tajaa\n  oauth_token: test-token\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(kwargs["input"], "test-token\n")
+                self.assertIn("--insecure-storage", command)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            if command[:2] == ["git", "--git-dir"]:
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(command)
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        ):
+            refresh_github_auth(record)
+            refresh_github_auth(record)
+
+        hosts = self.root / "data/homes/session-1/.config/gh/hosts.yml"
+        self.assertEqual(hosts.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(sum(call[1:3] == ["auth", "login"] for call in calls), 1)
+        self.assertEqual(sum(call[:2] == ["git", "--git-dir"] for call in calls), 2)
+
+    def test_github_auth_fails_with_one_host_login_instruction(self) -> None:
+        record = self.record()
+        origin = subprocess.CompletedProcess(
+            [], 0, "git@github.com:tajaa/matcha-recruit.git\n", ""
+        )
+        missing = subprocess.CompletedProcess([], 1, "", "not logged in")
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=(origin, missing)
+        ):
+            with self.assertRaisesRegex(SessionAuthError, "gh auth login"):
+                refresh_github_auth(record)
 
     def test_failed_pristine_startup_removes_all_session_state(self) -> None:
         with (

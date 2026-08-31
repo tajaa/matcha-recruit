@@ -10,6 +10,7 @@ from typing import Sequence
 
 from .docker_runtime import compose_command, compose_environment, exec_in_session
 from .models import Attachment, SessionRecord
+from .session_auth import refresh_github_auth
 
 
 class AgentError(RuntimeError):
@@ -166,6 +167,7 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
 
 
 def attach_agent(record: SessionRecord) -> int:
+    refresh_github_auth(record)
     if not tmux_running(record):
         raise AgentError(f"agent session is not running: {record.name}")
     # The PTY proxy preserves arbitrary input while rewriting a complete

@@ -4,7 +4,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -17,7 +16,6 @@ from .docker_runtime import (
     ensure_container,
     remove_container_project,
     remove_orphaned_container_project,
-    session_home,
     stop_container,
 )
 from .git_worktrees import (
@@ -40,6 +38,7 @@ from .git_worktrees import (
     sync_session_git_to_host,
 )
 from .models import PullRequest, ReleaseResult, SessionRecord, SessionSpec, utc_now
+from .session_auth import provision_session_auth, refresh_github_auth
 from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
     SCHEMA_VERSION,
@@ -60,37 +59,6 @@ def slugify(value: str) -> str:
     if not slug:
         raise SessionError("session name must contain a letter or number")
     return slug[:36]
-
-
-def _copy_auth_templates(record: SessionRecord) -> None:
-    """Copy only credentials needed by the selected agent; never share histories or logs."""
-    home = session_home(record)
-    home.mkdir(parents=True, exist_ok=True, mode=0o700)
-    candidates: dict[str, list[tuple[Path, Path]]] = {
-        "codex": [(Path.home() / ".codex/auth.json", home / ".codex/auth.json")],
-        "opencode": [
-            (
-                Path.home() / ".local/share/opencode/auth.json",
-                home / ".local/share/opencode/auth.json",
-            )
-        ],
-        "claude": [
-            (Path.home() / ".claude/.credentials.json", home / ".claude/.credentials.json"),
-            (Path.home() / ".claude.json", home / ".claude.json"),
-        ],
-    }
-    for source, destination in candidates[record.agent]:
-        if not source.is_file() or source.is_symlink():
-            continue
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        shutil.copyfile(source, destination, follow_symlinks=False)
-        destination.chmod(0o600)
-    gh_source = Path.home() / ".config/gh/hosts.yml"
-    if gh_source.is_file() and not gh_source.is_symlink():
-        gh_destination = home / ".config/gh/hosts.yml"
-        gh_destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        shutil.copyfile(gh_source, gh_destination, follow_symlinks=False)
-        gh_destination.chmod(0o600)
 
 
 def resolve_pr(repo: Path, number: int) -> tuple[str, str]:
@@ -191,7 +159,7 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
             # registration atomic with GC so a concurrent sweep cannot erase a
             # newly copied login before it knows the session is live.
             with state_lock(ARTIFACT_LIFECYCLE_LOCK, timeout_s=600):
-                _copy_auth_templates(record)
+                provision_session_auth(record)
                 save_session(record)
             if spec.start:
                 start_session(record, extra_agent_args)
@@ -294,6 +262,7 @@ def start_session(
         with state_lock(f"session-{record.id}"):
             return start_session(record, extra_agent_args, _lock_held=True)
     _reconcile_isolated_git(record)
+    refresh_github_auth(record)
     ensure_container(record)
     launch_agent(record, extra_agent_args)
     record.phase = "running"
