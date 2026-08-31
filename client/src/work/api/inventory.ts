@@ -210,7 +210,7 @@ export function commitReceipt(body: {
   invoice_number?: string | null
   received_on?: string | null
   force?: boolean
-  lines: { item_id?: string | null; new_item_name?: string | null; quantity: number; order_id?: string | null; expires_on?: string | null }[]
+  lines: { item_id?: string | null; new_item_name?: string | null; quantity: number; order_id?: string | null; expires_on?: string | null; vendor_sku?: string | null; unit_price?: number | null; pack_size?: string | null }[]
 }) {
   return api.post<ReceiptCommitResult>('/inventory/receipts/commit', body)
 }
@@ -648,6 +648,32 @@ export type ForecastParPreview = { considered: number; would_apply: number; woul
 export function previewForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) { return api.post<ForecastParPreview>(`/inventory/forecast/runs/${runId}/par-preview`, body) }
 export type InventoryInsight = { headline: string; detail: string; diagnosis: string; action: 'right_size_par' | 'review_handling' | 'check_rotation' | 'count_stock' | 'none'; confidence: string }
 export function getForecastInsight(runId: string) { return api.post<InventoryInsight>(`/inventory/forecast/insight?run_id=${runId}`, {}) }
+
+export type InventorySupplier = { id: string; name: string; contact_email: string | null; contact_phone: string | null; payment_terms: string | null; active: boolean }
+export type BuyingAlternative = { supplier_id: string; supplier_name: string; purchase_quantity: number; expected_arrival: string | null; landed_cost: number | null; eligible: boolean; reason: string }
+export type BuyingLine = {
+  id: string | null; item_id: string; item_name: string; unit: string | null; location_id: string | null; location_name: string | null
+  action: 'count_first' | 'hold' | 'buy' | 'expedite'; needed_quantity: number | null; transfer_quantity: number; purchase_quantity: number | null
+  supplier_id: string | null; supplier_item_id: string | null; supplier_name: string | null; order_by_date: string | null
+  expected_arrival: string | null; projected_runout: string | null; landed_cost: number | null; confidence: 'low' | 'medium' | 'high'
+  price_confirmation_required: boolean; rationale: string; alternatives: BuyingAlternative[]
+}
+export type BuyingPlan = {
+  id: string | null; forecast_run_id: string; location_id: string | null; input_fingerprint: string; created_at: string | null
+  summary: { count_first: number; hold: number; buy: number; expedite: number; total_landed_cost: number | null; unpriced_count: number }
+  lines: BuyingLine[]
+}
+
+export function listInventorySuppliers() { return api.get<{ suppliers: InventorySupplier[] }>('/inventory/buying/suppliers') }
+export function createInventorySupplier(body: { name: string; contact_email?: string; contact_phone?: string; payment_terms?: string }) { return api.post<InventorySupplier>('/inventory/buying/suppliers', body) }
+export function putInventorySupplierItem(itemId: string, body: { supplier_id: string; location_id?: string | null; vendor_sku?: string; purchase_unit?: string; pack_size_label?: string; units_per_pack?: number; minimum_order_quantity?: number; unit_price?: number; freight_flat?: number; lead_time_days?: number; price_observed_on?: string; preferred?: boolean; active?: boolean }) { return api.put(`/inventory/buying/supplier-items/${itemId}`, body) }
+export function createBuyingRun(body: { forecast_run_id: string; location_id?: string | null }) { return api.post<BuyingPlan>('/inventory/buying/runs', body) }
+export function stageBuyingLine(lineId: string) { return api.post<{ order_id: string; status: string }>(`/inventory/buying/lines/${lineId}/stage`, {}) }
+export function downloadBuyingPlan(forecastRunId: string, locationId?: string) {
+  const params = new URLSearchParams({ forecast_run_id: forecastRunId })
+  if (locationId) params.set('location_id', locationId)
+  return api.download(`/inventory/buying/export.csv?${params.toString()}`, 'inventory-buying-plan.csv')
+}
 
 export type WasteRollup = { total_units: number; total_value: number | null; revenue: number | null; waste_pct_of_revenue: number | null; groups: { key: string; label: string; units: number; value: number | null; pct: number | null }[] }
 export function getWasteRollup(start: string, end: string, groupBy: 'reason' | 'category' | 'item' = 'reason', locationId?: string) {
