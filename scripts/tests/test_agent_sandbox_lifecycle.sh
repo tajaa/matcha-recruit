@@ -164,7 +164,7 @@ check "activity detection includes the error and self-audit worker sandboxes" \
       'ACTIVE — an AutoPR coding agent is running' && echo 0 || echo 1)
 
 bare_output="$(run_msandbox)"
-check "non-interactive bare msandbox reports sessions without changing the control plane" \
+check "bare msandbox reports sessions after preserving the interlocked control plane" \
     $(printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
@@ -213,6 +213,18 @@ check "msandbox off immediately shuts down the dashboard, runner, and both sandb
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
       && echo 0 || echo 1)
 
+bare_output="$(run_msandbox)"
+check "bare msandbox starts the primary sandbox and complete AutoPR control plane" \
+    $(printf '%s' "$bare_output" | grep -q 'No active msandbox sessions' \
+      && [ -f "$TMP_DIR/state/autopr-enabled" ] \
+      && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
+      && [ -f "$TMP_DIR/launchagent.loaded" ] \
+      && [ -f "$TMP_DIR/runner.loaded" ] \
+      && [ -f "$TMP_DIR/tmux.session" ] \
+      && echo 0 || echo 1)
+
+run_msandbox off >/dev/null
+
 set +e
 env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
@@ -230,11 +242,12 @@ check "dedicated AutoPR lane fails closed after msandbox off" \
 
 : > "$TMP_DIR/dashboard.broken"
 set +e
-run_msandbox start >/dev/null 2>&1
+broken_output="$(run_msandbox 2>&1)"
 broken_start_rc=$?
 set -e
-check "partial startup rolls back instead of leaving an enabled system" \
+check "bare msandbox rolls back partial startup without opening the wizard" \
     $([ "$broken_start_rc" != 0 ] \
+      && ! printf '%s' "$broken_output" | grep -q 'No active msandbox sessions' \
       && [ ! -e "$TMP_DIR/state/autopr-enabled" ] \
       && [ ! -e "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ ! -e "$TMP_DIR/tmux.session" ] \
