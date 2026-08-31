@@ -7,7 +7,7 @@ on:
 # that owns the Kanban lane is now the sole five-minute clock and gives this
 # incident lane priority whenever its last completed pass is stale.
 
-# This must run on Finch's Mac. It uses that user's authenticated OpenCode
+# This must run on Finch's Mac. It uses that user's authenticated Codex
 # profile; no model credential is stored in GitHub.
 permissions:
   contents: write
@@ -260,6 +260,18 @@ jobs:
           No verification ran because the investigation produced no code change.
           EOF
 
+      - name: Write commit subject
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
+        timeout-minutes: 5
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-error-autofix-sandbox
+          AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-error-autofix-sandbox
+        run: |
+          ./scripts/kanban-autopr/write-commit-subject.sh fix "$RUNNER_TEMP/commit-subject.json" \
+            -f "$RUNNER_TEMP/incident.json" -f "$RUNNER_TEMP/decision.json" \
+            -f "$RUNNER_TEMP/report.md" -f "$RUNNER_TEMP/verification.md"
+
       - name: Publish PR (or no-fix issue)
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         env:
@@ -268,7 +280,8 @@ jobs:
         run: |
           ./scripts/error-autofix/publish.sh \
             "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/decision.json" \
-            "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
+            "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
+            "$RUNNER_TEMP/commit-subject.json"
 
       - name: Resolve review-ready PR
         id: review_pr
@@ -311,7 +324,7 @@ jobs:
             AGENT_SANDBOX_AUTOPR=1 \
             SANDBOX_WORKSPACE_DIR="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/workspace" \
             SANDBOX_AWS_DIR="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/empty-aws" \
-            SANDBOX_OPENCODE_AUTH_FILE="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/opencode-auth/auth.json" \
+            SANDBOX_CODEX_AUTH_FILE="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/codex-auth/auth.json" \
             ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
           git reset --hard >/dev/null 2>&1 || true
           git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -v "^$(git rev-parse --show-toplevel)\$" | xargs -r -n1 git worktree remove --force || true

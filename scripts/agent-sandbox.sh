@@ -102,14 +102,14 @@ configure_autopr_lane() {
     export SANDBOX_WORKSPACE_DIR="${SANDBOX_WORKSPACE_DIR:-$bootstrap_root/workspace}"
     export SANDBOX_AWS_DIR="${SANDBOX_AWS_DIR:-$bootstrap_root/empty-aws}"
     mkdir -p "$SANDBOX_WORKSPACE_DIR" "$SANDBOX_AWS_DIR"
-    # The trusted bridge stages exactly one mode-600 OpenCode auth.json before
+    # The trusted bridge stages exactly one mode-600 Codex auth.json before
     # setting this flag. Keep it out of ordinary interactive msandbox runs.
-    [ -n "${SANDBOX_OPENCODE_AUTH_FILE:-}" ] || {
-        echo "AutoPR sandbox requires SANDBOX_OPENCODE_AUTH_FILE from its trusted bridge." >&2
+    [ -n "${SANDBOX_CODEX_AUTH_FILE:-}" ] || {
+        echo "AutoPR sandbox requires SANDBOX_CODEX_AUTH_FILE from its trusted bridge." >&2
         exit 1
     }
-    [ -r "$SANDBOX_OPENCODE_AUTH_FILE" ] || {
-        echo "AutoPR OpenCode auth file is not readable: $SANDBOX_OPENCODE_AUTH_FILE" >&2
+    [ -r "$SANDBOX_CODEX_AUTH_FILE" ] || {
+        echo "AutoPR Codex auth file is not readable: $SANDBOX_CODEX_AUTH_FILE" >&2
         exit 1
     }
     COMPOSE=(docker compose --project-name "$SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE" --file "$AUTOPR_COMPOSE_FILE")

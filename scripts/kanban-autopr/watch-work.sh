@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live OpenCode/OpenAI pane. investigate.sh tees the model's real terminal
+# Live Codex pane. investigate.sh tees the model's real terminal
 # stream to a local file because GitHub does not expose in-progress step stdout.
 # GitHub is polled less often than the local log so this stays visually live
 # without turning the observer into an API-heavy execution path.
@@ -78,7 +78,7 @@ render_work() {
     [ "$log_lines" -ge 6 ] || log_lines=6
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'LIVE OPENCODE / OPENAI WORK · %s\n' "$(date '+%H:%M:%S %Z')"
+    printf 'LIVE CODEX WORK · %s\n' "$(date '+%H:%M:%S %Z')"
     case "$RUN_LANE" in
         errors) sandbox_project=matcha-error-autofix-sandbox ;;
         self-audit) sandbox_project=matcha-autopr-self-audit-sandbox ;;
@@ -92,7 +92,7 @@ render_work() {
         printf 'RUN idle\n'
     fi
 
-    pids="$(pgrep -f 'opencode run' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
+    pids="$(pgrep -f 'codex exec' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
     if [ -n "$pids" ]; then
         printf 'PROCESS '
         ps -p "$pids" -o pid=,etime=,comm= 2>/dev/null | paste -sd' ' - || true
@@ -102,7 +102,7 @@ render_work() {
     if [ -s "$LIVE_LOG" ]; then
         sanitize_model_stream < "$LIVE_LOG" | tail -n "$log_lines"
     else
-        printf 'Waiting for investigate.sh to start OpenCode.\n'
+        printf 'Waiting for investigate.sh to start Codex.\n'
         printf 'The stream will appear here without opening GitHub logs.\n'
     fi
 }

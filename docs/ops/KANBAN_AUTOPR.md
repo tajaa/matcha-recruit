@@ -22,9 +22,9 @@ a card back. The bot never merges and never approves.
 **Design constraint carried over from silent-error-autofix**: no model credential and no
 Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as Finch's
 user; before each run the trusted bridge makes a temporary mode-600 copy of the Mac's
-existing OpenCode `auth.json` and exposes that one file read-only in the dedicated
+existing Codex `~/.codex/auth.json` and exposes that one file read-only in the dedicated
 `matcha-kanban-autopr-sandbox` container. The Matcha bot credential lives in
-`~/.config/matcha-autopr/env` (`chmod 600`, never committed). OpenCode itself never
+`~/.config/matcha-autopr/env` (`chmod 600`, never committed). Codex itself never
 receives that file or credential.
 
 The existing `EC2_SSH_KEY` Actions secret is used only by the trusted harness. Before
@@ -35,7 +35,7 @@ tags, reads the public frontend build number, and compares production's read-onl
 from `main`, an unreadable build number, or an unreadable schema state fails the run
 closed. New frontend images expose the build/SHA in `/version.json`; the resolver keeps
 a compiled-bundle fallback only for older images that predate the manifest. The key is
-removed from the environment before OpenCode starts.
+removed from the environment before Codex starts.
 
 ## Why per-project collaborator rows, not a company scope
 
@@ -75,8 +75,8 @@ changes.
    `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
    whatever originally installed it. `install_repo_webhook` now PATCHes an existing
    hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
-5. Ensure the host OpenCode worker is already authenticated (the existing AutoPR setup
-   satisfies this). Do **not** run `opencode auth login` or add an API key for the
+5. Ensure the host Codex CLI is authenticated with the intended ChatGPT account
+   (`codex login status`). Do **not** add an API key for the
    sandbox: each run securely reuses only the host auth file.
 6. Install the local timer: `./scripts/kanban-autopr/install-launch-agent.sh`. Installation
    alone leaves autonomous work OFF. Its JSONL log is
@@ -104,7 +104,7 @@ access. Instead, the dispatcher evaluates the same fail-closed master predicate
 from launchd-safe locations: the `autopr-enabled` marker created only by
 `msandbox`, plus a running Docker Compose `matcha-agent-sandbox` workspace.
 The workflow repeats the complete `msandbox autopr-ready` check before starting
-OpenCode. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
+Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
 
 - **24h queue + PR dashboard** — active Kanban/error/self-audit workflow, the exact card
   `select.sh` would choose next, the Todo/Changes Requested queue, open bot PRs across
@@ -115,7 +115,7 @@ OpenCode. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
   and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
   runner worktree and never displays the ticket prompt or credential-bearing process
   arguments.
-- **live OpenCode/OpenAI work** — current Actions run/step, dedicated msandbox identity,
+- **live Codex work** — current Actions run/step, dedicated msandbox identity,
   plus the real model terminal
   stream while it investigates, reads files, edits code, and verifies the task. The
   trusted harness tees that output to the mode-600 local file
@@ -144,7 +144,7 @@ second scheduler.
 1. **Production freshness** — the trusted local runner records the exact active frontend
    build plus backend/frontend SHAs and production migration heads. Once a card is
    selected it also attaches bounded, redacted recent error reports and error-level
-   backend/worker/nginx log signals. OpenCode receives those files and a commit list
+   backend/worker/nginx log signals. Codex receives those files and a commit list
    between each live image and the checked-out branch, but never SSH or database
    credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
    fix or an unapplied migration. It may diagnose migration drift but the path guard still
@@ -189,10 +189,10 @@ second scheduler.
    access. `todo` mode implements the card; `rework` mode additionally receives the
    existing PR's reviews/comments and addresses the latest `review_note`, rejection
    events, discussion, and screenshots without re-litigating accepted earlier rounds.
-   It then calls `run-opencode-sandboxed.sh`, which clones only tracked files into a
+   It then calls `run-codex-sandboxed.sh`, which clones only tracked files into a
    dedicated msandbox workspace, removes the clone's remote, mounts an empty AWS
-   directory, gives OpenCode only a read-only copy of its existing auth file, and strips
-   GitHub/Matcha/SSH credentials. OpenCode gets broad permissions
+   directory, gives Codex only a read-only copy of its existing auth file, and strips
+   GitHub/Matcha/SSH credentials. Codex runs `gpt-5.6-sol` with medium reasoning and broad permissions
    inside that disposable clone, while the trusted harness copies back only its patch,
    report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
    `### Confidence` plus a shell-validated JSON triage decision. Additional-context
@@ -216,7 +216,13 @@ second scheduler.
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
-8. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+8. **`write-publication-copy.sh`** — runs a separate writing-only Codex pass with
+   `gpt-5.6-luna` and medium reasoning. It produces only a conventional commit subject
+   and a short card note. Trusted shell validates the exact JSON schema, category prefix,
+   one-line/length limits, and rejects any repository diff. For blocked/no-PR outcomes,
+   the note explains the actual missing decision or safety boundary instead of repeating
+   the status label.
+9. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
    restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
@@ -242,7 +248,8 @@ second scheduler.
    `questions_only` creates a no-product-change draft PR, applies
    `autopr-awaiting-input`, and leaves the card in `changes_requested` with a visible
    note such as `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod
-   c5d3a49 · PR #295 · 🟡 C42`. `rework` updates the existing branch and PR;
+   c5d3a49 · PR #295 · 🟡 C42 · note: Needs the canonical term before labels can be
+   updated safely.`. `rework` updates the existing branch and PR;
    once there are no remaining blocking questions it returns the card to `in_progress`
    (this is the one transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not

@@ -18,7 +18,7 @@ reinvestigating handled incidents on every pass.
 Pipeline (`scripts/error-autofix/`):
 
 1. **`reconcile.sh`** — before collection, compares each open `bot/err-*` draft with
-   recent, later human-merged PRs that overlap its files. Terra high must return a
+   recent, later human-merged PRs that overlap its files. Codex Sol-medium must return a
    strict, high-confidence semantic-equivalence verdict before the bot labels and
    closes a draft as superseded. It appends the human merge timestamp so a post-deploy
    recurrence can re-enter the queue. This pass has no production credentials.
@@ -35,15 +35,15 @@ Pipeline (`scripts/error-autofix/`):
    `gh pr list --head bot/err-<key> --state all`: open → skip; merged → skip unless a
    genuine recurrence is seen well after a deploy-grace window; closed-unmerged → skip
    for a 7-day cooldown, not forever. Also caps total open `autofix`-labeled PRs.
-4. **`investigate.sh`** — one sandboxed `opencode run` with
-   `openai/gpt-5.6-terra --variant high` in a disposable tracked-files-only clone,
-   with evidence attached as a file (not interpolated into the prompt). It must produce
+4. **`investigate.sh`** — one sandboxed `codex exec` with
+   `gpt-5.6-sol` and medium reasoning in a disposable tracked-files-only clone,
+   with evidence copied into the clone and enumerated in a bounded prompt. It must produce
    a markdown report with four required headings (Root cause / Fix / Blast radius /
    Confidence) plus a shell-validated JSON decision. The decision independently scores
    confidence and classifies criticality as red/orange/yellow. **The model never
    reports test results** — that's the next script's job, and anything it writes about
-   tests there is discarded. `--` terminates the repeated `--file` option before the
-   prompt; without it OpenCode interprets the prompt itself as another attachment.
+   tests there is discarded. The CLI is ephemeral, ignores user config, and receives no
+   GitHub, production, or Matcha credentials.
 5. **Cross-lane scope check** — `scripts/autopr-scope/check-open-prs.sh` captures the
    uncommitted proposal with a temporary Git index, prefilters open PRs targeting
    `main` by changed-file overlap, and suppresses publication only for an exact stable
@@ -60,7 +60,10 @@ Pipeline (`scripts/error-autofix/`):
    TypeScript diagnostics, and runs changed or colocated Vitest files against both
    trees. Missing verification dependencies label a draft `needs-work`; they never
    trigger an unpinned install in the scheduled workflow.
-7. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
+7. **`write-commit-subject.sh`** — uses Codex Luna-medium for the bounded commit
+   subject after verification. Trusted shell enforces the `fix:` prefix, one-line
+   72-character limit, and rejects any repository edit from this writing-only pass.
+8. **`publish.sh`** — opens a draft PR with a body assembled from the incident +
    report + verification table (endpoint, occurrence count, admin link, traceback,
    correlated log lines). The PR title, labels, and durable body trailers carry the same
    `🔴` / `🟠` / `🟡` criticality and C0–100 confidence presentation as Kanban
@@ -68,7 +71,7 @@ Pipeline (`scripts/error-autofix/`):
    body instead of silently doing nothing. Replacing the original placeholder body is
    essential: placeholders stay retryable after a failed run, while finalized no-fix
    reports stop queue starvation. A successful draft closes its matching no-fix issue.
-8. **`notify-review-ready.sh`** — after a reviewable PR exists, uses the trusted SSH
+9. **`notify-review-ready.sh`** — after a reviewable PR exists, uses the trusted SSH
    harness to call the live backend's already-configured Gmail/MailerSend transport and
    emails `aaron@hey-matcha.com` with the production error, triage, and PR link. A
    durable PR comment makes delivery idempotent; the next pass retries any opted-in open
@@ -79,9 +82,10 @@ It never deploys or auto-merges. A human reads the PR body and decides.
 ## One-time setup
 
 1. Register the GitHub Actions self-hosted runner on this Mac with labels
-   `self-hosted`, `macOS`, `opencode`, run as Finch's logged-in user (its
-   OpenCode/OpenAI auth and `server/venv` live under that user).
-2. Ensure `opencode models openai` lists `openai/gpt-5.6-luna` for that runner user.
+   `self-hosted`, `macOS`, `opencode`, run as Finch's logged-in user. `opencode` is the
+   legacy runner-registration label and does not select the execution engine.
+2. Ensure `codex login status` succeeds for that runner user and the installed Codex CLI
+   supports `gpt-5.6-sol` and `gpt-5.6-luna`.
 3. Keep repository secret `EC2_SSH_KEY` configured — used only for the read-only DB
    query and, as a fallback, log collection.
 4. Add repository variables `PROD_HEALTH_URL` / `PROD_API_HEALTH_URL` for the fallback

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Close an open autofix draft only when a later human PR demonstrably contains
-# the same fix. GitHub metadata is collected before Terra runs; Terra receives
+# the same fix. GitHub metadata is collected before Codex runs; Codex receives
 # no credentials and writes a strict verdict to a temp file.
 #
 # Usage: GH_TOKEN=... ./scripts/error-autofix/reconcile.sh
@@ -12,10 +12,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 LOOKBACK_DAYS="${AUTOFIX_RECONCILE_LOOKBACK_DAYS:-7}"
-MODEL="${AUTOFIX_RECONCILE_MODEL:-openai/gpt-5.6-terra}"
+MODEL="${AUTOFIX_RECONCILE_MODEL:-gpt-5.6-sol}"
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autofix-reconcile-XXXXXX")"
-TREE_DIR="$WORK_DIR/tree"
-trap 'git -C "$REPO_ROOT" worktree remove --force "$TREE_DIR" >/dev/null 2>&1 || true; rm -rf "$WORK_DIR"' EXIT
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
+trap 'rm -rf "$WORK_DIR"' EXIT
 
 since="$(date -u -v"-${LOOKBACK_DAYS}d" +%Y-%m-%d 2>/dev/null || date -u -d "${LOOKBACK_DAYS} days ago" +%Y-%m-%d)"
 drafts="$WORK_DIR/drafts.json"
@@ -79,8 +79,6 @@ gh pr list --repo "$REPO" --state merged --search "merged:>=$since" --limit 100 
     --json number,title,mergedAt,headRefName,files,url > "$merged"
 [ "$(jq 'length' "$merged")" -gt 0 ] || exit 0
 
-git -C "$REPO_ROOT" worktree add --detach "$TREE_DIR" HEAD >/dev/null
-
 while IFS= read -r draft_number; do
     draft="$WORK_DIR/draft-$draft_number.json"
     jq --argjson number "$draft_number" '.[] | select(.number == $number)' "$drafts" > "$draft"
@@ -105,13 +103,17 @@ while IFS= read -r draft_number; do
     done < <(jq -r '.[].number' "$candidates")
 
     result="$WORK_DIR/result-$draft_number.json"
-    prompt="$WORK_DIR/prompt-$draft_number.txt"
-    sed "s#RESULT_PATH#$result#g" "$SCRIPT_DIR/_reconcile_prompt.txt" > "$prompt"
-    # Terra does not need GitHub or production access to compare the patches.
+    receipt="$WORK_DIR/receipt-$draft_number.md"
+    # Codex does not need GitHub or production access to compare the patches.
     env -u GH_TOKEN -u GITHUB_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
-        opencode run --auto --model "$MODEL" --variant high --dir "$TREE_DIR" \
+        AUTOPR_CODEX_MODEL="$MODEL" \
+        AUTOPR_CODEX_REASONING_EFFORT=medium \
+        AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1 \
+        AUTOPR_SANDBOX_PROJECT_NAME=matcha-error-autofix-sandbox \
+        AUTOPR_SANDBOX_RUNTIME_ROOT="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)/matcha-error-autofix-sandbox" \
+        "$SANDBOX_RUNNER" "$SCRIPT_DIR/_reconcile_prompt.txt" "$receipt" "$result" \
         -f "$draft" -f "$candidates" -f "$draft_diff" "${candidate_diffs[@]}" \
-        -- "$(<"$prompt")" || continue
+        || continue
 
     jq -e '
         (.decision == "superseded" or .decision == "no_match" or .decision == "uncertain") and
@@ -125,7 +127,7 @@ while IFS= read -r draft_number; do
     jq -e --argjson number "$replacing_pr" 'any(.[]; .number == $number)' "$candidates" >/dev/null || continue
 
     # Re-fetch immediately before mutation. A human may have edited, marked
-    # ready, or merged either PR while Terra was comparing their patches.
+    # ready, or merged either PR while Codex was comparing their patches.
     live_draft="$(gh pr view "$draft_number" --repo "$REPO" --json number,state,isDraft,headRefName,body,labels)"
     live_replacing="$(gh pr view "$replacing_pr" --repo "$REPO" --json number,state,mergedAt)"
     [ "$(printf '%s' "$live_draft" | jq -r '.state')" = "OPEN" ] || continue

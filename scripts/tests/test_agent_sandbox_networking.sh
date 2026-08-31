@@ -66,7 +66,7 @@ assert workspace["environment"]["HOST_DEV_BACKEND_URL"] == "http://host.docker.i
 PY
 echo "PASS: sandbox and host-dev port overrides remain independent"
 
-SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
+SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
     render_compose --file "$AUTOPR_COMPOSE_FILE" > "$TMP_DIR/autopr.json"
 python3 - "$TMP_DIR/autopr.json" <<'PY'
 import json
@@ -76,6 +76,9 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     workspace = json.load(handle)["services"]["workspace"]
 
 assert workspace.get("ports", []) == []
+mounts = {volume["target"]: volume for volume in workspace["volumes"]}
+assert mounts["/home/agent/.codex/auth.json"]["read_only"] is True
+assert mounts["/home/agent/.codex/auth.json"]["source"].endswith("/auth.json")
 PY
 echo "PASS: AutoPR overlay still publishes no host ports"
 

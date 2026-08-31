@@ -150,7 +150,7 @@ env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
     AUTOPR_STATE_DIR="$TMP_DIR/state" \
     AUTOPR_LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" AUTOPR_TMUX_BIN="$TMP_DIR/bin/tmux" \
-    SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
+    SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
     SANDBOX_WORKSPACE_DIR="$TMP_DIR/workspace" SANDBOX_AWS_DIR="$TMP_DIR/empty-aws" \
     "$MSANDBOX" exec true >/dev/null
 check "dedicated AutoPR lane starts while the master switch is on" \
@@ -218,7 +218,7 @@ env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
     AUTOPR_STATE_DIR="$TMP_DIR/state" \
     AUTOPR_LAUNCHCTL_BIN="$TMP_DIR/bin/launchctl" AUTOPR_TMUX_BIN="$TMP_DIR/bin/tmux" \
-    SANDBOX_OPENCODE_AUTH_FILE="$TMP_DIR/auth.json" \
+    SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
     SANDBOX_WORKSPACE_DIR="$TMP_DIR/workspace" SANDBOX_AWS_DIR="$TMP_DIR/empty-aws" \
     "$MSANDBOX" exec true >/dev/null 2>&1
 off_rc=$?

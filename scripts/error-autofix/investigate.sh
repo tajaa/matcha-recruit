@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ask OpenCode to investigate one incident and write a structured report.
+# Ask Codex to investigate one incident and write a structured report.
 # Leaves any fix unstaged in the working tree; never commits.
 #
 # Usage: ./investigate.sh incident.json report.md decision.json [correlated-log.txt]
@@ -53,21 +53,16 @@ ATTACH_ARGS=(-f "$MODEL_INCIDENT")
 # Match the Kanban lane's isolation: production runs use a disposable,
 # tracked-files-only clone in the dedicated msandbox. Direct host execution is
 # an explicit local test seam and is forbidden in GitHub Actions.
-SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-opencode-sandboxed.sh}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$REPO_ROOT/scripts/kanban-autopr/run-codex-sandboxed.sh}"
 TEST_DIRECT="${AUTOPR_SANDBOX_TEST_DIRECT:-0}"
-if [ "$TEST_DIRECT" = 1 ]; then
-    [ "${GITHUB_ACTIONS:-}" != true ] || die "direct OpenCode execution is forbidden in GitHub Actions"
-    prompt_text="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" \
-        -e "s#DECISION_PATH#$DECISION_FILE#g" "$SCRIPT_DIR/_prompt.txt")"
-    env -u GH_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
-        opencode run --auto --model openai/gpt-5.6-terra --variant high \
-        "${ATTACH_ARGS[@]}" -- "$prompt_text"
-else
-    [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
-    env -u GH_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
-        "$SANDBOX_RUNNER" "$SCRIPT_DIR/_prompt.txt" "$REPORT_FILE" "$DECISION_FILE" \
-        "${ATTACH_ARGS[@]}"
-fi
+[ "$TEST_DIRECT" != 1 ] || [ "${GITHUB_ACTIONS:-}" != true ] \
+    || die "direct Codex execution is forbidden in GitHub Actions"
+[ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
+env -u GH_TOKEN -u EC2_SSH_KEY -u SSH_KEY \
+    AUTOPR_CODEX_MODEL=gpt-5.6-sol \
+    AUTOPR_CODEX_REASONING_EFFORT=medium \
+    "$SANDBOX_RUNNER" "$SCRIPT_DIR/_prompt.txt" "$REPORT_FILE" "$DECISION_FILE" \
+    "${ATTACH_ARGS[@]}"
 
 if [ ! -s "$REPORT_FILE" ]; then
     die "investigation produced no report at $REPORT_FILE"

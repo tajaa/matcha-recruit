@@ -3,7 +3,7 @@
 # or publish a question draft when the card needs a human answer. The board is
 # where this user works, not GitHub Issues.
 #
-# Usage: ./publish.sh card.json decision.json report.md verification.md
+# Usage: ./publish.sh card.json decision.json report.md verification.md publication-copy.json
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,10 +13,11 @@ source "$SCRIPT_DIR/lib.sh"
 # shellcheck source=./decision.sh
 source "$SCRIPT_DIR/decision.sh"
 
-CARD_FILE="${1:?usage: publish.sh card.json decision.json report.md verification.md}"
-DECISION_FILE="${2:?usage: publish.sh card.json decision.json report.md verification.md}"
-REPORT_FILE="${3:?usage: publish.sh card.json decision.json report.md verification.md}"
-VERIFICATION_FILE="${4:?usage: publish.sh card.json decision.json report.md verification.md}"
+CARD_FILE="${1:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+DECISION_FILE="${2:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+REPORT_FILE="${3:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+VERIFICATION_FILE="${4:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+PUBLICATION_COPY_FILE="${5:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
@@ -39,6 +40,10 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
+COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
+    || die "publication copy is missing a commit subject"
+CARD_NOTE="$(jq -er '.card_note | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
+    || die "publication copy is missing a card note"
 NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
 POSSIBLE_DUPLICATE="${AUTOPR_POSSIBLE_DUPLICATE:-0}"
 NOTE_STATE="ready_for_review"
@@ -82,12 +87,12 @@ progress_note_with_origin() {
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
     remainder="$(printf '%s' "$existing" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$existing" ] \
@@ -241,6 +246,15 @@ case "$CATEGORY" in
     fix|bug) PREFIX="fix" ;;
     *) PREFIX="chore" ;;
 esac
+[ "${COMMIT_SUBJECT#"$PREFIX: "}" != "$COMMIT_SUBJECT" ] \
+    || die "publication commit subject must start with $PREFIX:"
+[[ "$COMMIT_SUBJECT" != *$'\n'* && "$COMMIT_SUBJECT" != *$'\r'* ]] \
+    || die "publication commit subject must be one line"
+[ "${#COMMIT_SUBJECT}" -le 72 ] || die "publication commit subject exceeds 72 characters"
+[[ "$CARD_NOTE" != *$'\n'* && "$CARD_NOTE" != *$'\r'* && "$CARD_NOTE" != *'·'* ]] \
+    || die "publication card note contains a forbidden separator or newline"
+[ -n "$CARD_NOTE" ] && [ "${#CARD_NOTE}" -le 240 ] \
+    || die "publication card note must be 1-240 characters"
 
 # The decision must agree with the actual working tree. Do not turn a model
 # mismatch into a permanent no-spec marker, and never publish product changes
@@ -294,7 +308,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         replace_triage_labels "$existing_open_pr"
         pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$existing_open_pr"
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec" \
+            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
@@ -303,7 +317,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec" \
+            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
@@ -323,12 +337,12 @@ if [ "$AWAITING_HUMAN" = true ] && [ -z "$existing_open_pr" ]; then
 fi
 
 if [ "$has_diff" = true ]; then
-    git commit -m "$PREFIX: $TITLE" >/dev/null
+    git commit -m "$COMMIT_SUBJECT" >/dev/null
     git push --force-with-lease --set-upstream origin "$BRANCH"
 elif [ -z "$existing_open_pr" ]; then
     # GitHub needs a head commit to host a draft with questions, but this empty
     # commit deliberately changes no product files.
-    git commit --allow-empty -m "$PREFIX: $TITLE (questions)" >/dev/null
+    git commit --allow-empty -m "$COMMIT_SUBJECT" >/dev/null
     git push --force-with-lease --set-upstream origin "$BRANCH"
 fi
 
@@ -353,7 +367,7 @@ pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
 card_column=in_progress
 [ "$AWAITING_HUMAN" != true ] || card_column=changes_requested
 origin_note="$(progress_note_with_origin \
-    "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE" \
+    "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
 replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \

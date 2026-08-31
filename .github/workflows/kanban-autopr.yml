@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 # This must run on Finch's Mac. The trusted job owns board/prod/GitHub access,
-# while OpenCode runs with broad permissions only inside a dedicated msandbox
+# while Codex runs with broad permissions only inside a dedicated msandbox
 # containing a clean tracked-files-only clone. The Matcha bot credential lives
 # in ~/.config/matcha-autopr/env
 # (chmod 600, never committed, never a GitHub secret) — same design
@@ -251,13 +251,28 @@ jobs:
         run: |
           printf '%s\n' '## Verification' '' 'Not run: this result contains no product diff and is awaiting requirements or a human-only action.' > "$RUNNER_TEMP/verification.md"
 
+      - name: Write commit subject and card note
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
+        timeout-minutes: 5
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
+        run: |
+          ./scripts/kanban-autopr/write-publication-copy.sh \
+            "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
+            "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
+            "$RUNNER_TEMP/publication-copy.json"
+
       - name: Publish PR, question draft, or no-spec marker
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
         run: |
-          ./scripts/kanban-autopr/publish.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
+          ./scripts/kanban-autopr/publish.sh \
+            "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
+            "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
+            "$RUNNER_TEMP/publication-copy.json"
 
       - name: Cleanup
         if: always()

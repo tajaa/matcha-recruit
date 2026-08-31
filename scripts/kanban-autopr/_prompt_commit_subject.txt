@@ -1,0 +1,16 @@
+You write one commit subject for a completed Matcha AutoPR code change. Do not edit repository files.
+
+Read the supplied trusted context, evidence, decision, report, and verification files. The context file specifies the required conventional prefix.
+
+Write a brief Markdown receipt with the heading `### Commit subject` to REPORT_PATH. Write exactly one JSON object to DECISION_PATH:
+
+{"schema_version":1,"commit_subject":"fix: concise imperative summary"}
+
+Rules:
+
+- Use only facts in the supplied files. Do not invent changes, causes, or test results.
+- Use exactly the required `feat:`, `fix:`, or `chore:` prefix from the context file.
+- Use imperative wording that describes the actual code change, not the incident, card, audit id, or automation process.
+- The subject must be one line and at most 72 characters.
+- Do not add Markdown, issue/PR numbers, fingerprints, file paths, or trailing punctuation.
+- Do not emit JSON anywhere except DECISION_PATH.
