@@ -121,14 +121,17 @@ Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
   trusted harness tees that output to the mode-600 local file
   `~/Library/Logs/matcha-kanban-autopr-live.log`; GitHub does not expose live step stdout.
   Model credentials remain stripped, and the display adds common token and PEM redaction.
+  This pane appends instead of redrawing, so earlier work remains in tmux's 100,000-line
+  history across subsequent runs while the master session stays up. Scroll with the mouse
+  or trackpad, or enter copy mode with `Ctrl-b [`.
 - **timer + runner health** — LaunchAgent state, self-hosted runner presence, recent
   structured dispatch/skip/error events, and the dedicated worker's real Docker state.
   A container stuck in `created`, `exited`, or another non-running state is shown as
   blocked rather than healthy.
 
 The summary pane refreshes every 60 seconds, the PR pane every 10 seconds, the local model
-stream every 2 seconds (with GitHub status refreshed every 10), and health every 15
-seconds. Override those intervals with
+stream appends new output every 2 seconds (with status appended only when it changes and
+GitHub refreshed every 10), and health refreshes every 15 seconds. Override those intervals with
 `AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,
 `AUTOPR_WORK_REFRESH_SECONDS`, `AUTOPR_WORK_STATUS_REFRESH_SECONDS`, and
 `AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. Override

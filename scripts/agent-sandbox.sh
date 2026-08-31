@@ -852,10 +852,18 @@ case "$command_name" in
         ;;
     start)
         require_docker
-        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
         if [ "$OPEN_V2_WIZARD_AFTER_START" = 1 ]; then
+            startup_log="$(mktemp "${TMPDIR:-/tmp}/msandbox-start.XXXXXX")"
+            if ! start_primary_and_enable_autopr >"$startup_log" 2>&1; then
+                cat "$startup_log" >&2
+                rm -f -- "$startup_log"
+                exit 1
+            fi
+            rm -f -- "$startup_log"
+            printf 'msandbox + AutoPR ready · dashboard: tmux attach -t %s\n' "$AUTOPR_TMUX_SESSION"
             run_v2_controller
         fi
+        if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
         ;;
     dev)
         require_docker

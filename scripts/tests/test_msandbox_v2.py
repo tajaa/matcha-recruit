@@ -1046,6 +1046,7 @@ class HostAndInstallTests(MsandboxTestCase):
         legacy = fixture / "scripts/agent-sandbox.sh"
         legacy.write_text(
             '#!/bin/sh\n'
+            'if [ "$*" = "system up" ] && [ -n "${MSANDBOX_TEST_UP_MARKER:-}" ]; then : > "$MSANDBOX_TEST_UP_MARKER"; fi\n'
             'if [ "${MSANDBOX_TEST_FAIL_UP:-0}" = 1 ] && [ "$*" = "system up" ]; then exit 42; fi\n'
             'printf "legacy:%s\\n" "$*"\n',
             encoding="utf-8",
@@ -1081,13 +1082,19 @@ class HostAndInstallTests(MsandboxTestCase):
             capture_output=True,
         )
         self.assertEqual(completed.stdout.strip(), "legacy:system status")
+        bare_environment = dict(os.environ)
+        up_marker = self.root / "system-up-called"
+        bare_environment["MSANDBOX_TEST_UP_MARKER"] = str(up_marker)
         bare = subprocess.run(
             [str(bin_dir / "msandbox")],
             check=True,
             text=True,
             capture_output=True,
+            env=bare_environment,
         )
-        self.assertIn("legacy:system up", bare.stdout)
+        self.assertTrue(up_marker.is_file())
+        self.assertIn("msandbox + AutoPR ready", bare.stdout)
+        self.assertNotIn("legacy:system up", bare.stdout)
         self.assertIn("No active msandbox sessions", bare.stdout)
         failed_environment = dict(os.environ)
         failed_environment["MSANDBOX_TEST_FAIL_UP"] = "1"
@@ -1099,6 +1106,7 @@ class HostAndInstallTests(MsandboxTestCase):
             env=failed_environment,
         )
         self.assertEqual(failed_bare.returncode, 42)
+        self.assertNotIn("msandbox + AutoPR ready", failed_bare.stdout)
         self.assertNotIn("No active msandbox sessions", failed_bare.stdout)
         # `gc` is a v2 verb, so it must not fall through to the legacy script.
         garbage_environment = dict(os.environ)
