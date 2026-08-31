@@ -272,6 +272,15 @@ extension ProjectDetailViewModel {
         if merged.subtaskDone == nil { merged.subtaskDone = tasks[i].subtaskDone }
         if merged.updateCount == nil { merged.updateCount = tasks[i].updateCount }
         if merged.recentEventIds == nil { merged.recentEventIds = tasks[i].recentEventIds }
+        if merged.autoprReconsiderationPending == nil {
+            merged.autoprReconsiderationPending = tasks[i].autoprReconsiderationPending
+        }
+        if merged.autoprReconsiderationEventId == nil {
+            merged.autoprReconsiderationEventId = tasks[i].autoprReconsiderationEventId
+        }
+        if merged.autoprReconsiderationAt == nil {
+            merged.autoprReconsiderationAt = tasks[i].autoprReconsiderationAt
+        }
         if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = tasks[i].assignedAvatarUrl }
         if merged.createdBy == nil { merged.createdBy = tasks[i].createdBy }
         if merged.createdByName == nil { merged.createdByName = tasks[i].createdByName }

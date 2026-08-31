@@ -498,6 +498,27 @@ no_spec_rc=$?
 check "visible origin note still durably suppresses an unchanged no-spec card" \
     $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
 
+cat > "$TMP_DIR/reconsideration-cards.json" <<'EOF'
+[
+  {"task_id":"77777777-0000-4000-8000-000000000007","id8":"77777777","project_id":"p","title":"Reconsider me","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-01-02T00:00:00Z] already_fixed","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","autopr_reconsideration_at":"2026-01-03T00:00:00+00:00"},
+  {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Fresh work","board_column":"todo","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"}
+]
+EOF
+reconsideration_cache="$TMP_DIR/reconsideration-cache"
+reconsidered="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$reconsideration_cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+check "pending additional context reopens an unchanged no-spec decision" \
+    $([ "$(printf '%s' "$reconsidered" | jq -r '.id8')" = "77777777" ] \
+      && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
+      && echo 0 || echo 1)
+
+after_reconsideration="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$reconsideration_cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+check "a failed reconsideration cools down instead of spinning every tick" \
+    $([ "$(printf '%s' "$after_reconsideration" | jq -r '.id8')" = "88888888" ] && echo 0 || echo 1)
+
 cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "pr list" ]; then

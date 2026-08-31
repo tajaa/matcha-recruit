@@ -240,6 +240,41 @@ async def log_task_activity_endpoint(
         raise HTTPException(status_code=404, detail="Task not found")
     return result
 
+
+@router.post(
+    "/projects/{project_id}/tasks/{task_id}/autopr/reconsider",
+    status_code=201,
+)
+async def request_autopr_reconsideration_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Submit evidence that may invalidate one exact AutoPR no-PR decision."""
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    attachment_ids = await _parse_task_attachment_ids(
+        task_id, body.get("attachment_ids") or []
+    )
+    try:
+        result = await pt_svc.request_autopr_reconsideration(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            expected_progress_note=body.get("expected_progress_note") or "",
+            body=body.get("body"),
+            attachment_ids=attachment_ids or None,
+        )
+    except pt_svc.AutoPRReconsiderationConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
 def _serialize_activity_row(r) -> dict:
     d = dict(r)
     if d.get("actor_user_id") is not None:

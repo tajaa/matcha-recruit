@@ -147,6 +147,10 @@ extension TaskViewerSheet {
     }
 
     func submitNote() async {
+        if isAddingAutoPRContext {
+            await submitAutoPRContext()
+            return
+        }
         let text = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
         let pending = pendingAttachments
         guard (canSubmitNote), let pid = viewModel.project?.id, !addingNote else { return }
@@ -185,6 +189,52 @@ extension TaskViewerSheet {
             // Note: attachments were already uploaded and persisted on the
             // task — they show up under ATTACHMENTS even if the activity
             // POST failed.
+        }
+    }
+
+    func submitAutoPRContext() async {
+        let text = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pending = pendingAttachments
+        guard canSubmitNote,
+              let pid = viewModel.project?.id,
+              let expectedNote = autoSetupProgressNote,
+              !addingNote else { return }
+        addingNote = true
+        autoPRContextError = nil
+        defer { addingNote = false }
+
+        var uploadedIds: [String] = []
+        for att in pending {
+            guard let id = await viewModel.uploadTaskFile(
+                taskId: task.id,
+                data: att.data,
+                filename: att.filename,
+                mimeType: att.mimeType
+            ) else {
+                autoPRContextError = "One of the attachments could not be uploaded. Your draft is still here."
+                return
+            }
+            uploadedIds.append(id)
+        }
+
+        do {
+            _ = try await MatchaWorkService.shared.requestAutoPRReconsideration(
+                projectId: pid,
+                taskId: task.id,
+                body: text.isEmpty ? nil : text,
+                attachmentIds: uploadedIds.isEmpty ? nil : uploadedIds,
+                expectedProgressNote: expectedNote
+            )
+            newNote = ""
+            pendingAttachments = []
+            replyingToNote = nil
+            isAddingAutoPRContext = false
+            didSubmitAutoPRContext = true
+            autoPRContextError = nil
+            await loadHistory()
+            await viewModel.loadTasks()
+        } catch {
+            autoPRContextError = error.localizedDescription
         }
     }
 

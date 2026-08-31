@@ -59,6 +59,7 @@ extension TaskViewerSheet {
                         .foregroundColor(appState.themeText)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                    autoPRReconsiderationControl
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -76,6 +77,7 @@ extension TaskViewerSheet {
                             .foregroundColor(appState.themeText.opacity(0.8))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                        autoPRReconsiderationControl
                     }
                 }
                 .padding(.vertical, 10)
@@ -84,6 +86,55 @@ extension TaskViewerSheet {
                 .background(status.color.opacity(0.08))
                 .cornerRadius(8)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.24), lineWidth: 1))
+            }
+        }
+    }
+
+    var canRequestAutoPRReconsideration: Bool {
+        guard let note = autoSetupProgressNote else { return false }
+        return note.contains("[autopr:no-spec ")
+            && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
+                .contains(where: note.contains)
+    }
+
+    var autoPRReconsiderationIsPending: Bool {
+        didSubmitAutoPRContext || task.autoprReconsiderationPending == true
+    }
+
+    @ViewBuilder
+    var autoPRReconsiderationControl: some View {
+        if canRequestAutoPRReconsideration {
+            if autoPRReconsiderationIsPending {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Reconsideration queued")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(.mwInkStrong)
+                .padding(.top, 3)
+            } else if isAddingAutoPRContext {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Explain what AutoPR missed or attach evidence that changes this decision.")
+                        .font(.system(size: 10))
+                        .foregroundColor(appState.themeTextSecondary)
+                    noteComposer
+                }
+                .padding(.top, 3)
+            } else {
+                Button {
+                    replyingToNote = nil
+                    autoPRContextError = nil
+                    isAddingAutoPRContext = true
+                    Task { @MainActor in isNoteFieldFocused = true }
+                } label: {
+                    Label("Add additional context", systemImage: "arrowshape.turn.up.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.mwInkStrong)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 3)
+                .help("Give AutoPR new evidence and ask it to reconsider this decision")
             }
         }
     }

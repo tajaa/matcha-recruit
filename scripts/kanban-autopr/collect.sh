@@ -68,6 +68,9 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 pr_url: $t.pr_url,
                 pr_number: $t.pr_number,
                 progress_note: $t.progress_note,
+                autopr_reconsideration_pending: ($t.autopr_reconsideration_pending // false),
+                autopr_reconsideration_event_id: $t.autopr_reconsideration_event_id,
+                autopr_reconsideration_at: $t.autopr_reconsideration_at,
                 # Keep attachment metadata available for ranking/debugging,
                 # but never put short-lived signed storage URLs in card.json.
                 attachments: (($t.attachments // []) | map(del(.storage_url)))
