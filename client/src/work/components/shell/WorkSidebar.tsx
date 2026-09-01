@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive } from 'lucide-react'
-import { disconnectSharedChannelSocket } from '../../api/channelSocket'
-import { resetAuthCaches } from '../../../api/authReset'
+import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged, startPersonalCheckout } from '../../api/matchaWork'
 import { useMe } from '../../../hooks/useMe'
@@ -166,11 +165,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   }
 
   function handleLogout() {
-    localStorage.removeItem('matcha_access_token')
-    localStorage.removeItem('matcha_refresh_token')
-    resetAuthCaches()
-    disconnectSharedChannelSocket()
-    window.location.href = '/login'
+    void logoutSession()
   }
 
   const isActive = (path: string) => location.pathname === path

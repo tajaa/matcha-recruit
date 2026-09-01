@@ -3,11 +3,13 @@ import axios from 'axios'
 const TOKEN_KEY = 'oceanlab_access_token'
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  localStorage.removeItem(TOKEN_KEY)
+  return sessionStorage.getItem(TOKEN_KEY)
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token)
+  localStorage.removeItem(TOKEN_KEY)
+  sessionStorage.setItem(TOKEN_KEY, token)
 }
 
 export async function login(email: string, password: string): Promise<void> {
@@ -17,6 +19,11 @@ export async function login(email: string, password: string): Promise<void> {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem(TOKEN_KEY)
+}
+
+export async function logout(): Promise<void> {
+  try { await apiClient.post('/auth/logout') } finally { clearToken() }
 }
 
 export const apiClient = axios.create({

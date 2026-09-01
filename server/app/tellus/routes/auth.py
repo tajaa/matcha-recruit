@@ -15,6 +15,7 @@ from ...config import get_settings
 from ...core.services.email import _is_reserved_test_domain
 from ...core.services.google_identity import GoogleTokenError, verify_google_id_token
 from ...core.services.redis_cache import check_rate_limit, client_ip
+from ...core.services.session_tokens import refresh_session_expired
 from ...database import get_connection
 from ..dependencies import _is_tellus_admin, require_tellus_account
 from ._shared import slugify
@@ -75,11 +76,16 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
     )
 
 
-def _token_response(account: TellusAccount) -> TellusTokenResponse:
+def _token_response(
+    account: TellusAccount,
+    session_started_at: int | None = None,
+) -> TellusTokenResponse:
     settings = get_settings()
     return TellusTokenResponse(
         access_token=create_tellus_access_token(account.id, account.email),
-        refresh_token=create_tellus_refresh_token(account.id, account.email),
+        refresh_token=create_tellus_refresh_token(
+            account.id, account.email, session_started_at=session_started_at
+        ),
         expires_in=settings.jwt_access_token_expire_minutes * 60,
         account=account,
     )
@@ -370,10 +376,15 @@ async def refresh(body: TellusRefreshRequest, request: Request):
         )
         if row is None or row["status"] != "active":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not found or inactive")
+        if refresh_session_expired(payload.get("iat"), payload.get("session_started_at")):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
         if is_tellus_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked")
         account = await _load_account(conn, account_id)
-    return _token_response(account)
+    return _token_response(
+        account,
+        session_started_at=payload.get("session_started_at") or payload.get("iat"),
+    )
 
 
 @router.get("/auth/me", response_model=TellusAccount)

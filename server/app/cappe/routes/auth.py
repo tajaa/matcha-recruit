@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from ...config import get_settings
 from ...core.services.email import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
+from ...core.services.session_tokens import refresh_session_expired
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..services.email import send_cappe_verification_email
@@ -47,11 +48,16 @@ _VERIFY_TTL_HOURS = 24
 _DUMMY_PASSWORD_HASH = hash_password("cappe-login-timing-equalizer")
 
 
-def _token_response(account: CappeAccount) -> CappeTokenResponse:
+def _token_response(
+    account: CappeAccount,
+    session_started_at: int | None = None,
+) -> CappeTokenResponse:
     settings = get_settings()
     return CappeTokenResponse(
         access_token=create_cappe_access_token(account.id, account.email),
-        refresh_token=create_cappe_refresh_token(account.id, account.email),
+        refresh_token=create_cappe_refresh_token(
+            account.id, account.email, session_started_at=session_started_at
+        ),
         expires_in=settings.jwt_access_token_expire_minutes * 60,
         account=account,
     )
@@ -258,6 +264,9 @@ async def refresh(body: CappeRefreshRequest, request: Request):
     if row is None or row["status"] != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not found or inactive")
 
+    if refresh_session_expired(payload.get("iat"), payload.get("session_started_at")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
     # Revoked refresh tokens (issued before logout / password change) can't re-mint.
     if is_cappe_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked")
@@ -266,7 +275,10 @@ async def refresh(body: CappeRefreshRequest, request: Request):
         id=row["id"], email=row["email"], name=row["name"], plan=row["plan"],
         status=row["status"], account_type=row["account_type"],
     )
-    return _token_response(account)
+    return _token_response(
+        account,
+        session_started_at=payload.get("session_started_at") or payload.get("iat"),
+    )
 
 
 @router.get("/auth/me", response_model=CappeAccount)

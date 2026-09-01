@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 // Redeems an admin-generated business invite (server/app/core/routes/admin.py
 // POST /admin/business-invites, table business_invitations) — the generic,
 // tier-agnostic path for provisioning a full Pro/bespoke company with no
@@ -47,8 +48,7 @@ export default function BusinessInviteRegister() {
         setError(data.detail ?? 'Registration failed')
         return
       }
-      localStorage.setItem('matcha_access_token', data.access_token)
-      localStorage.setItem('matcha_refresh_token', data.refresh_token)
+      setAuthTokens(data.access_token, data.refresh_token)
       invalidateMeCache()
       navigate('/app')
     } catch {

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 /**
  * Free-beta signup for Matcha IR. Not linked from main nav — reached
  * by direct URL (/ir/signup) only during private beta. Posts to the
@@ -42,8 +43,7 @@ export default function IrSignup() {
         setError(data.detail ?? 'Registration failed')
         return
       }
-      localStorage.setItem('matcha_access_token', data.access_token)
-      localStorage.setItem('matcha_refresh_token', data.refresh_token)
+      setAuthTokens(data.access_token, data.refresh_token)
       invalidateMeCache()
       navigate(data.next ?? '/ir/onboarding')
     } catch {

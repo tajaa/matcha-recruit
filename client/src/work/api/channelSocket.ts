@@ -1,6 +1,7 @@
 import type { ChannelMessage, ChannelReaction } from './channels'
 import type { MWNotification } from './notifications'
 import { BaseSocket } from './baseSocket'
+import { getAccessToken } from '../../api/authStorage'
 
 type MessageHandler = (msg: ChannelMessage) => void
 type TypingHandler = (user: { id: string; name: string }) => void
@@ -10,9 +11,10 @@ type ChannelActionUpdate = { channel_id: string; action: { kind: string; id: str
 type ChannelActionHandler = (update: ChannelActionUpdate) => void
 type NotificationHandler = (notification: MWNotification) => void
 
-/** Durable outbox for sends attempted while the socket was down. Mirrors
- * Espresso's channels_outbox_v1 (UserDefaults) — safe to blind-replay because
- * the server INSERT is idempotent on (sender_id, client_message_id). */
+/** Tab-session outbox for sends attempted while the socket was down. It
+ * survives reconnects/reloads but not a closed browser session, so message
+ * content is not left in persistent origin storage. Replay is safe because the
+ * server INSERT is idempotent on (sender_id, client_message_id). */
 type OutboxEntry = {
   channel_id: string
   content: string
@@ -37,20 +39,20 @@ function _outboxKeyForToken(token: string | null): string {
   return OUTBOX_KEY_PREFIX
 }
 function _currentOutboxKey(): string {
-  return _outboxKeyForToken(localStorage.getItem('matcha_access_token'))
+  return _outboxKeyForToken(getAccessToken())
 }
 /** Called from api/client.ts's logout, with the token that was still valid
  * a moment ago (by the time the lazy import resolves, the token is already
  * cleared, so _currentOutboxKey() would derive the wrong — unscoped — key). */
 export function clearChannelOutbox(tokenAtLogout: string | null) {
   try {
-    localStorage.removeItem(_outboxKeyForToken(tokenAtLogout))
+    sessionStorage.removeItem(_outboxKeyForToken(tokenAtLogout))
   } catch { /* best-effort */ }
 }
 /** Drop entries no live socket ever managed to flush past this age — a
  * fresh page load can flush before rejoin() re-establishes room membership,
  * so a message can persist server-side yet never get an echo back (echo is
- * room-scoped) and sit in localStorage forever with nothing to remove it. */
+ * room-scoped) and sit in sessionStorage forever with nothing to remove it. */
 const OUTBOX_MAX_AGE_MS = 10 * 60 * 1000
 
 /** Shared add/remove/dispatch boilerplate for a Set-backed listener group.
@@ -160,7 +162,7 @@ export class ChannelSocket extends BaseSocket {
 
   private _readOutbox(): OutboxEntry[] {
     try {
-      const raw = localStorage.getItem(_currentOutboxKey())
+      const raw = sessionStorage.getItem(_currentOutboxKey())
       return raw ? (JSON.parse(raw) as OutboxEntry[]) : []
     } catch {
       return []
@@ -169,7 +171,7 @@ export class ChannelSocket extends BaseSocket {
 
   private _writeOutbox(entries: OutboxEntry[]) {
     try {
-      localStorage.setItem(_currentOutboxKey(), JSON.stringify(entries.slice(-OUTBOX_CAP)))
+      sessionStorage.setItem(_currentOutboxKey(), JSON.stringify(entries.slice(-OUTBOX_CAP)))
     } catch { /* quota — drop rather than crash the send path */ }
   }
 
@@ -215,7 +217,7 @@ export class ChannelSocket extends BaseSocket {
     // an entry here as soon as send() returned true was the actual root
     // cause of HIGH-1: by the time a rate_limited error frame came back for
     // entry #11 of an offline-queued burst, this loop had already removed
-    // it from localStorage a moment earlier, making the error handler's
+    // it from sessionStorage a moment earlier, making the error handler's
     // code branch a no-op. Resolution now happens ONLY via removeFromOutbox,
     // called from the 'message' echo or a permanent 'error' below — a
     // duplicate send on a later retry is safe by design (server INSERT is
@@ -404,7 +406,7 @@ export function getSharedChannelSocket(): ChannelSocket {
   }
   // connect() is idempotent: it bails if already open, and retries here
   // cover the case where the very first connect() ran before the auth token
-  // was in localStorage and silently returned. Accessing the socket later
+  // was in the tab session and silently returned. Accessing the socket later
   // (e.g. when the user lands on /work after login) will re-attempt.
   if (!_sharedSocket.hasSocket) {
     _sharedSocket.connect()

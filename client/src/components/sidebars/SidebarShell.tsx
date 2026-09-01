@@ -1,10 +1,9 @@
-import { NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
+import { NavLink, useLocation, Link } from 'react-router-dom'
 import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Avatar from '../shared/Avatar'
 import { useMe } from '../../hooks/useMe'
-import { resetAuthCaches } from '../../api/authReset'
-import { disconnectSharedChannelSocket } from '../../work/api/channelSocket'
+import { logoutSession } from '../../api/client'
 import { useLayoutContext } from '../../layouts/LayoutContext'
 import ThemeToggle from '../shared/ThemeToggle'
 
@@ -234,7 +233,6 @@ function NavGroupSection({ group, activeTo, collapsed }: { group: NavGroup; acti
 }
 
 export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle /> }: SidebarShellProps) {
-  const navigate = useNavigate()
   const location = useLocation()
   const { sidebarCollapsed, setSidebarCollapsed } = useLayoutContext()
   const { hasFeature, isBetaFeature, me } = useMe()
@@ -266,14 +264,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   const activeTo = findActiveTo(location.pathname, flatItems)
 
   function handleLogout() {
-    localStorage.removeItem('matcha_access_token')
-    localStorage.removeItem('matcha_refresh_token')
-    // Clears useMe, pinned resources, and every other registered per-user
-    // module cache — this SPA-navigate logout doesn't reload the page, so
-    // caches would otherwise survive into the next user's session.
-    resetAuthCaches()
-    disconnectSharedChannelSocket()
-    navigate('/login')
+    void logoutSession()
   }
 
   // Who is signed in, as distinct from which org the session is scoped to. The

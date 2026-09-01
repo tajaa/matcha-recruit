@@ -192,10 +192,11 @@ Placement rules, boundary rules between the three apps, and the deferred/follow-
 
 **Auth flow**:
 1. Login/register POSTs to `/api/auth/*` → returns `access_token` + `refresh_token`
-2. Tokens stored in `localStorage` as `matcha_access_token` / `matcha_refresh_token`
+2. Tokens stored per-tab in `sessionStorage` via `client/src/api/authStorage.ts`; legacy `localStorage` tokens are purged
 3. All requests attach `Authorization: Bearer <access_token>` header
 4. On 401, `client/src/api/client.ts` automatically refreshes via `/api/auth/refresh` and retries
-5. Auth state lives in `client/src/hooks/useMe.ts` — exposes `user`, `hasRole()`, `hasFeature()`, `companyFeatures`
+5. Sessions use 15-minute access tokens, a 30-minute refresh inactivity limit, and a 12-hour absolute boundary (all server-configurable)
+6. Auth state lives in `client/src/hooks/useMe.ts` — exposes `user`, `hasRole()`, `hasFeature()`, `companyFeatures`
 
 **WebSocket**: Chat / channels / matcha-work AI streams use WebSocket — handled in `api/chatClient.ts` and `Services/ChannelsWebSocket.swift` (desktop). Same JWT as HTTP.
 

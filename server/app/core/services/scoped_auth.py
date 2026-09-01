@@ -30,6 +30,7 @@ from uuid import UUID
 from jose import JWTError, jwt
 
 from app.config import get_settings
+from app.core.services.session_tokens import access_token_stale, refresh_token_times
 
 __all__ = ["ScopedTokenHelpers", "make_token_helpers", "is_token_revoked"]
 
@@ -60,7 +61,7 @@ def is_token_revoked(iat, tokens_valid_after) -> bool:
 class ScopedTokenHelpers:
     scope: str
     create_access_token: Callable[..., str]
-    create_refresh_token: Callable[[UUID, str], str]
+    create_refresh_token: Callable[..., str]
     decode_token: Callable[..., Optional[dict]]
 
 
@@ -86,17 +87,20 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
         }
         return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
-    def create_refresh_token(account_id: UUID, email: str) -> str:
+    def create_refresh_token(
+        account_id: UUID,
+        email: str,
+        session_started_at: Optional[int] = None,
+    ) -> str:
         settings = get_settings()
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.jwt_refresh_token_expire_days
-        )
+        issued_at, started_at, expire = refresh_token_times(session_started_at)
         payload = {
             "sub": str(account_id),
             "email": email,
             "scope": scope,
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": issued_at,
+            "session_started_at": started_at,
             "type": "refresh",
         }
         return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
@@ -130,6 +134,8 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
         if payload.get("scope") != scope:
             return None
         if expected_type and payload.get("type") != expected_type:
+            return None
+        if payload.get("type") == "access" and access_token_stale(payload.get("iat")):
             return None
         if "sub" not in payload:
             return None

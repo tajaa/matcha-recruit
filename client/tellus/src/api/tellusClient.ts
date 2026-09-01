@@ -9,23 +9,29 @@ const ACCESS_KEY = 'tellus_access_token'
 const REFRESH_KEY = 'tellus_refresh_token'
 
 export function getTellusToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY)
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+  return sessionStorage.getItem(ACCESS_KEY)
 }
 
 export function setTellusTokens(access: string, refresh: string) {
-  localStorage.setItem(ACCESS_KEY, access)
-  localStorage.setItem(REFRESH_KEY, refresh)
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+  sessionStorage.setItem(ACCESS_KEY, access)
+  sessionStorage.setItem(REFRESH_KEY, refresh)
 }
 
 export function clearTellusTokens() {
   localStorage.removeItem(ACCESS_KEY)
   localStorage.removeItem(REFRESH_KEY)
+  sessionStorage.removeItem(ACCESS_KEY)
+  sessionStorage.removeItem(REFRESH_KEY)
 }
 
 let _refreshing: Promise<boolean> | null = null
 
 async function _tryRefresh(): Promise<boolean> {
-  const refreshToken = localStorage.getItem(REFRESH_KEY)
+  const refreshToken = sessionStorage.getItem(REFRESH_KEY)
   if (!refreshToken) return false
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {

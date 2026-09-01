@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { Hash, Loader2 } from 'lucide-react'
 import { api } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 import { invalidateMeCache, useMe } from '../../hooks/useMe'
 
 type LoginResponse = {
@@ -42,8 +43,7 @@ export default function WerkLiteLogin() {
     setLoading(true)
     try {
       const res = await api.post<LoginResponse>('/auth/login', { email, password })
-      localStorage.setItem('matcha_access_token', res.access_token)
-      localStorage.setItem('matcha_refresh_token', res.refresh_token)
+      setAuthTokens(res.access_token, res.refresh_token)
       invalidateMeCache()
       navigate(safeNext, { replace: true })
     } catch {

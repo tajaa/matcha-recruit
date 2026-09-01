@@ -1,4 +1,5 @@
 import { resetAuthCaches } from './authReset'
+import { clearAuthTokens, getAccessToken, getRefreshToken, setAuthTokens } from './authStorage'
 import { noteRequestId, reportApiError } from './errorReporter'
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
@@ -6,7 +7,7 @@ export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, 
 let _refreshing: Promise<boolean> | null = null
 
 async function _tryRefresh(): Promise<boolean> {
-  const refreshToken = localStorage.getItem('matcha_refresh_token')
+  const refreshToken = getRefreshToken()
   if (!refreshToken) return false
 
   try {
@@ -19,40 +20,94 @@ async function _tryRefresh(): Promise<boolean> {
     if (!res.ok) return false
 
     const data = await res.json()
-    localStorage.setItem('matcha_access_token', data.access_token)
-    localStorage.setItem('matcha_refresh_token', data.refresh_token)
+    setAuthTokens(data.access_token, data.refresh_token, { recordActivity: false })
     return true
   } catch {
     return false
   }
 }
 
-function _logout() {
-  // Capture the outgoing user's outbox key SYNCHRONOUSLY — the dynamic
-  // import below resolves as a microtask, after the token removal a few
-  // lines down has already run, so reading the token inside the .then would
-  // always see it gone and clear the wrong (unscoped) key.
-  const outgoingToken = localStorage.getItem('matcha_access_token')
-  localStorage.removeItem('matcha_access_token')
-  localStorage.removeItem('matcha_refresh_token')
-  resetAuthCaches()
-  // Best-effort cleanup of the shared channel WS + its durable outbox. Lazy-
-  // imported to avoid a circular dependency between api/client.ts and
-  // api/channelSocket.ts.
-  import('../work/api/channelSocket').then((m) => {
-    m.disconnectSharedChannelSocket()
-    m.clearChannelOutbox(outgoingToken)
-  }).catch(() => {})
-  // Guard against a redirect loop: a failed refresh fired from the login page
-  // itself would otherwise reassign location to /login repeatedly.
-  if (window.location.pathname !== '/login') {
-    window.location.href = '/login'
+const SESSION_EVENT_KEY = 'matcha_session_event'
+let _clearingSession = false
+
+function _clearOutboxStorage(token: string | null) {
+  try {
+    let key = 'channels_outbox_v1'
+    if (token) {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+      if (payload?.sub) key += `:${payload.sub}`
+    }
+    sessionStorage.removeItem(key)
+  } catch { /* malformed token or blocked storage */ }
+}
+
+async function _clearLocalSession(broadcast = true) {
+  if (_clearingSession) return
+  _clearingSession = true
+  try {
+    // Capture the outgoing user's outbox key SYNCHRONOUSLY — the dynamic
+    // import below resolves as a microtask, after the token removal a few
+    // lines down has already run, so reading the token inside the .then would
+    // always see it gone and clear the wrong (unscoped) key.
+    const outgoingToken = getAccessToken()
+    clearAuthTokens()
+    _clearOutboxStorage(outgoingToken)
+    resetAuthCaches()
+    // Best-effort cleanup of the shared channel WS + its durable outbox. Lazy-
+    // imported to avoid a circular dependency between api/client.ts and
+    // api/channelSocket.ts.
+    await import('../work/api/channelSocket').then((m) => {
+      m.disconnectSharedChannelSocket()
+      m.clearChannelOutbox(outgoingToken)
+    }).catch(() => { /* optional WebSocket cleanup must not block logout */ })
+    if (broadcast) {
+      try { localStorage.setItem(SESSION_EVENT_KEY, JSON.stringify({ type: 'logout', at: Date.now() })) } catch { /* storage may be blocked */ }
+    }
+    // Guard against a redirect loop: a failed refresh fired from the login page
+    // itself would otherwise reassign location to /login repeatedly.
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  } finally {
+    // The login page is an SPA route, so the module can survive a subsequent
+    // sign-in without a full page reload. Only guard concurrent cleanup calls.
+    _clearingSession = false
   }
+}
+
+function _logout() {
+  void _clearLocalSession()
+}
+
+/** Revoke the server session, then clear every local user-scoped surface. */
+export async function logoutSession(): Promise<void> {
+  try {
+    // Refresh first when possible: with a 15-minute access token, a user may
+    // click Sign out after it expired. A fresh access token lets the revocation
+    // endpoint invalidate the still-live refresh session server-side.
+    if (getRefreshToken()) await _tryRefresh()
+    const token = getAccessToken()
+    if (token) {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+      })
+    }
+  } finally {
+    await _clearLocalSession()
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === SESSION_EVENT_KEY && event.newValue) void _clearLocalSession(false)
+  })
 }
 
 /** Proactively refresh token if it expires within 60s. Use before SSE/WebSocket where 401 retry isn't possible. */
 export async function ensureFreshToken(): Promise<string | null> {
-  const token = localStorage.getItem('matcha_access_token')
+  const token = getAccessToken()
   if (!token) return null
 
   try {
@@ -64,7 +119,7 @@ export async function ensureFreshToken(): Promise<string | null> {
       }
       const ok = await _refreshing
       if (!ok) { _logout(); return null }
-      return localStorage.getItem('matcha_access_token')
+      return getAccessToken()
     }
   } catch { /* malformed token, proceed */ }
 
@@ -105,7 +160,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('matcha_access_token')
+  const token = getAccessToken()
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: _buildHeaders(init, token),
@@ -121,7 +176,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const ok = await _refreshing
     if (ok) {
       // Retry with new token
-      const newToken = localStorage.getItem('matcha_access_token')
+      const newToken = getAccessToken()
       const retry = await fetch(`${API_BASE}${path}`, {
         ...init,
         headers: _buildHeaders(init, newToken),
@@ -205,7 +260,7 @@ async function _fetchWithRefresh(url: string, init: RequestInit = {}): Promise<R
   }
   const ok = await _refreshing
   if (!ok) { _logout(); return res }
-  const retry = await fetch(url, withAuth(localStorage.getItem('matcha_access_token')))
+  const retry = await fetch(url, withAuth(getAccessToken()))
   noteRequestId(retry.headers.get('x-request-id'))
   return retry
 }
@@ -267,4 +322,3 @@ export const api = {
     await _saveBlobResponse(res, path, filename)
   },
 }
-

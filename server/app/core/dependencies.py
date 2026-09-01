@@ -49,7 +49,9 @@ async def session_revoked(conn, user_id, token_iat: Optional[int]) -> bool:
     valid_after = await conn.fetchval(
         "SELECT tokens_valid_after FROM users WHERE id = $1", user_id
     )
-    return valid_after is not None and token_iat < valid_after.timestamp()
+    # JWT iat claims have whole-second precision; floor the DB watermark so a
+    # logout followed by an immediate same-second login is not self-revoked.
+    return valid_after is not None and float(token_iat) < int(valid_after.timestamp())
 
 
 async def revoke_user_sessions(conn, user_id) -> None:

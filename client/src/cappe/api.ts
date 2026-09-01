@@ -35,23 +35,29 @@ const ACCESS_KEY = 'cappe_access_token'
 const REFRESH_KEY = 'cappe_refresh_token'
 
 export function getCappeToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY)
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+  return sessionStorage.getItem(ACCESS_KEY)
 }
 
 export function setCappeTokens(access: string, refresh: string) {
-  localStorage.setItem(ACCESS_KEY, access)
-  localStorage.setItem(REFRESH_KEY, refresh)
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+  sessionStorage.setItem(ACCESS_KEY, access)
+  sessionStorage.setItem(REFRESH_KEY, refresh)
 }
 
 export function clearCappeTokens() {
   localStorage.removeItem(ACCESS_KEY)
   localStorage.removeItem(REFRESH_KEY)
+  sessionStorage.removeItem(ACCESS_KEY)
+  sessionStorage.removeItem(REFRESH_KEY)
 }
 
 let _refreshing: Promise<boolean> | null = null
 
 async function _tryRefresh(): Promise<boolean> {
-  const refreshToken = localStorage.getItem(REFRESH_KEY)
+  const refreshToken = sessionStorage.getItem(REFRESH_KEY)
   if (!refreshToken) return false
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
@@ -82,7 +88,7 @@ function _logout() {
  *  half-consumed and gone — so the token has to be good before it opens.
  *  Mirrors `api/client.ts:ensureFreshToken` on the cappe token pair. */
 export async function ensureFreshCappeToken(): Promise<string | null> {
-  const token = localStorage.getItem(ACCESS_KEY)
+  const token = getCappeToken()
   if (!token) return null
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
@@ -93,7 +99,7 @@ export async function ensureFreshCappeToken(): Promise<string | null> {
       }
       const ok = await _refreshing
       if (!ok) { _logout(); return null }
-      return localStorage.getItem(ACCESS_KEY)
+      return getCappeToken()
     }
   } catch { /* malformed token — let the request fail normally */ }
   return token
