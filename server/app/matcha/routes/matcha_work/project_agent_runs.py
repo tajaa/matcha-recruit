@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client
-from app.matcha.routes.matcha_work._shared import _verify_project_access
+from app.matcha.routes.matcha_work._shared import _can_edit_project, _verify_project_access
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,15 @@ async def enqueue_agent_task_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Queue a repo-reading Espresso run; the client polls before review."""
-    project, _role = await _verify_project_access(project_id, current_user)
+    project, role = await _verify_project_access(project_id, current_user)
+    # A run reads the repo and spends the workspace token budget, and its output
+    # can only land as a task the caller is allowed to create — so read-only
+    # collaborators are blocked here, not just at task creation.
+    if not _can_edit_project(role):
+        raise HTTPException(
+            status_code=403,
+            detail="You have read-only access to this project.",
+        )
     if not project.get("github_repo"):
         raise HTTPException(
             status_code=status.HTTP_412_PRECONDITION_FAILED,
@@ -59,7 +67,6 @@ async def enqueue_agent_task_draft_endpoint(
         raise HTTPException(status_code=400, detail="request_key must be a UUID")
 
     company_id = UUID(str(project["company_id"]))
-    model_override = str(body.get("model") or "").strip()[:100] or None
 
     from app.core.services.redis_cache import check_rate_limit
     from app.matcha.services.billing import token_budget_service
@@ -69,13 +76,9 @@ async def enqueue_agent_task_draft_endpoint(
     await check_rate_limit(str(current_user.id), "espresso_task_draft_user", 50, 86400)
     await check_rate_limit(str(company_id), "espresso_task_draft_company", 20, 3600)
 
-    from app.matcha.services.matcha_work.project_agent.task_draft_agent import resolve_model
-
-    selected_model = await resolve_model(
-        model_override,
-        company_id=company_id,
-        user_id=current_user.id,
-    )
+    # Drafts are pinned to Luna server-side; the run row records the model that
+    # actually ran, and a client-sent model is never consulted.
+    from app.matcha.services.matcha_work.project_agent.task_draft_agent import TASK_DRAFT_MODEL
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -84,11 +87,18 @@ async def enqueue_agent_task_draft_endpoint(
                 f"{project_id}:{current_user.id}:task_draft",
             )
             # A client may retry the POST after losing the response. Return the
-            # original run before applying the one-live-run guard.
+            # original run before applying the one-live-run guard — scoped to
+            # the same (project, requester) the advisory lock above serializes
+            # on. A bare request_key lookup is global: another tenant reusing a
+            # key would be handed this project's run id, and two users sending
+            # the same key would race past the lock into the unique index.
             run_id = await conn.fetchval(
                 """SELECT id FROM mw_project_agent_runs
-                   WHERE request_key=$1 AND agent_key='espresso'""",
+                   WHERE request_key=$1 AND agent_key='espresso'
+                     AND project_id=$2 AND requested_by=$3""",
                 request_key,
+                project_id,
+                current_user.id,
             )
             if run_id is None:
                 live = await conn.fetchval(
@@ -110,7 +120,7 @@ async def enqueue_agent_task_draft_endpoint(
                 run_id = await conn.fetchval(
                     """INSERT INTO mw_project_agent_runs
                        (company_id, project_id, requested_by, agent_key, kind,
-                        prompt, status, request_key, model_override)
+                        prompt, status, request_key, model)
                        VALUES ($1,$2,$3,'espresso','task_draft',$4,'queued',$5,$6)
                        RETURNING id""",
                     company_id,
@@ -118,7 +128,7 @@ async def enqueue_agent_task_draft_endpoint(
                     current_user.id,
                     prompt,
                     request_key,
-                    selected_model,
+                    TASK_DRAFT_MODEL,
                 )
 
     from app.workers.tasks.project_agent import run_task_draft
@@ -134,8 +144,12 @@ async def get_agent_task_draft_endpoint(
     response: Response,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Return one caller-owned task-draft run without exposing its audit log."""
-    await _verify_project_access(project_id, current_user)
+    """Return one caller-owned task-draft run without exposing its audit log.
+
+    The lookup itself is the authorization: it is pinned to this project AND
+    this requester, so it can only ever return the caller's own run. Re-running
+    full project access here cost ~6 queries on a 2s poll loop.
+    """
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """SELECT id, status, result, error, created_at, started_at, completed_at

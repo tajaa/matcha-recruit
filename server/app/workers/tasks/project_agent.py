@@ -49,7 +49,7 @@ async def _run(run_id: UUID) -> None:
                SET status='running', started_at=NOW()
                WHERE id=$1 AND status='queued'
                RETURNING company_id, project_id, channel_id, requested_by, prompt,
-                         kind, model_override""",
+                         kind""",
             run_id,
         )
         if not row:
@@ -95,7 +95,6 @@ async def _run(run_id: UUID) -> None:
                 project_title=project["title"] or "Untitled project",
                 repo=project["github_repo"],
                 base_branch=project["github_branch"] or "main",
-                model=row["model_override"],
                 collaborators=context["collaborators"],
                 elements=context["elements"],
                 recent_done=context["recent_done"],

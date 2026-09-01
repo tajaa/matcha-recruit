@@ -40,7 +40,6 @@ async def test_worker_deducts_successful_non_admin_usage(monkeypatch):
             "requested_by": user_id,
             "prompt": "How does login work?",
             "kind": "repo_question",
-            "model_override": None,
         },
         {
             "title": "MATCHA",
@@ -77,7 +76,6 @@ async def test_worker_dispatches_task_draft_without_posting_to_chat(monkeypatch)
             "requested_by": user_id,
             "prompt": "Add saved project filters",
             "kind": "task_draft",
-            "model_override": "test-model",
         },
         {
             "title": "MATCHA",
@@ -103,4 +101,4 @@ async def test_worker_dispatches_task_draft_without_posting_to_chat(monkeypatch)
     load_context.assert_awaited_once_with(project_id)
     run.assert_awaited_once()
     assert run.await_args.kwargs["request"] == "Add saved project filters"
-    assert run.await_args.kwargs["model"] == "test-model"
+    assert "model" not in run.await_args.kwargs

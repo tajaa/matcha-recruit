@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any
 from uuid import UUID
@@ -27,23 +28,14 @@ _WALL_SECONDS = 240.0
 _PRIORITIES = {"critical", "high", "medium", "low"}
 _CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix"}
 _COLUMNS = {"todo", "in_progress", "review", "done"}
-_TASK_DRAFT_MODEL = LUNA
+TASK_DRAFT_MODEL = LUNA
 _AI_USAGE_FEATURE = "matcha.espresso.task_draft"
 
 
-async def resolve_model(
-    model_override: str | None,
-    *,
-    company_id: UUID,
-    user_id: UUID,
-) -> str:
-    """Ticket drafts are intentionally pinned to OpenAI Luna with high reasoning.
-
-    Keep this request-time seam so queued runs audit the model actually selected,
-    rather than accepting a stale client-provided Gemini model override.
-    """
-    del model_override, company_id, user_id
-    return _TASK_DRAFT_MODEL
+# Anchored list-marker strip. A bare str.lstrip(charset) removes EVERY leading
+# character in the set, so "2FA login flow" lost its "2" and "3D map export"
+# lost its "3" — this only removes a real bullet or "1." / "1)" marker.
+_LIST_PREFIX = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
 
 
 def _clean_list(
@@ -59,27 +51,37 @@ def _clean_list(
     for item in value:
         text = str(item or "").strip()
         if strip_list_prefix:
-            text = text.lstrip("-*0123456789. ").strip()
+            text = _LIST_PREFIX.sub("", text).strip()
         if text:
             cleaned.append(text[:item_chars])
     return cleaned[:limit]
 
 
-def _match_named(value: Any, records: list[dict]) -> dict | None:
+_MIN_SUBSTRING_MATCH = 4
+
+
+def match_named(value: Any, records: list[dict]) -> dict | None:
+    """Resolve a model-supplied name to one record, or nothing.
+
+    The substring pass is the one that binds a draft to a real user id, so it
+    runs last, only on a meaningful fragment, and only when exactly one record
+    matches. The old ordering let a one-character artifact ("a") bind to the
+    first collaborator whose name happened to contain it ("Haley").
+    """
     wanted = str(value or "").strip().lower()
     if not wanted:
         return None
-    return (
-        next((row for row in records if str(row.get("name") or "").lower() == wanted), None)
-        or next((row for row in records if wanted in str(row.get("name") or "").lower()), None)
-        or next(
-            (
-                row for row in records
-                if str(row.get("name") or "").lower().split(" ")[0] == wanted
-            ),
-            None,
-        )
-    )
+    names = [(row, str(row.get("name") or "").strip().lower()) for row in records]
+    exact = next((row for row, name in names if name and name == wanted), None)
+    if exact is not None:
+        return exact
+    first_name = next((row for row, name in names if name.split(" ")[0] == wanted), None)
+    if first_name is not None:
+        return first_name
+    if len(wanted) < _MIN_SUBSTRING_MATCH:
+        return None
+    hits = [row for row, name in names if name and wanted in name]
+    return hits[0] if len(hits) == 1 else None
 
 
 def normalize_draft(
@@ -93,8 +95,8 @@ def normalize_draft(
     priority = str(args.get("priority") or "").strip().lower()
     category = str(args.get("category") or "").strip().lower()
     board_column = str(args.get("board_column") or "").strip().lower()
-    collaborator = _match_named(args.get("assignee_name"), collaborators)
-    element = _match_named(args.get("element_name"), elements)
+    collaborator = match_named(args.get("assignee_name"), collaborators)
+    element = match_named(args.get("element_name"), elements)
     return {
         "title": str(args.get("title") or "").strip()[:200],
         "description": str(args.get("description") or "").strip()[:8_000] or None,
@@ -152,13 +154,11 @@ async def run_task_draft(
     project_title: str,
     repo: str,
     base_branch: str,
-    model: str | None,
     collaborators: list[dict],
     elements: list[dict],
     recent_done: list[str],
 ) -> dict:
     """Draft one ticket using only audited repository reads."""
-    del model
     started = time.monotonic()
     client = get_luna_client()
     tree: list[dict] | None = None
@@ -166,9 +166,9 @@ async def run_task_draft(
     model_calls = 0
     seq = 0
     draft: dict | None = None
-    # The worker receives the resolved value persisted at queue time, but task
-    # drafting must not fall back to the generic Gemini model registry.
-    selected_model = _TASK_DRAFT_MODEL
+    # Task drafts are pinned to Luna server-side; the run row records the same
+    # constant purely as audit of what actually ran.
+    selected_model = TASK_DRAFT_MODEL
     usage: dict[str, Any] = {"model": selected_model}
 
     async def step(

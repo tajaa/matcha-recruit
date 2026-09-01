@@ -54,3 +54,32 @@ async def test_repository_context_is_fenced_and_sent_to_model(monkeypatch):
     assert "server/app/products/routes.py" in prompt
     assert "UNTRUSTED code/document content" in prompt
     assert result["subtasks"] == ["Update server/app/products/routes.py"]
+    # JSON mode is what keeps an unparseable reply from degrading into a
+    # 200 OK ticket titled with the raw prompt.
+    assert models.config.response_mime_type == "application/json"
+
+
+class _BadJSONModels:
+    async def generate_content(self, *, model, contents, config):
+        return SimpleNamespace(text="Sure! Here is the ticket you asked for.")
+
+
+@pytest.mark.asyncio
+async def test_unparseable_model_output_raises_instead_of_silent_fallback(monkeypatch):
+    client = SimpleNamespace(aio=SimpleNamespace(models=_BadJSONModels()))
+    monkeypatch.setattr(task_draft, "get_luna_client", lambda: client)
+
+    with pytest.raises(RuntimeError):
+        await task_draft.generate_task_draft(
+            prompt="Let sellers edit products",
+            project_title="Marketplace",
+            collaborator_names=[],
+            elements=[],
+        )
+
+
+def test_subtask_cleanup_keeps_leading_digits():
+    assert task_draft._LIST_PREFIX.sub("", "2FA login flow") == "2FA login flow"
+    assert task_draft._LIST_PREFIX.sub("", "401 handling in APIClient") == "401 handling in APIClient"
+    assert task_draft._LIST_PREFIX.sub("", "1. Wire the UI") == "Wire the UI"
+    assert task_draft._LIST_PREFIX.sub("", "- Add tests") == "Add tests"

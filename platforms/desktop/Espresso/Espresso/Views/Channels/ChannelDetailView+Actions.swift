@@ -14,8 +14,12 @@ extension ChannelDetailView {
         ticketDraftError = nil
         Task {
             do {
+                // One-shot on purpose: turning a chat message into a ticket is
+                // an incidental right-click, not a repo investigation. The
+                // durable agent path takes minutes and holds the board's
+                // one-live-run lock.
                 let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(
-                    projectId: pid, prompt: text, model: ticketDraftModel
+                    projectId: pid, prompt: text, model: ticketDraftModel, useAgent: false
                 )
                 await MainActor.run {
                     draftingTicket = false

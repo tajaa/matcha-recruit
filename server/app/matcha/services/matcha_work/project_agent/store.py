@@ -129,6 +129,9 @@ async def read_repo_file(
     }
 
 
+_NOTES_PER_ELEMENT = 5
+
+
 async def load_task_draft_context(project_id: UUID) -> dict:
     """Load compact project metadata through the worker-safe connection path."""
     async with connection_or_direct() as conn:
@@ -152,10 +155,21 @@ async def load_task_draft_context(project_id: UUID) -> dict:
                ORDER BY \"order\" ASC, created_at ASC""",
             project_id,
         )
+        # Only the newest few notes per element ever reach the prompt, so window
+        # in SQL — an unbounded fetch ships every note body a long-lived project
+        # has ever accumulated across the wire just to discard almost all of it.
         note_rows = await conn.fetch(
-            """SELECT element_id, kind, body, url FROM mw_element_notes
-               WHERE project_id=$1 ORDER BY created_at DESC""",
+            """SELECT element_id, kind, body, url FROM (
+                   SELECT element_id, kind, body, url, created_at,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY element_id ORDER BY created_at DESC
+                          ) AS rn
+                   FROM mw_element_notes WHERE project_id=$1
+               ) ranked
+               WHERE rn <= $2
+               ORDER BY created_at DESC""",
             project_id,
+            _NOTES_PER_ELEMENT,
         )
         done_rows = await conn.fetch(
             """SELECT title FROM mw_tasks
@@ -181,7 +195,7 @@ async def load_task_draft_context(project_id: UUID) -> dict:
                 "id": str(row["id"]),
                 "name": row["name"],
                 "description": row["description"],
-                "notes": notes_by_element.get(str(row["id"]), [])[:5],
+                "notes": notes_by_element.get(str(row["id"]), [])[:_NOTES_PER_ELEMENT],
             }
             for row in element_rows if row["name"]
         ],

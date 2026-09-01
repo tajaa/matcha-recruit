@@ -41,6 +41,15 @@ struct KanbanBoardView: View {
     @State private var aiDraft: MWTaskDraft?
     @State private var showAIReview = false
     @State private var aiError: String?
+    /// Retained so the (up to 5-minute) agent poll is actually cancellable —
+    /// an unstructured `Task {}` with no handle left the compose bar spinning
+    /// with no way out and made `Task.checkCancellation()` in the service dead
+    /// code.
+    @State private var aiDraftTask: Task<Void, Never>?
+    /// Bumped on every submit and every cancel. A cancelled run can still land
+    /// its completion handler after the user has started a new draft, so each
+    /// handler checks it owns the current generation before touching state.
+    @State private var aiDraftGeneration = 0
     /// Header model selector (shared with threads/blog via the same AppStorage key).
     @AppStorage("mw-model") private var selectedModelId = "flash"
     private var selectedModelValue: String? {
@@ -210,7 +219,12 @@ struct KanbanBoardView: View {
                 if isPipeline {
                     pipelineSummaryBar
                 } else {
-                    AIComposeBar(isDrafting: aiDrafting, error: aiError) { submitAIDraft(prompt: $0) }
+                    AIComposeBar(
+                        isDrafting: aiDrafting,
+                        error: aiError,
+                        onCancel: cancelAIDraft,
+                        onDraft: { submitAIDraft(prompt: $0) }
+                    )
                 }
                 if showListView {
                     KanbanListView(
@@ -457,26 +471,48 @@ struct KanbanBoardView: View {
         guard !prompt.isEmpty, !aiDrafting, let pid = viewModel.project?.id else { return }
         aiDrafting = true
         aiError = nil
-        Task {
+        aiDraftTask?.cancel()
+        aiDraftGeneration += 1
+        let generation = aiDraftGeneration
+        aiDraftTask = Task {
             do {
                 let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(projectId: pid, prompt: prompt, model: selectedModelValue)
                 await MainActor.run {
+                    guard generation == aiDraftGeneration else { return }
                     aiDrafting = false
+                    aiDraftTask = nil
                     aiDraft = draft
                     showAIReview = true
                 }
+            } catch is CancellationError {
+                // cancelAIDraft already reset the bar.
             } catch {
                 await MainActor.run {
+                    guard generation == aiDraftGeneration else { return }
                     aiDrafting = false
+                    aiDraftTask = nil
                     if case APIError.httpError(let code, _) = error, code == 429 {
                         aiError = "AI drafting limit reached. Create tickets manually or try again later."
                     } else if case APIError.httpError(let code, _) = error, code == 402 {
                         aiError = "This workspace has reached its AI token budget."
+                    } else if case APIError.httpError(let code, _) = error, code == 409 {
+                        aiError = "Espresso is already drafting a ticket for you in this project."
+                    } else if case APIError.httpError(let code, _) = error, code == 403 {
+                        aiError = "You have read-only access to this project."
                     } else {
                         aiError = "Couldn't draft that — try rephrasing."
                     }
                 }
             }
         }
+    }
+
+    /// User-initiated escape from a long agent run. The server run finishes on
+    /// its own; this only stops the client waiting on it.
+    private func cancelAIDraft() {
+        aiDraftTask?.cancel()
+        aiDraftTask = nil
+        aiDraftGeneration += 1
+        aiDrafting = false
     }
 }

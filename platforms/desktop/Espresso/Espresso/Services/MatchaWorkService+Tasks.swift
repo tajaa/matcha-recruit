@@ -303,7 +303,20 @@ extension MatchaWorkService {
     /// Espresso's durable read-only agent and poll its audited background run;
     /// projects without a repository retain the legacy one-shot draft path.
     /// `model` is the header selector's value (same plumbing as threads).
-    func draftTaskFromPrompt(projectId: String, prompt: String, model: String? = nil) async throws -> MWTaskDraft {
+    ///
+    /// `useAgent` is opt-out for surfaces where a multi-minute queued run is the
+    /// wrong shape. The agent run also holds a one-live-run-per-(project, user)
+    /// lock, so routing an incidental action through it would 409 against a
+    /// board draft the same person already started.
+    func draftTaskFromPrompt(
+        projectId: String,
+        prompt: String,
+        model: String? = nil,
+        useAgent: Bool = true
+    ) async throws -> MWTaskDraft {
+        guard useAgent else {
+            return try await draftTaskOneShot(projectId: projectId, prompt: prompt, model: model)
+        }
         do {
             return try await draftTaskWithAgent(projectId: projectId, prompt: prompt, model: model)
         } catch APIError.httpError(let code, _) where code == 412 {
@@ -354,12 +367,27 @@ extension MatchaWorkService {
             started = try await client.request(method: "POST", path: path, body: request)
         }
 
+        var consecutivePollFailures = 0
         for _ in 0..<150 {
             try Task.checkCancellation()
-            let run: RunStatus = try await client.request(
-                method: "GET",
-                path: "\(path)/\(started.runId)"
-            )
+            let run: RunStatus
+            do {
+                run = try await client.request(
+                    method: "GET",
+                    path: "\(path)/\(started.runId)"
+                )
+                consecutivePollFailures = 0
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The run keeps executing server-side, so giving up on one bad
+                // poll strands it — and the one-live-run guard then 409s the
+                // user's retry for up to 15 minutes. Ride out a blip instead.
+                consecutivePollFailures += 1
+                guard consecutivePollFailures < 5 else { throw error }
+                try await Task.sleep(for: .seconds(2))
+                continue
+            }
             switch run.status {
             case "done":
                 guard let draft = run.draft else {

@@ -94,7 +94,6 @@ async def test_task_draft_reads_repo_and_returns_resolved_review_draft(monkeypat
         project_title="MATCHA",
         repo="example/matcha",
         base_branch="main",
-        model=None,
         collaborators=[{"user_id": str(user_id), "name": "Haley"}],
         elements=[{"id": "element-1", "name": "Desktop", "description": "macOS app"}],
         recent_done=[],
@@ -135,12 +134,34 @@ def test_normalize_draft_drops_unknown_assignee_and_clamps_enums():
     assert result["assigned_to"] is None
 
 
-@pytest.mark.asyncio
-async def test_task_draft_model_is_pinned_to_openai_luna():
-    result = await task_draft_agent.resolve_model(
-        "gemini-3.7-flash",
-        company_id=uuid4(),
-        user_id=uuid4(),
-    )
+def test_task_draft_model_is_pinned_to_openai_luna():
+    assert task_draft_agent.TASK_DRAFT_MODEL == "gpt-5.6-luna"
 
-    assert result == "gpt-5.6-luna"
+
+def test_match_named_refuses_short_and_ambiguous_fragments():
+    people = [
+        {"user_id": "user-1", "name": "Haley"},
+        {"user_id": "user-2", "name": "Pete"},
+        {"user_id": "user-3", "name": "Haley Stewart"},
+    ]
+    # A one-character artifact used to bind to the first name containing it.
+    assert task_draft_agent.match_named("a", people) is None
+    assert task_draft_agent.match_named("e", people) is None
+    # A real but ambiguous fragment must not pick a person arbitrarily.
+    assert task_draft_agent.match_named("haley", people)["user_id"] == "user-1"
+    assert task_draft_agent.match_named("stew", people)["user_id"] == "user-3"
+    assert task_draft_agent.match_named("hale", people) is None
+
+
+def test_clean_list_keeps_leading_digits_in_real_text():
+    cleaned = task_draft_agent._clean_list(
+        ["2FA login flow must be covered", "3D map export", "1. Wire the UI", "- Add tests"],
+        limit=10,
+        item_chars=200,
+    )
+    assert cleaned == [
+        "2FA login flow must be covered",
+        "3D map export",
+        "Wire the UI",
+        "Add tests",
+    ]
