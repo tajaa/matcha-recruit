@@ -55,7 +55,7 @@ async def post_autopr_context_request(
         raise ValueError("AutoPR context requests require a decision and reason")
 
     from .project_service import ensure_discussion_channel
-    from .project_agent.chat import post_as_espresso
+    from .project_agent.chat import broadcast_espresso_message, persist_espresso_message
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -84,45 +84,68 @@ async def post_autopr_context_request(
     if channel_id is None:
         return False
 
+    payload = None
     async with get_connection() as conn:
-        already_posted = await conn.fetchval(
-            """SELECT EXISTS(
-                   SELECT 1 FROM channel_messages
-                   WHERE channel_id=$1
-                     AND metadata->>'kind'='autopr_context_request'
-                     AND metadata->>'task_id'=$2
-                     AND metadata->>'expected_progress_note'=$3
-               )""",
-            channel_id,
-            str(task_id),
-            expected,
-        )
-    if already_posted:
-        return True
+        async with conn.transaction():
+            # The task row is the serialization point for this decision. The
+            # freshness recheck, duplicate check, and insert all happen while
+            # holding the same row lock and transaction.
+            row = await conn.fetchrow(
+                """SELECT t.title, t.board_column, t.progress_note,
+                          p.company_id,
+                          (p.project_data->>'discussion_channel_id')::uuid AS channel_id
+                   FROM mw_tasks t
+                   JOIN mw_projects p ON p.id=t.project_id
+                   WHERE t.id=$1 AND t.project_id=$2
+                   FOR UPDATE OF t""",
+                task_id,
+                project_id,
+            )
+            if not row or (row["progress_note"] or "").strip() != expected:
+                return False
+            channel_id = row["channel_id"]
+            if channel_id is None:
+                return False
+            already_posted = await conn.fetchval(
+                """SELECT EXISTS(
+                       SELECT 1 FROM channel_messages
+                       WHERE channel_id=$1
+                         AND metadata->>'kind'='autopr_context_request'
+                         AND metadata->>'task_id'=$2
+                         AND metadata->>'expected_progress_note'=$3
+                   )""",
+                channel_id,
+                str(task_id),
+                expected,
+            )
+            if already_posted:
+                return True
 
-    safe_title = " ".join((row["title"] or "ticket").split())
-    safe_title = safe_title.replace("⟦", "").replace("⟧", "").replace("|", "/")[:200]
-    column = (row["board_column"] or "todo").replace("_", " ").title()
-    content = (
-        f"⟦ticket:{task_id}|{safe_title}|{column}⟧\n"
-        f"This ticket needs additional context because {why} "
-        "Reply to this Espresso message with the missing detail, or add it "
-        "from the ticket. You can attach screenshots. Start a line with "
-        "`--draft-pr` to require a draft or `--trust-still-broken` to reject "
-        "another already-fixed conclusion; add `--test-route=/app/...` for an "
-        "approved test-tenant replay. Your reply is bound to this exact decision."
-    )
-    await post_as_espresso(
-        row["company_id"],
-        channel_id,
-        content,
-        metadata={
-            "kind": "autopr_context_request",
-            "project_id": str(project_id),
-            "task_id": str(task_id),
-            "expected_progress_note": expected,
-        },
-    )
+            safe_title = " ".join((row["title"] or "ticket").split())
+            safe_title = safe_title.replace("⟦", "").replace("⟧", "").replace("|", "/")[:200]
+            column = (row["board_column"] or "todo").replace("_", " ").title()
+            content = (
+                f"⟦ticket:{task_id}|{safe_title}|{column}⟧\n"
+                f"This ticket needs additional context because {why} "
+                "Reply to this Espresso message with the missing detail, or add it "
+                "from the ticket. You can attach screenshots. Start a line with "
+                "`--draft-pr` to require a draft or `--trust-still-broken` to reject "
+                "another already-fixed conclusion; add `--test-route=/app/...` for an "
+                "approved test-tenant replay. Your reply is bound to this exact decision."
+            )
+            payload = await persist_espresso_message(
+                conn,
+                row["company_id"],
+                channel_id,
+                content,
+                metadata={
+                    "kind": "autopr_context_request",
+                    "project_id": str(project_id),
+                    "task_id": str(task_id),
+                    "expected_progress_note": expected,
+                },
+            )
+    await broadcast_espresso_message(payload)
     return True
 
 

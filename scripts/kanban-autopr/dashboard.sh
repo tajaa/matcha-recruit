@@ -204,11 +204,13 @@ render_dashboard() {
         --json number,title,createdAt,mergedAt,headRefName,labels,url
 
     fetch_json cards board_state board-cards "$SCRIPT_DIR/collect.sh"
-    fetch_json bot_prs bot_pr_state bot-pr-context "$SCRIPT_DIR/collect-pr-context.sh"
+    fetch_json bot_prs bot_pr_state bot-pr-context env GITHUB_REPOSITORY="$REPO" \
+        "$SCRIPT_DIR/collect-pr-context.sh"
     plan='{"schema_version":1,"plan_id":"unavailable","work_order":[],"merge_order":[],"release_blockers":[],"ready_prs_excluded":[]}'
     plan_state=unavailable
     plan_input_dir="$CACHE_DIR/plan-input"
-    if mkdir -p "$plan_input_dir" 2>/dev/null \
+    if [ "$board_state" = live ] && [ "$bot_pr_state" = live ] \
+        && mkdir -p "$plan_input_dir" 2>/dev/null \
         && (umask 077; printf '%s' "$cards" > "$plan_input_dir/cards.json") 2>/dev/null \
         && (umask 077; printf '%s' "$bot_prs" > "$plan_input_dir/prs.json") 2>/dev/null \
         && python3 "$PLAN_PY" \
@@ -389,13 +391,15 @@ render_dashboard() {
       [(.number | tostring),
        (if ([.labels[].name] | index("autopr")) then "KANBAN" elif ([.labels[].name] | index("autofix")) then "ERROR" else "AUDIT" end),
        (.title[0:40]), (.createdAt // ""), (.mergedAt // ""),
-       (if ([.labels[].name] | index("production-verified")) then "PROD VERIFIED"
+       (if ([.labels[].name] | index("autopr") | not) then ""
+        elif ([.labels[].name] | index("production-verified")) then "PROD VERIFIED"
         elif ([.labels[].name] | index("production-verification-failed")) then "PROD FAILED"
         elif ([.labels[].name] | index("production-verification-needed")) then "PROD CHECK NEEDED"
         else "AWAITING DEPLOY/CHECK" end)] | @tsv
     ' | while IFS=$'\t' read -r merged_number merged_lane merged_title merged_created merged_at merged_verification; do
-        printf '  #%-4s %-6s %-40s %8s · %s · %s\n' "$merged_number" "$merged_lane" "$merged_title" \
-            "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")" "$merged_verification"
+        printf '  #%-4s %-6s %-40s %8s · %s%s\n' "$merged_number" "$merged_lane" "$merged_title" \
+            "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")" \
+            "${merged_verification:+ · $merged_verification}"
     done
 
     printf '\nRECENT RUNS · DURATION · PACIFIC\n'

@@ -31,8 +31,31 @@ check_live_pr() {
         --json number,state,isDraft,reviewDecision,mergeStateStatus,labels,statusCheckRollup,headRefOid
 }
 
-for ((index = 0; index < count; index++)); do
+release_pr() (
+    set -e
+    index="$1"
+    made_ready=false
+
+    restore_draft_on_exit() {
+        rc=$?
+        trap - EXIT
+        if [ "$rc" -ne 0 ] && [ "$made_ready" = true ]; then
+            current_state="$(gh pr view "$number" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
+            if [ "$current_state" = OPEN ]; then
+                if gh pr ready "$number" --repo "$REPO" --undo >/dev/null; then
+                    echo "Restored PR #$number to draft after release failure" >&2
+                else
+                    echo "Could not restore PR #$number to draft after release failure" >&2
+                fi
+            fi
+        fi
+        exit "$rc"
+    }
+
     number="$(jq -r ".merge_order[$index].pr_number" "$PLAN_FILE")"
+    planned_head="$(jq -r ".merge_order[$index].head_oid // empty" "$PLAN_FILE")"
+    [[ "$planned_head" =~ ^[0-9a-fA-F]{40}$ ]] \
+        || { echo "PR #$number has no valid planned head commit" >&2; exit 1; }
     declared_dependencies="$(jq -r ".merge_order[$index].depends_on_prs[]?" "$PLAN_FILE")"
     while IFS= read -r dependency; do
         [ -n "$dependency" ] || continue
@@ -42,6 +65,9 @@ for ((index = 0; index < count; index++)); do
     done <<< "$declared_dependencies"
 
     live="$(check_live_pr "$number")"
+    live_head="$(jq -r '.headRefOid // empty' <<< "$live")"
+    [ "$live_head" = "$planned_head" ] \
+        || { echo "PR #$number head changed after plan generation ($planned_head -> $live_head)" >&2; exit 1; }
     jq -e '.state == "OPEN" and .isDraft == true' <<< "$live" >/dev/null \
         || { echo "PR #$number is no longer the not-ready draft in plan $actual_id" >&2; exit 1; }
     if jq -e '[.labels[].name] | any(. == "autopr-awaiting-input" or . == "needs-work" or . == "possible-duplicate" or . == "production-verification-failed")' <<< "$live" >/dev/null; then
@@ -49,10 +75,15 @@ for ((index = 0; index < count; index++)); do
         exit 1
     fi
 
+    trap restore_draft_on_exit EXIT
     gh pr ready "$number" --repo "$REPO" >/dev/null
+    made_ready=true
     deadline=$(( $(date +%s) + WAIT_SECONDS ))
     while :; do
         live="$(check_live_pr "$number")"
+        live_head="$(jq -r '.headRefOid // empty' <<< "$live")"
+        [ "$live_head" = "$planned_head" ] \
+            || { echo "PR #$number head changed after plan generation ($planned_head -> $live_head)" >&2; exit 1; }
         if jq -e '.reviewDecision == "CHANGES_REQUESTED"' <<< "$live" >/dev/null; then
             echo "PR #$number has changes requested" >&2
             exit 1
@@ -73,8 +104,14 @@ for ((index = 0; index < count; index++)); do
 
     # No --admin and no queued auto-merge: each predecessor is conclusively
     # merged before the next PR is evaluated against the new main.
-    gh pr merge "$number" --repo "$REPO" --squash --delete-branch
+    gh pr merge "$number" --repo "$REPO" --squash --delete-branch \
+        --match-head-commit "$planned_head"
     state="$(gh pr view "$number" --repo "$REPO" --json state --jq '.state')"
     [ "$state" = MERGED ] || { echo "PR #$number did not reach MERGED" >&2; exit 1; }
+    made_ready=false
     echo "Merged plan $actual_id position $((index + 1))/$count: PR #$number"
+)
+
+for ((index = 0; index < count; index++)); do
+    release_pr "$index"
 done

@@ -5,16 +5,19 @@
 set -euo pipefail
 
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+ROWS_FILE="$TMP_DIR/prs.jsonl"
+: > "$ROWS_FILE"
 
 open="$(gh pr list --repo "$REPO" --state open --limit 100 \
-    --json number,title,isDraft,headRefName,createdAt,updatedAt,labels,url \
+    --json number,title,isDraft,headRefName,headRefOid,createdAt,updatedAt,labels,url \
     --jq '[.[] | select([.labels[].name] | any(. == "autopr" or . == "autofix" or . == "autopr-self-audit"))]')"
 
-out='[]'
 while IFS= read -r number; do
     [ -n "$number" ] || continue
     if ! detail="$(gh pr view "$number" --repo "$REPO" \
-        --json number,title,isDraft,state,headRefName,createdAt,updatedAt,labels,url,body,reviewDecision,statusCheckRollup,comments,reviews,files 2>/dev/null)"; then
+        --json number,title,isDraft,state,headRefName,headRefOid,createdAt,updatedAt,labels,url,body,reviewDecision,statusCheckRollup,comments,reviews,files 2>/dev/null)"; then
         # Fail closed at the aggregate level. A partial PR snapshot can invent
         # an ordering by making a dependency/comment disappear.
         echo "could not read planning context for PR #$number" >&2
@@ -42,7 +45,7 @@ while IFS= read -r number; do
         }))
       | del(.statusCheckRollup)
     ')"
-    out="$(jq -cn --argjson rows "$out" --argjson row "$bounded" '$rows + [$row]')"
+    printf '%s\n' "$bounded" >> "$ROWS_FILE"
 done < <(printf '%s' "$open" | jq -r '.[].number')
 
-printf '%s\n' "$out"
+jq -s '.' "$ROWS_FILE"

@@ -9,6 +9,7 @@ DEPLOYED_SHA="${1:?usage: verify-production-fixes.sh deployed-sha deploy-target}
 DEPLOY_TARGET="${2:?usage: verify-production-fixes.sh deployed-sha deploy-target}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 SITE_URL="${AUTOPR_PRODUCTION_SITE_URL:-https://hey-matcha.com}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -59,7 +60,11 @@ while IFS= read -r pr; do
     encoded="$(printf '%s' "$body" | sed -nE 's/.*<!-- matcha-production-verification: ([A-Za-z0-9+\/=]+) -->.*/\1/p' | tail -1)"
     [ -n "$merge_sha" ] && [ -n "$encoded" ] || continue
     git merge-base --is-ancestor "$merge_sha" "$full_sha" || continue
-    if printf '%s' "$pr" | jq -e '[.labels[].name] | any(. == "production-verified" or . == "production-verification-needed")' >/dev/null; then
+    if printf '%s' "$pr" | jq -e '[.labels[].name] | any(
+        . == "production-verified"
+        or . == "production-verification-needed"
+        or . == "production-verification-failed"
+    )' >/dev/null; then
         continue
     fi
     if ! spec="$(decode_spec "$encoded")" \
@@ -95,15 +100,10 @@ while IFS= read -r pr; do
         continue
     fi
 
-    if ! printf '%s' "$spec" | jq -e '
+    if ! printf '%s' "$spec" | jq -L "$SCRIPT_DIR" -e '
+      include "production-check";
       (.checks | length >= 1 and length <= 5)
-      and all(.checks[];
-        (.path | type == "string" and startswith("/") and length <= 500
-          and (contains("://") | not) and (contains("?") | not)
-          and (contains("..") | not) and (test("[[:space:]]") | not))
-        and (.expected_status | type == "number" and floor == . and . >= 100 and . <= 599)
-        and ((.body_contains // "") | type == "string" and length <= 200)
-        and ((.body_absent // "") | type == "string" and length <= 200))
+      and all(.checks[]; valid_production_http_check)
     ' >/dev/null; then
         echo "PR #$number automatic production plan failed the HTTP allowlist" >&2
         replace_verification_labels "$number" production-verification-failed

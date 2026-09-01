@@ -118,6 +118,20 @@ _AUTOPR_TEST_ROUTE_RE = re.compile(
     re.IGNORECASE,
 )
 _AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
+_AUTOPR_DRAFT_COMMAND_RE = re.compile(
+    r"\b(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?(?:pr|pull\s+request)\b"
+)
+_AUTOPR_DRAFT_NEGATION_RE = re.compile(
+    r"\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}\b(?:draft|create|open)\b"
+)
+
+
+def _is_autopr_waiting_for_answers_note(note: str) -> bool:
+    normalized = (note or "").strip()
+    lowered = normalized.lower()
+    return normalized.startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS") or (
+        lowered.startswith("from auto setup") and "answers needed" in lowered
+    )
 
 
 def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
@@ -134,10 +148,10 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
         if not line.startswith("--"):
             continue
         instruction = " ".join(line[2:].strip().lower().replace("’", "'").split())
-        if (
-            instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
-            or ("draft" in instruction and (" pr" in f" {instruction}" or "pull request" in instruction))
-        ) and "draft_pr" not in directives:
+        explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
+        natural_draft = bool(_AUTOPR_DRAFT_COMMAND_RE.search(instruction))
+        draft_is_negated = bool(_AUTOPR_DRAFT_NEGATION_RE.search(instruction))
+        if (explicit_draft or (natural_draft and not draft_is_negated)) and "draft_pr" not in directives:
             directives.append("draft_pr")
         if (
             instruction in {"trust-still-broken", "trust still broken"}
@@ -274,9 +288,7 @@ async def request_autopr_reconsideration(
                 raise AutoPRReconsiderationConflict(
                     "The AutoPR decision changed; refresh the ticket and try again"
                 )
-            waiting_for_answers = current_note.startswith(
-                "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"
-            )
+            waiting_for_answers = _is_autopr_waiting_for_answers_note(current_note)
             if not _AUTOPR_NO_SPEC_RE.search(current_note) and not waiting_for_answers:
                 raise AutoPRReconsiderationConflict(
                     "This ticket no longer has an AutoPR decision awaiting context"

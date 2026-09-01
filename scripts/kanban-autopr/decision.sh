@@ -3,10 +3,12 @@
 # labels, or a card update. Source this file for the helpers or run
 # `decision.sh normalize raw.json decision.json`.
 set -euo pipefail
+_AUTOPR_DECISION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 _autopr_decision_schema_ok() {
     local file="$1"
-    jq -e '
+    jq -L "$_AUTOPR_DECISION_DIR" -e '
+      include "production-check";
       def bounded($key; $max):
         (.confidence[$key].score | type == "number" and floor == . and . >= 0 and . <= $max)
         and (.confidence[$key].reason | type == "string" and length > 0);
@@ -25,11 +27,6 @@ _autopr_decision_schema_ok() {
              and all(.[]; (.key | type == "string" and length > 0)
                          and (.label | type == "string" and length > 0)
                          and (.impact | type == "string" and length > 0)));
-      def valid_production_check:
-        (.path | type == "string" and startswith("/") and length <= 500)
-        and (.expected_status | type == "number" and floor == . and . >= 100 and . <= 599)
-        and ((.body_contains // "") | type == "string" and length <= 200)
-        and ((.body_absent // "") | type == "string" and length <= 200);
       def valid_production_verification:
         type == "object"
         and (.target | IN("backend", "frontend", "both"))
@@ -38,7 +35,7 @@ _autopr_decision_schema_ok() {
         and (.checks | type == "array")
         and (.steps | type == "array" and all(.[]; type == "string" and length > 0 and length <= 500))
         and (if .mode == "automatic_http" then
-               (.checks | length >= 1 and length <= 5 and all(.[]; valid_production_check))
+               (.checks | length >= 1 and length <= 5 and all(.[]; valid_production_http_check))
                and (.steps | length == 0)
              else
                (.checks | length == 0) and (.steps | length >= 1 and length <= 8)

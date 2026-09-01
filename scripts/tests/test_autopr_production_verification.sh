@@ -13,7 +13,8 @@ manual_b64="$(printf '%s' "$manual_spec" | base64 | tr -d '\r\n')"
 head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 jq -n --arg sha "$head_sha" --arg auto "$auto_b64" --arg manual "$manual_b64" '[
   {number:501,title:"automatic",mergeCommit:{oid:$sha},mergedAt:"2026-09-01T00:00:00Z",url:"x",labels:[{name:"autopr"}],body:("<!-- matcha-production-verification: " + $auto + " -->")},
-  {number:502,title:"manual",mergeCommit:{oid:$sha},mergedAt:"2026-09-01T00:01:00Z",url:"x",labels:[{name:"autopr"}],body:("<!-- matcha-production-verification: " + $manual + " -->")}
+  {number:502,title:"manual",mergeCommit:{oid:$sha},mergedAt:"2026-09-01T00:01:00Z",url:"x",labels:[{name:"autopr"}],body:("<!-- matcha-production-verification: " + $manual + " -->")},
+  {number:503,title:"known failure",mergeCommit:{oid:$sha},mergedAt:"2026-09-01T00:02:00Z",url:"x",labels:[{name:"autopr"},{name:"production-verification-failed"}],body:("<!-- matcha-production-verification: " + $auto + " -->")}
 ]' > "$TMP_DIR/prs.json"
 
 cat > "$TMP_DIR/bin/gh" <<'EOF'
@@ -51,6 +52,8 @@ grep -q -- '--add-label production-verified' "$TMP_DIR/gh.log"
 grep -q -- '--add-label production-verification-needed' "$TMP_DIR/gh.log"
 grep -q '^pr comment 501 ' "$TMP_DIR/gh.log"
 grep -q '^pr comment 502 ' "$TMP_DIR/gh.log"
+! grep -q '^pr comment 503 ' "$TMP_DIR/gh.log"
+! grep -q '^pr edit 503 ' "$TMP_DIR/gh.log"
 
 # A backend-only rollout cannot prove a frontend or both-target fix.
 : > "$TMP_DIR/gh.log"

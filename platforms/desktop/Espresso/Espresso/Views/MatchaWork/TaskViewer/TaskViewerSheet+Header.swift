@@ -101,8 +101,9 @@ extension TaskViewerSheet {
     var canRequestAutoPRReconsideration: Bool {
         guard let note = autoSetupProgressNote else { return false }
         let liveTask = liveAutoPRTask
-        let isAwaitingAnswers = note.contains("BLOCKED: AWAITING ANSWERS")
-            || note.lowercased().contains("answers needed")
+        let normalizedNote = note.lowercased()
+        let isAwaitingAnswers = note.hasPrefix("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")
+            || (normalizedNote.hasPrefix("from auto setup") && normalizedNote.contains("answers needed"))
         let isNoSafeAction = note.contains("[autopr:no-spec ")
             && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
                 .contains(where: note.contains)

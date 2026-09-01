@@ -153,7 +153,7 @@ post_reconsideration_reply() {
 
 post_context_request() {
     local reason="$1" expected_note="$2"
-    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | cut -c1-600)"
+    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rrs '.[0:600]')"
     if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
         "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
             '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then

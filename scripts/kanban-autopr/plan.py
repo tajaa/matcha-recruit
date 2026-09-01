@@ -65,10 +65,15 @@ def path_related(left: set[str], right: set[str]) -> list[str]:
                 continue
             if a_root == b_root or a_root.startswith(b_root + "/") or b_root.startswith(a_root + "/"):
                 matches.add(a_root if len(a_root) <= len(b_root) else b_root)
-            elif PurePosixPath(a_root).parts[:2] == PurePosixPath(b_root).parts[:2]:
-                # A shared two-component product package is useful context but
-                # weaker than an exact/ancestor path match.
-                matches.add("/".join(PurePosixPath(a_root).parts[:2]))
+            else:
+                # Sibling files in the same specific directory are related.
+                # Broad roots such as server/app and client/src are not: using
+                # them would collapse most backend or frontend work into one
+                # cluster and invent dependencies between unrelated changes.
+                a_parent = PurePosixPath(a_root).parent.parts
+                b_parent = PurePosixPath(b_root).parent.parts
+                if a_parent == b_parent and len(a_parent) >= 3:
+                    matches.add("/".join(a_parent))
     return sorted(matches)
 
 
@@ -103,16 +108,15 @@ def parse_time(value: str | None) -> str:
 def card_base_key(card: dict[str, Any]) -> tuple[Any, ...]:
     reconsider = bool(card.get("autopr_reconsideration_pending"))
     column = card.get("board_column")
-    progress = (card.get("progress_note") or "").lower()
     has_pr = isinstance(card.get("pr_number"), int)
     if reconsider:
         lane = 0
+    elif card_context_state(card) is not None:
+        lane = 4
     elif column == "changes_requested" and has_pr:
         lane = 1
     elif column == "changes_requested":
         lane = 2
-    elif "awaiting answers" in progress:
-        lane = 4
     else:
         lane = 3
     return (
@@ -260,18 +264,26 @@ def build_plan(cards: list[dict[str, Any]], prs: list[dict[str, Any]]) -> tuple[
     # Include every field that can affect relationships, ordering, evidence,
     # or release safety. The explicit release command must go stale whenever
     # any of those inputs changes.
-    canonical = {
-        "cards": [{key: card.get(key) for key in (
+    canonical_cards = [
+        {key: card.get(key) for key in (
             "task_id", "id8", "title", "description", "review_note",
             "board_column", "priority", "created_at", "last_moved_at",
             "progress_note", "autopr_reconsideration_pending", "pr_number",
             "repo_paths", "element_id",
-        )} for card in cards],
-        "prs": [{key: pr.get(key) for key in (
-            "number", "title", "body", "state", "isDraft", "headRefName",
+        )}
+        for card in cards
+    ]
+    canonical_prs = [
+        {key: pr.get(key) for key in (
+            "number", "title", "body", "state", "isDraft", "headRefName", "headRefOid",
             "createdAt", "updatedAt", "labels", "reviewDecision", "checks",
             "files", "comments", "reviews",
-        )} for pr in prs],
+        )}
+        for pr in prs
+    ]
+    canonical = {
+        "cards": sorted(canonical_cards, key=lambda row: str(row.get("task_id") or "")),
+        "prs": sorted(canonical_prs, key=lambda row: str(row.get("number") or "")),
     }
     plan_id = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:12]
 
@@ -379,6 +391,7 @@ def build_plan(cards: list[dict[str, Any]], prs: list[dict[str, Any]]) -> tuple[
             "pr_number": pr["number"],
             "title": pr.get("title") or "Untitled PR",
             "head": pr.get("headRefName"),
+            "head_oid": pr.get("headRefOid"),
             "lane": next((label for label in pr.get("labels") or [] if label in BOT_LABELS), "bot"),
             "linked_task_id": linked_card.get("task_id") if linked_card else None,
             "depends_on_prs": dependencies,

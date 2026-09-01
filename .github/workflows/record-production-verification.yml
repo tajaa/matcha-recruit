@@ -48,7 +48,7 @@ jobs:
           RESULT: ${{ inputs.result }}
           EVIDENCE: ${{ inputs.evidence }}
         run: |
-          evidence="$(printf '%s' "$EVIDENCE" | tr '\r\n' ' ' | cut -c1-1000)"
+          evidence="$(printf '%s' "$EVIDENCE" | tr '\r\n' ' ' | jq -Rrs '.[0:1000]')"
           [ -n "$evidence" ]
           label=production-verification-failed
           heading='Manual production verification failed'

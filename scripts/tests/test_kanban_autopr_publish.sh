@@ -152,6 +152,14 @@ check "publisher replies to the triggering additional-context note" \
 check "awaiting-input publication asks in project chat against the exact decision" \
   $(jq -e '(.reason | contains("canonical term")) and (.expected_progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))' "$TMP_DIR/context-request.json" >/dev/null && echo 0 || echo 1)
 
+unicode_sample="$(jq -nr '"a" * 599 + "🙂tail"')"
+unicode_truncated="$(printf '%s' "$unicode_sample" | jq -Rrs '.[0:600]')"
+check "context-request truncation preserves UTF-8 at the boundary" \
+  $([ "$(printf '%s' "$unicode_truncated" | jq -Rrs 'length')" = 600 ] \
+    && [[ "$unicode_truncated" == *🙂 ]] \
+    && grep -q "jq -Rrs '\.\[0:600\]'" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
+    && echo 0 || echo 1)
+
 cat > "$TMP_DIR/already-fixed-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"investigate","pr_number":364,"progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-08-28T22:37:56Z] already_fixed","autopr_reconsideration_event_id":"ffffffff-0000-4000-8000-000000000002","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF

@@ -57,7 +57,9 @@ deployed SHA for its required target.
 Safe public GET assertions run automatically and label/comment the PR
 `production-verified` or `production-verification-failed`. Authenticated, stateful, and
 visual plans are never guessed from CI: the workflow posts the reviewed steps and labels
-the PR `production-verification-needed`. The AutoPR dashboard shows the resulting state.
+the PR `production-verification-needed`. Failed automatic checks are not repeated on
+every later deploy; after resolving the cause, remove the failure label to request a new
+check. The AutoPR dashboard shows the resulting state for Kanban AutoPRs only.
 The operator records a completed manual check through
 `record-production-verification.yml`; it accepts only a merged PR with that outstanding
 label and writes the actor, bounded evidence, result, and workflow link back to the PR.

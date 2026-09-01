@@ -201,6 +201,13 @@ if grep -qF 'unexpected Vitest failures' "$CI_WORKFLOW" \
 else
     check "PR CI fingerprints each pre-existing main-branch failure" 1
 fi
+
+if ! grep -q 'cut -c1-1000' "$REPO_ROOT/.github/workflows/record-production-verification.yml" \
+    && grep -q "jq -Rrs '\.\[0:1000\]'" "$REPO_ROOT/.github/workflows/record-production-verification.yml"; then
+    check "manual production evidence truncation is Unicode-safe" 0
+else
+    check "manual production evidence truncation is Unicode-safe" 1
+fi
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"

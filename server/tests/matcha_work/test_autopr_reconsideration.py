@@ -65,6 +65,11 @@ def test_operator_directives_require_leading_marker_and_accept_natural_phrasing(
     assert route == "/app/jobs"
     assert svc._parse_autopr_directives("you need to draft this PR") == ([], None)
     assert svc._parse_autopr_directives("--test-route=https://evil.example/x") == ([], None)
+    assert svc._parse_autopr_directives(
+        "--do not draft a PR yet, ask questions first"
+    ) == ([], None)
+    assert svc._parse_autopr_directives("--no draft PR yet") == ([], None)
+    assert svc._parse_autopr_directives("--draft prevention notes") == ([], None)
 
 
 @pytest.mark.asyncio
@@ -191,6 +196,26 @@ async def test_reconsideration_persists_trusted_directive_policy(monkeypatch):
     assert metadata["autopr_test_route"] == "/app/jobs"
     assert result["autopr_directives"] == ["draft_pr", "trust_still_broken"]
     assert result["autopr_test_route"] == "/app/jobs"
+
+
+@pytest.mark.asyncio
+async def test_legacy_answers_needed_note_matches_desktop_eligibility(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = "from auto setup · build 849 · answers needed · Which screen is affected?"
+    conn = _ReconsiderationConn(current, board_column="changes_requested")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    monkeypatch.setattr(svc, "_notify_task_comment", AsyncMock())
+
+    result = await svc.request_autopr_reconsideration(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        expected_progress_note=current,
+        body="The jobs editor is affected.",
+    )
+
+    assert result["autopr_reconsideration_pending"] is True
 
 
 @pytest.mark.asyncio

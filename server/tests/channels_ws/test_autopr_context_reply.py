@@ -181,11 +181,45 @@ async def test_chat_image_reference_becomes_bounded_task_file(monkeypatch):
         user_id,
         [{
             "url": "https://cdn.example.cloudfront.net/chat/shot",
+            "filename": "x" * 500,
             "kind": "image",
             "size": 321,
         }],
     )
 
     assert ids == [file_id]
-    assert conn.insert_args[3] == "shot.png"
+    assert len(conn.insert_args[3]) == 500
+    assert conn.insert_args[3].endswith(".png")
     assert conn.insert_args[6] == 321
+
+
+@pytest.mark.asyncio
+async def test_project_chat_attachment_uses_shared_root_insert():
+    from app.matcha.services.matcha_work import project_file_service
+
+    file_id = uuid4()
+
+    class _Conn:
+        def __init__(self):
+            self.insert_args = None
+
+        async def fetchrow(self, query, *args):
+            assert "task_id IS NOT DISTINCT FROM $2" in query
+            self.insert_args = args
+            return {"id": file_id}
+
+    conn = _Conn()
+    added = await project_file_service.sync_channel_attachments_to_project(
+        conn,
+        uuid4(),
+        uuid4(),
+        [{
+            "url": "https://cdn.example.cloudfront.net/chat/report.pdf",
+            "filename": "report.pdf",
+            "size": 123,
+        }],
+    )
+
+    assert added == 1
+    assert conn.insert_args[1] is None
+    assert conn.insert_args[3] == "report.pdf"

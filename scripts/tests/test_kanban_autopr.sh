@@ -600,6 +600,22 @@ invalid_decision_rc=$?
 check "questions-only decisions require actionable questions" \
     $([ "$invalid_decision_rc" != 0 ] && echo 0 || echo 1)
 
+jq '.production_verification = {
+      target:"frontend",
+      mode:"automatic_http",
+      reason:"Query strings are outside the verifier allowlist.",
+      checks:[{path:"/app/jobs?tab=creds",expected_status:200}],
+      steps:[]
+    }' "$TMP_DIR/publication-decision.json" > "$TMP_DIR/invalid-production-check.json"
+"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/invalid-production-check.json" \
+    "$TMP_DIR/invalid-production-check.normalized.json" >/dev/null 2>&1
+invalid_production_check_rc=$?
+check "decision and deploy verifier share the production HTTP allowlist" \
+    $([ "$invalid_production_check_rc" != 0 ] \
+      && grep -q 'include "production-check"' "$AUTOPR_DIR/decision.sh" \
+      && grep -q 'include "production-check"' "$AUTOPR_DIR/verify-production-fixes.sh" \
+      && echo 0 || echo 1)
+
 jq '.outcome = "no_safe_action"
     | .safe_changes_present = false
     | .questions = []

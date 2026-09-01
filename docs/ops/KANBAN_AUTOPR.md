@@ -336,10 +336,13 @@ The trusted Mac rebuilds the plan from the live board and all open bot PRs. A st
 new comment/update, context contingency, `autopr-awaiting-input`, `needs-work`,
 `possible-duplicate`, failed check, requested change, or unmerged predecessor
 stops the release. Pending checks are shown in the plan but the released workflow waits
-for them. For each surviving draft, `release-plan.sh` marks it ready, waits for
+for them. Each merge position is pinned to the PR head commit captured by the plan;
+any later push stops the release, and GitHub receives the same commit as an atomic merge
+precondition. For each surviving draft, `release-plan.sh` marks it ready, waits for
 GitHub to report it clean, squash-merges without `--admin`, verifies `MERGED`, and only
 then evaluates the next PR against the new main. It never queues all PRs for unordered
-auto-merge.
+auto-merge. If a check, timeout, or merge attempt fails after the ready transition, the
+script restores the still-open PR to draft so a later authoritative plan can include it.
 
 ## Post-deploy production proof
 
@@ -353,9 +356,12 @@ After a successful blue/green swap, `update-ec2.sh` dispatches
 AutoPR only when its merge commit is an ancestor of the deployed source SHA and the
 required backend/frontend target is live. Passing automatic assertions add
 `production-verified`; a failed assertion adds `production-verification-failed` and
-does not mark the issue fixed. Manual plans add `production-verification-needed` and
+does not mark the issue fixed. A failed result is terminal for automatic deploy checks:
+later deploys skip it until an operator resolves the cause and removes the failure label
+to request a fresh check. Manual plans add `production-verification-needed` and
 post the exact checklist to the PR. The dashboard shows these states beside recently
-merged bot PRs. After performing a manual checklist, record the observed result through
+merged Kanban PRs; error-autofix and self-audit lanes do not claim a production-check
+state they never emit. After performing a manual checklist, record the observed result through
 `record-production-verification.yml` (PR number, passed/failed, and bounded evidence);
 it requires the outstanding manual-gate label and leaves an actor/run-linked PR audit
 comment before replacing the label. Merge alone, or merge-to-main before deployment,
