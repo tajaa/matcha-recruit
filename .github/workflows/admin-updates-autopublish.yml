@@ -27,6 +27,10 @@ on:
         description: "Bootstrap override only: last PR to treat as already processed"
         required: false
         type: string
+      since_date:
+        description: "Manual backfill only: last fully covered UTC date (YYYY-MM-DD) or ISO timestamp"
+        required: false
+        type: string
 
 # This workflow uses the same self-hosted Codex login and sealed msandbox as
 # matcha-autopr. GitHub/SSH stay on the trusted host; Luna receives only a
@@ -91,6 +95,7 @@ jobs:
           INPUT_SHA: ${{ inputs.sha }}
           INPUT_SOURCE: ${{ inputs.source }}
           INPUT_SINCE_PR: ${{ inputs.since_pr }}
+          INPUT_SINCE_DATE: ${{ inputs.since_date }}
         run: |
           deployed_at="$INPUT_DEPLOYED_AT"
           [ -n "$deployed_at" ] || deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -108,11 +113,12 @@ jobs:
             "$RUNNER_TEMP/production-state.json" \
             "$RUNNER_TEMP/deployment.json" \
             "$RUNNER_TEMP/admin-updates-plan.json" \
-            "$INPUT_SINCE_PR"
+            "$INPUT_SINCE_PR" \
+            "$INPUT_SINCE_DATE"
 
           echo "has_work=$(jq -r '.hasWork' "$RUNNER_TEMP/admin-updates-plan.json")" >> "$GITHUB_OUTPUT"
           echo "needs_draft=$(jq -r '.needsDraft' "$RUNNER_TEMP/admin-updates-plan.json")" >> "$GITHUB_OUTPUT"
-          jq '{sourceWatermark,sourceStateUpdatedAt,mergeCursorOverlapHours,targetWatermark,candidates:(.candidates|length),units:(.units|length),automaticSkips:(.automaticSkips|length),deferred}' \
+          jq '{sourceWatermark,manualSinceDate,sourceStateUpdatedAt,mergeCursorOverlapHours,targetWatermark,candidates:(.candidates|length),units:(.units|length),automaticSkips:(.automaticSkips|length),deferred}' \
             "$RUNNER_TEMP/admin-updates-plan.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Draft update content with Luna high

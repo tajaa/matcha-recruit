@@ -161,6 +161,38 @@ def test_merge_timestamp_overlap_catches_late_lower_number_pr(monkeypatch, tmp_p
     assert plan["mergeCursorOverlapHours"] == 24
 
 
+def test_manual_since_date_scopes_a_backfill_by_merge_time(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(),
+        production_state=_state(last_pr=100, updated_at=None),
+        merged_prs=[_pr(99, ["server/app/core/backfill.py"])],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+        since_date="2026-08-27",
+    )
+
+    assert plan["manualSinceDate"] == "2026-08-27"
+    assert plan["units"][0]["sourcePr"] == 99
+    assert plan["hasWork"] is True
+
+
+def test_manual_since_date_rejects_a_numeric_cursor(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    with pytest.raises(admin_collect.CollectionError, match="cannot be used together"):
+        admin_collect.build_plan(
+            production_context=_context(),
+            production_state=_state(),
+            merged_prs=[],
+            deployment=_deployment(),
+            repo_root=tmp_path,
+            since_pr=10,
+            since_date="2026-08-27",
+        )
+
+
 def test_deferred_pr_prevents_partial_batch_cursor_advance(monkeypatch, tmp_path):
     monkeypatch.setattr(
         admin_collect,
