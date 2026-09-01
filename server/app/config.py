@@ -110,6 +110,9 @@ class Settings:
     twilio_media_stream_url: Optional[str] = None
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 15
+    # Ceiling only: refresh_token_times() clamps every refresh token to the
+    # 12h absolute session bound, and refresh_session_expired() rejects one
+    # after 30m idle, so this never binds in practice.
     jwt_refresh_token_expire_days: int = 7
     jwt_refresh_idle_expire_minutes: int = 30
     jwt_session_absolute_expire_hours: int = 12

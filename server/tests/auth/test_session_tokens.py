@@ -40,3 +40,42 @@ def test_missing_issued_at_is_rejected(monkeypatch):
     monkeypatch.setattr(session_tokens, 'get_settings', _settings)
     assert session_tokens.access_token_stale(None) is True
     assert session_tokens.refresh_session_expired(None, None) is True
+
+
+def _watermark(now, **delta):
+    return now + timedelta(**delta)
+
+
+def test_revocation_kills_a_token_minted_a_fraction_of_a_second_earlier():
+    """The whole-second `iat` fallback let a token minted at T=100.2 survive a
+    logout at T=100.7, because both floor to 100. `iat_ms` decides exactly."""
+    logout_at = datetime(2026, 9, 1, 12, 0, 0, 700_000, tzinfo=timezone.utc)
+    minted_at = datetime(2026, 9, 1, 12, 0, 0, 200_000, tzinfo=timezone.utc)
+    assert session_tokens.token_predates_watermark(
+        int(minted_at.timestamp()),
+        session_tokens.issue_stamp_ms(minted_at),
+        logout_at,
+    ) is True
+
+
+def test_same_second_relogin_after_logout_is_not_self_revoked():
+    logout_at = datetime(2026, 9, 1, 12, 0, 0, 200_000, tzinfo=timezone.utc)
+    minted_at = datetime(2026, 9, 1, 12, 0, 0, 900_000, tzinfo=timezone.utc)
+    assert session_tokens.token_predates_watermark(
+        int(minted_at.timestamp()),
+        session_tokens.issue_stamp_ms(minted_at),
+        logout_at,
+    ) is False
+
+
+def test_legacy_token_without_iat_ms_falls_back_to_floored_second():
+    logout_at = datetime(2026, 9, 1, 12, 0, 0, 700_000, tzinfo=timezone.utc)
+    same_second = int(logout_at.timestamp())
+    # Legacy tokens keep the lenient whole-second behaviour: a same-second
+    # re-login must not 401 itself just because it predates iat_ms.
+    assert session_tokens.token_predates_watermark(same_second, None, logout_at) is False
+    assert session_tokens.token_predates_watermark(same_second - 1, None, logout_at) is True
+
+
+def test_no_watermark_never_revokes():
+    assert session_tokens.token_predates_watermark(1, 1000, None) is False

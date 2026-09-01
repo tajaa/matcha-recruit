@@ -268,7 +268,7 @@ async def refresh(body: CappeRefreshRequest, request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
     # Revoked refresh tokens (issued before logout / password change) can't re-mint.
-    if is_cappe_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
+    if is_cappe_token_revoked(payload.get("iat"), row["tokens_valid_after"], payload.get("iat_ms")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked")
 
     account = CappeAccount(

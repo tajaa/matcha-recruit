@@ -55,6 +55,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
   const sections = useSectionState(base)
   const [upgrading, setUpgrading] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [filter, setFilter] = useState('')
 
   // Inline rename state
@@ -165,6 +166,11 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   }
 
   function handleLogout() {
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
     void logoutSession()
   }
 

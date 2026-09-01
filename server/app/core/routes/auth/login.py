@@ -213,7 +213,7 @@ async def refresh_token(request: RefreshTokenRequest):
             )
 
         # A revoked refresh token (logout / password change) can't mint new tokens.
-        if await session_revoked(conn, user["id"], payload.iat):
+        if await session_revoked(conn, user["id"], payload.iat, payload.iat_ms):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has been revoked. Please log in again."

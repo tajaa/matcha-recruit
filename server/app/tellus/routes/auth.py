@@ -378,7 +378,7 @@ async def refresh(body: TellusRefreshRequest, request: Request):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not found or inactive")
         if refresh_session_expired(payload.get("iat"), payload.get("session_started_at")):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
-        if is_tellus_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
+        if is_tellus_token_revoked(payload.get("iat"), row["tokens_valid_after"], payload.get("iat_ms")):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked")
         account = await _load_account(conn, account_id)
     return _token_response(

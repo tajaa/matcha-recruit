@@ -107,7 +107,7 @@ async def require_tellus_account(
             detail="Account not found or inactive",
         )
 
-    if is_tellus_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
+    if is_tellus_token_revoked(payload.get("iat"), row["tokens_valid_after"], payload.get("iat_ms")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session has been revoked. Please sign in again.",

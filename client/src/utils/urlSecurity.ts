@@ -1,5 +1,11 @@
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// A generated token essentially always carries a digit, while a route slug
+// ("workforce-compliance") never does — without that requirement every long
+// route segment would collapse to :token. The digit-free residue is caught by
+// the second test: real slugs are hyphen/underscore-separated words, so a long
+// segment with no separator at all is a token regardless of its alphabet.
 const TOKENISH_RE = /^(?=.*\d)[A-Za-z0-9_-]{20,}$/
+const UNSEPARATED_RE = /^[A-Za-z0-9]{20,}$/
 const ROOT_SECRET_ROUTES = new Set([
   's', 'hb', 'candidate-interview', 'report', 'offer', 'invite', 'intake',
   'request-info', 'sign', 'sign-document', 'join-channel',
@@ -9,11 +15,11 @@ const ROOT_SECRET_ROUTES = new Set([
 export function normalizeSensitivePath(pathname: string): string {
   const clean = (pathname || '/').split('?')[0].split('#')[0]
   const segments = clean.split('/')
+  const first = segments[1]
   return (
     segments
       .map((segment, index) => {
         if (!segment) return segment
-        const first = segments[1]
         if (index === 2 && ROOT_SECRET_ROUTES.has(first) && !(first === 'intake' && segment === 'external')) {
           return ':token'
         }
@@ -22,7 +28,7 @@ export function normalizeSensitivePath(pathname: string): string {
         }
         if (UUID_RE.test(segment)) return ':id'
         if (/^\d+$/.test(segment)) return ':id'
-        if (TOKENISH_RE.test(segment)) return ':token'
+        if (TOKENISH_RE.test(segment) || UNSEPARATED_RE.test(segment)) return ':token'
         return segment
       })
       .join('/') || '/'

@@ -22,10 +22,16 @@ export default function PortalSidebar() {
   const { pathname } = useLocation()
   const { me, hasFeature } = useMe()
   const [logoutHover, setLogoutHover] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
 
   const navItems = NAV.filter((item) => !item.feature || hasFeature(item.feature))
 
   function handleLogout() {
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
     void logoutSession()
   }
 
@@ -63,11 +69,12 @@ export default function PortalSidebar() {
         </div>
         <button
           onClick={handleLogout}
+          disabled={loggingOut}
           onMouseEnter={() => setLogoutHover(true)}
           onMouseLeave={() => setLogoutHover(false)}
           className={`w-full text-xs text-left px-2 py-1.5 rounded transition-colors ${
             logoutHover ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500'
-          }`}
+          } disabled:opacity-50`}
         >
           Sign out
         </button>

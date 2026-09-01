@@ -39,6 +39,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   const [boards, setBoards] = useState<MWProject[]>([])
   const loggedEventsCount = useLoggedEventsCount(showEvents)
   const [showCreateChannel, setShowCreateChannel] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [creatingBoard, setCreatingBoard] = useState(false)
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [boardsOpen, setBoardsOpen] = useState(true)
@@ -104,6 +105,11 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   }
 
   function handleLogout() {
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
     void logoutSession()
   }
 
@@ -456,7 +462,8 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             </div>
             <button
               onClick={handleLogout}
-              className="shrink-0 p-1 rounded text-w-faint hover:text-red-400 hover:bg-w-surface2/60 transition-colors"
+              disabled={loggingOut}
+              className="shrink-0 p-1 rounded text-w-faint hover:text-red-400 hover:bg-w-surface2/60 transition-colors disabled:opacity-50"
               title="Log out"
             >
               <LogOut size={13} />

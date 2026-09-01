@@ -9,6 +9,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ..config import get_settings
 from ..database import get_connection, set_is_admin, set_user_id
+from .services.session_tokens import token_predates_watermark
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
@@ -38,20 +39,27 @@ async def _has_valid_after_column(conn) -> bool:
     return _users_has_valid_after
 
 
-async def session_revoked(conn, user_id, token_iat: Optional[int]) -> bool:
-    """True if a token (by its iat) predates the user's session-revocation
-    watermark. Returns False (no revocation) for tokens minted before this
-    feature shipped (no iat) or before the column exists."""
-    if token_iat is None:
+async def session_revoked(
+    conn,
+    user_id,
+    token_iat: Optional[int],
+    token_iat_ms: Optional[int] = None,
+) -> bool:
+    """True if a token predates the user's session-revocation watermark.
+    Returns False (no revocation) for tokens minted before this feature shipped
+    (no iat) or before the column exists.
+
+    `token_iat_ms` is the millisecond issue stamp minted alongside `iat`; it is
+    what lets the comparison be exact in both directions. See
+    ``token_predates_watermark``."""
+    if token_iat is None and token_iat_ms is None:
         return False
     if not await _has_valid_after_column(conn):
         return False
     valid_after = await conn.fetchval(
         "SELECT tokens_valid_after FROM users WHERE id = $1", user_id
     )
-    # JWT iat claims have whole-second precision; floor the DB watermark so a
-    # logout followed by an immediate same-second login is not self-revoked.
-    return valid_after is not None and float(token_iat) < int(valid_after.timestamp())
+    return token_predates_watermark(token_iat, token_iat_ms, valid_after)
 
 
 async def revoke_user_sessions(conn, user_id) -> None:
@@ -136,7 +144,7 @@ async def get_current_user(
 
         # Session revocation: reject tokens issued before the user logged out or
         # changed their password.
-        if await session_revoked(conn, user_row["id"], payload.iat):
+        if await session_revoked(conn, user_row["id"], payload.iat, payload.iat_ms):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session has been revoked. Please log in again.",

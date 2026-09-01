@@ -79,8 +79,16 @@ function _logout() {
   void _clearLocalSession()
 }
 
-/** Revoke the server session, then clear every local user-scoped surface. */
-export async function logoutSession(): Promise<void> {
+/** Revoke the server session, then clear every local user-scoped surface.
+ *
+ * Resolves to whether the SERVER-side revocation landed. Local state is cleared
+ * either way, so a false only matters for a token that already leaked — which
+ * is precisely what revocation exists for, so it must not be swallowed. It is
+ * reachable: on the idle-timeout path the refresh below is rejected by the
+ * server's own 30-minute idle rule, leaving only an access token that
+ * `access_token_stale` now refuses, so the POST 401s. */
+export async function logoutSession(): Promise<boolean> {
+  let revoked = false
   try {
     // Refresh first when possible: with a 15-minute access token, a user may
     // click Sign out after it expired. A fresh access token lets the revocation
@@ -88,15 +96,30 @@ export async function logoutSession(): Promise<void> {
     if (getRefreshToken()) await _tryRefresh()
     const token = getAccessToken()
     if (token) {
-      await fetch(`${API_BASE}/auth/logout`, {
+      const res = await fetch(`${API_BASE}/auth/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         keepalive: true,
       })
+      revoked = res.ok
+      if (!res.ok) {
+        reportApiError({
+          endpoint: '/auth/logout',
+          status: res.status,
+          message: `logout revocation failed (${res.status})`,
+        })
+      }
     }
+  } catch (err) {
+    reportApiError({
+      endpoint: '/auth/logout',
+      status: 0,
+      message: `logout revocation threw: ${err instanceof Error ? err.message : String(err)}`,
+    })
   } finally {
     await _clearLocalSession()
   }
+  return revoked
 }
 
 if (typeof window !== 'undefined') {

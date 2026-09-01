@@ -8,7 +8,7 @@ from jose import jwt, JWTError
 
 from ...config import get_settings
 from ..models.auth import TokenPayload, UserRole
-from .session_tokens import access_token_stale, refresh_token_times
+from .session_tokens import access_token_stale, issue_stamp_ms, refresh_token_times
 
 
 def hash_password(password: str) -> str:
@@ -50,12 +50,16 @@ def create_access_token(
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_access_token_expire_minutes)
 
+    issued_at = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "email": email,
         "role": role,
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": issued_at,
+        # Whole-second `iat` cannot distinguish a token minted just before a
+        # logout from one minted just after it. See token_predates_watermark.
+        "iat_ms": issue_stamp_ms(issued_at),
         "type": "access"
     }
 
@@ -78,6 +82,7 @@ def create_refresh_token(
         "role": role,
         "exp": expire,
         "iat": issued_at,
+        "iat_ms": issue_stamp_ms(issued_at),
         "session_started_at": started_at,
         "type": "refresh"
     }
@@ -188,6 +193,7 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[To
             role=payload["role"],
             exp=payload["exp"],
             iat=payload.get("iat"),
+            iat_ms=payload.get("iat_ms"),
             session_started_at=payload.get("session_started_at"),
             token_type=token_type,
         )

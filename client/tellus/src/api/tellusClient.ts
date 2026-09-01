@@ -8,30 +8,42 @@ const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/tellus`
 const ACCESS_KEY = 'tellus_access_token'
 const REFRESH_KEY = 'tellus_refresh_token'
 
-export function getTellusToken(): string | null {
+// One-shot migration off persistent origin storage, run at module load rather
+// than inside the getter — a getter that mutates storage ran a removeItem pair
+// on every single request.
+try {
   localStorage.removeItem(ACCESS_KEY)
   localStorage.removeItem(REFRESH_KEY)
-  return sessionStorage.getItem(ACCESS_KEY)
+} catch { /* storage may be blocked */ }
+
+export function getTellusToken(): string | null {
+  try { return sessionStorage.getItem(ACCESS_KEY) } catch { return null }
+}
+
+export function getTellusRefreshToken(): string | null {
+  try { return sessionStorage.getItem(REFRESH_KEY) } catch { return null }
 }
 
 export function setTellusTokens(access: string, refresh: string) {
-  localStorage.removeItem(ACCESS_KEY)
-  localStorage.removeItem(REFRESH_KEY)
-  sessionStorage.setItem(ACCESS_KEY, access)
-  sessionStorage.setItem(REFRESH_KEY, refresh)
+  try {
+    sessionStorage.setItem(ACCESS_KEY, access)
+    sessionStorage.setItem(REFRESH_KEY, refresh)
+  } catch { /* storage may be blocked */ }
 }
 
 export function clearTellusTokens() {
-  localStorage.removeItem(ACCESS_KEY)
-  localStorage.removeItem(REFRESH_KEY)
-  sessionStorage.removeItem(ACCESS_KEY)
-  sessionStorage.removeItem(REFRESH_KEY)
+  try {
+    localStorage.removeItem(ACCESS_KEY)
+    localStorage.removeItem(REFRESH_KEY)
+    sessionStorage.removeItem(ACCESS_KEY)
+    sessionStorage.removeItem(REFRESH_KEY)
+  } catch { /* storage may be blocked */ }
 }
 
 let _refreshing: Promise<boolean> | null = null
 
 async function _tryRefresh(): Promise<boolean> {
-  const refreshToken = sessionStorage.getItem(REFRESH_KEY)
+  const refreshToken = getTellusRefreshToken()
   if (!refreshToken) return false
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
@@ -108,7 +120,7 @@ async function _apiError(res: Response): Promise<ApiError> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem(ACCESS_KEY)
+  const token = getTellusToken()
   const res = await fetch(`${BASE}${path}`, { ...init, headers: _headers(init, token) })
 
   if (res.status === 401 && token) {
@@ -117,7 +129,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const ok = await _refreshing
     if (ok) {
-      const newToken = localStorage.getItem(ACCESS_KEY)
+      const newToken = getTellusToken()
       const retry = await fetch(`${BASE}${path}`, { ...init, headers: _headers(init, newToken) })
       if (!retry.ok) {
         if (retry.status === 401) { _logout(); throw new ApiError('Session expired', 401) }
@@ -159,7 +171,7 @@ export async function tellusPublicPost<T>(path: string, body: unknown): Promise<
 // backend can actually decode. Unlike tellusApi.get, never 401-redirects: a
 // missing/expired token just means anonymous, not a session to recover.
 export async function tellusMaybeAuthGet<T>(path: string): Promise<T> {
-  const token = localStorage.getItem(ACCESS_KEY)
+  const token = getTellusToken()
   const res = await fetch(`${BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
@@ -170,7 +182,7 @@ export async function tellusMaybeAuthGet<T>(path: string): Promise<T> {
 // Public POST that optionally carries the Tell-Us token if the user is logged
 // in (feedback submit: anonymous by default, attributed when signed in).
 export async function tellusMaybeAuthPost<T>(path: string, body: unknown): Promise<T> {
-  const token = localStorage.getItem(ACCESS_KEY)
+  const token = getTellusToken()
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: {

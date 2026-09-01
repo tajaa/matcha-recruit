@@ -58,3 +58,47 @@ def refresh_session_expired(
     if now_epoch - issued > settings.jwt_refresh_idle_expire_minutes * 60:
         return True
     return now_epoch - started > settings.jwt_session_absolute_expire_hours * 3600
+
+
+def issue_stamp_ms(issued_at: datetime) -> int:
+    """Millisecond issue stamp minted alongside the whole-second ``iat`` claim."""
+    return int(issued_at.timestamp() * 1000)
+
+
+def token_predates_watermark(
+    issued_at: Optional[int],
+    issued_at_ms: Optional[int],
+    tokens_valid_after,
+) -> bool:
+    """Whether a token was minted before an account's revocation watermark.
+
+    ``iat`` is whole-second by JWT convention, so comparing it against a
+    microsecond ``NOW()`` watermark rejects every token minted in the same
+    second as the logout — including a legitimate immediate re-login. Flooring
+    the watermark fixes that but leaves a one-second window in which a token
+    minted just *before* the logout survives it, which is exactly the token
+    revocation exists to kill.
+
+    ``iat_ms`` carries the precision needed to decide both cases exactly. It is
+    minted by every helper in this package, so only tokens predating that claim
+    fall back to the floored whole-second comparison.
+    """
+    if tokens_valid_after is None:
+        return False
+    try:
+        watermark = tokens_valid_after.timestamp()
+    except AttributeError:
+        return False
+
+    if issued_at_ms is not None:
+        try:
+            return int(issued_at_ms) / 1000.0 < watermark
+        except (TypeError, ValueError):
+            return False
+
+    if issued_at is None:
+        return False
+    try:
+        return float(issued_at) < int(watermark)
+    except (TypeError, ValueError):
+        return False

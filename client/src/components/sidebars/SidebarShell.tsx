@@ -235,6 +235,7 @@ function NavGroupSection({ group, activeTo, collapsed }: { group: NavGroup; acti
 export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle /> }: SidebarShellProps) {
   const location = useLocation()
   const { sidebarCollapsed, setSidebarCollapsed } = useLayoutContext()
+  const [loggingOut, setLoggingOut] = useState(false)
   const { hasFeature, isBetaFeature, me } = useMe()
 
   // A beta feature only ever reaches a real nav item for a test company (the
@@ -264,6 +265,11 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   const activeTo = findActiveTo(location.pathname, flatItems)
 
   function handleLogout() {
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
     void logoutSession()
   }
 
@@ -363,9 +369,10 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
           <button
             type="button"
             onClick={handleLogout}
+            disabled={loggingOut}
             title="Log out"
             aria-label="Log out"
-            className="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-100"
+            className="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-100 disabled:opacity-50"
           >
             <LogOut className="h-4 w-4" strokeWidth={1.5} />
           </button>
