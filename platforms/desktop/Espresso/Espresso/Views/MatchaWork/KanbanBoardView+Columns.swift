@@ -54,23 +54,22 @@ extension KanbanBoardView {
         // `ordered` is already in final display order (done column pre-sorted
         // most-recently-completed).
         let ordered = displayTasks(forColumn: key)
-        // Done column never shows the whole pile: either this week's finishes
-        // (weekly reset, the default) or the 5 most-recently-completed. The
-        // rest sit behind a "show more" expander.
+        // Done never mounts the whole pile. It starts with the five most recent
+        // cards and reveals five more for each click, regardless of whether the
+        // backing scope was loaded eagerly (cumulative) or on demand (weekly).
         let isDoneColumn = !isPipeline && key == "done"
-        let thisWeek = isDoneColumn && doneWeeklyReset
-            ? ordered.filter { viewModel.doneThisWeekIds.contains($0.id) }
-            : []
-        // Count against the server's Done total, not the loaded slice: the board
-        // only ever holds this week's finishes until the user expands.
+        // Before the all-time slice is fetched, use the server total so the
+        // button is still offered when this week's loaded cards are exhausted.
+        // Afterward, use the filtered in-memory count so search results do not
+        // leave behind a button that cannot reveal another matching card.
+        let availableDoneCount = viewModel.doneScope == "all"
+            ? ordered.count
+            : viewModel.doneTotal
         let hiddenDoneCount = isDoneColumn
-            ? (doneWeeklyReset
-               ? max(0, viewModel.doneTotal - thisWeek.count)
-               : max(0, viewModel.doneTotal - 5))
+            ? max(0, availableDoneCount - doneVisibleCount)
             : 0
-        let doneCollapsed = isDoneColumn && !doneExpanded && hiddenDoneCount > 0
-        let visible: [MWProjectTask] = doneCollapsed
-            ? (doneWeeklyReset ? thisWeek : Array(ordered.prefix(5)))
+        let visible: [MWProjectTask] = isDoneColumn
+            ? Array(ordered.prefix(doneVisibleCount))
             : ordered
         // Empty columns shrink so populated columns get the breathing room.
         // Hovering or starting an inline-add expands them back to full. Full
@@ -264,7 +263,7 @@ extension KanbanBoardView {
                 card(task)
             }
             if isDoneColumn && hiddenDoneCount > 0 {
-                showMoreDoneButton(hiddenDoneCount)
+                showMoreDoneButton()
             }
         }
         .padding(.horizontal, 6)
@@ -335,18 +334,16 @@ extension KanbanBoardView {
         } label: { Label("Delete", systemImage: "trash") }
     }
 
-    private func showMoreDoneButton(_ hiddenDoneCount: Int) -> some View {
+    private func showMoreDoneButton() -> some View {
         Button {
-            doneExpanded.toggle()
-            // Those earlier finishes aren't in memory — the board loaded only
-            // this week's. Fetch them the first time Done expands.
-            if doneExpanded { Task { await viewModel.loadAllDoneTasks() } }
+            Task {
+                // Weekly mode initially holds only this week's finishes. Fetch
+                // the all-time slice before revealing the next batch.
+                await viewModel.loadAllDoneTasks()
+                doneVisibleCount += 5
+            }
         } label: {
-            Text(doneExpanded
-                 ? "Show less"
-                 : (doneWeeklyReset
-                    ? "Show \(hiddenDoneCount) finished earlier"
-                    : "Show \(hiddenDoneCount) more"))
+            Text("Show more")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity)
@@ -355,6 +352,7 @@ extension KanbanBoardView {
                 .cornerRadius(5)
         }
         .buttonStyle(.plain)
+        .disabled(viewModel.isLoadingTasks)
     }
 
     // MARK: - Inline add

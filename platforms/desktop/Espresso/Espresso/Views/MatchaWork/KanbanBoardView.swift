@@ -27,14 +27,16 @@ struct KanbanBoardView: View {
     @State var inlineAddTitle: String = ""
     @State var hoveredEmptyColumn: String?
     @State private var searchText = ""
-    /// Done column collapses to the 5 most-recently-completed; expand shows all.
-    @State var doneExpanded = false
+    /// Number of completed cards rendered in Done. The backlog can contain
+    /// hundreds of tasks, so reveal it in small batches instead of mounting
+    /// every card when the user asks for earlier work.
+    @State var doneVisibleCount = 5
     /// Done column policy. `true` (default): the column resets every Monday and
     /// shows only what was finished this Pacific week — otherwise the board's
     /// completed pile grows without bound and buries the week's actual wins.
-    /// `false`: the all-time cumulative list, capped at 5 with a "show more".
-    /// Either way nothing is archived or deleted — the expander reveals the
-    /// rest, and the cards stay in `done` on the server.
+    /// `false`: the all-time cumulative list. Either way nothing is archived
+    /// or deleted — "Show more" reveals five cards at a time, and the cards
+    /// stay in `done` on the server.
     @AppStorage("kanban-done-weekly-reset") var doneWeeklyReset = true
     /// AI ticket drafting (natural language → reviewable draft).
     @State private var aiDrafting = false
