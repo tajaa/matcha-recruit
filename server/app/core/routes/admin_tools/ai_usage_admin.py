@@ -28,18 +28,16 @@ def _bucket_for(since_hours: int) -> str:
 
 _ROLLUP_COLUMNS = """
     COUNT(*) AS calls,
-    -- Historical OpenAI rows may contain locally estimated dollars. Never
-    -- present those as billed cost; provider billing remains authoritative.
-    SUM(cost_usd) FILTER (WHERE provider <> 'openai') AS cost_usd,
+    SUM(cost_usd) AS cost_usd,
     SUM(input_tokens) AS input_tokens,
     SUM(output_tokens) AS output_tokens,
     SUM(thinking_tokens) AS thinking_tokens,
     SUM(cached_tokens) AS cached_tokens,
     COUNT(*) FILTER (WHERE status <> 'ok') AS errors,
-    -- NULL cost means dollars are not locally attributable: OpenAI rows keep
-    -- exact per-response usage while provider billing remains authoritative;
-    -- an unpriced Gemini model or failed call can also have no local cost.
-    COUNT(*) FILTER (WHERE provider = 'openai' OR cost_usd IS NULL) AS unknown_cost_calls,
+    -- NULL remains meaningful for unpriced models and calls that failed before
+    -- returning token usage. OpenAI Luna responses are locally priced from
+    -- their exact provider token counters, like Gemini responses.
+    COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unknown_cost_calls,
     AVG(latency_ms) AS avg_latency_ms,
     PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_latency_ms
 """
@@ -82,7 +80,7 @@ async def ai_usage_summary(since_hours: int = 24):
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
             GROUP BY feature
-            ORDER BY SUM(cost_usd) FILTER (WHERE provider <> 'openai') DESC NULLS LAST,
+            ORDER BY SUM(cost_usd) DESC NULLS LAST,
                      COUNT(*) DESC
             """,
             str(since_hours),
@@ -93,7 +91,7 @@ async def ai_usage_summary(since_hours: int = 24):
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
             GROUP BY provider, model
-            ORDER BY SUM(cost_usd) FILTER (WHERE provider <> 'openai') DESC NULLS LAST,
+            ORDER BY SUM(cost_usd) DESC NULLS LAST,
                      COUNT(*) DESC
             """,
             str(since_hours),
@@ -125,7 +123,7 @@ async def ai_usage_timeseries(since_hours: int = 24):
             f"""
             SELECT date_trunc('{bucket}', created_at) AS bucket_at,
                    COUNT(*) AS calls,
-                   SUM(cost_usd) FILTER (WHERE provider <> 'openai') AS cost_usd,
+                   SUM(cost_usd) AS cost_usd,
                    COUNT(*) FILTER (WHERE status <> 'ok') AS errors
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
@@ -189,8 +187,7 @@ async def ai_usage_calls(
         rows = await conn.fetch(
             f"""
             SELECT id, provider, model, feature, method, input_tokens, output_tokens,
-                   thinking_tokens, cached_tokens,
-                   CASE WHEN provider = 'openai' THEN NULL ELSE cost_usd END AS cost_usd,
+                   thinking_tokens, cached_tokens, cache_write_tokens, cost_usd,
                    latency_ms, status, error,
                    provider_response_id, provider_status, service_tier, created_at
             FROM ai_usage_log
@@ -214,6 +211,7 @@ async def ai_usage_calls(
                 "output_tokens": r["output_tokens"],
                 "thinking_tokens": r["thinking_tokens"],
                 "cached_tokens": r["cached_tokens"],
+                "cache_write_tokens": r["cache_write_tokens"],
                 "cost_usd": float(r["cost_usd"]) if r["cost_usd"] is not None else None,
                 "latency_ms": r["latency_ms"],
                 "status": r["status"],

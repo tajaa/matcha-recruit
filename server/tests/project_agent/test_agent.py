@@ -1,10 +1,11 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 from google.genai import types
 
+from app.core.services import ai_usage
 from app.matcha.services.matcha_work.project_agent import agent
 
 
@@ -23,17 +24,14 @@ def _response(*parts):
 class _FakeModels:
     def __init__(self, responses):
         self.responses = list(responses)
+        self.calls = []
 
-    async def generate_content(self, **_kwargs):
+    async def generate_content(self, **kwargs):
+        self.calls.append({
+            **kwargs,
+            "feature": ai_usage._feature_override.get(),
+        })
         return self.responses.pop(0)
-
-
-class _FakeLimiter:
-    async def check_limit(self, *_args):
-        return None
-
-    async def record_call(self, *_args):
-        return None
 
 
 def test_source_citation_must_name_a_file_the_agent_read():
@@ -57,8 +55,8 @@ async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch
         )),
     ])
     fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
-    monkeypatch.setattr(agent, "get_genai_client", lambda: fake_client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _FakeLimiter)
+    get_client = Mock(return_value=fake_client)
+    monkeypatch.setattr(agent, "get_luna_client", get_client)
     monkeypatch.setattr(agent.store, "read_repo_file", AsyncMock(return_value={
         "path": "client/src/App.tsx",
         "start_line": 35,
@@ -89,6 +87,10 @@ async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch
     assert result["files_read"] == 1
     assert result["model_calls"] == 2
     assert result["token_usage"]["total_tokens"] == 34
+    assert result["token_usage"]["model"] == "gpt-5.6-luna"
+    assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
+    assert all(call["feature"] == "matcha.espresso.repo_question" for call in models.calls)
+    get_client.assert_called_once_with()
     post_answer.assert_awaited_once_with(company_id, channel_id, answer)
     assert record_step.await_count == 2
     mark_run.assert_awaited_once()
@@ -100,8 +102,7 @@ async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch
 async def test_repo_question_refuses_ungrounded_direct_answer(monkeypatch):
     models = _FakeModels([_response(types.Part(text="It probably works this way."))])
     fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
-    monkeypatch.setattr(agent, "get_genai_client", lambda: fake_client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _FakeLimiter)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: fake_client)
     monkeypatch.setattr(agent.store, "record_step", AsyncMock())
     monkeypatch.setattr(agent.chat, "post_as_espresso", AsyncMock())
 

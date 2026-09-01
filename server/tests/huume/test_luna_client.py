@@ -71,7 +71,10 @@ async def test_generate_content_records_exact_response_and_requests_high_reasoni
         "output_text": "Done.",
         "usage": {
             "input_tokens": 80,
-            "input_tokens_details": {"cached_tokens": 30},
+            "input_tokens_details": {
+                "cached_tokens": 30,
+                "cache_write_tokens": 10,
+            },
             "output_tokens": 40,
             "output_tokens_details": {"reasoning_tokens": 25},
             "total_tokens": 120,
@@ -111,6 +114,7 @@ async def test_generate_content_records_exact_response_and_requests_high_reasoni
     )
 
     assert sent["json"]["reasoning"] == {"effort": "high"}
+    assert sent["json"]["service_tier"] == "default"
     assert len(recorded) == 1
     assert recorded[0]["model"] == "gpt-5.6-luna"
     assert isinstance(recorded[0]["latency_ms"], int)
@@ -119,3 +123,4 @@ async def test_generate_content_records_exact_response_and_requests_high_reasoni
     assert result.usage_metadata.candidates_token_count == 40
     assert result.usage_metadata.thoughts_token_count == 25
     assert result.usage_metadata.cached_content_token_count == 30
+    assert result.usage_metadata.cache_write_token_count == 10
