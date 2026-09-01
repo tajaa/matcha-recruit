@@ -273,6 +273,7 @@ class WorktreeTests(MsandboxTestCase):
         record = self.record()
         private_git = session_git_dir(record.id)
         private_git.mkdir(parents=True)
+        (private_git / "config").write_text("[core]\n\tbare = false\n", encoding="utf-8")
         calls: list[list[str]] = []
 
         def run(argv, **kwargs):
@@ -292,7 +293,7 @@ class WorktreeTests(MsandboxTestCase):
                 self.assertEqual(kwargs["input"], "test-token\n")
                 self.assertIn("--insecure-storage", command)
                 return subprocess.CompletedProcess(argv, 0, "", "")
-            if command[:2] == ["git", "--git-dir"]:
+            if command[:2] == ["git", "config"]:
                 return subprocess.CompletedProcess(argv, 0, "", "")
             raise AssertionError(command)
 
@@ -305,7 +306,99 @@ class WorktreeTests(MsandboxTestCase):
         hosts = self.root / "data/homes/session-1/.config/gh/hosts.yml"
         self.assertEqual(hosts.stat().st_mode & 0o777, 0o600)
         self.assertEqual(sum(call[1:3] == ["auth", "login"] for call in calls), 1)
-        self.assertEqual(sum(call[:2] == ["git", "--git-dir"] for call in calls), 2)
+        self.assertEqual(sum(call[:2] == ["git", "config"] for call in calls), 2)
+
+    def test_github_auth_replaces_marker_symlink_without_following_it(self) -> None:
+        record = self.record()
+        config = self.root / "data/homes/session-1/.config/gh"
+        config.mkdir(parents=True)
+        victim = self.root / "host-file"
+        victim.write_text("keep\n", encoding="utf-8")
+        marker = config / ".msandbox-token-sha256"
+        marker.symlink_to(victim)
+
+        def run(argv, **kwargs):
+            command = [str(item) for item in argv]
+            if command[:4] == ["git", "-C", str(self.repo), "remote"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "https://github.com/tajaa/matcha-recruit.git\n",
+                    "",
+                )
+            if command[1:4] == ["auth", "token", "--hostname"]:
+                return subprocess.CompletedProcess(argv, 0, "test-token\n", "")
+            if command[1:3] == ["auth", "login"]:
+                generated = Path(kwargs["env"]["GH_CONFIG_DIR"]) / "hosts.yml"
+                generated.write_text(
+                    "github.com:\n  oauth_token: test-token\n", encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(command)
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        ):
+            refresh_github_auth(record)
+
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep\n")
+        self.assertFalse(marker.is_symlink())
+        self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+
+    def test_github_auth_rejects_symlinked_config_directory(self) -> None:
+        record = self.record()
+        config_root = self.root / "data/homes/session-1/.config"
+        config_root.mkdir(parents=True)
+        outside = self.root / "outside-gh"
+        outside.mkdir()
+        (config_root / "gh").symlink_to(outside, target_is_directory=True)
+        origin = subprocess.CompletedProcess(
+            [], 0, "https://github.com/tajaa/matcha-recruit.git\n", ""
+        )
+        token = subprocess.CompletedProcess([], 0, "test-token\n", "")
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=(origin, token)
+        ):
+            with self.assertRaisesRegex(SessionAuthError, "unsafe private controller directory"):
+                refresh_github_auth(record)
+
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_github_auth_rejects_symlinked_isolated_git_config(self) -> None:
+        record = self.record()
+        private_git = session_git_dir(record.id)
+        private_git.mkdir(parents=True)
+        victim = self.root / "host-git-config"
+        victim.write_text("keep\n", encoding="utf-8")
+        (private_git / "config").symlink_to(victim)
+
+        def run(argv, **kwargs):
+            command = [str(item) for item in argv]
+            if command[:4] == ["git", "-C", str(self.repo), "remote"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "https://github.com/tajaa/matcha-recruit.git\n",
+                    "",
+                )
+            if command[1:4] == ["auth", "token", "--hostname"]:
+                return subprocess.CompletedProcess(argv, 0, "test-token\n", "")
+            if command[1:3] == ["auth", "login"]:
+                generated = Path(kwargs["env"]["GH_CONFIG_DIR"]) / "hosts.yml"
+                generated.write_text(
+                    "github.com:\n  oauth_token: test-token\n", encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(command)
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        ):
+            with self.assertRaisesRegex(SessionAuthError, "isolated Git config is unsafe"):
+                refresh_github_auth(record)
+
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep\n")
 
     def test_github_auth_fails_with_one_host_login_instruction(self) -> None:
         record = self.record()
@@ -1229,8 +1322,24 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertTrue(interactive_marker.is_file())
         self.assertIn("legacy:system up", wizard.stdout)
         interactive_marker.unlink()
+        repo_wizard = subprocess.run(
+            [str(bin_dir / "msandbox"), "--repo", str(fixture), "wizard"],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=interactive_environment,
+        )
+        self.assertTrue(interactive_marker.is_file())
+        self.assertIn("legacy:system up", repo_wizard.stdout)
+        interactive_marker.unlink()
         missing = subprocess.run(
-            [str(bin_dir / "msandbox"), "session", "start", "missing"],
+            [
+                str(bin_dir / "msandbox"),
+                f"--repo={fixture}",
+                "session",
+                "start",
+                "missing",
+            ],
             check=False,
             text=True,
             capture_output=True,
