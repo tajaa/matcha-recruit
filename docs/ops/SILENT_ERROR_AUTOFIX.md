@@ -1,6 +1,6 @@
 # Silent Error Autofix
 
-`.github/workflows/silent-error-autofix.yml` runs from the same Mac-owned five-minute
+`.github/workflows/silent-error-autofix.yml` runs from the same Mac-owned one-minute
 LaunchAgent clock as Kanban AutoPR. GitHub's best-effort cron was removed after it left
 multi-hour gaps. When no AutoPR workflow is active, the dispatcher gives this lane the
 next slot if its last completed pass is at least ten minutes old; otherwise it advances

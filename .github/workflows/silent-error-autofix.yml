@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 # GitHub's best-effort cron left multi-hour gaps. The same Mac LaunchAgent
-# that owns the Kanban lane is now the sole five-minute clock and gives this
+# that owns the Kanban lane is now the sole one-minute clock and gives this
 # incident lane priority whenever its last completed pass is stale.
 
 # This must run on Finch's Mac. It uses that user's authenticated Codex

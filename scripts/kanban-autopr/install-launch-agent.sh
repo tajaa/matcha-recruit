@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the local five-minute dispatcher without embedding credentials in
+# Install the local one-minute dispatcher without embedding credentials in
 # launchd. The workflow itself still owns Codex, board, and production use.
 set -euo pipefail
 

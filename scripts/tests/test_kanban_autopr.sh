@@ -430,12 +430,14 @@ check "live tee preserves a failing Codex exit status" \
 # output/patch behavior is the same path production uses.
 ################################################################################
 SANDBOX_TEST_REPO="$TMP_DIR/sandbox-source"
-mkdir -p "$SANDBOX_TEST_REPO/client/src" "$SANDBOX_TEST_REPO/secrets"
+mkdir -p "$SANDBOX_TEST_REPO/client/src" "$SANDBOX_TEST_REPO/secrets" \
+  "$SANDBOX_TEST_REPO/server/app/matcha/services/huume"
 git -C "$SANDBOX_TEST_REPO" init --initial-branch=main --quiet
 git -C "$SANDBOX_TEST_REPO" config user.name test
 git -C "$SANDBOX_TEST_REPO" config user.email test@example.com
 printf 'export const existing = true;\n' > "$SANDBOX_TEST_REPO/client/src/existing.ts"
-git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts
+printf 'operator instructions\n' > "$SANDBOX_TEST_REPO/server/app/matcha/services/huume/CLAUDE.md"
+git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts server/app/matcha/services/huume/CLAUDE.md
 git -C "$SANDBOX_TEST_REPO" commit --quiet -m base
 printf 'host-only-secret\n' > "$SANDBOX_TEST_REPO/secrets/private.pem"
 
@@ -459,6 +461,7 @@ mkdir -p "$(dirname "$report_path")" "$(dirname "$decision_path")" client/src
 printf '%s\n' '### Summary' sandbox '### Changes' sandbox '### Blast radius' none '### Confidence' high > "$report_path"
 printf '%s\n' '{"schema_version":1,"outcome":"implementation"}' > "$decision_path"
 printf 'export const sandboxProbe = true;\n' > client/src/sandbox-probe.ts
+printf 'model note\n' >> server/app/matcha/services/huume/CLAUDE.md
 EOF
 chmod +x "$TMP_DIR/bin/codex"
 
@@ -478,9 +481,11 @@ AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
 sandbox_bridge_rc=$?
 [ "$sandbox_bridge_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/sandbox-bridge.log"
 
-check "msandbox bridge excludes untracked secrets and applies the model patch" \
+check "msandbox bridge excludes secrets and instruction edits while applying the product patch" \
     $([ "$sandbox_bridge_rc" = 0 ] \
       && grep -q 'sandboxProbe' "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" \
+      && [ "$(cat "$SANDBOX_TEST_REPO/server/app/matcha/services/huume/CLAUDE.md")" = "operator instructions" ] \
+      && grep -q 'Ignored model edit to operator instruction file' "$TMP_DIR/sandbox-bridge.log" \
       && [ -s "$TMP_DIR/sandbox-report.md" ] \
       && [ ! -e "$SANDBOX_TEST_REPO/.autopr-io" ] \
       && echo 0 || echo 1)

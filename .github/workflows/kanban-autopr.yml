@@ -23,7 +23,7 @@ concurrency:
   group: kanban-autopr
   cancel-in-progress: false
 
-# Keep the review queue bounded, but let the five-minute runner make progress
+# Keep the review queue bounded, but let the one-minute runner make progress
 # across the four supported projects instead of idling after only three drafts.
 # `select.sh` carries the same value as its safe local/dashboard default.
 env:
@@ -114,7 +114,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # GitHub delivery is the fast path; this is the five-minute repair
+          # GitHub delivery is the fast path; this is the one-minute repair
           # path. It also removes repaired cards from this run's candidate
           # snapshot, preventing a duplicate PR before the next collection.
           ./scripts/kanban-autopr/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
