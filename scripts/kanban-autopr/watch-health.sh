@@ -7,10 +7,23 @@ USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 LABEL="com.matcha.kanban-autopr-dispatch"
 REFRESH_SECONDS="${AUTOPR_HEALTH_REFRESH_SECONDS:-15}"
+PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 MSANDBOX_BIN="${AUTOPR_MSANDBOX_BIN:-$USER_HOME/.local/bin/msandbox}"
 KANBAN_SANDBOX_PROJECT="${AUTOPR_KANBAN_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}"
 ERROR_SANDBOX_PROJECT="${AUTOPR_ERROR_SANDBOX_PROJECT_NAME:-matcha-error-autofix-sandbox}"
 AUDIT_SANDBOX_PROJECT="${AUTOPR_AUDIT_SANDBOX_PROJECT_NAME:-matcha-autopr-self-audit-sandbox}"
+
+dispatch_time_pacific() {
+    local timestamp="$1" epoch rendered
+    epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$timestamp" +%s 2>/dev/null \
+        || date -u -d "$timestamp" +%s 2>/dev/null)" || { printf '?'; return; }
+    if date --version >/dev/null 2>&1; then
+        rendered="$(TZ="$PACIFIC_TZ" date -d "@$epoch" '+%I:%M:%S %p %Z' 2>/dev/null)"
+    else
+        rendered="$(TZ="$PACIFIC_TZ" date -r "$epoch" '+%I:%M:%S %p %Z' 2>/dev/null)"
+    fi
+    printf '%s' "$rendered" | sed 's/^0//'
+}
 
 render_worker_state() {
     local label="$1" project="$2" sandbox_state
@@ -32,7 +45,7 @@ render_worker_state() {
 render_health() {
     local launch_state runner_pids
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(date '+%H:%M:%S %Z')"
+    printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
 
     launch_state="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null \
         | sed -nE '/state =|runs =|last exit code =/p' | sed 's/^[[:space:]]*/  /')"
@@ -68,9 +81,10 @@ render_health() {
         # Active-workflow snapshots can contain dozens of prior runs. The
         # health pane needs the timer decision, not a wrapped dump of that
         # snapshot; the 24-hour dashboard owns workflow history.
-        tail -n 8 "$LOG_FILE" | jq -r '
-          "  " + (.timestamp // "?") + "  " + (.action // "?") + "  " + (.reason // "?")
-        ' 2>/dev/null || tail -n 8 "$LOG_FILE"
+        tail -n 8 "$LOG_FILE" | jq -r '[.timestamp // "", .action // "?", .reason // "?"] | @tsv' 2>/dev/null \
+          | while IFS=$'\t' read -r event_time event_action event_reason; do
+              printf '  %-15s %-8s %s\n' "$(dispatch_time_pacific "$event_time")" "$event_action" "$event_reason"
+            done
     else
         printf '  no timer events yet\n'
     fi
