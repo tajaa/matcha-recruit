@@ -5,12 +5,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PRODUCTION_CONTEXT="${1:?usage: collect.sh PRODUCTION_CONTEXT PRODUCTION_STATE DEPLOYMENT OUTPUT [SINCE_PR [SINCE_DATE]]}"
+PRODUCTION_CONTEXT="${1:?usage: collect.sh PRODUCTION_CONTEXT PRODUCTION_STATE DEPLOYMENT OUTPUT [SINCE_PR]}"
 PRODUCTION_STATE="${2:?missing production state}"
 DEPLOYMENT="${3:?missing deployment metadata}"
 OUTPUT="${4:?missing output path}"
 SINCE_PR="${5:-}"
-SINCE_DATE="${6:-}"
 LIMIT="${ADMIN_UPDATES_PR_LIMIT:-500}"
 REST_FILE_LIMIT="${ADMIN_UPDATES_REST_FILE_LIMIT:-3000}"
 REPO="${GITHUB_REPOSITORY:-tajaa/matcha-recruit}"
@@ -64,15 +63,8 @@ args=(
     --repo-root "$REPO_ROOT"
     --output "$OUTPUT"
 )
-if [ -n "$SINCE_PR" ] && [ -n "$SINCE_DATE" ]; then
-    echo "admin-updates: since_pr and since_date are mutually exclusive" >&2
-    exit 2
-fi
 if [ -n "$SINCE_PR" ]; then
     [[ "$SINCE_PR" =~ ^[0-9]+$ ]] || { echo "admin-updates: since_pr must be numeric" >&2; exit 2; }
     args+=(--since-pr "$SINCE_PR")
-fi
-if [ -n "$SINCE_DATE" ]; then
-    args+=(--since-date "$SINCE_DATE")
 fi
 python3 "$SCRIPT_DIR/collect.py" "${args[@]}"

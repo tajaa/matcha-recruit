@@ -162,9 +162,7 @@ def build_plan(
     deployment: dict[str, Any],
     repo_root: Path,
     since_pr: int | None = None,
-    since_date: str | None = None,
 ) -> dict[str, Any]:
-    explicit_since_pr = since_pr is not None
     stored = production_state.get("last_pr_number")
     inferred = _max_pr_from_ids(production_state)
     if since_pr is None:
@@ -174,8 +172,6 @@ def build_plan(
             "production has no changelog watermark or PR-derived update id; "
             "run the workflow manually once with since_pr"
         )
-    if since_date and explicit_since_pr:
-        raise CollectionError("since_pr and since_date cannot be used together")
 
     containers = production_context.get("containers") or {}
     live_shas = {
@@ -195,16 +191,6 @@ def build_plan(
         else None
     )
     overlap_start = state_updated_at - _MERGE_CURSOR_OVERLAP if state_updated_at else None
-    manual_since = None
-    if since_date:
-        manual_since = _timestamp(
-            f"{since_date}T00:00:00Z" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", since_date) else since_date,
-            field="since_date",
-        )
-        # A date-only request means the named date was already covered; begin
-        # at the following UTC midnight.
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", since_date):
-            manual_since += timedelta(days=1)
 
     pending_migrations = set((production_context.get("database") or {}).get("pending_migrations") or [])
     existing_by_product = {
@@ -218,14 +204,8 @@ def build_plan(
     target_watermark = since_pr
     processed_any = False
 
-    selected_prs = (
+    ordered = sorted(
         (
-            pr
-            for pr in merged_prs
-            if _timestamp(pr.get("mergedAt"), field="PR merge") > manual_since
-        )
-        if manual_since is not None
-        else (
             pr
             for pr in merged_prs
             if int(pr.get("number") or 0) > since_pr
@@ -233,10 +213,7 @@ def build_plan(
                 overlap_start is not None
                 and _timestamp(pr.get("mergedAt"), field="PR merge") > overlap_start
             )
-        )
-    )
-    ordered = sorted(
-        selected_prs,
+        ),
         key=lambda pr: (_timestamp(pr.get("mergedAt"), field="PR merge"), int(pr["number"])),
     )
     for pr in ordered:
@@ -324,7 +301,6 @@ def build_plan(
     return {
         "schemaVersion": 1,
         "sourceWatermark": since_pr,
-        "manualSinceDate": since_date,
         "sourceStateUpdatedAt": state_updated_at_raw,
         "mergeCursorOverlapHours": int(_MERGE_CURSOR_OVERLAP.total_seconds() / 3600),
         "targetWatermark": target_watermark,
@@ -351,7 +327,6 @@ def main() -> int:
     parser.add_argument("--deployment", required=True, type=Path)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--since-pr", type=int)
-    parser.add_argument("--since-date")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -363,7 +338,6 @@ def main() -> int:
             deployment=json.loads(args.deployment.read_text(encoding="utf-8")),
             repo_root=args.repo_root.resolve(),
             since_pr=args.since_pr,
-            since_date=args.since_date,
         )
     except (CollectionError, json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
         parser.error(str(exc))

@@ -82,25 +82,6 @@ Do not use `since_pr` for ordinary retries; production state is authoritative. A
 run opens or updates the deduplicated `ops-health:admin-updates` issue, and a successful
 later run comments on and closes it. The deploy itself remains successful.
 
-For a one-time historical backfill, use `since_date` instead. A date-only value treats
-that whole UTC date as already covered, so this closes a gap after the last visible
-update without revisiting prior history:
-
-```sh
-gh workflow run admin-updates-autopublish.yml --ref main -f since_date=2026-08-27
-```
-
-Do not combine `since_date` and `since_pr`.
-
-For an immediate one-time backfill from the trusted host, bypass Actions and run the
-same bounded pipeline directly. Start with the read-only plan, then publish only after
-reviewing its count and deferred status:
-
-```sh
-SSH_KEY=/path/to/matcha-prod.pem ./scripts/admin-updates/backfill.sh 2026-08-27 --dry-run
-SSH_KEY=/path/to/matcha-prod.pem ./scripts/admin-updates/backfill.sh 2026-08-27 --publish
-```
-
 `server/scripts/generate_changelog.py` remains available only as historical/manual
 tooling. `update-ec2.sh` no longer invokes its Gemini/dev-database path, preventing it
 from racing or advancing state independently of the production-aware workflow.
