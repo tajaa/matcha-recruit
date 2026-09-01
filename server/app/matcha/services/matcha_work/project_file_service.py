@@ -289,6 +289,90 @@ async def sync_channel_attachments_to_project(
     return added
 
 
+async def sync_channel_attachments_to_task(
+    conn,
+    project_id: UUID,
+    task_id: UUID,
+    uploaded_by: UUID,
+    attachments: list[dict[str, Any]],
+) -> list[UUID]:
+    """Attach a decision-bound Espresso reply's files to its kanban ticket.
+
+    Chat uploads already use permanent CloudFront URLs. Reusing that URL keeps
+    screenshot replies fast and avoids copying blobs, while the project/task
+    predicates prevent a crafted chat message from attaching across tickets.
+    """
+    owns_task = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM mw_tasks WHERE id=$1 AND project_id=$2)",
+        task_id,
+        project_id,
+    )
+    if not owns_task:
+        return []
+    ids: list[UUID] = []
+    for att in attachments or []:
+        if not isinstance(att, dict):
+            continue
+        url = att.get("url")
+        url_filename = url.rsplit("/", 1)[-1].split("?", 1)[0] if isinstance(url, str) else ""
+        filename = (att.get("filename") or url_filename or "screenshot")[:500]
+        if not os.path.splitext(filename)[1] and att.get("kind") == "image":
+            content_extension = {
+                "image/jpeg": ".jpg",
+                "image/gif": ".gif",
+                "image/webp": ".webp",
+                "image/heic": ".heic",
+                "image/heif": ".heif",
+            }.get(att.get("content_type"), ".png")
+            filename += content_extension
+        try:
+            file_size = int(att.get("size") or 0)
+        except (TypeError, ValueError):
+            file_size = -1
+        extension = os.path.splitext(filename)[1].lower()
+        if (
+            not isinstance(url, str)
+            or not url.startswith("https://")
+            or not get_storage().is_supported_storage_path(url)
+            or extension not in ALLOWED_PROJECT_FILE_EXTENSIONS
+            or file_size < 0
+            or file_size > PROJECT_FILE_MAX_BYTES
+        ):
+            continue
+        row = await conn.fetchrow(
+            """INSERT INTO mw_project_files
+                   (project_id, task_id, uploaded_by, filename, storage_url,
+                    content_type, file_size)
+               SELECT $1, $2, $3, $4, $5, $6, $7
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM mw_project_files
+                   WHERE project_id=$1 AND task_id=$2 AND storage_url=$5
+               )
+               RETURNING id""",
+            project_id,
+            task_id,
+            uploaded_by,
+            filename,
+            url,
+            att.get("content_type"),
+            file_size,
+        )
+        if row:
+            ids.append(row["id"])
+            continue
+        existing = await conn.fetchval(
+            """SELECT id FROM mw_project_files
+               WHERE project_id=$1 AND task_id=$2 AND storage_url=$3
+               LIMIT 1""",
+            project_id,
+            task_id,
+            url,
+        )
+        if existing:
+            ids.append(existing)
+    return ids
+
+
 async def backfill_project_chat_files(project_id: UUID) -> int:
     """Mirror ALL existing attachments from the project's discussion-channel
     messages into root Files. Idempotent — deduped on (project_id, storage_url)

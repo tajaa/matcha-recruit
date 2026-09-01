@@ -600,6 +600,28 @@ invalid_decision_rc=$?
 check "questions-only decisions require actionable questions" \
     $([ "$invalid_decision_rc" != 0 ] && echo 0 || echo 1)
 
+jq '.outcome = "no_safe_action"
+    | .safe_changes_present = false
+    | .questions = []
+    | .no_safe_action_reason = "already_fixed"' \
+    "$TMP_DIR/publication-decision.json" > "$TMP_DIR/already-fixed-decision.json"
+jq -n '{directives:["draft_pr","trust_still_broken"],test_route:"/app/jobs"}' \
+    > "$TMP_DIR/forced-policy.json"
+"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/already-fixed-decision.json" \
+    "$TMP_DIR/forced-decision.json" "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+forced_already_fixed_rc=$?
+check "decision-bound force directives reject another already-fixed exit" \
+    $([ "$forced_already_fixed_rc" != 0 ] && echo 0 || echo 1)
+
+env -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
+    python3 "$AUTOPR_DIR/collect-test-tenant-evidence.py" \
+    --policy "$TMP_DIR/forced-policy.json" \
+    --output "$TMP_DIR/test-tenant-unconfigured.json" \
+    --screenshot "$TMP_DIR/test-tenant.png"
+check "test-tenant replay fails closed without exposing or requiring credentials" \
+    $(jq -e '.status == "not_configured" and .route == "/app/jobs" and .screenshot_path == null' \
+      "$TMP_DIR/test-tenant-unconfigured.json" >/dev/null && echo 0 || echo 1)
+
 check "collector preserves task attachment metadata" \
     $(grep -qF 'attachments: (($t.attachments // []) | map(del(.storage_url)))' "$AUTOPR_DIR/collect.sh" && echo 0 || echo 1)
 

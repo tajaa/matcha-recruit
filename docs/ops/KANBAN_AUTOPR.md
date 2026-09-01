@@ -75,10 +75,17 @@ changes.
    MATCHA_BOT_PASSWORD=<the same password from step 1>
    MATCHA_PROJECT_IDS=7f728636-3219-4d83-9df3-a4682e3242de,fade10b4-36ff-4c60-af59-5cc6058285ab,84823d21-c752-4abd-9696-4c93c8b3c21e,8b924347-d6e4-4000-8e7d-ca8f46f76fba
    MATCHA_ASSIGNEE_EMAIL=haley@oceaneca.com
+   # Optional: approved is_test tenant used only by the trusted reproduction harness.
+   AUTOPR_TEST_TENANT_EMAIL=<test tenant owner email>
+   AUTOPR_TEST_TENANT_PASSWORD=<test tenant password>
    ```
    Scheduled GitHub runs fail closed if `MATCHA_API_URL` points at localhost or
    if any of the four project ids is missing. This prevents a production PR from
-   being linked to a dev-only card.
+   being linked to a dev-only card. If test-tenant replay is configured, install
+   its trusted runner browser once with
+   `server/venv/bin/python -m playwright install chromium`. The credentials,
+   cookies, headers, and response bodies never enter msandbox; only a screenshot
+   and bounded same-origin status signals do.
 3. Install the checkout hook in the real clone: `./scripts/kanban-autopr/install-hooks.sh`.
 4. Upgrade the repo's GitHub webhook to also deliver `pull_request` (idempotent — safe to
    re-run against an already-installed hook): call the existing
@@ -231,7 +238,14 @@ second scheduler.
    so the agent must choose prerequisite/build-on/separate boundaries in queue context.
    Additional-context events are untrusted but escalated evidence: the agent must trace
    the newly described uncovered scenario and cannot repeat `already_fixed` merely
-   because a generic patch exists. Missing product intent
+   because a generic patch exists. Lines beginning `--draft-pr` or the natural-language
+   `--you need to draft this PR` become trusted decision-bound policy and mechanically
+   reject another `already_fixed` exit. `--trust-still-broken` (including the matching
+   natural-language form) accepts that the described scenario fails, while
+   `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test
+   tenant. The coding model never receives those credentials. It must inspect correlated
+   production errors/log signals and any test replay before asking for an exact route,
+   role, reproduction steps, and screenshot. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
@@ -299,7 +313,8 @@ second scheduler.
    message into the project's discussion channel. It starts with the existing
    `⟦ticket:<id>|<title>|<column>⟧` token, so the ticket is clickable in Espresso.
    Replying directly to that message attaches the reply to the exact still-current
-   AutoPR decision and acknowledges the escalation in chat; a stale reply cannot
+   AutoPR decision and acknowledges the escalation in chat; attached screenshots are
+   copied onto the ticket so the next sandbox run can inspect them. A stale reply cannot
    reopen a newer decision.
 
 ## Work/merge plan and explicit release

@@ -75,11 +75,30 @@ _autopr_decision_schema_ok() {
     ' "$file" >/dev/null
 }
 
+_autopr_directive_policy_ok() {
+    local decision_file="$1" directive_file="${2:-}"
+    [ -n "$directive_file" ] && [ -s "$directive_file" ] || return 0
+    jq -e --slurpfile policy "$directive_file" '
+      ($policy[0].directives // []) as $directives
+      | (($directives | index("trust_still_broken")) == null
+         or .no_safe_action_reason != "already_fixed")
+      and (($directives | index("draft_pr")) == null
+         or .outcome != "no_safe_action"
+         or (.no_safe_action_reason | IN("migration_required", "policy_blocked", "external_dependency")))
+    ' "$decision_file" >/dev/null
+}
+
 autopr_normalize_decision() {
-    local raw_file="$1" normalized_file="$2"
+    local raw_file="$1" normalized_file="$2" directive_file="${3:-}"
+    local directive_policy='{"directives":[],"test_route":null}'
     [ -s "$raw_file" ] || die "investigation produced no triage decision at $raw_file"
     _autopr_decision_schema_ok "$raw_file" || die "triage decision failed schema or safety validation"
-    jq '
+    _autopr_directive_policy_ok "$raw_file" "$directive_file" \
+        || die "triage decision violated the decision-bound AutoPR directive"
+    if [ -n "$directive_file" ] && [ -s "$directive_file" ]; then
+        directive_policy="$(jq -c '{directives:(.directives // []),test_route:(.test_route // null)}' "$directive_file")"
+    fi
+    jq --argjson directive_policy "$directive_policy" '
       def total:
         [.confidence.requirements_clarity.score,
          .confidence.evidence_quality.score,
@@ -90,6 +109,8 @@ autopr_normalize_decision() {
         confidence_score: total,
         confidence_band: (if total >= 75 then "high" elif total >= 45 then "medium" else "low" end),
         awaiting_human: (.outcome == "partial_implementation" or .outcome == "questions_only"),
+        autopr_directives: ($directive_policy.directives // []),
+        autopr_test_route: ($directive_policy.test_route // null),
         production_verification: (.production_verification // {
           target: "both",
           mode: "manual",
@@ -156,8 +177,9 @@ autopr_render_questions() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
         normalize)
-            [ "$#" -eq 3 ] || die "usage: decision.sh normalize raw-decision.json decision.json"
-            autopr_normalize_decision "$2" "$3"
+            { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
+                || die "usage: decision.sh normalize raw-decision.json decision.json [directive-policy.json]"
+            autopr_normalize_decision "$2" "$3" "${4:-}"
             ;;
         feedback-snapshot)
             [ "$#" -eq 2 ] || die "usage: decision.sh feedback-snapshot feedback.json"

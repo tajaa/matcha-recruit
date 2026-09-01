@@ -107,7 +107,10 @@ async def post_autopr_context_request(
         f"⟦ticket:{task_id}|{safe_title}|{column}⟧\n"
         f"This ticket needs additional context because {why} "
         "Reply to this Espresso message with the missing detail, or add it "
-        "from the ticket. Your reply will be attached to this exact AutoPR decision."
+        "from the ticket. You can attach screenshots. Start a line with "
+        "`--draft-pr` to require a draft or `--trust-still-broken` to reject "
+        "another already-fixed conclusion; add `--test-route=/app/...` for an "
+        "approved test-tenant replay. Your reply is bound to this exact decision."
     )
     await post_as_espresso(
         row["company_id"],

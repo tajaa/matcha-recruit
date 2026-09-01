@@ -132,7 +132,7 @@ extension TaskViewerSheet {
                 .padding(.top, 3)
             } else if isAddingAutoPRContext {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Answer what AutoPR needs, explain what it missed, or attach new evidence.")
+                    Text("Explain what AutoPR missed or attach evidence. Use --draft-pr to require a draft, --trust-still-broken to reject another already-fixed result, and --test-route=/app/... for a test-tenant replay.")
                         .font(.system(size: 10))
                         .foregroundColor(appState.themeTextSecondary)
                     noteComposer

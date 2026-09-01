@@ -41,6 +41,9 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
+DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | join(",")' "$DECISION_FILE")"
+DIRECTIVE_MARKER=""
+[ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
 PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
 PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
 COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
@@ -90,12 +93,12 @@ progress_note_with_origin() {
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
     remainder="$(printf '%s' "$existing" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$existing" ] \
@@ -150,6 +153,7 @@ post_reconsideration_reply() {
 
 post_context_request() {
     local reason="$1" expected_note="$2"
+    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | cut -c1-600)"
     if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
         "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
             '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
@@ -349,7 +353,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         replace_triage_labels "$existing_open_pr"
         pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$existing_open_pr"
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
+            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
@@ -361,7 +365,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
+            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
@@ -414,7 +418,7 @@ pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
 card_column=in_progress
 [ "$AWAITING_HUMAN" != true ] || card_column=changes_requested
 origin_note="$(progress_note_with_origin \
-    "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · note: $CARD_NOTE" \
+    "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
 replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
@@ -422,7 +426,8 @@ mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         --arg note "$origin_note" \
         '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
 if [ "$AWAITING_HUMAN" = true ]; then
-    post_context_request "$CARD_NOTE" "$origin_note"
+    context_questions="$(jq -r '[.questions[]?.question] | join(" ")' "$DECISION_FILE")"
+    post_context_request "$CARD_NOTE $context_questions You can attach a screenshot in your Espresso reply or on the ticket." "$origin_note"
 fi
 post_reconsideration_reply "$published_pr"
 

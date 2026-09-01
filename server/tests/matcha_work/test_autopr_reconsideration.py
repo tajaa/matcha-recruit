@@ -51,6 +51,22 @@ def _connection_context(conn):
     return _AsyncContext(conn)
 
 
+def test_operator_directives_require_leading_marker_and_accept_natural_phrasing():
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    directives, route = svc._parse_autopr_directives(
+        "It still fails.\n"
+        "--you need to draft this PR\n"
+        "--you need to trust me that it's still not working\n"
+        "--test-route=/app/jobs\n"
+    )
+
+    assert directives == ["draft_pr", "trust_still_broken"]
+    assert route == "/app/jobs"
+    assert svc._parse_autopr_directives("you need to draft this PR") == ([], None)
+    assert svc._parse_autopr_directives("--test-route=https://evil.example/x") == ([], None)
+
+
 @pytest.mark.asyncio
 async def test_reconsideration_is_bound_to_exact_no_spec_note(monkeypatch):
     from app.matcha.services.matcha_work import project_task_service as svc
@@ -148,6 +164,59 @@ async def test_awaiting_answers_accepts_chat_or_ticket_context(monkeypatch):
 
     assert result["autopr_reconsideration_pending"] is True
     assert json.loads(conn.insert_args[4])["kind"] == "autopr_additional_context"
+
+
+@pytest.mark.asyncio
+async def test_reconsideration_persists_trusted_directive_policy(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = (
+        "🤖 AUTO SETUP · NO PR: ALREADY FIXED · "
+        "[autopr:no-spec 2026-08-30T20:00:00Z] already_fixed"
+    )
+    conn = _ReconsiderationConn(current)
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    monkeypatch.setattr(svc, "_notify_task_comment", AsyncMock())
+
+    result = await svc.request_autopr_reconsideration(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        expected_progress_note=current,
+        body="--draft-pr\n--trust-still-broken\n--test-route=/app/jobs",
+    )
+
+    metadata = json.loads(conn.insert_args[4])
+    assert metadata["autopr_directives"] == "draft_pr,trust_still_broken"
+    assert metadata["autopr_test_route"] == "/app/jobs"
+    assert result["autopr_directives"] == ["draft_pr", "trust_still_broken"]
+    assert result["autopr_test_route"] == "/app/jobs"
+
+
+@pytest.mark.asyncio
+async def test_force_directive_survives_a_screenshot_question_round(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = (
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · PR #501 · 🟡 C55 · "
+        "[autopr:directives draft_pr,trust_still_broken] · note: Attach the screen"
+    )
+    conn = _ReconsiderationConn(current, board_column="changes_requested")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    monkeypatch.setattr(svc, "_notify_task_comment", AsyncMock())
+
+    result = await svc.request_autopr_reconsideration(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        expected_progress_note=current,
+        body="Here is the requested screenshot and exact role.",
+        attachment_ids=[uuid4()],
+    )
+
+    metadata = json.loads(conn.insert_args[4])
+    assert metadata["autopr_directives"] == "draft_pr,trust_still_broken"
+    assert result["autopr_directives"] == ["draft_pr", "trust_still_broken"]
 
 
 @pytest.mark.asyncio

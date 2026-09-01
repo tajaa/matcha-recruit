@@ -176,6 +176,7 @@ async def _bg_apply_autopr_context_reply(
     user,
     content: str,
     reference: dict,
+    attachments: Optional[list] = None,
 ) -> None:
     """Turn a direct reply to Espresso into decision-bound card evidence."""
     try:
@@ -225,19 +226,35 @@ async def _bg_apply_autopr_context_reply(
                 "I can only attach context from someone who can access this project.",
             )
             return
-        if not text:
+        if not text and not attachments:
             await post_as_espresso(
                 project["company_id"], channel_id,
-                "Please include the missing detail in your reply, or add it from the ticket.",
+                "Please include the missing detail or a screenshot in your reply, or add it from the ticket.",
             )
             return
+        attachment_ids = []
+        if attachments:
+            from app.matcha.services.matcha_work.project_file_service import (
+                sync_channel_attachments_to_task,
+            )
+            async with get_connection() as conn:
+                attachment_ids = await sync_channel_attachments_to_task(
+                    conn, project_id, task_id, user.id, attachments,
+                )
+            if not attachment_ids and not text:
+                await post_as_espresso(
+                    project["company_id"], channel_id,
+                    "I couldn't attach that screenshot to the ticket. Please upload it from the ticket and resend the context.",
+                )
+                return
         try:
             result = await request_autopr_reconsideration(
                 project_id=project_id,
                 task_id=task_id,
                 actor_user_id=user.id,
                 expected_progress_note=reference["expected_progress_note"],
-                body=text,
+                body=text or None,
+                attachment_ids=attachment_ids or None,
             )
         except AutoPRReconsiderationConflict:
             await post_as_espresso(
@@ -247,9 +264,17 @@ async def _bg_apply_autopr_context_reply(
             return
         if result is None:
             return
+        directives = set(result.get("autopr_directives") or [])
+        directive_note = ""
+        if "draft_pr" in directives:
+            directive_note += " The draft-PR requirement is active."
+        if "trust_still_broken" in directives:
+            directive_note += " The still-broken assertion is active."
         await post_as_espresso(
             project["company_id"], channel_id,
-            "Thanks — I attached your reply as escalated AutoPR context. This ticket now goes ahead of routine rework in the next plan.",
+            "Thanks — I attached your reply and any screenshots as escalated AutoPR context."
+            + directive_note
+            + " This ticket now goes ahead of routine rework in the next plan.",
         )
     except Exception:
         logger.warning("AutoPR context reply failed", exc_info=True)
@@ -4107,6 +4132,7 @@ async def channel_websocket(
                                 # generic read-only repository-question agent.
                                 _spawn_bg(_bg_apply_autopr_context_reply(
                                     str(ch_uuid), user, row["content"], autopr_context_ref,
+                                    broadcast_attachments,
                                 ))
                             if (
                                 is_new_message
