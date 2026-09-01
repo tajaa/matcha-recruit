@@ -19,6 +19,7 @@ from .attestations import router as _attestations_router
 from .eligibility import router as _eligibility_router
 from .assistant import router as _assistant_router
 from .auto_schedules import router as _auto_schedules_router
+from .audit_logs import router as _audit_logs_router
 
 router = APIRouter()
 router.include_router(_shifts_router)
@@ -31,6 +32,7 @@ router.include_router(_attestations_router)
 router.include_router(_eligibility_router)
 router.include_router(_assistant_router)
 router.include_router(_auto_schedules_router)
+router.include_router(_audit_logs_router)
 
 # Sibling router — own prefix (/schedule-intelligence) + its own single-flag
 # gate (schedule_intelligence, not employee_schedule), mounted separately in

@@ -167,7 +167,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                 removed = await remove_assignment_core(
                     conn, company_id, shift_id=req["shift_id"], employee_id=req["employee_id"],
                     actor_user_id=current_user.id, shift_row=offered,
-                    audit_details={"request_id": str(request_id)},
+                    audit_details={"request_id": str(request_id), "request_type": req["request_type"]},
                 )
                 if not removed:
                     raise HTTPException(status_code=409, detail="Offered shift is no longer assigned to its owner")
@@ -177,7 +177,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                     removed_counter = await remove_assignment_core(
                         conn, company_id, shift_id=req["counter_shift_id"], employee_id=req["target_employee_id"],
                         actor_user_id=current_user.id, shift_row=counter,
-                        audit_details={"request_id": str(request_id)},
+                        audit_details={"request_id": str(request_id), "request_type": req["request_type"]},
                     )
                     if not removed_counter:
                         raise HTTPException(status_code=409, detail="Counter shift is no longer assigned to its owner")
