@@ -82,8 +82,7 @@ async def generate_review_suggestion(
         existing = await conn.fetchrow(
             """SELECT id, status FROM schedule_generation_runs
                WHERE company_id=$1 AND location_id=$2 AND week_start=$3
-                 AND (status IN ('proposed', 'applied')
-                      OR (origin='automatic' AND status='cancelled'))
+                 AND status IN ('proposed', 'applied')
                ORDER BY created_at DESC LIMIT 1""",
             company_id, location_id, week_start,
         )

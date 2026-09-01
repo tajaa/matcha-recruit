@@ -42,6 +42,7 @@ class _AsyncContext:
 class _SuggestionConn:
     def __init__(self):
         self.stale_query = None
+        self.existing_query = None
 
     async def execute(self, query, *args):
         if "SET status='stale'" in query:
@@ -51,6 +52,7 @@ class _SuggestionConn:
 
     async def fetchrow(self, query, *_args):
         if "FROM schedule_generation_runs" in query:
+            self.existing_query = query
             return None
         raise AssertionError(f"unexpected fetchrow query: {query}")
 
@@ -180,3 +182,32 @@ async def test_removed_applied_week_does_not_block_replacement_suggestion(monkey
         datetime(2026, 8, 30, tzinfo=timezone.utc),
         datetime(2026, 9, 6, tzinfo=timezone.utc),
     )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_automatic_suggestion_does_not_block_replacement(monkeypatch):
+    company_id, location_id, template_id = uuid4(), uuid4(), uuid4()
+    conn = _SuggestionConn()
+    monkeypatch.setattr(schedule_automation, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(
+        week_builder,
+        "get_week_build_readiness",
+        AsyncMock(return_value={"status": "ok", "ready": True}),
+    )
+    generation_id = uuid4()
+    monkeypatch.setattr(
+        week_builder,
+        "propose_week_draft",
+        AsyncMock(return_value={"status": "ready", "generation_run_id": str(generation_id)}),
+    )
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=company_id,
+        location_id=location_id,
+        week_start=date(2026, 8, 30),
+        week_template_id=template_id,
+    )
+
+    assert result["status"] == "generated"
+    assert "status IN ('proposed', 'applied')" in conn.existing_query
+    assert "cancelled" not in conn.existing_query
