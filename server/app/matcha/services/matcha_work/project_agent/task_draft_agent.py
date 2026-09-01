@@ -10,13 +10,8 @@ from uuid import UUID
 
 from google.genai import types
 
-from app.core.services.genai_client import get_genai_client
-from app.core.services.model_catalog import GEMINI_FLASH
-from app.core.services.rate_limiter import GeminiRateLimiter
-from app.matcha.services.matcha_work.matcha_work_ai._models import (
-    SUPPORTED_MODELS,
-    _get_model,
-)
+from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.routing import LUNA
 
 from . import store
 from .agent import _fold_usage, _has_source_citation, _safe_for_audit
@@ -31,6 +26,7 @@ _WALL_SECONDS = 240.0
 _PRIORITIES = {"critical", "high", "medium", "low"}
 _CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix"}
 _COLUMNS = {"todo", "in_progress", "review", "done"}
+_TASK_DRAFT_MODEL = LUNA
 
 
 async def resolve_model(
@@ -39,13 +35,13 @@ async def resolve_model(
     company_id: UUID,
     user_id: UUID,
 ) -> str:
-    """Resolve plan entitlement while still in the request process/pool."""
-    return await _get_model(
-        None,
-        model_override,
-        company_id=str(company_id),
-        user_id=str(user_id),
-    )
+    """Ticket drafts are intentionally pinned to OpenAI Luna with high reasoning.
+
+    Keep this request-time seam so queued runs audit the model actually selected,
+    rather than accepting a stale client-provided Gemini model override.
+    """
+    del model_override, company_id, user_id
+    return _TASK_DRAFT_MODEL
 
 
 def _clean_list(
@@ -160,14 +156,16 @@ async def run_task_draft(
     recent_done: list[str],
 ) -> dict:
     """Draft one ticket using only audited repository reads."""
+    del model
     started = time.monotonic()
-    limiter = GeminiRateLimiter()
     tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
     seq = 0
     draft: dict | None = None
-    selected_model = model if model in SUPPORTED_MODELS else GEMINI_FLASH
+    # The worker receives the resolved value persisted at queue time, but task
+    # drafting must not fall back to the generic Gemini model registry.
+    selected_model = _TASK_DRAFT_MODEL
     usage: dict[str, Any] = {"model": selected_model}
 
     async def step(
@@ -315,19 +313,15 @@ async def run_task_draft(
         and model_calls < _MAX_MODEL_CALLS
         and time.monotonic() - started < _WALL_SECONDS
     ):
-        await limiter.check_limit("project_agent", "task_draft")
         model_calls += 1
-        try:
-            response = await asyncio.wait_for(
-                get_genai_client().aio.models.generate_content(
-                    model=selected_model,
-                    contents=contents,
-                    config=config,
-                ),
-                timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
-            )
-        finally:
-            await limiter.record_call("project_agent", "task_draft")
+        response = await asyncio.wait_for(
+            get_luna_client().aio.models.generate_content(
+                model=selected_model,
+                contents=contents,
+                config=config,
+            ),
+            timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
+        )
 
         _fold_usage(usage, response)
         parts = [

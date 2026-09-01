@@ -1,18 +1,17 @@
-"""One-shot kanban task drafting (title / description / priority / category /
-column) -- independent of the thread turn loop.
+"""One-shot Luna-backed kanban task drafting (title / description / priority /
+category / column) independent of the thread turn loop.
 """
-import asyncio
 import json
 import logging
 from typing import Optional
 from google.genai import types
 
-from ._models import _get_model
+from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.routing import LUNA
+
 from ._text import _clean_json_text
 
 logger = logging.getLogger(__name__)
-
-from .provider import get_ai_provider
 
 
 _TASK_DRAFT_PRIORITIES = {"critical", "high", "medium", "low"}
@@ -38,7 +37,7 @@ async def generate_task_draft(
     repository_context: Optional[str] = None,
 ) -> dict:
     """Turn a natural-language request into a structured kanban-ticket draft via
-    Gemini Flash Lite. Returns a dict of fields (no DB write) — the route maps
+    OpenAI Luna with high reasoning. Returns a dict of fields (no DB write) — the route maps
     assignee/element NAMES back to ids and the client reviews before creating.
 
     `elements` carry context (name + description + notes) so the model checks
@@ -128,23 +127,20 @@ Return ONLY a JSON object with these keys:
 Request:
 {prompt}"""
 
-    provider = get_ai_provider()
-    # Honor the header model selector the same way threads do (_get_model picks
-    # the override when valid — clamped to plan — else the mode/plan default).
-    model = await _get_model(provider.settings, model_override, company_id=company_id, user_id=user_id)
-
-    def _call() -> str:
-        resp = provider.client.models.generate_content(
-            model=model,
-            contents=instruction,
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                response_mime_type="application/json",
+    # Task drafting is intentionally provider-pinned: callers may still send
+    # the thread model header, but it cannot route a draft back to Gemini.
+    del model_override, company_id, user_id
+    response = await get_luna_client().aio.models.generate_content(
+        model=LUNA,
+        contents=[types.Content(role="user", parts=[types.Part(text=instruction)])],
+        config=types.GenerateContentConfig(
+            system_instruction=(
+                "Return exactly one JSON object that satisfies the user's task-draft "
+                "schema. Do not add Markdown fences or commentary."
             ),
-        )
-        return resp.text or ""
-
-    raw = await asyncio.to_thread(_call)
+        ),
+    )
+    raw = response.text or ""
     try:
         data = json.loads(_clean_json_text(raw))
     except (json.JSONDecodeError, ValueError):

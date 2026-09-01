@@ -25,17 +25,11 @@ def _response(*parts):
 class _FakeModels:
     def __init__(self, responses):
         self.responses = list(responses)
+        self.calls = []
 
-    async def generate_content(self, **_kwargs):
+    async def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
         return self.responses.pop(0)
-
-
-class _FakeLimiter:
-    async def check_limit(self, *_args):
-        return None
-
-    async def record_call(self, *_args):
-        return None
 
 
 def test_task_draft_surface_is_read_only_and_structured():
@@ -73,8 +67,7 @@ async def test_task_draft_reads_repo_and_returns_resolved_review_draft(monkeypat
         _response(types.Part.from_function_call(name="draft_ticket", args=draft_args)),
     ])
     fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
-    monkeypatch.setattr(task_draft_agent, "get_genai_client", lambda: fake_client)
-    monkeypatch.setattr(task_draft_agent, "GeminiRateLimiter", _FakeLimiter)
+    monkeypatch.setattr(task_draft_agent, "get_luna_client", lambda: fake_client)
     monkeypatch.setattr(task_draft_agent.store, "read_repo_file", AsyncMock(return_value={
         "path": "platforms/desktop/Espresso/ProjectFilters.swift",
         "start_line": 1,
@@ -108,6 +101,8 @@ async def test_task_draft_reads_repo_and_returns_resolved_review_draft(monkeypat
     assert result["files_read"] == 1
     assert result["model_calls"] == 2
     assert result["token_usage"]["total_tokens"] == 34
+    assert result["token_usage"]["model"] == "gpt-5.6-luna"
+    assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
     assert mark_run.await_args.kwargs["status"] == "done"
     assert mark_run.await_args.kwargs["result"]["title"] == "Add saved project filters"
 
@@ -131,3 +126,14 @@ def test_normalize_draft_drops_unknown_assignee_and_clamps_enums():
     assert result["category"] == "product"
     assert result["board_column"] == "todo"
     assert result["assigned_to"] is None
+
+
+@pytest.mark.asyncio
+async def test_task_draft_model_is_pinned_to_openai_luna():
+    result = await task_draft_agent.resolve_model(
+        "gemini-3.7-flash",
+        company_id=uuid4(),
+        user_id=uuid4(),
+    )
+
+    assert result == "gpt-5.6-luna"
