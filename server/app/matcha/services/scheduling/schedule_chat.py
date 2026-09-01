@@ -440,6 +440,7 @@ def coerce_edit_request(raw) -> Optional[dict]:
     else:
         second_date = None
 
+    target_shift_id = _s("target_shift_id", 36)
     result = {
         "kind": kind,
         "target_employee_name": _s("target_employee_name"),
@@ -460,6 +461,12 @@ def coerce_edit_request(raw) -> Optional[dict]:
         "new_end_time": _coerce_time(raw.get("new_end_time")),
         "shift_by_minutes": _coerce_delta(raw.get("shift_by_minutes")),
     }
+    if target_shift_id:
+        # Exact ids are primarily supplied by the schedule-editor Huume
+        # surface after a deterministic overview/bulk selection. They still
+        # pass through the company/location/week checks in _resolve_shift_ref;
+        # an id is a selector, never authorization.
+        result["target_shift_id"] = target_shift_id
     # Minimum shape per kind — an op that can't possibly resolve is dropped
     # here rather than surfacing an opaque "couldn't find that shift" later.
     if kind in ("reassign", "unassign") and not result["target_employee_name"]:
@@ -479,7 +486,8 @@ def coerce_edit_request(raw) -> Optional[dict]:
     ):
         return None
     if kind in ("cancel", "assign") and not (
-        result["target_employee_name"] or result["target_date"] or result["target_day_hint"]
+        result.get("target_shift_id") or result["target_employee_name"]
+        or result["target_date"] or result["target_day_hint"]
         or result["target_role_hint"]
     ):
         return None
@@ -1072,7 +1080,13 @@ async def _resolve_shift_ref(
     days out was invisible to its own exact-date filter).
     -> {"shift": row} | {"ambiguous": [rows]} | {"none": reason}"""
     window_start = datetime.combine(week_start or today, time.min, tzinfo=timezone.utc)
-    has_exact_date = bool(ref.get("target_date"))
+    target_shift_id = None
+    if ref.get("target_shift_id"):
+        try:
+            target_shift_id = UUID(str(ref["target_shift_id"]))
+        except (TypeError, ValueError, AttributeError):
+            return {"none": "couldn't find a matching shift"}
+    has_exact_date = bool(ref.get("target_date") or target_shift_id)
     if week_start is not None:
         window_end = datetime.combine(
             (week_end or (week_start + timedelta(days=6))) + timedelta(days=1),
@@ -1093,6 +1107,9 @@ async def _resolve_shift_ref(
         if location_id is not None:
             params.append(location_id)
             where.append(f"s.location_id = ${len(params)}")
+        if target_shift_id is not None:
+            params.append(target_shift_id)
+            where.append(f"s.id = ${len(params)}")
         if ref.get("target_date"):
             params.append(date.fromisoformat(ref["target_date"]))
             where.append(f"s.starts_at::date = ${len(params)}")
@@ -1213,6 +1230,19 @@ async def build_edit_proposal(
     elif editor_location_id is not None:
         location_id = editor_location_id
 
+    employee_match_cache: dict[str, dict] = {}
+
+    async def _match_employee(name_hint: str) -> dict:
+        # A bulk editor proposal can target the same person hundreds of
+        # times. Resolve that roster identity once, then reuse the
+        # tenant/location-scoped result for every exact shift operation.
+        cache_key = name_hint.strip().casefold()
+        if cache_key not in employee_match_cache:
+            employee_match_cache[cache_key] = await _match_single_employee(
+                conn, company_id, name_hint, location_id,
+            )
+        return employee_match_cache[cache_key]
+
     ops: list[dict] = []
     for req in parsed["edit_requests"]:
         kind = req["kind"]
@@ -1239,7 +1269,7 @@ async def build_edit_proposal(
         to_employee_name: Optional[str] = None
 
         if req.get("target_employee_name"):
-            m = await _match_single_employee(conn, company_id, req["target_employee_name"], location_id)
+            m = await _match_employee(req["target_employee_name"])
             if "none" in m:
                 return await _clarify(m["none"])
             if "ambiguous" in m:
@@ -1248,7 +1278,7 @@ async def build_edit_proposal(
             from_employee_name = f"{m['employee']['first_name']} {m['employee']['last_name']}"
 
         if req.get("to_employee_name"):
-            m = await _match_single_employee(conn, company_id, req["to_employee_name"], location_id)
+            m = await _match_employee(req["to_employee_name"])
             if "none" in m:
                 return await _clarify(m["none"])
             if "ambiguous" in m:
@@ -1315,7 +1345,7 @@ async def build_edit_proposal(
         if kind == "swap":
             second_emp_id = None
             if req.get("second_employee_name"):
-                m = await _match_single_employee(conn, company_id, req["second_employee_name"], location_id)
+                m = await _match_employee(req["second_employee_name"])
                 if "none" in m:
                     return await _clarify(m["none"])
                 if "ambiguous" in m:

@@ -71,6 +71,10 @@ _SCHEDULE_EDIT_PROPERTIES = {
         type=types.Type.STRING,
         enum=["reassign", "assign", "unassign", "retime", "cancel", "swap"],
     ),
+    "target_shift_id": types.Schema(
+        type=types.Type.STRING,
+        description="Exact shift id returned by get_schedule_overview.",
+    ),
     "target_employee_name": types.Schema(type=types.Type.STRING),
     "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
     "target_time_hint": types.Schema(
@@ -920,7 +924,10 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Stage one schedule proposal for the admin to confirm. Use `changes` "
         "to batch up to four related edits (swap, reassign, assign, unassign, "
         "retime, or cancel) into one confirmation; use the legacy flat `kind` "
-        "fields for one edit or a brand new shift. Do not mix creates and edits. "
+        "fields for one edit or a brand new shift. When the manager explicitly "
+        "asks to assign one employee to every vacant shift in the selected "
+        "editor week, set all_vacant_shifts=true and to_employee_name instead "
+        "of enumerating changes. Do not mix creates and edits. "
         "Nothing happens until they confirm on a LATER turn by calling this "
         "again with EXACTLY the same confirm_id. Use real names/dates from "
         "lookup_context(topic='schedule') or find_shift_coverage — never "
@@ -940,6 +947,10 @@ TOOLS: tuple[HuumeTool, ...] = (
                 min_items=1,
                 max_items=4,
                 description="One to four edit operations resolved and confirmed as one proposal. Creates are not allowed here.",
+            ),
+            "all_vacant_shifts": types.Schema(
+                type=types.Type.BOOLEAN,
+                description="True only when the manager explicitly requested assigning to every vacant shift in the selected editor week.",
             ),
             "location_name": types.Schema(
                 type=types.Type.STRING,
