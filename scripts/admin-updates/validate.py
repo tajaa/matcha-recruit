@@ -22,6 +22,7 @@ ENTRY_KEYS = {
     "whatsNew", "howToUse", "setup", "notes", "tag",
 }
 SKIP_KEYS = {"sourcePr", "product", "reason"}
+SKIP_TRUSTED_ECHO_KEYS = {"id", "date"}
 
 
 class ValidationError(ValueError):
@@ -102,16 +103,28 @@ def validate(plan: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
         })
 
     for skipped in draft["skipped"]:
-        if not isinstance(skipped, dict) or set(skipped) != SKIP_KEYS:
-            raise ValidationError(f"each skip must contain exactly {sorted(SKIP_KEYS)}")
+        if not isinstance(skipped, dict):
+            raise ValidationError(f"each skip must contain {sorted(SKIP_KEYS)}")
+        skip_keys = set(skipped)
+        if not SKIP_KEYS <= skip_keys or not skip_keys <= SKIP_KEYS | SKIP_TRUSTED_ECHO_KEYS:
+            raise ValidationError(
+                f"each skip must contain {sorted(SKIP_KEYS)} and only optional trusted echoes "
+                f"{sorted(SKIP_TRUSTED_ECHO_KEYS)}"
+            )
         key = (skipped.get("sourcePr"), skipped.get("product"))
         if key not in expected:
             raise ValidationError(f"skip {key!r} was not requested by the plan")
         if key in seen:
             raise ValidationError(f"duplicate decision for {key!r}")
         seen.add(key)
+        unit = expected[key]
+        if "id" in skipped and skipped["id"] != unit["id"]:
+            raise ValidationError(f"skip {key!r} changed its trusted id")
+        if "date" in skipped and skipped["date"] != unit["date"]:
+            raise ValidationError(f"skip {key!r} changed its trusted deployment date")
         normalized_skips.append({
-            **skipped,
+            "sourcePr": skipped["sourcePr"],
+            "product": skipped["product"],
             "reason": _plain_text(skipped.get("reason"), field=f"skip {key!r}.reason", minimum=10, maximum=320),
         })
 

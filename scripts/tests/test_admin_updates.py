@@ -225,6 +225,45 @@ def test_validator_accepts_complete_exact_output():
     assert normalized["entries"][0]["id"] == "pr-11-add-useful-feature"
 
 
+def test_validator_accepts_and_strips_trusted_skip_echoes():
+    draft = _valid_draft()
+    draft["entries"] = []
+    draft["skipped"] = [{
+        "sourcePr": 11,
+        "product": "matcha",
+        "id": "pr-11-add-useful-feature",
+        "date": "2026-08-31",
+        "reason": "Internal change with no teammate-visible behavior.",
+    }]
+
+    normalized = admin_validate.validate(_plan_for_validation(), draft)
+
+    assert normalized["skipped"] == [{
+        "sourcePr": 11,
+        "product": "matcha",
+        "reason": "Internal change with no teammate-visible behavior.",
+    }]
+
+
+@pytest.mark.parametrize("field,value,match", [
+    ("id", "spoofed", "trusted id"),
+    ("date", "2026-09-01", "trusted deployment date"),
+    ("unexpected", "value", "optional trusted echoes"),
+])
+def test_validator_rejects_untrusted_skip_metadata(field, value, match):
+    draft = _valid_draft()
+    draft["entries"] = []
+    draft["skipped"] = [{
+        "sourcePr": 11,
+        "product": "matcha",
+        "reason": "Internal change with no teammate-visible behavior.",
+        field: value,
+    }]
+
+    with pytest.raises(admin_validate.ValidationError, match=match):
+        admin_validate.validate(_plan_for_validation(), draft)
+
+
 @pytest.mark.parametrize("mutation,match", [
     (lambda draft: draft["entries"][0].update(id="spoofed"), "trusted id"),
     (lambda draft: draft["entries"][0].update(setup=["Apply migration"]), "setup prerequisites"),

@@ -32,7 +32,7 @@ Write a short Markdown receipt to REPORT_PATH with heading `### Admin updates dr
 
 Rules:
 - Echo `processedThroughPr` from `targetWatermark`. Every `(sourcePr, product)` in `units` must appear exactly once in either `entries` or `skipped`.
-- Echo each unit's exact trusted `id`, `date`, `sourcePr`, and `product`. Never invent an entry for another PR or product.
+- For entries, echo the unit's exact trusted `id`, `date`, `sourcePr`, and `product`. For skips, include only `sourcePr`, `product`, and `reason`, exactly as shown above. Never invent a decision for another PR or product.
 - Matcha categories: Admin, Broker, Broker Pilot, Cappe, Compliance, Employee Scheduling, Employees, HR Pilot, Handbook Pilot, IR, Incident Reporting, Legal Defense, Legal Pilot, Limit Adequacy, Marketing, Matcha Compliance, Matcha Lite, Matcha Work, Newsletter, Ops, Property, Werk, Werk (macOS), Workforce Compliance, Analysis Pilot.
 - Tell-Us categories: Consumer, Brand, Places, Rewards, Messages, Billing, Platform.
 - Publish only behavior an internal teammate, admin, or customer can actually observe or use in the named product. Skip tests, refactors, dependency work, CI/infra, logging-only changes, and changes outside that product.
