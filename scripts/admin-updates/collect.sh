@@ -11,8 +11,12 @@ DEPLOYMENT="${3:?missing deployment metadata}"
 OUTPUT="${4:?missing output path}"
 SINCE_PR="${5:-}"
 LIMIT="${ADMIN_UPDATES_PR_LIMIT:-500}"
+REST_FILE_LIMIT="${ADMIN_UPDATES_REST_FILE_LIMIT:-3000}"
+REPO="${GITHUB_REPOSITORY:-tajaa/matcha-recruit}"
 MERGED_PRS="$(mktemp "${RUNNER_TEMP:-/tmp}/admin-updates-prs.XXXXXX.json")"
-trap 'rm -f "$MERGED_PRS"' EXIT
+FULL_FILES=""
+NEXT_PRS=""
+trap 'rm -f "$MERGED_PRS" "${FULL_FILES:-}" "${NEXT_PRS:-}"' EXIT
 
 gh pr list --state merged --base main --limit "$LIMIT" \
     --json number,title,body,mergedAt,mergeCommit,files,url > "$MERGED_PRS"
@@ -22,9 +26,33 @@ if [ "$count" -ge "$LIMIT" ]; then
     echo "admin-updates: merged PR query reached limit=$LIMIT; refusing a possibly incomplete watermark" >&2
     exit 1
 fi
-if jq -e 'any(.[]; ((.files // []) | length) >= 100)' "$MERGED_PRS" >/dev/null; then
-    echo "admin-updates: a PR hit GitHub's 100-file metadata cap; refusing unsafe product classification" >&2
-    exit 1
+# GraphQL's `files` connection stops at 100 records. Replace each possibly
+# truncated result with the paginated REST list before classifying products;
+# otherwise one invisible Tell-Us or frontend path could make us publish an
+# incomplete update. GitHub's REST endpoint itself caps a PR at 3,000 files,
+# so retain a fail-closed ceiling there.
+capped_prs="$(jq -r '.[] | select(((.files // []) | length) >= 100) | .number' "$MERGED_PRS")"
+if [ -n "$capped_prs" ]; then
+    while IFS= read -r pr_number; do
+        [ -n "$pr_number" ] || continue
+        FULL_FILES="$(mktemp "${RUNNER_TEMP:-/tmp}/admin-updates-files.XXXXXX.json")"
+        gh api --paginate "repos/$REPO/pulls/$pr_number/files?per_page=100" \
+            | jq -s 'add | map({path: .filename})' > "$FULL_FILES"
+        full_count="$(jq 'length' "$FULL_FILES")"
+        if [ "$full_count" -ge "$REST_FILE_LIMIT" ]; then
+            echo "admin-updates: PR #$pr_number reached the REST file limit=$REST_FILE_LIMIT; refusing unsafe product classification" >&2
+            exit 1
+        fi
+
+        NEXT_PRS="$(mktemp "${RUNNER_TEMP:-/tmp}/admin-updates-prs-next.XXXXXX.json")"
+        jq --argjson pr_number "$pr_number" --slurpfile files "$FULL_FILES" '
+            map(if .number == $pr_number then .files = $files[0] else . end)
+        ' "$MERGED_PRS" > "$NEXT_PRS"
+        mv "$NEXT_PRS" "$MERGED_PRS"
+        NEXT_PRS=""
+        rm -f "$FULL_FILES"
+        FULL_FILES=""
+    done <<< "$capped_prs"
 fi
 
 args=(

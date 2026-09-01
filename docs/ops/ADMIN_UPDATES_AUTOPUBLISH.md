@@ -26,6 +26,11 @@ that batch and leaves the watermark unchanged. Docs, CI, scripts, tests, and non
 application paths advance without a model call because they cannot produce a
 production web-app update.
 
+GitHub's PR-list GraphQL response exposes at most 100 changed files. When a PR reaches
+that boundary, the trusted collector replaces it with the complete paginated REST file
+list before product classification; at the REST endpoint's 3,000-file ceiling it fails
+closed rather than risking an incomplete product update.
+
 The publication date is the deployment date, not the merge date. Existing ids are
 never overwritten, so a hand-edited entry remains authoritative on retries.
 
