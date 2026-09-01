@@ -39,6 +39,16 @@ class _FakeConn:
         self.executed.append(args)
 
 
+class _ShiftCountConn:
+    def __init__(self, rows):
+        self.rows = rows
+        self.query = None
+
+    async def fetch(self, *args):
+        self.query = args
+        return self.rows
+
+
 def _employee(employee_id: str, name: str, *, jobs=None, state="windows", cap=2400):
     return {
         "id": employee_id,
@@ -192,6 +202,27 @@ def test_manager_constraints_fail_closed_instead_of_being_silently_dropped():
             "employee_id": "3f6b1c22-2000-4000-8000-000000000001",
             "max_weekly_minutes": 10081,
         }])
+
+
+@pytest.mark.asyncio
+async def test_week_shift_counts_does_not_find_published_shifts_in_empty_future_week():
+    company_id = UUID("3f6b1c22-2000-4000-8000-000000000001")
+    location_id = UUID("3f6b1c22-2000-4000-8000-000000000002")
+    conn = _ShiftCountConn([])
+
+    result = await week_builder._week_shift_counts(
+        conn, company_id=company_id, location_id=location_id,
+        week_start=date(2026, 11, 1),
+    )
+
+    assert result == {"draft": 0, "published": 0}
+    assert "status IN ('draft', 'published')" in conn.query[0]
+    assert conn.query[1:] == (
+        company_id,
+        location_id,
+        datetime(2026, 11, 1, tzinfo=UTC),
+        datetime(2026, 11, 8, tzinfo=UTC),
+    )
 
 
 @pytest.mark.asyncio

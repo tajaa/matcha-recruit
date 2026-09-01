@@ -509,19 +509,21 @@ async def _load_existing_demand(conn, *, company_id: UUID, location_id: UUID,
 
 async def _week_shift_counts(conn, *, company_id: UUID, location_id: UUID,
                              week_start: date) -> dict[str, int]:
+    """Count only draft/published shifts that start in the selected week."""
     lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     hi = lo + timedelta(days=7)
-    row = await conn.fetchrow(
-        """SELECT COUNT(*) FILTER (WHERE status='draft') AS draft_count,
-                  COUNT(*) FILTER (WHERE status='published') AS published_count
+    rows = await conn.fetch(
+        """SELECT status
              FROM schedule_shifts
             WHERE company_id=$1 AND location_id=$2
+              AND status IN ('draft', 'published')
               AND starts_at >= $3 AND starts_at < $4""",
         company_id, location_id, lo, hi,
     )
+    counts = Counter(row["status"] for row in rows)
     return {
-        "draft": int(row["draft_count"] or 0),
-        "published": int(row["published_count"] or 0),
+        "draft": counts["draft"],
+        "published": counts["published"],
     }
 
 
