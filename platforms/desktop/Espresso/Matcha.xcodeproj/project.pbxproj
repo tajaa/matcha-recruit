@@ -118,6 +118,7 @@
 		74C547BE5976EFD5D64A285B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F1E6446AC5C08F85073A51 /* APIClient.swift */; };
 		74D7570AF92483A279339C53 /* AppState+Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80C811C4F0D76528E1435659 /* AppState+Tabs.swift */; };
 		788DF3AB085B3D15F4231730 /* ChatPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52416548CAE98530BAD906E /* ChatPanelView.swift */; };
+		262CF510B3161AD8AD73511C /* ChatMessageComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E35F4A71D8F7681E613FCF9 /* ChatMessageComposer.swift */; };
 		79C8F2CC973CDDC430211240 /* ChannelMessageRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */; };
 		7A5C0000000000000000B001 /* TaskRound.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F001 /* TaskRound.swift */; };
 		7A5C0000000000000000B002 /* RoundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F002 /* RoundView.swift */; };
@@ -334,6 +335,7 @@
 		DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */; };
 		DETA11PANE000000000000B1 /* DetailPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DETA11PANE000000000000F2 /* DetailPanes.swift */; };
 		DF437ADE59FABFE8C32C332D /* SafeURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181ADEB8343F9C92BC77CA4F /* SafeURL.swift */; };
+		547AA3C8A96389C312EC3F98 /* MWLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0951985A8D0EF82C72437AF /* MWLog.swift */; };
 		DFADE57E23B12BD8F147A579 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */; };
 		DFEB29DD80A35047685D99B7 /* InboxListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABDBCBAF4AD1A652BADD661 /* InboxListView.swift */; };
 		E2A1B0C0D0E0F00100000001 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A1B0C0D0E0F00100000002 /* EmailService.swift */; };
@@ -418,6 +420,7 @@
 		15F1E6446AC5C08F85073A51 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadView.swift; sourceTree = "<group>"; };
 		181ADEB8343F9C92BC77CA4F /* SafeURL.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SafeURL.swift; sourceTree = "<group>"; };
+		D0951985A8D0EF82C72437AF /* MWLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MWLog.swift; sourceTree = "<group>"; };
 		1D1863D28F1BAEBA0D65ACF0 /* Avatar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Avatar.swift; sourceTree = "<group>"; };
 		210A398CCEA5FA1784C2C92D /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		28F1337BB8013FD3C4C0366C /* WorkbookPreview.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkbookPreview.swift; sourceTree = "<group>"; };
@@ -588,6 +591,7 @@
 		C18F579031442253A1AD76A9 /* AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		C2EA646E28D8B03AC9B68E63 /* AppStateModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppStateModels.swift; sourceTree = "<group>"; };
 		C52416548CAE98530BAD906E /* ChatPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelView.swift; sourceTree = "<group>"; };
+		8E35F4A71D8F7681E613FCF9 /* ChatMessageComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageComposer.swift; sourceTree = "<group>"; };
 		C64A65C839FF68B9E04DE36F /* ChannelChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChannelChatView.swift; sourceTree = "<group>"; };
 		C69396FAE1416DA6A369BBDC /* EmptyPreviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmptyPreviewView.swift; sourceTree = "<group>"; };
 		C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryPanelView.swift; sourceTree = "<group>"; };
@@ -823,6 +827,7 @@
 				0B3F3B04FAEA73368120D2C4 /* ThreadListView.swift */,
 				A91B82ECF6D3B416A97C8FD9 /* ThreadDetailView.swift */,
 				C52416548CAE98530BAD906E /* ChatPanelView.swift */,
+				8E35F4A71D8F7681E613FCF9 /* ChatMessageComposer.swift */,
 				3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */,
 				DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */,
 				49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */,
@@ -903,6 +908,7 @@
 				E5C3CE5229A938126E840ABD /* MultipartUploadBuilder.swift */,
 				5ADDBEAEEBA9E4439ECD6181 /* ServiceCache.swift */,
 				181ADEB8343F9C92BC77CA4F /* SafeURL.swift */,
+				D0951985A8D0EF82C72437AF /* MWLog.swift */,
 			);
 			name = Support;
 			path = Support;
@@ -1621,6 +1627,7 @@
 				C77BADBAE54E04005E00E518 /* ThreadListView.swift in Sources */,
 				36EE1D8AC492F24143BFEEBD /* ThreadDetailView.swift in Sources */,
 				788DF3AB085B3D15F4231730 /* ChatPanelView.swift in Sources */,
+				262CF510B3161AD8AD73511C /* ChatMessageComposer.swift in Sources */,
 				E8EB21EC67FE2F741A8AEA6A /* MessageBubbleView.swift in Sources */,
 				FC22CC98585FB00D59E39358 /* PreviewPanelView.swift in Sources */,
 				1BFFF9E1D881752A67CF8777 /* VersionHistoryView.swift in Sources */,
@@ -1762,6 +1769,7 @@
 				B8EF0BA967250612BA7375C9 /* ScreenplayPaginator.swift in Sources */,
 				55E3216B24ACA8EAA93FCC78 /* ScreenplayPDF.swift in Sources */,
 				9845D484782C6962A4479A86 /* SafeURL.swift in Sources */,
+				547AA3C8A96389C312EC3F98 /* MWLog.swift in Sources */,
 				71512EC747B04A2EECDAC04D /* MatchaWorkService+Threads.swift in Sources */,
 				9B54D7253D12B0D197980C24 /* MatchaWorkService+Projects.swift in Sources */,
 				907959E1689B61670C0348A4 /* MatchaWorkService+Collaborators.swift in Sources */,

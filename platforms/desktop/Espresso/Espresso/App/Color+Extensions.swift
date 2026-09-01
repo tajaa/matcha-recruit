@@ -1,5 +1,46 @@
 import SwiftUI
 
+/// Cached `mw-theme` lookup for the dynamic `Color` statics below.
+///
+/// Those colors are read inside view bodies — several per body evaluation, on
+/// every keystroke and every window-resize frame — and each read used to bridge
+/// a fresh `String` out of `UserDefaults`. Cache it, and invalidate whenever the
+/// defaults change (which is how the theme is written).
+private final class MWThemeCache: @unchecked Sendable {
+    static let shared = MWThemeCache()
+
+    private let lock = NSLock()
+    private var cached: String?
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            self.cached = nil
+            self.lock.unlock()
+        }
+    }
+
+    var name: String {
+        lock.lock()
+        if let cached {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let value = UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum"
+        lock.lock()
+        cached = value
+        lock.unlock()
+        return value
+    }
+}
+
 extension Color {
     static let matcha500 = Color("matcha500")
     static let matcha600 = Color("matcha600")
@@ -10,7 +51,7 @@ extension Color {
     /// Dynamic — switches with the active theme so all views get the right
     /// background without individually reading AppState.
     static var appBackground: Color {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
+        switch MWThemeCache.shared.name {
         case "light":     return grayBg
         case "platinum":  return platinumBg
         case "cappuchin": return cappuchinDark
@@ -21,7 +62,7 @@ extension Color {
 
     /// Dynamic card/surface color, mirrors AppState.themeCard.
     static var cardBackground: Color {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
+        switch MWThemeCache.shared.name {
         case "light":     return grayCard
         case "platinum":  return platinumCard
         case "cappuchin": return cappuchinCard
@@ -32,7 +73,7 @@ extension Color {
 
     /// Dynamic border color, mirrors AppState.themeBorder.
     static var borderColor: Color {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
+        switch MWThemeCache.shared.name {
         case "light":     return grayBorder
         case "platinum":  return platinumBorder
         case "cappuchin": return cappuchinBorder
@@ -47,7 +88,7 @@ extension Color {
     // (≈amber-700 on light, amber-500 on dark) as the single attention accent.
     // Theme-aware via `mw-theme` so views without AppState still adapt.
     private static var mwIsLightTheme: Bool {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
+        switch MWThemeCache.shared.name {
         case "light", "platinum": return true
         default: return false
         }

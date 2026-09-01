@@ -519,7 +519,7 @@ final class ChannelsWebSocket: NSObject {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
-        print("[ChannelsWS] schedule reconnect — delay=\(reconnectDelay)s")
+        mwLog("[ChannelsWS] schedule reconnect — delay=\(reconnectDelay)s")
         isConnected = false
         isConnecting = false
         pingTask?.cancel(); pingTask = nil
@@ -538,7 +538,7 @@ final class ChannelsWebSocket: NSObject {
             // which is why "click out + click back in" recovers the chat
             // stream. Matches the ProjectWebSocket fix in b653ddd.
             let refreshed = await AuthService.shared.refreshIfNeeded()
-            print("[ChannelsWS] reconnect token refresh=\(refreshed)")
+            mwLog("[ChannelsWS] reconnect token refresh=\(refreshed)")
             await MainActor.run {
                 self.reconnectTask = nil
                 self.connect()
@@ -562,7 +562,7 @@ extension Notification.Name {
 extension ChannelsWebSocket: URLSessionWebSocketDelegate {
     nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         Task { @MainActor in
-            print("[ChannelsWS] connected — replaying \(self.subscribedRooms.count) join_room frames")
+            mwLog("[ChannelsWS] connected — replaying \(self.subscribedRooms.count) join_room frames")
             self.isConnected = true
             self.isConnecting = false
             self.reconnectDelay = 3.0
@@ -584,7 +584,7 @@ extension ChannelsWebSocket: URLSessionWebSocketDelegate {
     nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let codeRaw = closeCode.rawValue
         Task { @MainActor in
-            print("[ChannelsWS] WS closed code=\(codeRaw)")
+            mwLog("[ChannelsWS] WS closed code=\(codeRaw)")
             self.endNoNap()
             self.scheduleReconnect()
         }

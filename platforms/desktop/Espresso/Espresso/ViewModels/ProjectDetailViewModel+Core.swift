@@ -93,19 +93,18 @@ extension ProjectDetailViewModel {
         }
         do {
             if cachedDetail != nil {
-                // WARM: header already painted; revalidate detail + every entity
-                // in the background (the loaders force-refresh + diff-update).
-                let proj = try await service.getProjectDetail(id: id, forceRefresh: true)
-                await MainActor.run {
-                    guard project?.id == id else { return }
-                    project = proj
-                    activeChatId = proj.chats?.first?.id
-                    isLoading = false
+                // WARM: the caches already painted every surface, so this is a
+                // pure background revalidate — through the SAME single /bundle
+                // round-trip the cold path uses. It used to be a forced detail
+                // GET plus four loaders (six requests), which made re-selecting
+                // a recently opened project cost MORE than opening a cold one.
+                await MainActor.run { isLoading = false }
+                if let bundle = try await bundleForRevalidate(id: id) {
+                    await MainActor.run {
+                        guard project?.id == id else { return }
+                        applyBundle(bundle, id: id)
+                    }
                 }
-                Task { await self.loadTasks() }
-                Task { await self.loadFiles() }
-                Task { await self.loadCollaborators() }
-                Task { await self.loadElements() }
             } else {
                 // COLD: one /bundle call warms detail + all six sub-resources.
                 // Fall back to the pre-bundle path (detail + parallel loaders) if
@@ -140,28 +139,7 @@ extension ProjectDetailViewModel {
                     bundle = nil
                 }
                 if let bundle {
-                    await MainActor.run {
-                        project = bundle.project
-                        activeChatId = bundle.project.chats?.first?.id
-                        tasks = bundle.tasks
-                        // The bundle always ships the week-scoped Done column.
-                        doneScope = "week"
-                        doneTotal = bundle.doneTotal ?? bundle.tasks.filter { $0.boardColumn == "done" }.count
-                        var seeded: [String: [MWProjectFile]] = [:]
-                        for t in bundle.tasks { if let atts = t.attachments { seeded[t.id] = atts } }
-                        taskFiles = seeded
-                        files = bundle.files
-                        folders = bundle.folders
-                        links = bundle.links
-                        collaborators = bundle.collaborators
-                        elements = bundle.elements
-                        // Bundle already returned files+folders+links fresh — stamp
-                        // so the first Files/Media open doesn't redundantly refetch
-                        // (chat-sync is left unstamped so Media still backfills once).
-                        lastFilesFetch[id] = Date()
-                        lastLinksFetch[id] = Date()
-                        isLoading = false
-                    }
+                    await MainActor.run { applyBundle(bundle, id: id) }
                 } else {
                     let proj = try await service.getProjectDetail(id: id, forceRefresh: true)
                     await MainActor.run {
@@ -186,6 +164,59 @@ extension ProjectDetailViewModel {
                 return
             }
             await MainActor.run { errorMessage = error.localizedDescription; isLoading = false }
+        }
+    }
+
+    /// Paint a `/bundle` response across every surface. Shared by the cold
+    /// open and the warm revalidate so the two can't drift.
+    @MainActor
+    private func applyBundle(_ bundle: MWProjectBundle, id: String) {
+        project = bundle.project
+        activeChatId = bundle.project.chats?.first?.id
+        tasks = bundle.tasks
+        // The bundle always ships the week-scoped Done column.
+        doneScope = "week"
+        doneTotal = bundle.doneTotal ?? bundle.tasks.filter { $0.boardColumn == "done" }.count
+        var seeded: [String: [MWProjectFile]] = [:]
+        for t in bundle.tasks { if let atts = t.attachments { seeded[t.id] = atts } }
+        taskFiles = seeded
+        files = bundle.files
+        folders = bundle.folders
+        links = bundle.links
+        collaborators = bundle.collaborators
+        elements = bundle.elements
+        // Bundle already returned files+folders+links fresh — stamp so the
+        // first Files/Media open doesn't redundantly refetch (chat-sync is
+        // left unstamped so Media still backfills once).
+        lastFilesFetch[id] = Date()
+        lastLinksFetch[id] = Date()
+        isLoading = false
+    }
+
+    /// Warm-path bundle fetch. Returns nil when the revalidate should simply be
+    /// dropped — a rapid switch cancelled it, or the project is gone — rather
+    /// than falling back to the legacy multi-request path, which would fire
+    /// five more requests exactly when the user is switching fastest.
+    private func bundleForRevalidate(id: String) async throws -> MWProjectBundle? {
+        do {
+            return try await service.getProjectBundle(id: id)
+        } catch is CancellationError {
+            return nil
+        } catch APIError.httpError(404, _) {
+            // Same nginx-404-jail hazard as the cold path: forget it, don't retry.
+            service.forgetProject(id: id)
+            await MainActor.run {
+                guard project?.id == id else { return }
+                project = nil
+                errorMessage = "This project no longer exists. It may have been deleted."
+                isLoading = false
+            }
+            return nil
+        } catch {
+            // Older server without /bundle, or a transient failure. The cached
+            // surfaces are already on screen and still valid; the next open
+            // revalidates again.
+            return nil
         }
     }
 

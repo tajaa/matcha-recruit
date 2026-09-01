@@ -63,9 +63,20 @@ final class TicketUpdatesStore {
     /// already viewed so a ticket's pre-existing history isn't flagged as new.
     /// Only genuinely new events that arrive afterward then count as unviewed.
     /// No-op once the task has an entry, or if the task carries no event ids yet.
-    func baselineIfNeeded(_ task: MWProjectTask) {
-        guard viewed[task.id] == nil, let ids = task.recentEventIds else { return }
-        viewed[task.id] = Set(ids)
+    /// Batch form — the only caller baselines a whole freshly-loaded board.
+    ///
+    /// Doing this one task at a time meant N full `UserDefaults` encodes of the
+    /// entire dictionary AND N `generation` bumps on the main actor per load;
+    /// `generation` is read from every card body, so each bump invalidated the
+    /// whole board. Now: one write, one bump, and only if something changed.
+    func baselineIfNeeded(_ tasks: [MWProjectTask]) {
+        var changed = false
+        for task in tasks {
+            guard viewed[task.id] == nil, let ids = task.recentEventIds else { continue }
+            viewed[task.id] = Set(ids)
+            changed = true
+        }
+        guard changed else { return }
         persist()
         generation &+= 1
     }

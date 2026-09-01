@@ -83,6 +83,8 @@ plutil -lint "$PROJECT/project.pbxproj"
 # Compile the desktop target unsigned in CI; local builds retain the project's
 # normal development signing, while release scripts keep their explicit
 # Developer ID / App Store signing paths.
+# NB: expanded as ${ARR[@]+"${ARR[@]}"} below — macOS ships bash 3.2, where a
+# plain "${ARR[@]}" on an EMPTY array trips `set -u` with "unbound variable".
 XCODEBUILD_SETTINGS=()
 if [[ "${CI:-}" == "true" && "$TARGET" == "espresso" ]]; then
     XCODEBUILD_SETTINGS+=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
@@ -94,11 +96,11 @@ case "$ACTION" in
         ;;
     build)
         xcodebuild -project "$PROJECT" -scheme "$SCHEME" -destination "$DESTINATION" \
-            "${XCODEBUILD_SETTINGS[@]}" build
+            ${XCODEBUILD_SETTINGS[@]+"${XCODEBUILD_SETTINGS[@]}"} build
         ;;
     test)
         xcodebuild -project "$PROJECT" -scheme "$SCHEME" -destination "$DESTINATION" \
-            "${XCODEBUILD_SETTINGS[@]}" test
+            ${XCODEBUILD_SETTINGS[@]+"${XCODEBUILD_SETTINGS[@]}"} test
         ;;
     *)
         echo "Unknown action: $ACTION (expected build, test, or open)" >&2
