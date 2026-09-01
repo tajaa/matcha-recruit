@@ -179,6 +179,24 @@ cp "$HOST_DECISION" "$DECISION_FILE"
 # pre-model commit. This still captures edits if a model ignored the prompt
 # and committed locally; the disposable clone's history is never trusted.
 git -C "$SANDBOX_WORKSPACE" add --intent-to-add --all -- .
+
+# Repository instruction files are operator-owned context, not product output.
+# A model may occasionally append implementation notes to one despite the
+# prompt. Restore tracked instruction files mechanically before constructing
+# the patch so an otherwise valid product change is not abandoned at publish.
+# A newly-created instruction file remains in the patch and is rejected by the
+# downstream path guard; only files already present at MODEL_BASE_SHA qualify.
+while IFS= read -r -d '' changed_path; do
+    case "/$changed_path" in
+        */CLAUDE.md|*/AGENTS.md)
+            if git -C "$SANDBOX_WORKSPACE" cat-file -e "$MODEL_BASE_SHA:$changed_path" 2>/dev/null; then
+                git -C "$SANDBOX_WORKSPACE" restore --source "$MODEL_BASE_SHA" --worktree -- "$changed_path"
+                printf 'Ignored model edit to operator instruction file: %s\n' "$changed_path"
+            fi
+            ;;
+    esac
+done < <(git -C "$SANDBOX_WORKSPACE" diff --name-only -z "$MODEL_BASE_SHA" -- .)
+
 PATCH_FILE="$RUNTIME_ROOT/model.patch"
 git -C "$SANDBOX_WORKSPACE" diff --binary --full-index "$MODEL_BASE_SHA" -- . > "$PATCH_FILE"
 CHANGED_FILE_COUNT="$(git -C "$SANDBOX_WORKSPACE" diff --name-only "$MODEL_BASE_SHA" -- . \

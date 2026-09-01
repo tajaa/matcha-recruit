@@ -288,7 +288,7 @@ decisions, and any symlink/submodule change before applying the patch.
 
 The primary `msandbox` command is the authoritative AutoPR master switch.
 `msandbox` or `msandbox start` starts the normal workspace container, writes a
-private enable marker, loads/kicks the five-minute LaunchAgent, and creates the
+private enable marker, loads/kicks the one-minute LaunchAgent, and creates the
 host tmux dashboard. Startup prints primary-container, master-switch, timer,
 dashboard, and agentic-activity state before opening a shell. A missing timer
 or any dead/missing dashboard pane makes startup fail and rolls back anything

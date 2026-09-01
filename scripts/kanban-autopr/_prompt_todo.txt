@@ -72,6 +72,8 @@ Hard limits, no exceptions:
 - Do not commit or open a PR — leave changes unstaged in the working tree.
 - Do not change .github/, deploy/, scripts/, secrets, lockfiles, dependency
   manifests, or server/alembic/.
+- Do not edit repository instruction or memory files, including CLAUDE.md or
+  AGENTS.md. They are operator-owned context, never part of a product patch.
 - Do not touch more than 25 files. If the card needs more than that to
   implement, it needed a human to scope it — write Confidence: none instead.
 
