@@ -193,6 +193,36 @@ def test_manual_since_date_rejects_a_numeric_cursor(monkeypatch, tmp_path):
         )
 
 
+def test_collect_cli_passes_manual_since_date(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    def fake_build_plan(**kwargs):
+        captured.update(kwargs)
+        return {"hasWork": False}
+
+    context_path = tmp_path / "context.json"
+    state_path = tmp_path / "state.json"
+    merged_prs_path = tmp_path / "merged-prs.json"
+    deployment_path = tmp_path / "deployment.json"
+    output_path = tmp_path / "output.json"
+    for path in (context_path, state_path, deployment_path):
+        path.write_text("{}", encoding="utf-8")
+    merged_prs_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(admin_collect, "build_plan", fake_build_plan)
+    monkeypatch.setattr(sys, "argv", [
+        "collect.py",
+        "--production-context", str(context_path),
+        "--production-state", str(state_path),
+        "--merged-prs", str(merged_prs_path),
+        "--deployment", str(deployment_path),
+        "--since-date", "2026-08-27",
+        "--output", str(output_path),
+    ])
+
+    assert admin_collect.main() == 0
+    assert captured["since_date"] == "2026-08-27"
+
+
 def test_deferred_pr_prevents_partial_batch_cursor_advance(monkeypatch, tmp_path):
     monkeypatch.setattr(
         admin_collect,

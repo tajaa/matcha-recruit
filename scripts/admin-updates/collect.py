@@ -351,6 +351,7 @@ def main() -> int:
     parser.add_argument("--deployment", required=True, type=Path)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--since-pr", type=int)
+    parser.add_argument("--since-date")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -362,6 +363,7 @@ def main() -> int:
             deployment=json.loads(args.deployment.read_text(encoding="utf-8")),
             repo_root=args.repo_root.resolve(),
             since_pr=args.since_pr,
+            since_date=args.since_date,
         )
     except (CollectionError, json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
         parser.error(str(exc))
