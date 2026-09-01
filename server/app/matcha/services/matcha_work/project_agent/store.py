@@ -127,3 +127,77 @@ async def read_repo_file(
         "path": normalized,
         **numbered_line_window(content, start_line=start_line, end_line=end_line),
     }
+
+
+_NOTES_PER_ELEMENT = 5
+
+
+async def load_task_draft_context(project_id: UUID) -> dict:
+    """Load compact project metadata through the worker-safe connection path."""
+    async with connection_or_direct() as conn:
+        collaborator_rows = await conn.fetch(
+            """SELECT pc.user_id,
+                      COALESCE(c.name,
+                               NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''),
+                               a.name, u.email) AS name
+               FROM mw_project_collaborators pc
+               JOIN users u ON u.id=pc.user_id
+               LEFT JOIN admins a ON a.user_id=pc.user_id
+               LEFT JOIN clients c ON c.user_id=pc.user_id
+               LEFT JOIN employees e ON e.user_id=pc.user_id
+               WHERE pc.project_id=$1 AND pc.status='active'
+               ORDER BY pc.created_at ASC""",
+            project_id,
+        )
+        element_rows = await conn.fetch(
+            """SELECT id, name, description FROM mw_project_elements
+               WHERE project_id=$1 AND kind IS DISTINCT FROM '_repository_snapshot'
+               ORDER BY \"order\" ASC, created_at ASC""",
+            project_id,
+        )
+        # Only the newest few notes per element ever reach the prompt, so window
+        # in SQL — an unbounded fetch ships every note body a long-lived project
+        # has ever accumulated across the wire just to discard almost all of it.
+        note_rows = await conn.fetch(
+            """SELECT element_id, kind, body, url FROM (
+                   SELECT element_id, kind, body, url, created_at,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY element_id ORDER BY created_at DESC
+                          ) AS rn
+                   FROM mw_element_notes WHERE project_id=$1
+               ) ranked
+               WHERE rn <= $2
+               ORDER BY created_at DESC""",
+            project_id,
+            _NOTES_PER_ELEMENT,
+        )
+        done_rows = await conn.fetch(
+            """SELECT title FROM mw_tasks
+               WHERE project_id=$1 AND status='completed'
+                 AND completed_at >= NOW() - INTERVAL '7 days'
+               ORDER BY completed_at DESC LIMIT 15""",
+            project_id,
+        )
+
+    notes_by_element: dict[str, list[str]] = {}
+    for row in note_rows:
+        text = (row["url"] if row["kind"] == "link" else row["body"]) or ""
+        if str(text).strip():
+            notes_by_element.setdefault(str(row["element_id"]), []).append(str(text).strip())
+
+    return {
+        "collaborators": [
+            {"user_id": str(row["user_id"]), "name": row["name"]}
+            for row in collaborator_rows if row["name"]
+        ],
+        "elements": [
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "description": row["description"],
+                "notes": notes_by_element.get(str(row["id"]), [])[:_NOTES_PER_ELEMENT],
+            }
+            for row in element_rows if row["name"]
+        ],
+        "recent_done": [row["title"] for row in done_rows if row["title"]],
+    }

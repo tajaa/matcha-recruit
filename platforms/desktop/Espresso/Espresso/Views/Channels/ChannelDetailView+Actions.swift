@@ -14,8 +14,12 @@ extension ChannelDetailView {
         ticketDraftError = nil
         Task {
             do {
+                // One-shot on purpose: turning a chat message into a ticket is
+                // an incidental right-click, not a repo investigation. The
+                // durable agent path takes minutes and holds the board's
+                // one-live-run lock.
                 let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(
-                    projectId: pid, prompt: text, model: ticketDraftModel
+                    projectId: pid, prompt: text, model: ticketDraftModel, useAgent: false
                 )
                 await MainActor.run {
                     draftingTicket = false
@@ -26,7 +30,9 @@ extension ChannelDetailView {
                 await MainActor.run {
                     draftingTicket = false
                     if case APIError.httpError(let code, _) = error, code == 429 {
-                        ticketDraftError = "Daily AI limit reached — try again later."
+                        ticketDraftError = "AI drafting limit reached — try again later."
+                    } else if case APIError.httpError(let code, _) = error, code == 402 {
+                        ticketDraftError = "This workspace has reached its AI token budget."
                     } else {
                         ticketDraftError = "Couldn't draft a ticket from that message."
                     }

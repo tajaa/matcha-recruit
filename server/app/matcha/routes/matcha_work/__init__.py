@@ -45,6 +45,10 @@ from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)
 
+from .project_agent_runs import router as _project_agent_runs_router
+
+router.include_router(_project_agent_runs_router)
+
 from .ticket_drafts import router as _ticket_drafts_router
 
 router.include_router(_ticket_drafts_router)

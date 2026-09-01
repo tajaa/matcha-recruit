@@ -2,9 +2,9 @@ import Foundation
 
 // MARK: - Task draft
 
-/// AI-generated ticket draft (Gemini Flash Lite) returned by
-/// `POST /projects/{id}/tasks/ai-draft`. Not persisted — the user reviews/edits
-/// it in `AIDraftReviewSheet`, then creates via the normal task POST.
+/// AI-generated ticket draft returned by the one-shot endpoint or Espresso's
+/// durable project-agent run. The user reviews/edits it in
+/// `AIDraftReviewSheet`, then creates via the normal task POST.
 struct MWTaskDraft: Codable {
     var title: String
     var description: String?
@@ -18,9 +18,13 @@ struct MWTaskDraft: Codable {
     /// AI-suggested checklist steps. Reviewed/edited in AIDraftReviewSheet, then
     /// created as mw_subtasks after the task on Create.
     var subtasks: [String]?
+    /// Live repository evidence read by the project agent. Advisory only; it
+    /// is shown during review and is not copied into the created task.
+    var groundingSources: [String]?
 
     enum CodingKeys: String, CodingKey {
         case title, description, priority, category, subtasks
+        case groundingSources = "grounding_sources"
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"
         case assignedName = "assigned_name"

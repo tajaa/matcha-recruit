@@ -336,7 +336,6 @@ async def ai_draft_task_endpoint(
 ):
     """Turn a natural-language request into a structured ticket draft (no DB
     write). The client reviews/edits, then creates via POST .../tasks."""
-    from app.matcha.services.matcha_work import project_service as proj_svc
     from app.matcha.services.matcha_work import matcha_work_ai
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -365,47 +364,27 @@ async def ai_draft_task_endpoint(
         except Exception as e:
             logger.warning("AI draft rate-limit check failed (allowing): %s", e)
 
-    collaborators = await proj_svc.list_collaborators(project_id)
-    async with get_connection() as conn:
-        element_rows = await conn.fetch(
-            """SELECT id, name, description FROM mw_project_elements
-               WHERE project_id = $1 AND kind IS DISTINCT FROM '_repository_snapshot'
-               ORDER BY \"order\" ASC, created_at ASC""",
-            str(project_id),
-        )
-        # Element context notes (one query, grouped client-side).
-        note_rows = await conn.fetch(
-            """SELECT element_id, kind, body, url FROM mw_element_notes
-               WHERE project_id = $1 ORDER BY created_at DESC""",
-            project_id,
-        )
-        # What the team finished this week — soft context for the draft.
-        done_rows = await conn.fetch(
-            """SELECT title FROM mw_tasks
-               WHERE project_id = $1 AND status = 'completed'
-                 AND completed_at >= NOW() - INTERVAL '7 days'
-               ORDER BY completed_at DESC LIMIT 15""",
-            project_id,
-        )
+    # This path calls the same pinned high-reasoning model the durable agent
+    # uses, so it is metered the same way: budget checked before the call,
+    # tokens deducted after. Without this it was the one unbilled Luna route.
+    from app.matcha.services.billing import token_budget_service
 
-    notes_by_element: dict[str, list[str]] = {}
-    for r in note_rows:
-        eid = str(r["element_id"])
-        text = (r["url"] if r["kind"] == "link" else r["body"]) or ""
-        text = text.strip()
-        if text:
-            notes_by_element.setdefault(eid, []).append(text)
+    draft_company_id = project.get("company_id")
+    company_uuid = UUID(str(draft_company_id)) if draft_company_id else None
+    is_admin = (getattr(current_user, "role", "") or "").lower() == "admin"
+    if company_uuid and not is_admin:
+        await token_budget_service.check_token_budget(company_uuid)
 
-    elements = [
-        {
-            "id": str(r["id"]),
-            "name": r["name"],
-            "description": r["description"],
-            "notes": notes_by_element.get(str(r["id"]), []),
-        }
-        for r in element_rows
-    ]
-    recent_done = [r["title"] for r in done_rows if r["title"]]
+    # Same collaborator/element/recent-done context the durable agent path
+    # loads. Shared on purpose: two copies of this drifted (the agent resolved
+    # richer collaborator names), so the same project produced different
+    # assignees depending on which draft path ran.
+    from app.matcha.services.matcha_work.project_agent import store as agent_store
+
+    context = await agent_store.load_task_draft_context(project_id)
+    collaborators = context["collaborators"]
+    elements = context["elements"]
+    recent_done = context["recent_done"]
 
     # Repo conventions (CLAUDE.md etc.) from the synced element snapshot — grounds
     # the model in this codebase so subtasks reference real files/migrations/tests.
@@ -418,7 +397,10 @@ async def ai_draft_task_endpoint(
 
     try:
         repository_context, _manifest = await repo_svc.build_relevant_grounding_context(
-            project_id, prompt, char_budget=100_000,
+            # Kept well under the provider client's 60s HTTP timeout: this
+            # route blocks a request worker on one high-reasoning call, and a
+            # 100k-char prompt regularly ran past it (502 with tokens spent).
+            project_id, prompt, char_budget=30_000,
         )
     except Exception:  # noqa: BLE001 — advisory context, never block a draft
         repository_context = ""
@@ -430,9 +412,6 @@ async def ai_draft_task_endpoint(
             collaborator_names=[c["name"] for c in collaborators if c.get("name")],
             elements=elements,
             recent_done=recent_done,
-            model_override=(body.get("model") or None),
-            company_id=str(project.get("company_id")) if project.get("company_id") else None,
-            user_id=str(current_user.id),
             conventions=conventions or None,
             repository_context=repository_context or None,
         )
@@ -440,32 +419,35 @@ async def ai_draft_task_endpoint(
         logger.warning("AI task draft failed project=%s: %s", project_id, e)
         raise HTTPException(status_code=502, detail="Couldn't draft the task — try again")
 
-    # Resolve assignee NAME → user_id (exact, then first-name / substring).
+    # Deduct after the call — the draft is already produced, so an accounting
+    # failure must not turn a good draft into a user-facing error.
+    if company_uuid and not is_admin:
+        try:
+            total_tokens = int((draft.get("token_usage") or {}).get("total_tokens") or 0)
+            if total_tokens > 0:
+                async with get_connection() as conn:
+                    async with conn.transaction():
+                        await token_budget_service.deduct_tokens(conn, company_uuid, total_tokens)
+        except Exception:
+            logger.warning(
+                "Failed to deduct AI task-draft tokens project=%s", project_id, exc_info=True,
+            )
+
+    # Shared with the durable agent path: the substring pass runs last, needs a
+    # meaningful fragment, and must be unambiguous before it binds a draft to a
+    # real user id.
+    from app.matcha.services.matcha_work.project_agent.task_draft_agent import match_named
+
     assigned_to = None
     assigned_name = None
-    if draft.get("assignee_name"):
-        want = draft["assignee_name"].strip().lower()
-        match = (
-            next((c for c in collaborators if (c.get("name") or "").lower() == want), None)
-            or next((c for c in collaborators if want and want in (c.get("name") or "").lower()), None)
-            or next((c for c in collaborators if (c.get("name") or "").lower().split(" ")[0] == want), None)
-        )
-        if match:
-            assigned_to = str(match["user_id"])
-            assigned_name = match["name"]
+    collaborator_match = match_named(draft.get("assignee_name"), collaborators)
+    if collaborator_match:
+        assigned_to = str(collaborator_match["user_id"])
+        assigned_name = collaborator_match["name"]
 
-    # Resolve element NAME → id (exact, then substring).
-    element_id = None
-    element_name = None
-    if draft.get("element_name"):
-        want = draft["element_name"].strip().lower()
-        match = (
-            next((e for e in elements if e["name"].lower() == want), None)
-            or next((e for e in elements if want and want in e["name"].lower()), None)
-        )
-        if match:
-            element_id = match["id"]
-            element_name = match["name"]
+    element_match = match_named(draft.get("element_name"), elements)
+    element_id = element_match["id"] if element_match else None
+    element_name = element_match["name"] if element_match else None
 
     return {
         "title": draft["title"],
