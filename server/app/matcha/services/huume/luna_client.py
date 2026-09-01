@@ -169,6 +169,11 @@ class _LunaModels:
         }
         if follow_up:
             payload["previous_response_id"] = self._previous_response_id
+        # Structured-output switch for tool-less callers that parse the reply as
+        # JSON (the one-shot task draft). Without it the model may wrap the
+        # object in prose and the caller's json.loads silently yields nothing.
+        if str(getattr(config, "response_mime_type", "") or "") == "application/json":
+            payload["text"] = {"format": {"type": "json_object"}}
 
         started = time.monotonic()
         try:

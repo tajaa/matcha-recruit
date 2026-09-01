@@ -8,6 +8,9 @@ struct AIComposeBar: View {
     @Environment(AppState.self) private var appState
     var isDrafting: Bool
     var error: String?
+    /// Escape hatch for the durable agent path, which can legitimately run for
+    /// minutes. Without it the bar was unusable for the whole run.
+    var onCancel: () -> Void
     var onDraft: (String) -> Void
 
     @State private var text = ""
@@ -35,9 +38,21 @@ struct AIComposeBar: View {
                     .foregroundColor(appState.themeText)
                     .frame(maxWidth: .infinity)
                     .onSubmit { submit() }
-                    .help("e.g. \"fix the 503 in console <error> and assign haley\"")
+                    .help("Espresso reads the connected repo and drafts a reviewable ticket. e.g. \"add saved project filters\"")
                 if isDrafting {
-                    ProgressView().controlSize(.small)
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.small)
+                        Text("Reading repo…")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Button(action: onCancel) {
+                            Text("Cancel")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Stop waiting for this draft")
+                    }
                 } else {
                     Button(action: submit) {
                         Text("Draft")

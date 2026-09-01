@@ -1,18 +1,20 @@
-"""One-shot kanban task drafting (title / description / priority / category /
-column) -- independent of the thread turn loop.
+"""One-shot Luna-backed kanban task drafting (title / description / priority /
+category / column) independent of the thread turn loop.
 """
-import asyncio
 import json
 import logging
+import re
 from typing import Optional
+
 from google.genai import types
 
-from ._models import _get_model
+from app.core.services.ai_usage import feature_scope
+from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.routing import LUNA
+
 from ._text import _clean_json_text
 
 logger = logging.getLogger(__name__)
-
-from .provider import get_ai_provider
 
 
 _TASK_DRAFT_PRIORITIES = {"critical", "high", "medium", "low"}
@@ -22,6 +24,12 @@ _TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "
 
 
 _TASK_DRAFT_COLUMNS = {"todo", "in_progress", "review", "done"}
+_AI_USAGE_FEATURE = "matcha.espresso.task_draft"
+
+# Anchored list-marker strip. A bare str.lstrip(charset) removes EVERY leading
+# character in the set, so "2FA login flow" lost its "2" and "401 handling" lost
+# its "401" — this only removes a real leading bullet or "1." / "1)" marker.
+_LIST_PREFIX = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
 
 
 async def generate_task_draft(
@@ -31,14 +39,11 @@ async def generate_task_draft(
     collaborator_names: list[str],
     elements: list[dict],
     recent_done: Optional[list[str]] = None,
-    model_override: Optional[str] = None,
-    company_id: Optional[str] = None,
-    user_id: Optional[str] = None,
     conventions: Optional[str] = None,
     repository_context: Optional[str] = None,
 ) -> dict:
     """Turn a natural-language request into a structured kanban-ticket draft via
-    Gemini Flash Lite. Returns a dict of fields (no DB write) — the route maps
+    OpenAI Luna with high reasoning. Returns a dict of fields (no DB write) — the route maps
     assignee/element NAMES back to ids and the client reviews before creating.
 
     `elements` carry context (name + description + notes) so the model checks
@@ -128,30 +133,33 @@ Return ONLY a JSON object with these keys:
 Request:
 {prompt}"""
 
-    provider = get_ai_provider()
-    # Honor the header model selector the same way threads do (_get_model picks
-    # the override when valid — clamped to plan — else the mode/plan default).
-    model = await _get_model(provider.settings, model_override, company_id=company_id, user_id=user_id)
-
-    def _call() -> str:
-        resp = provider.client.models.generate_content(
-            model=model,
-            contents=instruction,
+    # Task drafting is intentionally provider-pinned: the thread model picker
+    # cannot route a draft back to Gemini, so this takes no model argument.
+    with feature_scope(_AI_USAGE_FEATURE):
+        response = await get_luna_client().aio.models.generate_content(
+            model=LUNA,
+            contents=[types.Content(role="user", parts=[types.Part(text=instruction)])],
             config=types.GenerateContentConfig(
-                temperature=0.2,
+                # JSON mode is load-bearing, not decorative: the fallbacks below
+                # would otherwise turn an unparseable reply into a 200 OK ticket
+                # titled with the raw prompt and no description.
                 response_mime_type="application/json",
+                system_instruction=(
+                    "Return exactly one JSON object that satisfies the user's task-draft "
+                    "schema. Do not add Markdown fences or commentary."
+                ),
             ),
         )
-        return resp.text or ""
-
-    raw = await asyncio.to_thread(_call)
+    raw = response.text or ""
     try:
         data = json.loads(_clean_json_text(raw))
-    except (json.JSONDecodeError, ValueError):
-        data = {}
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("task draft returned unparseable JSON (%s): %.400s", exc, raw)
+        raise RuntimeError("Task draft model returned unparseable JSON") from exc
 
     if not isinstance(data, dict):
-        data = {}
+        logger.warning("task draft returned a non-object payload: %.400s", raw)
+        raise RuntimeError("Task draft model returned a non-object payload")
 
     title = str(data.get("title") or "").strip() or (prompt.strip()[:80] or "New task")
     description = str(data.get("description") or "").strip() or None
@@ -179,7 +187,7 @@ Request:
         for s in raw_sub:
             if isinstance(s, dict):
                 s = s.get("title") or s.get("text") or s.get("name") or s.get("step") or ""
-            t = str(s).strip().lstrip("-*0123456789. ").strip()
+            t = _LIST_PREFIX.sub("", str(s).strip()).strip()
             if t:
                 subtasks.append(t[:200])
         subtasks = subtasks[:10]
@@ -188,7 +196,18 @@ Request:
         s = str(v).strip() if v is not None else ""
         return s or None
 
+    # Surfaced so the route can meter this call against the workspace token
+    # budget the same way the durable agent path does.
+    meta = getattr(response, "usage_metadata", None)
+    token_usage = {
+        "model": LUNA,
+        "prompt_tokens": int(getattr(meta, "prompt_token_count", 0) or 0),
+        "completion_tokens": int(getattr(meta, "candidates_token_count", 0) or 0),
+        "total_tokens": int(getattr(meta, "total_token_count", 0) or 0),
+    }
+
     return {
+        "token_usage": token_usage,
         "title": title[:200],
         "description": description,
         "priority": priority,
