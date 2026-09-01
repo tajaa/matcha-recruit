@@ -113,6 +113,68 @@ _AUTOPR_NO_SPEC_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
     r"(already_fixed|migration_required|policy_blocked|external_dependency)(?:\s|$)"
 )
+_AUTOPR_TEST_ROUTE_RE = re.compile(
+    r"(?:test[-_ ]route|reproduce(?:[-_ ]route)?)\s*(?:=|:)\s*(/[^\s]+)",
+    re.IGNORECASE,
+)
+_AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
+_AUTOPR_DRAFT_COMMAND_RE = re.compile(
+    r"\b(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?(?:pr|pull\s+request)\b"
+)
+_AUTOPR_DRAFT_NEGATION_RE = re.compile(
+    r"\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}\b(?:draft|create|open)\b"
+)
+
+
+def _is_autopr_waiting_for_answers_note(note: str) -> bool:
+    normalized = (note or "").strip()
+    lowered = normalized.lower()
+    return normalized.startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS") or (
+        lowered.startswith("from auto setup") and "answers needed" in lowered
+    )
+
+
+def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
+    """Parse the small operator-owned directive language from context lines.
+
+    Only leading ``--`` lines qualify. Ordinary ticket prose stays evidence,
+    never authority. Natural-language spellings are accepted for the two
+    directives the project owner asked to be able to type in Espresso.
+    """
+    directives: list[str] = []
+    test_route: Optional[str] = None
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("--"):
+            continue
+        instruction = " ".join(line[2:].strip().lower().replace("’", "'").split())
+        explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
+        natural_draft = bool(_AUTOPR_DRAFT_COMMAND_RE.search(instruction))
+        draft_is_negated = bool(_AUTOPR_DRAFT_NEGATION_RE.search(instruction))
+        if (explicit_draft or (natural_draft and not draft_is_negated)) and "draft_pr" not in directives:
+            directives.append("draft_pr")
+        if (
+            instruction in {"trust-still-broken", "trust still broken"}
+            or ("trust" in instruction and any(
+                phrase in instruction
+                for phrase in ("still not working", "isn't working", "is not working", "still broken")
+            ))
+        ) and "trust_still_broken" not in directives:
+            directives.append("trust_still_broken")
+        route_match = _AUTOPR_TEST_ROUTE_RE.search(line[2:])
+        if route_match:
+            candidate = route_match.group(1).rstrip(".,;)")
+            if (
+                candidate.startswith("/")
+                and not candidate.startswith("//")
+                and "://" not in candidate
+                and ".." not in candidate
+                and "?" not in candidate
+                and "#" not in candidate
+                and len(candidate) <= 500
+            ):
+                test_route = candidate
+    return directives, test_route
 
 
 class AutoPRReconsiderationConflict(ValueError):
@@ -176,7 +238,7 @@ async def request_autopr_reconsideration(
     body: Optional[str] = None,
     attachment_ids: Optional[list[UUID]] = None,
 ) -> Optional[dict]:
-    """Attach human evidence to one exact AutoPR no-safe-action decision.
+    """Attach human evidence to one exact AutoPR context-blocked decision.
 
     The history event is the durable retry signal. It stores the full current
     progress note in autopr_reconsideration_of; the task-list query only
@@ -189,6 +251,7 @@ async def request_autopr_reconsideration(
         raise ValueError("Additional context requires text or an attachment")
     if len(text) > 10_000:
         raise ValueError("Additional context must be 10,000 characters or fewer")
+    directives, test_route = _parse_autopr_directives(text)
 
     expected = (expected_progress_note or "").strip()
     async with get_connection() as conn:
@@ -216,13 +279,19 @@ async def request_autopr_reconsideration(
 
             current_note_raw = task["progress_note"] or ""
             current_note = current_note_raw.strip()
+            marker_match = _AUTOPR_DIRECTIVE_MARKER_RE.search(current_note)
+            if marker_match:
+                for inherited in marker_match.group(1).split(","):
+                    if inherited in {"draft_pr", "trust_still_broken"} and inherited not in directives:
+                        directives.append(inherited)
             if not expected or current_note != expected:
                 raise AutoPRReconsiderationConflict(
                     "The AutoPR decision changed; refresh the ticket and try again"
                 )
-            if not _AUTOPR_NO_SPEC_RE.search(current_note):
+            waiting_for_answers = _is_autopr_waiting_for_answers_note(current_note)
+            if not _AUTOPR_NO_SPEC_RE.search(current_note) and not waiting_for_answers:
                 raise AutoPRReconsiderationConflict(
-                    "This ticket no longer has a reconsiderable AutoPR no-PR decision"
+                    "This ticket no longer has an AutoPR decision awaiting context"
                 )
 
             metadata: dict = {
@@ -234,6 +303,12 @@ async def request_autopr_reconsideration(
                 "reply_to_name": "AUTO SETUP",
                 "reply_to_excerpt": current_note.replace("\n", " ")[:140],
             }
+            if directives:
+                # Keep these strings for the desktop history decoder. The
+                # trusted harness expands them back into structured policy.
+                metadata["autopr_directives"] = ",".join(directives)
+            if test_route:
+                metadata["autopr_test_route"] = test_route
             if attachment_ids:
                 metadata["attachment_ids"] = [str(a) for a in attachment_ids]
 
@@ -260,6 +335,8 @@ async def request_autopr_reconsideration(
         "activity_id": str(row["id"]),
         "created_at": row["created_at"].isoformat(),
         "autopr_reconsideration_pending": True,
+        "autopr_directives": directives,
+        "autopr_test_route": test_route,
     }
 
 

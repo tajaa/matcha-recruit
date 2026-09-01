@@ -46,3 +46,22 @@ only confirmed deployed entries; partial backend/frontend releases wait until al
 required components are live. Dispatch failure never rolls back a healthy deploy,
 but workflow failure opens a deduplicated ops issue. Full runbook:
 `docs/ops/ADMIN_UPDATES_AUTOPUBLISH.md`.
+
+## Post-deploy AutoPR fix verification
+
+The successful-swap hook also dispatches `post-deploy-fix-verification.yml` for laptop
+and GitHub Actions deploys. It examines only merged `autopr` PRs carrying a validated
+production-verification trailer and only after the PR's merge commit is contained in the
+deployed SHA for its required target.
+
+Safe public GET assertions run automatically and label/comment the PR
+`production-verified` or `production-verification-failed`. Authenticated, stateful, and
+visual plans are never guessed from CI: the workflow posts the reviewed steps and labels
+the PR `production-verification-needed`. Failed automatic checks are not repeated on
+every later deploy; after resolving the cause, remove the failure label to request a new
+check. The AutoPR dashboard shows the resulting state for Kanban AutoPRs only.
+The operator records a completed manual check through
+`record-production-verification.yml`; it accepts only a merged PR with that outstanding
+label and writes the actor, bounded evidence, result, and workflow link back to the PR.
+As with the other post-deploy dispatches, dispatch failure warns but does not roll back a
+healthy blue/green swap.

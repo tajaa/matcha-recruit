@@ -49,6 +49,37 @@ printf '%s' "$subtasks" > "$WORK_DIR/subtasks.json"
 printf '%s' "$history" > "$WORK_DIR/history.json"
 printf '%s' "$files" > "$WORK_DIR/files.json"
 
+# Only the exact decision-bound reconsideration event may grant operator
+# directives. Card prose, comments, PR bodies, and unrelated history remain
+# untrusted evidence. Metadata stores a comma-separated string for desktop
+# compatibility; expand it into a fixed allowlist here.
+DIRECTIVE_FILE="$WORK_DIR/directive-policy.json"
+jq -n \
+    --slurpfile card "$CARD_FILE" \
+    --slurpfile history "$WORK_DIR/history.json" '
+    ($card[0].autopr_reconsideration_event_id // "") as $event_id
+    | (([$history[0][]? | select((.id | tostring) == ($event_id | tostring))] | last) // {}) as $event
+    | (($event.metadata.autopr_directives // "") | split(",")
+       | map(select(. == "draft_pr" or . == "trust_still_broken")) | unique) as $directives
+    | {
+        directives: $directives,
+        test_route: ($event.metadata.autopr_test_route // null),
+        source_event_id: (if $event_id == "" then null else $event_id end)
+      }
+' > "$DIRECTIVE_FILE"
+
+# An approved test tenant may be exercised by the trusted browser harness.
+# Credentials never enter context.json or msandbox; only a screenshot and
+# bounded same-origin console/network status reach the coding model.
+TEST_TENANT_EVIDENCE_FILE="$WORK_DIR/test-tenant-evidence.json"
+TEST_TENANT_SCREENSHOT="$WORK_DIR/test-tenant-reproduction.png"
+EVIDENCE_PYTHON="${AUTOPR_EVIDENCE_PYTHON:-$REPO_ROOT/server/venv/bin/python}"
+[ -x "$EVIDENCE_PYTHON" ] || EVIDENCE_PYTHON=python3
+"$EVIDENCE_PYTHON" "$SCRIPT_DIR/collect-test-tenant-evidence.py" \
+    --policy "$DIRECTIVE_FILE" \
+    --output "$TEST_TENANT_EVIDENCE_FILE" \
+    --screenshot "$TEST_TENANT_SCREENSHOT"
+
 # Production access stays in this trusted shell. Give the coding model bounded,
 # redacted diagnostics only: recent error reports, recent error-level container
 # signals, live migration state, and the commits between the live image and the
@@ -165,12 +196,18 @@ jq -n \
     --slurpfile subtasks "$WORK_DIR/subtasks.json" \
     --slurpfile history "$WORK_DIR/history.json" \
     --slurpfile files "$WORK_DIR/files.json" \
+    --slurpfile directive_policy "$DIRECTIVE_FILE" \
+    --slurpfile test_tenant_evidence "$TEST_TENANT_EVIDENCE_FILE" \
     --slurpfile production_errors "$WORK_DIR/production-errors.json" \
     --slurpfile changes_since_production "$WORK_DIR/changes-since-production.json" \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    '{card: $card[0], directive_policy: $directive_policy[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
+
+if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
+    ATTACH_ARGS+=( -f "$TEST_TENANT_SCREENSHOT" )
+fi
 
 # Put the structured brief first, then the locally downloaded evidence. macOS
 # still ships Bash 3.2, where expanding an empty array under `set -u` raises an
@@ -233,6 +270,7 @@ fi
 run_codex() {
     [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
     env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
         AUTOPR_CODEX_MODEL=gpt-5.6-sol \
         AUTOPR_CODEX_REASONING_EFFORT=medium \
         "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
@@ -267,7 +305,7 @@ done
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
-"$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized"
+"$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE"
 jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     '. + {feedback_checkpoint: $checkpoint}' \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"

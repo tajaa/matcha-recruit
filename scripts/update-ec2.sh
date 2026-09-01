@@ -271,8 +271,10 @@ trigger_post_deploy_automations() {
     local target="$1"
     local deployed_at deploy_id sha source
     deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    sha="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    deploy_id="${sha}-$(date -u +%Y%m%d%H%M%S)"
+    # Follow-up ancestry checks need the immutable full object id. A short SHA
+    # is operator-friendly but not an authoritative cross-checkout identity.
+    sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+    deploy_id="${sha:0:12}-$(date -u +%Y%m%d%H%M%S)"
     source="laptop"
     [ "${GITHUB_ACTIONS:-}" = "true" ] && source="github"
 
@@ -305,6 +307,18 @@ trigger_post_deploy_automations() {
         log_success "Production admin-update publisher dispatched ($deploy_id)"
     else
         log_warn "Could not dispatch production admin-update publisher; deploy remains successful"
+    fi
+
+    if gh workflow run post-deploy-fix-verification.yml --ref main \
+        -f deploy_id="$deploy_id" \
+        -f deployed_at="$deployed_at" \
+        -f target="$target" \
+        -f sha="$sha" \
+        -f source="$source"
+    then
+        log_success "Post-deploy AutoPR fix verification dispatched ($deploy_id)"
+    else
+        log_warn "Could not dispatch post-deploy AutoPR fix verification; deploy remains successful"
     fi
 }
 

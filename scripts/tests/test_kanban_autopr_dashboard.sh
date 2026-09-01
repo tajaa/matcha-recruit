@@ -104,9 +104,16 @@ check "simultaneous dashboard starts create exactly one tmux session" \
 VIEW_DIR="$TMP_DIR/view"
 mkdir "$VIEW_DIR"
 cp "$AUTOPR_DIR/dashboard.sh" "$VIEW_DIR/dashboard.sh"
+cp "$AUTOPR_DIR/plan.py" "$VIEW_DIR/plan.py"
 cat > "$VIEW_DIR/collect.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' '[{"task_id":"a","id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","last_moved_at":"2026-08-27T00:00:00Z","created_at":"2026-08-27T00:00:00Z","progress_note":""},{"task_id":"b","id8":"bbbb0000","project_title":"MATCHA","title":"Polish reports","board_column":"todo","last_moved_at":"2026-08-27T01:00:00Z","created_at":"2026-08-27T01:00:00Z","progress_note":""}]'
+EOF
+cat > "$VIEW_DIR/collect-pr-context.sh" <<'EOF'
+#!/usr/bin/env bash
+[ "${GITHUB_REPOSITORY:-}" = "tajaa/matcha-recruit" ] || exit 1
+[ "${AUTOPR_TEST_PR_CONTEXT_FAIL:-false}" != true ] || exit 1
+printf '%s\n' '[{"number":307,"title":"fix: Intake","isDraft":true,"state":"OPEN","headRefName":"bot/task-aaaa0000","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","createdAt":"2099-08-27T00:00:00Z","updatedAt":"2099-08-27T01:00:00Z","labels":["autopr"],"reviewDecision":null,"checks":[],"files":["server/app/intake.py"],"comments":[{"author":"reviewer","body":"still fails for emailed intake"}],"reviews":[]}]'
 EOF
 cat > "$VIEW_DIR/select.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -123,7 +130,7 @@ elif [ "$1 $2" = "run view" ]; then
 elif [ "$1 $2" = "pr list" ] && [[ "$*" == *"--state open"* ]]; then
   printf '%s\n' '[{"number":307,"title":"🟡 [C91] fix: Intake","isDraft":true,"headRefName":"bot/task-aaaa0000","createdAt":"2099-08-27T00:00:00Z","updatedAt":"2099-08-27T01:00:00Z","labels":[{"name":"autopr"}],"url":"x"}]'
 elif [ "$1 $2" = "pr list" ]; then
-  printf '%s\n' '[{"number":306,"title":"🟠 [C80] fix: Reports","createdAt":"2099-08-27T00:00:00Z","mergedAt":"2099-08-27T01:00:00Z","headRefName":"bot/task-bbbbbbbb","labels":[{"name":"autopr"}],"url":"x"}]'
+  printf '%s\n' '[{"number":306,"title":"🟠 [C80] fix: Reports","createdAt":"2099-08-27T00:00:00Z","mergedAt":"2099-08-27T01:00:00Z","headRefName":"bot/task-bbbbbbbb","labels":[{"name":"autopr"}],"url":"x"},{"number":305,"title":"fix: Error recovery","createdAt":"2099-08-27T00:00:00Z","mergedAt":"2099-08-27T00:30:00Z","headRefName":"bot/err-305","labels":[{"name":"autofix"}],"url":"x"}]'
 fi
 EOF
 chmod +x "$TMP_DIR/gh"
@@ -137,17 +144,32 @@ AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
   AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
   AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
   "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
-check "control board shows now, exact next, queue states, PR timing, and Pacific history" \
+check "control board shows cross-queue plan, exact next, PR timing, and Pacific history" \
   $(grep -q 'MATCHA AUTOPR CONTROL BOARD' "$TMP_DIR/dashboard.out" \
     && grep -q 'NOW · INVESTIGATING · 1h 30m' "$TMP_DIR/dashboard.out" \
     && grep -q 'NEXT · EXACT SELECTOR RESULT' "$TMP_DIR/dashboard.out" \
     && grep -q 'QUEUE · 2 tracked' "$TMP_DIR/dashboard.out" \
+    && grep -q 'PLAN · ' "$TMP_DIR/dashboard.out" \
+    && grep -q 'NOT-READY PRS ONLY' "$TMP_DIR/dashboard.out" \
+    && grep -q 'MERGE ORDER · 1 draft(s)' "$TMP_DIR/dashboard.out" \
     && grep -q 'OPEN BOT PRS · AGE' "$TMP_DIR/dashboard.out" \
     && grep -q 'RECENT BOT PRS · OPEN → MERGE · PACIFIC' "$TMP_DIR/dashboard.out" \
+    && grep -q '#305.*ERROR' "$TMP_DIR/dashboard.out" \
+    && ! grep -q '#305.*AWAITING DEPLOY/CHECK' "$TMP_DIR/dashboard.out" \
     && grep -q 'RECENT RUNS · DURATION · PACIFIC' "$TMP_DIR/dashboard.out" \
     && grep -q '6:00 PM PDT' "$TMP_DIR/dashboard.out" \
     && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
     && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_PR_CONTEXT_FAIL=true \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-no-pr-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-no-pr-context.out"
+check "PR-context failure cannot produce a live release plan" \
+  $(grep -q 'PLAN · unavailable · NOT-READY PRS ONLY' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && grep -q 'unavailable · existing queue remains visible below' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && ! grep -q '  RELEASE gh workflow run' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && echo 0 || echo 1)
 
 cat > "$VIEW_DIR/select.sh" <<'EOF'
 #!/usr/bin/env bash

@@ -251,42 +251,147 @@ async def delete_project_file(file_id: UUID, project_id: UUID) -> bool:
     return result.endswith("1")
 
 
+def _bounded_channel_filename(
+    attachment: dict[str, Any],
+    url: str,
+    *,
+    infer_image_extension: bool,
+) -> str:
+    url_filename = url.rsplit("/", 1)[-1].split("?", 1)[0] if infer_image_extension else ""
+    filename = str(attachment.get("filename") or url_filename or "attachment")
+    if infer_image_extension and not os.path.splitext(filename)[1] and attachment.get("kind") == "image":
+        content_extension = {
+            "image/jpeg": ".jpg",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+            "image/heic": ".heic",
+            "image/heif": ".heif",
+        }.get(attachment.get("content_type"), ".png")
+        filename += content_extension
+    if len(filename) <= 500:
+        return filename
+    stem, extension = os.path.splitext(filename)
+    if extension and len(extension) < 500:
+        return stem[:500 - len(extension)] + extension
+    return filename[:500]
+
+
+async def _sync_channel_attachments(
+    conn,
+    *,
+    project_id: UUID,
+    task_id: Optional[UUID],
+    uploaded_by: UUID,
+    attachments: list[dict[str, Any]],
+    validate: bool,
+) -> tuple[list[UUID], int]:
+    """Shared channel-attachment insert path for project and task files."""
+    ids: list[UUID] = []
+    added = 0
+    for att in attachments or []:
+        if not isinstance(att, dict):
+            continue
+        url = att.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        filename = _bounded_channel_filename(att, url, infer_image_extension=validate)
+        try:
+            file_size = int(att.get("size") or 0)
+        except (TypeError, ValueError):
+            continue
+        if validate and (
+            not url.startswith("https://")
+            or not get_storage().is_supported_storage_path(url)
+            or os.path.splitext(filename)[1].lower() not in ALLOWED_PROJECT_FILE_EXTENSIONS
+            or file_size < 0
+            or file_size > PROJECT_FILE_MAX_BYTES
+        ):
+            continue
+        row = await conn.fetchrow(
+            """INSERT INTO mw_project_files
+                   (project_id, task_id, uploaded_by, filename, storage_url,
+                    content_type, file_size)
+               SELECT $1, $2::uuid, $3, $4, $5, $6, $7
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM mw_project_files
+                   WHERE project_id=$1
+                     AND task_id IS NOT DISTINCT FROM $2::uuid
+                     AND storage_url=$5
+               )
+               RETURNING id""",
+            project_id,
+            task_id,
+            uploaded_by,
+            filename,
+            url,
+            att.get("content_type"),
+            file_size,
+        )
+        if row:
+            ids.append(row["id"])
+            added += 1
+            continue
+        if task_id is not None:
+            existing = await conn.fetchval(
+                """SELECT id FROM mw_project_files
+                   WHERE project_id=$1 AND task_id=$2 AND storage_url=$3
+                   LIMIT 1""",
+                project_id,
+                task_id,
+                url,
+            )
+            if existing:
+                ids.append(existing)
+    return ids, added
+
+
 async def sync_channel_attachments_to_project(
     conn,
     project_id: UUID,
     uploaded_by: UUID,
     attachments: list[dict[str, Any]],
 ) -> int:
-    """Mirror chat-message attachments into a project's root Files (task_id
-    NULL). Best-effort and idempotent: deduped on (project_id, storage_url)
-    among root files via NOT EXISTS, so message edits / WS redelivery don't
-    double-insert. Runs on the caller's connection (same txn as the message
-    insert). Must never raise into the send path — callers wrap in try/except.
-    Returns the number of files added. Channel uploads return permanent
-    CloudFront URLs, so the URL is stored directly (no S3 copy)."""
-    added = 0
-    for att in attachments or []:
-        url = att.get("url")
-        if not url:
-            continue
-        result = await conn.execute(
-            """INSERT INTO mw_project_files
-                   (project_id, task_id, uploaded_by, filename, storage_url, content_type, file_size)
-               SELECT $1, NULL, $2, $3, $4, $5, $6
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM mw_project_files
-                   WHERE project_id = $1 AND storage_url = $4 AND task_id IS NULL
-               )""",
-            project_id,
-            uploaded_by,
-            (att.get("filename") or "attachment")[:500],
-            url,
-            att.get("content_type"),
-            int(att.get("size") or 0),
-        )
-        if result.rsplit(" ", 1)[-1] == "1":
-            added += 1
+    """Mirror chat attachments into root Files on the caller's transaction."""
+    _, added = await _sync_channel_attachments(
+        conn,
+        project_id=project_id,
+        task_id=None,
+        uploaded_by=uploaded_by,
+        attachments=attachments,
+        validate=False,
+    )
     return added
+
+
+async def sync_channel_attachments_to_task(
+    conn,
+    project_id: UUID,
+    task_id: UUID,
+    uploaded_by: UUID,
+    attachments: list[dict[str, Any]],
+) -> list[UUID]:
+    """Attach a decision-bound Espresso reply's files to its kanban ticket.
+
+    Chat uploads already use permanent CloudFront URLs. Reusing that URL keeps
+    screenshot replies fast and avoids copying blobs, while the project/task
+    predicates prevent a crafted chat message from attaching across tickets.
+    """
+    owns_task = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM mw_tasks WHERE id=$1 AND project_id=$2)",
+        task_id,
+        project_id,
+    )
+    if not owns_task:
+        return []
+    ids, _ = await _sync_channel_attachments(
+        conn,
+        project_id=project_id,
+        task_id=task_id,
+        uploaded_by=uploaded_by,
+        attachments=attachments,
+        validate=True,
+    )
+    return ids
 
 
 async def backfill_project_chat_files(project_id: UUID) -> int:

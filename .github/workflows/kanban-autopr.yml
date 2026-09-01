@@ -121,6 +121,27 @@ jobs:
             > "$RUNNER_TEMP/reconciled-cards.json"
           mv "$RUNNER_TEMP/reconciled-cards.json" "$RUNNER_TEMP/cards.json"
 
+      - name: Build cross-card and bot-PR work plan
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Comments/reviews from all three bot lanes are bounded, untrusted
+          # planning evidence. plan.py clusters related cards, excludes PRs
+          # already marked ready for review, and assigns the proposed merge
+          # order for the remaining drafts.
+          ./scripts/kanban-autopr/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
+          python3 ./scripts/kanban-autopr/plan.py \
+            --cards "$RUNNER_TEMP/cards.json" \
+            --prs "$RUNNER_TEMP/bot-prs.json" \
+            --output "$RUNNER_TEMP/plan.json" \
+            --cards-output "$RUNNER_TEMP/planned-cards.json"
+          mv "$RUNNER_TEMP/planned-cards.json" "$RUNNER_TEMP/cards.json"
+          {
+            echo '## AutoPR work and merge plan'
+            jq '{plan_id, work_order, merge_order, ready_prs_excluded, release_blockers}' "$RUNNER_TEMP/plan.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Select one card
         id: select
         env:

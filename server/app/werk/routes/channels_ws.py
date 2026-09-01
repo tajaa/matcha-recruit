@@ -147,6 +147,139 @@ def _channel_recently_ems_drafted(channel_id_str: str) -> bool:
     return deadline is not None and deadline >= time.monotonic()
 
 
+def _autopr_context_reference(raw_metadata) -> Optional[dict]:
+    """Return a validated Espresso AutoPR context pointer, if present."""
+    if isinstance(raw_metadata, str):
+        try:
+            raw_metadata = json.loads(raw_metadata)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(raw_metadata, dict) or raw_metadata.get("kind") != "autopr_context_request":
+        return None
+    try:
+        project_id = UUID(str(raw_metadata.get("project_id")))
+        task_id = UUID(str(raw_metadata.get("task_id")))
+    except (TypeError, ValueError):
+        return None
+    expected = str(raw_metadata.get("expected_progress_note") or "").strip()
+    if not expected:
+        return None
+    return {
+        "project_id": project_id,
+        "task_id": task_id,
+        "expected_progress_note": expected,
+    }
+
+
+async def _bg_apply_autopr_context_reply(
+    channel_id_str: str,
+    user,
+    content: str,
+    reference: dict,
+    attachments: Optional[list] = None,
+) -> None:
+    """Turn a direct reply to Espresso into decision-bound card evidence."""
+    try:
+        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+        from app.matcha.services.matcha_work.project_task_service import (
+            AutoPRReconsiderationConflict,
+            request_autopr_reconsideration,
+        )
+
+        project_id = reference["project_id"]
+        task_id = reference["task_id"]
+        channel_id = UUID(channel_id_str)
+        text = re.sub(
+            r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
+        ).strip()
+        async with get_connection() as conn:
+            project = await conn.fetchrow(
+                """SELECT p.company_id,
+                          EXISTS(
+                            SELECT 1 FROM mw_project_collaborators pc
+                            WHERE pc.project_id=p.id AND pc.user_id=$3
+                              AND pc.status='active'
+                          ) AS is_collaborator,
+                          EXISTS(
+                            SELECT 1 FROM clients c
+                            WHERE c.user_id=$3 AND c.company_id=p.company_id
+                          ) OR EXISTS(
+                            SELECT 1 FROM employees e
+                            WHERE e.user_id=$3 AND e.org_id=p.company_id
+                          ) AS is_same_company
+                   FROM mw_projects p
+                   WHERE p.id=$1
+                     AND p.project_data->>'discussion_channel_id'=$2""",
+                project_id,
+                channel_id_str,
+                user.id,
+            )
+        if not project:
+            return
+        if not (
+            project["is_collaborator"]
+            or project["is_same_company"]
+            or (getattr(user, "role", "") or "").lower() == "admin"
+        ):
+            await post_as_espresso(
+                project["company_id"], channel_id,
+                "I can only attach context from someone who can access this project.",
+            )
+            return
+        if not text and not attachments:
+            await post_as_espresso(
+                project["company_id"], channel_id,
+                "Please include the missing detail or a screenshot in your reply, or add it from the ticket.",
+            )
+            return
+        attachment_ids = []
+        if attachments:
+            from app.matcha.services.matcha_work.project_file_service import (
+                sync_channel_attachments_to_task,
+            )
+            async with get_connection() as conn:
+                attachment_ids = await sync_channel_attachments_to_task(
+                    conn, project_id, task_id, user.id, attachments,
+                )
+            if not attachment_ids and not text:
+                await post_as_espresso(
+                    project["company_id"], channel_id,
+                    "I couldn't attach that screenshot to the ticket. Please upload it from the ticket and resend the context.",
+                )
+                return
+        try:
+            result = await request_autopr_reconsideration(
+                project_id=project_id,
+                task_id=task_id,
+                actor_user_id=user.id,
+                expected_progress_note=reference["expected_progress_note"],
+                body=text or None,
+                attachment_ids=attachment_ids or None,
+            )
+        except AutoPRReconsiderationConflict:
+            await post_as_espresso(
+                project["company_id"], channel_id,
+                "That AutoPR decision changed before this reply arrived. Open the linked ticket to review its current state.",
+            )
+            return
+        if result is None:
+            return
+        directives = set(result.get("autopr_directives") or [])
+        directive_note = ""
+        if "draft_pr" in directives:
+            directive_note += " The draft-PR requirement is active."
+        if "trust_still_broken" in directives:
+            directive_note += " The still-broken assertion is active."
+        await post_as_espresso(
+            project["company_id"], channel_id,
+            "Thanks — I attached your reply and any screenshots as escalated AutoPR context."
+            + directive_note
+            + " This ticket now goes ahead of routine rework in the next plan.",
+        )
+    except Exception:
+        logger.warning("AutoPR context reply failed", exc_info=True)
+
+
 async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
     """Mirror a message's attachments into the linked collab project's Files,
     on its own connection and off the send hot path. The reverse JSONB lookup
@@ -3790,6 +3923,7 @@ async def channel_websocket(
                     import json as _json
                     attachments_json = _json.dumps(attachments) if attachments else "[]"
                     reply_target_type: Optional[str] = None
+                    reply_target_metadata: dict = {}
                     async with get_connection() as conn:
                         try:
                             access = await load_channel_access(
@@ -3830,12 +3964,22 @@ async def channel_websocket(
                                 # reply targets a Huume system-message pill
                                 # (a possible clarify answer) without a
                                 # second query.
-                                reply_target_type = await conn.fetchval(
-                                    "SELECT message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
+                                reply_target = await conn.fetchrow(
+                                    "SELECT message_type, metadata FROM channel_messages WHERE id = $1 AND channel_id = $2",
                                     reply_uuid, ch_uuid,
                                 )
-                                if reply_target_type is None:
+                                if reply_target is None:
                                     reply_uuid = None
+                                else:
+                                    reply_target_type = reply_target["message_type"]
+                                    raw_reply_metadata = reply_target["metadata"]
+                                    if isinstance(raw_reply_metadata, str):
+                                        try:
+                                            raw_reply_metadata = _json.loads(raw_reply_metadata)
+                                        except (TypeError, ValueError):
+                                            raw_reply_metadata = {}
+                                    if isinstance(raw_reply_metadata, dict):
+                                        reply_target_metadata = raw_reply_metadata
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -3980,7 +4124,21 @@ async def channel_websocket(
                             # responding to one code request.
                             # Espresso is an independent read-only project agent;
                             # unlike Huume it never enters the EMS dispatch tree.
-                            if is_new_message and "espresso" in mention_handles:
+                            autopr_context_ref = _autopr_context_reference(reply_target_metadata)
+                            if is_new_message and autopr_context_ref is not None:
+                                # A direct reply to Espresso's decision-bound
+                                # request is card evidence, even without an
+                                # @espresso mention. Do not also send it to the
+                                # generic read-only repository-question agent.
+                                _spawn_bg(_bg_apply_autopr_context_reply(
+                                    str(ch_uuid), user, row["content"], autopr_context_ref,
+                                    broadcast_attachments,
+                                ))
+                            if (
+                                is_new_message
+                                and "espresso" in mention_handles
+                                and autopr_context_ref is None
+                            ):
                                 _spawn_bg(_bg_dispatch_espresso_mention(
                                     str(ch_uuid), user, row["content"], row["id"],
                                 ))

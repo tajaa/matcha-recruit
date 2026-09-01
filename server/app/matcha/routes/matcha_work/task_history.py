@@ -251,7 +251,7 @@ async def request_autopr_reconsideration_endpoint(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    """Submit evidence that may invalidate one exact AutoPR no-PR decision."""
+    """Submit evidence for one exact AutoPR context-blocked decision."""
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
@@ -274,6 +274,45 @@ async def request_autopr_reconsideration_endpoint(
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
+
+
+@router.post(
+    "/projects/{project_id}/tasks/{task_id}/autopr/context-request",
+    status_code=201,
+)
+async def post_autopr_context_request_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Ask for decision-bound AutoPR context in the project's Espresso chat."""
+    from app.matcha.services.matcha_work.project_task_notifications import (
+        post_autopr_context_request,
+    )
+
+    await _verify_project_access(project_id, current_user)
+    raw_reason = body.get("reason")
+    raw_expected = body.get("expected_progress_note")
+    if not isinstance(raw_reason, str) or not isinstance(raw_expected, str):
+        raise HTTPException(status_code=400, detail="reason and expected_progress_note must be strings")
+    reason = raw_reason.strip()
+    expected = raw_expected.strip()
+    if not reason or len(reason) > 600:
+        raise HTTPException(status_code=400, detail="reason must be 1-600 characters")
+    try:
+        posted = await post_autopr_context_request(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            expected_progress_note=expected,
+            reason=reason,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not posted:
+        raise HTTPException(status_code=409, detail="The AutoPR decision or project chat changed")
+    return {"ok": True}
 
 def _serialize_activity_row(r) -> dict:
     d = dict(r)

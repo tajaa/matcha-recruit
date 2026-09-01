@@ -162,6 +162,15 @@ already_handled() {
         if [ "$state" = "OPEN" ]; then
             labels="$(printf '%s' "$prs" | jq -r '.[0].labels[]?.name')"
             if printf '%s\n' "$labels" | grep -qx 'autopr-awaiting-input'; then
+                if [ "$reconsideration_pending" = true ]; then
+                    # Context supplied on the card or by replying to Espresso
+                    # is equivalent to new PR feedback. It is already bound to
+                    # the exact live decision, so rework the existing draft
+                    # immediately instead of waiting for a duplicate GitHub
+                    # comment.
+                    echo rework
+                    return
+                fi
                 body="$(printf '%s' "$prs" | jq -r '.[0].body // ""')"
                 pr_number="$(printf '%s' "$prs" | jq -r '.[0].number // empty')"
                 if ! snapshot="$(feedback_snapshot "$pr_number")"; then
@@ -198,14 +207,18 @@ already_handled() {
     echo investigate
 }
 
-# Rank: changes_requested before todo (already-specified rework unblocks a
-# PR in flight), then oldest last_moved_at (falling back to created_at) first
-# within each group.
+# Rank from the cross-queue plan when present. The planner sees every Todo /
+# Changes Requested card plus every open bot PR and keeps related work
+# contiguous. The fallback preserves safe standalone use. A pending explicit
+# reconsideration is first even without a plan: new human evidence is a direct
+# rebuttal of the prior no-safe-action decision and must not sit behind routine
+# rework.
 ranked="$(jq -c '
     sort_by(
-        (if .board_column == "changes_requested" then 0
-         elif (.autopr_reconsideration_pending // false) then 1
-         else 2 end),
+        (.autopr_plan.work_position //
+          (if (.autopr_reconsideration_pending // false) then 0
+           elif .board_column == "changes_requested" then 1
+           else 2 end)),
         (.last_moved_at // .created_at)
     )
 ' "$CARDS_FILE")"

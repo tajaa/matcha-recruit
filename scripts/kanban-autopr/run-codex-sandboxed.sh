@@ -133,6 +133,10 @@ if jq -e '.downloaded_attachments | type == "array"' "$CONTEXT_COPY" >/dev/null 
           .local_path = ($paths[.local_path] // .local_path)
         else . end
       )
+      | if (.test_tenant_evidence.screenshot_path // "") != "" then
+          .test_tenant_evidence.screenshot_path =
+            ($paths[.test_tenant_evidence.screenshot_path] // .test_tenant_evidence.screenshot_path)
+        else . end
     ' "$CONTEXT_COPY" > "$CONTEXT_COPY.next"
     mv "$CONTEXT_COPY.next" "$CONTEXT_COPY"
 fi
@@ -155,6 +159,7 @@ if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
     codex "${CODEX_ARGS[@]}"
 else
     env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
         AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
         AGENT_SANDBOX_AUTOPR=1 \
         SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
