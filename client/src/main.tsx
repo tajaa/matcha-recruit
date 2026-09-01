@@ -19,8 +19,11 @@ applyTheme(getTheme())
 // imported module"). Reload once to pick up the new manifest. See
 // utils/staleChunk for the shared detection + one-shot guard (ErrorBoundary
 // uses the same guard for React.lazy failures that bypass this event).
-window.addEventListener('vite:preloadError', (event) => {
-  if (reloadForStaleChunk()) event.preventDefault()
+window.addEventListener('vite:preloadError', () => {
+  // Do not cancel the event: Vite interprets preventDefault() as recovery and
+  // resolves the failed import with undefined, which makes React.lazy throw
+  // while the reload is pending when it reads the module's default export.
+  reloadForStaleChunk()
 })
 
 createRoot(document.getElementById('root')!).render(
