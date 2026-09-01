@@ -10,6 +10,7 @@ from uuid import UUID
 
 from google.genai import types
 
+from app.core.services.ai_usage import feature_scope
 from app.matcha.services.huume.luna_client import get_luna_client
 from app.matcha.services.huume.routing import LUNA
 
@@ -27,6 +28,7 @@ _PRIORITIES = {"critical", "high", "medium", "low"}
 _CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix"}
 _COLUMNS = {"todo", "in_progress", "review", "done"}
 _TASK_DRAFT_MODEL = LUNA
+_AI_USAGE_FEATURE = "matcha.espresso.task_draft"
 
 
 async def resolve_model(
@@ -158,6 +160,7 @@ async def run_task_draft(
     """Draft one ticket using only audited repository reads."""
     del model
     started = time.monotonic()
+    client = get_luna_client()
     tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
@@ -314,14 +317,15 @@ async def run_task_draft(
         and time.monotonic() - started < _WALL_SECONDS
     ):
         model_calls += 1
-        response = await asyncio.wait_for(
-            get_luna_client().aio.models.generate_content(
-                model=selected_model,
-                contents=contents,
-                config=config,
-            ),
-            timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
-        )
+        with feature_scope(_AI_USAGE_FEATURE):
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model=selected_model,
+                    contents=contents,
+                    config=config,
+                ),
+                timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
+            )
 
         _fold_usage(usage, response)
         parts = [

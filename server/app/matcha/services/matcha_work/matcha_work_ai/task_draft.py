@@ -4,8 +4,10 @@ category / column) independent of the thread turn loop.
 import json
 import logging
 from typing import Optional
+
 from google.genai import types
 
+from app.core.services.ai_usage import feature_scope
 from app.matcha.services.huume.luna_client import get_luna_client
 from app.matcha.services.huume.routing import LUNA
 
@@ -21,6 +23,7 @@ _TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "
 
 
 _TASK_DRAFT_COLUMNS = {"todo", "in_progress", "review", "done"}
+_AI_USAGE_FEATURE = "matcha.espresso.task_draft"
 
 
 async def generate_task_draft(
@@ -130,16 +133,17 @@ Request:
     # Task drafting is intentionally provider-pinned: callers may still send
     # the thread model header, but it cannot route a draft back to Gemini.
     del model_override, company_id, user_id
-    response = await get_luna_client().aio.models.generate_content(
-        model=LUNA,
-        contents=[types.Content(role="user", parts=[types.Part(text=instruction)])],
-        config=types.GenerateContentConfig(
-            system_instruction=(
-                "Return exactly one JSON object that satisfies the user's task-draft "
-                "schema. Do not add Markdown fences or commentary."
+    with feature_scope(_AI_USAGE_FEATURE):
+        response = await get_luna_client().aio.models.generate_content(
+            model=LUNA,
+            contents=[types.Content(role="user", parts=[types.Part(text=instruction)])],
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "Return exactly one JSON object that satisfies the user's task-draft "
+                    "schema. Do not add Markdown fences or commentary."
+                ),
             ),
-        ),
-    )
+        )
     raw = response.text or ""
     try:
         data = json.loads(_clean_json_text(raw))

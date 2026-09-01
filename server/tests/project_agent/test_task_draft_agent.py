@@ -1,10 +1,11 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 from google.genai import types
 
+from app.core.services import ai_usage
 from app.matcha.services.matcha_work.project_agent import task_draft_agent
 from app.matcha.services.matcha_work.project_agent.prompt import build_task_draft_system_prompt
 from app.matcha.services.matcha_work.project_agent.tools import task_draft_declarations
@@ -28,7 +29,10 @@ class _FakeModels:
         self.calls = []
 
     async def generate_content(self, **kwargs):
-        self.calls.append(kwargs)
+        self.calls.append({
+            **kwargs,
+            "feature": ai_usage._feature_override.get(),
+        })
         return self.responses.pop(0)
 
 
@@ -67,7 +71,8 @@ async def test_task_draft_reads_repo_and_returns_resolved_review_draft(monkeypat
         _response(types.Part.from_function_call(name="draft_ticket", args=draft_args)),
     ])
     fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
-    monkeypatch.setattr(task_draft_agent, "get_luna_client", lambda: fake_client)
+    get_client = Mock(return_value=fake_client)
+    monkeypatch.setattr(task_draft_agent, "get_luna_client", get_client)
     monkeypatch.setattr(task_draft_agent.store, "read_repo_file", AsyncMock(return_value={
         "path": "platforms/desktop/Espresso/ProjectFilters.swift",
         "start_line": 1,
@@ -103,6 +108,8 @@ async def test_task_draft_reads_repo_and_returns_resolved_review_draft(monkeypat
     assert result["token_usage"]["total_tokens"] == 34
     assert result["token_usage"]["model"] == "gpt-5.6-luna"
     assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
+    assert all(call["feature"] == "matcha.espresso.task_draft" for call in models.calls)
+    get_client.assert_called_once_with()
     assert mark_run.await_args.kwargs["status"] == "done"
     assert mark_run.await_args.kwargs["result"]["title"] == "Add saved project filters"
 
