@@ -254,6 +254,7 @@ function CallLogRow({ call, isOpen, onToggle }: { call: AiUsageCall; isOpen: boo
             {call.service_tier && <span>service tier: {call.service_tier}</span>}
             <span>at: {new Date(call.created_at).toLocaleString()}</span>
             <span>thinking: {fmtTokens(call.thinking_tokens)}</span>
+            <span>cache writes: {fmtTokens(call.cache_write_tokens)}</span>
           </div>
           {call.error && (
             <pre className="text-[11px] font-mono text-red-300/90 bg-zinc-950/80 p-3 rounded border border-zinc-800 overflow-x-auto whitespace-pre-wrap">

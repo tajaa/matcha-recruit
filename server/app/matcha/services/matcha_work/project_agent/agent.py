@@ -11,9 +11,9 @@ from uuid import UUID
 
 from google.genai import types
 
-from app.core.services.genai_client import get_genai_client
-from app.core.services.model_catalog import GEMINI_FLASH
-from app.core.services.rate_limiter import GeminiRateLimiter
+from app.core.services.ai_usage import feature_scope
+from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.routing import LUNA
 
 from . import chat, store
 from .prompt import build_system_prompt
@@ -25,6 +25,7 @@ _MAX_MODEL_CALLS = 18
 _WALL_SECONDS = 240.0
 _STEP_AUDIT_CAP = 4_000
 _MAX_ANSWER_CHARS = 3_500
+_AI_USAGE_FEATURE = "matcha.espresso.repo_question"
 
 
 def _safe_for_audit(value: Any) -> Any:
@@ -81,13 +82,13 @@ async def run_repo_question(
 ) -> dict:
     """Answer one question with bounded repo reads and no mutation tools."""
     started = time.monotonic()
-    limiter = GeminiRateLimiter()
+    client = get_luna_client()
     tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
     seq = 0
     answer: str | None = None
-    usage: dict[str, Any] = {"model": GEMINI_FLASH}
+    usage: dict[str, Any] = {"model": LUNA}
 
     async def step(
         name: str,
@@ -197,19 +198,16 @@ async def run_repo_question(
         and model_calls < _MAX_MODEL_CALLS
         and time.monotonic() - started < _WALL_SECONDS
     ):
-        await limiter.check_limit("project_agent", "repo_question")
         model_calls += 1
-        try:
+        with feature_scope(_AI_USAGE_FEATURE):
             response = await asyncio.wait_for(
-                get_genai_client().aio.models.generate_content(
-                    model=GEMINI_FLASH,
+                client.aio.models.generate_content(
+                    model=LUNA,
                     contents=contents,
                     config=config,
                 ),
                 timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
             )
-        finally:
-            await limiter.record_call("project_agent", "repo_question")
 
         _fold_usage(usage, response)
         parts = [
@@ -219,7 +217,7 @@ async def run_repo_question(
         ]
         calls = [part.function_call for part in parts if getattr(part, "function_call", None)]
         if not calls:
-            # Gemini occasionally returns its final prose directly despite the
+            # Luna occasionally returns its final prose directly despite the
             # explicit finish tool. Accept it only after a repository read; the
             # same size and grounding preconditions still apply.
             direct = _text_parts(parts)

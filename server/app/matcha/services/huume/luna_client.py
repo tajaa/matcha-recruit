@@ -163,6 +163,9 @@ class _LunaModels:
             "tools": _tools(config),
             "parallel_tool_calls": True,
             "reasoning": {"effort": "high"},
+            # Pin the published standard-rate tier so per-call cost attribution
+            # cannot silently drift to a differently priced service tier.
+            "service_tier": "default",
         }
         if follow_up:
             payload["previous_response_id"] = self._previous_response_id
@@ -228,6 +231,7 @@ class _LunaModels:
             total_token_count=usage.get("total_tokens", 0),
             thoughts_token_count=output_details.get("reasoning_tokens", 0),
             cached_content_token_count=input_details.get("cached_tokens", 0),
+            cache_write_token_count=input_details.get("cache_write_tokens", 0),
         )
         await record_openai_response(
             model=model,
