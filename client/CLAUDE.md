@@ -120,8 +120,8 @@ client/src/
 ## Conventions
 
 **Auth + identity**:
-- `useMe()` is the source of truth. Exposes `user`, `hasRole(role)`, `hasFeature(flag)`, `companyFeatures`. Never read tokens directly from localStorage in components — go through this hook.
-- Tokens live in localStorage as `matcha_access_token` and `matcha_refresh_token`. `api/client.ts` attaches `Authorization: Bearer <token>` automatically and refreshes on 401.
+- `useMe()` is the source of truth. Exposes `user`, `hasRole(role)`, `hasFeature(flag)`, `companyFeatures`. Never read token storage directly in components — go through this hook.
+- Tokens live in per-tab `sessionStorage` behind `api/authStorage.ts`; legacy persistent tokens are purged. `api/client.ts` attaches `Authorization: Bearer <token>` automatically and refreshes on 401.
 - Public/anon endpoints bypass the auth interceptor: pass `{ skipAuth: true }` option, or use the bare `fetch()` (see `IRCopilotPanel.tsx` stream handler).
 
 **Routing + tier dispatch**:
@@ -201,7 +201,7 @@ tell that nothing was checked.
 
 ## Common pitfalls
 
-- **Don't read `matcha_access_token` directly from localStorage.** Use `api/client.ts` helpers; they handle the refresh dance. Documented exceptions (each commented in place, none safely convertible): `utils/usageTracker.ts` (`flush()` — must stay sync for the pagehide beacon), `components/marketing/NewsletterSignup.tsx` and `components/landing/NewsletterHeroSection.tsx` (optional-auth `/newsletter/subscribe` — `ensureFreshToken` would bounce an anonymous visitor to `/login` on submit), `work/api/baseSocket.ts` (`connect()` — must stay sync, token rides the WS constructor's `Sec-WebSocket-Protocol` arg; `_reconnectAfterAuthFailure()` — before/after diff around its own `ensureFreshToken()` call), and `api/errorReporter.ts` (importing `client.ts` back would create the module cycle noted in that file).
+- **Don't read bearer-token storage directly.** Use `api/client.ts` for requests and `api/authStorage.ts` only in low-level transports/reporters that must synchronously obtain the current access token.
 - **Don't bypass `<FeatureGate>` on a feature page.** URL-hopping is the failure mode it exists for.
 - **Don't put product-tier logic in pages.** Centralize in `utils/tier.ts` + `TenantSidebar.tsx`.
 - **Don't introduce a new CSS framework or design system.** Match Tailwind classes used in neighboring components.

@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/billing/matchaLitePricing'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 export default function MatchaLiteSignup() {
   const [searchParams] = useSearchParams()
   const brokerRef = searchParams.get('ref')
@@ -93,8 +94,7 @@ export default function MatchaLiteSignup() {
 
       const accessToken: string = regData.access_token
       const refreshToken: string = regData.refresh_token
-      localStorage.setItem('matcha_access_token', accessToken)
-      localStorage.setItem('matcha_refresh_token', refreshToken)
+      setAuthTokens(accessToken, refreshToken)
       invalidateMeCache()
 
       // Broker-pays or admin invite: account is already active, skip Stripe

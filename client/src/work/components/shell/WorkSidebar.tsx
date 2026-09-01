@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive } from 'lucide-react'
-import { disconnectSharedChannelSocket } from '../../api/channelSocket'
-import { resetAuthCaches } from '../../../api/authReset'
+import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged, startPersonalCheckout } from '../../api/matchaWork'
 import { useMe } from '../../../hooks/useMe'
@@ -56,6 +55,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
   const sections = useSectionState(base)
   const [upgrading, setUpgrading] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [filter, setFilter] = useState('')
 
   // Inline rename state
@@ -166,11 +166,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   }
 
   function handleLogout() {
-    localStorage.removeItem('matcha_access_token')
-    localStorage.removeItem('matcha_refresh_token')
-    resetAuthCaches()
-    disconnectSharedChannelSocket()
-    window.location.href = '/login'
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
+    void logoutSession()
   }
 
   const isActive = (path: string) => location.pathname === path

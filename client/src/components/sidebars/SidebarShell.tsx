@@ -1,10 +1,9 @@
-import { NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
+import { NavLink, useLocation, Link } from 'react-router-dom'
 import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Avatar from '../shared/Avatar'
 import { useMe } from '../../hooks/useMe'
-import { resetAuthCaches } from '../../api/authReset'
-import { disconnectSharedChannelSocket } from '../../work/api/channelSocket'
+import { logoutSession } from '../../api/client'
 import { useLayoutContext } from '../../layouts/LayoutContext'
 import ThemeToggle from '../shared/ThemeToggle'
 
@@ -234,9 +233,9 @@ function NavGroupSection({ group, activeTo, collapsed }: { group: NavGroup; acti
 }
 
 export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle /> }: SidebarShellProps) {
-  const navigate = useNavigate()
   const location = useLocation()
   const { sidebarCollapsed, setSidebarCollapsed } = useLayoutContext()
+  const [loggingOut, setLoggingOut] = useState(false)
   const { hasFeature, isBetaFeature, me } = useMe()
 
   // A beta feature only ever reaches a real nav item for a test company (the
@@ -266,14 +265,12 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   const activeTo = findActiveTo(location.pathname, flatItems)
 
   function handleLogout() {
-    localStorage.removeItem('matcha_access_token')
-    localStorage.removeItem('matcha_refresh_token')
-    // Clears useMe, pinned resources, and every other registered per-user
-    // module cache — this SPA-navigate logout doesn't reload the page, so
-    // caches would otherwise survive into the next user's session.
-    resetAuthCaches()
-    disconnectSharedChannelSocket()
-    navigate('/login')
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
+    void logoutSession()
   }
 
   // Who is signed in, as distinct from which org the session is scoped to. The
@@ -372,9 +369,10 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
           <button
             type="button"
             onClick={handleLogout}
+            disabled={loggingOut}
             title="Log out"
             aria-label="Log out"
-            className="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-100"
+            className="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-100 disabled:opacity-50"
           >
             <LogOut className="h-4 w-4" strokeWidth={1.5} />
           </button>

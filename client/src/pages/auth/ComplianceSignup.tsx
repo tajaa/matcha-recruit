@@ -7,6 +7,7 @@ import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/billing
 import { Select } from '../../components/ui/Select'
 import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 export default function ComplianceSignup() {
   const [searchParams] = useSearchParams()
   const brokerRef = searchParams.get('ref')
@@ -106,8 +107,7 @@ export default function ComplianceSignup() {
 
       const accessToken: string = regData.access_token
       const refreshToken: string = regData.refresh_token
-      localStorage.setItem('matcha_access_token', accessToken)
-      localStorage.setItem('matcha_refresh_token', refreshToken)
+      setAuthTokens(accessToken, refreshToken)
       invalidateMeCache()
 
       // Broker-pays or admin invite: account is already active, skip Stripe

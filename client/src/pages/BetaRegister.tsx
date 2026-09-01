@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../hooks/useMe'
 import { API_BASE } from '../api/client'
+import { setAuthTokens } from '../api/authStorage'
 export default function BetaRegister() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
@@ -44,8 +45,7 @@ export default function BetaRegister() {
         setError(data.detail ?? 'Registration failed')
         return
       }
-      localStorage.setItem('matcha_access_token', data.access_token)
-      localStorage.setItem('matcha_refresh_token', data.refresh_token)
+      setAuthTokens(data.access_token, data.refresh_token)
       // Drop any cached /auth/me from a previous session.
       invalidateMeCache()
       navigate('/werk')

@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Link, Route, Routes } from 'react-router-dom'
-import { getToken, login } from './api/client'
+import { getToken, login, logout } from './api/client'
 import { CatalogPage } from './pages/CatalogPage'
 import { ReleaseDetailPage } from './pages/ReleaseDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function TokenGate({ children }: { children: React.ReactNode }) {
   const [hasToken, setHasToken] = useState(!!getToken())
-  const [email, setEmail] = useState('tajatheprince@gmail.com')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
@@ -52,7 +52,7 @@ function LandingPage() {
 }
 
 function Admin() {
-  return <TokenGate><nav className="admin-nav"><Link className="font-semibold" to="/">oceanlab</Link><Link to="/admin">Catalog</Link><Link to="/admin/settings">Settings</Link></nav><Routes><Route path="/admin" element={<CatalogPage />} /><Route path="/admin/releases/:id" element={<ReleaseDetailPage />} /><Route path="/admin/settings" element={<SettingsPage />} /></Routes></TokenGate>
+  return <TokenGate><nav className="admin-nav"><Link className="font-semibold" to="/">oceanlab</Link><Link to="/admin">Catalog</Link><Link to="/admin/settings">Settings</Link><button type="button" onClick={() => { void logout().finally(() => window.location.reload()) }}>Sign out</button></nav><Routes><Route path="/admin" element={<CatalogPage />} /><Route path="/admin/releases/:id" element={<ReleaseDetailPage />} /><Route path="/admin/settings" element={<SettingsPage />} /></Routes></TokenGate>
 }
 
 function App() {

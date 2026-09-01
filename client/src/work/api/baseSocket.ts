@@ -15,6 +15,7 @@
  */
 
 import { API_BASE } from '../../api/client'
+import { getAccessToken } from '../../api/authStorage'
 
 function getWsBase(): string {
   const base = API_BASE
@@ -119,7 +120,7 @@ export abstract class BaseSocket {
   /**
    * Whether connect() has ever produced a socket object. Distinct from isOpen:
    * getSharedChannelSocket uses this to retry a connect() that bailed early
-   * because no auth token was in localStorage yet.
+   * because no auth token was in the tab session yet.
    */
   get hasSocket(): boolean {
     return this.ws !== null
@@ -165,7 +166,7 @@ export abstract class BaseSocket {
     }
     // Raw read, not ensureFreshToken(): connect() must stay sync — the
     // WebSocket constructor call below can't await a refresh.
-    const token = localStorage.getItem('matcha_access_token')
+    const token = getAccessToken()
     if (!token) return
 
     try {
@@ -287,7 +288,7 @@ export abstract class BaseSocket {
     if (this._closed) return
     // Raw read for a before/after diff around the ensureFreshToken() call
     // below — the point of this read is to compare, not to attach a header.
-    const before = localStorage.getItem('matcha_access_token')
+    const before = getAccessToken()
     const { ensureFreshToken } = await import('../../api/client')
     const after = await ensureFreshToken()
     if (this._closed) return

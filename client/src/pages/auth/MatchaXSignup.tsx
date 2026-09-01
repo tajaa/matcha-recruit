@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 // TODO: set the real Matcha-X price. Mirrors Lite's stub for now — keep in
 // sync with matcha_x_price_cents() in server/app/core/services/stripe_service.py.
 function matchaXPriceDollars(headcount: number): number {
@@ -84,8 +85,7 @@ export default function MatchaXSignup() {
 
       const accessToken: string = regData.access_token
       const refreshToken: string = regData.refresh_token
-      localStorage.setItem('matcha_access_token', accessToken)
-      localStorage.setItem('matcha_refresh_token', refreshToken)
+      setAuthTokens(accessToken, refreshToken)
       invalidateMeCache()
 
       // Broker-pays or admin invite: account is already active, skip Stripe

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ChannelSocket, clearChannelOutbox } from './channelSocket'
+import { clearAuthTokens, getAccessToken, setAuthTokens } from '../../api/authStorage'
 
 // Same fake-WebSocket approach as baseSocket.test.ts — outbox behavior is
 // entirely about what gets replayed on open/error, driven frame-by-frame.
@@ -42,14 +43,16 @@ describe('ChannelSocket outbox', () => {
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
     localStorage.clear()
-    localStorage.setItem('matcha_access_token', fakeToken('user-1'))
+    sessionStorage.clear()
+    setAuthTokens(fakeToken('user-1'), 'refresh-1')
     vi.useFakeTimers()
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
-    localStorage.clear()
+    clearAuthTokens()
+    sessionStorage.clear()
   })
 
   it('queues a send made while offline, and replays it on reconnect', () => {
@@ -160,7 +163,7 @@ describe('ChannelSocket outbox', () => {
     s1.sendMessage('ch-1', 'from user 1', undefined, 'cmid-u1')
 
     // Simulate logout -> different user logging in on the same browser.
-    localStorage.setItem('matcha_access_token', fakeToken('user-2'))
+    setAuthTokens(fakeToken('user-2'), 'refresh-2')
     const s2 = new ChannelSocket()
     s2.connect()
     latest().readyState = FakeWebSocket.OPEN
@@ -174,18 +177,18 @@ describe('ChannelSocket outbox', () => {
     const s = new ChannelSocket()
     s.connect()
     latest().readyState = FakeWebSocket.CLOSED
-    const outgoingToken = localStorage.getItem('matcha_access_token')
+    const outgoingToken = getAccessToken()
     s.sendMessage('ch-1', 'hello', undefined, 'cmid-logout')
 
     // Token already rotated by the time the async logout cleanup runs, as
     // it does for real in api/client.ts's _logout().
-    localStorage.setItem('matcha_access_token', fakeToken('user-3'))
+    setAuthTokens(fakeToken('user-3'), 'refresh-3')
     clearChannelOutbox(outgoingToken)
 
     const s2 = new ChannelSocket()
     // Re-set back to user-1's token to prove the entry is actually gone,
     // not just unreachable under user-3's key.
-    localStorage.setItem('matcha_access_token', outgoingToken!)
+    setAuthTokens(outgoingToken!, 'refresh-2')
     s2.connect()
     latest().readyState = FakeWebSocket.OPEN
     latest().open()

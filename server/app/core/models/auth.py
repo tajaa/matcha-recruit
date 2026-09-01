@@ -48,6 +48,8 @@ class TokenPayload(BaseModel):
     role: UserRole
     exp: int
     iat: Optional[int] = None  # issued-at (epoch); used for session revocation
+    iat_ms: Optional[int] = None  # issued-at (epoch ms); exact revocation compare
+    session_started_at: Optional[int] = None  # preserved across refresh rotation
     token_type: Optional[str] = None  # "access" or "refresh"
 
 

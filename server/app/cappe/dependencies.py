@@ -59,7 +59,7 @@ async def require_cappe_account(
         )
 
     # Session revocation: reject access tokens issued before logout / password change.
-    if is_cappe_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
+    if is_cappe_token_revoked(payload.get("iat"), row["tokens_valid_after"], payload.get("iat_ms")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session has been revoked. Please sign in again.",

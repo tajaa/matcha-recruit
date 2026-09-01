@@ -5,12 +5,14 @@ import App from './App'
 import { ToastProvider } from './components/ui'
 import { ErrorBoundary } from './components/shared/ErrorBoundary'
 import { installErrorReporter } from './api/errorReporter'
+import { installSessionSecurity } from './api/sessionSecurity'
 import { installUsageTracker } from './utils/usageTracker'
 import { reloadForStaleChunk } from './utils/staleChunk'
 import { applyTheme, getTheme } from './utils/theme'
 import './index.css'
 
 installErrorReporter()
+installSessionSecurity()
 installUsageTracker()
 applyTheme(getTheme())
 

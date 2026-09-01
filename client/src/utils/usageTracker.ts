@@ -11,6 +11,8 @@
  */
 
 import { API_BASE } from '../api/client'
+import { getAccessToken } from '../api/authStorage'
+import { normalizeSensitivePath } from './urlSecurity'
 
 type Surface = 'web' | 'public' | 'werk_desktop'
 
@@ -50,12 +52,6 @@ function getVisitorId(): string | undefined {
   }
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-// Requires a digit: generated tokens (hex/base64url) essentially always carry
-// one, while long route slugs ("workforce-compliance") never do — without the
-// digit requirement any 20+ char route segment would collapse to :token.
-const TOKENISH_RE = /^(?=.*\d)[A-Za-z0-9_-]{20,}$/
-
 /**
  * Collapse identifying segments before anything leaves the browser.
  *
@@ -65,19 +61,7 @@ const TOKENISH_RE = /^(?=.*\d)[A-Za-z0-9_-]{20,}$/
  * never crosses the wire in the first place.
  */
 export function normalizePath(pathname: string): string {
-  const clean = (pathname || '/').split('?')[0].split('#')[0]
-  return (
-    clean
-      .split('/')
-      .map((seg) => {
-        if (!seg) return seg
-        if (UUID_RE.test(seg)) return ':id'
-        if (/^\d+$/.test(seg)) return ':id'
-        if (TOKENISH_RE.test(seg)) return ':token'
-        return seg
-      })
-      .join('/') || '/'
-  ).slice(0, 300)
+  return normalizeSensitivePath(pathname)
 }
 
 function surfaceFor(path: string): Surface {
@@ -115,7 +99,7 @@ function flush(useKeepalive = false) {
     // Deliberate raw read (documented exception): flush() must stay sync for
     // the pagehide beacon, and a dead session must not trigger
     // ensureFreshToken's logout redirect.
-    const token = localStorage.getItem('matcha_access_token')
+    const token = getAccessToken()
     void fetch(`${API_BASE}/usage/beacon`, {
       method: 'POST',
       // keepalive lets the request outlive the page on tab close. sendBeacon

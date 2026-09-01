@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { PricingContactModal } from '../components/marketing/PricingContactModal'
 import { api, API_BASE } from '../api/client'
+import { setAuthTokens } from '../api/authStorage'
+import { safeSameOriginPath } from '../utils/urlSecurity'
 import { invalidateMeCache } from '../hooks/useMe'
 
 type LoginResponse = {
@@ -68,12 +70,11 @@ export default function Login() {
     setLoading(true)
     try {
       const res = await api.post<LoginResponse>('/auth/login', { email, password })
-      localStorage.setItem('matcha_access_token', res.access_token)
-      localStorage.setItem('matcha_refresh_token', res.refresh_token)
+      setAuthTokens(res.access_token, res.refresh_token)
       invalidateMeCache()
       // Open-redirect guard: only honor `next` if it's a same-origin relative
       // path (single leading slash, not `//host` or a scheme).
-      const safeNext = nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : null
+      const safeNext = safeSameOriginPath(nextParam)
       navigate(safeNext || roleRoutes[res.user.role] || '/app')
     } catch {
       setError('Invalid email or password')

@@ -109,8 +109,13 @@ class Settings:
     twilio_phone_number: Optional[str] = None
     twilio_media_stream_url: Optional[str] = None
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 1440  # 24 hours
-    jwt_refresh_token_expire_days: int = 30
+    jwt_access_token_expire_minutes: int = 15
+    # Ceiling only: refresh_token_times() clamps every refresh token to the
+    # 12h absolute session bound, and refresh_session_expired() rejects one
+    # after 30m idle, so this never binds in practice.
+    jwt_refresh_token_expire_days: int = 7
+    jwt_refresh_idle_expire_minutes: int = 30
+    jwt_session_absolute_expire_hours: int = 12
 
     # Chat System Auth (separate from main app)
     chat_jwt_secret_key: str = ""
@@ -361,8 +366,10 @@ def load_settings() -> Settings:
         twilio_media_stream_url=os.getenv("TWILIO_MEDIA_STREAM_URL"),
         jwt_secret_key=jwt_secret_key,
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
-        jwt_access_token_expire_minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
-        jwt_refresh_token_expire_days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),
+        jwt_access_token_expire_minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "15")),
+        jwt_refresh_token_expire_days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7")),
+        jwt_refresh_idle_expire_minutes=int(os.getenv("JWT_REFRESH_IDLE_EXPIRE_MINUTES", "30")),
+        jwt_session_absolute_expire_hours=int(os.getenv("JWT_SESSION_ABSOLUTE_EXPIRE_HOURS", "12")),
         chat_jwt_secret_key=chat_jwt_secret_key,
         chat_jwt_access_token_expire_minutes=int(os.getenv("CHAT_JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
         chat_jwt_refresh_token_expire_days=int(os.getenv("CHAT_JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),

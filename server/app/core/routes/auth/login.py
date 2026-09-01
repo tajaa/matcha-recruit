@@ -45,6 +45,7 @@ from app.core.feature_flags import (
 )
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
+from app.core.services.session_tokens import refresh_session_expired
 from app.config import get_settings
 
 
@@ -205,8 +206,14 @@ async def refresh_token(request: RefreshTokenRequest):
                 detail="User not found or inactive"
             )
 
+        if refresh_session_expired(payload.iat, payload.session_started_at):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired. Please log in again.",
+            )
+
         # A revoked refresh token (logout / password change) can't mint new tokens.
-        if await session_revoked(conn, user["id"], payload.iat):
+        if await session_revoked(conn, user["id"], payload.iat, payload.iat_ms):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has been revoked. Please log in again."
@@ -214,7 +221,10 @@ async def refresh_token(request: RefreshTokenRequest):
 
         settings = get_settings()
         access_token = create_access_token(user["id"], user["email"], user["role"])
-        new_refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+        new_refresh_token = create_refresh_token(
+            user["id"], user["email"], user["role"],
+            session_started_at=payload.session_started_at or payload.iat,
+        )
 
         return TokenResponse(
             access_token=access_token,
@@ -239,4 +249,3 @@ async def logout(current_user: CurrentUser = Depends(get_current_user)):
     async with get_connection() as conn:
         await revoke_user_sessions(conn, current_user.id)
     return {"status": "logged_out"}
-

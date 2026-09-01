@@ -45,6 +45,12 @@ async def me(user: CurrentUser = Depends(require_admin)):
     return {"email": user.email, "role": user.role}
 
 
+@router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(user: CurrentUser = Depends(require_admin)):
+    async with get_connection() as conn:
+        await revoke_user_sessions(conn, user.id)
+
+
 @router.post("/auth/change-password")
 async def change_password(request: PasswordChangeRequest, user: CurrentUser = Depends(require_admin)):
     async with get_connection() as conn:

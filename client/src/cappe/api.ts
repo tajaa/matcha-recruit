@@ -1,5 +1,5 @@
 // Cappe API client — a parallel, self-contained auth/fetch layer for the Cappe
-// product. Keyed on its OWN localStorage tokens (cappe_*) and base path
+// product. Keyed on its OWN tab-session tokens (cappe_*) and base path
 // (/api/cappe), so a Cappe session and a matcha session coexist in one browser
 // without colliding. Mirrors api/client.ts's 401 refresh-and-retry.
 
@@ -34,24 +34,42 @@ function _errorDetailCode(detail: unknown): string | undefined {
 const ACCESS_KEY = 'cappe_access_token'
 const REFRESH_KEY = 'cappe_refresh_token'
 
+// One-shot migration off persistent origin storage, run at module load rather
+// than inside the getter — a getter that mutates storage ran a removeItem pair
+// on every single request.
+try {
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+} catch { /* storage may be blocked */ }
+
 export function getCappeToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY)
+  try { return sessionStorage.getItem(ACCESS_KEY) } catch { return null }
+}
+
+export function getCappeRefreshToken(): string | null {
+  try { return sessionStorage.getItem(REFRESH_KEY) } catch { return null }
 }
 
 export function setCappeTokens(access: string, refresh: string) {
-  localStorage.setItem(ACCESS_KEY, access)
-  localStorage.setItem(REFRESH_KEY, refresh)
+  try {
+    sessionStorage.setItem(ACCESS_KEY, access)
+    sessionStorage.setItem(REFRESH_KEY, refresh)
+  } catch { /* storage may be blocked */ }
 }
 
 export function clearCappeTokens() {
-  localStorage.removeItem(ACCESS_KEY)
-  localStorage.removeItem(REFRESH_KEY)
+  try {
+    localStorage.removeItem(ACCESS_KEY)
+    localStorage.removeItem(REFRESH_KEY)
+    sessionStorage.removeItem(ACCESS_KEY)
+    sessionStorage.removeItem(REFRESH_KEY)
+  } catch { /* storage may be blocked */ }
 }
 
 let _refreshing: Promise<boolean> | null = null
 
 async function _tryRefresh(): Promise<boolean> {
-  const refreshToken = localStorage.getItem(REFRESH_KEY)
+  const refreshToken = getCappeRefreshToken()
   if (!refreshToken) return false
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
@@ -82,7 +100,7 @@ function _logout() {
  *  half-consumed and gone — so the token has to be good before it opens.
  *  Mirrors `api/client.ts:ensureFreshToken` on the cappe token pair. */
 export async function ensureFreshCappeToken(): Promise<string | null> {
-  const token = localStorage.getItem(ACCESS_KEY)
+  const token = getCappeToken()
   if (!token) return null
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
@@ -93,7 +111,7 @@ export async function ensureFreshCappeToken(): Promise<string | null> {
       }
       const ok = await _refreshing
       if (!ok) { _logout(); return null }
-      return localStorage.getItem(ACCESS_KEY)
+      return getCappeToken()
     }
   } catch { /* malformed token — let the request fail normally */ }
   return token
@@ -119,7 +137,7 @@ function _buildHeaders(init?: RequestInit, token?: string | null): HeadersInit {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem(ACCESS_KEY)
+  const token = getCappeToken()
   const res = await fetch(`${BASE}${path}`, { ...init, headers: _buildHeaders(init, token) })
 
   if (res.status === 401 && token) {
@@ -128,7 +146,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const ok = await _refreshing
     if (ok) {
-      const newToken = localStorage.getItem(ACCESS_KEY)
+      const newToken = getCappeToken()
       const retry = await fetch(`${BASE}${path}`, { ...init, headers: _buildHeaders(init, newToken) })
       if (!retry.ok) {
         if (retry.status === 401) { _logout(); throw new Error('Session expired') }
@@ -206,7 +224,7 @@ export const cappeApi = {
     request<T>(path, { method: 'POST', body: formData }),
   // POST returning raw text (e.g. rendered HTML for the live preview iframe).
   postHtml: async (path: string, body?: unknown): Promise<string> => {
-    const token = localStorage.getItem(ACCESS_KEY)
+    const token = getCappeToken()
     const res = await fetch(`${BASE}${path}`, {
       method: 'POST',
       headers: _buildHeaders({ body: body ? JSON.stringify(body) : undefined }, token),
@@ -217,7 +235,7 @@ export const cappeApi = {
   },
   // Authed GET of a binary (e.g. a receipt PDF) → opens it in a new tab.
   openBlob: async (path: string): Promise<void> => {
-    const token = localStorage.getItem(ACCESS_KEY)
+    const token = getCappeToken()
     const res = await fetch(`${BASE}${path}`, { headers: _buildHeaders(undefined, token) })
     if (!res.ok) {
       const body = await res.json().catch(() => null)
