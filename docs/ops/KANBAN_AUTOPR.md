@@ -3,7 +3,7 @@
 `.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
 `silent-error-autofix.yml` and `autopr-self-audit.yml`. `msandbox` is the authoritative
 master switch. While it is ON, a local macOS LaunchAgent is the sole automatic
-one-minute clock and dispatches only when no AutoPR lane is queued or active. A
+five-minute clock and dispatches only when no AutoPR lane is queued or active. A
 production-error pass gets the next slot when its last completion is at least ten
 minutes old; then a self-audit gets one when its last completion is at least six hours
 old; otherwise Kanban advances.
@@ -42,7 +42,7 @@ removed from the environment before Codex starts.
 
 The post-deploy admin-update publisher reuses this same sealed bridge and sandbox
 identity for a writing-only `gpt-5.6-luna`/high pass. It is dispatched by a completed
-deploy rather than the one-minute card clock, but the one-slot Mac runner serializes
+deploy rather than the five-minute card clock, but the one-slot Mac runner serializes
 it with the other lanes. The model receives neither the SSH key nor database access;
 trusted code validates its fixed JSON and owns the narrow changelog transaction. See
 `docs/ops/ADMIN_UPDATES_AUTOPUBLISH.md`.
@@ -109,7 +109,7 @@ changes.
 ## Local tmux dashboard
 
 While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
-`matcha-autopr` session on its next one-minute tick if the session is missing. Detaching
+`matcha-autopr` session on its next five-minute tick if the session is missing. Detaching
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
 considered healthy: if any of the four panes is dead or missing, the helper replaces the
 whole observer session. Autonomous model startup fails closed until all four panes are
@@ -217,7 +217,7 @@ second scheduler.
    history or pretending the card moved; a later AutoPR outcome replaces the note and
    therefore consumes the signal. New context submitted after an earlier failed-attempt
    marker can bypass that old cooldown once. A failed attempt otherwise cools down
-   for 15 minutes, so one-minute ticks can work other cards instead of repeatedly
+   for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
    `autopr` PRs (question-only drafts use their separate cap).
 6. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
