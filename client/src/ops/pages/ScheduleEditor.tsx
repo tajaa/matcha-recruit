@@ -40,7 +40,13 @@ export default function ScheduleEditor() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const weekStart = parseWeek(searchParams.get('week'))
-  const { locationId, setLocationId, locations } = useLocationScope()
+  const {
+    locationId: requestedLocationId,
+    setLocationId,
+    locations,
+    loading: locationsLoading,
+  } = useLocationScope()
+  const locationId = locations.some((location) => location.id === requestedLocationId) ? requestedLocationId : ''
   const { me, hasFeature } = useMe()
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
@@ -79,6 +85,10 @@ export default function ScheduleEditor() {
   useEffect(() => {
     setHuumeSelectedShiftIds(new Set())
   }, [locationId, weekStart])
+
+  useEffect(() => {
+    if (!locationsLoading && requestedLocationId && !locationId) setLocationId('')
+  }, [locationId, locationsLoading, requestedLocationId, setLocationId])
 
   useEffect(() => {
     let cancelled = false
