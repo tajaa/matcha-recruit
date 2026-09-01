@@ -31,6 +31,7 @@ from uuid import UUID
 
 _ALLOWED_ROLES = frozenset({"client", "admin"})
 _MAX_SCHEDULE_EDIT_OPS = 4
+_MAX_BULK_VACANT_SHIFTS = 500
 
 
 class ScheduleProposalResult(TypedDict):
@@ -58,6 +59,7 @@ def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
 def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": kind,
+        "target_shift_id": args.get("target_shift_id"),
         "target_employee_name": args.get("target_employee_name"),
         "target_date": args.get("target_date"),
         "target_time_hint": args.get("target_time_hint"),
@@ -153,6 +155,64 @@ def _coerce_tool_edit_requests(schedule_chat, args: dict[str, Any]) -> tuple[lis
     return edit_requests, None
 
 
+async def _all_vacant_shift_requests(
+    conn, *, company_id: UUID, location_id: Optional[UUID],
+    week_start: Optional[_date], week_end: Optional[_date],
+    employee_name: Optional[str], schedule_chat,
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """Resolve an explicit all-vacant request inside the editor scope."""
+    if location_id is None or week_start is None:
+        return [], "Bulk vacant-shift assignment requires a scoped schedule workspace."
+    employee_hint = str(employee_name or "").strip()
+    if not employee_hint:
+        return [], "Who should I assign to every vacant shift?"
+
+    matched = await schedule_chat._match_single_employee(
+        conn, company_id, employee_hint, location_id,
+    )
+    if "none" in matched:
+        return [], matched["none"]
+    if "ambiguous" in matched:
+        return [], f"Which {employee_hint} did you mean? " + ", ".join(matched["ambiguous"])
+    employee = matched["employee"]
+    employee_id = employee["id"]
+    employee_full_name = f"{employee['first_name']} {employee['last_name']}".strip()
+    inclusive_end = week_end or (week_start + _date.resolution * 6)
+    rows = await conn.fetch(
+        """
+        SELECT s.id
+        FROM schedule_shifts s
+        WHERE s.company_id=$1 AND s.location_id=$2
+          AND s.status = ANY($3::text[])
+          AND s.starts_at::date >= $4 AND s.starts_at::date <= $5
+          AND (SELECT COUNT(*) FROM schedule_shift_assignments a WHERE a.shift_id=s.id)
+              < COALESCE(s.required_staff, 1)
+          AND NOT EXISTS (
+              SELECT 1 FROM schedule_shift_assignments a
+              WHERE a.shift_id=s.id AND a.employee_id=$6
+          )
+        ORDER BY s.starts_at, s.id
+        LIMIT $7
+        """,
+        company_id, location_id, ["draft", "published"], week_start,
+        inclusive_end, employee_id, _MAX_BULK_VACANT_SHIFTS + 1,
+    )
+    if len(rows) > _MAX_BULK_VACANT_SHIFTS:
+        return [], (
+            f"This week has more than {_MAX_BULK_VACANT_SHIFTS} vacant shifts. "
+            "Narrow the request by day or role."
+        )
+    if not rows:
+        return [], f"There are no vacant shifts in this editor week for {employee_full_name} to pick up."
+    return [
+        {
+            "kind": "assign", "target_shift_id": str(row["id"]),
+            "to_employee_name": employee_full_name,
+        }
+        for row in rows
+    ], None
+
+
 async def find_coverage(
     *, company_id: UUID, role: Optional[str], features: dict[str, Any],
     date_str: str, role_hint: Optional[str], location_id: Optional[UUID] = None,
@@ -229,7 +289,15 @@ async def propose(
             )
             operation_count = 1
         else:
-            edit_requests, error = _coerce_tool_edit_requests(schedule_chat, args)
+            if args.get("all_vacant_shifts") is True:
+                edit_requests, error = await _all_vacant_shift_requests(
+                    conn, company_id=company_id, location_id=location_id,
+                    week_start=week_start, week_end=week_end,
+                    employee_name=args.get("to_employee_name"),
+                    schedule_chat=schedule_chat,
+                )
+            else:
+                edit_requests, error = _coerce_tool_edit_requests(schedule_chat, args)
             if error:
                 return {"status": "clarify", "message": error}
             if not edit_requests:
