@@ -484,16 +484,24 @@ struct ChannelMessageRowView: View {
             let handleRange = m.range(at: 1)
             guard handleRange.location != NSNotFound else { continue }
             let handle = nsContent.substring(with: handleRange).lowercased()
-            guard let member = memberByHandle[handle] else { continue }
-            // If the server stamped resolved IDs, only chip those; otherwise
-            // chip every membership-resolved handle (REST-fetched older msgs).
-            if !resolved.isEmpty && !resolved.contains(member.userId) { continue }
             let chipNSRange = NSRange(location: handleRange.location - 1, length: handleRange.length + 1)
             guard chipNSRange.location >= 0,
                   chipNSRange.location + chipNSRange.length <= nsContent.length,
                   let stringRange = Range(chipNSRange, in: text),
                   let attrRange = Range(stringRange, in: attributed)
             else { continue }
+            // Espresso is a virtual project-chat mention. Its inactive service
+            // identity never joins channels, so it cannot appear in the member
+            // map or server-resolved mentioned_user_ids list.
+            if handle == "espresso" {
+                attributed[attrRange].foregroundColor = appState.themeAccent
+                attributed[attrRange].font = .system(size: 13, weight: .semibold)
+                continue
+            }
+            guard let member = memberByHandle[handle] else { continue }
+            // If the server stamped resolved IDs, only chip those; otherwise
+            // chip every membership-resolved handle (REST-fetched older msgs).
+            if !resolved.isEmpty && !resolved.contains(member.userId) { continue }
             let isMe = member.userId == currentUserId
             attributed[attrRange].foregroundColor = isMe ? .yellow : appState.themeAccent
             attributed[attrRange].font = .system(size: 13, weight: .semibold)

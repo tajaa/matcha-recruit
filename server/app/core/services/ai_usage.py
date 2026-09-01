@@ -151,6 +151,7 @@ _SPLIT_SERVICE_PACKAGES = {
     "legal_defense",
     "matcha_work_ai",
     "matcha_work_document",
+    "project_agent",
     "project_service",
     "risk_assessment_service",
 }

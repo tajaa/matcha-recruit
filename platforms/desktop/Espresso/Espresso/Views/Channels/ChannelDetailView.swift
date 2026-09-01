@@ -153,6 +153,7 @@ struct ChannelDetailView: View {
                     userHandle: userHandle,
                     members: vm.channel?.members ?? [],
                     currentUserId: appState.currentUser?.id ?? "",
+                    supportsEspressoAgent: vm.channel?.projectId != nil,
                     maxAttachments: maxAttachments,
                     typingPing: { ws.sendTyping(channelId: channelId) },
                     onSend: { send($0) },

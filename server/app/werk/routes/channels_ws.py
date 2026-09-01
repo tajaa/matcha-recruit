@@ -168,6 +168,155 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
         logger.warning("channel->project Files sync failed", exc_info=True)
 
 
+async def _bg_dispatch_espresso_mention(
+    channel_id_str: str,
+    user,
+    content: str,
+    trigger_message_id: UUID,
+) -> bool:
+    """Queue one read-only repo question for a linked project discussion.
+
+    Channel membership is not treated as repository authorization: same-tenant
+    users or active project collaborators are re-checked before the process-
+    global GitHub read token can be used. Returns whether a project discussion
+    claimed the mention; raw ``@espresso`` text elsewhere stays ordinary chat.
+    """
+    claimed = False
+    try:
+        from app.core.feature_flags import merge_company_features
+        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+        from app.matcha.services.matcha_work.project_agent.guards import can_ask_project_agent
+        from app.matcha.services.billing import token_budget_service
+        from app.workers.tasks.project_agent import run_repo_question
+
+        async with get_connection() as conn:
+            project = await conn.fetchrow(
+                """SELECT p.id, p.company_id, p.github_repo,
+                          c.enabled_features, c.signup_source
+                   FROM mw_projects p
+                   JOIN companies c ON c.id=p.company_id
+                   WHERE p.project_data->>'discussion_channel_id'=$1""",
+                channel_id_str,
+            )
+            if not project:
+                return False
+            claimed = True
+            company_id = project["company_id"]
+            channel_id = UUID(channel_id_str)
+            features = merge_company_features(
+                project["enabled_features"], project["signup_source"],
+            )
+            if not features.get("matcha_work"):
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Espresso repository questions aren't enabled for this workspace.",
+                )
+                return True
+
+            collaborator_role = await conn.fetchval(
+                """SELECT role FROM mw_project_collaborators
+                   WHERE project_id=$1 AND user_id=$2 AND status='active'""",
+                project["id"], user.id,
+            )
+            sender_role = (getattr(user, "role", "") or "").lower()
+            sender_company_id = None
+            if sender_role in ("client", "individual"):
+                sender_company_id = await conn.fetchval(
+                    "SELECT company_id FROM clients WHERE user_id=$1", user.id,
+                )
+            elif sender_role == "employee":
+                sender_company_id = await conn.fetchval(
+                    "SELECT org_id FROM employees WHERE user_id=$1", user.id,
+                )
+            if not can_ask_project_agent(
+                sender_company_id=sender_company_id,
+                project_company_id=company_id,
+                collaborator_role=collaborator_role,
+            ):
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "I can only inspect the repository for people who can access this project.",
+                )
+                return True
+            if not project["github_repo"]:
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Connect a GitHub repository in Elements before asking me about the app.",
+                )
+                return True
+
+            # Strip the first virtual-agent mention before persisting the task;
+            # keep every other character exactly as the user wrote it.
+            question = re.sub(
+                r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
+            ).strip()
+            if not question:
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Ask me a question about how this project or its connected repository works.",
+                )
+                return True
+            if sender_role != "admin":
+                try:
+                    await token_budget_service.check_token_budget(company_id)
+                except HTTPException:
+                    await post_as_espresso(
+                        company_id, channel_id,
+                        "This workspace has reached its Matcha Work AI token budget.",
+                    )
+                    return True
+            try:
+                await check_rate_limit(str(company_id), "espresso_repo_question", 20, 3600)
+            except HTTPException:
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Espresso has reached this workspace's hourly repo-question limit. Please try again later.",
+                )
+                return True
+
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))", str(project["id"]),
+                )
+                live = await conn.fetchval(
+                    """SELECT EXISTS(
+                           SELECT 1 FROM mw_project_agent_runs
+                           WHERE project_id=$1 AND kind='repo_question'
+                             AND status IN ('queued','running')
+                             AND COALESCE(started_at, created_at) > NOW() - INTERVAL '15 minutes'
+                       )""",
+                    project["id"],
+                )
+                if live:
+                    await post_as_espresso(
+                        company_id, channel_id,
+                        "I'm already answering a repository question for this project. Ask me again when that answer lands.",
+                    )
+                    return True
+                run_id = await conn.fetchval(
+                    """INSERT INTO mw_project_agent_runs
+                       (company_id, project_id, channel_id, requested_by,
+                        trigger_message_id, agent_key, kind, prompt, status)
+                       VALUES ($1,$2,$3,$4,$5,'espresso','repo_question',$6,'queued')
+                       ON CONFLICT (trigger_message_id, agent_key) DO NOTHING
+                       RETURNING id""",
+                    company_id, project["id"], channel_id, user.id,
+                    trigger_message_id, question,
+                )
+            if run_id is None:
+                return True
+            run_repo_question.delay(str(run_id))
+
+        await post_as_espresso(
+            company_id, channel_id,
+            "I’m reading the connected repository now. I’ll post a source-linked answer here when the task finishes.",
+        )
+        return True
+    except Exception:
+        logger.warning("Espresso project-agent dispatch failed", exc_info=True)
+        return claimed
+
+
 async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str, trigger_message_id) -> bool:
     """Queue one collab-chat code run and report whether it claimed the mention.
 
@@ -3809,6 +3958,12 @@ async def channel_websocket(
                             # existing clarify-first path for replies to EMS system
                             # messages, while preventing two Huume workflows from
                             # responding to one code request.
+                            # Espresso is an independent read-only project agent;
+                            # unlike Huume it never enters the EMS dispatch tree.
+                            if is_new_message and "espresso" in mention_handles:
+                                _spawn_bg(_bg_dispatch_espresso_mention(
+                                    str(ch_uuid), user, row["content"], row["id"],
+                                ))
                             if is_new_message and "huume" in mention_handles:
                                 _spawn_bg(_bg_dispatch_huume_mention(
                                     str(ch_uuid), str(row["id"]),

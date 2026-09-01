@@ -80,6 +80,11 @@ All project types support:
 - Real-time presence (see who is active in the project)
 - Activity feed (task moves, file uploads, collaborator additions)
 
+Repo-connected project discussions also expose **@espresso**, a read-only
+repository guide. Mention it with a question about how the app or a feature
+works; it completes a background, source-grounded read and posts the answer
+back into the project chat without changing code or opening a pull request.
+
 ---
 
 ## Journals
