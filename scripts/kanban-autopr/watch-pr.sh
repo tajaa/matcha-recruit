@@ -12,6 +12,7 @@ GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 GIT_BIN="${AUTOPR_GIT_BIN:-/usr/bin/git}"
 RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-actions-runner/_work/matcha-recruit/matcha-recruit}"
 REFRESH_SECONDS="${AUTOPR_PR_REFRESH_SECONDS:-10}"
+PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 MAX_DIFF_LINES="${AUTOPR_PR_DIFF_LINES:-80}"
 MAX_FILE_LINES="${AUTOPR_PR_FILE_LINES:-3}"
 CARD_SNAPSHOT="${AUTOPR_CARD_SNAPSHOT:-$USER_HOME/Library/Caches/matcha-kanban-autopr/cards.json}"
@@ -142,7 +143,7 @@ render_pr() {
     branch="$(current_task_branch "$workflow_active")"
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'ACTIVE / MOST RECENT KANBAN PR\nUpdated %s\n\n' "$(date '+%H:%M:%S %Z')"
+    printf 'ACTIVE / MOST RECENT KANBAN PR\nUpdated %s\n\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
     if [ -z "$branch" ]; then
         printf 'No bot/task-* worktree or open Kanban AutoPR was found.\n'
         printf 'This pane will populate after the workflow selects a card.\n'

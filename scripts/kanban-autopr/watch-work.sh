@@ -16,6 +16,7 @@ LIVE_LOG="${AUTOPR_LIVE_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-live.l
 REFRESH_SECONDS="${AUTOPR_WORK_REFRESH_SECONDS:-2}"
 STATUS_REFRESH_SECONDS="${AUTOPR_WORK_STATUS_REFRESH_SECONDS:-10}"
 MAX_ITERATIONS="${AUTOPR_DASHBOARD_MAX_ITERATIONS:-0}"
+PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 
 RUN_ID=""
 RUN_STATUS="idle"
@@ -83,7 +84,7 @@ render_work_snapshot() {
     log_lines=$((pane_rows - 8))
     [ "$log_lines" -ge 6 ] || log_lines=6
 
-    printf 'LIVE CODEX WORK · %s\n' "$(date '+%H:%M:%S %Z')"
+    printf 'LIVE CODEX WORK · %s\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
     case "$RUN_LANE" in
         errors) sandbox_project=matcha-error-autofix-sandbox ;;
         self-audit) sandbox_project=matcha-autopr-self-audit-sandbox ;;
@@ -143,7 +144,7 @@ emit_status_change() {
         self-audit) sandbox_project=matcha-autopr-self-audit-sandbox ;;
         *) sandbox_project=matcha-kanban-autopr-sandbox ;;
     esac
-    printf '\n[STATUS %s] msandbox · %s\n' "$(date '+%H:%M:%S %Z')" \
+    printf '\n[STATUS %s] msandbox · %s\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')" \
         "${AUTOPR_SANDBOX_PROJECT_NAME:-$sandbox_project}"
     if [ -n "$RUN_ID" ]; then
         printf 'RUN %s #%s · %s\n' "$RUN_LANE" "$RUN_ID" "$RUN_STATUS"

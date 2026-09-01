@@ -103,7 +103,9 @@ While the `msandbox` master switch is ON, the LaunchAgent recreates the read-onl
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
 considered healthy: if any of the four panes is dead or missing, the helper replaces the
 whole observer session. Autonomous model startup fails closed until all four panes are
-live. The window uses a 2x2 grid: dashboard/work above PR/health.
+live. The overview owns the full-height left side; the right side stacks live agent work,
+active PR detail, and automation health. This keeps the operational answer readable from
+across a room while retaining drill-down detail in the same tmux window.
 
 The LaunchAgent does not execute the repo-backed `msandbox` symlink directly:
 macOS can deny background agents access to `~/Documents` even when Terminal has
@@ -113,16 +115,21 @@ from launchd-safe locations: the `autopr-enabled` marker created only by
 The workflow repeats the complete `msandbox autopr-ready` check before starting
 Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
 
-- **24h queue + PR dashboard** — active Kanban/error/self-audit/admin-update workflow, the exact card
-  `select.sh` would choose next, the Todo/Changes Requested queue, open bot PRs across
-  all lanes, merged bot PRs, and workflow runs from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
+- **operations overview (Pacific time)** — a glanceable control board with the current
+  workflow phase and elapsed time, active card/branch, the exact card `select.sh` would
+  choose next, queue entries classified as feedback/rework/Todo/waiting/held, open PR age,
+  open-to-merge duration for recently merged bot PRs, and recent workflow duration. Every
+  timestamp displayed to the operator is Pacific time. GitHub and board responses are
+  cached as last-known-good snapshots: a transient source failure is shown as `STALE` or
+  `DEGRADED`, never as an empty queue. Selector failures are also explicit instead of being
+  rendered as “none eligible.” The selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
   refresh cannot create a cooldown marker or consume a card.
-- **active PR + live diff** — the active `bot/task-*` branch and cached card title before
+- **active PR detail** — the active `bot/task-*` branch and cached card title before
   publication, followed by its PR number, draft state, labels, checks, URL, changed files,
   and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
   runner worktree and never displays the ticket prompt or credential-bearing process
   arguments.
-- **live Codex work** — current Actions run/step, dedicated msandbox identity,
+- **live agent detail** — current Actions run/step, dedicated msandbox identity,
   plus the real model terminal
   stream while it investigates, reads files, edits code, and verifies the task. The
   trusted harness tees that output to the mode-600 local file
@@ -131,12 +138,12 @@ Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
   This pane appends instead of redrawing, so earlier work remains in tmux's 100,000-line
   history across subsequent runs while the master session stays up. Scroll with the mouse
   or trackpad, or enter copy mode with `Ctrl-b [`.
-- **timer + runner health** — LaunchAgent state, self-hosted runner presence, recent
+- **automation health** — LaunchAgent state, self-hosted runner presence, recent
   structured dispatch/skip/error events, and the dedicated worker's real Docker state.
   A container stuck in `created`, `exited`, or another non-running state is shown as
   blocked rather than healthy.
 
-The summary pane refreshes every 60 seconds, the PR pane every 10 seconds, the local model
+The overview refreshes every 30 seconds, the PR pane every 10 seconds, the local model
 stream appends new output every 2 seconds (with status appended only when it changes and
 GitHub refreshed every 10), and health refreshes every 15 seconds. Override those intervals with
 `AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,

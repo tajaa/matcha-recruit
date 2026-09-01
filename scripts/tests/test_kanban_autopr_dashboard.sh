@@ -56,14 +56,14 @@ AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
 check "tmux observer creates one session with four panes" \
   $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] \
     && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 3 ] \
-    && grep -q '^split-window -h -p 50 ' "$TMP_DIR/tmux.log" \
+    && grep -q '^split-window -h -p 42 ' "$TMP_DIR/tmux.log" \
     && [ "$(grep -c '^split-window -v -p 50 ' "$TMP_DIR/tmux.log")" = 2 ] \
     && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
-  $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
-    && grep -q 'live Codex work' "$TMP_DIR/tmux.log" \
-    && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
-    && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+  $(grep -q 'operations overview · Pacific time' "$TMP_DIR/tmux.log" \
+    && grep -q 'live agent detail' "$TMP_DIR/tmux.log" \
+    && grep -q 'automation health' "$TMP_DIR/tmux.log" \
+    && grep -q 'active PR detail' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
 check "tmux observer preserves a large mouse-scrollable history" \
   $(grep -q '^set-option -t matcha-autopr history-limit 100000' "$TMP_DIR/tmux.log" \
     && grep -q '^set-option -t matcha-autopr mouse on' "$TMP_DIR/tmux.log" \
@@ -118,24 +118,62 @@ cat > "$TMP_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
   printf '%s\n' '[{"databaseId":900,"status":"in_progress","conclusion":null,"event":"workflow_dispatch","createdAt":"2099-08-27T01:00:00Z","updatedAt":"2099-08-27T01:01:00Z","url":"x","displayTitle":"Kanban autopr"}]'
+elif [ "$1 $2" = "run view" ]; then
+  printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
 elif [ "$1 $2" = "pr list" ] && [[ "$*" == *"--state open"* ]]; then
-  printf '%s\n' '[{"number":307,"title":"🟡 [C91] fix: Intake","isDraft":true,"headRefName":"bot/task-aaaa0000","updatedAt":"2099-08-27T01:00:00Z","labels":[{"name":"autopr"}],"url":"x"}]'
+  printf '%s\n' '[{"number":307,"title":"🟡 [C91] fix: Intake","isDraft":true,"headRefName":"bot/task-aaaa0000","createdAt":"2099-08-27T00:00:00Z","updatedAt":"2099-08-27T01:00:00Z","labels":[{"name":"autopr"}],"url":"x"}]'
 elif [ "$1 $2" = "pr list" ]; then
-  printf '%s\n' '[{"number":306,"title":"🟠 [C80] fix: Reports","mergedAt":"2099-08-27T00:00:00Z","url":"x"}]'
+  printf '%s\n' '[{"number":306,"title":"🟠 [C80] fix: Reports","createdAt":"2099-08-27T00:00:00Z","mergedAt":"2099-08-27T01:00:00Z","headRefName":"bot/task-bbbbbbbb","labels":[{"name":"autopr"}],"url":"x"}]'
 fi
 EOF
 chmod +x "$TMP_DIR/gh"
 
+cat > "$TMP_DIR/dispatch.log" <<'EOF'
+{"timestamp":"2099-08-27T01:30:00Z","action":"dispatch","reason":"kanban-pass"}
+EOF
+dashboard_now="$(jq -nr '"2099-08-27T02:30:00Z" | fromdateiso8601')"
+
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
-  AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
-check "24-hour dashboard shows now, next, queue, open PRs, and history" \
-  $(grep -q 'WORKFLOW NOW' "$TMP_DIR/dashboard.out" \
-    && grep -q 'UP NEXT' "$TMP_DIR/dashboard.out" \
-    && grep -q 'BOARD QUEUE' "$TMP_DIR/dashboard.out" \
-    && grep -q 'OPEN AUTO PRS' "$TMP_DIR/dashboard.out" \
-    && grep -q 'MERGED AUTO PRS · LAST 24 HOURS' "$TMP_DIR/dashboard.out" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
+check "control board shows now, exact next, queue states, PR timing, and Pacific history" \
+  $(grep -q 'MATCHA AUTOPR CONTROL BOARD' "$TMP_DIR/dashboard.out" \
+    && grep -q 'NOW · INVESTIGATING · 1h 30m' "$TMP_DIR/dashboard.out" \
+    && grep -q 'NEXT · EXACT SELECTOR RESULT' "$TMP_DIR/dashboard.out" \
+    && grep -q 'QUEUE · 2 tracked' "$TMP_DIR/dashboard.out" \
+    && grep -q 'OPEN BOT PRS · AGE' "$TMP_DIR/dashboard.out" \
+    && grep -q 'RECENT BOT PRS · OPEN → MERGE · PACIFIC' "$TMP_DIR/dashboard.out" \
+    && grep -q 'RECENT RUNS · DURATION · PACIFIC' "$TMP_DIR/dashboard.out" \
+    && grep -q '6:00 PM PDT' "$TMP_DIR/dashboard.out" \
     && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
     && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-selector-error.out"
+check "selector failure is explicit instead of looking like an empty queue" \
+  $(grep -q 'Selector failed (exit 1); this does not mean the queue is empty.' "$TMP_DIR/dashboard-selector-error.out" \
+    && echo 0 || echo 1)
+
+cat > "$TMP_DIR/gh-unavailable" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$TMP_DIR/gh-unavailable"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-unavailable" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-stale.out"
+check "GitHub failure retains cached data and labels the overview stale" \
+  $(grep -q 'STALE · showing last-known-good data' "$TMP_DIR/dashboard-stale.out" \
+    && grep -q '#307' "$TMP_DIR/dashboard-stale.out" && echo 0 || echo 1)
 
 cat > "$TMP_DIR/git-pr" <<'EOF'
 #!/usr/bin/env bash
