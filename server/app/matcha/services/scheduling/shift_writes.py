@@ -56,6 +56,14 @@ def _iso(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _audit_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    return value
+
+
 async def log_audit(
     conn,
     company_id: UUID,
@@ -264,12 +272,12 @@ def shift_snapshot(row) -> dict:
     analysis, which needs to know what a shift looked like before a change —
     the plain audit log recorded only which fields changed, not their values.
     """
-    return {
-        "starts_at": _iso(row["starts_at"]),
-        "ends_at": _iso(row["ends_at"]),
-        "status": row["status"],
-        "location_id": str(row["location_id"]) if row["location_id"] else None,
-    }
+    fields = (
+        "starts_at", "ends_at", "status", "location_id", "role", "department",
+        "break_minutes", "required_staff", "color", "notes", "job_id", "published_at",
+    )
+    available = set(row.keys())
+    return {field: _audit_value(row[field]) for field in fields if field in available}
 
 
 async def restore_assignment_raw(
@@ -475,6 +483,10 @@ async def retime_shift_core(
                         "fields": ["starts_at", "ends_at"],
                         "before": before, "after": after,
                         "was_published": was_published,
+                        "assigned_employee_ids": (
+                            [str(row["employee_id"]) for row in assignees]
+                            if was_published else []
+                        ),
                         **(audit_details or {}),
                     })
 
@@ -494,8 +506,12 @@ async def cancel_shift_core(
     starts_at/ends_at/status/location_id/published_at. Caller has already
     run the FW cancel-advisory check and owns the transaction."""
     before = shift_snapshot(existing_row)
-    after = {**before, "status": "cancelled"}
+    after = {**before, "status": "cancelled", "published_at": None}
     was_published = existing_row["published_at"] is not None
+    assignees = await conn.fetch(
+        "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+        shift_id,
+    ) if was_published else []
     await conn.execute(
         "UPDATE schedule_shifts SET status = 'cancelled', published_at = NULL, "
         "updated_at = NOW() WHERE id = $1 AND company_id = $2",
@@ -503,9 +519,10 @@ async def cancel_shift_core(
     )
     await log_audit(conn, company_id, "shift", shift_id, actor_user_id,
                     "shift.update", {
-                        "fields": ["status"],
+                        "fields": ["published_at", "status"],
                         "before": before, "after": after,
                         "was_published": was_published,
+                        "assigned_employee_ids": [str(row["employee_id"]) for row in assignees],
                         **(audit_details or {}),
                     })
 
