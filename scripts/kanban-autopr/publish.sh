@@ -44,6 +44,10 @@ NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE
 DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | join(",")' "$DECISION_FILE")"
 DIRECTIVE_MARKER=""
 [ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
+ALLOW_MIGRATION_VERSION=false
+case ",$DIRECTIVE_CSV," in
+    *,draft_pr,*) ALLOW_MIGRATION_VERSION=true ;;
+esac
 PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
 PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
 COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
@@ -115,12 +119,14 @@ report_summary() {
       /^### Summary[[:space:]]*$/ { capture=1; next }
       /^### / && capture { exit }
       capture { print }
-    ' "$REPORT_FILE" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-1200
+    ' "$REPORT_FILE" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' \
+        | jq -Rsr '.[0:1200]'
 }
 
 post_reconsideration_reply() {
-    local pr_number="${1:-}" summary message fixed_pr
+    local pr_number="${1:-}" expected_note="${2:-}" summary message fixed_pr
     [ -n "$RECONSIDERATION_EVENT_ID" ] || return 0
+    [ -n "$expected_note" ] || die "reconsideration result is missing its decision note"
     summary="$(report_summary)"
     case "$OUTCOME" in
         implementation)
@@ -149,11 +155,21 @@ post_reconsideration_reply() {
             '{kind:"note",body:$body,reply_to:$reply}')" >/dev/null); then
         printf 'kanban-autopr: warning: could not post reconsideration result for task %s\n' "$TASK_ID" >&2
     fi
+    # The activity thread is durable history, but the AutoPR account can be
+    # the same identity as the reporter and ordinary comment notifications
+    # deliberately suppress self-notification. This decision-bound endpoint
+    # targets the original context author and is required: a run must not
+    # silently consume their instruction.
+    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/result-notification" \
+        "$(jq -n --arg event "$RECONSIDERATION_EVENT_ID" --arg note "$expected_note" \
+            --arg message "$message" \
+            '{reconsideration_event_id:$event,expected_progress_note:$note,message:$message}')" \
+        >/dev/null
 }
 
 post_context_request() {
     local reason="$1" expected_note="$2"
-    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rrs '.[0:600]')"
+    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rsr '.[0:600]')"
     if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
         "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
             '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
@@ -253,12 +269,22 @@ replace_triage_labels() {
 cd "$REPO_ROOT"
 git add --all
 
-# Path guard: denylist is what stops the bot rewriting its own harness or
-# CI. The allowlist is strictly stronger — it closes every path the denylist
-# didn't think to name. A card that genuinely needs a migration or infra
-# change cannot be auto-PR'd; that is the correct conservative outcome, and
-# the no-spec path below says so on the card.
-unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^deploy/|^scripts/|^server/alembic/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+# Path guard: denylist is what stops the bot rewriting its own harness or CI.
+# The allowlist is strictly stronger. A decision-bound draft_pr directive may
+# additionally author a migration *version* for human review; it never permits
+# migration configuration/runner changes and this script never applies it.
+changed_paths="$(git diff --cached --no-renames --name-only)"
+unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
+    unsafe_migrations="$(printf '%s\n' "$changed_paths" \
+        | grep -E '^server/alembic/' \
+        | grep -vE '^server/alembic/versions/[^/]+\.py$' || true)"
+else
+    unsafe_migrations="$(printf '%s\n' "$changed_paths" | grep -E '^server/alembic/' || true)"
+fi
+if [ -n "$unsafe_migrations" ]; then
+    unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
+fi
 if [ -n "$unsafe_paths" ]; then
     echo "Refusing unsafe automated change:" >&2
     printf '%s\n' "$unsafe_paths" >&2
@@ -266,9 +292,13 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-disallowed_paths="$(git diff --cached --no-renames --name-only | grep -vE '^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$' || true)"
+allowed_paths_re='^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
+if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
+    allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[^/]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
+fi
+disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
-    echo "Refusing change outside server/app, server/tests, client/src, or Espresso source:" >&2
+    echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
@@ -361,7 +391,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
             post_context_request "$CARD_NOTE" "$origin_note"
         fi
-        post_reconsideration_reply "$existing_open_pr"
+        post_reconsideration_reply "$existing_open_pr" "$origin_note"
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
         origin_note="$(progress_note_with_origin \
@@ -372,7 +402,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
             post_context_request "$CARD_NOTE" "$origin_note"
         fi
-        post_reconsideration_reply
+        post_reconsideration_reply "" "$origin_note"
         echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     fi
     exit 0
@@ -429,6 +459,6 @@ if [ "$AWAITING_HUMAN" = true ]; then
     context_questions="$(jq -r '[.questions[]?.question] | join(" ")' "$DECISION_FILE")"
     post_context_request "$CARD_NOTE $context_questions You can attach a screenshot in your Espresso reply or on the ticket." "$origin_note"
 fi
-post_reconsideration_reply "$published_pr"
+post_reconsideration_reply "$published_pr" "$origin_note"
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"

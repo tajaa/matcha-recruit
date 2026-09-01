@@ -119,10 +119,22 @@ _AUTOPR_TEST_ROUTE_RE = re.compile(
 )
 _AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
 _AUTOPR_DRAFT_COMMAND_RE = re.compile(
-    r"\b(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?(?:pr|pull\s+request)\b"
+    r"^(?:(?:please\s+)?(?:(?:you\s+)?"
+    r"(?:can|may|must|should|need\s+to)\s+)?)?"
+    r"(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?"
+    r"(?:pr|pull\s+request)\b"
 )
-_AUTOPR_DRAFT_NEGATION_RE = re.compile(
-    r"\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}\b(?:draft|create|open)\b"
+_AUTOPR_WORK_COMMAND_RE = re.compile(
+    r"^(?:(?:please\s+)?(?:go\s+ahead(?:\s+and)?\s+)?)?"
+    r"(?:(?:you\s+)?(?:can|may|must|should|need\s+to)\s+)?"
+    r"(?:work\s+on|implement|start\s+work\s+on)\s+"
+    r"(?:this|it|the\s+(?:ticket|card|pr|pull\s+request))\b"
+)
+_AUTOPR_FORCE_NEGATION_RE = re.compile(
+    r"(?:\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}"
+    r"\b(?:work|implement|draft|create|open)\b)"
+    r"|(?:\b(?:work|implement|draft|create|open)\b.{0,20}"
+    r"\b(?:not|never)\b)"
 )
 
 
@@ -135,25 +147,33 @@ def _is_autopr_waiting_for_answers_note(note: str) -> bool:
 
 
 def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
-    """Parse the small operator-owned directive language from context lines.
+    """Parse operator-owned directives from decision-bound context.
 
-    Only leading ``--`` lines qualify. Ordinary ticket prose stays evidence,
-    never authority. Natural-language spellings are accepted for the two
-    directives the project owner asked to be able to type in Espresso.
+    This function is called only for an authorized reply bound to the exact
+    live AutoPR decision, so a clear affirmative work command is authority
+    even without a ``--`` prefix. Ordinary ticket prose never reaches this
+    parser. Other directives retain their explicit ``--`` marker.
     """
     directives: list[str] = []
     test_route: Optional[str] = None
     for raw_line in (text or "").splitlines():
         line = raw_line.strip()
-        if not line.startswith("--"):
-            continue
-        instruction = " ".join(line[2:].strip().lower().replace("’", "'").split())
+        marked = line.startswith("--")
+        directive_text = line[2:] if marked else line
+        instruction = " ".join(
+            directive_text.strip().lower().replace("’", "'").split()
+        )
         explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
         natural_draft = bool(_AUTOPR_DRAFT_COMMAND_RE.search(instruction))
-        draft_is_negated = bool(_AUTOPR_DRAFT_NEGATION_RE.search(instruction))
-        if (explicit_draft or (natural_draft and not draft_is_negated)) and "draft_pr" not in directives:
-            directives.append("draft_pr")
+        natural_work = bool(_AUTOPR_WORK_COMMAND_RE.search(instruction))
+        force_is_negated = bool(_AUTOPR_FORCE_NEGATION_RE.search(instruction))
         if (
+            (explicit_draft or natural_draft or natural_work)
+            and not force_is_negated
+            and "draft_pr" not in directives
+        ):
+            directives.append("draft_pr")
+        if marked and (
             instruction in {"trust-still-broken", "trust still broken"}
             or ("trust" in instruction and any(
                 phrase in instruction
@@ -161,7 +181,7 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
             ))
         ) and "trust_still_broken" not in directives:
             directives.append("trust_still_broken")
-        route_match = _AUTOPR_TEST_ROUTE_RE.search(line[2:])
+        route_match = _AUTOPR_TEST_ROUTE_RE.search(directive_text) if marked else None
         if route_match:
             candidate = route_match.group(1).rstrip(".,;)")
             if (

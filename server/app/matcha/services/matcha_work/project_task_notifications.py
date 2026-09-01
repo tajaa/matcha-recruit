@@ -129,7 +129,8 @@ async def post_autopr_context_request(
                 f"This ticket needs additional context because {why} "
                 "Reply to this Espresso message with the missing detail, or add it "
                 "from the ticket. You can attach screenshots. Start a line with "
-                "`--draft-pr` to require a draft or `--trust-still-broken` to reject "
+                "`--draft-pr`, or say `you can work on this`, to require a draft. Use "
+                "`--trust-still-broken` to reject "
                 "another already-fixed conclusion; add `--test-route=/app/...` for an "
                 "approved test-tenant replay. Your reply is bound to this exact decision."
             )
@@ -146,6 +147,88 @@ async def post_autopr_context_request(
                 },
             )
     await broadcast_espresso_message(payload)
+    return True
+
+
+async def post_autopr_result_notification(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    reconsideration_event_id: UUID,
+    expected_progress_note: str,
+    message: str,
+) -> bool:
+    """Notify the author of one decision-bound AutoPR result exactly once.
+
+    The current task note and the triggering additional-context event are both
+    verified while the task row is locked. That lock serializes retries, so
+    the notification lookup plus insert is idempotent without a new database
+    constraint. Returns False when the decision or event is stale.
+    """
+    expected = (expected_progress_note or "").strip()
+    result_message = (message or "").strip()
+    if not expected or not result_message:
+        raise ValueError("AutoPR result notifications require a decision and message")
+    if len(result_message) > 1_600:
+        raise ValueError("AutoPR result notification message must be 1-1600 characters")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                """SELECT t.title, t.progress_note, t.company_id,
+                          p.name AS project_title
+                   FROM mw_tasks t
+                   LEFT JOIN mw_projects p ON p.id=t.project_id
+                   WHERE t.id=$1 AND t.project_id=$2
+                   FOR UPDATE OF t""",
+                task_id,
+                project_id,
+            )
+            if not task or (task["progress_note"] or "").strip() != expected:
+                return False
+
+            recipient_id = await conn.fetchval(
+                """SELECT actor_user_id
+                   FROM mw_task_history
+                   WHERE id=$1 AND task_id=$2 AND project_id=$3
+                     AND event_type='activity'
+                     AND metadata->>'kind'='autopr_additional_context'
+                     AND actor_user_id IS NOT NULL""",
+                reconsideration_event_id,
+                task_id,
+                project_id,
+            )
+            if recipient_id is None:
+                return False
+
+            already_notified = await conn.fetchval(
+                """SELECT EXISTS(
+                       SELECT 1 FROM mw_notifications
+                       WHERE user_id=$1 AND type='autopr_result'
+                         AND metadata->>'reconsideration_event_id'=$2
+                   )""",
+                recipient_id,
+                str(reconsideration_event_id),
+            )
+            if already_notified:
+                return True
+
+            await notif_svc.create_notification(
+                user_id=recipient_id,
+                company_id=task["company_id"],
+                type="autopr_result",
+                title=f"AutoPR result: {task['title']}",
+                body=result_message,
+                link=f"/work?project={project_id}&task={task_id}",
+                metadata={
+                    "project_id": str(project_id),
+                    "task_id": str(task_id),
+                    "project_title": task["project_title"],
+                    "task_title": task["title"],
+                    "reconsideration_event_id": str(reconsideration_event_id),
+                },
+                send_email=False,
+            )
     return True
 
 

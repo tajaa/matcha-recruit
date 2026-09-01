@@ -629,6 +629,14 @@ forced_already_fixed_rc=$?
 check "decision-bound force directives reject another already-fixed exit" \
     $([ "$forced_already_fixed_rc" != 0 ] && echo 0 || echo 1)
 
+jq '.no_safe_action_reason = "migration_required"' \
+    "$TMP_DIR/already-fixed-decision.json" > "$TMP_DIR/migration-required-decision.json"
+"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/forced-migration-decision.json" "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+forced_migration_rc=$?
+check "decision-bound draft directive requires authoring a needed migration" \
+    $([ "$forced_migration_rc" != 0 ] && echo 0 || echo 1)
+
 env -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
     python3 "$AUTOPR_DIR/collect-test-tenant-evidence.py" \
     --policy "$TMP_DIR/forced-policy.json" \

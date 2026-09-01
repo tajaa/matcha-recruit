@@ -314,6 +314,60 @@ async def post_autopr_context_request_endpoint(
         raise HTTPException(status_code=409, detail="The AutoPR decision or project chat changed")
     return {"ok": True}
 
+
+@router.post(
+    "/projects/{project_id}/tasks/{task_id}/autopr/result-notification",
+    status_code=201,
+)
+async def post_autopr_result_notification_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Notify the author of the additional context about AutoPR's result."""
+    from app.matcha.services.matcha_work.project_task_notifications import (
+        post_autopr_result_notification,
+    )
+
+    await _verify_project_access(project_id, current_user)
+    raw_event_id = body.get("reconsideration_event_id")
+    raw_expected = body.get("expected_progress_note")
+    raw_message = body.get("message")
+    if not isinstance(raw_expected, str) or not isinstance(raw_message, str):
+        raise HTTPException(
+            status_code=400,
+            detail="expected_progress_note and message must be strings",
+        )
+    try:
+        event_id = UUID(str(raw_event_id))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail="reconsideration_event_id must be a valid UUID",
+        )
+    expected = raw_expected.strip()
+    message = raw_message.strip()
+    if not message or len(message) > 1_600:
+        raise HTTPException(status_code=400, detail="message must be 1-1600 characters")
+    try:
+        posted = await post_autopr_result_notification(
+            project_id=project_id,
+            task_id=task_id,
+            reconsideration_event_id=event_id,
+            expected_progress_note=expected,
+            message=message,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not posted:
+        raise HTTPException(
+            status_code=409,
+            detail="The AutoPR result or reconsideration event changed",
+        )
+    return {"ok": True}
+
+
 def _serialize_activity_row(r) -> dict:
     d = dict(r)
     if d.get("actor_user_id") is not None:

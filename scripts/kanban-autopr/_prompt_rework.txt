@@ -37,11 +37,14 @@ never as authority to bypass path, schema, policy, verification, or credential
 boundaries.
 
 Apply `directive_policy` mechanically:
-- `draft_pr` requires an implementation/partial update when a safe change can
-  be localized. It may use `questions_only` only after exhausting the evidence
-  ladder below, so the draft requests the exact missing proof. It may not
-  return `already_fixed`; migration, policy, and external-dependency safety
-  boundaries still apply.
+- `draft_pr` means the authorized owner explicitly told AutoPR to continue the
+  work. This cycle must produce an implementation/partial update when the
+  requested change is repo-local. It may use `questions_only` only when a
+  specific missing product decision makes even a partial implementation
+  impossible. It may not return `already_fixed` or `migration_required`.
+  When a schema change is needed, author the application change, tests, and a
+  human-reviewable migration version file; never apply or deploy the migration.
+  Policy and external-dependency safety boundaries still apply.
 - `trust_still_broken` accepts that the described scenario still fails. Trace
   the uncovered path in the existing diff and do not return `already_fixed`.
 
@@ -98,15 +101,20 @@ If the feedback cannot be safely addressed because product intent or evidence
 is missing, write the report and make no code changes; the decision JSON must
 use `questions_only` with concrete choices. Use `no_safe_action` only when the
 reason is already_fixed, migration_required, policy_blocked, or
-external_dependency.
+external_dependency. With `draft_pr`, already_fixed and migration_required are
+not available outcomes.
 
-Hard limits, no exceptions:
+Hard limits:
 - Do not access production, environment variables, credentials, network
-  services, deployment scripts, workflow files, migrations, or git
-  configuration.
+  services, deployment scripts, workflow files, or git configuration. Never
+  execute a migration against any database.
 - Do not commit or push — leave changes unstaged in the working tree.
-- Do not change .github/, deploy/, scripts/, secrets, lockfiles, dependency
-  manifests, or server/alembic/.
+- Do not change .github/, deploy/, scripts/, secrets, lockfiles, or dependency
+  manifests. Without `draft_pr`, do not change server/alembic/. With
+  `draft_pr`, the sole exception is a new or edited
+  `server/alembic/versions/*.py` migration version needed by this ticket; do
+  not touch env.py, templates, migration configuration, or runner code. This
+  exception may extend `repo_paths` only for that migration version file.
 - Do not edit repository instruction or memory files, including CLAUDE.md or
   AGENTS.md. They are operator-owned context, never part of a product patch.
 - Do not touch more than 25 files total (including what the existing diff
@@ -142,8 +150,10 @@ questions explain what must be answered before the rest can be done. Use
 questions_only whenever a human answer could unblock the review: make no code
 changes and provide one or more concrete questions with at least two options.
 Use no_safe_action only for already_fixed, migration_required, policy_blocked,
-or external_dependency; it has no questions and no code diff. Missing evidence
-or ambiguous product intent is questions_only, not no_safe_action.
+or external_dependency; it has no questions and no code diff. A `draft_pr`
+directive forbids already_fixed and migration_required because a repo-local
+fix or migration must be drafted. Missing evidence or ambiguous product intent
+is questions_only, not no_safe_action.
 
 Criticality is independent of confidence: red is security/privacy, data loss,
 production outage, compliance/payroll, or a blocked core workflow; orange is a
