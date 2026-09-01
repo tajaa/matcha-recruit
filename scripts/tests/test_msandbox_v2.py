@@ -11,12 +11,13 @@ import sys
 import tempfile
 import termios
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 from scripts.msandbox.agent_adapters import agent_argv, launch_agent
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
+from scripts.msandbox.cli import run as run_cli
 from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
 from scripts.msandbox.docker_runtime import (
     BUILDER_NAME,
@@ -46,6 +47,7 @@ from scripts.msandbox.git_worktrees import (
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
 from scripts.msandbox.install import InstallError, install_release, rollback_release
 from scripts.msandbox.models import PortSet, SessionRecord, SessionSpec, TestPlan, ValidationReference
+from scripts.msandbox.session_auth import SessionAuthError, refresh_github_auth
 from scripts.msandbox.pty_proxy import (
     PASTE_END,
     PASTE_START,
@@ -169,6 +171,58 @@ class StateTests(MsandboxTestCase):
     def test_new_session_specs_default_to_standard_permissions(self) -> None:
         self.assertEqual(SessionSpec("safe", "codex").permission_mode, "standard")
 
+    def test_cli_reports_and_stops_all_running_sessions_without_releasing_them(self) -> None:
+        first = self.record("session-1")
+        second = self.record("session-2")
+        second.name = "other"
+        first.phase = "running"
+        second.phase = "stopped"
+        with (
+            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch(
+                "scripts.msandbox.cli.reconcile_session", side_effect=lambda item: item
+            ),
+        ):
+            self.assertEqual(
+                run_cli(["--repo", str(self.repo), "session", "has-running"]), 0
+            )
+
+        first.phase = "stopped"
+        with (
+            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch(
+                "scripts.msandbox.cli.reconcile_session", side_effect=lambda item: item
+            ),
+        ):
+            self.assertEqual(
+                run_cli(["--repo", str(self.repo), "session", "has-running"]), 1
+            )
+
+        output = io.StringIO()
+        with (
+            mock.patch("scripts.msandbox.cli.list_sessions", return_value=[first, second]),
+            mock.patch("scripts.msandbox.cli.stop_session") as stop,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(
+                run_cli(
+                    [
+                        "--repo",
+                        str(self.repo),
+                        "session",
+                        "stop",
+                        "--all",
+                        "--force",
+                    ]
+                ),
+                0,
+            )
+        self.assertEqual(
+            stop.call_args_list,
+            [mock.call(first, force=True), mock.call(second, force=True)],
+        )
+        self.assertIn("Stopped 2 independent msandbox session(s).", output.getvalue())
+
     def test_kernel_lock_survives_its_owner_file_and_is_reacquirable(self) -> None:
         lock = self.root / "state/locks/repo.lock"
         child = os.fork()
@@ -210,10 +264,153 @@ class WorktreeTests(MsandboxTestCase):
             self.assertIn(ARTIFACT_LIFECYCLE_LOCK, active_locks)
 
         with mock.patch("scripts.msandbox.sessions.state_lock", tracked_lock), mock.patch(
-            "scripts.msandbox.sessions._copy_auth_templates",
+            "scripts.msandbox.sessions.provision_session_auth",
             side_effect=assert_registration_locked,
         ):
             create_session(self.repo, SessionSpec("locked", "codex", "main", start=False))
+
+    def test_github_auth_materializes_keychain_token_and_repairs_git(self) -> None:
+        record = self.record()
+        private_git = session_git_dir(record.id)
+        private_git.mkdir(parents=True)
+        (private_git / "config").write_text("[core]\n\tbare = false\n", encoding="utf-8")
+        calls: list[list[str]] = []
+
+        def run(argv, **kwargs):
+            command = [str(item) for item in argv]
+            calls.append(command)
+            if command[:4] == ["git", "-C", str(self.repo), "remote"]:
+                return subprocess.CompletedProcess(argv, 0, "https://github.com/tajaa/matcha-recruit.git\n", "")
+            if command[1:4] == ["auth", "token", "--hostname"]:
+                return subprocess.CompletedProcess(argv, 0, "test-token\n", "")
+            if command[1:3] == ["auth", "login"]:
+                config = Path(kwargs["env"]["GH_CONFIG_DIR"])
+                config.mkdir(parents=True, exist_ok=True)
+                (config / "hosts.yml").write_text(
+                    "github.com:\n  user: tajaa\n  oauth_token: test-token\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(kwargs["input"], "test-token\n")
+                self.assertIn("--insecure-storage", command)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            if command[:2] == ["git", "config"]:
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(command)
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        ):
+            refresh_github_auth(record)
+            refresh_github_auth(record)
+
+        hosts = self.root / "data/homes/session-1/.config/gh/hosts.yml"
+        self.assertEqual(hosts.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(sum(call[1:3] == ["auth", "login"] for call in calls), 1)
+        self.assertEqual(sum(call[:2] == ["git", "config"] for call in calls), 2)
+
+    def test_github_auth_replaces_marker_symlink_without_following_it(self) -> None:
+        record = self.record()
+        config = self.root / "data/homes/session-1/.config/gh"
+        config.mkdir(parents=True)
+        victim = self.root / "host-file"
+        victim.write_text("keep\n", encoding="utf-8")
+        marker = config / ".msandbox-token-sha256"
+        marker.symlink_to(victim)
+
+        def run(argv, **kwargs):
+            command = [str(item) for item in argv]
+            if command[:4] == ["git", "-C", str(self.repo), "remote"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "https://github.com/tajaa/matcha-recruit.git\n",
+                    "",
+                )
+            if command[1:4] == ["auth", "token", "--hostname"]:
+                return subprocess.CompletedProcess(argv, 0, "test-token\n", "")
+            if command[1:3] == ["auth", "login"]:
+                generated = Path(kwargs["env"]["GH_CONFIG_DIR"]) / "hosts.yml"
+                generated.write_text(
+                    "github.com:\n  oauth_token: test-token\n", encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(command)
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        ):
+            refresh_github_auth(record)
+
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep\n")
+        self.assertFalse(marker.is_symlink())
+        self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+
+    def test_github_auth_rejects_symlinked_config_directory(self) -> None:
+        record = self.record()
+        config_root = self.root / "data/homes/session-1/.config"
+        config_root.mkdir(parents=True)
+        outside = self.root / "outside-gh"
+        outside.mkdir()
+        (config_root / "gh").symlink_to(outside, target_is_directory=True)
+        origin = subprocess.CompletedProcess(
+            [], 0, "https://github.com/tajaa/matcha-recruit.git\n", ""
+        )
+        token = subprocess.CompletedProcess([], 0, "test-token\n", "")
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=(origin, token)
+        ):
+            with self.assertRaisesRegex(SessionAuthError, "unsafe private controller directory"):
+                refresh_github_auth(record)
+
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_github_auth_rejects_symlinked_isolated_git_config(self) -> None:
+        record = self.record()
+        private_git = session_git_dir(record.id)
+        private_git.mkdir(parents=True)
+        victim = self.root / "host-git-config"
+        victim.write_text("keep\n", encoding="utf-8")
+        (private_git / "config").symlink_to(victim)
+
+        def run(argv, **kwargs):
+            command = [str(item) for item in argv]
+            if command[:4] == ["git", "-C", str(self.repo), "remote"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "https://github.com/tajaa/matcha-recruit.git\n",
+                    "",
+                )
+            if command[1:4] == ["auth", "token", "--hostname"]:
+                return subprocess.CompletedProcess(argv, 0, "test-token\n", "")
+            if command[1:3] == ["auth", "login"]:
+                generated = Path(kwargs["env"]["GH_CONFIG_DIR"]) / "hosts.yml"
+                generated.write_text(
+                    "github.com:\n  oauth_token: test-token\n", encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(command)
+
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=run
+        ):
+            with self.assertRaisesRegex(SessionAuthError, "isolated Git config is unsafe"):
+                refresh_github_auth(record)
+
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep\n")
+
+    def test_github_auth_fails_with_one_host_login_instruction(self) -> None:
+        record = self.record()
+        origin = subprocess.CompletedProcess(
+            [], 0, "git@github.com:tajaa/matcha-recruit.git\n", ""
+        )
+        missing = subprocess.CompletedProcess([], 1, "", "not logged in")
+        with mock.patch("scripts.msandbox.session_auth.shutil.which", return_value="/opt/gh"), mock.patch(
+            "scripts.msandbox.session_auth.subprocess.run", side_effect=(origin, missing)
+        ):
+            with self.assertRaisesRegex(SessionAuthError, "gh auth login"):
+                refresh_github_auth(record)
 
     def test_failed_pristine_startup_removes_all_session_state(self) -> None:
         with (
@@ -746,6 +943,8 @@ class AttachmentTests(MsandboxTestCase):
         self.assertIn("exec_workspace_with_file_proxy claude", launcher)
         self.assertIn("exec_workspace_with_file_proxy opencode", launcher)
         self.assertGreaterEqual(launcher.count("exec_workspace_with_file_proxy bash"), 2)
+        self.assertIn("call_v2_controller session stop --all --force", launcher)
+        self.assertIn("ensure_v2_system_plane", launcher)
 
 
 class HostAndInstallTests(MsandboxTestCase):
@@ -1046,6 +1245,7 @@ class HostAndInstallTests(MsandboxTestCase):
         legacy = fixture / "scripts/agent-sandbox.sh"
         legacy.write_text(
             '#!/bin/sh\n'
+            'if [ "$*" = "autopr-ready" ]; then exit "${MSANDBOX_TEST_READY_RC:-0}"; fi\n'
             'if [ "$*" = "system up" ] && [ -n "${MSANDBOX_TEST_UP_MARKER:-}" ]; then : > "$MSANDBOX_TEST_UP_MARKER"; fi\n'
             'if [ "${MSANDBOX_TEST_FAIL_UP:-0}" = 1 ] && [ "$*" = "system up" ]; then exit 42; fi\n'
             'printf "legacy:%s\\n" "$*"\n',
@@ -1108,6 +1308,46 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(failed_bare.returncode, 42)
         self.assertNotIn("msandbox + AutoPR ready", failed_bare.stdout)
         self.assertNotIn("No active msandbox sessions", failed_bare.stdout)
+        interactive_environment = dict(os.environ)
+        interactive_marker = self.root / "interactive-system-up-called"
+        interactive_environment["MSANDBOX_TEST_READY_RC"] = "1"
+        interactive_environment["MSANDBOX_TEST_UP_MARKER"] = str(interactive_marker)
+        wizard = subprocess.run(
+            [str(bin_dir / "msandbox"), "wizard"],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=interactive_environment,
+        )
+        self.assertTrue(interactive_marker.is_file())
+        self.assertIn("legacy:system up", wizard.stdout)
+        interactive_marker.unlink()
+        repo_wizard = subprocess.run(
+            [str(bin_dir / "msandbox"), "--repo", str(fixture), "wizard"],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=interactive_environment,
+        )
+        self.assertTrue(interactive_marker.is_file())
+        self.assertIn("legacy:system up", repo_wizard.stdout)
+        interactive_marker.unlink()
+        missing = subprocess.run(
+            [
+                str(bin_dir / "msandbox"),
+                f"--repo={fixture}",
+                "session",
+                "start",
+                "missing",
+            ],
+            check=False,
+            text=True,
+            capture_output=True,
+            env=interactive_environment,
+        )
+        self.assertTrue(interactive_marker.is_file())
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("unknown msandbox session", missing.stderr)
         # `gc` is a v2 verb, so it must not fall through to the legacy script.
         garbage_environment = dict(os.environ)
         garbage_environment["PATH"] = str(Path(sys.executable).parent)

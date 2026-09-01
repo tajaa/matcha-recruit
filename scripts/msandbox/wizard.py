@@ -16,6 +16,7 @@ from .agent_adapters import attach_agent
 from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session, session_home
 from .models import SessionRecord, SessionSpec
+from .session_auth import refresh_github_auth
 from .sessions import (
     create_session,
     reconcile_session,
@@ -413,6 +414,7 @@ def _open_session(
                 start_session(record)
             attach_agent(record)
         elif action == "shell":
+            refresh_github_auth(record)
             ensure_container(record)
             shell_handoff = _install_session_shell_handoff(record)
             exec_in_session(

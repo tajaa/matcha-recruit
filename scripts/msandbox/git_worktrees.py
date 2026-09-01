@@ -105,7 +105,7 @@ def initialize_session_git(
         origin = _git(repo, "remote", "get-url", "origin").stdout.strip()
         isolated_origin = github_https_url(origin)
         _git(git_dir, "config", "remote.origin.url", isolated_origin)
-        if isolated_origin != origin:
+        if isolated_origin.startswith("https://github.com/"):
             # Session homes receive gh's hosts.yml. Scope its credential helper
             # to the private Git directory rather than mutating common config.
             _git(

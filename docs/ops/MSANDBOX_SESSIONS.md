@@ -16,6 +16,15 @@ Names are generated automatically, and leaving an agent returns to the wizard.
 Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
 exposing a host Docker or tmux socket to the container.
 
+AutoPR and independent sessions share one lifecycle even though their durable
+terminal sessions stay on the host side of the container boundary. From an
+attached agent, press `Ctrl-b s` and select `matcha-autopr`; use `Ctrl-b d` to
+detach. Running `tmux attach -t matcha-autopr` as a command inside the container
+addresses the container's isolated tmux server and is therefore not the switch
+operation. Direct `msandbox wizard`, `session create`, `session start`,
+`session attach`, and `session shell` entrypoints reassert the complete AutoPR
+plane before opening interactive work.
+
 Every new session explicitly chooses an agent, a permission mode, development
 ports/browser capability, and main or a PR as its starting point. Standard is
 always the default. Autonomous must be selected for that session and is stored
@@ -37,7 +46,13 @@ msandbox session list
 msandbox session attach payroll-fix
 msandbox session shell site-editor
 msandbox session exec payroll-fix -- git status --short
+msandbox session stop payroll-fix
 ```
+
+`msandbox stop` refuses while any independent session or AutoPR agent is running;
+`msandbox stop --force` and `msandbox off` stop every independent session as well as
+the system plane. Stopping preserves session worktrees, isolated Git state, and
+uncommitted files so a session can be resumed later with `msandbox session start`.
 
 One session consists of:
 
@@ -171,11 +186,38 @@ Sessions with identical inputs share image and dependency caches; different
 lockfiles or controller toolchains cannot race through a mutable `latest`
 image. Dependency volumes are initialized under a host lock and mounted
 read-only into sessions; only per-session tool cache mounts remain writable.
+The agent CLIs are deliberately pinned in the image. Codex startup checks and
+in-app updates are disabled through `/etc/codex/requirements.toml`; update the
+Dockerfile pin and rebuild/install the controller instead of accepting an
+interactive updater that cannot write to the read-only `/opt/node` toolchain.
 
 Host fetch, verification, and publication rewrite GitHub SSH remotes to HTTPS
 for that command only. This works on networks that block SSH port 22 while
 leaving the repository's common Git configuration untouched. Private session
-Git directories use the copied `gh` credentials for the same HTTPS remote.
+Git directories use the host's active `gh` account for the same HTTPS remote.
+The controller resolves a macOS Keychain-backed token on the host and writes it
+only to that session's mode-600 home; it never places the token in Compose
+environment variables, Docker metadata, a command line, or shared Git config.
+Credentials refresh on create, start, attach, shell, and `session exec`, so an
+existing session picks up a renewed host login when it is reopened. One-time
+host setup is `gh auth login --hostname github.com --git-protocol https --web`.
+
+Inside the sandbox, ordinary GitHub work is available directly:
+
+```bash
+git add ... && git commit -m "..."
+git push origin HEAD:refs/heads/codex/my-change
+gh pr create --base main --head codex/my-change
+gh workflow run workflow.yml --ref codex/my-change
+gh run list --workflow workflow.yml
+gh run watch RUN_ID
+```
+
+`msandbox doctor SESSION` verifies both GitHub CLI authentication and Actions
+API access. `msandbox session submit` remains the safer publication path when
+its validation/lease/release contract fits the task. Workflow dispatch is a
+real repository mutation and can invoke production jobs; use each workflow's
+dry-run input when it provides one.
 Wizard action failures remain visible until Enter is pressed instead of being
 covered immediately by the next full-screen menu.
 

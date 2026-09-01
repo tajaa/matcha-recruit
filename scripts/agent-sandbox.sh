@@ -22,6 +22,21 @@ run_v2_controller() {
         exec python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
 }
 
+call_v2_controller() {
+    PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+        MATCHA_REPO_ROOT="${MATCHA_REPO_ROOT:-$PROJECT_ROOT}" \
+        python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
+}
+
+ensure_v2_system_plane() {
+    # Independent sessions and AutoPR are one operator-facing system. Direct
+    # wizard/session entry must heal the control plane just like bare
+    # `msandbox`; otherwise a durable agent tmux session can outlive a stopped
+    # dashboard and present a split state to the user.
+    "$SCRIPT_SOURCE" autopr-ready >/dev/null 2>&1 \
+        || "$SCRIPT_SOURCE" system up
+}
+
 OPEN_V2_WIZARD_AFTER_START=0
 if [ "$#" = 0 ]; then
     # Bare `msandbox` is the one-command system entrypoint. Bring up the
@@ -32,7 +47,17 @@ if [ "$#" = 0 ]; then
     set -- start
 fi
 case "${1:-}" in
-    wizard|session|worktree|pr|test|install|host|gc)
+    wizard)
+        ensure_v2_system_plane
+        run_v2_controller "$@"
+        ;;
+    session)
+        case "${2:-}" in
+            create|start|attach|shell) ensure_v2_system_plane ;;
+        esac
+        run_v2_controller "$@"
+        ;;
+    worktree|pr|test|install|host|gc)
         run_v2_controller "$@"
         ;;
     attach)
@@ -470,7 +495,8 @@ detect_agentic_activity() {
         return 0
     fi
 
-    local primary_agent=0 autopr_agent=0 found_local=0 runs='[]' workflow_runs="" workflow="" project="" gh_ok=1
+    local primary_agent=0 autopr_agent=0 independent_agent=0 found_local=0
+    local runs='[]' workflow_runs="" workflow="" project="" gh_ok=1
     container_has_agent_process "$PRIMARY_SANDBOX_PROJECT_NAME" && primary_agent=1
     while IFS= read -r project; do
         if container_has_agent_process "$project"; then
@@ -478,7 +504,11 @@ detect_agentic_activity() {
             break
         fi
     done < <(autopr_sandbox_projects)
-    if [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ]; then found_local=1; fi
+    call_v2_controller session has-running >/dev/null 2>&1 && independent_agent=1
+    if [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ] \
+        || [ "$independent_agent" = 1 ]; then
+        found_local=1
+    fi
 
     if [ -x "$AUTOPR_GH_BIN" ] && command -v jq >/dev/null; then
         for workflow in "$AUTOPR_ERROR_WORKFLOW" "$AUTOPR_AUDIT_WORKFLOW" \
@@ -507,7 +537,12 @@ detect_agentic_activity() {
     else
         if [ "$found_local" = 1 ]; then
             AGENTIC_ACTIVITY_STATE=active
-            if [ "$primary_agent" = 1 ] && [ "$autopr_agent" = 1 ]; then
+            if [ "$independent_agent" = 1 ] \
+                && { [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ]; }; then
+                AGENTIC_ACTIVITY_DETAIL="coding agents are running in independent and system sandboxes"
+            elif [ "$independent_agent" = 1 ]; then
+                AGENTIC_ACTIVITY_DETAIL="an independent msandbox coding agent is running"
+            elif [ "$primary_agent" = 1 ] && [ "$autopr_agent" = 1 ]; then
                 AGENTIC_ACTIVITY_DETAIL="coding agents are running in both sandboxes"
             elif [ "$autopr_agent" = 1 ]; then
                 AGENTIC_ACTIVITY_DETAIL="an AutoPR coding agent is running"
@@ -523,7 +558,12 @@ detect_agentic_activity() {
 
     if [ "$found_local" = 1 ]; then
         AGENTIC_ACTIVITY_STATE=active
-        if [ "$primary_agent" = 1 ] && [ "$autopr_agent" = 1 ]; then
+        if [ "$independent_agent" = 1 ] \
+            && { [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ]; }; then
+            AGENTIC_ACTIVITY_DETAIL="coding agents are running in independent and system sandboxes"
+        elif [ "$independent_agent" = 1 ]; then
+            AGENTIC_ACTIVITY_DETAIL="an independent msandbox coding agent is running"
+        elif [ "$primary_agent" = 1 ] && [ "$autopr_agent" = 1 ]; then
             AGENTIC_ACTIVITY_DETAIL="coding agents are running in both sandboxes"
         elif [ "$autopr_agent" = 1 ]; then
             AGENTIC_ACTIVITY_DETAIL="an AutoPR coding agent is running"
@@ -678,13 +718,22 @@ stop_autopr_containers() {
 }
 
 shutdown_all_sandboxes() {
+    local independent_stop_failed=0
     disable_autopr_control_plane
     stop_actions_runner
+    # Independent v2 sessions own separate Compose projects and host tmux
+    # sessions. Stopping the legacy system plane alone leaves those agents
+    # alive, contradicting `stop --force`/`off`'s global shutdown contract.
+    call_v2_controller session stop --all --force || independent_stop_failed=1
     if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
         stop_autopr_containers
         "${PRIMARY_COMPOSE[@]}" stop workspace
     fi
     print_system_status "MSANDBOX STOPPED"
+    if [ "$independent_stop_failed" = 1 ]; then
+        echo "MSANDBOX shutdown incomplete: one or more independent sessions could not be stopped." >&2
+        return 1
+    fi
 }
 
 start_primary_and_enable_autopr() {
