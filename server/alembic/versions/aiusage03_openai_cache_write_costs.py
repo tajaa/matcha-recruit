@@ -71,11 +71,9 @@ def upgrade():
 
 
 def downgrade():
-    op.execute(
-        """UPDATE ai_usage_log
-           SET cost_usd = NULL
-           WHERE provider = 'openai' AND model LIKE 'gpt-5.6-luna%'"""
-    )
+    # Keep the cost backfill. Once the upgrade runs, those rows are
+    # indistinguishable from Luna rows priced before or after this migration;
+    # clearing by model would destroy legitimate historical billing data.
     op.execute(
         "ALTER TABLE ai_usage_log "
         "DROP COLUMN IF EXISTS cache_write_tokens"

@@ -305,7 +305,27 @@ async def _bg_dispatch_espresso_mention(
                 )
             if run_id is None:
                 return True
-            run_repo_question.delay(str(run_id))
+            try:
+                run_repo_question.delay(str(run_id))
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue Espresso project-agent run=%s", run_id,
+                )
+                failed_run_id = await conn.fetchval(
+                    """UPDATE mw_project_agent_runs
+                       SET status='failed', completed_at=NOW(),
+                           error='Task enqueue failed before worker delivery.'
+                       WHERE id=$1 AND status='queued'
+                       RETURNING id""",
+                    run_id,
+                )
+                if failed_run_id is not None:
+                    await post_as_espresso(
+                        company_id,
+                        channel_id,
+                        "I couldn't queue that repository question right now. Please try again.",
+                    )
+                    return True
 
         await post_as_espresso(
             company_id, channel_id,
