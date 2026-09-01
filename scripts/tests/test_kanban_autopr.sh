@@ -549,6 +549,18 @@ check "publication writer uses Luna medium and validates its bounded output" \
       && grep -qx 'model_reasoning_effort="medium"' "$TMP_DIR/luna-args" \
       && echo 0 || echo 1)
 
+jq '.category = "feat"' "$TMP_DIR/card.json" > "$TMP_DIR/feat-card.json"
+PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/feat-luna-args" \
+AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/feat-card.json" "$TMP_DIR/decision.json" \
+  "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/feat-publication-copy.json" \
+  >/dev/null 2>&1
+feat_publication_copy_rc=$?
+check "publication writer repairs a model-selected commit prefix without dropping the card outcome" \
+    $([ "$feat_publication_copy_rc" = 0 ] \
+      && jq -e '.commit_subject == "feat: standardize terminology" and (.card_note | contains("canonical term"))' "$TMP_DIR/feat-publication-copy.json" >/dev/null \
+      && echo 0 || echo 1)
+
 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/commit-luna-args" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
   "$AUTOPR_DIR/write-commit-subject.sh" fix "$TMP_DIR/commit-subject.json" \

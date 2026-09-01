@@ -32,6 +32,7 @@ PROD_BUILD_NUMBER="$(jq -r '.production.build_number // empty' "$CARD_FILE")"
 PROD_BACKEND_SHA="$(jq -r '.production.containers.backend.git_sha // empty' "$CARD_FILE")"
 PROD_FRONTEND_SHA="$(jq -r '.production.containers.frontend.git_sha // empty' "$CARD_FILE")"
 EXISTING_PROGRESS_NOTE="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+EXISTING_PR_NUMBER="$(jq -r '.pr_number // empty' "$CARD_FILE")"
 RECONSIDERATION_EVENT_ID="$(jq -r '.autopr_reconsideration_event_id // empty' "$CARD_FILE")"
 OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
 CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
@@ -113,7 +114,7 @@ report_summary() {
 }
 
 post_reconsideration_reply() {
-    local pr_number="${1:-}" summary message
+    local pr_number="${1:-}" summary message fixed_pr
     [ -n "$RECONSIDERATION_EVENT_ID" ] || return 0
     summary="$(report_summary)"
     case "$OUTCOME" in
@@ -124,7 +125,16 @@ post_reconsideration_reply() {
             message="AutoPR reviewed this additional context but still needs human answers in PR #$pr_number."
             ;;
         no_safe_action)
-            message="AutoPR reconsidered this context, but the no-PR decision still applies ($NO_SAFE_ACTION_REASON)."
+            if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+                fixed_pr="${pr_number:-$EXISTING_PR_NUMBER}"
+                if [[ "$fixed_pr" =~ ^[0-9]+$ ]]; then
+                    message="After reviewing your additional context, AutoPR still found this request already fixed in PR #$fixed_pr."
+                else
+                    message="After reviewing your additional context, AutoPR still found this request already fixed."
+                fi
+            else
+                message="After reviewing your additional context, AutoPR found that the no-PR decision still applies ($NO_SAFE_ACTION_REASON)."
+            fi
             ;;
         *) return 0 ;;
     esac
