@@ -170,11 +170,18 @@ fi
 # observation dispatch. The monitor is intentionally outside the swap path, so
 # deleting its call would silently restore the original observability gap.
 ################################################################################
-if grep -q 'trigger_post_deploy_monitor matcha' "$UPDATE_EC2" \
-    && grep -q 'post-deploy-error-regression.yml' "$UPDATE_EC2"; then
+if grep -q 'trigger_post_deploy_automations matcha' "$UPDATE_EC2" \
+    && grep -q 'post-deploy-error-regression.yml' "$UPDATE_EC2" \
+    && grep -q 'admin-updates-autopublish.yml' "$UPDATE_EC2"; then
     check "update-ec2.sh retains post-deploy error-monitor dispatch" 0
 else
     check "update-ec2.sh retains post-deploy error-monitor dispatch" 1
+fi
+
+if ! grep -q 'server/scripts/generate_changelog.py' "$UPDATE_EC2"; then
+    check "deploy no longer races the production publisher with legacy Gemini generation" 0
+else
+    check "deploy no longer races the production publisher with legacy Gemini generation" 1
 fi
 
 ################################################################################

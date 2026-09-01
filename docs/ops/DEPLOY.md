@@ -34,3 +34,15 @@ and growth from its own initial snapshot; it is a regression signal, not an
 exact request error-rate calculation. A detected spike opens a deduplicated
 `deploy-regression` GitHub issue with normalized messages and query-free paths
 only. It never creates a PR, changes production data, or blocks deployment.
+
+## Post-deploy admin updates
+
+The same successful-swap hook also dispatches
+`admin-updates-autopublish.yml`. It runs on the self-hosted `matcha-autopr` Mac,
+checks active backend/frontend commit ancestry and production migration state,
+then has Luna/high draft the feature description and usage steps inside the
+credential-free AutoPR sandbox. A strict validator and fixed transaction publish
+only confirmed deployed entries; partial backend/frontend releases wait until all
+required components are live. Dispatch failure never rolls back a healthy deploy,
+but workflow failure opens a deduplicated ops issue. Full runbook:
+`docs/ops/ADMIN_UPDATES_AUTOPUBLISH.md`.

@@ -90,6 +90,7 @@ AUTOPR_REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 AUTOPR_WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 AUTOPR_ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
 AUTOPR_AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
+AUTOPR_ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 MSANDBOX_ATTACHMENTS_DIR="${MSANDBOX_ATTACHMENTS_DIR:-$PROJECT_ROOT/.msandbox/attachments}"
 MSANDBOX_ATTACHMENT_MAX_BYTES="${MSANDBOX_ATTACHMENT_MAX_BYTES:-52428800}"
 PRIMARY_COMPOSE=(docker compose --project-name "$PRIMARY_SANDBOX_PROJECT_NAME" --file "$COMPOSE_FILE")
@@ -480,7 +481,8 @@ detect_agentic_activity() {
     if [ "$primary_agent" = 1 ] || [ "$autopr_agent" = 1 ]; then found_local=1; fi
 
     if [ -x "$AUTOPR_GH_BIN" ] && command -v jq >/dev/null; then
-        for workflow in "$AUTOPR_ERROR_WORKFLOW" "$AUTOPR_AUDIT_WORKFLOW" "$AUTOPR_WORKFLOW"; do
+        for workflow in "$AUTOPR_ERROR_WORKFLOW" "$AUTOPR_AUDIT_WORKFLOW" \
+            "$AUTOPR_ADMIN_UPDATES_WORKFLOW" "$AUTOPR_WORKFLOW"; do
             if workflow_runs="$("$AUTOPR_GH_BIN" run list --repo "$AUTOPR_REPO" \
                 --workflow "$workflow" --branch main --limit 20 \
                 --json databaseId,status,url 2>/dev/null)"; then

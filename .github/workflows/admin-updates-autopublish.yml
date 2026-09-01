@@ -1,0 +1,203 @@
+name: Publish production admin updates
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_id:
+        description: "Deployment identifier (normally supplied by update-ec2.sh)"
+        required: false
+        type: string
+      deployed_at:
+        description: "UTC ISO-8601 deployment completion time"
+        required: false
+        type: string
+      target:
+        description: "matcha, backend, or frontend"
+        required: false
+        type: string
+      sha:
+        description: "Source SHA reported by the deploy"
+        required: false
+        type: string
+      source:
+        description: "github, laptop, or manual"
+        required: false
+        type: string
+      since_pr:
+        description: "Bootstrap override only: last PR to treat as already processed"
+        required: false
+        type: string
+
+# This workflow uses the same self-hosted Codex login and sealed msandbox as
+# matcha-autopr. GitHub/SSH stay on the trusted host; Luna receives only a
+# bounded release plan and read-only repository clone. The trusted publisher
+# accepts validated prose fields, not SQL, and performs one fixed transaction.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-admin-updates
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: [self-hosted, macOS, opencode]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false
+
+      - name: Require msandbox master switch
+        run: |
+          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+            echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
+            exit 1
+          fi
+
+      - name: Configure GitHub CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh auth status
+
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          umask 077
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Resolve active production release
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: ./scripts/kanban-autopr/resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"
+
+      - name: Read changelog watermark and existing ids
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: ./scripts/admin-updates/collect-prod-state.sh > "$RUNNER_TEMP/production-state.json"
+
+      - name: Build production-bounded drafting plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_DEPLOY_ID: ${{ inputs.deploy_id }}
+          INPUT_DEPLOYED_AT: ${{ inputs.deployed_at }}
+          INPUT_TARGET: ${{ inputs.target }}
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_SOURCE: ${{ inputs.source }}
+          INPUT_SINCE_PR: ${{ inputs.since_pr }}
+        run: |
+          deployed_at="$INPUT_DEPLOYED_AT"
+          [ -n "$deployed_at" ] || deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg deploy_id "${INPUT_DEPLOY_ID:-manual-$GITHUB_RUN_ID}" \
+            --arg deployed_at "$deployed_at" \
+            --arg target "${INPUT_TARGET:-manual}" \
+            --arg sha "${INPUT_SHA:-$GITHUB_SHA}" \
+            --arg source "${INPUT_SOURCE:-manual}" \
+            '{deploy_id:$deploy_id,deployed_at:$deployed_at,target:$target,sha:$sha,source:$source}' \
+            > "$RUNNER_TEMP/deployment.json"
+
+          ./scripts/admin-updates/collect.sh \
+            "$RUNNER_TEMP/production-context.json" \
+            "$RUNNER_TEMP/production-state.json" \
+            "$RUNNER_TEMP/deployment.json" \
+            "$RUNNER_TEMP/admin-updates-plan.json" \
+            "$INPUT_SINCE_PR"
+
+          echo "has_work=$(jq -r '.hasWork' "$RUNNER_TEMP/admin-updates-plan.json")" >> "$GITHUB_OUTPUT"
+          echo "needs_draft=$(jq -r '.needsDraft' "$RUNNER_TEMP/admin-updates-plan.json")" >> "$GITHUB_OUTPUT"
+          jq '{sourceWatermark,sourceStateUpdatedAt,mergeCursorOverlapHours,targetWatermark,candidates:(.candidates|length),units:(.units|length),automaticSkips:(.automaticSkips|length),deferred}' \
+            "$RUNNER_TEMP/admin-updates-plan.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Draft update content with Luna high
+        if: steps.plan.outputs.needs_draft == 'true'
+        timeout-minutes: 15
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
+        run: |
+          ./scripts/admin-updates/write-content.sh \
+            "$RUNNER_TEMP/admin-updates-plan.json" \
+            "$RUNNER_TEMP/production-context.json" \
+            "$RUNNER_TEMP/admin-updates-draft.json" \
+            "$RUNNER_TEMP/admin-updates-report.md"
+          cat "$RUNNER_TEMP/admin-updates-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create empty decision when only internal PRs advanced
+        if: steps.plan.outputs.has_work == 'true' && steps.plan.outputs.needs_draft != 'true'
+        run: |
+          jq '{schemaVersion:1,processedThroughPr:.targetWatermark,entries:[],skipped:[]}' \
+            "$RUNNER_TEMP/admin-updates-plan.json" > "$RUNNER_TEMP/admin-updates-draft.json"
+
+      - name: Publish validated entries to production
+        if: steps.plan.outputs.has_work == 'true'
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ./scripts/admin-updates/publish.sh \
+            "$RUNNER_TEMP/admin-updates-plan.json" \
+            "$RUNNER_TEMP/admin-updates-draft.json" \
+            "$RUNNER_TEMP/admin-updates-publish.json"
+          jq . "$RUNNER_TEMP/admin-updates-publish.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production state
+        if: steps.plan.outputs.has_work == 'true'
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ./scripts/admin-updates/collect-prod-state.sh > "$RUNNER_TEMP/production-state-after.json"
+          jq -e --slurpfile draft "$RUNNER_TEMP/admin-updates-draft.json" '
+            .last_pr_number >= $draft[0].processedThroughPr and
+            (([$draft[0].entries[] | select(.product == "matcha") | .id] - .existing.matcha) | length == 0) and
+            (([$draft[0].entries[] | select(.product == "tellus") | .id] - .existing.tellus) | length == 0)
+          ' "$RUNNER_TEMP/production-state-after.json" >/dev/null
+
+      - name: Record no-op
+        if: steps.plan.outputs.has_work != 'true'
+        run: echo "No newly deployed PRs are ready for changelog publication." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Recover publication alert
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf 'Production admin-update publication recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > "$RUNNER_TEMP/admin-updates-recovery.md"
+          ./scripts/ops-health/publish-issue.sh \
+            ops-health:admin-updates \
+            'ops: production admin updates failed' \
+            "$RUNNER_TEMP/admin-updates-recovery.md" \
+            ops-health --recover
+
+      - name: Publish failure alert
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf 'The post-deploy admin-update publisher failed before an authoritative verification.\n\nWorkflow: %s/%s/actions/runs/%s\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/admin-updates-failure.md"
+          ./scripts/ops-health/publish-issue.sh \
+            ops-health:admin-updates \
+            'ops: production admin updates failed' \
+            "$RUNNER_TEMP/admin-updates-failure.md" \
+            ops-health
+
+      - name: Delete production material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/matcha-prod.pem" \
+            "$RUNNER_TEMP/production-context.json" \
+            "$RUNNER_TEMP/production-state.json" \
+            "$RUNNER_TEMP/production-state-after.json" \
+            "$RUNNER_TEMP/deployment.json" \
+            "$RUNNER_TEMP/admin-updates-plan.json" \
+            "$RUNNER_TEMP/admin-updates-draft.json" \
+            "$RUNNER_TEMP/admin-updates-report.md" \
+            "$RUNNER_TEMP/admin-updates-publish.json"

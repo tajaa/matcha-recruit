@@ -267,7 +267,7 @@ cleanup() {
     ssh_cmd "docker builder prune -f" || true
 }
 
-trigger_post_deploy_monitor() {
+trigger_post_deploy_automations() {
     local target="$1"
     local deployed_at deploy_id sha source
     deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -276,10 +276,11 @@ trigger_post_deploy_monitor() {
     source="laptop"
     [ "${GITHUB_ACTIONS:-}" = "true" ] && source="github"
 
-    # The monitor is observational: a missing gh session, token, or temporary
-    # GitHub outage must never turn a healthy production swap into a failed deploy.
+    # Both follow-ups happen after the production swap. A missing gh session,
+    # token, or temporary GitHub outage must never turn a healthy swap into a
+    # failed deploy; each workflow reports its own authoritative failure.
     if ! command -v gh >/dev/null 2>&1; then
-        log_warn "Post-deploy error monitor not dispatched: gh CLI is unavailable"
+        log_warn "Post-deploy automations not dispatched: gh CLI is unavailable"
         return 0
     fi
     if gh workflow run post-deploy-error-regression.yml --ref main \
@@ -292,6 +293,18 @@ trigger_post_deploy_monitor() {
         log_success "Post-deploy error monitor dispatched ($deploy_id)"
     else
         log_warn "Could not dispatch post-deploy error monitor; deploy remains successful"
+    fi
+
+    if gh workflow run admin-updates-autopublish.yml --ref main \
+        -f deploy_id="$deploy_id" \
+        -f deployed_at="$deployed_at" \
+        -f target="$target" \
+        -f sha="$sha" \
+        -f source="$source"
+    then
+        log_success "Production admin-update publisher dispatched ($deploy_id)"
+    else
+        log_warn "Could not dispatch production admin-update publisher; deploy remains successful"
     fi
 }
 
@@ -412,11 +425,11 @@ show_status
 
 if [ "$UPDATE_MATCHA" = true ]; then
     if [ "$UPDATE_BACKEND" = true ] && [ "$UPDATE_FRONTEND" = true ]; then
-        trigger_post_deploy_monitor matcha
+        trigger_post_deploy_automations matcha
     elif [ "$UPDATE_BACKEND" = true ]; then
-        trigger_post_deploy_monitor backend
+        trigger_post_deploy_automations backend
     else
-        trigger_post_deploy_monitor frontend
+        trigger_post_deploy_automations frontend
     fi
 fi
 
@@ -447,17 +460,6 @@ if [ "$HOTFIX" = false ] && [ "$UPDATE_MATCHA" = true ]; then
             } >> "$GITHUB_STEP_SUMMARY"
         fi
     else
-        log_info "Generating changelog entries from merged PRs..."
-        CG_PY="server/venv/bin/python"; [ -x "$CG_PY" ] || CG_PY="python3"
-        CG_TIMEOUT="timeout"; command -v gtimeout >/dev/null 2>&1 && CG_TIMEOUT="gtimeout"
-        if command -v "$CG_TIMEOUT" >/dev/null 2>&1; then
-            "$CG_TIMEOUT" 600 "$CG_PY" server/scripts/generate_changelog.py \
-                || log_warn "Changelog generation failed or timed out after 10m (deploy unaffected). Run server/scripts/generate_changelog.py manually."
-        else
-            "$CG_PY" server/scripts/generate_changelog.py \
-                || log_warn "Changelog generation failed (deploy unaffected). Run server/scripts/generate_changelog.py manually."
-        fi
-
         log_info "Syncing test tenants (dev <-> prod)..."
         "$(dirname "$0")/sync-test-tenants.sh" --auto \
             || log_warn "Test-tenant sync failed (deploy unaffected). Run ./scripts/sync-test-tenants.sh manually."

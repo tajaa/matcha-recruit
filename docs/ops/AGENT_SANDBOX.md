@@ -307,7 +307,7 @@ command, so it also interrupts active work. Booting the runner out means a
 `workflow_dispatch` (the only trigger `kanban-autopr.yml` has) queues with no
 executor instead of running a gated no-op — it also idles the sibling
 `schema-drift-checks.yml` and `silent-error-autofix.yml`, which share this
-runner, plus `autopr-self-audit.yml`, until the next `msandbox start` (or
+runner, plus `autopr-self-audit.yml` and `admin-updates-autopublish.yml`, until the next `msandbox start` (or
 `AUTOPR_MANAGE_RUNNER=0` to opt out).
 The dispatcher, GitHub workflow, and dedicated model launcher independently
 require the marker, running primary workspace, loaded timer, and four live
