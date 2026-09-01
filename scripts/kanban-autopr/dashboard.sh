@@ -10,6 +10,7 @@ REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
 AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
+ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 REFRESH_SECONDS="${AUTOPR_DASHBOARD_REFRESH_SECONDS:-60}"
@@ -25,7 +26,7 @@ safe_gh() {
 }
 
 render_dashboard() {
-    local runs kanban_runs error_runs audit_runs open_prs open_kanban open_errors open_audits merged_prs cards selected selected_rc cutoff snapshot_tmp
+    local runs kanban_runs error_runs audit_runs admin_updates_runs open_prs open_kanban open_errors open_audits merged_prs cards selected selected_rc cutoff snapshot_tmp
     cutoff="$(utc_24_hours_ago)"
     kanban_runs="$(safe_gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch "$REF" --limit 100 \
         --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
@@ -33,8 +34,12 @@ render_dashboard() {
         --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
     audit_runs="$(safe_gh run list --repo "$REPO" --workflow "$AUDIT_WORKFLOW" --branch "$REF" --limit 100 \
         --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
-    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" '
-      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) + ($audit | map(. + {lane:"self-audit"})))
+    admin_updates_runs="$(safe_gh run list --repo "$REPO" --workflow "$ADMIN_UPDATES_WORKFLOW" --branch "$REF" --limit 100 \
+        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle)"
+    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" \
+      --argjson admin_updates "$admin_updates_runs" '
+      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) +
+       ($audit | map(. + {lane:"self-audit"})) + ($admin_updates | map(. + {lane:"admin-updates"})))
       | sort_by(.createdAt // "") | reverse')"
     open_kanban="$(safe_gh pr list --repo "$REPO" --state open --label autopr --limit 100 \
         --json number,title,isDraft,headRefName,updatedAt,labels,url)"

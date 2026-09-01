@@ -37,6 +37,13 @@ closed. New frontend images expose the build/SHA in `/version.json`; the resolve
 a compiled-bundle fallback only for older images that predate the manifest. The key is
 removed from the environment before Codex starts.
 
+The post-deploy admin-update publisher reuses this same sealed bridge and sandbox
+identity for a writing-only `gpt-5.6-luna`/high pass. It is dispatched by a completed
+deploy rather than the five-minute card clock, but the one-slot Mac runner serializes
+it with the other lanes. The model receives neither the SSH key nor database access;
+trusted code validates its fixed JSON and owns the narrow changelog transaction. See
+`docs/ops/ADMIN_UPDATES_AUTOPUBLISH.md`.
+
 ## Why per-project collaborator rows, not a company scope
 
 The four projects span **two different `companies` rows** — WerkWerk/Beetlejuse/Gummfit
@@ -106,7 +113,7 @@ from launchd-safe locations: the `autopr-enabled` marker created only by
 The workflow repeats the complete `msandbox autopr-ready` check before starting
 Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
 
-- **24h queue + PR dashboard** — active Kanban/error/self-audit workflow, the exact card
+- **24h queue + PR dashboard** — active Kanban/error/self-audit/admin-update workflow, the exact card
   `select.sh` would choose next, the Todo/Changes Requested queue, open bot PRs across
   all lanes, merged bot PRs, and workflow runs from the last 24 hours. Its selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
   refresh cannot create a cooldown marker or consume a card.

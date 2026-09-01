@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Mac-owned clock for both AutoPR lanes. Production errors get the first slot
-# whenever their last completed pass is stale; otherwise the clock advances
-# the Kanban queue. Neither workflow has a competing GitHub cron.
+# Mac-owned clock for the scheduled AutoPR lanes. Production errors get the
+# first slot whenever their last completed pass is stale; otherwise the clock
+# advances self-audit or Kanban. The externally dispatched admin-update lane
+# participates in the active-run interlock but is never scheduled here.
 set -euo pipefail
 
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 KANBAN_WORKFLOW="${AUTOPR_KANBAN_WORKFLOW:-${AUTOPR_WORKFLOW:-kanban-autopr.yml}}"
 ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
 AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
+ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 ERROR_MAX_AGE_SECONDS="${AUTOPR_ERROR_MAX_AGE_SECONDS:-600}"
 AUDIT_MAX_AGE_SECONDS="${AUTOPR_AUDIT_MAX_AGE_SECONDS:-21600}"
 REF="${AUTOPR_REF:-main}"
@@ -114,7 +116,7 @@ main() {
         exit 0
     fi
 
-    local kanban_runs error_runs audit_runs all_runs workflow reason
+    local kanban_runs error_runs audit_runs admin_updates_runs all_runs workflow reason
     if ! error_runs="$(get_workflow_runs_json "$ERROR_WORKFLOW")"; then
         # Fail closed: a blind dispatch could create a second queued coding job.
         log_event error error-run-list-failed
@@ -128,8 +130,13 @@ main() {
         log_event error audit-run-list-failed
         exit 1
     fi
+    if ! admin_updates_runs="$(get_workflow_runs_json "$ADMIN_UPDATES_WORKFLOW")"; then
+        log_event error admin-updates-run-list-failed
+        exit 1
+    fi
     all_runs="$(jq -cn --argjson errors "$error_runs" --argjson audit "$audit_runs" \
-        --argjson kanban "$kanban_runs" '$errors + $audit + $kanban')"
+        --argjson admin_updates "$admin_updates_runs" --argjson kanban "$kanban_runs" \
+        '$errors + $audit + $admin_updates + $kanban')"
     if has_active_workflow_run "$all_runs"; then
         log_event skip active-autopr-workflow "$all_runs"
         exit 0

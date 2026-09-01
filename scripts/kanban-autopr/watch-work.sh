@@ -10,6 +10,7 @@ REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
 WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 ERROR_WORKFLOW="${AUTOPR_ERROR_WORKFLOW:-silent-error-autofix.yml}"
 AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
+ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 REFRESH_SECONDS="${AUTOPR_WORK_REFRESH_SECONDS:-2}"
@@ -23,7 +24,7 @@ STEP_LINE=""
 LAST_STATUS_REFRESH=0
 
 refresh_workflow_status() {
-    local now runs kanban_runs error_runs audit_runs active details
+    local now runs kanban_runs error_runs audit_runs admin_updates_runs active details
     now="$(date +%s)"
     if [ "${AUTOPR_DASHBOARD_ONCE:-0}" != 1 ] \
         && [ $((now - LAST_STATUS_REFRESH)) -lt "$STATUS_REFRESH_SECONDS" ]; then
@@ -37,8 +38,12 @@ refresh_workflow_status() {
         --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
     audit_runs="$($GH_BIN run list --repo "$REPO" --workflow "$AUDIT_WORKFLOW" --limit 10 \
         --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
-    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" '
-      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) + ($audit | map(. + {lane:"self-audit"})))
+    admin_updates_runs="$($GH_BIN run list --repo "$REPO" --workflow "$ADMIN_UPDATES_WORKFLOW" --limit 10 \
+        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
+    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" \
+      --argjson admin_updates "$admin_updates_runs" '
+      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) +
+       ($audit | map(. + {lane:"self-audit"})) + ($admin_updates | map(. + {lane:"admin-updates"})))
       | sort_by(.createdAt // "") | reverse')"
     active="$(printf '%s' "$runs" | jq -c \
         '[.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))][0] // .[0] // {}' 2>/dev/null)"

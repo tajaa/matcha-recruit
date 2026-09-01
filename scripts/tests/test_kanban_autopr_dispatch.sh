@@ -24,6 +24,8 @@ if [ "$1 $2" = "run list" ]; then
     printf '%s\n' "${AUTOPR_TEST_ERROR_RUNS:-[]}"
   elif [[ "$*" == *"autopr-self-audit.yml"* ]]; then
     printf '%s\n' "${AUTOPR_TEST_AUDIT_RUNS:-[]}"
+  elif [[ "$*" == *"admin-updates-autopublish.yml"* ]]; then
+    printf '%s\n' "${AUTOPR_TEST_ADMIN_UPDATES_RUNS:-[]}"
   else
     printf '%s\n' "${AUTOPR_TEST_KANBAN_RUNS:-[]}"
   fi
@@ -92,6 +94,15 @@ AUTOPR_TEST_ERROR_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS='[{"databaseId":7,"status":"in_progress","event":"workflow_dispatch","createdAt":"2026-08-27T00:00:00Z","updatedAt":"2026-08-27T00:00:00Z","url":"x"}]' \
   run_dispatcher
 check "active work in either lane skips dispatch" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'active-autopr-workflow' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' \
+  AUTOPR_TEST_ADMIN_UPDATES_RUNS='[{"databaseId":10,"status":"queued","event":"workflow_dispatch","createdAt":"2026-08-31T00:00:00Z","updatedAt":"2026-08-31T00:00:00Z","url":"x"}]' \
+  run_dispatcher
+check "queued admin-update publication blocks a competing AutoPR dispatch" \
   $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'active-autopr-workflow' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"

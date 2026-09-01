@@ -246,8 +246,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# admin_updates + tellus_admin_updates — unchanged one-way dev->prod push
-# (not company-scoped, so the merge engine above never touches them).
+# admin_updates + tellus_admin_updates — additive dev->prod push. Production
+# is now also written by the post-deploy autopublisher, so prod must win on an
+# existing id; a stale dev row may never overwrite Luna-authored/corrected
+# production copy. New hand-authored dev ids still insert normally.
 # ---------------------------------------------------------------------------
 ADMIN_OUT="$OUT_DIR/sync_admin_updates.sql"
 log "==> Reading dev changelog tables (admin_updates, tellus_admin_updates)"
@@ -256,7 +258,7 @@ log "==> Reading dev changelog tables (admin_updates, tellus_admin_updates)"
 # then a hardcoded default, silently reading the changelog from a different
 # database than the one this run just diffed if the operator's dev DSN
 # differs (different db name/port).
-"$PY" scripts/export-dev-data.py --dsn "$DEV_URL" --table admin_updates --table tellus_admin_updates --mode update --scrub-emails --out "$ADMIN_OUT" >&2
+"$PY" scripts/export-dev-data.py --dsn "$DEV_URL" --table admin_updates --table tellus_admin_updates --scrub-emails --out "$ADMIN_OUT" >&2
 
 if has_mutations "$ADMIN_OUT"; then
   if [[ "$MODE" == "auto" ]]; then
