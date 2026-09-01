@@ -147,6 +147,27 @@ check "card remains Changes Requested with a visible auto-setup note" \
 check "publisher replies to the triggering additional-context note" \
   $(jq -e '.kind == "note" and .reply_to == "eeeeeeee-0000-4000-8000-000000000001" and (.body | contains("still needs human answers in PR #501"))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
 
+cat > "$TMP_DIR/already-fixed-card.json" <<'EOF'
+{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"investigate","pr_number":364,"progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-08-28T22:37:56Z] already_fixed","autopr_reconsideration_event_id":"ffffffff-0000-4000-8000-000000000002","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
+EOF
+cat > "$TMP_DIR/raw-already-fixed.json" <<'EOF'
+{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"request is clear"},"evidence_quality":{"score":20,"reason":"implementation is present"},"code_localization":{"score":20,"reason":"existing code identified"},"verification_strength":{"score":15,"reason":"existing tests cover it"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["existing behavior verified"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"already_fixed"}
+EOF
+cat > "$TMP_DIR/already-fixed-publication-copy.json" <<'EOF'
+{"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"After reviewing the additional context, AutoPR still found this request already fixed."}
+EOF
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-already-fixed.json" "$TMP_DIR/already-fixed.json"
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
+)
+
+check "already-fixed reconsideration leaves a threaded note with the covering PR" \
+  $(jq -e '.kind == "note" and .reply_to == "ffffffff-0000-4000-8000-000000000002" and (.body | startswith("After reviewing your additional context, AutoPR still found this request already fixed in PR #364."))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
+
 cat > "$TMP_DIR/rework-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"rework","progress_note":"from auto setup · build 849 · prod 1111111 · PR #501 · 🔴 C42 · awaiting answers · Human note","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
