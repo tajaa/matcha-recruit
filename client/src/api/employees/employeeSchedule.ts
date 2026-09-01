@@ -8,6 +8,7 @@ import type {
   AvailabilityState, EmployeeJobAssignment, EmployeeJobAssignmentPayload,
   EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
   ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
+  ScheduleAuditFilters, ScheduleAuditResponse,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -90,6 +91,30 @@ export function updateEmployeeSchedulingDetails(
  *  location — resolves which location to scope the page to. */
 export function fetchShift(shiftId: string) {
   return api.get<Shift>(`/employee-schedule/shifts/${shiftId}`)
+}
+
+function scheduleAuditQuery(filters: ScheduleAuditFilters): string {
+  const query = new URLSearchParams()
+  if (filters.start) query.set('start', filters.start)
+  if (filters.end) query.set('end', filters.end)
+  if (filters.shiftId) query.set('shift_id', filters.shiftId)
+  if (filters.actorUserId) query.set('actor_user_id', filters.actorUserId)
+  if (filters.employeeId) query.set('employee_id', filters.employeeId)
+  if (filters.limit != null) query.set('limit', String(filters.limit))
+  if (filters.offset != null) query.set('offset', String(filters.offset))
+  const value = query.toString()
+  return value ? `?${value}` : ''
+}
+
+export function fetchScheduleAuditLogs(filters: ScheduleAuditFilters) {
+  return api.get<ScheduleAuditResponse>(`/employee-schedule/audit-logs${scheduleAuditQuery(filters)}`)
+}
+
+export function exportScheduleAuditLogs(filters: Omit<ScheduleAuditFilters, 'limit' | 'offset'>) {
+  return api.download(
+    `/employee-schedule/audit-logs/export${scheduleAuditQuery(filters)}`,
+    'published-shift-audit-log.csv',
+  )
 }
 
 export function updateAssignmentNote(shiftId: string, employeeId: string, payload: AssignmentNotePayload) {

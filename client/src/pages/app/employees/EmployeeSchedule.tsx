@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp, CalendarClock,
+  History,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
@@ -30,6 +31,7 @@ import { useMe } from '../../../hooks/useMe'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../../components/shared/LocationPicker'
 import AutoSchedulesTab from '../../../components/employees/AutoSchedulesTab'
+import ScheduleAuditLog from '../../../components/employees/ScheduleAuditLog'
 import {
   MAX_BREAK_MINUTES,
   MAX_REQUIRED_STAFF,
@@ -172,9 +174,10 @@ export default function EmployeeSchedule() {
           <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
           <TabButton active={tab === 'auto-schedules'} onClick={() => setTab('auto-schedules')} icon={<CalendarClock className="h-4 w-4" />}>Auto schedules</TabButton>
           <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
+          <TabButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<History className="h-4 w-4" />}>Audit log</TabButton>
           {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
         </div>
-        <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
+        {tab !== 'audit' && <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />}
       </div>
 
       <div className="min-w-0 space-y-6 p-5">
@@ -246,6 +249,7 @@ export default function EmployeeSchedule() {
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
       {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} />}
       {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
+      {tab === 'audit' && <ScheduleAuditLog />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
       <ScheduleHelperWizard open={guideOpen} onClose={closeGuide} />
@@ -254,7 +258,7 @@ export default function EmployeeSchedule() {
 }
 
 function parseScheduleTab(value: string | null): EmployeeScheduleTab {
-  if (value === 'templates' || value === 'auto-schedules' || value === 'requests' || value === 'intelligence') return value
+  if (value === 'templates' || value === 'auto-schedules' || value === 'requests' || value === 'audit' || value === 'intelligence') return value
   return 'schedule'
 }
 

@@ -80,6 +80,49 @@ export interface Shift {
   assignments: ShiftAssignment[]
 }
 
+export type ScheduleAuditAction =
+  | 'shift.update'
+  | 'shift.delete'
+  | 'assignment.create'
+  | 'assignment.delete'
+
+export type ScheduleAuditEmployee = {
+  id: string
+  name: string | null
+}
+
+export type ScheduleAuditEntry = {
+  id: string
+  timestamp: string
+  shift_id: string | null
+  action: ScheduleAuditAction
+  modifying_user: {
+    id: string | null
+    name: string | null
+    email: string | null
+  }
+  assigned_employees: ScheduleAuditEmployee[]
+  fields: string[]
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  details: Record<string, unknown>
+}
+
+export type ScheduleAuditResponse = {
+  logs: ScheduleAuditEntry[]
+  total: number
+}
+
+export type ScheduleAuditFilters = {
+  start?: string
+  end?: string
+  shiftId?: string
+  actorUserId?: string
+  employeeId?: string
+  limit?: number
+  offset?: number
+}
+
 export interface ScheduleSummary {
   total_shifts: number
   published: number
