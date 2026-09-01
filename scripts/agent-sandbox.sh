@@ -28,6 +28,15 @@ call_v2_controller() {
         python3 -m scripts.msandbox --repo "$PROJECT_ROOT" "$@"
 }
 
+ensure_v2_system_plane() {
+    # Independent sessions and AutoPR are one operator-facing system. Direct
+    # wizard/session entry must heal the control plane just like bare
+    # `msandbox`; otherwise a durable agent tmux session can outlive a stopped
+    # dashboard and present a split state to the user.
+    "$SCRIPT_SOURCE" autopr-ready >/dev/null 2>&1 \
+        || "$SCRIPT_SOURCE" system up
+}
+
 OPEN_V2_WIZARD_AFTER_START=0
 if [ "$#" = 0 ]; then
     # Bare `msandbox` is the one-command system entrypoint. Bring up the
@@ -38,7 +47,17 @@ if [ "$#" = 0 ]; then
     set -- start
 fi
 case "${1:-}" in
-    wizard|session|worktree|pr|test|install|host|gc)
+    wizard)
+        ensure_v2_system_plane
+        run_v2_controller "$@"
+        ;;
+    session)
+        case "${2:-}" in
+            create|start|attach|shell) ensure_v2_system_plane ;;
+        esac
+        run_v2_controller "$@"
+        ;;
+    worktree|pr|test|install|host|gc)
         run_v2_controller "$@"
         ;;
     attach)
