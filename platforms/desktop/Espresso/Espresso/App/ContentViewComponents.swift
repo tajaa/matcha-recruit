@@ -41,22 +41,30 @@ struct GlassPanelModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+#if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             content
                 .glassEffect(.regular.tint(tint.opacity(min(tintOpacity, 0.35))), in: shape)
         } else {
-            content
-                .background {
-                    ZStack {
-                        VisualEffectView(material: material, blendingMode: blending)
-                        tint.opacity(tintOpacity)
-                    }
-                    .clipShape(shape)
-                }
-                .overlay(shape.stroke(stroke, lineWidth: 1))
-                .shadow(color: shadow ? .black.opacity(0.20) : .clear,
-                        radius: shadow ? 14 : 0, y: shadow ? 6 : 0)
+            fallback(content: content, shape: shape)
         }
+#else
+        fallback(content: content, shape: shape)
+#endif
+    }
+
+    private func fallback(content: Content, shape: RoundedRectangle) -> some View {
+        content
+            .background {
+                ZStack {
+                    VisualEffectView(material: material, blendingMode: blending)
+                    tint.opacity(tintOpacity)
+                }
+                .clipShape(shape)
+            }
+            .overlay(shape.stroke(stroke, lineWidth: 1))
+            .shadow(color: shadow ? .black.opacity(0.20) : .clear,
+                    radius: shadow ? 14 : 0, y: shadow ? 6 : 0)
     }
 }
 

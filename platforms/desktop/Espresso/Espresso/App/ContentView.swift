@@ -623,6 +623,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarBackground: some View {
+#if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             // Keep a solid inverse-mode foundation for legibility, then layer
             // the system glass over a strong tint for depth without washout.
@@ -632,6 +633,9 @@ struct ContentView: View {
         } else {
             appState.themeSidebar
         }
+#else
+        appState.themeSidebar
+#endif
     }
 
 }
