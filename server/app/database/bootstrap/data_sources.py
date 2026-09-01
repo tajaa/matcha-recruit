@@ -317,6 +317,7 @@ async def create_data_sources(conn):
                 output_tokens   INTEGER,
                 thinking_tokens INTEGER,
                 cached_tokens   INTEGER,
+                cache_write_tokens INTEGER,
                 cost_usd        NUMERIC(12,6),
                 latency_ms      INTEGER,
                 status          TEXT NOT NULL DEFAULT 'ok',

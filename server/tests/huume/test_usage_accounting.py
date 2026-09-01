@@ -45,11 +45,11 @@ class TestHuumeModelPricing:
         assert _MODEL in MODEL_PRICING
         assert MODEL_PRICING[_MODEL] != DEFAULT_PRICING
 
-    def test_admin_ledger_does_not_estimate_openai_cost(self):
-        # Per-feature admin rows use exact provider tokens and leave billed
-        # dollars to OpenAI's organization Costs API.
+    def test_admin_ledger_prices_openai_cost(self):
+        # Per-feature admin rows use exact provider tokens with Luna's
+        # published rates; the organization Costs API remains invoice-level.
         from app.core.services.ai_usage import PRICING
-        assert ("openai", LUNA) not in PRICING
+        assert PRICING[("openai", LUNA)] == (0.20, 1.20)
 
     def test_million_token_cost(self):
         cost = calculate_call_cost(LUNA, 1_000_000, 1_000_000)

@@ -204,8 +204,30 @@ def test_compute_cost_unknown_model_is_none():
     assert ai_usage.compute_cost("gemini", "gemini-9-nonexistent", 100, 100, 0) is None
 
 
-def test_compute_cost_does_not_estimate_openai_billing():
-    assert ai_usage.compute_cost("openai", "gpt-5.6-luna", 100, 100, 50) is None
+def test_compute_cost_prices_openai_without_double_counting_reasoning():
+    with_reasoning = ai_usage.compute_cost(
+        "openai", "gpt-5.6-luna", 100, 100, 50,
+    )
+    without_reasoning = ai_usage.compute_cost(
+        "openai", "gpt-5.6-luna", 100, 100, 0,
+    )
+    assert with_reasoning == pytest.approx(0.00014)
+    assert with_reasoning == without_reasoning
+
+
+def test_compute_cost_prices_openai_snapshot_cache_reads_and_writes():
+    cost = ai_usage.compute_cost(
+        "openai",
+        "gpt-5.6-luna-2026-08-01",
+        1_000_000,
+        1_000_000,
+        500_000,
+        cached_tokens=200_000,
+        cache_write_tokens=100_000,
+    )
+    # 700k ordinary input + 200k cached + 100k cache write + 1M output.
+    # Long-context multipliers: 2x input and 1.5x output.
+    assert cost == pytest.approx((0.14 + 0.004 + 0.025) * 2 + 1.20 * 1.5)
 
 
 def test_compute_cost_strips_models_prefix():
@@ -257,7 +279,10 @@ async def test_record_openai_response_uses_exact_provider_payload(recorded):
             "service_tier": "default",
             "usage": {
                 "input_tokens": 100,
-                "input_tokens_details": {"cached_tokens": 40},
+                "input_tokens_details": {
+                    "cached_tokens": 40,
+                    "cache_write_tokens": 10,
+                },
                 "output_tokens": 50,
                 "output_tokens_details": {"reasoning_tokens": 30},
                 "total_tokens": 150,
@@ -273,9 +298,10 @@ async def test_record_openai_response_uses_exact_provider_payload(recorded):
     assert row["service_tier"] == "default"
     assert row["input_tokens"] == 100
     assert row["cached_tokens"] == 40
+    assert row["cache_write_tokens"] == 10
     assert row["output_tokens"] == 50
     assert row["thinking_tokens"] == 30
-    assert row["cost_usd"] is None
+    assert row["cost_usd"] == pytest.approx(0.0000733)
 
 
 # --- proxy: fake client -----------------------------------------------------
