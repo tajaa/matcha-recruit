@@ -102,6 +102,26 @@ describe('ScheduleEditor', () => {
     expect(screen.getByText('Opener')).toBeInTheDocument()
   })
 
+  it('does not load schedule data for a stale location URL', async () => {
+    const setLocationId = vi.fn()
+    useLocationScopeMock.mockReturnValue({
+      locationId: 'deleted-location',
+      setLocationId,
+      locations: [{ id: 'loc1', name: 'Wilshire', city: 'Los Angeles', state: 'CA', is_active: true }],
+      loading: false,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=deleted-location']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(useEditorMock).toHaveBeenCalledWith('2026-08-09', '', expect.any(Object))
+    await waitFor(() => expect(setLocationId).toHaveBeenCalledWith(''))
+    expect(screen.getByText('Pick a location to see its schedule.')).toBeInTheDocument()
+  })
+
   it('opens location job and credential configuration from the editor toolbar', () => {
     useMeMock.mockReturnValue({
       me: { profile: { name: 'Jamie Rivera' } },
