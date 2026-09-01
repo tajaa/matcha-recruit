@@ -92,6 +92,15 @@ gh workflow run admin-updates-autopublish.yml --ref main -f since_date=2026-08-2
 
 Do not combine `since_date` and `since_pr`.
 
+For an immediate one-time backfill from the trusted host, bypass Actions and run the
+same bounded pipeline directly. Start with the read-only plan, then publish only after
+reviewing its count and deferred status:
+
+```sh
+SSH_KEY=/path/to/matcha-prod.pem ./scripts/admin-updates/backfill.sh 2026-08-27 --dry-run
+SSH_KEY=/path/to/matcha-prod.pem ./scripts/admin-updates/backfill.sh 2026-08-27 --publish
+```
+
 `server/scripts/generate_changelog.py` remains available only as historical/manual
 tooling. `update-ec2.sh` no longer invokes its Gemini/dev-database path, preventing it
 from racing or advancing state independently of the production-aware workflow.
