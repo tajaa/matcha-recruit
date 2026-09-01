@@ -34,6 +34,95 @@ _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 
+async def post_autopr_context_request(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: UUID,
+    expected_progress_note: str,
+    reason: str,
+) -> bool:
+    """Post one decision-bound Espresso request into the project chat.
+
+    The exact progress note is stored in message metadata. A reply can safely
+    become an ``autopr_additional_context`` event only while that same decision
+    is still current. Repeated publisher attempts are idempotent for the same
+    task+decision. Returns False when the task/decision/chat no longer exists.
+    """
+    expected = (expected_progress_note or "").strip()
+    why = " ".join((reason or "").split())[:600]
+    if not expected or not why:
+        raise ValueError("AutoPR context requests require a decision and reason")
+
+    from .project_service import ensure_discussion_channel
+    from .project_agent.chat import post_as_espresso
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT t.title, t.board_column, t.progress_note,
+                      p.company_id,
+                      (p.project_data->>'discussion_channel_id')::uuid AS channel_id
+               FROM mw_tasks t
+               JOIN mw_projects p ON p.id=t.project_id
+               WHERE t.id=$1 AND t.project_id=$2""",
+            task_id,
+            project_id,
+        )
+    if not row or (row["progress_note"] or "").strip() != expected:
+        return False
+
+    channel_id = row["channel_id"]
+    if channel_id is None:
+        try:
+            channel_id = await ensure_discussion_channel(project_id, actor_user_id)
+        except Exception:
+            logger.warning(
+                "Failed to resolve AutoPR context channel project=%s", project_id,
+                exc_info=True,
+            )
+            return False
+    if channel_id is None:
+        return False
+
+    async with get_connection() as conn:
+        already_posted = await conn.fetchval(
+            """SELECT EXISTS(
+                   SELECT 1 FROM channel_messages
+                   WHERE channel_id=$1
+                     AND metadata->>'kind'='autopr_context_request'
+                     AND metadata->>'task_id'=$2
+                     AND metadata->>'expected_progress_note'=$3
+               )""",
+            channel_id,
+            str(task_id),
+            expected,
+        )
+    if already_posted:
+        return True
+
+    safe_title = " ".join((row["title"] or "ticket").split())
+    safe_title = safe_title.replace("⟦", "").replace("⟧", "").replace("|", "/")[:200]
+    column = (row["board_column"] or "todo").replace("_", " ").title()
+    content = (
+        f"⟦ticket:{task_id}|{safe_title}|{column}⟧\n"
+        f"This ticket needs additional context because {why} "
+        "Reply to this Espresso message with the missing detail, or add it "
+        "from the ticket. Your reply will be attached to this exact AutoPR decision."
+    )
+    await post_as_espresso(
+        row["company_id"],
+        channel_id,
+        content,
+        metadata={
+            "kind": "autopr_context_request",
+            "project_id": str(project_id),
+            "task_id": str(task_id),
+            "expected_progress_note": expected,
+        },
+    )
+    return True
+
+
 async def broadcast_channel_message(channel_id: UUID, payload: dict) -> None:
     """Fan out a persisted channel message through the established bridge.
 

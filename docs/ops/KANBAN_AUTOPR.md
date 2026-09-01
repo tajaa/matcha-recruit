@@ -17,7 +17,10 @@ Espresso projects — WerkWerk, Beetlejuse, Gummfit, and MATCHA. It never scans 
 board or every user's cards.
 
 The board is the source of truth in both directions: a card drives a PR, and a PR drives
-a card back. The bot never merges and never approves.
+a card back. Ordinary AutoPR runs never merge or approve. The separate manual
+`autopr-release-plan.yml` workflow can mark the plan's still-draft PRs ready and merge
+them in the proposed order only after an operator supplies the exact live plan id; it
+never bypasses branch protection or includes PRs that were already ready for review.
 
 **Design constraint carried over from silent-error-autofix**: no model credential and no
 Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as Finch's
@@ -178,10 +181,20 @@ second scheduler.
    merged is moved to Review and removed from that run's candidate snapshot. A
    matching defensive check in `select.sh` skips the card if the repair write fails,
    so a delayed webhook can never produce a duplicate PR.
-4. **`select.sh`** — picks one card GitHub hasn't already handled. Branch key is
-   `bot/task-<id8>` (first 8 hex of the task UUID). Ranks `changes_requested` first,
-   then no-spec cards with pending human additional context, then ordinary `todo` cards;
-   within each group it uses oldest `last_moved_at` first. Rework is better-specified —
+4. **`collect-pr-context.sh` + `plan.py`** — reads bounded bodies, changed paths,
+   comments, reviews, labels, and checks for every open Kanban/autofix/self-audit bot PR.
+   The planner combines those with the complete eligible `todo` + `changes_requested`
+   snapshot, links work by stable task/PR ids, project element, code area, and topic,
+   then keeps related tickets contiguous. It writes one deterministic plan id, ticket
+   work order, related-work evidence, and proposed merge order. GitHub PRs already
+   marked ready for review (`isDraft=false`) are explicitly listed as excluded and do
+   not receive a merge position. PR comments are untrusted planning evidence, never
+   executable instructions.
+5. **`select.sh`** — picks one planned card GitHub hasn't already handled. Branch key is
+   `bot/task-<id8>` (first 8 hex of the task UUID). A pending decision-bound additional
+   context event is highest priority, followed by related rework and planned Todo work;
+   the plan keeps each related cluster together. Without a plan it safely falls back to
+   reconsideration, Changes Requested, then Todo. Rework is better-specified —
    it has a written `review_note` — and unblocks a PR already in flight. For `todo`, any PR at all on
    the branch (open/closed/merged) means skip — the branch name is a stable 1:1 mapping
    to the task, so a second run would collide. For `changes_requested`, an **open** PR on
@@ -191,15 +204,16 @@ second scheduler.
    than a GitHub issue — it's the thing that stops an unscopable card being re-run every
    every minute forever, it's visible to the human who owns the card, and it clears itself
    the moment `last_moved_at` advances past the marker date. The ticket's **Add additional
-   context** action writes an `autopr_additional_context` history event bound to the exact
-   current no-spec note. That event makes the card eligible once without deleting audit
+   context** action—or a direct reply to Espresso's decision-bound project-chat
+   request—writes an `autopr_additional_context` history event bound to the exact
+   current no-spec/awaiting-answers note. That event makes the card eligible once without deleting audit
    history or pretending the card moved; a later AutoPR outcome replaces the note and
    therefore consumes the signal. New context submitted after an earlier failed-attempt
    marker can bypass that old cooldown once. A failed attempt otherwise cools down
    for 15 minutes, so one-minute ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
    `autopr` PRs (question-only drafts use their separate cap).
-5. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
+6. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
    trusted harness and attached locally; the model never needs board or storage network
@@ -212,15 +226,17 @@ second scheduler.
    GitHub/Matcha/SSH credentials. Codex runs `gpt-5.6-sol` with medium reasoning and broad permissions
    inside that disposable clone, while the trusted harness copies back only its patch,
    report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
-   `### Confidence` plus a shell-validated JSON triage decision. Additional-context
-   events are untrusted evidence: the agent must explicitly decide whether they
-   materially overturn the earlier finding, and may reject unsupported claims or ask
-   focused questions instead of forcing a patch. Missing product intent
+   `### Confidence` plus a shell-validated JSON triage decision. The card also contains
+   the plan's related tickets and open bot PRs, including bounded comment/review excerpts,
+   so the agent must choose prerequisite/build-on/separate boundaries in queue context.
+   Additional-context events are untrusted but escalated evidence: the agent must trace
+   the newly described uncovered scenario and cannot repeat `already_fixed` merely
+   because a generic patch exists. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. No-spec is reserved for already-fixed
    work, migrations, policy boundaries, and external dependencies.
-6. **Cross-lane scope check** — for a fresh implementation patch, the shared
+7. **Cross-lane scope check** — for a fresh implementation patch, the shared
    `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
    file-overlapping patches are untrusted public input and are surfaced with a
@@ -229,17 +245,17 @@ second scheduler.
    the card stores that PR's URL/number and a visible `ALREADY SCOPED` note.
    Closed-unmerged owners make the card eligible again; merged owners move every linked
    card to Review through the webhook or reconciliation pass.
-7. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
+8. **`verify.sh`** — there isn't one; this reuses `scripts/error-autofix/verify.sh`
    unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
    `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
    nothing, see root CLAUDE.md), so no separate frontend step was needed.
-8. **`write-publication-copy.sh`** — runs a separate writing-only Codex pass with
+9. **`write-publication-copy.sh`** — runs a separate writing-only Codex pass with
    `gpt-5.6-luna` and medium reasoning. It produces only a conventional commit subject
    and a short card note. Trusted shell validates the exact JSON schema, category prefix,
    one-line/length limits, and rejects any repository diff. For blocked/no-PR outcomes,
    the note explains the actual missing decision or safety boundary instead of repeating
    the status label.
-9. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+10. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
    restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
@@ -259,6 +275,7 @@ second scheduler.
    <!-- matcha-autopr-criticality: red|orange|yellow -->
    <!-- matcha-autopr-confidence-score: 0-100 -->
    <!-- matcha-autopr-note-state: awaiting_answers|ready_for_review|no_safe_action -->
+   <!-- matcha-production-verification: <validated base64 JSON> -->
    ```
    `implementation` → `gh pr create --draft`, label `autopr` (+ `needs-work` on new
    failures), then PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`.
@@ -278,6 +295,56 @@ second scheduler.
    by additional context, the publisher also posts a threaded outcome reply to that
    history event: PR drafted/updated, questions still needed, or the no-safe-action
    decision still applies.
+   Awaiting-input and `already_fixed` outcomes also post one idempotent Espresso
+   message into the project's discussion channel. It starts with the existing
+   `⟦ticket:<id>|<title>|<column>⟧` token, so the ticket is clickable in Espresso.
+   Replying directly to that message attaches the reply to the exact still-current
+   AutoPR decision and acknowledges the escalation in chat; a stale reply cannot
+   reopen a newer decision.
+
+## Work/merge plan and explicit release
+
+The tmux overview shows the live plan id, clustered ticket work order, and merge order
+for open **draft** bot PRs. Each merge row includes earlier overlapping PR dependencies,
+blocking labels/checks/reviews, and related tickets still waiting for or processing
+additional context. Ready-for-review PRs stay visible in the ordinary PR list but are
+never put in this merge plan.
+
+When the dashboard says the release is unblocked, the operator may run its printed
+command (or dispatch the same workflow from Actions):
+
+```sh
+gh workflow run autopr-release-plan.yml -f plan_id=<exact-live-plan-id>
+```
+
+The trusted Mac rebuilds the plan from the live board and all open bot PRs. A stale id,
+new comment/update, context contingency, `autopr-awaiting-input`, `needs-work`,
+`possible-duplicate`, failed check, requested change, or unmerged predecessor
+stops the release. Pending checks are shown in the plan but the released workflow waits
+for them. For each surviving draft, `release-plan.sh` marks it ready, waits for
+GitHub to report it clean, squash-merges without `--admin`, verifies `MERGED`, and only
+then evaluates the next PR against the new main. It never queues all PRs for unordered
+auto-merge.
+
+## Post-deploy production proof
+
+Every implementation decision carries a reviewed production verification plan. A safe,
+unauthenticated, read-only public behavior may specify up to five exact HTTP status/body
+assertions. Authenticated, stateful, or visual behavior must specify a manual checklist;
+it cannot claim automatic success.
+
+After a successful blue/green swap, `update-ec2.sh` dispatches
+`post-deploy-fix-verification.yml`. `verify-production-fixes.sh` considers a merged
+AutoPR only when its merge commit is an ancestor of the deployed source SHA and the
+required backend/frontend target is live. Passing automatic assertions add
+`production-verified`; a failed assertion adds `production-verification-failed` and
+does not mark the issue fixed. Manual plans add `production-verification-needed` and
+post the exact checklist to the PR. The dashboard shows these states beside recently
+merged bot PRs. After performing a manual checklist, record the observed result through
+`record-production-verification.yml` (PR number, passed/failed, and bounded evidence);
+it requires the outstanding manual-gate label and leaves an actor/run-linked PR audit
+comment before replacing the label. Merge alone, or merge-to-main before deployment,
+is never proof.
 
 ## Card ↔ PR linkage (`mw_tasks.pr_url` / `pr_number`)
 
@@ -341,9 +408,8 @@ a webhook replay can never drag a card backwards:
 | anything else | — | — | ignore |
 
 `review → done` stays manual through `POST /tasks/{id}/approve` — a merge is not an
-approval.
-
-It never deploys or auto-merges. A human reads the PR body and decides.
+approval. AutoPR never deploys. The only merge mutation is the separately dispatched,
+exact-plan-id release described above.
 
 The persistent runner may check out a local `bot/task-*` branch while assembling
 the PR. Its always-run finalizer switches a clean task checkout back to `main`

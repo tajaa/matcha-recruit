@@ -101,11 +101,14 @@ extension TaskViewerSheet {
     var canRequestAutoPRReconsideration: Bool {
         guard let note = autoSetupProgressNote else { return false }
         let liveTask = liveAutoPRTask
-        return liveTask.status != "cancelled"
-            && ["todo", "changes_requested"].contains(liveTask.boardColumn)
-            && note.contains("[autopr:no-spec ")
+        let isAwaitingAnswers = note.contains("BLOCKED: AWAITING ANSWERS")
+            || note.lowercased().contains("answers needed")
+        let isNoSafeAction = note.contains("[autopr:no-spec ")
             && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
                 .contains(where: note.contains)
+        return liveTask.status != "cancelled"
+            && ["todo", "changes_requested"].contains(liveTask.boardColumn)
+            && (isAwaitingAnswers || isNoSafeAction)
     }
 
     var autoPRReconsiderationIsPending: Bool {
@@ -129,7 +132,7 @@ extension TaskViewerSheet {
                 .padding(.top, 3)
             } else if isAddingAutoPRContext {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Explain what AutoPR missed or attach evidence that changes this decision.")
+                    Text("Answer what AutoPR needs, explain what it missed, or attach new evidence.")
                         .font(.system(size: 10))
                         .foregroundColor(appState.themeTextSecondary)
                     noteComposer

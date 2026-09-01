@@ -21,6 +21,7 @@ RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-action
 CACHE_DIR="${AUTOPR_DASHBOARD_CACHE_DIR:-$USER_HOME/Library/Caches/matcha-kanban-autopr/dashboard}"
 CARD_SNAPSHOT="${AUTOPR_CARD_SNAPSHOT:-$USER_HOME/Library/Caches/matcha-kanban-autopr/cards.json}"
 DISPATCH_LOG="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
+PLAN_PY="${AUTOPR_PLAN_PY:-$SCRIPT_DIR/plan.py}"
 
 dashboard_now_epoch() {
     printf '%s\n' "${AUTOPR_DASHBOARD_NOW_EPOCH:-$(date +%s)}"
@@ -156,16 +157,17 @@ phase_label() {
 
 render_dashboard() {
     local cutoff kanban_runs error_runs audit_runs admin_updates_runs runs
-    local open_kanban open_errors open_audits open_prs merged_prs cards selected selected_rc
+    local open_kanban open_errors open_audits open_prs merged_prs cards bot_prs plan selected selected_rc
     local kanban_state error_state audit_state admin_state open_kanban_state open_errors_state
-    local open_audits_state merged_state board_state all_states source_state
+    local open_audits_state merged_state board_state bot_pr_state plan_state all_states source_state
     local active run_id run_lane run_status run_created run_title run_elapsed run_started current_id8=""
     local run_details run_details_state step_line phase branch id8 active_card project card_title
     local dispatch_line dispatch_ts dispatch_action dispatch_reason dispatch_time
     local queue_counts row_badge row_project row_title row_time row_when row_iso
     local pr_number pr_lane pr_state pr_title pr_created pr_flag
-    local merged_number merged_lane merged_title merged_created merged_at
+    local merged_number merged_lane merged_title merged_created merged_at merged_verification
     local recent_id recent_lane recent_result recent_created recent_updated
+    local plan_input_dir plan_id plan_merge_count plan_release_blockers plan_position plan_number plan_title plan_blocked
 
     cutoff="$(utc_24_hours_ago)"
     fetch_json kanban_runs kanban_state runs-kanban "$GH_BIN" run list --repo "$REPO" \
@@ -202,13 +204,31 @@ render_dashboard() {
         --json number,title,createdAt,mergedAt,headRefName,labels,url
 
     fetch_json cards board_state board-cards "$SCRIPT_DIR/collect.sh"
+    fetch_json bot_prs bot_pr_state bot-pr-context "$SCRIPT_DIR/collect-pr-context.sh"
+    plan='{"schema_version":1,"plan_id":"unavailable","work_order":[],"merge_order":[],"release_blockers":[],"ready_prs_excluded":[]}'
+    plan_state=unavailable
+    plan_input_dir="$CACHE_DIR/plan-input"
+    if mkdir -p "$plan_input_dir" 2>/dev/null \
+        && (umask 077; printf '%s' "$cards" > "$plan_input_dir/cards.json") 2>/dev/null \
+        && (umask 077; printf '%s' "$bot_prs" > "$plan_input_dir/prs.json") 2>/dev/null \
+        && python3 "$PLAN_PY" \
+            --cards "$plan_input_dir/cards.json" \
+            --prs "$plan_input_dir/prs.json" \
+            --output "$plan_input_dir/plan.json" \
+            --cards-output "$plan_input_dir/planned-cards.json" 2>/dev/null \
+        && jq -e '.schema_version == 1' "$plan_input_dir/plan.json" >/dev/null 2>&1 \
+        && jq -e 'type == "array"' "$plan_input_dir/planned-cards.json" >/dev/null 2>&1; then
+        plan="$(<"$plan_input_dir/plan.json")"
+        cards="$(<"$plan_input_dir/planned-cards.json")"
+        plan_state=live
+    fi
     write_card_snapshot "$cards"
     selected="$(AUTOPR_SELECT_READ_ONLY=true GITHUB_REPOSITORY="$REPO" \
         "$SCRIPT_DIR/select.sh" <(printf '%s' "$cards") 2>/dev/null)"
     selected_rc=$?
     [ "$selected_rc" -eq 0 ] || selected=""
 
-    all_states="$kanban_state $error_state $audit_state $admin_state $open_kanban_state $open_errors_state $open_audits_state $merged_state $board_state"
+    all_states="$kanban_state $error_state $audit_state $admin_state $open_kanban_state $open_errors_state $open_audits_state $merged_state $board_state $bot_pr_state $plan_state"
     if [[ "$all_states" == *unavailable* ]]; then
         source_state='DEGRADED · source unavailable'
     elif [[ "$all_states" == *stale* ]]; then
@@ -269,6 +289,37 @@ render_dashboard() {
     else
         printf ' · IDLE\n'
         printf '  No workflow is currently queued or running.\n'
+    fi
+
+    plan_id="$(printf '%s' "$plan" | jq -r '.plan_id // "unavailable"')"
+    printf '\nPLAN · %s · NOT-READY PRS ONLY\n' "$plan_id"
+    if [ "$plan_state" != live ]; then
+        printf '  unavailable · existing queue remains visible below\n'
+    else
+        printf '  WORK ORDER\n'
+        printf '%s' "$plan" | jq -r '.work_order[:5][] |
+          [(.position | tostring), .cluster_id, (if .blocked then "CONTEXT" elif .board_column == "changes_requested" then "REWORK" else "TODO" end), (.title[0:52])] | @tsv
+        ' | while IFS=$'\t' read -r plan_position row_project row_badge plan_title; do
+            printf '    %-2s %-4s %-8s %s\n' "$plan_position" "$row_project" "$row_badge" "$plan_title"
+        done
+        plan_merge_count="$(printf '%s' "$plan" | jq '.merge_order | length')"
+        printf '  MERGE ORDER · %s draft(s)\n' "$plan_merge_count"
+        if [ "$plan_merge_count" -eq 0 ]; then
+            printf '    none · PRs already ready for review are deliberately excluded\n'
+        else
+            printf '%s' "$plan" | jq -r '.merge_order[:6][] |
+              [(.position | tostring), (.pr_number | tostring), (.title[0:48]),
+               (((.blockers // []) + ([.context_dependencies[]?.state])) | join(", "))] | @tsv
+            ' | while IFS=$'\t' read -r plan_position plan_number plan_title plan_blocked; do
+                printf '    %-2s #%-4s %-48s%s\n' "$plan_position" "$plan_number" "$plan_title" "${plan_blocked:+ · BLOCKED: $plan_blocked}"
+            done
+        fi
+        plan_release_blockers="$(printf '%s' "$plan" | jq '.release_blockers | length')"
+        if [ "$plan_merge_count" -gt 0 ] && [ "$plan_release_blockers" -eq 0 ]; then
+            printf '  RELEASE gh workflow run autopr-release-plan.yml -f plan_id=%s\n' "$plan_id"
+        elif [ "$plan_release_blockers" -gt 0 ]; then
+            printf '  RELEASE BLOCKED · %s unresolved review/check/context condition(s)\n' "$plan_release_blockers"
+        fi
     fi
 
     printf '\nNEXT'
@@ -337,10 +388,14 @@ render_dashboard() {
       | sort_by(.mergedAt) | reverse | .[:5][] |
       [(.number | tostring),
        (if ([.labels[].name] | index("autopr")) then "KANBAN" elif ([.labels[].name] | index("autofix")) then "ERROR" else "AUDIT" end),
-       (.title[0:40]), (.createdAt // ""), (.mergedAt // "")] | @tsv
-    ' | while IFS=$'\t' read -r merged_number merged_lane merged_title merged_created merged_at; do
-        printf '  #%-4s %-6s %-40s %8s · %s\n' "$merged_number" "$merged_lane" "$merged_title" \
-            "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")"
+       (.title[0:40]), (.createdAt // ""), (.mergedAt // ""),
+       (if ([.labels[].name] | index("production-verified")) then "PROD VERIFIED"
+        elif ([.labels[].name] | index("production-verification-failed")) then "PROD FAILED"
+        elif ([.labels[].name] | index("production-verification-needed")) then "PROD CHECK NEEDED"
+        else "AWAITING DEPLOY/CHECK" end)] | @tsv
+    ' | while IFS=$'\t' read -r merged_number merged_lane merged_title merged_created merged_at merged_verification; do
+        printf '  #%-4s %-6s %-40s %8s · %s · %s\n' "$merged_number" "$merged_lane" "$merged_title" \
+            "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")" "$merged_verification"
     done
 
     printf '\nRECENT RUNS · DURATION · PACIFIC\n'

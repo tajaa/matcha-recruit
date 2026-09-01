@@ -1,0 +1,71 @@
+name: Record manual production verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Merged AutoPR number carrying production-verification-needed"
+        required: true
+        type: string
+      result:
+        description: "Observed result in production"
+        required: true
+        type: choice
+        options:
+          - passed
+          - failed
+      evidence:
+        description: "What was tested and what was observed (no secrets/customer data)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate the outstanding manual gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json state,labels --jq '
+              .state == "MERGED"
+              and ([.labels[].name] | index("production-verification-needed") != null)
+            ' | grep -qx true
+
+      - name: Record result on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          RESULT: ${{ inputs.result }}
+          EVIDENCE: ${{ inputs.evidence }}
+        run: |
+          evidence="$(printf '%s' "$EVIDENCE" | tr '\r\n' ' ' | cut -c1-1000)"
+          [ -n "$evidence" ]
+          label=production-verification-failed
+          heading='Manual production verification failed'
+          if [ "$RESULT" = passed ]; then
+            label=production-verified
+            heading='Manual production verification passed'
+          fi
+          body_file="$RUNNER_TEMP/manual-production-verification.md"
+          {
+            echo "## $heading"
+            echo
+            echo "Recorded by \`$GITHUB_ACTOR\` after following the reviewed production checklist."
+            echo
+            echo "$evidence"
+            echo
+            echo "[Audit workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+          } > "$body_file"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$body_file"
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --remove-label production-verification-needed --add-label "$label"

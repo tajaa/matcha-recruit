@@ -41,6 +41,8 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
+PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
+PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
 COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
     || die "publication copy is missing a commit subject"
 CARD_NOTE="$(jq -er '.card_note | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
@@ -146,6 +148,18 @@ post_reconsideration_reply() {
     fi
 }
 
+post_context_request() {
+    local reason="$1" expected_note="$2"
+    if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
+        "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
+            '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
+        # The card/PR state remains authoritative; surface chat delivery loss
+        # without rolling back an otherwise complete publication.
+        printf 'kanban-autopr: warning: could not post Espresso context request for task %s\n' \
+            "$TASK_ID" >&2
+    fi
+}
+
 BRANCH="bot/task-$ID8"
 
 existing_feedback_checkpoint() {
@@ -165,6 +179,7 @@ render_body() {
         echo "<!-- matcha-autopr-criticality: $CRITICALITY -->"
         echo "<!-- matcha-autopr-confidence-score: $CONFIDENCE_SCORE -->"
         echo "<!-- matcha-autopr-note-state: $NOTE_STATE -->"
+        echo "<!-- matcha-production-verification: $PRODUCTION_VERIFICATION_B64 -->"
         [ -z "$NO_SAFE_ACTION_REASON" ] || echo "<!-- matcha-autopr-no-safe-action-reason: $NO_SAFE_ACTION_REASON -->"
         echo "<!-- matcha-feedback-comment-id: ${comment_id:-none} -->"
         echo "<!-- matcha-feedback-review-id: ${review_id:-none} -->"
@@ -185,6 +200,22 @@ render_body() {
         cat "$REPORT_FILE"
         echo
         cat "$VERIFICATION_FILE"
+        echo
+        echo "## Production verification"
+        jq -r '
+          .production_verification |
+          "**Target** " + .target + " · **Mode** " + .mode + "\n\n" +
+          .reason + "\n\n" +
+          (if .mode == "automatic_http" then
+             (.checks | map("- `GET " + .path + "` → " + (.expected_status | tostring) +
+               (if (.body_contains // "") != "" then "; contains `" + .body_contains + "`" else "" end) +
+               (if (.body_absent // "") != "" then "; excludes `" + .body_absent + "`" else "" end)) | join("\n"))
+           else
+             (.steps | to_entries | map(((.key + 1) | tostring) + ". " + .value) | join("\n"))
+           end)
+        ' "$DECISION_FILE"
+        echo
+        echo "_This check becomes eligible only after this merge is present in the deployed production SHA._"
         echo
         echo "_Built by [this workflow run]($RUN_URL)._"
     } > "$output_file"
@@ -323,6 +354,9 @@ if [ "$OUTCOME" = no_safe_action ]; then
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
                 '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
+        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+            post_context_request "$CARD_NOTE" "$origin_note"
+        fi
         post_reconsideration_reply "$existing_open_pr"
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
@@ -331,6 +365,9 @@ if [ "$OUTCOME" = no_safe_action ]; then
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
+        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+            post_context_request "$CARD_NOTE" "$origin_note"
+        fi
         post_reconsideration_reply
         echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     fi
@@ -384,6 +421,9 @@ mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \
         --arg note "$origin_note" \
         '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
+if [ "$AWAITING_HUMAN" = true ]; then
+    post_context_request "$CARD_NOTE" "$origin_note"
+fi
 post_reconsideration_reply "$published_pr"
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"

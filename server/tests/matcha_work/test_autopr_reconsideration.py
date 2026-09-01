@@ -127,6 +127,30 @@ async def test_reconsideration_rejects_non_no_spec_task(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_awaiting_answers_accepts_chat_or_ticket_context(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = (
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 900 · "
+        "prod abc1234 · PR #501 · note: Which jobs screen is affected?"
+    )
+    conn = _ReconsiderationConn(current, board_column="changes_requested")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    monkeypatch.setattr(svc, "_notify_task_comment", AsyncMock())
+
+    result = await svc.request_autopr_reconsideration(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        expected_progress_note=current,
+        body="The jobs editor at /work/jobs is the affected screen.",
+    )
+
+    assert result["autopr_reconsideration_pending"] is True
+    assert json.loads(conn.insert_args[4])["kind"] == "autopr_additional_context"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("board_column", "status"),
     [

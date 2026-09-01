@@ -172,10 +172,11 @@ fi
 ################################################################################
 if grep -q 'trigger_post_deploy_automations matcha' "$UPDATE_EC2" \
     && grep -q 'post-deploy-error-regression.yml' "$UPDATE_EC2" \
-    && grep -q 'admin-updates-autopublish.yml' "$UPDATE_EC2"; then
-    check "update-ec2.sh retains post-deploy error-monitor dispatch" 0
+    && grep -q 'admin-updates-autopublish.yml' "$UPDATE_EC2" \
+    && grep -q 'post-deploy-fix-verification.yml' "$UPDATE_EC2"; then
+    check "update-ec2.sh retains post-deploy observation and fix-verification dispatches" 0
 else
-    check "update-ec2.sh retains post-deploy error-monitor dispatch" 1
+    check "update-ec2.sh retains post-deploy observation and fix-verification dispatches" 1
 fi
 
 if ! grep -q 'server/scripts/generate_changelog.py' "$UPDATE_EC2"; then

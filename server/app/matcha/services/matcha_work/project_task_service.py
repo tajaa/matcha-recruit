@@ -176,7 +176,7 @@ async def request_autopr_reconsideration(
     body: Optional[str] = None,
     attachment_ids: Optional[list[UUID]] = None,
 ) -> Optional[dict]:
-    """Attach human evidence to one exact AutoPR no-safe-action decision.
+    """Attach human evidence to one exact AutoPR context-blocked decision.
 
     The history event is the durable retry signal. It stores the full current
     progress note in autopr_reconsideration_of; the task-list query only
@@ -220,9 +220,12 @@ async def request_autopr_reconsideration(
                 raise AutoPRReconsiderationConflict(
                     "The AutoPR decision changed; refresh the ticket and try again"
                 )
-            if not _AUTOPR_NO_SPEC_RE.search(current_note):
+            waiting_for_answers = current_note.startswith(
+                "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"
+            )
+            if not _AUTOPR_NO_SPEC_RE.search(current_note) and not waiting_for_answers:
                 raise AutoPRReconsiderationConflict(
-                    "This ticket no longer has a reconsiderable AutoPR no-PR decision"
+                    "This ticket no longer has an AutoPR decision awaiting context"
                 )
 
             metadata: dict = {

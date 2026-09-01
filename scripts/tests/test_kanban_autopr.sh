@@ -381,6 +381,7 @@ check "investigation context reserves bounded production diagnostics" \
 
 check "investigation normalizes validated confidence and triage" \
     $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
+cp "$TMP_DIR/decision.json" "$TMP_DIR/publication-decision.json"
 
 check "investigation invokes Sol medium and mirrors Codex output to the live-work log" \
     $(grep -q 'CODEX LIVE STREAM' "$TMP_DIR/live-work.log" \
@@ -542,7 +543,7 @@ printf '%s\n' '## Verification' '' 'Focused checks passed.' > "$TMP_DIR/publicat
 
 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/luna-args" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
-  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/decision.json" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/publication-decision.json" \
   "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/publication-copy.json" \
   >"$TMP_DIR/publication-command.log" 2>&1
 publication_copy_rc=$?
@@ -557,7 +558,7 @@ check "publication writer uses Luna medium and validates its bounded output" \
 jq '.category = "feat"' "$TMP_DIR/card.json" > "$TMP_DIR/feat-card.json"
 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/feat-luna-args" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
-  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/feat-card.json" "$TMP_DIR/decision.json" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/feat-card.json" "$TMP_DIR/publication-decision.json" \
   "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/feat-publication-copy.json" \
   >/dev/null 2>&1
 feat_publication_copy_rc=$?
@@ -569,7 +570,7 @@ check "publication writer repairs a model-selected commit prefix without droppin
 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/commit-luna-args" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
   "$AUTOPR_DIR/write-commit-subject.sh" fix "$TMP_DIR/commit-subject.json" \
-  -f "$TMP_DIR/card.json" -f "$TMP_DIR/decision.json" -f "$TMP_DIR/report.md" \
+  -f "$TMP_DIR/card.json" -f "$TMP_DIR/publication-decision.json" -f "$TMP_DIR/report.md" \
   -f "$TMP_DIR/publication-verification.md" >/dev/null 2>&1
 commit_subject_rc=$?
 check "commit-subject writer uses Luna medium and validates its bounded output" \
@@ -581,7 +582,7 @@ check "commit-subject writer uses Luna medium and validates its bounded output" 
 
 CODEX_STUB_EDIT=1 PATH="$TMP_DIR/bin:$PATH" CODEX_STUB_ARGS="$TMP_DIR/luna-edit-args" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/publication-runtime" \
-  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/decision.json" \
+  "$AUTOPR_DIR/write-publication-copy.sh" "$TMP_DIR/card.json" "$TMP_DIR/publication-decision.json" \
   "$TMP_DIR/report.md" "$TMP_DIR/publication-verification.md" "$TMP_DIR/publication-copy-edit.json" \
   >/dev/null 2>&1
 publication_edit_rc=$?
@@ -590,7 +591,7 @@ check "publication writer rejects Luna repository edits before applying them" \
       && [ ! -e "$REPO_ROOT/client/src/luna-edit.ts" ] \
       && echo 0 || echo 1)
 
-cp "$TMP_DIR/decision.json" "$TMP_DIR/invalid-decision.json"
+cp "$TMP_DIR/publication-decision.json" "$TMP_DIR/invalid-decision.json"
 jq '.outcome = "questions_only" | .questions = [] | .safe_changes_present = false' \
     "$TMP_DIR/invalid-decision.json" > "$TMP_DIR/invalid-decision.next.json"
 mv "$TMP_DIR/invalid-decision.next.json" "$TMP_DIR/invalid-decision.json"

@@ -1,0 +1,60 @@
+name: Release AutoPR merge plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_id:
+        description: "Exact live plan id shown on the AutoPR dashboard"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autopr-merge-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # The board credential is intentionally local to this trusted Mac and is
+    # needed to prove context contingencies are resolved before any mutation.
+    runs-on: [self-hosted, macOS, opencode]
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          clean: false
+
+      - name: Require AutoPR control plane
+        run: ./scripts/agent-sandbox.sh autopr-ready
+
+      - name: Rebuild authoritative live plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          ./scripts/kanban-autopr/collect.sh > "$RUNNER_TEMP/cards.json"
+          ./scripts/kanban-autopr/reconcile-merged-cards.sh "$RUNNER_TEMP/cards.json" \
+            > "$RUNNER_TEMP/reconciled-cards.json"
+          ./scripts/kanban-autopr/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
+          python3 ./scripts/kanban-autopr/plan.py \
+            --cards "$RUNNER_TEMP/reconciled-cards.json" \
+            --prs "$RUNNER_TEMP/bot-prs.json" \
+            --output "$RUNNER_TEMP/plan.json" \
+            --cards-output "$RUNNER_TEMP/planned-cards.json"
+          jq '{plan_id, merge_order, release_blockers, ready_prs_excluded}' \
+            "$RUNNER_TEMP/plan.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release in dependency order
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          AUTOPR_RELEASE_EXECUTE: "true"
+          EXPECTED_PLAN_ID: ${{ inputs.plan_id }}
+        run: |
+          [[ "$EXPECTED_PLAN_ID" =~ ^[0-9a-f]{12}$ ]]
+          ./scripts/kanban-autopr/release-plan.sh \
+            "$RUNNER_TEMP/plan.json" "$EXPECTED_PLAN_ID"

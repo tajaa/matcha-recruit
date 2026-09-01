@@ -25,6 +25,24 @@ _autopr_decision_schema_ok() {
              and all(.[]; (.key | type == "string" and length > 0)
                          and (.label | type == "string" and length > 0)
                          and (.impact | type == "string" and length > 0)));
+      def valid_production_check:
+        (.path | type == "string" and startswith("/") and length <= 500)
+        and (.expected_status | type == "number" and floor == . and . >= 100 and . <= 599)
+        and ((.body_contains // "") | type == "string" and length <= 200)
+        and ((.body_absent // "") | type == "string" and length <= 200);
+      def valid_production_verification:
+        type == "object"
+        and (.target | IN("backend", "frontend", "both"))
+        and (.mode | IN("automatic_http", "manual"))
+        and (.reason | type == "string" and length > 0 and length <= 600)
+        and (.checks | type == "array")
+        and (.steps | type == "array" and all(.[]; type == "string" and length > 0 and length <= 500))
+        and (if .mode == "automatic_http" then
+               (.checks | length >= 1 and length <= 5 and all(.[]; valid_production_check))
+               and (.steps | length == 0)
+             else
+               (.checks | length == 0) and (.steps | length >= 1 and length <= 8)
+             end);
       type == "object"
       and .schema_version == 1
       and (.outcome | IN("implementation", "partial_implementation", "questions_only", "no_safe_action"))
@@ -39,6 +57,9 @@ _autopr_decision_schema_ok() {
       and bounded("code_localization"; 20)
       and bounded("verification_strength"; 15)
       and bounded("production_alignment"; 15)
+      and ((.production_verification // {
+        target:"both",mode:"manual",reason:"No production plan supplied",checks:[],steps:["Verify the reported behavior in production."]
+      }) | valid_production_verification)
       and (
         if .outcome == "implementation" then
           total >= 75 and .safe_changes_present and (.questions | length == 0) and .no_safe_action_reason == null
@@ -68,7 +89,14 @@ autopr_normalize_decision() {
       . + {
         confidence_score: total,
         confidence_band: (if total >= 75 then "high" elif total >= 45 then "medium" else "low" end),
-        awaiting_human: (.outcome == "partial_implementation" or .outcome == "questions_only")
+        awaiting_human: (.outcome == "partial_implementation" or .outcome == "questions_only"),
+        production_verification: (.production_verification // {
+          target: "both",
+          mode: "manual",
+          reason: "The investigation did not supply an executable production check.",
+          checks: [],
+          steps: ["Reproduce the reported ticket behavior against the deployed production build."]
+        })
       }
     ' "$raw_file" > "$normalized_file"
 }

@@ -1,6 +1,7 @@
 """Persist and fan out ordinary Espresso chat messages from API or Celery."""
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 from app.database import connection_or_direct
@@ -8,18 +9,27 @@ from app.database import connection_or_direct
 from .identity import ensure_espresso_bot_user
 
 
-async def post_as_espresso(company_id: UUID, channel_id: UUID, content: str) -> None:
+async def post_as_espresso(
+    company_id: UUID,
+    channel_id: UUID,
+    content: str,
+    *,
+    metadata: dict | None = None,
+) -> None:
     message = (content or "").strip()[:4000]
     if not message:
         return
     async with connection_or_direct() as conn:
         bot_id = await ensure_espresso_bot_user(conn, company_id)
         row = await conn.fetchrow(
-            """INSERT INTO channel_messages (channel_id, sender_id, content)
-               VALUES ($1, $2, $3) RETURNING id, created_at""",
+            """INSERT INTO channel_messages
+                   (channel_id, sender_id, content, metadata)
+               VALUES ($1, $2, $3, $4::jsonb)
+               RETURNING id, created_at""",
             channel_id,
             bot_id,
             message,
+            json.dumps(metadata or {}),
         )
     # Reuse the established Matcha Work -> Werk fan-out bridge. This avoids a
     # new cross-package manager import and keeps REST/WS message shapes aligned.
@@ -41,4 +51,5 @@ async def post_as_espresso(company_id: UUID, channel_id: UUID, content: str) -> 
         "mentioned_user_ids": [],
         "client_message_id": None,
         "message_type": "message",
+        "metadata": metadata or {},
     })
