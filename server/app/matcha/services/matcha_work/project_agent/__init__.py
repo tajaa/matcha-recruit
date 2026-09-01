@@ -1,1 +1,1 @@
-"""Read-only project agents for Matcha Work collaboration chats."""
+"""Read-only repository agents for project chat answers and ticket drafts."""

@@ -35,9 +35,14 @@ struct AIComposeBar: View {
                     .foregroundColor(appState.themeText)
                     .frame(maxWidth: .infinity)
                     .onSubmit { submit() }
-                    .help("e.g. \"fix the 503 in console <error> and assign haley\"")
+                    .help("Espresso reads the connected repo and drafts a reviewable ticket. e.g. \"add saved project filters\"")
                 if isDrafting {
-                    ProgressView().controlSize(.small)
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.small)
+                        Text("Reading repo…")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
                 } else {
                     Button(action: submit) {
                         Text("Draft")

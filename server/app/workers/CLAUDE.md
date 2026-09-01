@@ -10,10 +10,12 @@ Moved verbatim from root `CLAUDE.md`'s Feature Flags table. Root keeps a one-lin
 
 - **Workers are pool-free — shared service code must not assume a pool.** `celery_app.py` deliberately never calls `init_pool` (each task runs its own `asyncio.run()` loop; an asyncpg pool bound to another loop can't be reused). `database.connection_or_direct()` yields a pooled connection when one exists and a raw one otherwise — use it in shared code that runs in **both** worlds. This is load-bearing: `rate_limiter` and `platform_settings` (the model-mode lookup) sit on the path of **every Gemini call in the codebase** and hard-required the pool, so **no Celery task could call Gemini at all** — it raised in `check_limit` *before* the API call and surfaced only as research that mysteriously produced nothing. Prefer an explicit `conn=` param on worker paths (as `get_recent_corrections` now takes); `connection_or_direct` is for the narrow middle with no caller context.
 
-`tasks/project_agent.py` follows that rule for `@espresso`: the WebSocket path
-persists a queued `mw_project_agent_runs` row, and the pool-free worker performs
-bounded GitHub reads plus Gemini calls before posting the answer to project chat.
-Worker startup reconciles queued/running rows older than 15 minutes to `failed`.
+`tasks/project_agent.py` follows that rule for Espresso's two project tasks:
+the WebSocket path persists `repo_question` runs, while the desktop board's
+idempotent REST enqueue persists `task_draft` runs. The pool-free worker performs
+the same bounded, audited GitHub reads for both; questions post to project chat,
+while drafts are polled into the review sheet. Worker startup reconciles
+queued/running rows older than 15 minutes to `failed`.
 
 
 ## ir_deadline_alerts (moved from root Background Workers)

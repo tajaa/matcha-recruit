@@ -21,7 +21,7 @@ def _tool(
     )
 
 
-def declarations() -> list[types.FunctionDeclaration]:
+def _read_declarations() -> list[types.FunctionDeclaration]:
     string = lambda description="": types.Schema(type=types.Type.STRING, description=description)
     integer = lambda description="": types.Schema(type=types.Type.INTEGER, description=description)
     return [
@@ -46,10 +46,48 @@ def declarations() -> list[types.FunctionDeclaration]:
             },
             ["path"],
         ),
+    ]
+
+
+def declarations() -> list[types.FunctionDeclaration]:
+    string = lambda description="": types.Schema(type=types.Type.STRING, description=description)
+    return [
+        *_read_declarations(),
         _tool(
             "answer_question",
             "Finish with the grounded answer that will be posted to project chat.",
             {"answer": string("Concise Markdown with source path and line citations")},
             ["answer"],
+        ),
+    ]
+
+
+def task_draft_declarations() -> list[types.FunctionDeclaration]:
+    string = lambda description="": types.Schema(type=types.Type.STRING, description=description)
+    strings = lambda description="": types.Schema(
+        type=types.Type.ARRAY,
+        description=description,
+        items=types.Schema(type=types.Type.STRING),
+    )
+    return [
+        *_read_declarations(),
+        _tool(
+            "draft_ticket",
+            "Finish with one repo-grounded, reviewable kanban ticket draft.",
+            {
+                "title": string("Short imperative title, at most 80 characters"),
+                "description": string("Concise Markdown that explains scope and acceptance criteria"),
+                "priority": string("critical, high, medium, or low"),
+                "category": string("engineering, bug, product, sales, general, manual, feat, or fix"),
+                "board_column": string("todo, in_progress, review, or done; normally todo"),
+                "assignee_name": string("Exact collaborator name, or an empty string"),
+                "element_name": string("Exact project element name, or an empty string"),
+                "subtasks": strings("Three to six short, ordered, verifiable checklist steps"),
+                "sources": strings("Repository citations as path:line or path:start-end"),
+            },
+            [
+                "title", "description", "priority", "category", "board_column",
+                "subtasks", "sources",
+            ],
         ),
     ]

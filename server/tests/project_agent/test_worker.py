@@ -6,7 +6,7 @@ import pytest
 
 from app import database
 from app.matcha.services.billing import token_budget_service
-from app.matcha.services.matcha_work.project_agent import agent
+from app.matcha.services.matcha_work.project_agent import agent, store, task_draft_agent
 from app.workers.tasks import project_agent as worker
 
 
@@ -39,6 +39,8 @@ async def test_worker_deducts_successful_non_admin_usage(monkeypatch):
             "channel_id": channel_id,
             "requested_by": user_id,
             "prompt": "How does login work?",
+            "kind": "repo_question",
+            "model_override": None,
         },
         {
             "title": "MATCHA",
@@ -62,3 +64,43 @@ async def test_worker_deducts_successful_non_admin_usage(monkeypatch):
 
     run.assert_awaited_once()
     deduct.assert_awaited_once_with(conn, company_id, 321)
+
+
+@pytest.mark.asyncio
+async def test_worker_dispatches_task_draft_without_posting_to_chat(monkeypatch):
+    run_id, company_id, project_id, user_id = uuid4(), uuid4(), uuid4(), uuid4()
+    conn = _Connection(
+        {
+            "company_id": company_id,
+            "project_id": project_id,
+            "channel_id": None,
+            "requested_by": user_id,
+            "prompt": "Add saved project filters",
+            "kind": "task_draft",
+            "model_override": "test-model",
+        },
+        {
+            "title": "MATCHA",
+            "github_repo": "example/matcha",
+            "github_branch": "main",
+            "requester_role": "admin",
+        },
+    )
+
+    @asynccontextmanager
+    async def connection_or_direct():
+        yield conn
+
+    context = {"collaborators": [], "elements": [], "recent_done": []}
+    load_context = AsyncMock(return_value=context)
+    run = AsyncMock(return_value={"token_usage": {"total_tokens": 42}})
+    monkeypatch.setattr(database, "connection_or_direct", connection_or_direct)
+    monkeypatch.setattr(store, "load_task_draft_context", load_context)
+    monkeypatch.setattr(task_draft_agent, "run_task_draft", run)
+
+    await worker._run(run_id)
+
+    load_context.assert_awaited_once_with(project_id)
+    run.assert_awaited_once()
+    assert run.await_args.kwargs["request"] == "Add saved project filters"
+    assert run.await_args.kwargs["model"] == "test-model"

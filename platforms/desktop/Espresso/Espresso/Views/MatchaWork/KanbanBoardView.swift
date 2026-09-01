@@ -469,7 +469,9 @@ struct KanbanBoardView: View {
                 await MainActor.run {
                     aiDrafting = false
                     if case APIError.httpError(let code, _) = error, code == 429 {
-                        aiError = "Daily AI limit reached (50 per 24 hours). Create tickets manually or try again later."
+                        aiError = "AI drafting limit reached. Create tickets manually or try again later."
+                    } else if case APIError.httpError(let code, _) = error, code == 402 {
+                        aiError = "This workspace has reached its AI token budget."
                     } else {
                         aiError = "Couldn't draft that — try rephrasing."
                     }

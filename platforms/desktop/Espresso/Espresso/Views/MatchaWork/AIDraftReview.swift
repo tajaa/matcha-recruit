@@ -131,6 +131,30 @@ struct AIDraftReviewSheet: View {
                 .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
 
+            if let sources = draft.groundingSources, !sources.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 9))
+                            .foregroundColor(appState.themeAccent)
+                        Text("REPO EVIDENCE")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                    }
+                    ForEach(Array(sources.prefix(4)), id: \.self) { source in
+                        Text(source)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(appState.themeAccent.opacity(0.05))
+                .cornerRadius(6)
+            }
+
             HStack(spacing: 6) {
                 labeledPicker("Priority", selection: $priority, options: priorities)
                 labeledPicker("Type", selection: $category, options: categories)
