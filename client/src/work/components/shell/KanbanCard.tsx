@@ -188,7 +188,7 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       {task.board_column === 'changes_requested' && reviewNote && (
         <div className="mt-1.5 flex items-start gap-1 pl-6 text-xs text-orange-400/90">
           <RefreshCw className="mt-0.5 h-3 w-3 shrink-0" />
-          <span className="line-clamp-2">{reviewNote}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words">{reviewNote}</span>
         </div>
       )}
 
