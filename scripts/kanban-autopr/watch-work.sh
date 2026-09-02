@@ -14,7 +14,9 @@ ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopubli
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 REFRESH_SECONDS="${AUTOPR_WORK_REFRESH_SECONDS:-2}"
-STATUS_REFRESH_SECONDS="${AUTOPR_WORK_STATUS_REFRESH_SECONDS:-10}"
+# The local model stream still refreshes every two seconds; remote workflow
+# status does not need to consume the shared GitHub budget that often.
+STATUS_REFRESH_SECONDS="${AUTOPR_WORK_STATUS_REFRESH_SECONDS:-60}"
 MAX_ITERATIONS="${AUTOPR_DASHBOARD_MAX_ITERATIONS:-0}"
 PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 

@@ -217,9 +217,15 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"11111111-0000-4000-8000-000000000001","title":"Reassigned reconsideration","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_reconsideration_pending":true},
     {"id":"22222222-0000-4000-8000-000000000002","title":"Ordinary reassigned work","assigned_email":"human@example.com","board_column":"todo","status":"pending"},
     {"id":"33333333-0000-4000-8000-000000000003","title":"Moved reconsideration","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_reconsideration_pending":true},
-    {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"}
+    {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"},
+    {"id":"55555555-0000-4000-8000-000000000005","title":"Consumed go-ahead directive","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed"}
   ]
 }
+EOF
+cat > "$TMP_DIR/collect-history.json" <<'EOF'
+[
+  {"id":"consumed-collector-event","created_at":"2026-09-02T00:59:00Z","metadata":{"kind":"autopr_additional_context","body":"just go ahead and do it anyways","autopr_reconsideration_of":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T00:30:00Z] already_fixed"}}
+]
 EOF
 cat > "$TMP_DIR/collect-bin/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -238,7 +244,11 @@ if [[ "$url" == */auth/login ]]; then
     printf '{"access_token":"stub-token"}'
     exit 0
 fi
-cp "$AUTOPR_TEST_BUNDLE_FILE" "$output_file"
+if [[ "$url" == */history ]]; then
+    cp "$AUTOPR_TEST_HISTORY_FILE" "$output_file"
+else
+    cp "$AUTOPR_TEST_BUNDLE_FILE" "$output_file"
+fi
 [ "$write_status" = "0" ] || printf 200
 EOF
 chmod +x "$TMP_DIR/collect-bin/curl"
@@ -246,13 +256,16 @@ collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
     RUNNER_TEMP="$TMP_DIR/collect-runner" \
     MATCHA_AUTOPR_ENV="$env_file" \
     AUTOPR_TEST_BUNDLE_FILE="$TMP_DIR/collect-bundle.json" \
+    AUTOPR_TEST_HISTORY_FILE="$TMP_DIR/collect-history.json" \
     "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
 collect_rc=$?
 check "collector honors reassigned reconsideration only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "2" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "3" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444"]' >/dev/null \
+        'map(.id8) == ["11111111", "44444444", "55555555"]
+         and .[2].autopr_reconsideration_pending
+         and .[2].autopr_reconsideration_event_id == "consumed-collector-event"' >/dev/null \
       && echo 0 || echo 1)
 
 ################################################################################
@@ -664,6 +677,34 @@ python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
 check "pre-upgrade decision-bound context still grants the requested draft" \
     $(jq -e '.directives == ["draft_pr"] and .source_event_id == "old-event"' \
       "$TMP_DIR/resolved-old-directive.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/consumed-directive-card.json" <<'EOF'
+{"board_column":"todo","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed","autopr_reconsideration_pending":false}
+EOF
+cat > "$TMP_DIR/consumed-directive-history.json" <<'EOF'
+[
+  {"id":"consumed-event","created_at":"2026-09-02T00:59:00Z","metadata":{"kind":"autopr_additional_context","body":"just go ahead and do it anyways","autopr_reconsideration_of":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T00:30:00Z] already_fixed"}}
+]
+EOF
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-directive-card.json" \
+    --history "$TMP_DIR/consumed-directive-history.json" \
+    --output "$TMP_DIR/recovered-consumed-directive.json"
+check "legacy go-ahead context survives one obsolete repeated already-fixed result" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+      "$TMP_DIR/recovered-consumed-directive.json" >/dev/null && echo 0 || echo 1)
+
+jq '.progress_note = "🤖 AUTO SETUP · NO PR: POLICY BLOCKED · [autopr:no-spec 2026-09-02T01:00:00Z] policy_blocked"' \
+    "$TMP_DIR/consumed-directive-card.json" > "$TMP_DIR/nonrecoverable-card.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/nonrecoverable-card.json" \
+    --history "$TMP_DIR/consumed-directive-history.json" \
+    --output "$TMP_DIR/nonrecovered-directive.json"
+check "consumed directive recovery cannot override a different current blocker" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
+      "$TMP_DIR/nonrecovered-directive.json" >/dev/null && echo 0 || echo 1)
 
 jq '.[1].metadata.body = "do not go ahead and do it"' \
     "$TMP_DIR/pending-directive-history.json" > "$TMP_DIR/negated-directive-history.json"
