@@ -130,6 +130,17 @@ already_handled() {
         fi
     fi
 
+    # A runtime-limited pass is intentionally not an automatic retry loop.
+    # Its partial work is checkpointed, and the owner must either add bounded
+    # context (including --extend-runtime for a 40-minute attempt) or press Run
+    # AutoPR for another ordinary 20-minute attempt.
+    if [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"* ]] \
+        && [ "$reconsideration_pending" != true ] \
+        && [ "$run_requested" != true ]; then
+        echo skip
+        return
+    fi
+
     # No-spec ledger lives on the card itself, not GitHub — this stops a
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).

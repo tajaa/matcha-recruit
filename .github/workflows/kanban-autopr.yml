@@ -32,7 +32,10 @@ env:
 jobs:
   build:
     runs-on: [self-hosted, macOS, opencode]
-    timeout-minutes: 50
+    # A card gets 20 investigation minutes normally or one owner-approved
+    # 40-minute attempt. Leave enough job headroom for collection, validation,
+    # publication, and the always-run checkpoint/cleanup path.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -177,6 +180,17 @@ jobs:
           echo "AUTOPR_WORKSPACE_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           echo "AUTOPR_SANDBOX_REPO_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
 
+      - name: Resolve investigation runtime approval
+        id: runtime
+        if: steps.select.outputs.skip == 'false'
+        timeout-minutes: 2
+        run: |
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/runtime-policy.sh" \
+            "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/runtime-policy.json"
+          echo "minutes=$(jq -r '.minutes' "$RUNNER_TEMP/runtime-policy.json")" >> "$GITHUB_OUTPUT"
+          jq '{minutes,extended,approval_event_id:.source_event_id}' \
+            "$RUNNER_TEMP/runtime-policy.json" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create or check out task branch
         id: branch
         if: steps.select.outputs.skip == 'false'
@@ -214,7 +228,7 @@ jobs:
       - name: Investigate
         id: investigate
         if: steps.select.outputs.skip == 'false'
-        timeout-minutes: 15
+        timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes) }}
         continue-on-error: true
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
@@ -224,19 +238,39 @@ jobs:
           AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
         run: |
+          date +%s > "$RUNNER_TEMP/investigation-started-at"
           "$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
+
+      - name: Checkpoint interrupted investigation
+        id: checkpoint
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
+        timeout-minutes: 2
+        continue-on-error: true
+        env:
+          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
+        run: |
+          started_at="$(cat "$RUNNER_TEMP/investigation-started-at" 2>/dev/null || date +%s)"
+          checkpoint="$($AUTOPR_CONTROL_ROOT/kanban-autopr/checkpoint.sh save \
+            "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
+            "$started_at" "${{ steps.runtime.outputs.minutes }}")"
+          echo "path=$checkpoint" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Interrupted investigation checkpoint"
+            jq . "$checkpoint/metadata.json"
+            echo
+            echo "Stored locally on the trusted runner; partial model output was not uploaded to GitHub."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail incomplete investigation
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
         run: |
-          # investigate.sh can die after the model edited files. Discard
-          # those unverified edits, fail the run visibly, and leave the card
-          # eligible for a later retry. A harness/model failure is not a
-          # legitimate "no safe fix" conclusion and must not write a
-          # no-spec marker that blocks the card forever.
+          # The prior always-run step copied partial sandbox work into protected
+          # local checkpoint storage. Discard only the trusted checkout's
+          # unverified edits; a later attempt can restore the sandbox patch.
           git reset --hard HEAD
           git clean -fd
-          echo "Investigation failed before producing a valid report; this card remains eligible for retry." >> "$GITHUB_STEP_SUMMARY"
+          echo "Investigation failed before producing a valid report. Any partial output was checkpointed before cleanup." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
       - name: Read validated triage decision

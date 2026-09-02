@@ -26,6 +26,20 @@ check "local dispatcher is the workflow's only automatic clock" \
 check "workflow resolves the active production build before collecting cards" \
     $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" && echo 0 || echo 1)
 
+check "workflow gives ordinary investigations 20 minutes and requires a trusted extension for 40" \
+    $(grep -qF 'runtime-policy.sh' "$workflow" \
+      && grep -qF 'timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes) }}' "$workflow" \
+      && grep -qF 'AUTOPR_NORMAL_RUNTIME_MINUTES:-20' "$AUTOPR_DIR/runtime-policy.sh" \
+      && grep -qF 'AUTOPR_EXTENDED_RUNTIME_MINUTES:-40' "$AUTOPR_DIR/runtime-policy.sh" \
+      && echo 0 || echo 1)
+
+check "failed investigations checkpoint before the trusted checkout is reset" \
+    $(grep -qF 'name: Checkpoint interrupted investigation' "$workflow" \
+      && grep -qF 'checkpoint.sh save' "$workflow" \
+      && grep -qF 'AUTOPR_RESUME_PATCH' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
+      && grep -qF 'checkpoint.sh" consume' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
 check "production resolver uses active container digests and read-only migration revisions" \
     $(grep -qF 'aws ecr describe-images' "$AUTOPR_DIR/resolve-production-context.sh" \
       && grep -qF 'schema-snapshot.sh" prod-revisions' "$AUTOPR_DIR/resolve-production-context.sh" \
@@ -388,6 +402,7 @@ PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" RUNNER_TEMP="$TMP_DIR/ru
 GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/codex-files" \
 CODEX_STUB_CONTEXT="$TMP_DIR/context.json" CODEX_STUB_ARGS="$TMP_DIR/codex-args" \
 AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > "$TMP_DIR/investigate-command.log" 2>&1
 investigate_rc=$?
@@ -428,6 +443,7 @@ AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
 GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/codex-no-files" \
 CODEX_STUB_CONTEXT="$TMP_DIR/context-no-files.json" CODEX_STUB_ARGS="$TMP_DIR/codex-no-files-args" \
 AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
     "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
@@ -447,6 +463,7 @@ MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 CODEX_STUB_FILES="$TMP_DIR/codex-failed-files" CODEX_STUB_CONTEXT="$TMP_DIR/context-failed.json" \
 CODEX_STUB_ARGS="$TMP_DIR/codex-failed-args" \
 AUTOPR_LIVE_LOG="$TMP_DIR/live-failed.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-failed.md" \
     "$TMP_DIR/decision-failed.json" > /dev/null 2>&1
@@ -472,6 +489,46 @@ printf 'operator instructions\n' > "$SANDBOX_TEST_REPO/server/app/matcha/service
 git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts server/app/matcha/services/huume/CLAUDE.md
 git -C "$SANDBOX_TEST_REPO" commit --quiet -m base
 printf 'host-only-secret\n' > "$SANDBOX_TEST_REPO/secrets/private.pem"
+
+# Simulate a model killed before the bridge copied its output into RUNNER_TEMP.
+# The checkpoint must capture tracked + untracked edits directly from the
+# disposable workspace and make them available to the next sandbox attempt.
+CHECKPOINT_RUNTIME="$TMP_DIR/checkpoint-runtime"
+mkdir -p "$CHECKPOINT_RUNTIME"
+git clone --quiet "$SANDBOX_TEST_REPO" "$CHECKPOINT_RUNTIME/workspace"
+checkpoint_base="$(git -C "$CHECKPOINT_RUNTIME/workspace" rev-parse HEAD)"
+mkdir -p "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output"
+printf '%s\n' "$checkpoint_base" \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/model-base-sha"
+printf 'export const existing = false;\n' \
+    > "$CHECKPOINT_RUNTIME/workspace/client/src/existing.ts"
+printf 'export const recovered = true;\n' \
+    > "$CHECKPOINT_RUNTIME/workspace/client/src/recovered.ts"
+printf '%s\n' '### Summary' partial \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output/report.md"
+printf '%s\n' '{"schema_version":1}' \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output/decision.json"
+printf 'partial transcript\n' > "$TMP_DIR/checkpoint-live.log"
+cat > "$TMP_DIR/checkpoint-card.json" <<'EOF'
+{"task_id":"cccccccc-0000-4000-8000-000000000003","id8":"cccccccc","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+checkpoint_path="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/checkpoint-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20)"
+latest_checkpoint="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/checkpoint-card.json")"
+check "interrupted model work is checkpointed outside the disposable workspace" \
+    $([ "$latest_checkpoint" = "$checkpoint_path" ] \
+      && grep -q 'recovered.ts' "$checkpoint_path/model.patch" \
+      && grep -q 'partial transcript' "$checkpoint_path/transcript.log" \
+      && jq -e '.patch_saved == true and .runtime_limited == false' \
+        "$checkpoint_path/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
 
 cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
@@ -505,6 +562,7 @@ jq -n --arg path "$TMP_DIR/sandbox-attachment.txt" \
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
 AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_RESUME_PATCH="$checkpoint_path/model.patch" \
 AUTOPR_SANDBOX_CAPTURE_CONTEXT="$TMP_DIR/sandbox-captured-context.json" \
   "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
   "$TMP_DIR/sandbox-report.md" "$TMP_DIR/sandbox-decision.json" \
@@ -516,11 +574,21 @@ sandbox_bridge_rc=$?
 check "msandbox bridge excludes secrets and instruction edits while applying the product patch" \
     $([ "$sandbox_bridge_rc" = 0 ] \
       && grep -q 'sandboxProbe' "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" \
+      && grep -q 'recovered' "$SANDBOX_TEST_REPO/client/src/recovered.ts" \
       && [ "$(cat "$SANDBOX_TEST_REPO/server/app/matcha/services/huume/CLAUDE.md")" = "operator instructions" ] \
       && grep -q 'Ignored model edit to operator instruction file' "$TMP_DIR/sandbox-bridge.log" \
       && [ -s "$TMP_DIR/sandbox-report.md" ] \
       && [ ! -e "$SANDBOX_TEST_REPO/.autopr-io" ] \
       && echo 0 || echo 1)
+
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" consume "$TMP_DIR/checkpoint-card.json"
+consumed_checkpoint="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/checkpoint-card.json")"
+check "a completed retry deactivates but does not delete its saved checkpoint" \
+    $([ -z "$consumed_checkpoint" ] && [ -d "$checkpoint_path" ] && echo 0 || echo 1)
 
 mapped_attachment="$(jq -r '.downloaded_attachments[0].local_path' "$TMP_DIR/sandbox-captured-context.json" 2>/dev/null)"
 check "msandbox bridge rewrites attachment paths into the isolated workspace" \
@@ -631,6 +699,21 @@ invalid_decision_rc=$?
 check "questions-only decisions require actionable questions" \
     $([ "$invalid_decision_rc" != 0 ] && echo 0 || echo 1)
 
+jq '.questions = [
+      {id:"q1",question:"First choice?",why_blocking:"Needed",default_assumption:"Choose A",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}]},
+      {id:"q2",question:"Second choice?",why_blocking:"Needed",default_assumption:"Choose B",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}]}
+    ]' "$TMP_DIR/publication-decision.json" > "$TMP_DIR/question-render-decision.json"
+question_pr_copy="$(/bin/bash -c 'source "$1"; autopr_render_questions "$2"' _ \
+    "$AUTOPR_DIR/decision.sh" "$TMP_DIR/question-render-decision.json")"
+question_card_copy="$(/bin/bash -c 'source "$1"; autopr_render_card_questions "$2"' _ \
+    "$AUTOPR_DIR/decision.sh" "$TMP_DIR/question-render-decision.json")"
+check "question drafts are numbered and expose an in-ticket answer path" \
+    $(printf '%s\n%s' "$question_pr_copy" "$question_card_copy" \
+      | grep -qF '2. Second choice?' \
+      && printf '%s' "$question_pr_copy" | grep -qF 'Add additional context' \
+      && printf '%s' "$question_card_copy" | grep -qF 'reply below with the numbered choices' \
+      && echo 0 || echo 1)
+
 jq '.production_verification = {
       target:"frontend",
       mode:"automatic_http",
@@ -684,6 +767,28 @@ python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
 check "pre-upgrade decision-bound context still grants the requested draft" \
     $(jq -e '.directives == ["draft_pr"] and .source_event_id == "old-event"' \
       "$TMP_DIR/resolved-old-directive.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/runtime-card.json" <<'EOF'
+{"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"bbbbbbbb-0000-4000-8000-000000000002","board_column":"changes_requested","progress_note":"🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"runtime-event"}
+EOF
+cat > "$TMP_DIR/runtime-history.json" <<'EOF'
+[{"id":"runtime-event","metadata":{"kind":"autopr_additional_context","body":"--extend-runtime"}}]
+EOF
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/extended-runtime-policy.json"
+check "a decision-bound runtime approval grants exactly one 40-minute attempt" \
+    $(jq -e '.minutes == 40 and .extended == true and .directives == ["extend_runtime"]' \
+      "$TMP_DIR/extended-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+jq '.[0].metadata.body = "Here is more evidence, but no time approval."' \
+    "$TMP_DIR/runtime-history.json" > "$TMP_DIR/normal-runtime-history.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/normal-runtime-policy.json"
+check "ordinary additional context remains capped at 20 minutes" \
+    $(jq -e '.minutes == 20 and .extended == false and .directives == []' \
+      "$TMP_DIR/normal-runtime-policy.json" >/dev/null && echo 0 || echo 1)
 
 cat > "$TMP_DIR/consumed-directive-card.json" <<'EOF'
 {"board_column":"todo","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed","autopr_reconsideration_pending":false}
@@ -742,13 +847,13 @@ check "a migration-required repeat cannot consume the owner's draft authorizatio
       "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
 
 cat > "$TMP_DIR/standing-directive-card.json" <<'EOF'
-{"board_column":"todo","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · 🟡 C60 · [autopr:directives draft_pr]","autopr_reconsideration_pending":false}
+{"board_column":"todo","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · 🟡 C60 · [autopr:directives draft_pr,extend_runtime]","autopr_reconsideration_pending":false}
 EOF
 python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
     --card "$TMP_DIR/standing-directive-card.json" \
     --history "$TMP_DIR/pending-directive-history.json" \
     --output "$TMP_DIR/standing-directive.json"
-check "an authorization already granted on the card survives the next cycle" \
+check "draft authority survives while runtime approval remains one-shot" \
     $(jq -e '.directives == ["draft_pr"]' "$TMP_DIR/standing-directive.json" >/dev/null \
       && echo 0 || echo 1)
 
@@ -851,6 +956,29 @@ PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 no_spec_rc=$?
 check "visible origin note still durably suppresses an unchanged no-spec card" \
     $([ "$no_spec_rc" = "3" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/runtime-paused-card.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"p","title":"Long investigation","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED · checkpoint 123"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-paused-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-paused-card.json" >/dev/null 2>&1
+runtime_paused_rc=$?
+check "a runtime-limited card waits instead of retrying forever" \
+    $([ "$runtime_paused_rc" = "3" ] && echo 0 || echo 1)
+
+jq '.[0].autopr_reconsideration_pending = true
+    | .[0].autopr_reconsideration_event_id = "runtime-event"
+    | .[0].autopr_reconsideration_at = "2026-01-02T00:00:00Z"' \
+    "$TMP_DIR/runtime-paused-card.json" > "$TMP_DIR/runtime-approved-card.json"
+runtime_approved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-approved-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-approved-card.json")"
+check "new decision-bound context reopens a runtime-limited card" \
+    $([ "$(printf '%s' "$runtime_approved" | jq -r '.id8')" = "aaaaaaaa" ] \
+      && echo 0 || echo 1)
 
 cat > "$TMP_DIR/reconsideration-cards.json" <<'EOF'
 [

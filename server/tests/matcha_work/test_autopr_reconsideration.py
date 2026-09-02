@@ -85,6 +85,8 @@ def test_operator_directives_accept_clear_work_commands_in_bound_context():
     )
     assert svc._parse_autopr_directives("--no draft PR yet") == ([], None)
     assert svc._parse_autopr_directives("--draft prevention notes") == ([], None)
+    assert svc._parse_autopr_directives("--extend-runtime") == (["extend_runtime"], None)
+    assert svc._parse_autopr_directives("please extend the runtime") == ([], None)
 
 
 def test_operator_directives_accept_ordinary_override_phrasing():
@@ -214,6 +216,32 @@ async def test_awaiting_answers_accepts_chat_or_ticket_context(monkeypatch):
 
     assert result["autopr_reconsideration_pending"] is True
     assert json.loads(conn.insert_args[4])["kind"] == "autopr_additional_context"
+
+
+@pytest.mark.asyncio
+async def test_runtime_pause_accepts_one_run_extension_approval(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = (
+        "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED · checkpoint 123 · "
+        "note: Partial work is preserved. Add additional context with "
+        "--extend-runtime to approve one 40-minute retry."
+    )
+    conn = _ReconsiderationConn(current, board_column="changes_requested")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    monkeypatch.setattr(svc, "_notify_task_comment", AsyncMock())
+
+    result = await svc.request_autopr_reconsideration(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        expected_progress_note=current,
+        body="--extend-runtime",
+    )
+
+    metadata = json.loads(conn.insert_args[4])
+    assert metadata["autopr_directives"] == "extend_runtime"
+    assert result["autopr_directives"] == ["extend_runtime"]
 
 
 @pytest.mark.asyncio

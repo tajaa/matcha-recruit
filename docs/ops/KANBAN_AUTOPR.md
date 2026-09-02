@@ -312,7 +312,20 @@ second scheduler.
    tenant. The coding model never receives those credentials. It must inspect correlated
    production errors/log signals and any test replay before asking for an exact route,
    role, reproduction steps, and screenshot. Missing product intent
-   or evidence produces a question-only draft PR, not a no-spec marker. The card remains
+   or evidence produces a question-only draft PR, not a no-spec marker. The normal
+   investigation ceiling is 20 minutes. A run that reaches it is stopped, its bounded
+   patch/report/decision fragments and final 2 MB of terminal output are stored mode-600
+   under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`, and the card becomes
+   `PAUSED: RUNTIME APPROVAL REQUIRED`; it does not spin on every scheduler tick. From
+   that exact card decision, **Approve 40-minute retry** submits the explicit
+   `--extend-runtime` directive. That grants one 40-minute attempt only: it is never
+   inferred from ordinary prose and is not carried into later cycles. The retry restores
+   the partial patch only inside the disposable msandbox and attaches the saved textual
+   output as untrusted context. If the patch no longer applies to current code, the text
+   remains available and the retry starts from a clean tree. Successful recovery
+   deactivates but does not delete the checkpoint.
+
+   The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. Without a trusted draft directive,
    no-spec remains available for already-fixed work, migrations, policy boundaries,
@@ -366,7 +379,11 @@ second scheduler.
    `autopr-awaiting-input`, and leaves the card in `changes_requested` with a visible
    note such as `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod
    c5d3a49 · PR #295 · 🟡 C42 · note: Needs the canonical term before labels can be
-   updated safely.`. `rework` updates the existing branch and PR;
+   updated safely.` followed by the numbered questions, choices, and suggested defaults.
+   Espresso shows those questions on the card and in the opened ticket. **Answer AutoPR
+   questions** submits numbered choices through the existing decision-bound additional-
+   context endpoint; a PR comment/review remains an alternate answer path. `rework`
+   updates the existing branch and PR;
    once there are no remaining blocking questions it returns the card to `in_progress`
    (this is the one transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not

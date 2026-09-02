@@ -36,6 +36,25 @@ ID8="$(jq -r '.id8' "$CARD_FILE")"
 
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
+RESUME_PATCH=""
+PRIOR_CHECKPOINT_FILE="$WORK_DIR/prior-checkpoint.json"
+printf 'null\n' > "$PRIOR_CHECKPOINT_FILE"
+
+# A previous timeout may have preserved a partial patch and bounded outputs in
+# protected .git metadata. Restore the patch only inside the disposable
+# msandbox and attach the textual artifacts so Codex can continue its own
+# reasoning instead of repeating twenty minutes of work.
+prior_checkpoint="$($SCRIPT_DIR/checkpoint.sh latest "$CARD_FILE")"
+if [ -n "$prior_checkpoint" ]; then
+    if [ -s "$prior_checkpoint/metadata.json" ]; then
+        cp "$prior_checkpoint/metadata.json" "$PRIOR_CHECKPOINT_FILE"
+    fi
+    [ ! -s "$prior_checkpoint/model.patch" ] || RESUME_PATCH="$prior_checkpoint/model.patch"
+    for checkpoint_input in report.md decision.json transcript.log; do
+        [ ! -s "$prior_checkpoint/$checkpoint_input" ] \
+            || ATTACH_ARGS+=(-f "$prior_checkpoint/$checkpoint_input")
+    done
+fi
 
 # Consume any "run now" request as soon as this card is actually picked up.
 # The claim is what stops the one-minute watcher re-dispatching for a card
@@ -201,9 +220,10 @@ jq -n \
     --slurpfile test_tenant_evidence "$TEST_TENANT_EVIDENCE_FILE" \
     --slurpfile production_errors "$WORK_DIR/production-errors.json" \
     --slurpfile changes_since_production "$WORK_DIR/changes-since-production.json" \
+    --slurpfile prior_checkpoint "$PRIOR_CHECKPOINT_FILE" \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], directive_policy: $directive_policy[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
 
 if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
@@ -270,11 +290,14 @@ fi
 
 run_codex() {
     [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
-    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
-        AUTOPR_CODEX_MODEL=gpt-5.6-sol \
-        AUTOPR_CODEX_REASONING_EFFORT=medium \
-        "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
+    runner_env=(
+        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY
+        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD
+        AUTOPR_CODEX_MODEL=gpt-5.6-sol
+        AUTOPR_CODEX_REASONING_EFFORT=medium
+    )
+    [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
+    "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
         "${ATTACH_ARGS[@]}"
 }
 
@@ -343,3 +366,4 @@ jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
 mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
 mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+"$SCRIPT_DIR/checkpoint.sh" consume "$CARD_FILE"

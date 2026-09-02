@@ -44,6 +44,22 @@ struct KanbanCardView: View {
 
     private var assigneeDisplay: String? { task.displayAssignee }
 
+    /// Question-only AutoPR drafts used to collapse to an opaque one-line
+    /// status on the card, leaving the actual questions visible only on
+    /// GitHub. New notes embed the answer form; surface its beginning directly
+    /// on the Kanban card so the next action is discoverable before opening it.
+    private var autoPRQuestionPreview: String? {
+        guard let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+              note.lowercased().contains("awaiting answers") else { return nil }
+        let marker = "Answers needed — reply below with the numbered choices:"
+        guard let range = note.range(of: marker) else {
+            return "Open this ticket to view and answer AutoPR's questions."
+        }
+        let questions = note[range.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return questions.isEmpty ? nil : questions
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header — checkbox + title. Staleness no longer tints the whole
@@ -78,7 +94,18 @@ struct KanbanCardView: View {
             .padding(.bottom, 9)
 
             VStack(alignment: .leading, spacing: 9) {
-                if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let questions = autoPRQuestionPreview {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("AUTO SETUP · ANSWERS NEEDED", systemImage: "questionmark.circle.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.orange)
+                        Text(questions)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.72))
+                            .lineLimit(4)
+                            .multilineTextAlignment(.leading)
+                    }
+                } else if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "location.north.line")
                             .font(.system(size: 8))
