@@ -178,12 +178,19 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
                 || die "usage: decision.sh normalize raw-decision.json decision.json [directive-policy.json]"
             autopr_normalize_decision "$2" "$3" "${4:-}"
             ;;
+        directive-ok)
+            # Directive check only, so a caller can distinguish "the model
+            # contradicted the owner's directive" (retryable) from a malformed
+            # or unsafe decision (fatal). Normalize still re-checks both.
+            [ "$#" -eq 3 ] || die "usage: decision.sh directive-ok raw-decision.json directive-policy.json"
+            _autopr_directive_policy_ok "$2" "$3"
+            ;;
         feedback-snapshot)
             [ "$#" -eq 2 ] || die "usage: decision.sh feedback-snapshot feedback.json"
             autopr_feedback_snapshot_file "$2"
             ;;
         *)
-            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh feedback-snapshot feedback.json"
+            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
             ;;
     esac
 fi

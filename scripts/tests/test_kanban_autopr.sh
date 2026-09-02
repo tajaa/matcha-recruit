@@ -218,7 +218,8 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"22222222-0000-4000-8000-000000000002","title":"Ordinary reassigned work","assigned_email":"human@example.com","board_column":"todo","status":"pending"},
     {"id":"33333333-0000-4000-8000-000000000003","title":"Moved reconsideration","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_reconsideration_pending":true},
     {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"},
-    {"id":"55555555-0000-4000-8000-000000000005","title":"Consumed go-ahead directive","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed"}
+    {"id":"55555555-0000-4000-8000-000000000005","title":"Consumed go-ahead directive","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed"},
+    {"id":"66666666-0000-4000-8000-000000000006","title":"Consumed directive answered with a migration stop","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"}
   ]
 }
 EOF
@@ -259,13 +260,15 @@ collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
     AUTOPR_TEST_HISTORY_FILE="$TMP_DIR/collect-history.json" \
     "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
 collect_rc=$?
-check "collector honors reassigned reconsideration only in an eligible lane" \
+check "collector recovers a consumed authorization from either refusal it overrides" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "3" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "4" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444", "55555555"]
+        'map(.id8) == ["11111111", "44444444", "55555555", "66666666"]
          and .[2].autopr_reconsideration_pending
-         and .[2].autopr_reconsideration_event_id == "consumed-collector-event"' >/dev/null \
+         and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
+         and .[3].autopr_reconsideration_pending
+         and .[3].autopr_reconsideration_event_id == "consumed-collector-event"' >/dev/null \
       && echo 0 || echo 1)
 
 ################################################################################
@@ -705,6 +708,66 @@ python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
 check "consumed directive recovery cannot override a different current blocker" \
     $(jq -e '.directives == [] and .source_event_id == null' \
       "$TMP_DIR/nonrecovered-directive.json" >/dev/null && echo 0 || echo 1)
+
+for phrasing in "you can work on this." "do it anyway" "draft the migration" \
+    "it can absolutely draft a pr with migration scripts"; do
+    jq --arg body "$phrasing" '.[1].metadata.body = $body' \
+        "$TMP_DIR/pending-directive-history.json" > "$TMP_DIR/natural-directive-history.json"
+    python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+        --card "$TMP_DIR/pending-directive-card.json" \
+        --history "$TMP_DIR/natural-directive-history.json" \
+        --output "$TMP_DIR/resolved-natural-directive.json"
+    check "plain owner authorization grants a draft: $phrasing" \
+        $(jq -e '.directives == ["draft_pr"]' "$TMP_DIR/resolved-natural-directive.json" \
+          >/dev/null && echo 0 || echo 1)
+done
+
+jq '.progress_note = "🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"
+    | .autopr_reconsideration_pending = false' \
+    "$TMP_DIR/consumed-directive-card.json" > "$TMP_DIR/consumed-migration-card.json"
+jq '.[0].metadata.autopr_reconsideration_of = "🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T00:30:00Z] migration_required"
+    | .[0].metadata.body = "you can work on this."' \
+    "$TMP_DIR/consumed-directive-history.json" > "$TMP_DIR/consumed-migration-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-migration-card.json" \
+    --history "$TMP_DIR/consumed-migration-history.json" \
+    --output "$TMP_DIR/recovered-migration-directive.json"
+check "a migration-required repeat cannot consume the owner's draft authorization" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+      "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
+
+cat > "$TMP_DIR/standing-directive-card.json" <<'EOF'
+{"board_column":"todo","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · 🟡 C60 · [autopr:directives draft_pr]","autopr_reconsideration_pending":false}
+EOF
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/standing-directive-card.json" \
+    --history "$TMP_DIR/pending-directive-history.json" \
+    --output "$TMP_DIR/standing-directive.json"
+check "an authorization already granted on the card survives the next cycle" \
+    $(jq -e '.directives == ["draft_pr"]' "$TMP_DIR/standing-directive.json" >/dev/null \
+      && echo 0 || echo 1)
+
+jq '.board_column = "review"' "$TMP_DIR/standing-directive-card.json" \
+    > "$TMP_DIR/standing-directive-review-card.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/standing-directive-review-card.json" \
+    --history "$TMP_DIR/pending-directive-history.json" \
+    --output "$TMP_DIR/standing-directive-review.json"
+check "a standing authorization does not follow the card off the AutoPR lanes" \
+    $(jq -e '.directives == []' "$TMP_DIR/standing-directive-review.json" >/dev/null \
+      && echo 0 || echo 1)
+
+"$AUTOPR_DIR/decision.sh" directive-ok "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+directive_ok_rejects_rc=$?
+"$AUTOPR_DIR/decision.sh" directive-ok "$TMP_DIR/publication-decision.json" \
+    "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
+directive_ok_accepts_rc=$?
+check "directive-ok isolates a retryable directive violation from a fatal decision" \
+    $([ "$directive_ok_rejects_rc" != 0 ] && [ "$directive_ok_accepts_rc" = 0 ] \
+      && grep -q 'decision.sh" directive-ok' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
 
 jq '.[1].metadata.body = "do not go ahead and do it"' \
     "$TMP_DIR/pending-directive-history.json" > "$TMP_DIR/negated-directive-history.json"

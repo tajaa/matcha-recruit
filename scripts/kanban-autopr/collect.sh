@@ -52,12 +52,14 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 )
               )
               or (
-                # Legacy workers could consume an explicit additional-context
-                # directive by repeating already_fixed. Admit those cards as
-                # bounded recovery probes; only a matching decision-bound
-                # history event survives the post-fetch filter below.
+                # A worker can consume an explicit additional-context directive
+                # by repeating the very refusal that directive overrides.
+                # Admit those cards as bounded recovery probes; only a matching
+                # decision-bound history event survives the post-fetch filter
+                # below.
                 (.board_column == "todo" or .board_column == "changes_requested")
-                and ((.progress_note // "") | test("\\[autopr:no-spec [^]]+\\] already_fixed(?: |$)"; "i"))
+                and ((.progress_note // "")
+                     | test("\\[autopr:no-spec [^]]+\\] (already_fixed|migration_required)(?: |$)"; "i"))
               )
             )
             and .status != "cancelled"
@@ -101,10 +103,11 @@ for project_id in "${PROJECT_IDS[@]}"; do
     out="$(jq -c -n --argjson a "$out" --argjson b "$candidates" '$a + $b')"
 done
 
-# Repair one pre-directive-parser edge case without weakening ordinary
-# decision binding. The resolver accepts only an explicit directive whose old
-# bound note and current note are both already_fixed. Once selected, draft_pr
-# mechanically forbids another already_fixed outcome.
+# Repair one consumed-directive edge case without weakening ordinary decision
+# binding. The resolver accepts only an explicit directive whose old bound note
+# and current note are both a refusal draft_pr forbids (already_fixed or
+# migration_required). Once selected, draft_pr mechanically forbids repeating
+# either of those outcomes.
 recovery_dir="$(mktemp -d)"
 trap 'rm -rf "$recovery_dir"' EXIT
 card_count="$(printf '%s' "$out" | jq 'length')"
@@ -112,7 +115,11 @@ for ((i = 0; i < card_count; i++)); do
     card="$(printf '%s' "$out" | jq -c ".[$i]")"
     pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
-    [[ "$pending" != true && "$progress_note" == *"[autopr:no-spec "*" already_fixed"* ]] || continue
+    [ "$pending" != true ] || continue
+    case "$progress_note" in
+        *"[autopr:no-spec "*" already_fixed"*|*"[autopr:no-spec "*" migration_required"*) ;;
+        *) continue ;;
+    esac
     project_id="$(printf '%s' "$card" | jq -r '.project_id')"
     task_id="$(printf '%s' "$card" | jq -r '.task_id')"
     history="$(mw_api GET "/matcha-work/projects/$project_id/tasks/$task_id/history" 2>/dev/null || printf '[]')"
