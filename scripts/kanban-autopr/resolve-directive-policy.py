@@ -43,6 +43,9 @@ _TEST_ROUTE_RE = re.compile(
     r"(?:test[-_ ]route|reproduce(?:[-_ ]route)?)\s*(?:=|:)\s*(/\S+)",
     re.IGNORECASE,
 )
+_ALREADY_FIXED_NOTE_RE = re.compile(
+    r"\[autopr:no-spec [^\]]+\]\s+already_fixed(?:\s|$)", re.IGNORECASE
+)
 
 
 def _parse_bound_body(body: str) -> tuple[list[str], str | None]:
@@ -125,16 +128,64 @@ def resolve(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    """Recover one explicit directive consumed by an obsolete already-fixed pass.
+
+    Older workers could accept decision-bound additional context, repeat
+    ``already_fixed``, and thereby change the progress note so the event no
+    longer appeared pending. Recovery is deliberately narrow: both the old
+    bound decision and the current decision must be ``already_fixed``, and the
+    event itself must contain an explicit work/still-broken directive.
+    """
+    current_note = str(card.get("progress_note") or "")
+    if (
+        card.get("autopr_reconsideration_pending", False)
+        or card.get("board_column") not in {"todo", "changes_requested"}
+        or not _ALREADY_FIXED_NOTE_RE.search(current_note)
+    ):
+        return {"directives": [], "test_route": None, "source_event_id": None}
+
+    for event in reversed(history):
+        if not isinstance(event, dict):
+            continue
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict) or metadata.get("kind") != "autopr_additional_context":
+            continue
+        prior_note = str(metadata.get("autopr_reconsideration_of") or "")
+        if not _ALREADY_FIXED_NOTE_RE.search(prior_note):
+            continue
+        stored = str(metadata.get("autopr_directives") or "").split(",")
+        directives = [
+            item for item in stored if item in {"draft_pr", "trust_still_broken"}
+        ]
+        parsed, parsed_route = _parse_bound_body(str(metadata.get("body") or ""))
+        directives = list(dict.fromkeys([*directives, *parsed]))
+        if not ({"draft_pr", "trust_still_broken"} & set(directives)):
+            continue
+        test_route = metadata.get("autopr_test_route") or parsed_route
+        if not isinstance(test_route, str):
+            test_route = None
+        return {
+            "directives": directives,
+            "test_route": test_route,
+            "source_event_id": str(event.get("id") or "") or None,
+            "source_event_at": event.get("created_at"),
+        }
+    return {"directives": [], "test_route": None, "source_event_id": None}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--card", required=True)
     parser.add_argument("--history", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--recover-consumed", action="store_true")
     args = parser.parse_args()
 
     card = json.loads(Path(args.card).read_text())
     history = json.loads(Path(args.history).read_text())
-    Path(args.output).write_text(json.dumps(resolve(card, history), indent=2) + "\n")
+    result = recover_consumed(card, history) if args.recover_consumed else resolve(card, history)
+    Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
 
 
 if __name__ == "__main__":

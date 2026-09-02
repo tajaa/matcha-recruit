@@ -15,7 +15,9 @@ ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopubli
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 GIT_BIN="${AUTOPR_GIT_BIN:-/usr/bin/git}"
-REFRESH_SECONDS="${AUTOPR_DASHBOARD_REFRESH_SECONDS:-30}"
+# Four live panes share one GitHub token. A 30-second overview plus the detail
+# panes could exhaust the hourly core budget and prevent workflow dispatch.
+REFRESH_SECONDS="${AUTOPR_DASHBOARD_REFRESH_SECONDS:-60}"
 PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-actions-runner/_work/matcha-recruit/matcha-recruit}"
 CACHE_DIR="${AUTOPR_DASHBOARD_CACHE_DIR:-$USER_HOME/Library/Caches/matcha-kanban-autopr/dashboard}"
