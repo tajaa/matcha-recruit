@@ -10,6 +10,12 @@ export type CredentialType = {
   is_system: boolean
 }
 
+export type CredentialTypeSettings = {
+  is_configured: boolean
+  selected_type_ids: string[]
+  credential_types: CredentialType[]
+}
+
 export type RoleCategory = {
   id: string
   key: string

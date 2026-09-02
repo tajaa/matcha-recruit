@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.core.models.auth import CurrentUser
+from app.core.models.credential_templates import CredentialTypeVisibilityUpdate
 from app.core.services.credential_template_service import (
     get_templates_for_scope,
     get_employee_credential_requirements,
@@ -142,16 +143,135 @@ class WaiveRequest(BaseModel):
 # ── Credential types ──────────────────────────────────────────────────
 
 
+def _credential_settings_company_id(company_id: UUID | None) -> UUID:
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="A company account is required")
+    return company_id
+
+
 @router.get("/types")
 async def list_credential_types(
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID | None = Depends(get_client_company_id),
 ):
-    """List all credential types."""
+    """List credential types available for this company's dropdowns."""
+    company_id = _credential_settings_company_id(company_id)
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM credential_types ORDER BY category, label"
+            """
+            SELECT ct.*
+            FROM credential_types ct
+            WHERE NOT EXISTS (
+                SELECT 1 FROM company_credential_type_filters f
+                WHERE f.company_id = $1
+            ) OR EXISTS (
+                SELECT 1 FROM company_credential_type_filter_items item
+                WHERE item.company_id = $1 AND item.credential_type_id = ct.id
+            )
+            ORDER BY ct.category, ct.label
+            """,
+            company_id,
         )
         return [dict(r) for r in rows]
+
+
+@router.get("/type-settings")
+async def get_credential_type_settings(
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID | None = Depends(get_client_company_id),
+):
+    """Return the full catalog and this company's current dropdown filter."""
+    company_id = _credential_settings_company_id(company_id)
+    async with get_connection() as conn:
+        configured = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM company_credential_type_filters WHERE company_id = $1)",
+            company_id,
+        )
+        selected_rows = await conn.fetch(
+            """
+            SELECT credential_type_id
+            FROM company_credential_type_filter_items
+            WHERE company_id = $1
+            ORDER BY credential_type_id
+            """,
+            company_id,
+        )
+        type_rows = await conn.fetch(
+            "SELECT * FROM credential_types ORDER BY category, label"
+        )
+    return {
+        "is_configured": configured,
+        "selected_type_ids": [row["credential_type_id"] for row in selected_rows],
+        "credential_types": [dict(row) for row in type_rows],
+    }
+
+
+@router.put("/type-settings")
+async def update_credential_type_settings(
+    body: CredentialTypeVisibilityUpdate,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID | None = Depends(get_client_company_id),
+):
+    """Replace the company-specific credential dropdown allowlist."""
+    company_id = _credential_settings_company_id(company_id)
+    selected_ids = list(dict.fromkeys(body.credential_type_ids))
+    async with get_connection() as conn:
+        existing_rows = []
+        if selected_ids:
+            existing_rows = await conn.fetch(
+                "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])",
+                selected_ids,
+            )
+        existing_ids = {row["id"] for row in existing_rows}
+        missing_ids = [
+            credential_type_id
+            for credential_type_id in selected_ids
+            if credential_type_id not in existing_ids
+        ]
+        if missing_ids:
+            raise HTTPException(status_code=422, detail="One or more credential types do not exist")
+
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO company_credential_type_filters (company_id, updated_by)
+                VALUES ($1, $2)
+                ON CONFLICT (company_id) DO UPDATE
+                SET updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                """,
+                company_id,
+                user.id,
+            )
+            await conn.execute(
+                "DELETE FROM company_credential_type_filter_items WHERE company_id = $1",
+                company_id,
+            )
+            if selected_ids:
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_type_filter_items (company_id, credential_type_id)
+                    SELECT $1, credential_type_id
+                    FROM UNNEST($2::uuid[]) AS credential_type_id
+                    """,
+                    company_id,
+                    selected_ids,
+                )
+    return {"ok": True, "selected_count": len(selected_ids)}
+
+
+@router.delete("/type-settings")
+async def reset_credential_type_settings(
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID | None = Depends(get_client_company_id),
+):
+    """Restore the legacy default where every credential type is offered."""
+    company_id = _credential_settings_company_id(company_id)
+    async with get_connection() as conn:
+        await conn.execute(
+            "DELETE FROM company_credential_type_filters WHERE company_id = $1",
+            company_id,
+        )
+    return {"ok": True}
 
 
 # ── Role categories ───────────────────────────────────────────────────

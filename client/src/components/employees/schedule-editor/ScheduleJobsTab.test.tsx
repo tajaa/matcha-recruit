@@ -56,4 +56,24 @@ describe('ScheduleJobsTab', () => {
     expect(screen.getByText('1 qualified employee · 0 credential rules')).toBeInTheDocument()
     expect(fetchCredentialTypesMock).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps an already-selected hidden credential visible by its saved label', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [{
+        id: 'job-1', name: 'Opener', location_id: 'loc1', color: null, notes: null,
+        credential_grace_days: null, employee_ids: ['employee-1'],
+        credential_requirements: [{
+          credential_type_id: 'hidden-type', credential_type_label: 'Food Handler Card',
+          is_required: true, schedule_blocking: true,
+        }],
+      }],
+    })
+    fetchCredentialTypesMock.mockResolvedValue([])
+
+    render(<ScheduleJobsTab locationId="loc1" credentialTemplatesEnabled />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand Opener' }))
+    expect(screen.getByRole('button', { name: 'Food Handler Card ×' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Food Handler Card' })).not.toBeInTheDocument()
+  })
 })
