@@ -103,6 +103,32 @@ class _ResultConn:
         raise AssertionError(f"Unexpected query: {query}")
 
 
+class _CommentConn:
+    def __init__(self):
+        self.company_id = uuid4()
+        self.assigned_to = uuid4()
+        self.created_by = uuid4()
+        self.queries: list[str] = []
+
+    async def fetchrow(self, query, *_args):
+        self.queries.append(query)
+        if "FROM mw_tasks" in query:
+            return {
+                "company_id": self.company_id,
+                "assigned_to": self.assigned_to,
+                "created_by": self.created_by,
+                "title": "Fix intake",
+                "project_title": "Hiring",
+            }
+        if "FROM users" in query:
+            return {"name": "Reviewer"}
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetch(self, query, *_args):
+        self.queries.append(query)
+        return []
+
+
 @pytest.mark.asyncio
 async def test_context_request_rechecks_and_inserts_under_one_task_lock(monkeypatch):
     from app.matcha.services.matcha_work import project_task_notifications as svc
@@ -186,6 +212,8 @@ async def test_result_notification_targets_context_author_once_under_task_lock(m
 
     assert posted is True
     assert any("FOR UPDATE OF t" in query for query in conn.queries)
+    assert any("p.title AS project_title" in query for query in conn.queries)
+    assert all("p.name AS project_title" not in query for query in conn.queries)
     create_notification.assert_awaited_once()
     kwargs = create_notification.await_args.kwargs
     assert kwargs["user_id"] == conn.recipient_id
@@ -236,6 +264,27 @@ async def test_result_notification_retry_is_idempotent(monkeypatch):
 
     assert posted is True
     create_notification.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_comment_notification_queries_canonical_project_title(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_notifications as svc
+
+    conn = _CommentConn()
+    create_notification = AsyncMock(return_value={"id": uuid4()})
+    monkeypatch.setattr(svc, "get_connection", lambda: _Context(conn))
+    monkeypatch.setattr(svc.notif_svc, "create_notification", create_notification)
+
+    await svc._notify_task_comment(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        body="The intake details are ready.",
+    )
+
+    assert any("p.title AS project_title" in query for query in conn.queries)
+    assert all("p.name AS project_title" not in query for query in conn.queries)
+    assert create_notification.await_count == 2
 
 
 @pytest.mark.asyncio
