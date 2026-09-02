@@ -42,6 +42,8 @@ class BreakRule:
     waiver_allowed: bool = False
     waiver_max_shift_minutes: int | None = None
     trigger_operator: TriggerOperator = "gt"
+    minimum_age: int | None = None
+    maximum_age: int | None = None
     citation: str = ""
 
 
@@ -142,6 +144,7 @@ def evaluate_break_plan(
     timezone: ZoneInfo,
     rules: Sequence[BreakRule],
     waiver: MealWaiverAttestation | None = None,
+    employee_age: int | None = None,
 ) -> BreakPlan:
     """Evaluate every applicable meal/rest rule for one scheduled shift.
 
@@ -158,6 +161,10 @@ def evaluate_break_plan(
 
     ordered_rules = sorted(rules, key=lambda rule: (rule.trigger_after_minutes, rule.kind, rule.ordinal))
     for rule in ordered_rules:
+        if rule.minimum_age is not None and (employee_age is None or employee_age < rule.minimum_age):
+            continue
+        if rule.maximum_age is not None and (employee_age is None or employee_age > rule.maximum_age):
+            continue
         if not _rule_applies(rule, shift_minutes):
             continue
 
@@ -233,6 +240,8 @@ def render_break_requirement(requirement: BreakRequirement) -> str:
 def render_break_plan(plan: BreakPlan) -> str | None:
     """Render a plan summary, or ``None`` when no employee action is needed."""
 
+    if plan.status == "error":
+        return "Break requirements could not be fully evaluated; verify manually."
     if plan.status == "unmapped":
         return "Break requirements could not be mapped for this location; verify manually."
     active = [requirement for requirement in plan.requirements if not requirement.waived]
@@ -293,3 +302,13 @@ def guidance_payload(plan: BreakPlan, *, timezone: str, evaluated_at: datetime) 
         ],
         "advisories": list(plan.advisories),
     }
+
+
+def minimum_meal_break_minutes(plan: BreakPlan) -> int:
+    """Aggregate the active meal periods represented by ``break_minutes``."""
+
+    return sum(
+        requirement.duration_minutes
+        for requirement in plan.requirements
+        if requirement.kind == "meal" and not requirement.waived
+    )

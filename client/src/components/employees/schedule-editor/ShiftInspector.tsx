@@ -52,13 +52,21 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const [role, setRole] = useState(shift?.role ?? '')
   const [jobId, setJobId] = useState(shift?.job_id ?? '')
   const [department, setDepartment] = useState(shift?.department ?? '')
-  const [breakMinutes, setBreakMinutes] = useState(String(shift?.break_minutes ?? 0))
+  const [breakMinutes, setBreakMinutes] = useState(shift ? String(shift.break_minutes) : '')
+  const [breakDirty, setBreakDirty] = useState(false)
   const [requiredStaff, setRequiredStaff] = useState(String(shift?.required_staff ?? 1))
   const [notes, setNotes] = useState(shift?.notes ?? '')
   const [kind, setKind] = useState<'work' | 'training'>(shift?.kind ?? 'work')
   const [requirementId, setRequirementId] = useState(shift?.training_requirement_id ?? '')
   const [requirements, setRequirements] = useState<TrainingRequirement[]>([])
   const [validationError, setValidationError] = useState<string | null>(null)
+  const persistedBreakMinutes = shift?.break_minutes
+
+  useEffect(() => {
+    if (!breakDirty && persistedBreakMinutes !== undefined) {
+      setBreakMinutes(String(persistedBreakMinutes))
+    }
+  }, [breakDirty, persistedBreakMinutes])
 
   useEffect(() => {
     if (!trainingEnabled || editing) return
@@ -70,7 +78,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const overnight = end <= start
   const assignments = shift?.assignments ?? []
 
-  function payload(requiredStaffValue: number, breakMinutesValue: number): ShiftPayload {
+  function payload(requiredStaffValue: number, breakMinutesValue: number | undefined): ShiftPayload {
     const endDate = overnight ? addDays(date, 1) : date
     return {
       starts_at: `${date}T${start}:00Z`,
@@ -79,7 +87,8 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       job_id: jobId || null,
       department: department.trim() || null,
       location_id: locationId || null,
-      break_minutes: breakMinutesValue,
+      break_mode: breakMinutesValue === undefined ? 'auto' : 'manual',
+      ...(breakMinutesValue === undefined ? {} : { break_minutes: breakMinutesValue }),
       required_staff: requiredStaffValue,
       notes: notes.trim() || null,
       ...(editing ? {} : {
@@ -101,7 +110,8 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       return
     }
     setValidationError(null)
-    const nextPayload = payload(validation.requiredStaff, validation.breakMinutes)
+    const plannedBreak = editing && !breakDirty ? undefined : validation.breakMinutes
+    const nextPayload = payload(validation.requiredStaff, plannedBreak)
     if (editing) await onUpdate(nextPayload)
     else await onCreate(nextPayload)
   }
@@ -126,7 +136,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Job<select value={jobId} onChange={(event) => setJobId(event.target.value)} disabled={readOnly} className={input}><option value="">No job — anyone can be assigned</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Location<div className={`${input} text-zinc-400`}>{locationName}</div></label>
         <div className="grid grid-cols-2 gap-2">
-          <label className="text-[10px] uppercase tracking-wide text-zinc-600">Planned break (minutes)<input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>
+          <div className="text-[10px] uppercase tracking-wide text-zinc-600"><label htmlFor="shift-break-minutes">Planned break (minutes)</label><input id="shift-break-minutes" aria-describedby="shift-break-help" type="number" min="0" max={MAX_BREAK_MINUTES} step="5" value={breakMinutes} onChange={(event) => { setBreakMinutes(event.target.value); setBreakDirty(true) }} disabled={readOnly} placeholder="Auto" className={input} /><span id="shift-break-help" className="mt-1 block text-[9px] normal-case tracking-normal text-zinc-600">Leave blank for Auto. Untouched breaks are raised when approved rules require it.</span></div>
           <label className="text-[10px] uppercase tracking-wide text-zinc-600">Staff needed<input type="number" min="1" max={MAX_REQUIRED_STAFF} step="1" required value={requiredStaff} onChange={(event) => setRequiredStaff(event.target.value)} disabled={readOnly} className={input} /></label>
         </div>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Notes<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={readOnly} className={input} /></label>

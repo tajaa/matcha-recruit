@@ -600,7 +600,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
   const [role, setRole] = useState(shift?.role ?? '')
   const [notes, setNotes] = useState(shift?.notes ?? '')
-  const [breakMinutes, setBreakMinutes] = useState(String(shift?.break_minutes ?? 0))
+  const [breakMinutes, setBreakMinutes] = useState(shift ? String(shift.break_minutes) : '')
+  const [breakDirty, setBreakDirty] = useState(false)
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
 
@@ -617,7 +618,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const overnight = end <= start
   const durationHours = spanHours(start, end)
 
-  function buildPayload(requiredStaff: number, plannedBreak: number): ShiftPayload {
+  function buildPayload(requiredStaff: number, plannedBreak: number | undefined): ShiftPayload {
     const startDay = editing ? shift!.starts_at.slice(0, 10) : day
     const endDay = overnight ? addDays(startDay, 1) : startDay
     const payload: ShiftPayload = {
@@ -625,7 +626,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       notes: notes.trim() || null,
-      break_minutes: plannedBreak,
+      break_mode: plannedBreak === undefined ? 'auto' : 'manual',
+      ...(plannedBreak === undefined ? {} : { break_minutes: plannedBreak }),
       required_staff: requiredStaff,
     }
     if (!editing && kind === 'training' && requirementId) {
@@ -654,7 +656,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
     }
     setBusy(true)
     try {
-      const payload = buildPayload(validation.requiredStaff, validation.breakMinutes)
+      const plannedBreak = editing && !breakDirty ? undefined : validation.breakMinutes
+      const payload = buildPayload(validation.requiredStaff, plannedBreak)
       if (editing) {
         // PUT is a true PATCH, but every field here is one the form owns, so
         // sending the lot is the same write. `status` is deliberately NOT sent —
@@ -718,8 +721,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
-        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
-        <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Used by scheduling-law checks when employees are assigned.</span>
+        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" value={breakMinutes} onChange={(e) => { setBreakMinutes(e.target.value); setBreakDirty(true) }} placeholder="Auto" className={`${inputCls} mt-0.5`} />
+        <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Leave blank to generate the approved legal minimum. You can add time later, but cannot save below that minimum.</span>
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Notes <span className="text-zinc-600 normal-case">(optional)</span></span>

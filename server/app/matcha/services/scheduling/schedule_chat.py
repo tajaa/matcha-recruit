@@ -69,7 +69,8 @@ from .shift_compliance import _approved_db_rules, _fair_workweek_advisories, _we
 from .shift_writes import (
     apply_assignment_core, cancel_shift_core, create_shift_core, fetch_availability,
     find_conflicts, generate_week_template_shifts, log_audit, remove_assignment_core,
-    removal_audit_details, restore_assignment_raw, retime_shift_core,
+    lock_scheduling_employees, removal_audit_details, restore_assignment_raw,
+    retime_shift_core,
 )
 
 logger = logging.getLogger(__name__)
@@ -1951,6 +1952,7 @@ async def execute_proposal(
 
     async with conn.transaction():
         await _claim_proposal_execution(conn, proposal_row["id"])
+        await lock_scheduling_employees(conn, company_id, all_employee_ids)
         for shift in proposal["shifts"]:
             starts_at = datetime.fromisoformat(shift["starts_at"])
             ends_at = datetime.fromisoformat(shift["ends_at"])
@@ -2091,6 +2093,42 @@ async def execute_edit_proposal(
 
     async with conn.transaction():
         await _claim_proposal_execution(conn, proposal_row["id"])
+        # Every edit proposal locks its complete shift set in one stable order
+        # before reading any roster or applying either half of a swap.  This
+        # prevents two overlapping proposals from deadlocking or validating a
+        # secondary shift against state that changes before the write.
+        shift_ids_to_lock = sorted({
+            UUID(raw_id)
+            for op in ops
+            for raw_id in (op.get("shift_id"), op.get("second_shift_id"))
+            if raw_id
+        })
+        if shift_ids_to_lock:
+            await conn.fetch(
+                """
+                SELECT id
+                FROM schedule_shifts
+                WHERE company_id = $1 AND id = ANY($2::uuid[])
+                ORDER BY id
+                FOR UPDATE
+                """,
+                company_id, shift_ids_to_lock,
+            )
+        explicit_employee_ids = {
+            UUID(raw_id)
+            for op in ops
+            for raw_id in (op.get("from_employee_id"), op.get("to_employee_id"))
+            if raw_id
+        }
+        roster_rows = await conn.fetch(
+            "SELECT employee_id FROM schedule_shift_assignments "
+            "WHERE shift_id = ANY($1::uuid[])",
+            shift_ids_to_lock,
+        ) if shift_ids_to_lock else []
+        await lock_scheduling_employees(
+            conn, company_id,
+            [*explicit_employee_ids, *(row["employee_id"] for row in roster_rows)],
+        )
         removed: dict[int, dict] = {}
         for idx, op in enumerate(ops):
             if op["kind"] in ("reassign", "unassign") and op.get("from_employee_id"):
@@ -2126,6 +2164,7 @@ async def execute_edit_proposal(
                 SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
                        kind, training_requirement_id, published_at, required_staff
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
+                FOR UPDATE
                 """,
                 shift_id, company_id,
             )

@@ -22,7 +22,8 @@ from ...services.scheduling.schedule_rules import (  # re-exported for the route
     shift_full_detail, shift_window_on_date, unlocated_employee_detail,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
-    _iso, fetch_availability, find_conflicts, log_audit, log_availability_override, shift_snapshot,
+    _iso, fetch_availability, find_conflicts, lock_scheduling_employees,
+    log_audit, log_availability_override, shift_snapshot,
 )
 from ...services.scheduling.schedule_warning_events import reconcile_schedule_warning_events
 
@@ -348,13 +349,14 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     """
     row = await conn.fetchrow(
         """
-        SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
+        SELECT s.id, s.starts_at, s.ends_at, s.status, s.required_staff,
                s.location_id, s.break_minutes, s.role, s.kind,
                s.training_requirement_id, s.job_id,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
                 WHERE a.shift_id = s.id) AS assigned_count
         FROM schedule_shifts s
         WHERE s.id = $1 AND s.company_id = $2
+        FOR UPDATE
         """,
         shift_id, company_id,
     )

@@ -13,6 +13,24 @@ from . import schedule_compliance
 from .schedule_breaks import BreakRule
 from .schedule_location_readiness import get_schedule_location_readiness
 
+MAX_SHIFT_BREAK_MINUTES = 1440
+_GUIDANCE_RULE_LOCK_KEY = "schedule-break-rules:guidance:v1"
+
+
+async def lock_schedule_break_rule_guidance(conn, *, exclusive: bool) -> None:
+    """Serialize persisted guidance with rule review transitions.
+
+    Resolvers take the shared transaction lock while rule approvals/rejections
+    take the exclusive form.  This prevents an old rule snapshot from being
+    written after a newly committed review decision.
+    """
+    query = (
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))"
+        if exclusive
+        else "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text, 0))"
+    )
+    await conn.fetchval(query, _GUIDANCE_RULE_LOCK_KEY)
+
 
 @dataclass(frozen=True)
 class ResolvedBreakRules:
@@ -31,10 +49,50 @@ def _uuid_for_legacy(state: str) -> UUID:
 def _as_int(value: Any, *, default: int | None = None) -> int | None:
     if value is None:
         return default
-    try:
+    if isinstance(value, bool):
+        raise ValueError("numeric rule values must be whole numbers")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
         return int(value)
-    except (TypeError, ValueError):
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value)
+    raise ValueError("numeric rule values must be whole numbers")
+
+
+def _as_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
         return default
+    if not isinstance(value, bool):
+        raise ValueError("boolean rule values must be true or false")
+    return value
+
+
+def _age_bounds(raw: dict[str, Any]) -> tuple[int | None, int | None]:
+    def supplied_int(*keys: str) -> int | None:
+        found = next((key for key in keys if key in raw), None)
+        if found is None or raw[found] is None:
+            return None
+        value = raw[found]
+        if isinstance(value, bool):
+            raise ValueError(f"{keys[0]} must be a whole number")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return int(value)
+        raise ValueError(f"{keys[0]} must be a whole number")
+
+    minimum = supplied_int("minimum_age", "min_age")
+    maximum = supplied_int("maximum_age", "max_age")
+    if minimum is not None and not 0 <= minimum <= 125:
+        raise ValueError("minimum_age must be between 0 and 125")
+    if maximum is not None and not 0 <= maximum <= 125:
+        raise ValueError("maximum_age must be between 0 and 125")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ValueError("minimum_age cannot exceed maximum_age")
+    return minimum, maximum
 
 
 def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[BreakRule]:
@@ -51,11 +109,25 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
         for raw in periods:
             if not isinstance(raw, dict):
                 raise ValueError(f"{key} entries must be objects")
+            minimum_age, maximum_age = _age_bounds(raw)
             duration = _as_int(raw.get("duration_minutes"))
             trigger = _as_int(raw.get("trigger_after_minutes"))
             ordinal = _as_int(raw.get("ordinal"), default=1)
+            if ordinal is None or ordinal < 1:
+                raise ValueError(f"invalid {kind} break ordinal")
+            trigger_operator = raw.get("trigger_operator", "gt")
+            if trigger_operator not in ("gt", "gte"):
+                raise ValueError("trigger_operator must be 'gt' or 'gte'")
+            paid = _as_bool(raw.get("paid"), default=kind == "rest")
+            waiver = raw.get("waiver") or {}
+            if not isinstance(waiver, dict):
+                raise ValueError("waiver must be an object")
+            waiver_allowed = _as_bool(waiver.get("allowed"), default=False)
+            waiver_max = _as_int(waiver.get("max_shift_minutes"))
+            if waiver_max is not None and waiver_max < 0:
+                raise ValueError("waiver max_shift_minutes cannot be negative")
             count_bands = raw.get("count_bands") if kind == "rest" else None
-            if duration is None or duration <= 0:
+            if duration is None or not 0 < duration <= MAX_SHIFT_BREAK_MINUTES:
                 raise ValueError(f"invalid {kind} break duration")
             if not count_bands and (trigger is None or trigger < 0):
                 raise ValueError(f"invalid {kind} break trigger")
@@ -73,7 +145,10 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                         raise ValueError("count_bands entries must be objects")
                     band_trigger = _as_int(band.get("min_minutes"), default=trigger)
                     count = _as_int(band.get("count"), default=0) or 0
-                    if band_trigger is None or band_trigger < 0 or count < 0:
+                    if (
+                        band_trigger is None or band_trigger < 0
+                        or count < 0 or count > MAX_SHIFT_BREAK_MINUTES
+                    ):
                         raise ValueError("invalid count_bands threshold/count")
                     bands.append((band_trigger, count))
                 previous_count = 0
@@ -87,36 +162,61 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                             ordinal=ordinal_value,
                             trigger_after_minutes=band_trigger,
                             duration_minutes=duration,
-                            paid=bool(raw.get("paid", kind == "rest")),
+                            paid=paid,
                             deadline_offset_minutes=_as_int(raw.get("deadline_offset_minutes")),
                             earliest_offset_minutes=_as_int(raw.get("earliest_offset_minutes")),
                             recommended_offset_minutes=_as_int(raw.get("recommended_offset_minutes")),
                             latest_offset_minutes=_as_int(raw.get("latest_offset_minutes")),
-                            waiver_allowed=bool((raw.get("waiver") or {}).get("allowed", False)),
-                            waiver_max_shift_minutes=_as_int((raw.get("waiver") or {}).get("max_shift_minutes")),
-                            trigger_operator=raw.get("trigger_operator", "gt"),
+                            waiver_allowed=waiver_allowed,
+                            waiver_max_shift_minutes=waiver_max,
+                            trigger_operator=trigger_operator,
+                            minimum_age=minimum_age,
+                            maximum_age=maximum_age,
                             citation=str(raw.get("citation") or citation),
                         ))
                     previous_count = count
                 continue
-            waiver = raw.get("waiver") or {}
             parsed.append(BreakRule(
                 rule_set_id=rule_set_id,
                 kind=kind,
                 ordinal=ordinal or 1,
                 trigger_after_minutes=trigger or 0,
                 duration_minutes=duration,
-                paid=bool(raw.get("paid", kind == "rest")),
+                paid=paid,
                 deadline_offset_minutes=_as_int(raw.get("deadline_offset_minutes")),
                 earliest_offset_minutes=_as_int(raw.get("earliest_offset_minutes")),
                 recommended_offset_minutes=_as_int(raw.get("recommended_offset_minutes")),
                 latest_offset_minutes=_as_int(raw.get("latest_offset_minutes")),
-                waiver_allowed=bool(waiver.get("allowed", False)),
-                waiver_max_shift_minutes=_as_int(waiver.get("max_shift_minutes")),
-                trigger_operator=raw.get("trigger_operator", "gt"),
+                waiver_allowed=waiver_allowed,
+                waiver_max_shift_minutes=waiver_max,
+                trigger_operator=trigger_operator,
+                minimum_age=minimum_age,
+                maximum_age=maximum_age,
                 citation=str(raw.get("citation") or citation),
             ))
+    # The public shift contract and editor both cap the aggregate planned
+    # break at one day.  Check every possible employee age so overlapping
+    # scoped rules cannot synthesize an unwritable value after approval.
+    for employee_age in (None, *range(126)):
+        meal_total = sum(
+            rule.duration_minutes
+            for rule in parsed
+            if rule.kind == "meal"
+            and (rule.minimum_age is None or employee_age is not None and employee_age >= rule.minimum_age)
+            and (rule.maximum_age is None or employee_age is not None and employee_age <= rule.maximum_age)
+        )
+        if meal_total > MAX_SHIFT_BREAK_MINUTES:
+            raise ValueError("aggregate meal break duration exceeds 1440 minutes")
     return parsed
+
+
+def validate_break_rule_payload(payload: Any, citation: str = "") -> None:
+    """Validate persisted/imported rules with the runtime parser.
+
+    Keeping one parser for import, approval, and resolution prevents an
+    approved payload from silently degrading to an empty rule set at runtime.
+    """
+    _rules_from_payload(UUID(int=0), payload, citation)
 
 
 def _location_timezone(value: str | None) -> ZoneInfo | None:
@@ -169,6 +269,7 @@ async def resolve_break_rules(
     location_id: UUID,
     shift_date: date,
 ) -> ResolvedBreakRules:
+    await lock_schedule_break_rule_guidance(conn, exclusive=False)
     readiness = await get_schedule_location_readiness(conn, company_id, location_id)
     if readiness.jurisdiction_id is None:
         return ResolvedBreakRules(

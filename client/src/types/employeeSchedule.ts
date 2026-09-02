@@ -255,6 +255,7 @@ export interface ShiftPayload {
   department?: string | null
   location_id?: string | null
   break_minutes?: number
+  break_mode?: 'auto' | 'manual'
   required_staff?: number
   color?: string | null
   notes?: string | null

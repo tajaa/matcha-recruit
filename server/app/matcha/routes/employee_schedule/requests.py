@@ -18,12 +18,14 @@ from ...services.scheduling.shift_requests import find_same_day_assignments, sam
 from ...services.scheduling.schedule_request_notifications import (
     mark_manager_ready_notifications_resolved,
 )
+from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
+from ...services.scheduling.schedule_guidance import resolve_shift_break_plan
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
     check_job_qualification, find_conflicts, raise_conflict, raise_not_qualified,
     fetch_availability, availability_violations, raise_outside_availability,
-    reconcile_warning_events, fetch_locked_shift_pair,
+    reconcile_warning_events, fetch_locked_shift_pair, lock_scheduling_employees,
 )
 from ._compliance import check_shift_compliance, raise_for_violations
 
@@ -79,9 +81,18 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     )
     if unqualified and not force:
         raise_not_qualified(unqualified)
+    break_plan = await resolve_shift_break_plan(
+        conn, company_id, location_id=shift["location_id"],
+        starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+        employee_id=employee_id,
+    )
+    effective_break = max(
+        int(shift["break_minutes"] or 0),
+        minimum_meal_break_minutes(break_plan),
+    )
     violations = await check_shift_compliance(
         conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"], starts_at=shift["starts_at"],
-        ends_at=shift["ends_at"], break_minutes=shift["break_minutes"] or 0,
+        ends_at=shift["ends_at"], break_minutes=effective_break,
         employee_id=employee_id, exclude_shift_id=exclude_shift_id, fw_event="assign",
         fw_shift_published=(shift["status"] == "published"), shift_kind=shift["kind"],
         training_requirement_id=shift["training_requirement_id"],
@@ -121,6 +132,12 @@ async def review_request(request_id: UUID, body: RequestReview,
                         raise HTTPException(status_code=409, detail="Swap is missing its counterparty shift")
                     shift_ids.append(req["counter_shift_id"])
                 locked = await fetch_locked_shift_pair(conn, company_id, *shift_ids)
+                await lock_scheduling_employees(
+                    conn, company_id,
+                    [employee_id for employee_id in (
+                        req["employee_id"], req["target_employee_id"],
+                    ) if employee_id is not None],
+                )
                 offered = locked.get(str(req["shift_id"]))
                 if offered is None or offered["status"] != "published":
                     raise HTTPException(status_code=409, detail="Offered shift is no longer published")

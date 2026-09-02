@@ -26,6 +26,10 @@ from ...services.scheduling.schedule_location_readiness import (
     get_schedule_location_readiness,
 )
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
+from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
+from ...services.scheduling.schedule_guidance import (
+    resolve_shift_break_plan, resolve_shift_break_plans,
+)
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
@@ -34,6 +38,7 @@ from ._shared import (
     fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
     shift_window_on_date, check_job_qualification, raise_not_qualified,
     reconcile_warning_events,
+    lock_scheduling_employees,
 )
 from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
@@ -45,14 +50,54 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _locked_break_write(
+    *, requested: int, locked: int, existing: int, minimum: int,
+    manual: bool, legacy_value: bool,
+) -> int:
+    """Resolve a break write after locking without losing a newer increase."""
+    if manual:
+        if locked != existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "shift_changed",
+                    "message": "The shift changed while you were editing it. Reload and try again.",
+                },
+            )
+        return requested
+    if legacy_value and locked == existing:
+        # A legacy API caller may still intentionally lower a compliant value.
+        # It is only automatic when stale or racing a newer write.
+        return max(requested, minimum)
+    return max(requested, locked, minimum)
+
+
+async def _resolve_break_plans_for_ids(
+    conn, company_id: UUID, *, location_id: UUID | None,
+    starts_at: datetime, ends_at: datetime,
+    employee_ids: list[UUID | None],
+):
+    concrete_ids = [employee_id for employee_id in employee_ids if employee_id is not None]
+    if concrete_ids:
+        plans = await resolve_shift_break_plans(
+            conn, company_id, location_id=location_id, starts_at=starts_at,
+            ends_at=ends_at, employee_ids=concrete_ids,
+        )
+        return [plans[employee_id] for employee_id in concrete_ids]
+    return [await resolve_shift_break_plan(
+        conn, company_id, location_id=location_id,
+        starts_at=starts_at, ends_at=ends_at,
+    )]
+
+
 async def _lock_and_assert_publish_assignments_eligible(
     conn,
     company_id: UUID,
     candidate_shifts: list[dict],
-) -> None:
+) -> dict[UUID, int]:
     """Lock assignees and reject publication if eligibility changed in draft."""
     if not candidate_shifts:
-        return
+        return {}
     shifts_by_id = {shift["id"]: shift for shift in candidate_shifts}
     assignments = await conn.fetch(
         """
@@ -64,12 +109,34 @@ async def _lock_and_assert_publish_assignments_eligible(
         """,
         list(shifts_by_id),
     )
+    assignments_by_shift: dict[UUID, list[UUID]] = {}
+    for assignment in assignments:
+        assignments_by_shift.setdefault(assignment["shift_id"], []).append(
+            assignment["employee_id"]
+        )
+    effective_breaks: dict[UUID, int] = {}
+    for shift in candidate_shifts:
+        employee_ids = assignments_by_shift.get(shift["id"], [])
+        plans = await _resolve_break_plans_for_ids(
+            conn, company_id, location_id=shift["location_id"],
+            starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+            employee_ids=employee_ids or [None],
+        )
+        generated_minimum = max(minimum_meal_break_minutes(plan) for plan in plans)
+        effective_break = max(int(shift["break_minutes"] or 0), generated_minimum)
+        effective_breaks[shift["id"]] = effective_break
+        if effective_break > int(shift["break_minutes"] or 0):
+            await conn.execute(
+                "UPDATE schedule_shifts SET break_minutes=$1, updated_at=NOW() "
+                "WHERE id=$2 AND company_id=$3",
+                effective_break, shift["id"], company_id,
+            )
     for assignment in assignments:
         shift = shifts_by_id[assignment["shift_id"]]
         violations = await check_shift_compliance(
             conn, company_id, location_id=shift["location_id"],
             job_id=shift.get("job_id"), starts_at=shift["starts_at"],
-            ends_at=shift["ends_at"], break_minutes=shift["break_minutes"] or 0,
+            ends_at=shift["ends_at"], break_minutes=effective_breaks[shift["id"]],
             employee_id=assignment["employee_id"], exclude_shift_id=shift["id"],
             shift_kind=shift["kind"],
             training_requirement_id=shift["training_requirement_id"],
@@ -80,6 +147,7 @@ async def _lock_and_assert_publish_assignments_eligible(
             and violation.get("severity") == "block"
         ]
         raise_for_violations(eligibility_blocks, force=False)
+    return effective_breaks
 
 
 async def _duplicate_assignment_block(
@@ -281,6 +349,28 @@ async def create_shift(body: ShiftCreate,
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         await assert_job_in_company(conn, company_id, body.job_id)
+        plan_employee_ids = list(dict.fromkeys(body.employee_ids)) or [None]
+        break_plans = await _resolve_break_plans_for_ids(
+            conn, company_id, location_id=body.location_id,
+            starts_at=body.starts_at, ends_at=body.ends_at,
+            employee_ids=plan_employee_ids,
+        )
+        generated_minimum = max(
+            minimum_meal_break_minutes(plan) for plan in break_plans
+        )
+        if body.break_mode == "manual" and body.break_minutes < generated_minimum:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "break_minimum_required",
+                    "minimum_break_minutes": generated_minimum,
+                    "message": (
+                        f"Planned break cannot be below the generated "
+                        f"{generated_minimum}-minute legal minimum."
+                    ),
+                },
+            )
+        effective_break = max(body.break_minutes, generated_minimum)
         training_requirement = None
         if body.kind == "training":
             features = await get_company_features(company_id, conn=conn)
@@ -342,7 +432,7 @@ async def create_shift(body: ShiftCreate,
             violations = await check_shift_compliance(
                 conn, company_id, location_id=body.location_id, job_id=body.job_id,
                 starts_at=body.starts_at, ends_at=body.ends_at,
-                break_minutes=body.break_minutes or 0, employee_id=emp_id,
+                break_minutes=effective_break, employee_id=emp_id,
                 shift_kind=body.kind, training_requirement_id=body.training_requirement_id,
                 lapse_items=lapse_map.get(str(emp_id), []),
             )
@@ -355,16 +445,27 @@ async def create_shift(body: ShiftCreate,
                 await check_shift_compliance(
                     conn, company_id, location_id=body.location_id, job_id=body.job_id,
                     starts_at=body.starts_at, ends_at=body.ends_at,
-                    break_minutes=body.break_minutes or 0,
+                    break_minutes=effective_break,
                 ),
                 force=force,
             )
         async with conn.transaction():
+            # Re-check conflicts under transaction-scoped employee locks in a
+            # stable order.  The earlier pass provides detailed validation;
+            # this pass closes the gap between that snapshot and insertion.
+            if not force:
+                for employee_id in sorted(set(body.employee_ids)):
+                    conflicts = await find_conflicts(
+                        conn, company_id, employee_id,
+                        body.starts_at, body.ends_at,
+                    )
+                    if conflicts:
+                        raise_conflict(employee_id, conflicts)
             shift_id = await create_shift_core(
                 conn, company_id,
                 location_id=body.location_id, role=body.role, department=body.department,
                 starts_at=body.starts_at, ends_at=body.ends_at,
-                break_minutes=body.break_minutes, required_staff=body.required_staff,
+                break_minutes=effective_break, required_staff=body.required_staff,
                 color=body.color, notes=body.notes, kind=body.kind, job_id=body.job_id,
                 training_requirement=dict(training_requirement) if training_requirement else None,
                 training_requirement_id=body.training_requirement_id,
@@ -445,6 +546,7 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
         dropped: list[dict] = []
         created_ids: list[UUID] = []
         async with conn.transaction():
+            await lock_scheduling_employees(conn, company_id, employee_ids)
             for d in body.target_dates:
                 new_start, new_end = shift_window_on_date(src["starts_at"], src["ends_at"], d)
                 surviving: list[UUID] = []
@@ -498,19 +600,28 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
     """
     company_id = await require_company_id(current_user)
     patch = body.model_dump(exclude_unset=True)
+    break_mode = patch.pop("break_mode", None)
+    legacy_break_value = break_mode is None and "break_minutes" in patch
+    auto_break_requested = break_mode == "auto"
+    if auto_break_requested:
+        # Auto is an instruction, not a database column.  Ignore any value a
+        # caller happened to serialize with it and preserve longer stored
+        # breaks while enforcing the generated minimum below.
+        patch.pop("break_minutes", None)
+    break_was_explicit = break_mode == "manual"
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             """
             SELECT starts_at, ends_at, status, published_at, break_minutes, location_id,
                    role, department, required_staff, color, notes,
-                   kind, training_requirement_id, job_id
+                   kind, training_requirement_id, job_id, updated_at
             FROM schedule_shifts WHERE id = $1 AND company_id = $2
             """,
             shift_id, company_id,
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Shift not found")
-        if not patch:
+        if not patch and (not auto_break_requested or existing["location_id"] is None):
             return await fetch_shift_by_id(conn, company_id, shift_id)
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
@@ -518,6 +629,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             await assert_job_in_company(conn, company_id, patch["job_id"])
 
         new_status = patch.get("status", existing["status"])
+        publishing = new_status == "published" and existing["status"] != "published"
         # Cancelled is terminal for publication — POST /publish already refuses it
         # (`AND status <> 'cancelled'`), and a resurrected shift would reappear on
         # every assignee's portal. Reopening as a draft is the supported path.
@@ -541,7 +653,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         # double-book everyone already on it, so it takes the same guard + force.
         # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
-        compliance_relevant = (
+        compliance_relevant = auto_break_requested or (
             retimed or "break_minutes" in patch or "location_id" in patch or "job_id" in patch
         )
         # Fair Workweek notice/clopening obligations attach to a POSTED shift's
@@ -553,13 +665,35 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         availability_overrides: dict[str, list[dict]] = {}
         qualification_overrides: dict[str, dict] = {}
         if compliance_relevant and new_status != "cancelled":
-            new_break = patch.get("break_minutes", existing["break_minutes"])
             new_location = patch.get("location_id", existing["location_id"])
             new_job_id = patch.get("job_id", existing["job_id"])
             assignees = await conn.fetch(
                 "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
                 shift_id,
             )
+            plan_employee_ids = [row["employee_id"] for row in assignees] or [None]
+            plans = await _resolve_break_plans_for_ids(
+                conn, company_id, location_id=new_location,
+                starts_at=new_start, ends_at=new_end,
+                employee_ids=plan_employee_ids,
+            )
+            generated_minimum = max(minimum_meal_break_minutes(plan) for plan in plans)
+            requested_break = patch.get("break_minutes", existing["break_minutes"])
+            if break_was_explicit and requested_break < generated_minimum:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "break_minimum_required",
+                        "minimum_break_minutes": generated_minimum,
+                        "message": (
+                            f"Planned break cannot be below the generated "
+                            f"{generated_minimum}-minute legal minimum."
+                        ),
+                    },
+                )
+            if requested_break < generated_minimum:
+                patch["break_minutes"] = generated_minimum
+            new_break = patch.get("break_minutes", existing["break_minutes"])
             # Same hoist-and-batch as create_shift: one feature lookup + one
             # batched lapse fetch for every assignee, not one each.
             lapse_map: dict = {}
@@ -648,23 +782,138 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             else:
                 patch["published_at"] = None
 
-        before = shift_snapshot(existing)
         new_location = patch.get("location_id", existing["location_id"])
-        after = {**before}
-        for field, value in patch.items():
-            after[field] = (
-                value.isoformat() if isinstance(value, datetime)
-                else str(value) if isinstance(value, UUID)
-                else value
-            )
         was_published = existing["published_at"] is not None
-        audit_assignees = await conn.fetch(
-            "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
-            shift_id,
-        ) if was_published else []
-
-        set_sql, params = build_patch(patch, first_param=3)
+        locked_plans_by_employee = {}
+        locked_guidance_timezone = None
         async with conn.transaction():
+            locked_shift = await conn.fetchrow(
+                "SELECT break_minutes, updated_at FROM schedule_shifts "
+                "WHERE id = $1 AND company_id = $2 FOR UPDATE",
+                shift_id, company_id,
+            )
+            if locked_shift is None:
+                raise HTTPException(status_code=404, detail="Shift not found")
+            if locked_shift["updated_at"] != existing["updated_at"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "shift_changed",
+                        "message": "The shift changed while you were editing it. Reload and try again.",
+                    },
+                )
+            if compliance_relevant and new_status != "cancelled":
+                locked_break = int(locked_shift["break_minutes"] or 0)
+                locked_assignees = await conn.fetch(
+                    "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+                    shift_id,
+                )
+                if {row["employee_id"] for row in locked_assignees} != {
+                    row["employee_id"] for row in assignees
+                }:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "shift_changed",
+                            "message": "The shift roster changed while you were editing it. Reload and try again.",
+                        },
+                    )
+                if retimed and not force:
+                    # Employee advisory locks serialize this retime with
+                    # assignments to other shifts; repeat overlap checks only
+                    # after those locks are held.
+                    for employee_id in sorted(
+                        row["employee_id"] for row in locked_assignees
+                    ):
+                        conflicts = await find_conflicts(
+                            conn, company_id, employee_id, new_start, new_end,
+                            exclude_shift_id=shift_id,
+                        )
+                        if conflicts:
+                            raise_conflict(employee_id, conflicts)
+                locked_employee_ids = [row["employee_id"] for row in locked_assignees] or [None]
+                locked_plans = await _resolve_break_plans_for_ids(
+                    conn, company_id, location_id=new_location,
+                    starts_at=new_start, ends_at=new_end,
+                    employee_ids=locked_employee_ids,
+                )
+                locked_minimum = max(
+                    minimum_meal_break_minutes(plan) for plan in locked_plans
+                )
+                locked_plans_by_employee = dict(zip(locked_employee_ids, locked_plans))
+                if locked_assignees and new_location is not None:
+                    locked_guidance_timezone = await conn.fetchval(
+                        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+                        new_location, company_id,
+                    ) or "UTC"
+                write_break = int(patch.get("break_minutes", existing["break_minutes"]) or 0)
+                if write_break < locked_minimum:
+                    if break_was_explicit:
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "code": "break_minimum_required",
+                                "minimum_break_minutes": locked_minimum,
+                                "message": (
+                                    f"Planned break cannot be below the generated "
+                                    f"{locked_minimum}-minute legal minimum."
+                                ),
+                            },
+                        )
+                    write_break = locked_minimum
+                write_break = _locked_break_write(
+                    requested=write_break,
+                    locked=locked_break,
+                    existing=int(existing["break_minutes"] or 0),
+                    minimum=locked_minimum,
+                    manual=break_was_explicit,
+                    legacy_value=legacy_break_value,
+                )
+                if write_break != locked_break or auto_break_requested:
+                    patch["break_minutes"] = write_break
+
+            if publishing:
+                # ShiftUpdate historically accepts status changes, so keep that
+                # contract while routing draft -> published through the same
+                # locked minimum/eligibility gate as the dedicated endpoints.
+                publish_breaks = await _lock_and_assert_publish_assignments_eligible(
+                    conn,
+                    company_id,
+                    [{
+                        "id": shift_id,
+                        "location_id": new_location,
+                        "job_id": patch.get("job_id", existing["job_id"]),
+                        "starts_at": new_start,
+                        "ends_at": new_end,
+                        "break_minutes": patch.get(
+                            "break_minutes", locked_shift["break_minutes"],
+                        ),
+                        "kind": existing["kind"],
+                        "training_requirement_id": existing["training_requirement_id"],
+                    }],
+                )
+                effective_break = publish_breaks[shift_id]
+                if effective_break != int(locked_shift["break_minutes"] or 0):
+                    patch["break_minutes"] = effective_break
+
+            # Auto is intentionally a no-op for cancelled shifts.  Avoid
+            # asking build_patch() to synthesize an UPDATE from no columns.
+            if not patch:
+                return await fetch_shift_by_id(conn, company_id, shift_id)
+
+            before = shift_snapshot(existing)
+            after = {**before}
+            for field, value in patch.items():
+                after[field] = (
+                    value.isoformat() if isinstance(value, datetime)
+                    else str(value) if isinstance(value, UUID)
+                    else value
+                )
+            audit_assignees = await conn.fetch(
+                "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+                shift_id,
+            ) if was_published else []
+            set_sql, params = build_patch(patch, first_param=3)
             await conn.execute(
                 f"""
                 UPDATE schedule_shifts SET {set_sql}, updated_at = NOW()
@@ -690,6 +939,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         conn, company_id, shift_id=shift_id,
                         employee_id=assignee["employee_id"], location_id=new_location,
                         starts_at=new_start, ends_at=new_end,
+                        plan=locked_plans_by_employee.get(assignee["employee_id"]),
+                        timezone_name=locked_guidance_timezone,
                     )
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
