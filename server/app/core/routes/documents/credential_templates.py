@@ -5,6 +5,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
@@ -220,31 +221,47 @@ async def get_credential_type_settings(
     catalog, flagged ``manageable=False`` so the UI hides the save controls
     instead of writing to whichever tenant happens to be oldest.
     """
-    configured = False
-    selected_rows: list = []
     async with get_connection() as conn:
-        if company_id is not None:
-            configured = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM company_credential_type_filters WHERE company_id = $1)",
-                company_id,
-            )
-            selected_rows = await conn.fetch(
-                """
-                SELECT credential_type_id
-                FROM company_credential_type_filter_items
-                WHERE company_id = $1
-                ORDER BY credential_type_id
-                """,
-                company_id,
-            )
         type_rows = await conn.fetch(
-            "SELECT * FROM credential_types ORDER BY category, label"
+            """
+            WITH filter_state AS (
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM company_credential_type_filters
+                    WHERE company_id = $1
+                ) AS is_configured
+            )
+            SELECT ct.*, filter_state.is_configured AS _is_configured,
+                   item.credential_type_id IS NOT NULL AS _is_selected
+            FROM filter_state
+            LEFT JOIN credential_types ct ON TRUE
+            LEFT JOIN company_credential_type_filter_items item
+              ON item.company_id = $1 AND item.credential_type_id = ct.id
+            ORDER BY ct.category, ct.label
+            """,
+            company_id,
         )
+
+    configured = False
+    selected_type_ids = []
+    credential_types = []
+    for row in type_rows:
+        credential_type = dict(row)
+        configured = bool(credential_type.pop("_is_configured"))
+        selected = bool(credential_type.pop("_is_selected"))
+        # The LEFT JOIN deliberately returns one sentinel row when the shared
+        # catalog is empty, so configured state still survives that edge case.
+        if credential_type.get("id") is None:
+            continue
+        credential_types.append(credential_type)
+        if selected:
+            selected_type_ids.append(credential_type["id"])
+
     return {
         "is_configured": bool(configured),
         "manageable": company_id is not None,
-        "selected_type_ids": [row["credential_type_id"] for row in selected_rows],
-        "credential_types": [dict(row) for row in type_rows],
+        "selected_type_ids": selected_type_ids,
+        "credential_types": credential_types,
     }
 
 
@@ -278,30 +295,39 @@ async def update_credential_type_settings(
         if missing_ids:
             raise HTTPException(status_code=422, detail="One or more credential types do not exist")
 
-        async with conn.transaction():
-            await conn.execute(
-                """
-                INSERT INTO company_credential_type_filters (company_id, updated_by)
-                VALUES ($1, $2)
-                ON CONFLICT (company_id) DO UPDATE
-                SET updated_by = EXCLUDED.updated_by, updated_at = NOW()
-                """,
-                company_id,
-                user.id,
-            )
-            await conn.execute(
-                "DELETE FROM company_credential_type_filter_items WHERE company_id = $1",
-                company_id,
-            )
-            await conn.execute(
-                """
-                INSERT INTO company_credential_type_filter_items (company_id, credential_type_id)
-                SELECT $1, credential_type_id
-                FROM UNNEST($2::uuid[]) AS credential_type_id
-                """,
-                company_id,
-                selected_ids,
-            )
+        try:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_type_filters (company_id, updated_by)
+                    VALUES ($1, $2)
+                    ON CONFLICT (company_id) DO UPDATE
+                    SET updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                    """,
+                    company_id,
+                    user.id,
+                )
+                await conn.execute(
+                    "DELETE FROM company_credential_type_filter_items WHERE company_id = $1",
+                    company_id,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_type_filter_items (company_id, credential_type_id)
+                    SELECT $1, credential_type_id
+                    FROM UNNEST($2::uuid[]) AS credential_type_id
+                    """,
+                    company_id,
+                    selected_ids,
+                )
+        except asyncpg.ForeignKeyViolationError as exc:
+            # The company or a selected catalog row can be deleted after the
+            # existence check. The transaction rolls back the replacement; the
+            # stale request is a validation failure, not an internal error.
+            raise HTTPException(
+                status_code=422,
+                detail="The company or one or more credential types no longer exist; reload and try again",
+            ) from exc
     return {"ok": True, "selected_count": len(selected_ids)}
 
 

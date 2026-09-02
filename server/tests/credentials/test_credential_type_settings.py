@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import uuid4
 
+import asyncpg
 import pytest
 from fastapi import HTTPException
 
@@ -18,9 +19,20 @@ class _Transaction:
 
 
 class _Connection:
-    def __init__(self, *, existing_ids=(), configured=False):
+    def __init__(
+        self,
+        *,
+        existing_ids=(),
+        configured=False,
+        selected_ids=(),
+        catalog_type_id=None,
+        fail_filter_item_insert=False,
+    ):
         self.existing_ids = set(existing_ids)
         self.configured = configured
+        self.selected_ids = set(selected_ids)
+        self.catalog_type_id = catalog_type_id or uuid4()
+        self.fail_filter_item_insert = fail_filter_item_insert
         self.calls = []
 
     def transaction(self):
@@ -36,12 +48,21 @@ class _Connection:
         self.calls.append(("fetch", query, args))
         if "SELECT id FROM credential_types" in query:
             return [{"id": value} for value in self.existing_ids]
+        if "WITH filter_state AS" in query:
+            return [{
+                "id": self.catalog_type_id,
+                "label": "Food Handler Card",
+                "_is_configured": self.configured,
+                "_is_selected": self.catalog_type_id in self.selected_ids,
+            }]
         if "SELECT ct.*" in query or "SELECT * FROM credential_types" in query:
             return [{"id": uuid4(), "label": "Food Handler Card"}]
         return []
 
     async def execute(self, query, *args):
         self.calls.append(("execute", query, args))
+        if self.fail_filter_item_insert and "INSERT INTO company_credential_type_filter_items" in query:
+            raise asyncpg.ForeignKeyViolationError("catalog row disappeared")
         return "OK"
 
 
@@ -110,6 +131,26 @@ async def test_update_credential_type_settings_rejects_unknown_type(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_update_credential_type_settings_maps_fk_race_to_422(monkeypatch):
+    selected_id = uuid4()
+    conn = _Connection(
+        existing_ids={selected_id},
+        fail_filter_item_insert=True,
+    )
+    monkeypatch.setattr(routes, "get_connection", _connection_context(conn))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.update_credential_type_settings(
+            CredentialTypeVisibilityUpdate(credential_type_ids=[selected_id]),
+            user=SimpleNamespace(id=uuid4()),
+            company_id=uuid4(),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "reload" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
 async def test_reset_credential_type_settings_restores_default(monkeypatch):
     company_id = uuid4()
     conn = _Connection()
@@ -145,7 +186,12 @@ async def test_update_credential_type_settings_rejects_empty_selection(monkeypat
 @pytest.mark.asyncio
 async def test_get_credential_type_settings_reports_company_selection(monkeypatch):
     company_id = uuid4()
-    conn = _Connection(configured=True)
+    selected_id = uuid4()
+    conn = _Connection(
+        configured=True,
+        selected_ids={selected_id},
+        catalog_type_id=selected_id,
+    )
     monkeypatch.setattr(routes, "get_connection", _connection_context(conn))
 
     result = await routes.get_credential_type_settings(
@@ -154,7 +200,10 @@ async def test_get_credential_type_settings_reports_company_selection(monkeypatc
 
     assert result["is_configured"] is True
     assert result["manageable"] is True
+    assert result["selected_type_ids"] == [selected_id]
     assert result["credential_types"][0]["label"] == "Food Handler Card"
+    assert "_is_configured" not in result["credential_types"][0]
+    assert len(conn.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -169,8 +218,10 @@ async def test_get_credential_type_settings_unscoped_admin_is_read_only(monkeypa
     assert result["manageable"] is False
     assert result["is_configured"] is False
     assert result["selected_type_ids"] == []
-    # No tenant was resolved, so nothing may be read out of another tenant's filter.
-    assert not [call for call in conn.calls if "company_credential_type_filter" in call[1]]
+    # SQL NULL equality matches no tenant row, so the single combined query
+    # cannot read another company's selection.
+    assert len(conn.calls) == 1
+    assert conn.calls[0][2] == (None,)
 
 
 @pytest.mark.asyncio
