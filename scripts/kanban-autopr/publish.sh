@@ -384,6 +384,13 @@ TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
 # ---- unautomatable: mark the card and reconcile an existing rework PR ----
 if [ "$OUTCOME" = no_safe_action ]; then
     git reset --hard >/dev/null 2>&1
+    # Both refusals a draft_pr directive can overturn must actively ask the
+    # owner for that authorization. Without the prompt the card just reads as
+    # a refusal, and the human has no visible way to say "do it anyway".
+    NEEDS_CONTEXT_REQUEST=false
+    case "$NO_SAFE_ACTION_REASON" in
+        already_fixed|migration_required) NEEDS_CONTEXT_REQUEST=true ;;
+    esac
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
     note_prefix="🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL"
     if [ "$MODE" = rework ]; then
@@ -399,7 +406,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
                 '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
-        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+        if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
             post_context_request "$CARD_NOTE" "$origin_note"
         fi
         post_reconsideration_reply "$existing_open_pr" "$origin_note"
@@ -410,7 +417,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
-        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+        if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
             post_context_request "$CARD_NOTE" "$origin_note"
         fi
         post_reconsideration_reply "" "$origin_note"

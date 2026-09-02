@@ -118,30 +118,48 @@ _AUTOPR_TEST_ROUTE_RE = re.compile(
     re.IGNORECASE,
 )
 _AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
+# Operator directive grammar. Deliberately generous: this parser only ever
+# sees text an authorized owner bound to one exact AutoPR decision, so a plain
+# affirmative ("you can work on this", "do it anyway", "draft the migration")
+# is authority. Keep in lock-step with the harness-side copy in
+# scripts/kanban-autopr/resolve-directive-policy.py.
+_AUTOPR_LEAD_IN = (
+    r"^(?:(?:please|pls|hey|ok|okay|yes|yep|yeah|sure|thanks)\b[\s,]*)*"
+    r"(?:(?:anyway|anyways|either\s+way|regardless|still|nonetheless)\b[\s,]*)*"
+    r"(?:i\s+(?:need|want|expect)\s+(?:you\s+)?to\s+)?"
+    r"(?:(?:you|u|it|autopr|the\s+bot|the\s+agent)\s+)?"
+    r"(?:(?:can|may|must|should|could|shall|will|need\s+to|have\s+to|ought\s+to"
+    r"|are\s+(?:ok|okay|clear|free|allowed)\s+to)\s+)?"
+    r"(?:go\s+ahead\s+(?:and\s+)?)?"
+    r"(?:(?:just|still|absolutely|definitely|certainly|totally|really|simply"
+    r"|please|now|then|instead|anyway|anyways)\s+)*"
+)
 _AUTOPR_DRAFT_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:(?:you\s+)?"
-    r"(?:can|may|must|should|need\s+to)\s+)?)?"
-    r"(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?"
-    r"(?:pr|pull\s+request)\b"
+    _AUTOPR_LEAD_IN
+    + r"(?:draft|create|open|make|write|author|submit|raise|put\s+up)\s+"
+    r"(?:(?:this|that|a|an|the)\s+)?(?:draft\s+)?"
+    r"(?:pr|pull\s+request|migration(?:\s+(?:script|file|version))?s?)\b"
 )
 _AUTOPR_WORK_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:go\s+ahead(?:\s+and)?\s+)?)?"
-    r"(?:(?:you\s+)?(?:can|may|must|should|need\s+to)\s+)?"
-    r"(?:work\s+on|implement|start\s+work\s+on)\s+"
-    r"(?:this|it|the\s+(?:ticket|card|pr|pull\s+request))\b"
+    _AUTOPR_LEAD_IN
+    + r"(?:work\s+on|start\s+(?:work\s+)?on|implement|build|do|handle|fix"
+    r"|finish|complete|tackle|take\s+on|pick\s+up|proceed\s+with)\s+"
+    r"(?:this|that|it|the\s+(?:ticket|card|pr|pull\s+request|work|change|migration))\b"
 )
 _AUTOPR_GO_AHEAD_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:just\s+)?)?go\s+ahead"
-    r"(?:\s+and\s+(?:do|fix|handle|implement)\s+(?:it|this))?"
-    r"(?:\s+(?:with\s+)?(?:it|this))?"
-    r"(?:\s+anyways?)?[.!]*$"
+    _AUTOPR_LEAD_IN + r"(?:go\s+ahead|proceed|carry\s+on|keep\s+going)\b"
 )
 _AUTOPR_FORCE_NEGATION_RE = re.compile(
     r"(?:\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}"
-    r"\b(?:work|implement|draft|create|open)\b)"
-    r"|(?:\b(?:work|implement|draft|create|open)\b.{0,20}"
-    r"\b(?:not|never)\b)"
+    r"\b(?:work|implement|draft|create|open|build|handle|fix|finish|proceed"
+    r"|go\s+ahead)\b)"
+    r"|(?:\b(?:work|implement|draft|create|open|build|handle|fix|finish|proceed)\b"
+    r".{0,20}\b(?:not|never)\b)"
 )
+_AUTOPR_EXPLICIT_DRAFT_COMMANDS = {
+    "draft-pr", "draft pr", "force-pr", "force pr", "force", "override",
+    "draft it", "do it", "work on it", "ship it",
+}
 
 
 def _is_autopr_waiting_for_answers_note(note: str) -> bool:
@@ -169,7 +187,7 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
         instruction = " ".join(
             directive_text.strip().lower().replace("’", "'").split()
         )
-        explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
+        explicit_draft = instruction in _AUTOPR_EXPLICIT_DRAFT_COMMANDS
         natural_draft = bool(_AUTOPR_DRAFT_COMMAND_RE.search(instruction))
         natural_work = bool(_AUTOPR_WORK_COMMAND_RE.search(instruction))
         natural_go_ahead = bool(_AUTOPR_GO_AHEAD_COMMAND_RE.search(instruction))

@@ -15,37 +15,58 @@ from pathlib import Path
 from typing import Any
 
 
+# Operator directive grammar. Deliberately generous: this parser only ever
+# sees text an authorized owner bound to one exact AutoPR decision, so a plain
+# affirmative ("you can work on this", "do it anyway", "draft the migration")
+# is authority. Keep byte-identical with the API-side copy in
+# server/app/matcha/services/matcha_work/project_task_service.py.
+_LEAD_IN = (
+    r"^(?:(?:please|pls|hey|ok|okay|yes|yep|yeah|sure|thanks)\b[\s,]*)*"
+    r"(?:(?:anyway|anyways|either\s+way|regardless|still|nonetheless)\b[\s,]*)*"
+    r"(?:i\s+(?:need|want|expect)\s+(?:you\s+)?to\s+)?"
+    r"(?:(?:you|u|it|autopr|the\s+bot|the\s+agent)\s+)?"
+    r"(?:(?:can|may|must|should|could|shall|will|need\s+to|have\s+to|ought\s+to"
+    r"|are\s+(?:ok|okay|clear|free|allowed)\s+to)\s+)?"
+    r"(?:go\s+ahead\s+(?:and\s+)?)?"
+    r"(?:(?:just|still|absolutely|definitely|certainly|totally|really|simply"
+    r"|please|now|then|instead|anyway|anyways)\s+)*"
+)
 _DRAFT_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:(?:you\s+)?"
-    r"(?:can|may|must|should|need\s+to)\s+)?)?"
-    r"(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?"
-    r"(?:pr|pull\s+request)\b"
+    _LEAD_IN
+    + r"(?:draft|create|open|make|write|author|submit|raise|put\s+up)\s+"
+    r"(?:(?:this|that|a|an|the)\s+)?(?:draft\s+)?"
+    r"(?:pr|pull\s+request|migration(?:\s+(?:script|file|version))?s?)\b"
 )
 _WORK_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:go\s+ahead(?:\s+and)?\s+)?)?"
-    r"(?:(?:you\s+)?(?:can|may|must|should|need\s+to)\s+)?"
-    r"(?:work\s+on|implement|start\s+work\s+on)\s+"
-    r"(?:this|it|the\s+(?:ticket|card|pr|pull\s+request))\b"
+    _LEAD_IN
+    + r"(?:work\s+on|start\s+(?:work\s+)?on|implement|build|do|handle|fix"
+    r"|finish|complete|tackle|take\s+on|pick\s+up|proceed\s+with)\s+"
+    r"(?:this|that|it|the\s+(?:ticket|card|pr|pull\s+request|work|change|migration))\b"
 )
 _GO_AHEAD_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:just\s+)?)?go\s+ahead"
-    r"(?:\s+and\s+(?:do|fix|handle|implement)\s+(?:it|this))?"
-    r"(?:\s+(?:with\s+)?(?:it|this))?"
-    r"(?:\s+anyways?)?[.!]*$"
+    _LEAD_IN + r"(?:go\s+ahead|proceed|carry\s+on|keep\s+going)\b"
 )
 _FORCE_NEGATION_RE = re.compile(
     r"(?:\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}"
-    r"\b(?:work|implement|draft|create|open|go\s+ahead)\b)"
-    r"|(?:\b(?:work|implement|draft|create|open)\b.{0,20}"
-    r"\b(?:not|never)\b)"
+    r"\b(?:work|implement|draft|create|open|build|handle|fix|finish|proceed"
+    r"|go\s+ahead)\b)"
+    r"|(?:\b(?:work|implement|draft|create|open|build|handle|fix|finish|proceed)\b"
+    r".{0,20}\b(?:not|never)\b)"
 )
+_EXPLICIT_DRAFT_COMMANDS = {
+    "draft-pr", "draft pr", "force-pr", "force pr", "force", "override",
+    "draft it", "do it", "work on it", "ship it",
+}
 _TEST_ROUTE_RE = re.compile(
     r"(?:test[-_ ]route|reproduce(?:[-_ ]route)?)\s*(?:=|:)\s*(/\S+)",
     re.IGNORECASE,
 )
-_ALREADY_FIXED_NOTE_RE = re.compile(
-    r"\[autopr:no-spec [^\]]+\]\s+already_fixed(?:\s|$)", re.IGNORECASE
+_RECOVERABLE_NOTE_RE = re.compile(
+    r"\[autopr:no-spec [^\]]+\]\s+(already_fixed|migration_required)(?:\s|$)",
+    re.IGNORECASE,
 )
+_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
+_KNOWN_DIRECTIVES = {"draft_pr", "trust_still_broken"}
 
 
 def _parse_bound_body(body: str) -> tuple[list[str], str | None]:
@@ -58,7 +79,7 @@ def _parse_bound_body(body: str) -> tuple[list[str], str | None]:
         instruction = " ".join(
             directive_text.strip().lower().replace("’", "'").split()
         )
-        explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
+        explicit_draft = instruction in _EXPLICIT_DRAFT_COMMANDS
         if (
             explicit_draft
             or _DRAFT_COMMAND_RE.search(instruction)
@@ -98,10 +119,27 @@ def _parse_bound_body(body: str) -> tuple[list[str], str | None]:
     return list(dict.fromkeys(directives)), test_route
 
 
+def _standing_directives(card: dict[str, Any]) -> list[str]:
+    """Directives already granted on this card, read from its progress note.
+
+    The note prefix is written by the trusted publisher (or edited by the
+    card's human owner), never by the model. Once an owner has authorized a
+    draft, that authorization survives the run that consumed the event: a
+    ticket does not have to be re-authorized after every AutoPR cycle.
+    """
+    if card.get("board_column") not in {"todo", "changes_requested"}:
+        return []
+    match = _DIRECTIVE_MARKER_RE.search(str(card.get("progress_note") or ""))
+    if not match:
+        return []
+    return [item for item in match.group(1).split(",") if item in _KNOWN_DIRECTIVES]
+
+
 def resolve(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    standing = _standing_directives(card)
     event_id = str(card.get("autopr_reconsideration_event_id") or "")
     if not event_id or not card.get("autopr_reconsideration_pending", False):
-        return {"directives": [], "test_route": None, "source_event_id": None}
+        return {"directives": standing, "test_route": None, "source_event_id": None}
 
     event = next(
         (row for row in reversed(history) if str(row.get("id") or "") == event_id),
@@ -109,12 +147,10 @@ def resolve(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, An
     )
     metadata = event.get("metadata") if isinstance(event, dict) else None
     if not isinstance(metadata, dict) or metadata.get("kind") != "autopr_additional_context":
-        return {"directives": [], "test_route": None, "source_event_id": event_id}
+        return {"directives": standing, "test_route": None, "source_event_id": event_id}
 
     stored = str(metadata.get("autopr_directives") or "").split(",")
-    directives = [
-        item for item in stored if item in {"draft_pr", "trust_still_broken"}
-    ]
+    directives = [*standing, *(item for item in stored if item in _KNOWN_DIRECTIVES)]
     parsed, parsed_route = _parse_bound_body(str(metadata.get("body") or ""))
     directives = list(dict.fromkeys([*directives, *parsed]))
 
@@ -129,19 +165,21 @@ def resolve(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, An
 
 
 def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
-    """Recover one explicit directive consumed by an obsolete already-fixed pass.
+    """Recover one explicit directive consumed by an obsolete blocked pass.
 
-    Older workers could accept decision-bound additional context, repeat
-    ``already_fixed``, and thereby change the progress note so the event no
+    A worker could accept decision-bound additional context, repeat the same
+    kind of refusal, and thereby change the progress note so the event no
     longer appeared pending. Recovery is deliberately narrow: both the old
-    bound decision and the current decision must be ``already_fixed``, and the
-    event itself must contain an explicit work/still-broken directive.
+    bound decision and the current decision must be a refusal a ``draft_pr``
+    directive mechanically forbids (``already_fixed`` or
+    ``migration_required``), and the event itself must contain an explicit
+    work/still-broken directive.
     """
     current_note = str(card.get("progress_note") or "")
     if (
         card.get("autopr_reconsideration_pending", False)
         or card.get("board_column") not in {"todo", "changes_requested"}
-        or not _ALREADY_FIXED_NOTE_RE.search(current_note)
+        or not _RECOVERABLE_NOTE_RE.search(current_note)
     ):
         return {"directives": [], "test_route": None, "source_event_id": None}
 
@@ -152,15 +190,13 @@ def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dic
         if not isinstance(metadata, dict) or metadata.get("kind") != "autopr_additional_context":
             continue
         prior_note = str(metadata.get("autopr_reconsideration_of") or "")
-        if not _ALREADY_FIXED_NOTE_RE.search(prior_note):
+        if not _RECOVERABLE_NOTE_RE.search(prior_note):
             continue
         stored = str(metadata.get("autopr_directives") or "").split(",")
-        directives = [
-            item for item in stored if item in {"draft_pr", "trust_still_broken"}
-        ]
+        directives = [item for item in stored if item in _KNOWN_DIRECTIVES]
         parsed, parsed_route = _parse_bound_body(str(metadata.get("body") or ""))
         directives = list(dict.fromkeys([*directives, *parsed]))
-        if not ({"draft_pr", "trust_still_broken"} & set(directives)):
+        if not (_KNOWN_DIRECTIVES & set(directives)):
             continue
         test_route = metadata.get("autopr_test_route") or parsed_route
         if not isinstance(test_route, str):

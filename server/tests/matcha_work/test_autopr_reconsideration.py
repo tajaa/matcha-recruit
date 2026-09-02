@@ -87,6 +87,36 @@ def test_operator_directives_accept_clear_work_commands_in_bound_context():
     assert svc._parse_autopr_directives("--draft prevention notes") == ([], None)
 
 
+def test_operator_directives_accept_ordinary_override_phrasing():
+    """A refusal is overridden the way an owner actually types it.
+
+    Every phrasing here was rejected by the first-generation parser, so a
+    ticket the owner had explicitly unblocked kept publishing the same
+    "no safe action" note.
+    """
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    for phrasing in (
+        "do it anyway",
+        "work on it either way",
+        "you can absolutely draft a PR with migration scripts",
+        "draft the migration",
+        "write the migration file",
+        "i need you to implement this",
+        "handle the migration",
+        "proceed",
+    ):
+        assert svc._parse_autopr_directives(phrasing) == (["draft_pr"], None), phrasing
+
+    # Prose that merely mentions the same verbs stays untrusted.
+    assert svc._parse_autopr_directives("the dropdown should fix hospitality accounts") == (
+        [],
+        None,
+    )
+    assert svc._parse_autopr_directives("no need to draft a PR for this") == ([], None)
+    assert svc._parse_autopr_directives("do not draft the migration") == ([], None)
+
+
 @pytest.mark.asyncio
 async def test_reconsideration_is_bound_to_exact_no_spec_note(monkeypatch):
     from app.matcha.services.matcha_work import project_task_service as svc

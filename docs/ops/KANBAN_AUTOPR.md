@@ -245,11 +245,21 @@ second scheduler.
    Additional-context events are untrusted but escalated evidence: the agent must trace
    the newly described uncovered scenario and cannot repeat `already_fixed` merely
    because a generic patch exists. A clear affirmative work command in that exact
-   decision-bound reply—such as `you can work on this` or `you need to draft this PR`—
-   becomes trusted `draft_pr` policy even without a magic prefix. `--draft-pr` remains
-   the explicit form. Negated commands do not activate it. The policy mechanically
-   rejects both `already_fixed` and `migration_required`: when needed, the draft may
-   author only `server/alembic/versions/*.py` for human review and must never apply it.
+   decision-bound reply—such as `you can work on this`, `do it anyway`, `draft the
+   migration`, or `you need to draft this PR`—becomes trusted `draft_pr` policy even
+   without a magic prefix. `--draft-pr` remains the explicit form. Negated commands do
+   not activate it. The policy mechanically rejects both `already_fixed` and
+   `migration_required`: when needed, the draft may author only
+   `server/alembic/versions/*.py` for human review and must never apply it. That
+   authorization is durable in three ways, because the operator saying "work on it"
+   once must not have to be repeated after every cycle: the granted directives are
+   published back onto the card as `[autopr:directives …]` and re-read on later cycles
+   while it sits in `todo`/`changes_requested`; a run that consumes the event and then
+   repeats `already_fixed` or `migration_required` is recovered by `collect.sh`'s
+   bounded probe; and a decision contradicting the directive is retried once with the
+   rejection stated back to the model (`decision.sh directive-ok`) instead of failing
+   the run silently. A `migration_required` stop now also posts the same Espresso
+   context request `already_fixed` did, so the override is visible where the refusal is.
    `--trust-still-broken` (including the matching
    natural-language form) accepts that the described scenario fails, while
    `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test

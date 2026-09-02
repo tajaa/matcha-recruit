@@ -267,30 +267,61 @@ run_codex() {
         "${ATTACH_ARGS[@]}"
 }
 
-if [ "$live_log_ready" = true ]; then
-    run_codex 2>&1 | tee -a "$LIVE_LOG"
-    codex_rc="${PIPESTATUS[0]}"
-else
-    run_codex
-    codex_rc=$?
-fi
-if [ "$codex_rc" -ne 0 ]; then
-    [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
-        "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
-    die "Codex investigation exited $codex_rc"
-fi
-[ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \
-    "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
-
-if [ ! -s "$REPORT_FILE" ]; then
-    die "investigation produced no report at $REPORT_FILE"
-fi
-
-for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; do
-    if ! grep -qF "$heading" "$REPORT_FILE"; then
-        die "report is missing required heading: $heading"
+codex_pass() {
+    if [ "$live_log_ready" = true ]; then
+        run_codex 2>&1 | tee -a "$LIVE_LOG"
+        codex_rc="${PIPESTATUS[0]}"
+    else
+        run_codex
+        codex_rc=$?
     fi
-done
+    if [ "$codex_rc" -ne 0 ]; then
+        [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
+            "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+        die "Codex investigation exited $codex_rc"
+    fi
+    [ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \
+        "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+
+    if [ ! -s "$REPORT_FILE" ]; then
+        die "investigation produced no report at $REPORT_FILE"
+    fi
+
+    for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; do
+        if ! grep -qF "$heading" "$REPORT_FILE"; then
+            die "report is missing required heading: $heading"
+        fi
+    done
+}
+
+codex_pass
+
+# One corrective retry when the returned outcome contradicts the card owner's
+# own directive. The owner already authorized this work, so a refusal the
+# directive forbids is a model error, not a safety stop — and dying here would
+# leave the card showing the stale refusal with no sign the authorization was
+# ever read. The retry re-states the directive as a rejection of the exact
+# decision just produced; the trusted validation below still has the last word.
+if [ -s "$DIRECTIVE_FILE" ] \
+    && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
+    echo "kanban-autopr: decision violated the operator directive; retrying once" >&2
+    # The rejected pass concluded "no safe action", so it must not leave edits
+    # behind for the retry to inherit.
+    git -C "$REPO_ROOT" reset --hard HEAD >/dev/null 2>&1 || true
+    git -C "$REPO_ROOT" clean -fd >/dev/null 2>&1 || true
+    CORRECTION_FILE="$WORK_DIR/directive-correction.json"
+    jq -n --slurpfile policy "$DIRECTIVE_FILE" --slurpfile rejected "$RAW_DECISION_FILE" \
+        '{kind: "directive_violation",
+          directive_policy: $policy[0],
+          rejected_decision: {outcome: $rejected[0].outcome,
+                              no_safe_action_reason: $rejected[0].no_safe_action_reason},
+          instruction: "The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed or migration_required: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. questions_only is allowed only when a specific missing product decision blocks even a partial implementation. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."}' \
+        > "$CORRECTION_FILE"
+    ATTACH_ARGS+=(-f "$CORRECTION_FILE")
+    : > "$REPORT_FILE"
+    : > "$RAW_DECISION_FILE"
+    codex_pass
+fi
 
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
