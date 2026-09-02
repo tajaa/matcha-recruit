@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib.sh"
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"
 RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.json}"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -51,22 +51,12 @@ printf '%s' "$files" > "$WORK_DIR/files.json"
 
 # Only the exact decision-bound reconsideration event may grant operator
 # directives. Card prose, comments, PR bodies, and unrelated history remain
-# untrusted evidence. Metadata stores a comma-separated string for desktop
-# compatibility; expand it into a fixed allowlist here.
+# untrusted evidence. Resolve structured metadata plus the same event's body
+# so context submitted before a parser upgrade remains actionable.
 DIRECTIVE_FILE="$WORK_DIR/directive-policy.json"
-jq -n \
-    --slurpfile card "$CARD_FILE" \
-    --slurpfile history "$WORK_DIR/history.json" '
-    ($card[0].autopr_reconsideration_event_id // "") as $event_id
-    | (([$history[0][]? | select((.id | tostring) == ($event_id | tostring))] | last) // {}) as $event
-    | (($event.metadata.autopr_directives // "") | split(",")
-       | map(select(. == "draft_pr" or . == "trust_still_broken")) | unique) as $directives
-    | {
-        directives: $directives,
-        test_route: ($event.metadata.autopr_test_route // null),
-        source_event_id: (if $event_id == "" then null else $event_id end)
-      }
-' > "$DIRECTIVE_FILE"
+python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
+    --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
+    --output "$DIRECTIVE_FILE"
 
 # An approved test tenant may be exercised by the trusted browser harness.
 # Credentials never enter context.json or msandbox; only a screenshot and

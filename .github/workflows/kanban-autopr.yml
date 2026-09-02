@@ -166,6 +166,17 @@ jobs:
             mv "$RUNNER_TEMP/card-with-production.json" "$RUNNER_TEMP/card.json"
           fi
 
+      - name: Snapshot trusted AutoPR control plane
+        if: steps.select.outputs.skip == 'false'
+        run: |
+          control_root="$RUNNER_TEMP/autopr-control"
+          mkdir -p "$control_root"
+          git archive main scripts/kanban-autopr scripts/error-autofix \
+            | tar -x -C "$control_root"
+          echo "AUTOPR_CONTROL_ROOT=$control_root/scripts" >> "$GITHUB_ENV"
+          echo "AUTOPR_WORKSPACE_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "AUTOPR_SANDBOX_REPO_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
       - name: Create or check out task branch
         id: branch
         if: steps.select.outputs.skip == 'false'
@@ -186,6 +197,15 @@ jobs:
             # branch to match origin exactly instead.
             git fetch origin "$branch"
             git switch -C "$branch" "origin/$branch"
+            # A draft can predate the current automation harness and product
+            # tree. Bring it forward before investigation so its PR diff does
+            # not accidentally include deletions from a stale base.
+            git config user.name "matcha-kanban-autopr"
+            git config user.email "matcha-kanban-autopr@users.noreply.github.com"
+            if ! git merge --no-edit main; then
+              git merge --abort || true
+              exit 1
+            fi
           else
             git switch -C "$branch" main
           fi
@@ -201,10 +221,10 @@ jobs:
           # Fail closed into the dedicated container/volume namespace. The
           # helper also mounts an empty AWS directory and never passes this
           # step's GitHub, Matcha, or production credentials through.
-          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
         run: |
-          ./scripts/kanban-autopr/investigate.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
 
       - name: Fail incomplete investigation
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
@@ -263,7 +283,7 @@ jobs:
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 8
         run: |
-          ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
+          "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
         env:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
@@ -276,10 +296,10 @@ jobs:
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 5
         env:
-          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
         run: |
-          ./scripts/kanban-autopr/write-publication-copy.sh \
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/write-publication-copy.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/publication-copy.json"
@@ -290,7 +310,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
         run: |
-          ./scripts/kanban-autopr/publish.sh \
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/publication-copy.json"
@@ -301,4 +321,4 @@ jobs:
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.
-          ./scripts/kanban-autopr/leave-task-checkout.sh
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/leave-task-checkout.sh"

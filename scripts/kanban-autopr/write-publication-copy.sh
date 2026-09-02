@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CARD_FILE="${1:?usage: write-publication-copy.sh CARD DECISION REPORT VERIFICATION OUTPUT}"
 DECISION_FILE="${2:?missing decision path}"
 REPORT_FILE="${3:?missing report path}"

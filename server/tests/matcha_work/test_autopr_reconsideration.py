@@ -69,6 +69,10 @@ def test_operator_directives_accept_clear_work_commands_in_bound_context():
         ["draft_pr"],
         None,
     )
+    assert svc._parse_autopr_directives("just go ahead and do it anyways") == (
+        ["draft_pr"],
+        None,
+    )
     assert svc._parse_autopr_directives("--test-route=https://evil.example/x") == ([], None)
     assert svc._parse_autopr_directives(
         "--do not draft a PR yet, ask questions first"
