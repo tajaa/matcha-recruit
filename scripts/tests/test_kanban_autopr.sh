@@ -697,6 +697,9 @@ if [[ "$*" == *"--label autopr"* && "$*" == *"--json labels"* ]]; then
     printf '0\n'
 elif [[ "$*" == *"--label autopr"* ]]; then
     printf '[]\n'
+elif [[ "$*" == *"--head bot/task-77777777"* ]] && [ -n "${AUTOPR_TEST_PRIOR_TASK_PR:-}" ]; then
+    printf '[{"state":"%s","createdAt":"2026-01-01T00:00:00Z","number":77,"labels":[{"name":"autopr"}],"body":""}]\n' \
+        "$AUTOPR_TEST_PRIOR_TASK_PR"
 else
     printf '[]\n'
 fi
@@ -755,6 +758,20 @@ check "pending additional context reopens an unchanged no-spec decision" \
     $([ "$(printf '%s' "$reconsidered" | jq -r '.id8')" = "77777777" ] \
       && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
       && echo 0 || echo 1)
+
+prior_pr_retry_ok=0
+for prior_state in CLOSED MERGED; do
+    prior_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+        AUTOPR_TEST_PRIOR_TASK_PR="$prior_state" \
+        AUTOPR_CACHE_DIR="$TMP_DIR/prior-$prior_state-cache" \
+        "$AUTOPR_DIR/select.sh" "$TMP_DIR/reconsideration-cards.json")"
+    if [ "$(printf '%s' "$prior_selected" | jq -r '.id8')" != "77777777" ] \
+        || [ "$(printf '%s' "$prior_selected" | jq -r '.mode')" != "investigate" ]; then
+        prior_pr_retry_ok=1
+    fi
+done
+check "pending Todo context overrides a closed or merged historical bot PR" \
+    "$prior_pr_retry_ok"
 
 after_reconsideration="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
     AUTOPR_CACHE_DIR="$reconsideration_cache" \

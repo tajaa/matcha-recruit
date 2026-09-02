@@ -137,6 +137,16 @@ already_handled() {
         esac
     fi
 
+    # A decision-bound human reply is fresh work authorization. In Todo that
+    # must outrank the stable branch's historical PR ledger: the previous PR
+    # may be closed or merged precisely because the operator reported that the
+    # issue remains. Investigation starts again from current main and publish
+    # will update an open PR or create a new draft for a closed/merged one.
+    if [ "$column" = "todo" ] && [ "$reconsideration_pending" = true ]; then
+        echo investigate
+        return
+    fi
+
     local prs n
     if ! prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 10 \
         --json state,createdAt,number,labels,body --jq 'sort_by(.createdAt) | reverse')"; then
@@ -198,11 +208,9 @@ already_handled() {
         return
     fi
 
-    # todo: any PR at all on this branch (open, closed, or merged) means a
-    # bot already worked this card — the branch name is stable
-    # (bot/task-<id8>), so a second run would collide. If the card is back
-    # in todo after a merge/close, a human moved it there deliberately;
-    # investigate.sh will see the fresh state.
+    # todo without fresh decision-bound context: any PR at all on this branch
+    # means the bot already worked this card. The branch name is stable, so a
+    # second automatic run would collide or duplicate work.
     [ "$n" -gt 0 ] && { echo skip; return; }
     echo investigate
 }
