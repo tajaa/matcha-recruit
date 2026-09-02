@@ -26,6 +26,16 @@ function renderInspector() {
 }
 
 describe('ShiftInspector validation', () => {
+  it('leaves a new shift break blank so the server generates it', async () => {
+    const onCreate = renderInspector()
+
+    expect(screen.getByLabelText('Planned break (minutes)')).toHaveValue(null)
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalled())
+    expect(onCreate.mock.calls[0][0]).not.toHaveProperty('break_minutes')
+  })
+
   it('shows required-field errors without creating malformed shifts', async () => {
     const onCreate = renderInspector()
 

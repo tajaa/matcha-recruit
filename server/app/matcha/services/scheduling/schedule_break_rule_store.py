@@ -37,6 +37,18 @@ def _as_int(value: Any, *, default: int | None = None) -> int | None:
         return default
 
 
+def _age_bounds(raw: dict[str, Any]) -> tuple[int | None, int | None]:
+    minimum = _as_int(raw.get("minimum_age", raw.get("min_age")))
+    maximum = _as_int(raw.get("maximum_age", raw.get("max_age")))
+    if minimum is not None and not 0 <= minimum <= 125:
+        raise ValueError("minimum_age must be between 0 and 125")
+    if maximum is not None and not 0 <= maximum <= 125:
+        raise ValueError("maximum_age must be between 0 and 125")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ValueError("minimum_age cannot exceed maximum_age")
+    return minimum, maximum
+
+
 def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[BreakRule]:
     if isinstance(payload, str):
         payload = json.loads(payload)
@@ -51,6 +63,7 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
         for raw in periods:
             if not isinstance(raw, dict):
                 raise ValueError(f"{key} entries must be objects")
+            minimum_age, maximum_age = _age_bounds(raw)
             duration = _as_int(raw.get("duration_minutes"))
             trigger = _as_int(raw.get("trigger_after_minutes"))
             ordinal = _as_int(raw.get("ordinal"), default=1)
@@ -95,6 +108,8 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                             waiver_allowed=bool((raw.get("waiver") or {}).get("allowed", False)),
                             waiver_max_shift_minutes=_as_int((raw.get("waiver") or {}).get("max_shift_minutes")),
                             trigger_operator=raw.get("trigger_operator", "gt"),
+                            minimum_age=minimum_age,
+                            maximum_age=maximum_age,
                             citation=str(raw.get("citation") or citation),
                         ))
                     previous_count = count
@@ -114,6 +129,8 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                 waiver_allowed=bool(waiver.get("allowed", False)),
                 waiver_max_shift_minutes=_as_int(waiver.get("max_shift_minutes")),
                 trigger_operator=raw.get("trigger_operator", "gt"),
+                minimum_age=minimum_age,
+                maximum_age=maximum_age,
                 citation=str(raw.get("citation") or citation),
             ))
     return parsed

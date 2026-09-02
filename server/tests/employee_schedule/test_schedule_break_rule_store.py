@@ -81,6 +81,31 @@ def test_approved_structured_rule_beats_legacy_fallback():
     assert result.rules[0].trigger_after_minutes == 240
 
 
+def test_approved_rule_preserves_reviewed_age_scope():
+    location = _location()
+    rule_id = uuid4()
+    row = {
+        "id": rule_id,
+        "rules": {
+            "meal_periods": [{
+                "trigger_after_minutes": 240,
+                "duration_minutes": 30,
+                "maximum_age": 17,
+            }],
+        },
+        "citation": "Minor meal citation",
+        "depth": 0,
+        "industry_code": "retail",
+        "effective_from": date(2026, 1, 1),
+        "effective_to": None,
+    }
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[row]), company_id=uuid4(),
+        location_id=location["id"], shift_date=date(2026, 8, 21),
+    ))
+    assert result.rules[0].maximum_age == 17
+
+
 def test_ca_legacy_rule_is_adapted_until_structured_rows_exist():
     location = _location()
     result = _run(resolve_break_rules(

@@ -28,4 +28,4 @@ def test_guidance_evaluates_waivers_on_the_location_calendar_day():
     guidance = Path(__file__).parents[2] / "app/matcha/services/scheduling/schedule_guidance.py"
     source = guidance.read_text()
     assert "starts_at.astimezone(location_timezone).date()" in source
-    assert "starts_at.astimezone(resolved.timezone).date()" in source
+    assert "starts_at.astimezone(effective_timezone).date()" in source

@@ -199,10 +199,32 @@ async def create_shift_core(
     from app.matcha.services.training.training_assignment import (
         assign_training, evaluate_scheduled_role_rules,
     )
-    from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
+    from app.matcha.services.scheduling.schedule_breaks import minimum_meal_break_minutes
+    from app.matcha.services.scheduling.schedule_guidance import (
+        refresh_assignment_break_guidance,
+        resolve_shift_break_plan,
+    )
 
     import logging
     logger = logging.getLogger(__name__)
+
+    plan_employee_ids = list(dict.fromkeys(employee_ids))
+    plans = [
+        await resolve_shift_break_plan(
+            conn, company_id, location_id=location_id, starts_at=starts_at,
+            ends_at=ends_at, employee_id=employee_id,
+        )
+        for employee_id in plan_employee_ids
+    ]
+    if not plans:
+        plans = [await resolve_shift_break_plan(
+            conn, company_id, location_id=location_id, starts_at=starts_at,
+            ends_at=ends_at,
+        )]
+    break_minutes = max(
+        break_minutes,
+        max(minimum_meal_break_minutes(plan) for plan in plans),
+    )
 
     shift_id = await conn.fetchval(
         """
@@ -220,7 +242,7 @@ async def create_shift_core(
         training_requirement_id, created_by, status, job_id,
         series_id,
     )
-    for emp_id in dict.fromkeys(employee_ids):
+    for emp_id in plan_employee_ids:
         await conn.execute(
             """
             INSERT INTO schedule_shift_assignments
@@ -324,12 +346,20 @@ async def apply_assignment_core(
     from app.matcha.services.training.training_assignment import (
         assign_training, evaluate_scheduled_role_rules,
     )
+    from app.matcha.services.scheduling.schedule_breaks import minimum_meal_break_minutes
     from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 
     import logging
     logger = logging.getLogger(__name__)
 
     shift_id = shift_row["id"]
+    current_break = int(shift_row["break_minutes"] or 0)
+    if shift_row["location_id"] is not None:
+        current_break = int(await conn.fetchval(
+            "SELECT break_minutes FROM schedule_shifts "
+            "WHERE id = $1 AND company_id = $2 FOR UPDATE",
+            shift_id, company_id,
+        ) or 0)
     await conn.execute(
         """
         INSERT INTO schedule_shift_assignments
@@ -339,11 +369,28 @@ async def apply_assignment_core(
         """,
         company_id, shift_id, employee_id, actor_user_id,
     )
-    await refresh_assignment_break_guidance(
+    plan = await refresh_assignment_break_guidance(
         conn, company_id, shift_id=shift_id, employee_id=employee_id,
         location_id=shift_row["location_id"], starts_at=shift_row["starts_at"],
         ends_at=shift_row["ends_at"],
     )
+    generated_minimum = minimum_meal_break_minutes(plan)
+    if generated_minimum > current_break:
+        await conn.execute(
+            "UPDATE schedule_shifts SET break_minutes = $1, updated_at = NOW() "
+            "WHERE id = $2 AND company_id = $3",
+            generated_minimum, shift_id, company_id,
+        )
+        await log_audit(
+            conn, company_id, "shift", shift_id, actor_user_id, "shift.update",
+            {
+                "fields": ["break_minutes"],
+                "before": {"break_minutes": current_break},
+                "after": {"break_minutes": generated_minimum},
+                "source": "automatic_break_assignment",
+                "employee_id": str(employee_id),
+            },
+        )
     await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
                     "assignment.create", {
                         "employee_id": str(employee_id),
@@ -452,24 +499,42 @@ async def retime_shift_core(
     status/location_id/published_at. Caller has already run conflict/
     availability/compliance re-checks (with `exclude_shift_id=shift_id`) and
     owns the transaction."""
+    from app.matcha.services.scheduling.schedule_breaks import minimum_meal_break_minutes
+    from app.matcha.services.scheduling.schedule_guidance import (
+        refresh_assignment_break_guidance,
+        resolve_shift_break_plan,
+    )
+
+    assignees = await conn.fetch(
+        "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+        shift_id,
+    )
+    plan_employee_ids = [row["employee_id"] for row in assignees] or [None]
+    plans = [
+        await resolve_shift_break_plan(
+            conn, company_id, location_id=existing_row["location_id"],
+            starts_at=new_starts_at, ends_at=new_ends_at, employee_id=employee_id,
+        )
+        for employee_id in plan_employee_ids
+    ]
+    generated_minimum = max(minimum_meal_break_minutes(plan) for plan in plans)
+    current_break = int(existing_row["break_minutes"] or 0)
+    new_break = max(current_break, generated_minimum)
+
     before = shift_snapshot(existing_row)
     after = {
         "starts_at": new_starts_at.isoformat(),
         "ends_at": new_ends_at.isoformat(),
         "status": existing_row["status"],
         "location_id": str(existing_row["location_id"]) if existing_row["location_id"] else None,
+        "break_minutes": new_break,
     }
     was_published = existing_row["published_at"] is not None
     await conn.execute(
-        "UPDATE schedule_shifts SET starts_at = $1, ends_at = $2, updated_at = NOW() "
-        "WHERE id = $3 AND company_id = $4",
-        new_starts_at, new_ends_at, shift_id, company_id,
-    )
-    from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
-
-    assignees = await conn.fetch(
-        "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
-        shift_id,
+        "UPDATE schedule_shifts SET starts_at = $1, ends_at = $2, "
+        "break_minutes = $3, updated_at = NOW() "
+        "WHERE id = $4 AND company_id = $5",
+        new_starts_at, new_ends_at, new_break, shift_id, company_id,
     )
     for assignee in assignees:
         await refresh_assignment_break_guidance(
@@ -480,7 +545,10 @@ async def retime_shift_core(
         )
     await log_audit(conn, company_id, "shift", shift_id, actor_user_id,
                     "shift.update", {
-                        "fields": ["starts_at", "ends_at"],
+                        "fields": [
+                            "starts_at", "ends_at",
+                            *(["break_minutes"] if new_break != current_break else []),
+                        ],
                         "before": before, "after": after,
                         "was_published": was_published,
                         "assigned_employee_ids": (

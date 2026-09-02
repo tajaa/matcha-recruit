@@ -10,7 +10,7 @@ type ShiftFieldInput = {
 }
 
 type ShiftFieldValidation =
-  | { valid: true; requiredStaff: number; breakMinutes: number }
+  | { valid: true; requiredStaff: number; breakMinutes: number | undefined }
   | { valid: false; error: string }
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
@@ -32,10 +32,13 @@ export function validateShiftFields({ date, start, end, requiredStaff, breakMinu
     return { valid: false, error: `Staff needed must be a whole number from 1 to ${MAX_REQUIRED_STAFF}` }
   }
 
+  if (breakMinutes.trim() === '') {
+    return { valid: true, requiredStaff: parsedRequiredStaff, breakMinutes: undefined }
+  }
+
   const parsedBreakMinutes = Number(breakMinutes)
   if (
-    breakMinutes.trim() === ''
-    || !Number.isInteger(parsedBreakMinutes)
+    !Number.isInteger(parsedBreakMinutes)
     || parsedBreakMinutes < 0
     || parsedBreakMinutes > MAX_BREAK_MINUTES
   ) {
