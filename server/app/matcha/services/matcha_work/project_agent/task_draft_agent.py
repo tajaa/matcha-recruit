@@ -317,14 +317,16 @@ async def run_task_draft(
         and time.monotonic() - started < _WALL_SECONDS
     ):
         model_calls += 1
+        call_timeout = max(1, _WALL_SECONDS - (time.monotonic() - started))
         with feature_scope(_AI_USAGE_FEATURE):
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(
                     model=selected_model,
                     contents=contents,
                     config=config,
+                    timeout_seconds=call_timeout,
                 ),
-                timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
+                timeout=call_timeout,
             )
 
         _fold_usage(usage, response)
