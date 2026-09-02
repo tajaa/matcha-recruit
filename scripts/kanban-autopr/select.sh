@@ -130,6 +130,22 @@ already_handled() {
         fi
     fi
 
+    # A timed-out card waits for an explicit continuation, a run-now request,
+    # or new feedback on the draft PR it already opened. That PR reply is a
+    # documented answer path, so the skip cannot short-circuit the
+    # changes_requested branch below before the feedback check has run.
+    local paused=false
+    if { [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES"* ]] \
+        || [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"* ]]; } \
+        && [ "$reconsideration_pending" != true ] \
+        && [ "$run_requested" != true ]; then
+        paused=true
+        if [ "$column" != changes_requested ]; then
+            echo skip
+            return
+        fi
+    fi
+
     # No-spec ledger lives on the card itself, not GitHub — this stops a
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
@@ -232,6 +248,8 @@ already_handled() {
                 else
                     echo skip
                 fi
+            elif [ "$paused" = true ]; then
+                echo skip
             else
                 echo rework
             fi
@@ -241,6 +259,8 @@ already_handled() {
             # Defense in depth for a missed merge webhook. The workflow's
             # reconciliation step moves this card to Review; until that write
             # succeeds, never mistake the merged bot branch for fresh work.
+            echo skip
+        elif [ "$paused" = true ]; then
             echo skip
         else
             echo investigate

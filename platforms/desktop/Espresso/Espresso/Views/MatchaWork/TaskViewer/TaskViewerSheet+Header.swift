@@ -29,12 +29,32 @@ extension TaskViewerSheet {
         return note
     }
 
+    var autoPRIsAwaitingAnswers: Bool {
+        guard let note = autoSetupProgressNote else { return false }
+        let normalized = note.lowercased()
+        // publish.sh still recognizes the legacy lowercase note, whose state
+        // segment reads "awaiting answers" and never "answers needed".
+        return note.hasPrefix("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")
+            || (normalized.hasPrefix("from auto setup")
+                && (normalized.contains("answers needed")
+                    || normalized.contains("awaiting answers")))
+    }
+
+    var autoPRNeedsRuntimeApproval: Bool {
+        guard let note = autoSetupProgressNote else { return false }
+        return note.hasPrefix("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+            || note.hasPrefix("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
+    }
+
     /// A short, human-readable state for the ticket detail banner. The full
     /// machine-written note remains visible below it, including build/PR/card
     /// identifiers, so this is a summary rather than a lossy replacement.
     var autoSetupStatus: (label: String, color: Color, icon: String) {
         let note = (autoSetupProgressNote ?? "").lowercased()
-        if note.contains("awaiting answers") || note.contains("answers needed") {
+        if autoPRNeedsRuntimeApproval {
+            return ("APPROVAL NEEDED FOR 10 MORE MINUTES", .orange, "timer")
+        }
+        if autoPRIsAwaitingAnswers {
             return ("AWAITING ANSWERS", .orange, "questionmark.circle.fill")
         }
         if note.contains("already fixed") {
@@ -101,15 +121,12 @@ extension TaskViewerSheet {
     var canRequestAutoPRReconsideration: Bool {
         guard let note = autoSetupProgressNote else { return false }
         let liveTask = liveAutoPRTask
-        let normalizedNote = note.lowercased()
-        let isAwaitingAnswers = note.hasPrefix("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")
-            || (normalizedNote.hasPrefix("from auto setup") && normalizedNote.contains("answers needed"))
         let isNoSafeAction = note.contains("[autopr:no-spec ")
             && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
                 .contains(where: note.contains)
         return liveTask.status != "cancelled"
             && ["todo", "changes_requested"].contains(liveTask.boardColumn)
-            && (isAwaitingAnswers || isNoSafeAction)
+            && (autoPRIsAwaitingAnswers || autoPRNeedsRuntimeApproval || isNoSafeAction)
     }
 
     var autoPRReconsiderationIsPending: Bool {
@@ -187,7 +204,7 @@ extension TaskViewerSheet {
                 .padding(.top, 3)
             } else if isAddingAutoPRContext {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Explain what AutoPR missed or attach evidence. Use --draft-pr to require a draft, --trust-still-broken to reject another already-fixed result, and --test-route=/app/... for a test-tenant replay.")
+                    Text(autoPRContextInstructions)
                         .font(.system(size: 10))
                         .foregroundColor(appState.themeTextSecondary)
                     noteComposer
@@ -197,10 +214,13 @@ extension TaskViewerSheet {
                 Button {
                     replyingToNote = nil
                     autoPRContextError = nil
+                    if autoPRNeedsRuntimeApproval {
+                        newNote = "--extend-runtime"
+                    }
                     isAddingAutoPRContext = true
                     Task { @MainActor in isNoteFieldFocused = true }
                 } label: {
-                    Label("Add additional context", systemImage: "arrowshape.turn.up.left")
+                    Label(autoPRContextActionLabel, systemImage: "arrowshape.turn.up.left")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.mwInkStrong)
                 }
@@ -209,6 +229,22 @@ extension TaskViewerSheet {
                 .help("Give AutoPR new evidence and ask it to reconsider this decision")
             }
         }
+    }
+
+    var autoPRContextActionLabel: String {
+        if autoPRNeedsRuntimeApproval { return "Approve 10 more minutes" }
+        if autoPRIsAwaitingAnswers { return "Answer AutoPR questions" }
+        return "Add additional context"
+    }
+
+    var autoPRContextInstructions: String {
+        if autoPRNeedsRuntimeApproval {
+            return "Keep --extend-runtime in this reply to approve 10 more minutes. AutoPR will continue from its saved work."
+        }
+        if autoPRIsAwaitingAnswers {
+            return "Enter numbered answers to the questions above (for example: 1-a, 2-b), plus any context or screenshots AutoPR should use."
+        }
+        return "Explain what AutoPR missed or attach evidence. Use --draft-pr to require a draft, --trust-still-broken to reject another already-fixed result, and --test-route=/app/... for a test-tenant replay."
     }
 
     // MARK: - "You are here" phase

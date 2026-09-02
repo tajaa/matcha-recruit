@@ -66,7 +66,8 @@ _RECOVERABLE_NOTE_RE = re.compile(
     re.IGNORECASE,
 )
 _DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
-_KNOWN_DIRECTIVES = {"draft_pr", "trust_still_broken"}
+_KNOWN_DIRECTIVES = {"draft_pr", "trust_still_broken", "extend_runtime"}
+_STANDING_DIRECTIVES = {"draft_pr", "trust_still_broken"}
 
 
 def _parse_bound_body(body: str) -> tuple[list[str], str | None]:
@@ -103,6 +104,13 @@ def _parse_bound_body(body: str) -> tuple[list[str], str | None]:
             )
         ):
             directives.append("trust_still_broken")
+        if marked and instruction in {
+            "extend-runtime",
+            "extend runtime",
+            "allow-more-time",
+            "allow more time",
+        }:
+            directives.append("extend_runtime")
         route_match = _TEST_ROUTE_RE.search(directive_text) if marked else None
         if route_match:
             candidate = route_match.group(1).rstrip(".,;")
@@ -132,7 +140,7 @@ def _standing_directives(card: dict[str, Any]) -> list[str]:
     match = _DIRECTIVE_MARKER_RE.search(str(card.get("progress_note") or ""))
     if not match:
         return []
-    return [item for item in match.group(1).split(",") if item in _KNOWN_DIRECTIVES]
+    return [item for item in match.group(1).split(",") if item in _STANDING_DIRECTIVES]
 
 
 def resolve(card: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -193,10 +201,15 @@ def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dic
         if not _RECOVERABLE_NOTE_RE.search(prior_note):
             continue
         stored = str(metadata.get("autopr_directives") or "").split(",")
-        directives = [item for item in stored if item in _KNOWN_DIRECTIVES]
+        # Only a standing directive may be recovered from an old event. A
+        # one-shot runtime approval bound to a cycle that is already over is
+        # not authority for this one.
+        directives = [item for item in stored if item in _STANDING_DIRECTIVES]
         parsed, parsed_route = _parse_bound_body(str(metadata.get("body") or ""))
-        directives = list(dict.fromkeys([*directives, *parsed]))
-        if not (_KNOWN_DIRECTIVES & set(directives)):
+        directives = list(dict.fromkeys(
+            [*directives, *(item for item in parsed if item in _STANDING_DIRECTIVES)]
+        ))
+        if not (_STANDING_DIRECTIVES & set(directives)):
             continue
         test_route = metadata.get("autopr_test_route") or parsed_route
         if not isinstance(test_route, str):
