@@ -178,7 +178,7 @@ async def post_autopr_result_notification(
         async with conn.transaction():
             task = await conn.fetchrow(
                 """SELECT t.title, t.progress_note, t.company_id,
-                          p.name AS project_title
+                          p.title AS project_title
                    FROM mw_tasks t
                    LEFT JOIN mw_projects p ON p.id=t.project_id
                    WHERE t.id=$1 AND t.project_id=$2
@@ -653,7 +653,7 @@ async def _notify_task_comment(
         async with get_connection() as conn:
             task = await conn.fetchrow(
                 """SELECT t.company_id, t.assigned_to, t.created_by, t.title,
-                          p.name AS project_title
+                          p.title AS project_title
                    FROM mw_tasks t
                    LEFT JOIN mw_projects p ON p.id = t.project_id
                    WHERE t.id = $1 AND t.project_id = $2""",
