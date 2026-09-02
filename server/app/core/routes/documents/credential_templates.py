@@ -17,6 +17,7 @@ from app.matcha.dependencies import (
 from app.core.models.auth import CurrentUser
 from app.core.models.credential_templates import CredentialTypeVisibilityUpdate
 from app.core.services.credential_template_service import (
+    find_hidden_credential_types,
     get_templates_for_scope,
     get_employee_credential_requirements,
     research_credential_requirements,
@@ -389,6 +390,14 @@ async def create_template(
     """Manually create a credential requirement template."""
     _validate_schedule_blocking(enabled=body.schedule_blocking, legal_basis=body.legal_basis)
     async with get_connection() as conn:
+        hidden = await find_hidden_credential_types(
+            conn, company_id=company_id, credential_type_ids=[body.credential_type_id],
+        )
+        if hidden:
+            raise HTTPException(
+                status_code=422,
+                detail="That credential type is not available to this company",
+            )
         async with conn.transaction():
             row = await conn.fetchrow(
                 """

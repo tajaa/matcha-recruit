@@ -730,6 +730,37 @@ async def get_employee_credential_requirements(
     return [dict(r) for r in rows]
 
 
+async def find_hidden_credential_types(
+    conn, *, company_id: UUID, credential_type_ids: list[UUID]
+) -> list[UUID]:
+    """Return which of these types the company has removed from its dropdowns.
+
+    A company with no filter row has not configured one, so nothing is hidden.
+    Callers pass only the ids they are *adding*: rules that predate the filter
+    stay editable and removable, which is the whole point of hiding a type
+    rather than deleting it.
+    """
+    if not credential_type_ids:
+        return []
+    rows = await conn.fetch(
+        """
+        SELECT ct.id
+        FROM credential_types ct
+        WHERE ct.id = ANY($2::uuid[])
+          AND EXISTS (
+              SELECT 1 FROM company_credential_type_filters f WHERE f.company_id = $1
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM company_credential_type_filter_items item
+              WHERE item.company_id = $1 AND item.credential_type_id = ct.id
+          )
+        """,
+        company_id,
+        list(credential_type_ids),
+    )
+    return [row["id"] for row in rows]
+
+
 async def get_templates_for_scope(
     conn,
     state: str,

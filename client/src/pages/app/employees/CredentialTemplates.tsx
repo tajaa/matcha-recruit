@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Select, useToast } from '../../../components/ui'
 import {
-  fetchCredentialTypes,
   fetchRoleCategories,
   fetchTemplates,
   approveTemplate,
@@ -15,7 +14,6 @@ import {
   resetCredentialTypeSettings,
 } from '../../../api/employees/credentialTemplates'
 import type {
-  CredentialType,
   RoleCategory,
   CredentialRequirementTemplate,
   PreviewResult,
@@ -45,7 +43,6 @@ const US_STATES = [
 
 export default function CredentialTemplates() {
   const { toast } = useToast()
-  const [credTypes, setCredTypes] = useState<CredentialType[]>([])
   const [roles, setRoles] = useState<RoleCategory[]>([])
   const [templates, setTemplates] = useState<CredentialRequirementTemplate[]>([])
   const [loading, setLoading] = useState(true)
@@ -66,17 +63,12 @@ export default function CredentialTemplates() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [ct, rc, tmpl, settings] = await Promise.all([
-        fetchCredentialTypes(),
+      const [rc, tmpl] = await Promise.all([
         fetchRoleCategories(),
         fetchTemplates({ state: filterState || undefined, role_category_id: filterRole || undefined }),
-        fetchCredentialTypeSettings(),
       ])
-      setCredTypes(ct)
       setRoles(rc)
       setTemplates(tmpl)
-      setTypeSettings(settings)
-      setSelectedTypeIds(settings.is_configured ? settings.selected_type_ids : settings.credential_types.map(type => type.id))
     } catch (e) {
       console.error('Failed to load credential template data', e)
     } finally {
@@ -84,7 +76,21 @@ export default function CredentialTemplates() {
     }
   }, [filterState, filterRole])
 
+  // Kept out of loadData on purpose: that reloads on every filter change and
+  // after every approve/reject/delete, and re-seeding the checkboxes there
+  // would silently throw away an in-progress edit on the Dropdown options tab.
+  const loadTypeSettings = useCallback(async () => {
+    try {
+      const settings = await fetchCredentialTypeSettings()
+      setTypeSettings(settings)
+      setSelectedTypeIds(settings.is_configured ? settings.selected_type_ids : settings.credential_types.map(type => type.id))
+    } catch (e) {
+      console.error('Failed to load credential dropdown options', e)
+    }
+  }, [])
+
   useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { loadTypeSettings() }, [loadTypeSettings])
 
   const grouped = useMemo(() => {
     const map = new Map<string, CredentialRequirementTemplate[]>()
@@ -156,7 +162,7 @@ export default function CredentialTemplates() {
     setSavingTypes(true)
     try {
       await updateCredentialTypeSettings(selectedTypeIds)
-      await loadData()
+      await loadTypeSettings()
       toast('Credential dropdown options saved', 'success')
     } catch (error) {
       console.error('Failed to save credential dropdown options', error)
@@ -170,7 +176,7 @@ export default function CredentialTemplates() {
     setSavingTypes(true)
     try {
       await resetCredentialTypeSettings()
-      await loadData()
+      await loadTypeSettings()
       toast('All credential types are available again', 'success')
     } catch (error) {
       console.error('Failed to reset credential dropdown options', error)
@@ -258,7 +264,7 @@ export default function CredentialTemplates() {
             <span>{templates.length} templates</span>
             <span>{templates.filter(t => t.review_status === 'pending').length} pending review</span>
             <span>{new Set(templates.map(t => t.state)).size} states</span>
-            <span>{credTypes.length} credential types</span>
+            <span>{typeSettings?.credential_types.length ?? 0} credential types</span>
           </div>
 
           {/* Template groups */}

@@ -20,7 +20,7 @@ def upgrade() -> None:
     # while still allowing a deliberately empty selection.
     op.execute(
         """
-        CREATE TABLE company_credential_type_filters (
+        CREATE TABLE IF NOT EXISTS company_credential_type_filters (
             company_id UUID PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
             updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -30,7 +30,7 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE TABLE company_credential_type_filter_items (
+        CREATE TABLE IF NOT EXISTS company_credential_type_filter_items (
             company_id UUID NOT NULL REFERENCES company_credential_type_filters(company_id) ON DELETE CASCADE,
             credential_type_id UUID NOT NULL REFERENCES credential_types(id) ON DELETE CASCADE,
             PRIMARY KEY (company_id, credential_type_id)
@@ -39,7 +39,7 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX idx_company_credential_type_filter_items_type
+        CREATE INDEX IF NOT EXISTS idx_company_credential_type_filter_items_type
         ON company_credential_type_filter_items(credential_type_id)
         """
     )
