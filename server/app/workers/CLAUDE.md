@@ -12,10 +12,12 @@ Moved verbatim from root `CLAUDE.md`'s Feature Flags table. Root keeps a one-lin
 
 `tasks/project_agent.py` follows that rule for Espresso's two project tasks:
 the WebSocket path persists `repo_question` runs, while the desktop board's
-idempotent REST enqueue persists `task_draft` runs. The pool-free worker performs
-the same bounded, audited GitHub reads for both; questions post to project chat,
-while drafts are polled into the review sheet. Worker startup reconciles
-queued/running rows older than 15 minutes to `failed`.
+idempotent REST enqueue persists `task_draft` runs. The pool-free worker keeps
+questions on the bounded repository-reading loop, while task drafts preload only
+the root `CLAUDE.md` or `AGENTS.md` architecture guide before one structured
+finish tool; questions post to project chat, while drafts are polled into the
+review sheet. Worker startup reconciles queued/running rows older than 15 minutes
+to `failed`.
 
 
 ## ir_deadline_alerts (moved from root Background Workers)

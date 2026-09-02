@@ -325,7 +325,7 @@ extension MatchaWorkService {
     }
 
     /// Natural-language → structured ticket draft. Repo-connected projects use
-    /// Espresso's durable read-only agent and poll its audited background run;
+    /// Espresso's architecture-guide-only agent and poll its audited background run;
     /// projects without a repository retain the legacy one-shot draft path.
     /// `model` is the header selector's value (same plumbing as threads).
     ///
