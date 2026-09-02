@@ -148,35 +148,40 @@ async def create_job(body: JobCreate, current_user=Depends(require_admin_or_clie
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         employee_ids = await _validate_employee_ids(conn, company_id, body.employee_ids)
-        async with conn.transaction():
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO schedule_jobs
-                    (company_id, location_id, name, color, notes, credential_grace_days, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING {_JOB_COLS}
-                """,
-                company_id, body.location_id, body.name.strip(), body.color, body.notes,
-                body.credential_grace_days, current_user.id,
-            )
-            for employee_id in employee_ids:
-                await conn.execute(
-                    """
-                    INSERT INTO schedule_job_employees
-                        (job_id, employee_id, company_id, created_by)
-                    VALUES ($1, $2, $3, $4)
+        try:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO schedule_jobs
+                        (company_id, location_id, name, color, notes, credential_grace_days, created_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    RETURNING {_JOB_COLS}
                     """,
-                    row["id"], employee_id, company_id, current_user.id,
+                    company_id, body.location_id, body.name.strip(), body.color, body.notes,
+                    body.credential_grace_days, current_user.id,
                 )
-            await replace_job_credential_requirements(
-                conn, company_id=company_id, job_id=row["id"],
-                requirements=[item.model_dump() for item in body.credential_requirements],
-                actor_user_id=current_user.id,
-            )
-            await log_audit(
-                conn, company_id, "schedule_job", row["id"], current_user.id,
-                "schedule_job.create", {"name": body.name, "employees": len(employee_ids)},
-            )
+                for employee_id in employee_ids:
+                    await conn.execute(
+                        """
+                        INSERT INTO schedule_job_employees
+                            (job_id, employee_id, company_id, created_by)
+                        VALUES ($1, $2, $3, $4)
+                        """,
+                        row["id"], employee_id, company_id, current_user.id,
+                    )
+                await replace_job_credential_requirements(
+                    conn, company_id=company_id, job_id=row["id"],
+                    requirements=[item.model_dump() for item in body.credential_requirements],
+                    actor_user_id=current_user.id,
+                )
+                await log_audit(
+                    conn, company_id, "schedule_job", row["id"], current_user.id,
+                    "schedule_job.create", {"name": body.name, "employees": len(employee_ids)},
+                )
+        except ValueError as exc:
+            # Unknown or company-hidden credential type — same 422 the replace
+            # endpoint returns, rather than an unhandled 500.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return await _serialize_job(conn, company_id, row, [str(employee_id) for employee_id in employee_ids])
 
 

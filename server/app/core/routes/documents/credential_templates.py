@@ -5,13 +5,20 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.dependencies import (
+    require_admin_or_client,
+    get_client_company_id,
+    resolve_accessible_company_scope,
+)
 from app.core.models.auth import CurrentUser
+from app.core.models.credential_templates import CredentialTypeVisibilityUpdate
 from app.core.services.credential_template_service import (
+    find_hidden_credential_types,
     get_templates_for_scope,
     get_employee_credential_requirements,
     research_credential_requirements,
@@ -142,16 +149,200 @@ class WaiveRequest(BaseModel):
 # ── Credential types ──────────────────────────────────────────────────
 
 
+async def credential_settings_scope(
+    company_id: UUID | None = Query(
+        None, description="Platform admins must name the company they are acting on"
+    ),
+    user: CurrentUser = Depends(require_admin_or_client),
+) -> UUID | None:
+    """Resolve which tenant's credential dropdown config the caller is acting on.
+
+    ``get_client_company_id`` falls back to the oldest company in the database
+    for platform admins, so it must not be used here -- a blind admin call would
+    read and write an unrelated tenant's allowlist.  Admins name the company
+    explicitly; everyone else is pinned to their own.  ``None`` means "no tenant
+    scope", which reads as the unfiltered catalog and is rejected for writes.
+    """
+    if user.role == "admin" and company_id is None:
+        return None
+    scope = await resolve_accessible_company_scope(user, company_id)
+    return scope.get("company_id")
+
+
+async def credential_settings_company_id(
+    company_id: UUID | None = Depends(credential_settings_scope),
+) -> UUID:
+    """Write-side scope: a definite company, never the oldest-tenant fallback."""
+    if company_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="A company account is required. Platform admins must pass company_id.",
+        )
+    return company_id
+
+
 @router.get("/types")
 async def list_credential_types(
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID | None = Depends(credential_settings_scope),
 ):
-    """List all credential types."""
+    """List credential types available for this company's dropdowns.
+
+    A NULL ``company_id`` matches no filter row, so an unscoped caller keeps the
+    legacy behavior of seeing the whole catalog.
+    """
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM credential_types ORDER BY category, label"
+            """
+            SELECT ct.*
+            FROM credential_types ct
+            WHERE NOT EXISTS (
+                SELECT 1 FROM company_credential_type_filters f
+                WHERE f.company_id = $1
+            ) OR EXISTS (
+                SELECT 1 FROM company_credential_type_filter_items item
+                WHERE item.company_id = $1 AND item.credential_type_id = ct.id
+            )
+            ORDER BY ct.category, ct.label
+            """,
+            company_id,
         )
         return [dict(r) for r in rows]
+
+
+@router.get("/type-settings")
+async def get_credential_type_settings(
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID | None = Depends(credential_settings_scope),
+):
+    """Return the full catalog and this company's current dropdown filter.
+
+    An unscoped caller (a platform admin who named no company) still gets the
+    catalog, flagged ``manageable=False`` so the UI hides the save controls
+    instead of writing to whichever tenant happens to be oldest.
+    """
+    async with get_connection() as conn:
+        type_rows = await conn.fetch(
+            """
+            WITH filter_state AS (
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM company_credential_type_filters
+                    WHERE company_id = $1
+                ) AS is_configured
+            )
+            SELECT ct.*, filter_state.is_configured AS _is_configured,
+                   item.credential_type_id IS NOT NULL AS _is_selected
+            FROM filter_state
+            LEFT JOIN credential_types ct ON TRUE
+            LEFT JOIN company_credential_type_filter_items item
+              ON item.company_id = $1 AND item.credential_type_id = ct.id
+            ORDER BY ct.category, ct.label
+            """,
+            company_id,
+        )
+
+    configured = False
+    selected_type_ids = []
+    credential_types = []
+    for row in type_rows:
+        credential_type = dict(row)
+        configured = bool(credential_type.pop("_is_configured"))
+        selected = bool(credential_type.pop("_is_selected"))
+        # The LEFT JOIN deliberately returns one sentinel row when the shared
+        # catalog is empty, so configured state still survives that edge case.
+        if credential_type.get("id") is None:
+            continue
+        credential_types.append(credential_type)
+        if selected:
+            selected_type_ids.append(credential_type["id"])
+
+    return {
+        "is_configured": bool(configured),
+        "manageable": company_id is not None,
+        "selected_type_ids": selected_type_ids,
+        "credential_types": credential_types,
+    }
+
+
+@router.put("/type-settings")
+async def update_credential_type_settings(
+    body: CredentialTypeVisibilityUpdate,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(credential_settings_company_id),
+):
+    """Replace the company-specific credential dropdown allowlist."""
+    selected_ids = list(dict.fromkeys(body.credential_type_ids))
+    if not selected_ids:
+        # An empty allowlist is still "configured", which would hide every type
+        # company-wide and leave no way to add a credential rule.  Resetting is
+        # the deliberate way back to the full catalog.
+        raise HTTPException(
+            status_code=422,
+            detail="Select at least one credential type, or reset to offer every type again",
+        )
+    async with get_connection() as conn:
+        existing_rows = await conn.fetch(
+            "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])",
+            selected_ids,
+        )
+        existing_ids = {row["id"] for row in existing_rows}
+        missing_ids = [
+            credential_type_id
+            for credential_type_id in selected_ids
+            if credential_type_id not in existing_ids
+        ]
+        if missing_ids:
+            raise HTTPException(status_code=422, detail="One or more credential types do not exist")
+
+        try:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_type_filters (company_id, updated_by)
+                    VALUES ($1, $2)
+                    ON CONFLICT (company_id) DO UPDATE
+                    SET updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                    """,
+                    company_id,
+                    user.id,
+                )
+                await conn.execute(
+                    "DELETE FROM company_credential_type_filter_items WHERE company_id = $1",
+                    company_id,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_type_filter_items (company_id, credential_type_id)
+                    SELECT $1, credential_type_id
+                    FROM UNNEST($2::uuid[]) AS credential_type_id
+                    """,
+                    company_id,
+                    selected_ids,
+                )
+        except asyncpg.ForeignKeyViolationError as exc:
+            # The company or a selected catalog row can be deleted after the
+            # existence check. The transaction rolls back the replacement; the
+            # stale request is a validation failure, not an internal error.
+            raise HTTPException(
+                status_code=422,
+                detail="The company or one or more credential types no longer exist; reload and try again",
+            ) from exc
+    return {"ok": True, "selected_count": len(selected_ids)}
+
+
+@router.delete("/type-settings")
+async def reset_credential_type_settings(
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(credential_settings_company_id),
+):
+    """Restore the legacy default where every credential type is offered."""
+    async with get_connection() as conn:
+        await conn.execute(
+            "DELETE FROM company_credential_type_filters WHERE company_id = $1",
+            company_id,
+        )
+    return {"ok": True}
 
 
 # ── Role categories ───────────────────────────────────────────────────
@@ -225,6 +416,14 @@ async def create_template(
     """Manually create a credential requirement template."""
     _validate_schedule_blocking(enabled=body.schedule_blocking, legal_basis=body.legal_basis)
     async with get_connection() as conn:
+        hidden = await find_hidden_credential_types(
+            conn, company_id=company_id, credential_type_ids=[body.credential_type_id],
+        )
+        if hidden:
+            raise HTTPException(
+                status_code=422,
+                detail="That credential type is not available to this company",
+            )
         async with conn.transaction():
             row = await conn.fetchrow(
                 """

@@ -157,7 +157,18 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
   async function saveCredentials() {
     setSavingCredentials(true)
     try {
-      const requirements: JobCredentialRequirement[] = requirementIds.map((credential_type_id) => ({ credential_type_id, is_required: true, schedule_blocking: true }))
+      // A save replaces the whole rule set, so carry each retained rule's own
+      // flags and notes forward. Defaulting them here would quietly promote an
+      // advisory requirement to schedule-blocking and erase its notes.
+      const requirements: JobCredentialRequirement[] = requirementIds.map((credential_type_id) => {
+        const existing = job.credential_requirements.find((item) => item.credential_type_id === credential_type_id)
+        return {
+          credential_type_id,
+          is_required: existing?.is_required ?? true,
+          schedule_blocking: existing?.schedule_blocking ?? true,
+          notes: existing?.notes ?? null,
+        }
+      })
       await Promise.all([
         updateJob(job.id, { credential_grace_days: graceDays === '' ? null : Number(graceDays) }),
         replaceJobCredentialRequirements(job.id, requirements),
@@ -197,7 +208,7 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
         {credentialTemplatesEnabled && <div className="mt-4 border-t border-zinc-800/70 pt-3">
           <p className="mb-2 text-xs text-zinc-500">Required credentials block this job after the new-hire grace period. They do not affect unrelated jobs.</p>
           <label className="block max-w-48 text-[10px] uppercase tracking-wide text-zinc-500">Grace days<input value={graceDays} min="0" max="365" type="number" onChange={(event) => setGraceDays(event.target.value)} placeholder="Company default" className={`${inputCls} mt-1`} /></label>
-          <CredentialRequirementPicker credentialTypes={credentialTypes} selectedIds={requirementIds} onChange={setRequirementIds} />
+          <CredentialRequirementPicker credentialTypes={credentialTypes} selectedIds={requirementIds} selectedRequirements={job.credential_requirements} onChange={setRequirementIds} />
           <button onClick={saveCredentials} disabled={savingCredentials} className="mt-3 inline-flex items-center gap-1 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-950 disabled:opacity-50">{savingCredentials ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save credential rules</button>
         </div>}
       </div>}
@@ -205,7 +216,7 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
   )
 }
 
-function CredentialRequirementPicker({ credentialTypes, selectedIds, onChange }: { credentialTypes: CredentialType[]; selectedIds: string[]; onChange(ids: string[]): void }) {
+function CredentialRequirementPicker({ credentialTypes, selectedIds, selectedRequirements = [], onChange }: { credentialTypes: CredentialType[]; selectedIds: string[]; selectedRequirements?: JobCredentialRequirement[]; onChange(ids: string[]): void }) {
   const selected = new Set(selectedIds)
   const available = credentialTypes.filter((type) => !selected.has(type.id))
   return <div className="mt-3">
@@ -215,7 +226,8 @@ function CredentialRequirementPicker({ credentialTypes, selectedIds, onChange }:
     </select>
     {selectedIds.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{selectedIds.map((id) => {
       const type = credentialTypes.find((item) => item.id === id)
-      return <button key={id} type="button" onClick={() => onChange(selectedIds.filter((item) => item !== id))} className="rounded-md border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-[11px] text-emerald-200 hover:border-red-700" title="Remove requirement">{type?.label ?? 'Credential'} ×</button>
+      const existingRequirement = selectedRequirements.find((item) => item.credential_type_id === id)
+      return <button key={id} type="button" onClick={() => onChange(selectedIds.filter((item) => item !== id))} className="rounded-md border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-[11px] text-emerald-200 hover:border-red-700" title="Remove requirement">{type?.label ?? existingRequirement?.credential_type_label ?? 'Credential'} ×</button>
     })}</div>}
   </div>
 }

@@ -1,6 +1,7 @@
 import { api } from '../client'
 import type {
   CredentialType,
+  CredentialTypeSettings,
   RoleCategory,
   CredentialRequirementTemplate,
   CredentialResearchLog,
@@ -12,6 +13,20 @@ import type {
 
 export function fetchCredentialTypes() {
   return api.get<CredentialType[]>('/credential-templates/types')
+}
+
+export function fetchCredentialTypeSettings() {
+  return api.get<CredentialTypeSettings>('/credential-templates/type-settings')
+}
+
+export function updateCredentialTypeSettings(credentialTypeIds: string[]) {
+  return api.put<{ ok: boolean; selected_count: number }>('/credential-templates/type-settings', {
+    credential_type_ids: credentialTypeIds,
+  })
+}
+
+export function resetCredentialTypeSettings() {
+  return api.delete<{ ok: boolean }>('/credential-templates/type-settings')
 }
 
 // ── Role Categories ──

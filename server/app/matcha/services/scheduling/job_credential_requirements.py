@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from uuid import UUID
 
+from app.core.services.credential_template_service import find_hidden_credential_types
+
 
 async def materialize_job_requirements(
     conn,
@@ -88,6 +90,14 @@ async def replace_job_credential_requirements(
         company_id, job_id,
     )
     existing_ids = {row["credential_type_id"] for row in existing}
+    # Types the company removed from its dropdowns cannot be attached to a job
+    # by a stale tab or a direct API call.  Retained rules are exempt so an
+    # already-configured requirement stays editable and removable.
+    hidden = await find_hidden_credential_types(
+        conn, company_id=company_id, credential_type_ids=list(set(normalized) - existing_ids),
+    )
+    if hidden:
+        raise ValueError("One or more credential types are not available to this company")
     remove_ids = list(existing_ids - set(normalized))
     if remove_ids:
         await conn.execute(
