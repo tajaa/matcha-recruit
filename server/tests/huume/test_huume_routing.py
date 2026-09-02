@@ -242,7 +242,7 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
     """Planner and tool-result calls both remain pinned to Luna."""
     recorded = []
 
-    async def _generate(*, model, contents, config):
+    async def _generate(*, model, contents, config, **_request_options):
         recorded.append({"model": model, "thinking": config.thinking_config})
         if len(recorded) == 1:
             return _fake_response(parts=[_fake_part(_fake_call("check_offer_status", {"offer_id": "abc"}))])
@@ -277,7 +277,7 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
-    async def _generate(*, model, contents, config):
+    async def _generate(*, model, contents, config, **_request_options):
         return _fake_response(parts=[], text="Sure, here you go.")
 
     client = MagicMock()
@@ -302,7 +302,7 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
 async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
     recorded = []
 
-    async def _generate(*, model, contents, config):
+    async def _generate(*, model, contents, config, **_request_options):
         recorded.append(model)
         return _fake_response(parts=[], text="Confirmed.")
 

@@ -1,5 +1,6 @@
 """OpenAI Responses adapter regressions for Huume."""
 
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -7,7 +8,12 @@ import pytest
 from google.genai import types
 
 from app.matcha.services.huume import luna_client
-from app.matcha.services.huume.luna_client import _LunaModels, _http_error_detail, _messages
+from app.matcha.services.huume.luna_client import (
+    _LunaModels,
+    _http_error_detail,
+    _messages,
+    _rate_limit_delay,
+)
 
 
 def test_messages_use_responses_content_types_for_each_role():
@@ -57,6 +63,66 @@ def test_messages_do_not_replay_assistant_images_as_user_input():
         "role": "assistant",
         "content": [{"type": "output_text", "text": "Here is the image."}],
     }]
+
+
+def test_rate_limit_delay_never_caps_retry_after(monkeypatch):
+    monkeypatch.setattr(luna_client.random, "uniform", lambda *_args: 0.0)
+    response = httpx.Response(
+        429,
+        headers={"retry-after": "56"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+    )
+
+    assert _rate_limit_delay(response, 0) == 56.0
+
+
+def test_rate_limit_delay_parses_composite_reset_duration(monkeypatch):
+    monkeypatch.setattr(luna_client.random, "uniform", lambda *_args: 0.0)
+    response = httpx.Response(
+        429,
+        headers={"x-ratelimit-reset-tokens": "6m0s"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+    )
+
+    assert _rate_limit_delay(response, 0) == 360.0
+
+
+def test_rate_limit_delay_prefers_request_specific_message_to_full_reset(monkeypatch):
+    monkeypatch.setattr(luna_client.random, "uniform", lambda *_args: 0.0)
+    response = httpx.Response(
+        429,
+        headers={"x-ratelimit-reset-tokens": "6m0s"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        json={
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": "Rate limit reached. Please try again in 9.675s.",
+            },
+        },
+    )
+
+    assert _rate_limit_delay(response, 0) == 9.675
+
+
+def test_rate_limit_delay_uses_longest_advertised_dimension(monkeypatch):
+    monkeypatch.setattr(luna_client.random, "uniform", lambda *_args: 0.0)
+    response = httpx.Response(
+        429,
+        headers={
+            "x-ratelimit-reset-requests": "12s",
+            "x-ratelimit-reset-tokens": "100ms",
+            "x-ratelimit-reset-project-tokens": "3s",
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        json={
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": "Rate limit reached. Please try again in 12s.",
+            },
+        },
+    )
+
+    assert _rate_limit_delay(response, 0) == 12.0
 
 
 @pytest.mark.asyncio
@@ -147,6 +213,7 @@ async def test_generate_content_retries_transient_token_rate_limit(monkeypatch):
     ]
     sleeps = []
     recorded = []
+    hooks = []
 
     class Client:
         async def __aenter__(self):
@@ -164,18 +231,119 @@ async def test_generate_content_retries_transient_token_rate_limit(monkeypatch):
     async def record(**kwargs):
         recorded.append(kwargs)
 
+    async def before_request():
+        hooks.append("before")
+
+    async def after_request():
+        hooks.append("after")
+
     monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="test-key"))
     monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
     monkeypatch.setattr(luna_client.asyncio, "sleep", sleep)
+    monkeypatch.setattr(luna_client.random, "uniform", lambda *_args: 0.25)
     monkeypatch.setattr(luna_client, "record_openai_response", record)
 
     result = await _LunaModels().generate_content(
         model="gpt-5.6-luna",
         contents=[types.Content(role="user", parts=[types.Part(text="Help")])],
         config=SimpleNamespace(system_instruction="Be useful", tools=[]),
+        before_request=before_request,
+        after_request=after_request,
     )
 
     assert sleeps == [pytest.approx(9.925)]
     assert not responses
     assert result.text == "Done."
+    assert hooks == ["before", "after", "before", "after"]
+    assert [entry.get("status", "ok") for entry in recorded] == ["error", "ok"]
+
+
+@pytest.mark.asyncio
+async def test_generate_content_skips_retry_that_exceeds_total_budget(monkeypatch):
+    response = httpx.Response(
+        429,
+        headers={"retry-after": "56"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        json={
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": "Please try again later.",
+            },
+        },
+    )
+    calls = []
+    recorded = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append("post")
+            return response
+
+    async def fail_sleep(_delay):
+        pytest.fail("the adapter must not retry before Retry-After")
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="test-key"))
+    monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(luna_client.asyncio, "sleep", fail_sleep)
+    monkeypatch.setattr(luna_client.random, "uniform", lambda *_args: 0.0)
+    monkeypatch.setattr(luna_client, "record_openai_response", record)
+
+    with pytest.raises(RuntimeError, match="retry delay 56.000s exceeds"):
+        await _LunaModels().generate_content(
+            model="gpt-5.6-luna",
+            contents=[types.Content(role="user", parts=[types.Part(text="Help")])],
+            config=SimpleNamespace(system_instruction="Be useful", tools=[]),
+            timeout_seconds=55.0,
+        )
+
+    assert calls == ["post"]
     assert len(recorded) == 1
+    assert recorded[0]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_generate_content_enforces_total_request_deadline(monkeypatch):
+    recorded = []
+    hooks = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            await asyncio.Event().wait()
+
+    async def after_request():
+        hooks.append("after")
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="test-key"))
+    monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(luna_client, "record_openai_response", record)
+
+    with pytest.raises(RuntimeError, match="request exceeded 0.01s total deadline"):
+        await _LunaModels().generate_content(
+            model="gpt-5.6-luna",
+            contents=[types.Content(role="user", parts=[types.Part(text="Help")])],
+            config=SimpleNamespace(system_instruction="Be useful", tools=[]),
+            timeout_seconds=0.01,
+            after_request=after_request,
+        )
+
+    assert hooks == ["after"]
+    assert len(recorded) == 1
+    assert recorded[0]["status"] == "timeout"

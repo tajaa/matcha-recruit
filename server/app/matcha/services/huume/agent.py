@@ -1995,20 +1995,23 @@ async def run_huume_turn(
                     )
                 break
 
-            await rate_limiter.check_limit("huume", "agent")
             is_first_call = model_calls == 0
             model_calls += 1
             call_model = tier.planner_model if is_first_call else tier.executor_model
             call_config = planner_config if is_first_call else executor_config
             call_timeout = min(_CALL_TIMEOUT, max(1.0, _WALL_CLOCK_SECONDS - elapsed()))
-            try:
-                with feature_scope("matcha.huume.loop"):
-                    response = await asyncio.wait_for(
-                        client.aio.models.generate_content(model=call_model, contents=contents, config=call_config),
-                        timeout=call_timeout,
-                    )
-            finally:
-                await rate_limiter.record_call("huume", "agent")
+            with feature_scope("matcha.huume.loop"):
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=call_model,
+                        contents=contents,
+                        config=call_config,
+                        timeout_seconds=call_timeout,
+                        before_request=lambda: rate_limiter.check_limit("huume", "agent"),
+                        after_request=lambda: rate_limiter.record_call("huume", "agent"),
+                    ),
+                    timeout=call_timeout,
+                )
 
             usage = getattr(response, "usage_metadata", None)
             if usage:
