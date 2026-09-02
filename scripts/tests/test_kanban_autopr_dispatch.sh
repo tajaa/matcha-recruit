@@ -18,22 +18,31 @@ check() {
 
 cat > "$TMP_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${AUTOPR_TEST_GH_CALLS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_GH_CALLS"
 if [ "$1 $2" = "run list" ]; then
   [ "${AUTOPR_TEST_LIST_FAIL:-0}" = 0 ] || exit 1
-  if [[ "$*" == *"silent-error-autofix.yml"* ]]; then
-    printf '%s\n' "${AUTOPR_TEST_ERROR_RUNS:-[]}"
-  elif [[ "$*" == *"autopr-self-audit.yml"* ]]; then
-    printf '%s\n' "${AUTOPR_TEST_AUDIT_RUNS:-[]}"
-  elif [[ "$*" == *"admin-updates-autopublish.yml"* ]]; then
-    printf '%s\n' "${AUTOPR_TEST_ADMIN_UPDATES_RUNS:-[]}"
-  else
-    printf '%s\n' "${AUTOPR_TEST_KANBAN_RUNS:-[]}"
-  fi
+  jq -cn \
+    --argjson errors "${AUTOPR_TEST_ERROR_RUNS:-[]}" \
+    --argjson audit "${AUTOPR_TEST_AUDIT_RUNS:-[]}" \
+    --argjson admin "${AUTOPR_TEST_ADMIN_UPDATES_RUNS:-[]}" \
+    --argjson kanban "${AUTOPR_TEST_KANBAN_RUNS:-[]}" '
+      ($errors | map(. + {workflowName:"Silent error autofix"}))
+      + ($audit | map(. + {workflowName:"AutoPR self audit"}))
+      + ($admin | map(. + {workflowName:"Publish production admin updates"}))
+      + ($kanban | map(. + {workflowName:"Kanban autopr"}))
+    '
   exit 0
 fi
-if [ "$1 $2" = "workflow run" ]; then
+if [ "$1" = api ] && [[ "$*" == *"/actions/workflows/"*"/dispatches"* ]]; then
   [ "${AUTOPR_TEST_DISPATCH_FAIL:-0}" = 0 ] || exit 1
-  printf '%s\n' "$3" >> "$AUTOPR_TEST_DISPATCHES"
+  for arg in "$@"; do
+    case "$arg" in
+      repos/*/actions/workflows/*/dispatches)
+        workflow="${arg%/dispatches}"
+        printf '%s\n' "${workflow##*/}" >> "$AUTOPR_TEST_DISPATCHES"
+        ;;
+    esac
+  done
   exit 0
 fi
 exit 1
@@ -53,6 +62,8 @@ run_dispatcher() {
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
     AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
+    AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/github-cache" \
+    AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=0 \
     AUTOPR_TMUX_DASHBOARD=0 \
     "$DISPATCHER" >/dev/null 2>&1
 }
@@ -63,6 +74,17 @@ check "msandbox-off master switch skips before dispatch" \
   $(grep -q 'msandbox-off' "$TMP_DIR/log.jsonl" \
     && [ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 touch "$TMP_DIR/autopr-enabled"
+
+AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_GH_CALLS="$TMP_DIR/snapshot-gh.log" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/shared-snapshot" \
+  AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=60 \
+  "$REPO_ROOT/scripts/kanban-autopr/run-snapshot.sh" >/dev/null
+AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_GH_CALLS="$TMP_DIR/snapshot-gh.log" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/shared-snapshot" \
+  AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=60 \
+  "$REPO_ROOT/scripts/kanban-autopr/run-snapshot.sh" >/dev/null
+check "dashboard panes share one cached GitHub run-list request" \
+  $([ "$(grep -c '^run list ' "$TMP_DIR/snapshot-gh.log")" = 1 ] && echo 0 || echo 1)
 
 AUTOPR_TEST_CONTAINER_OFF=1 run_dispatcher
 check "stopped primary sandbox skips before dispatch" \

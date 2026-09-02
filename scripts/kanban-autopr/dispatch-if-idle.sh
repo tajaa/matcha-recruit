@@ -22,6 +22,7 @@ LOG_FILE="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-di
 LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispatch.lock}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_ENSURE="${AUTOPR_DASHBOARD_ENSURE:-$SCRIPT_DIR/ensure-dashboard.sh}"
+RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
 
 log_event() {
     local action="$1" reason="$2" runs="${3:-[]}"
@@ -52,19 +53,14 @@ acquire_dispatch_lock() {
     return 1
 }
 
-get_workflow_runs_json() {
-    local workflow="$1"
-    "$GH_BIN" run list --repo "$REPO" --workflow "$workflow" --branch "$REF" --limit 20 \
-        --json databaseId,status,event,createdAt,updatedAt,url
-}
-
 has_active_workflow_run() {
     local runs="$1"
     printf '%s' "$runs" | jq -e 'any(.[]; .status | IN("queued", "in_progress", "requested", "waiting", "pending"))' >/dev/null
 }
 
 dispatch_workflow() {
-    "$GH_BIN" workflow run "$1" --repo "$REPO" --ref "$REF"
+    "$GH_BIN" api --method POST \
+        "repos/$REPO/actions/workflows/$1/dispatches" -f "ref=$REF"
 }
 
 iso_to_epoch() {
@@ -116,27 +112,16 @@ main() {
         exit 0
     fi
 
-    local kanban_runs error_runs audit_runs admin_updates_runs all_runs workflow reason
-    if ! error_runs="$(get_workflow_runs_json "$ERROR_WORKFLOW")"; then
+    local kanban_runs error_runs audit_runs all_runs workflow reason
+    if [ ! -x "$RUN_SNAPSHOT" ] || ! all_runs="$(AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
+        AUTOPR_GH_BIN="$GH_BIN" AUTOPR_GITHUB_SNAPSHOT_ALLOW_STALE=false "$RUN_SNAPSHOT")"; then
         # Fail closed: a blind dispatch could create a second queued coding job.
-        log_event error error-run-list-failed
+        log_event error run-snapshot-failed
         exit 1
     fi
-    if ! kanban_runs="$(get_workflow_runs_json "$KANBAN_WORKFLOW")"; then
-        log_event error kanban-run-list-failed
-        exit 1
-    fi
-    if ! audit_runs="$(get_workflow_runs_json "$AUDIT_WORKFLOW")"; then
-        log_event error audit-run-list-failed
-        exit 1
-    fi
-    if ! admin_updates_runs="$(get_workflow_runs_json "$ADMIN_UPDATES_WORKFLOW")"; then
-        log_event error admin-updates-run-list-failed
-        exit 1
-    fi
-    all_runs="$(jq -cn --argjson errors "$error_runs" --argjson audit "$audit_runs" \
-        --argjson admin_updates "$admin_updates_runs" --argjson kanban "$kanban_runs" \
-        '$errors + $audit + $admin_updates + $kanban')"
+    kanban_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "kanban")][0:20]')"
+    error_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "errors")][0:20]')"
+    audit_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "self-audit")][0:20]')"
     if has_active_workflow_run "$all_runs"; then
         log_event skip active-autopr-workflow "$all_runs"
         exit 0

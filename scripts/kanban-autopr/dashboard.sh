@@ -24,6 +24,7 @@ CACHE_DIR="${AUTOPR_DASHBOARD_CACHE_DIR:-$USER_HOME/Library/Caches/matcha-kanban
 CARD_SNAPSHOT="${AUTOPR_CARD_SNAPSHOT:-$USER_HOME/Library/Caches/matcha-kanban-autopr/cards.json}"
 DISPATCH_LOG="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autopr-dispatch.log}"
 PLAN_PY="${AUTOPR_PLAN_PY:-$SCRIPT_DIR/plan.py}"
+RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
 
 dashboard_now_epoch() {
     printf '%s\n' "${AUTOPR_DASHBOARD_NOW_EPOCH:-$(date +%s)}"
@@ -172,23 +173,15 @@ render_dashboard() {
     local plan_input_dir plan_id plan_merge_count plan_release_blockers plan_position plan_number plan_title plan_blocked
 
     cutoff="$(utc_24_hours_ago)"
-    fetch_json kanban_runs kanban_state runs-kanban "$GH_BIN" run list --repo "$REPO" \
-        --workflow "$WORKFLOW" --branch "$REF" --limit 100 \
-        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle
-    fetch_json error_runs error_state runs-errors "$GH_BIN" run list --repo "$REPO" \
-        --workflow "$ERROR_WORKFLOW" --branch "$REF" --limit 100 \
-        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle
-    fetch_json audit_runs audit_state runs-audit "$GH_BIN" run list --repo "$REPO" \
-        --workflow "$AUDIT_WORKFLOW" --branch "$REF" --limit 100 \
-        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle
-    fetch_json admin_updates_runs admin_state runs-admin "$GH_BIN" run list --repo "$REPO" \
-        --workflow "$ADMIN_UPDATES_WORKFLOW" --branch "$REF" --limit 100 \
-        --json databaseId,status,conclusion,event,createdAt,updatedAt,url,displayTitle
-    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" \
-        --argjson audit "$audit_runs" --argjson admin_updates "$admin_updates_runs" '
-      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) +
-       ($audit | map(. + {lane:"self-audit"})) + ($admin_updates | map(. + {lane:"admin-updates"})))
-      | sort_by(.createdAt // "") | reverse')"
+    fetch_json runs kanban_state runs-all env AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
+        AUTOPR_GH_BIN="$GH_BIN" "$RUN_SNAPSHOT"
+    error_state="$kanban_state"
+    audit_state="$kanban_state"
+    admin_state="$kanban_state"
+    kanban_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.lane == "kanban")]')"
+    error_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.lane == "errors")]')"
+    audit_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.lane == "self-audit")]')"
+    admin_updates_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.lane == "admin-updates")]')"
 
     fetch_json open_kanban open_kanban_state prs-open-kanban "$GH_BIN" pr list --repo "$REPO" \
         --state open --label autopr --limit 100 \

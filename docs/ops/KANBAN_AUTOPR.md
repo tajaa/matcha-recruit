@@ -153,13 +153,18 @@ Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
   A container stuck in `created`, `exited`, or another non-running state is shown as
   blocked rather than healthy.
 
-The overview refreshes every 30 seconds, the PR pane every 10 seconds, the local model
-stream appends new output every 2 seconds (with status appended only when it changes and
-GitHub refreshed every 10), and health refreshes every 15 seconds. Override those intervals with
+The overview and PR metadata refresh every 60 seconds. The local model stream still
+appends new output every 2 seconds, but its remote workflow status refreshes every 60;
+health refreshes from local state every 15 seconds. The overview, PR pane, live-work pane,
+and dispatcher share one mode-600 GitHub run snapshot with a 60-second TTL. Its refresh is
+one unfiltered run-list request that is classified locally, rather than each pane resolving
+and polling four workflow names independently. A dispatch uses one direct workflow API
+POST. Override those intervals with
 `AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,
 `AUTOPR_WORK_REFRESH_SECONDS`, `AUTOPR_WORK_STATUS_REFRESH_SECONDS`, and
-`AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. Override
-`AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
+`AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. The shared GitHub
+TTL is `AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS`; do not lower it without accounting for every
+observer pane. Override `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
 
 The self-audit implementation and its sealed model allowlist are documented in
 `docs/ops/AGENT_SANDBOX.md`. Manual recovery commands are `msandbox audit` and

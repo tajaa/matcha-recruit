@@ -28,7 +28,7 @@ validate_dependencies() {
 install_runtime() {
     mkdir -p "$INSTALL_ROOT"
     local name
-    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh watch-pr.sh collect.sh select.sh; do
+    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh watch-pr.sh collect.sh select.sh run-snapshot.sh; do
         install -m 755 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
     done
     install -m 644 "$SCRIPT_DIR/lib.sh" "$INSTALL_ROOT/lib.sh"
