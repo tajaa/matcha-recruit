@@ -160,7 +160,7 @@ export default function CredentialTemplates() {
       toast('Credential dropdown options saved', 'success')
     } catch (error) {
       console.error('Failed to save credential dropdown options', error)
-      toast('Credential dropdown options could not be saved', 'error')
+      toast(error instanceof Error && error.message ? error.message : 'Credential dropdown options could not be saved', 'error')
     } finally {
       setSavingTypes(false)
     }
@@ -174,7 +174,7 @@ export default function CredentialTemplates() {
       toast('All credential types are available again', 'success')
     } catch (error) {
       console.error('Failed to reset credential dropdown options', error)
-      toast('Credential dropdown options could not be reset', 'error')
+      toast(error instanceof Error && error.message ? error.message : 'Credential dropdown options could not be reset', 'error')
     } finally {
       setSavingTypes(false)
     }
@@ -434,21 +434,31 @@ export default function CredentialTemplates() {
                   Choose the credential types your company can add to jobs. Existing requirements stay visible and can still be removed after a type is hidden.
                 </p>
               </div>
-              <div className="flex gap-2">
+              {typeSettings.manageable && <div className="flex gap-2">
                 {typeSettings.is_configured && <Button onClick={handleResetTypeSettings} disabled={savingTypes} variant="secondary">Use all types</Button>}
-                <Button onClick={handleSaveTypeSettings} disabled={savingTypes}>
+                <Button onClick={handleSaveTypeSettings} disabled={savingTypes || selectedTypeIds.length === 0}>
                   {savingTypes ? 'Saving...' : 'Save options'}
                 </Button>
-              </div>
+              </div>}
             </div>
             <div className="mt-3 text-xs text-zinc-500">
               {typeSettings.is_configured ? `${selectedTypeIds.length} of ${typeSettings.credential_types.length} types shown` : 'All credential types are currently shown'}
             </div>
+            {!typeSettings.manageable && (
+              <div className="mt-2 text-xs text-amber-400/80">
+                This is the shared credential catalog. Sign in as the company to change which types it offers.
+              </div>
+            )}
+            {typeSettings.manageable && selectedTypeIds.length === 0 && (
+              <div className="mt-2 text-xs text-amber-400/80">
+                Select at least one type. To offer every type again, use "Use all types".
+              </div>
+            )}
           </div>
           <div className="grid gap-2 md:grid-cols-2">
             {typeSettings.credential_types.map(type => (
               <label key={type.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3 hover:border-zinc-700">
-                <input type="checkbox" checked={selectedTypeIds.includes(type.id)} onChange={() => toggleCredentialType(type.id)} className="mt-0.5 accent-emerald-500" />
+                <input type="checkbox" checked={selectedTypeIds.includes(type.id)} onChange={() => toggleCredentialType(type.id)} disabled={!typeSettings.manageable} className="mt-0.5 accent-emerald-500 disabled:opacity-40" />
                 <span className="min-w-0">
                   <span className="block text-sm text-zinc-200">{type.label}</span>
                   <span className="block text-[10px] uppercase tracking-wide text-zinc-600">{type.category}</span>

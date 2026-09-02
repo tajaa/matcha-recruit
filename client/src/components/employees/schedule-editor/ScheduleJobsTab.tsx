@@ -157,7 +157,18 @@ function JobCard({ job, roster, credentialTypes, credentialTemplatesEnabled, onC
   async function saveCredentials() {
     setSavingCredentials(true)
     try {
-      const requirements: JobCredentialRequirement[] = requirementIds.map((credential_type_id) => ({ credential_type_id, is_required: true, schedule_blocking: true }))
+      // A save replaces the whole rule set, so carry each retained rule's own
+      // flags and notes forward. Defaulting them here would quietly promote an
+      // advisory requirement to schedule-blocking and erase its notes.
+      const requirements: JobCredentialRequirement[] = requirementIds.map((credential_type_id) => {
+        const existing = job.credential_requirements.find((item) => item.credential_type_id === credential_type_id)
+        return {
+          credential_type_id,
+          is_required: existing?.is_required ?? true,
+          schedule_blocking: existing?.schedule_blocking ?? true,
+          notes: existing?.notes ?? null,
+        }
+      })
       await Promise.all([
         updateJob(job.id, { credential_grace_days: graceDays === '' ? null : Number(graceDays) }),
         replaceJobCredentialRequirements(job.id, requirements),

@@ -12,6 +12,8 @@ export type CredentialType = {
 
 export type CredentialTypeSettings = {
   is_configured: boolean
+  /** False for a platform admin who has not named a company — read-only view. */
+  manageable: boolean
   selected_type_ids: string[]
   credential_types: CredentialType[]
 }

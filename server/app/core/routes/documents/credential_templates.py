@@ -9,7 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.dependencies import (
+    require_admin_or_client,
+    get_client_company_id,
+    resolve_accessible_company_scope,
+)
 from app.core.models.auth import CurrentUser
 from app.core.models.credential_templates import CredentialTypeVisibilityUpdate
 from app.core.services.credential_template_service import (
@@ -143,19 +147,48 @@ class WaiveRequest(BaseModel):
 # ── Credential types ──────────────────────────────────────────────────
 
 
-def _credential_settings_company_id(company_id: UUID | None) -> UUID:
+async def credential_settings_scope(
+    company_id: UUID | None = Query(
+        None, description="Platform admins must name the company they are acting on"
+    ),
+    user: CurrentUser = Depends(require_admin_or_client),
+) -> UUID | None:
+    """Resolve which tenant's credential dropdown config the caller is acting on.
+
+    ``get_client_company_id`` falls back to the oldest company in the database
+    for platform admins, so it must not be used here -- a blind admin call would
+    read and write an unrelated tenant's allowlist.  Admins name the company
+    explicitly; everyone else is pinned to their own.  ``None`` means "no tenant
+    scope", which reads as the unfiltered catalog and is rejected for writes.
+    """
+    if user.role == "admin" and company_id is None:
+        return None
+    scope = await resolve_accessible_company_scope(user, company_id)
+    return scope.get("company_id")
+
+
+async def credential_settings_company_id(
+    company_id: UUID | None = Depends(credential_settings_scope),
+) -> UUID:
+    """Write-side scope: a definite company, never the oldest-tenant fallback."""
     if company_id is None:
-        raise HTTPException(status_code=403, detail="A company account is required")
+        raise HTTPException(
+            status_code=403,
+            detail="A company account is required. Platform admins must pass company_id.",
+        )
     return company_id
 
 
 @router.get("/types")
 async def list_credential_types(
     user: CurrentUser = Depends(require_admin_or_client),
-    company_id: UUID | None = Depends(get_client_company_id),
+    company_id: UUID | None = Depends(credential_settings_scope),
 ):
-    """List credential types available for this company's dropdowns."""
-    company_id = _credential_settings_company_id(company_id)
+    """List credential types available for this company's dropdowns.
+
+    A NULL ``company_id`` matches no filter row, so an unscoped caller keeps the
+    legacy behavior of seeing the whole catalog.
+    """
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -178,29 +211,37 @@ async def list_credential_types(
 @router.get("/type-settings")
 async def get_credential_type_settings(
     user: CurrentUser = Depends(require_admin_or_client),
-    company_id: UUID | None = Depends(get_client_company_id),
+    company_id: UUID | None = Depends(credential_settings_scope),
 ):
-    """Return the full catalog and this company's current dropdown filter."""
-    company_id = _credential_settings_company_id(company_id)
+    """Return the full catalog and this company's current dropdown filter.
+
+    An unscoped caller (a platform admin who named no company) still gets the
+    catalog, flagged ``manageable=False`` so the UI hides the save controls
+    instead of writing to whichever tenant happens to be oldest.
+    """
+    configured = False
+    selected_rows: list = []
     async with get_connection() as conn:
-        configured = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM company_credential_type_filters WHERE company_id = $1)",
-            company_id,
-        )
-        selected_rows = await conn.fetch(
-            """
-            SELECT credential_type_id
-            FROM company_credential_type_filter_items
-            WHERE company_id = $1
-            ORDER BY credential_type_id
-            """,
-            company_id,
-        )
+        if company_id is not None:
+            configured = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM company_credential_type_filters WHERE company_id = $1)",
+                company_id,
+            )
+            selected_rows = await conn.fetch(
+                """
+                SELECT credential_type_id
+                FROM company_credential_type_filter_items
+                WHERE company_id = $1
+                ORDER BY credential_type_id
+                """,
+                company_id,
+            )
         type_rows = await conn.fetch(
             "SELECT * FROM credential_types ORDER BY category, label"
         )
     return {
-        "is_configured": configured,
+        "is_configured": bool(configured),
+        "manageable": company_id is not None,
         "selected_type_ids": [row["credential_type_id"] for row in selected_rows],
         "credential_types": [dict(row) for row in type_rows],
     }
@@ -210,18 +251,23 @@ async def get_credential_type_settings(
 async def update_credential_type_settings(
     body: CredentialTypeVisibilityUpdate,
     user: CurrentUser = Depends(require_admin_or_client),
-    company_id: UUID | None = Depends(get_client_company_id),
+    company_id: UUID = Depends(credential_settings_company_id),
 ):
     """Replace the company-specific credential dropdown allowlist."""
-    company_id = _credential_settings_company_id(company_id)
     selected_ids = list(dict.fromkeys(body.credential_type_ids))
+    if not selected_ids:
+        # An empty allowlist is still "configured", which would hide every type
+        # company-wide and leave no way to add a credential rule.  Resetting is
+        # the deliberate way back to the full catalog.
+        raise HTTPException(
+            status_code=422,
+            detail="Select at least one credential type, or reset to offer every type again",
+        )
     async with get_connection() as conn:
-        existing_rows = []
-        if selected_ids:
-            existing_rows = await conn.fetch(
-                "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])",
-                selected_ids,
-            )
+        existing_rows = await conn.fetch(
+            "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])",
+            selected_ids,
+        )
         existing_ids = {row["id"] for row in existing_rows}
         missing_ids = [
             credential_type_id
@@ -246,26 +292,24 @@ async def update_credential_type_settings(
                 "DELETE FROM company_credential_type_filter_items WHERE company_id = $1",
                 company_id,
             )
-            if selected_ids:
-                await conn.execute(
-                    """
-                    INSERT INTO company_credential_type_filter_items (company_id, credential_type_id)
-                    SELECT $1, credential_type_id
-                    FROM UNNEST($2::uuid[]) AS credential_type_id
-                    """,
-                    company_id,
-                    selected_ids,
-                )
+            await conn.execute(
+                """
+                INSERT INTO company_credential_type_filter_items (company_id, credential_type_id)
+                SELECT $1, credential_type_id
+                FROM UNNEST($2::uuid[]) AS credential_type_id
+                """,
+                company_id,
+                selected_ids,
+            )
     return {"ok": True, "selected_count": len(selected_ids)}
 
 
 @router.delete("/type-settings")
 async def reset_credential_type_settings(
     user: CurrentUser = Depends(require_admin_or_client),
-    company_id: UUID | None = Depends(get_client_company_id),
+    company_id: UUID = Depends(credential_settings_company_id),
 ):
     """Restore the legacy default where every credential type is offered."""
-    company_id = _credential_settings_company_id(company_id)
     async with get_connection() as conn:
         await conn.execute(
             "DELETE FROM company_credential_type_filters WHERE company_id = $1",

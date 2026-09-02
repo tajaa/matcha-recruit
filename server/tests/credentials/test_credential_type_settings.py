@@ -18,18 +18,25 @@ class _Transaction:
 
 
 class _Connection:
-    def __init__(self, *, existing_ids=()):
+    def __init__(self, *, existing_ids=(), configured=False):
         self.existing_ids = set(existing_ids)
+        self.configured = configured
         self.calls = []
 
     def transaction(self):
         return _Transaction()
 
+    async def fetchval(self, query, *args):
+        self.calls.append(("fetchval", query, args))
+        if "company_credential_type_filters" in query:
+            return self.configured
+        return None
+
     async def fetch(self, query, *args):
         self.calls.append(("fetch", query, args))
         if "SELECT id FROM credential_types" in query:
             return [{"id": value} for value in self.existing_ids]
-        if "SELECT ct.*" in query:
+        if "SELECT ct.*" in query or "SELECT * FROM credential_types" in query:
             return [{"id": uuid4(), "label": "Food Handler Card"}]
         return []
 
@@ -118,8 +125,82 @@ async def test_reset_credential_type_settings_restores_default(monkeypatch):
     assert conn.calls[0][2] == (company_id,)
 
 
-def test_company_is_required_for_credential_settings():
+@pytest.mark.asyncio
+async def test_update_credential_type_settings_rejects_empty_selection(monkeypatch):
+    conn = _Connection()
+    monkeypatch.setattr(routes, "get_connection", _connection_context(conn))
+
     with pytest.raises(HTTPException) as exc_info:
-        routes._credential_settings_company_id(None)
+        await routes.update_credential_type_settings(
+            CredentialTypeVisibilityUpdate(credential_type_ids=[]),
+            user=SimpleNamespace(id=uuid4()),
+            company_id=uuid4(),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "at least one" in exc_info.value.detail
+    assert not conn.calls
+
+
+@pytest.mark.asyncio
+async def test_get_credential_type_settings_reports_company_selection(monkeypatch):
+    company_id = uuid4()
+    conn = _Connection(configured=True)
+    monkeypatch.setattr(routes, "get_connection", _connection_context(conn))
+
+    result = await routes.get_credential_type_settings(
+        user=SimpleNamespace(id=uuid4()), company_id=company_id
+    )
+
+    assert result["is_configured"] is True
+    assert result["manageable"] is True
+    assert result["credential_types"][0]["label"] == "Food Handler Card"
+
+
+@pytest.mark.asyncio
+async def test_get_credential_type_settings_unscoped_admin_is_read_only(monkeypatch):
+    conn = _Connection()
+    monkeypatch.setattr(routes, "get_connection", _connection_context(conn))
+
+    result = await routes.get_credential_type_settings(
+        user=SimpleNamespace(id=uuid4()), company_id=None
+    )
+
+    assert result["manageable"] is False
+    assert result["is_configured"] is False
+    assert result["selected_type_ids"] == []
+    # No tenant was resolved, so nothing may be read out of another tenant's filter.
+    assert not [call for call in conn.calls if "company_credential_type_filter" in call[1]]
+
+
+@pytest.mark.asyncio
+async def test_admin_without_company_gets_no_tenant_scope():
+    admin = SimpleNamespace(id=uuid4(), role="admin")
+
+    assert await routes.credential_settings_scope(company_id=None, user=admin) is None
+
+
+@pytest.mark.asyncio
+async def test_scoped_admin_resolves_the_named_company(monkeypatch):
+    company_id = uuid4()
+    admin = SimpleNamespace(id=uuid4(), role="admin")
+    seen = {}
+
+    async def _resolve(user, requested_company_id=None):
+        seen["requested"] = requested_company_id
+        return {"company_id": requested_company_id}
+
+    monkeypatch.setattr(routes, "resolve_accessible_company_scope", _resolve)
+
+    resolved = await routes.credential_settings_scope(company_id=company_id, user=admin)
+
+    assert resolved == company_id
+    assert seen["requested"] == company_id
+
+
+@pytest.mark.asyncio
+async def test_write_scope_rejects_an_unscoped_caller():
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.credential_settings_company_id(company_id=None)
 
     assert exc_info.value.status_code == 403
