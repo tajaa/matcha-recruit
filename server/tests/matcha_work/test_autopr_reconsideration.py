@@ -353,3 +353,98 @@ def test_task_shape_serializes_reconsideration_fields():
     )
     assert shaped["autopr_reconsideration_event_id"] == str(event_id)
     assert shaped["autopr_reconsideration_at"] == now.isoformat()
+
+
+class _RunRequestConn:
+    """Stub for the run-now queue: one task row, one pending-request lookup."""
+
+    def __init__(self, *, board_column="todo", status="pending", pending_at=None, exists=True):
+        self.board_column = board_column
+        self.status = status
+        self.pending_at = pending_at
+        self.exists = exists
+        self.insert_args = None
+        self.activity_id = uuid4()
+        self.created_at = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+
+    def transaction(self):
+        return _AsyncContext()
+
+    async def fetchrow(self, query, *args):
+        if "SELECT id, board_column" in query:
+            if not self.exists:
+                return None
+            return {"id": args[0], "board_column": self.board_column, "status": self.status}
+        if "INSERT INTO mw_task_history" in query:
+            self.insert_args = args
+            return {"id": self.activity_id, "created_at": self.created_at}
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetchval(self, query, *args):
+        if "autopr_run_request" in query:
+            return self.pending_at
+        if "SELECT 1 FROM mw_tasks" in query:
+            return 1 if self.exists else None
+        raise AssertionError(f"Unexpected query: {query}")
+
+
+@pytest.mark.asyncio
+async def test_run_now_queues_one_pending_request(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.request_autopr_run(
+        project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+    )
+
+    assert result["already_pending"] is False
+    assert result["autopr_run_requested_at"] == conn.created_at.isoformat()
+    metadata = json.loads(conn.insert_args[4])
+    assert metadata == {"kind": "autopr_run_request"}
+
+
+@pytest.mark.asyncio
+async def test_run_now_is_idempotent_while_a_request_is_unclaimed(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    pending_at = datetime(2026, 9, 2, 2, 55, tzinfo=timezone.utc)
+    conn = _RunRequestConn(pending_at=pending_at)
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.request_autopr_run(
+        project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+    )
+
+    assert result["already_pending"] is True
+    assert result["autopr_run_requested_at"] == pending_at.isoformat()
+    # Pressing the button twice must not stack a second history event.
+    assert conn.insert_args is None
+
+
+@pytest.mark.asyncio
+async def test_run_now_rejects_lanes_autopr_never_picks_from(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn(board_column="review")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    with pytest.raises(svc.AutoPRReconsiderationConflict):
+        await svc.request_autopr_run(
+            project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+        )
+    assert conn.insert_args is None
+
+
+@pytest.mark.asyncio
+async def test_run_claim_consumes_the_request(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+
+    assert result["claimed_at"] == conn.created_at.isoformat()
+    assert json.loads(conn.insert_args[4]) == {"kind": "autopr_run_claim"}

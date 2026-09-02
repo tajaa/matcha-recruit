@@ -282,6 +282,9 @@ extension ProjectDetailViewModel {
             if merged.autoprReconsiderationPending == nil {
                 merged.autoprReconsiderationPending = false
             }
+            // A published decision means the harness ran, so it also claimed
+            // any queued "run now" request.
+            merged.autoprRunRequestedAt = nil
         } else {
             if merged.autoprReconsiderationPending == nil {
                 merged.autoprReconsiderationPending = previous.autoprReconsiderationPending
@@ -291,6 +294,9 @@ extension ProjectDetailViewModel {
             }
             if merged.autoprReconsiderationAt == nil {
                 merged.autoprReconsiderationAt = previous.autoprReconsiderationAt
+            }
+            if merged.autoprRunRequestedAt == nil {
+                merged.autoprRunRequestedAt = previous.autoprRunRequestedAt
             }
         }
         if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = previous.assignedAvatarUrl }

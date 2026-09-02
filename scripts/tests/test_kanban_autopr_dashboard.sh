@@ -223,6 +223,7 @@ EOF
 chmod +x "$TMP_DIR/git-pr" "$TMP_DIR/gh-pr"
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-pr" AUTOPR_GIT_BIN="$TMP_DIR/git-pr" \
+  AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache" \
   AUTOPR_RUNNER_WORKTREE="$TMP_DIR/runner-worktree" "$AUTOPR_DIR/watch-pr.sh" > "$TMP_DIR/pr-pane.out"
 check "PR pane shows real metadata, labels, worktree files, and live diff" \
   $(grep -q 'PR #310  DRAFT' "$TMP_DIR/pr-pane.out" \
@@ -230,6 +231,25 @@ check "PR pane shows real metadata, labels, worktree files, and live diff" \
     && grep -q '4 files changed' "$TMP_DIR/pr-pane.out" \
     && grep -q 'CHANGED FILES · LIVE RUNNER WORKTREE' "$TMP_DIR/pr-pane.out" \
     && grep -q 'ComplianceLocationModal' "$TMP_DIR/pr-pane.out" && echo 0 || echo 1)
+
+# A second redraw of the same pane must not spend a second GitHub request:
+# the observer panes were re-listing PRs every cycle, every pane.
+cat > "$TMP_DIR/gh-pr-counting" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1 $2" >> "$AUTOPR_TEST_GH_CALLS"
+exec "$AUTOPR_TEST_REAL_GH" "$@"
+EOF
+chmod +x "$TMP_DIR/gh-pr-counting"
+: > "$TMP_DIR/pr-gh-calls.log"
+for _ in 1 2 3; do
+  AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-pr-counting" AUTOPR_GIT_BIN="$TMP_DIR/git-pr" \
+    AUTOPR_TEST_REAL_GH="$TMP_DIR/gh-pr" AUTOPR_TEST_GH_CALLS="$TMP_DIR/pr-gh-calls.log" \
+    AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache-ttl" \
+    AUTOPR_RUNNER_WORKTREE="$TMP_DIR/runner-worktree" "$AUTOPR_DIR/watch-pr.sh" >/dev/null
+done
+check "repeat observer redraws reuse cached PR metadata instead of re-asking GitHub" \
+  $([ "$(grep -c 'pr view' "$TMP_DIR/pr-gh-calls.log")" = 1 ] \
+    && [ "$(grep -c 'pr list' "$TMP_DIR/pr-gh-calls.log")" -le 2 ] && echo 0 || echo 1)
 
 cat > "$TMP_DIR/gh-work" <<'EOF'
 #!/usr/bin/env bash
@@ -254,6 +274,7 @@ EOF
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
   AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/work-github-cache" \
+  AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
 check "live-work pane shows model activity and redacts common credentials" \
   $(grep -q 'LIVE CODEX WORK' "$TMP_DIR/work-pane.out" \
@@ -267,6 +288,7 @@ check "live-work pane shows model activity and redacts common credentials" \
 
 AUTOPR_DASHBOARD_MAX_ITERATIONS=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
   AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/work-github-cache" \
+  AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-history.out"
 check "interactive live-work pane appends sanitized output without clearing history" \
   $(grep -q 'append-only history' "$TMP_DIR/work-history.out" \

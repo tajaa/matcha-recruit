@@ -37,6 +37,17 @@ ID8="$(jq -r '.id8' "$CARD_FILE")"
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
 
+# Consume any "run now" request as soon as this card is actually picked up.
+# The claim is what stops the one-minute watcher re-dispatching for a card
+# whose run then crashes, is capped, or produces no PR. Non-fatal: losing the
+# claim must never abandon an investigation that is otherwise ready to go.
+if [ "$(jq -r '.autopr_run_requested_at // empty' "$CARD_FILE")" != "" ]; then
+    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/run-claim" '{}' \
+        >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not claim the run request for %s\n' \
+            "$TASK_ID" >&2
+fi
+
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist
 # reasons/severities, and attachment ids. This is required in BOTH modes: a

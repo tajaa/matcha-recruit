@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Mac-owned clock for the scheduled AutoPR lanes. Production errors get the
 # first slot whenever their last completed pass is stale; otherwise the clock
-# advances self-audit or Kanban. The externally dispatched admin-update lane
-# participates in the active-run interlock but is never scheduled here.
+# advances self-audit, then Kanban — and the Kanban lane is held to one pass
+# every twenty minutes so routine board sweeps stop dominating the runner.
+# `--if-requested` is the human's way past that clock: the one-minute watcher
+# LaunchAgent asks the board whether a card pressed "Run AutoPR now" and
+# dispatches Kanban immediately when one has, without touching the GitHub API
+# on an idle tick. The externally dispatched admin-update lane participates in
+# the active-run interlock but is never scheduled here.
 set -euo pipefail
 
 REPO="${AUTOPR_REPO:-tajaa/matcha-recruit}"
@@ -12,6 +17,13 @@ AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
 ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 ERROR_MAX_AGE_SECONDS="${AUTOPR_ERROR_MAX_AGE_SECONDS:-600}"
 AUDIT_MAX_AGE_SECONDS="${AUTOPR_AUDIT_MAX_AGE_SECONDS:-21600}"
+# The Kanban lane is the slow one: a scheduled pass every twenty minutes, not
+# every tick. A human who wants a card now presses "Run AutoPR now" on it,
+# which the one-minute watcher below turns into an immediate dispatch.
+KANBAN_MAX_AGE_SECONDS="${AUTOPR_KANBAN_MAX_AGE_SECONDS:-1200}"
+# Floor between two request-driven dispatches, so a card that cannot actually
+# be selected (capped queue, wrong lane, crashed run) cannot spin the runner.
+FORCED_MIN_INTERVAL_SECONDS="${AUTOPR_FORCED_MIN_INTERVAL_SECONDS:-300}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
@@ -23,6 +35,9 @@ LOCK_DIR="${AUTOPR_DISPATCH_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-kanban-autopr-dispa
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_ENSURE="${AUTOPR_DASHBOARD_ENSURE:-$SCRIPT_DIR/ensure-dashboard.sh}"
 RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
+RUN_REQUEST_PROBE="${AUTOPR_RUN_REQUEST_PROBE:-$SCRIPT_DIR/has-run-request.sh}"
+STATE_DIR="${AUTOPR_DISPATCH_STATE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard/dispatch}"
+FORCED_MARKER="$STATE_DIR/last-forced-kanban"
 
 log_event() {
     local action="$1" reason="$2" runs="${3:-[]}"
@@ -93,7 +108,32 @@ autopr_master_ready() {
         --filter 'status=running' 2>/dev/null)" ]
 }
 
+marker_age_seconds() {
+    local marker="$1" modified now
+    [ -f "$marker" ] || { printf '%s' 999999999; return; }
+    modified="$(stat -f '%m' "$marker" 2>/dev/null || true)"
+    [[ "$modified" =~ ^[0-9]+$ ]] || modified="$(stat -c '%Y' "$marker" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
+    printf '%s' "$((now - modified))"
+}
+
+# Exit status only: 0 = a card is waiting, 1 = nothing to force (queue empty or
+# the board could not be asked). A probe failure must never force a run.
+run_request_pending() {
+    [ -x "$RUN_REQUEST_PROBE" ] || return 1
+    local rc
+    "$RUN_REQUEST_PROBE" >/dev/null 2>&1
+    rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        3) return 1 ;;
+        *) log_event error run-request-probe-failed; return 1 ;;
+    esac
+}
+
 main() {
+    local requested_mode=false
+    [ "${1:-}" != "--if-requested" ] || requested_mode=true
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
     # `msandbox` remains the authoritative kill switch: it alone creates and
     # removes ENABLE_FILE. A persistent marker alone is insufficient after a
@@ -112,6 +152,20 @@ main() {
         exit 0
     fi
 
+    # The watcher lane asks the board first and gives up before touching the
+    # GitHub API, so a minute-by-minute tick costs one bounded query against
+    # our own API and nothing else.
+    if [ "$requested_mode" = true ]; then
+        if [ "$(marker_age_seconds "$FORCED_MARKER")" -lt "$FORCED_MIN_INTERVAL_SECONDS" ]; then
+            log_event skip forced-kanban-cooldown
+            exit 0
+        fi
+        if ! run_request_pending; then
+            log_event skip no-run-request
+            exit 0
+        fi
+    fi
+
     local kanban_runs error_runs audit_runs all_runs workflow reason
     if [ ! -x "$RUN_SNAPSHOT" ] || ! all_runs="$(AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
         AUTOPR_GH_BIN="$GH_BIN" AUTOPR_GITHUB_SNAPSHOT_ALLOW_STALE=false "$RUN_SNAPSHOT")"; then
@@ -127,15 +181,24 @@ main() {
         exit 0
     fi
 
-    if workflow_pass_due "$error_runs" "$ERROR_MAX_AGE_SECONDS"; then
+    if [ "$requested_mode" = true ]; then
+        # An explicit card request outranks the other lanes' schedules: the
+        # human is waiting on this specific ticket.
+        workflow="$KANBAN_WORKFLOW"
+        reason="kanban-run-request"
+        mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER"
+    elif workflow_pass_due "$error_runs" "$ERROR_MAX_AGE_SECONDS"; then
         workflow="$ERROR_WORKFLOW"
         reason="production-error-pass-due"
     elif workflow_pass_due "$audit_runs" "$AUDIT_MAX_AGE_SECONDS"; then
         workflow="$AUDIT_WORKFLOW"
         reason="autopr-self-audit-due"
-    else
+    elif workflow_pass_due "$kanban_runs" "$KANBAN_MAX_AGE_SECONDS"; then
         workflow="$KANBAN_WORKFLOW"
         reason="kanban-pass"
+    else
+        log_event skip kanban-not-due
+        exit 0
     fi
     if ! dispatch_workflow "$workflow" >/dev/null; then
         log_event error "${workflow}-dispatch-failed"

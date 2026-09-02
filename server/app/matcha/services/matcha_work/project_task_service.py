@@ -259,7 +259,7 @@ def _row_to_task(row: dict) -> dict:
         d["due_date"] = d["due_date"].isoformat()
     for key in (
         "completed_at", "created_at", "updated_at", "last_moved_at",
-        "autopr_reconsideration_at",
+        "autopr_reconsideration_at", "autopr_run_requested_at",
     ):
         if d.get(key) is not None:
             d[key] = d[key].isoformat()
@@ -383,6 +383,156 @@ async def request_autopr_reconsideration(
         "autopr_directives": directives,
         "autopr_test_route": test_route,
     }
+
+
+_AUTOPR_RUN_LANES = ("todo", "changes_requested")
+
+
+async def request_autopr_run(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: UUID,
+) -> Optional[dict]:
+    """Queue one immediate AutoPR pass for this card.
+
+    The scheduled lane is deliberately slow. This is the human's way past it:
+    a request sits pending until the harness posts a matching claim, and the
+    local watcher dispatches a run as soon as it sees one. Repeating the
+    request while one is already pending is idempotent — it returns the
+    existing timestamp rather than stacking events.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                """
+                SELECT id, board_column, status
+                FROM mw_tasks
+                WHERE id = $1 AND project_id = $2
+                FOR UPDATE
+                """,
+                task_id, project_id,
+            )
+            if not task:
+                return None
+            if task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
+                raise AutoPRReconsiderationConflict(
+                    "AutoPR only picks up tickets in Todo or Changes Requested"
+                )
+            pending_at = await conn.fetchval(
+                """
+                SELECT MAX(h.created_at) FROM mw_task_history h
+                WHERE h.task_id = $1
+                  AND h.event_type = 'activity'
+                  AND h.metadata->>'kind' = 'autopr_run_request'
+                  AND h.created_at > COALESCE((
+                        SELECT MAX(c.created_at) FROM mw_task_history c
+                        WHERE c.task_id = $1
+                          AND c.event_type = 'activity'
+                          AND c.metadata->>'kind' = 'autopr_run_claim'
+                      ), '-infinity'::timestamptz)
+                """,
+                task_id,
+            )
+            if pending_at is not None:
+                return {
+                    "ok": True,
+                    "already_pending": True,
+                    "autopr_run_requested_at": pending_at.isoformat(),
+                }
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                RETURNING id, created_at
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                # No body: the discussion feed renders bodyless notes as
+                # nothing, so a queue request stays out of the conversation.
+                json.dumps({"kind": "autopr_run_request"}),
+            )
+    return {
+        "ok": True,
+        "already_pending": False,
+        "activity_id": str(row["id"]),
+        "autopr_run_requested_at": row["created_at"].isoformat(),
+    }
+
+
+async def claim_autopr_run(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: Optional[UUID] = None,
+) -> Optional[dict]:
+    """Consume any pending run request for this card.
+
+    Called by the trusted harness when it actually starts investigating, so a
+    crashed or unselectable card cannot make the watcher dispatch forever.
+    """
+    async with get_connection() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+        if not exists:
+            return None
+        row = await conn.fetchrow(
+            """
+            INSERT INTO mw_task_history
+                (task_id, task_id_text, project_id, actor_user_id,
+                 event_type, metadata)
+            VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+            RETURNING id, created_at
+            """,
+            task_id, str(task_id), project_id, actor_user_id,
+            json.dumps({"kind": "autopr_run_claim"}),
+        )
+    return {"ok": True, "claimed_at": row["created_at"].isoformat()}
+
+
+async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
+    """Pending run requests across the caller's projects.
+
+    Deliberately tiny: the local watcher polls this once a minute and must not
+    pay for a whole board bundle to learn that nothing is queued.
+    """
+    if not project_ids:
+        return []
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT t.id AS task_id, t.project_id, t.board_column,
+                   MAX(h.created_at) AS requested_at
+            FROM mw_task_history h
+            JOIN mw_tasks t ON t.id = h.task_id
+            WHERE h.project_id = ANY($1::uuid[])
+              AND h.event_type = 'activity'
+              AND h.metadata->>'kind' = 'autopr_run_request'
+              AND t.status != 'cancelled'
+              AND t.board_column = ANY($2::text[])
+              AND h.created_at > COALESCE((
+                    SELECT MAX(c.created_at) FROM mw_task_history c
+                    WHERE c.task_id = h.task_id
+                      AND c.event_type = 'activity'
+                      AND c.metadata->>'kind' = 'autopr_run_claim'
+                  ), '-infinity'::timestamptz)
+            GROUP BY t.id, t.project_id, t.board_column
+            ORDER BY MAX(h.created_at)
+            """,
+            project_ids, list(_AUTOPR_RUN_LANES),
+        )
+    return [
+        {
+            "task_id": str(r["task_id"]),
+            "project_id": str(r["project_id"]),
+            "board_column": r["board_column"],
+            "requested_at": r["requested_at"].isoformat(),
+        }
+        for r in rows
+    ]
 
 
 async def log_task_activity(
@@ -564,6 +714,10 @@ async def list_project_tasks(
                    (autopr_ctx.id IS NOT NULL) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
+                   -- "Run AutoPR now" on the card. Pending until the harness
+                   -- claims the card for a run, so the scheduled lane can stay
+                   -- slow without a human having to wait for its next tick.
+                   autopr_run.created_at AS autopr_run_requested_at,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first move. Counts a
                    -- review_rejected as a move too (review → changes_requested)
@@ -639,6 +793,25 @@ async def list_project_tasks(
                 ORDER BY h5.created_at DESC
                 LIMIT 1
             ) autopr_ctx ON TRUE
+            LEFT JOIN LATERAL (
+                -- A run request outlives nothing but its own claim: the
+                -- harness posts autopr_run_claim when it actually picks the
+                -- card up, which is what stops the request re-firing every
+                -- tick. No column, same shape as the reconsideration join.
+                SELECT h6.created_at
+                FROM mw_task_history h6
+                WHERE h6.task_id = t.id
+                  AND h6.event_type = 'activity'
+                  AND h6.metadata->>'kind' = 'autopr_run_request'
+                  AND h6.created_at > COALESCE((
+                        SELECT MAX(h7.created_at) FROM mw_task_history h7
+                        WHERE h7.task_id = t.id
+                          AND h7.event_type = 'activity'
+                          AND h7.metadata->>'kind' = 'autopr_run_claim'
+                      ), '-infinity'::timestamptz)
+                ORDER BY h6.created_at DESC
+                LIMIT 1
+            ) autopr_run ON TRUE
             WHERE t.project_id = $1 AND t.status != 'cancelled'
               {_done_clause}
             ORDER BY

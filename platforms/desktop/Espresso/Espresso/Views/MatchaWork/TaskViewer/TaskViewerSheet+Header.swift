@@ -119,6 +119,56 @@ extension TaskViewerSheet {
         return submittedDecisionIsCurrent || liveTask.autoprReconsiderationPending == true
     }
 
+    // MARK: - Run AutoPR now
+
+    /// The scheduled Kanban lane sweeps every twenty minutes. This is the way
+    /// past that clock for one specific ticket: the local watcher polls for
+    /// pending requests once a minute and dispatches a run as soon as it sees
+    /// one. Only the two lanes AutoPR actually picks from can queue.
+    var canRequestAutoPRRun: Bool {
+        let liveTask = liveAutoPRTask
+        return liveTask.status != "cancelled"
+            && ["todo", "changes_requested"].contains(liveTask.boardColumn)
+    }
+
+    var autoPRRunIsQueued: Bool {
+        didRequestAutoPRRun || liveAutoPRTask.autoprRunRequestedAt != nil
+    }
+
+    @ViewBuilder
+    var autoPRRunNowControl: some View {
+        if canRequestAutoPRRun {
+            HStack(spacing: 8) {
+                if autoPRRunIsQueued {
+                    Label("Queued for AutoPR", systemImage: "bolt.horizontal.circle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.mwInkStrong)
+                } else {
+                    Button {
+                        Task { await requestAutoPRRun() }
+                    } label: {
+                        Label(
+                            requestingAutoPRRun ? "Queueing…" : "Run AutoPR now",
+                            systemImage: "bolt.fill"
+                        )
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.mwInkStrong)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(requestingAutoPRRun)
+                    .help("Queue this ticket for the next AutoPR tick instead of the twenty-minute sweep")
+                }
+                if let error = autoPRRunError {
+                    Text(error)
+                        .font(.system(size: 10))
+                        .foregroundColor(.red)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     @ViewBuilder
     var autoPRReconsiderationControl: some View {
         if canRequestAutoPRReconsideration {

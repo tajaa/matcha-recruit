@@ -274,6 +274,31 @@ extension MatchaWorkService {
         )
     }
 
+    struct AutoPRRunRequestResponse: Decodable {
+        let ok: Bool
+        let alreadyPending: Bool?
+        let autoprRunRequestedAt: String?
+
+        enum CodingKeys: String, CodingKey {
+            case ok
+            case alreadyPending = "already_pending"
+            case autoprRunRequestedAt = "autopr_run_requested_at"
+        }
+    }
+
+    /// Queue this ticket for the next AutoPR pass instead of waiting on the
+    /// scheduled sweep. Idempotent: asking twice returns the pending request
+    /// rather than stacking another one.
+    func requestAutoPRRun(projectId: String, taskId: String) async throws -> AutoPRRunRequestResponse {
+        struct Req: Encodable {}
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/run-now",
+            body: Req()
+        )
+    }
+
     /// Reviewer sends a task back for changes: server bounces review →
     /// changes_requested, stores the note, and emails the assignee. Returns the
     /// updated task.

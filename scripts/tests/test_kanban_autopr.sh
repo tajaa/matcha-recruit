@@ -219,7 +219,9 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"33333333-0000-4000-8000-000000000003","title":"Moved reconsideration","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_reconsideration_pending":true},
     {"id":"44444444-0000-4000-8000-000000000004","title":"Assigned scoped work","assigned_email":"owner@example.com","board_column":"in_progress","status":"pending","progress_note":"🤖 AUTO SETUP · ALREADY SCOPED · PR #444"},
     {"id":"55555555-0000-4000-8000-000000000005","title":"Consumed go-ahead directive","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed"},
-    {"id":"66666666-0000-4000-8000-000000000006","title":"Consumed directive answered with a migration stop","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"}
+    {"id":"66666666-0000-4000-8000-000000000006","title":"Consumed directive answered with a migration stop","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"},
+    {"id":"77777777-0000-4000-8000-000000000007","title":"Queued by hand from the card","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
+    {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"}
   ]
 }
 EOF
@@ -260,11 +262,12 @@ collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
     AUTOPR_TEST_HISTORY_FILE="$TMP_DIR/collect-history.json" \
     "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
 collect_rc=$?
-check "collector recovers a consumed authorization from either refusal it overrides" \
+check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "4" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "5" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444", "55555555", "66666666"]
+        'map(.id8) == ["11111111", "44444444", "55555555", "66666666", "77777777"]
+         and (.[4].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
          and .[2].autopr_reconsideration_pending
          and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
          and .[3].autopr_reconsideration_pending
@@ -861,6 +864,30 @@ reconsidered="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recrui
 check "pending additional context reopens an unchanged no-spec decision" \
     $([ "$(printf '%s' "$reconsidered" | jq -r '.id8')" = "77777777" ] \
       && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
+      && echo 0 || echo 1)
+
+cat > "$TMP_DIR/run-request-cards.json" <<'EOF'
+[
+  {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Ordinary changes-requested work","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"},
+  {"task_id":"99999999-0000-4000-8000-000000000009","id8":"99999999","project_id":"p","title":"Run me now","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-01-02T00:00:00Z] migration_required","autopr_run_requested_at":"2026-01-03T00:00:00+00:00"}
+]
+EOF
+run_requested="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json")"
+check "an explicit run request outranks routine work and its own no-spec marker" \
+    $([ "$(printf '%s' "$run_requested" | jq -r '.id8')" = "99999999" ] \
+      && [ "$(printf '%s' "$run_requested" | jq -r '.mode')" = "investigate" ] \
+      && echo 0 || echo 1)
+
+# The same cache now holds a fresh attempt marker for that card: a request
+# newer than the attempt must still beat the cooldown, exactly like
+# decision-bound context does.
+run_requested_again="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" 2>/dev/null)"
+check "a stale run request does not beat its own cooldown" \
+    $([ "$(printf '%s' "$run_requested_again" | jq -r '.id8 // empty')" != "99999999" ] \
       && echo 0 || echo 1)
 
 prior_pr_retry_ok=0
