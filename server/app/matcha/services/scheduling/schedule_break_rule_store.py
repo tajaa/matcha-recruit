@@ -14,6 +14,22 @@ from .schedule_breaks import BreakRule
 from .schedule_location_readiness import get_schedule_location_readiness
 
 MAX_SHIFT_BREAK_MINUTES = 1440
+_GUIDANCE_RULE_LOCK_KEY = "schedule-break-rules:guidance:v1"
+
+
+async def lock_schedule_break_rule_guidance(conn, *, exclusive: bool) -> None:
+    """Serialize persisted guidance with rule review transitions.
+
+    Resolvers take the shared transaction lock while rule approvals/rejections
+    take the exclusive form.  This prevents an old rule snapshot from being
+    written after a newly committed review decision.
+    """
+    query = (
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))"
+        if exclusive
+        else "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text, 0))"
+    )
+    await conn.fetchval(query, _GUIDANCE_RULE_LOCK_KEY)
 
 
 @dataclass(frozen=True)
@@ -253,6 +269,7 @@ async def resolve_break_rules(
     location_id: UUID,
     shift_date: date,
 ) -> ResolvedBreakRules:
+    await lock_schedule_break_rule_guidance(conn, exclusive=False)
     readiness = await get_schedule_location_readiness(conn, company_id, location_id)
     if readiness.jurisdiction_id is None:
         return ResolvedBreakRules(

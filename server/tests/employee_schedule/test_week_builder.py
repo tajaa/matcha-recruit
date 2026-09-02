@@ -1,5 +1,6 @@
 """Pure tests for Huume's deterministic whole-week assignment planner."""
 
+import inspect
 from datetime import date, datetime, time, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -192,6 +193,16 @@ def test_manager_constraints_fail_closed_instead_of_being_silently_dropped():
             "employee_id": "3f6b1c22-2000-4000-8000-000000000001",
             "max_weekly_minutes": 10081,
         }])
+
+
+def test_apply_week_draft_prelocks_complete_employee_set():
+    source = inspect.getsource(week_builder.apply_week_draft)
+    employee_set = source.index("employee_ids = sorted({")
+    prelock = source.index(
+        "await lock_scheduling_employees(conn, company_id, employee_ids)",
+    )
+    conflict_loop = source.index("elif await find_conflicts(", prelock)
+    assert employee_set < prelock < conflict_loop
 
 
 @pytest.mark.asyncio

@@ -69,9 +69,12 @@ def test_publish_gate_locks_assignments_and_blocks_expired_credentials():
 def test_publish_routes_lock_candidate_shifts_and_update_only_validated_ids():
     single_source = inspect.getsource(shifts.publish_shift)
     range_source = inspect.getsource(shifts.publish_range)
+    update_source = inspect.getsource(shifts.update_shift)
 
     assert "FOR UPDATE" in single_source
     assert "_lock_and_assert_publish_assignments_eligible" in single_source
     assert "FOR UPDATE" in range_source
     assert "_lock_and_assert_publish_assignments_eligible" in range_source
     assert "id = ANY($2::uuid[])" in range_source
+    assert "if publishing:" in update_source
+    assert "publish_breaks = await _lock_and_assert_publish_assignments_eligible" in update_source

@@ -25,6 +25,7 @@ from .shift_writes import (
     create_shift_core,
     fetch_availability,
     find_conflicts,
+    lock_scheduling_employees,
     log_audit,
 )
 
@@ -1029,6 +1030,10 @@ async def apply_week_draft(
                 for shift in proposal.get("shifts") or []
                 for assignment in shift.get("proposed_assignments") or []
             })
+            # find_conflicts retains transaction advisory locks.  Acquire the
+            # whole set in one stable order before the proposal-order loop so
+            # concurrent week applies cannot deadlock on inverse rosters.
+            await lock_scheduling_employees(conn, company_id, employee_ids)
             availability = await fetch_availability(conn, company_id, employee_ids)
             for shift in proposal.get("shifts") or []:
                 shift_id = shift_id_by_key[shift["key"]]

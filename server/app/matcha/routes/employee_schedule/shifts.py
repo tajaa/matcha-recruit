@@ -94,10 +94,10 @@ async def _lock_and_assert_publish_assignments_eligible(
     conn,
     company_id: UUID,
     candidate_shifts: list[dict],
-) -> None:
+) -> dict[UUID, int]:
     """Lock assignees and reject publication if eligibility changed in draft."""
     if not candidate_shifts:
-        return
+        return {}
     shifts_by_id = {shift["id"]: shift for shift in candidate_shifts}
     assignments = await conn.fetch(
         """
@@ -147,6 +147,7 @@ async def _lock_and_assert_publish_assignments_eligible(
             and violation.get("severity") == "block"
         ]
         raise_for_violations(eligibility_blocks, force=False)
+    return effective_breaks
 
 
 async def _duplicate_assignment_block(
@@ -628,6 +629,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             await assert_job_in_company(conn, company_id, patch["job_id"])
 
         new_status = patch.get("status", existing["status"])
+        publishing = new_status == "published" and existing["status"] != "published"
         # Cancelled is terminal for publication — POST /publish already refuses it
         # (`AND status <> 'cancelled'`), and a resurrected shift would reappear on
         # every assignee's portal. Reopening as a draft is the supported path.
@@ -869,6 +871,30 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 )
                 if write_break != locked_break or auto_break_requested:
                     patch["break_minutes"] = write_break
+
+            if publishing:
+                # ShiftUpdate historically accepts status changes, so keep that
+                # contract while routing draft -> published through the same
+                # locked minimum/eligibility gate as the dedicated endpoints.
+                publish_breaks = await _lock_and_assert_publish_assignments_eligible(
+                    conn,
+                    company_id,
+                    [{
+                        "id": shift_id,
+                        "location_id": new_location,
+                        "job_id": patch.get("job_id", existing["job_id"]),
+                        "starts_at": new_start,
+                        "ends_at": new_end,
+                        "break_minutes": patch.get(
+                            "break_minutes", locked_shift["break_minutes"],
+                        ),
+                        "kind": existing["kind"],
+                        "training_requirement_id": existing["training_requirement_id"],
+                    }],
+                )
+                effective_break = publish_breaks[shift_id]
+                if effective_break != int(locked_shift["break_minutes"] or 0):
+                    patch["break_minutes"] = effective_break
 
             # Auto is intentionally a no-op for cancelled shifts.  Avoid
             # asking build_patch() to synthesize an UPDATE from no columns.

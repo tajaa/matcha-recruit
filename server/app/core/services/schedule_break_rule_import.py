@@ -53,7 +53,12 @@ async def review_break_rule_set(
 ) -> dict:
     if decision not in {"approved", "rejected"}:
         raise ValueError("decision must be approved or rejected")
+    from app.matcha.services.scheduling.schedule_break_rule_store import (
+        lock_schedule_break_rule_guidance,
+        validate_break_rule_payload,
+    )
     async with conn.transaction():
+        await lock_schedule_break_rule_guidance(conn, exclusive=True)
         existing = await conn.fetchrow(
             """
             SELECT id, jurisdiction_id, rules, citation
@@ -71,9 +76,6 @@ async def review_break_rule_set(
             # Revalidate the locked database value.  A pending row could have
             # been inserted before strict validation existed or altered by an
             # operational repair after import.
-            from app.matcha.services.scheduling.schedule_break_rule_store import (
-                validate_break_rule_payload,
-            )
             validate_break_rule_payload(existing["rules"], existing["citation"])
         row = await conn.fetchrow(
             """
@@ -81,7 +83,7 @@ async def review_break_rule_set(
             SET review_status = $2,
                 reviewed_by = $3,
                 reviewed_at = NOW(),
-                updated_at = NOW()
+                updated_at = clock_timestamp()
             WHERE id = $1
             RETURNING id, review_status, reviewed_by, reviewed_at
             """,

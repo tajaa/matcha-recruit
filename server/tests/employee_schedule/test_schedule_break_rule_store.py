@@ -1,6 +1,7 @@
 """Rule-resolution tests with fake asyncpg records."""
 
 import asyncio
+import inspect
 from datetime import date
 from uuid import uuid4
 
@@ -24,6 +25,8 @@ class FakeConn:
         raise AssertionError(query)
 
     async def fetchval(self, query, *args):
+        if "pg_advisory_xact_lock_shared" in query:
+            return None
         if "SELECT industry FROM companies" in query:
             return self.industry
         if "SELECT state FROM business_locations" in query:
@@ -248,8 +251,15 @@ def test_approval_revalidates_the_locked_persisted_payload():
             return False
 
     class Connection:
+        def __init__(self):
+            self.locked = False
+
         def transaction(self):
             return Transaction()
+
+        async def fetchval(self, query, *_args):
+            assert "pg_advisory_xact_lock(" in query
+            self.locked = True
 
         async def fetchrow(self, query, *_args):
             assert "FOR UPDATE" in query
@@ -262,8 +272,16 @@ def test_approval_revalidates_the_locked_persisted_payload():
                 "citation": "Authority",
             }
 
+    conn = Connection()
     with pytest.raises(ValueError, match="whole numbers"):
         _run(review_break_rule_set(
-            Connection(), rule_set_id=uuid4(), decision="approved",
+            conn, rule_set_id=uuid4(), decision="approved",
             actor_user_id=uuid4(),
         ))
+    assert conn.locked
+
+
+def test_rule_review_uses_commit_order_timestamp_for_recovery():
+    source = inspect.getsource(review_break_rule_set)
+    assert "lock_schedule_break_rule_guidance(conn, exclusive=True)" in source
+    assert "updated_at = clock_timestamp()" in source
