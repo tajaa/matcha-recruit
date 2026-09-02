@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Return one shared, lane-tagged snapshot of every AutoPR workflow run.
 #
-# All four tmux panes and the five-minute dispatcher use this helper. The
+# All four tmux panes and both dispatcher lanes use this helper. The
 # first caller refreshes one unfiltered GitHub run list; concurrent/subsequent
 # callers reuse the private local cache instead of each resolving four
 # workflow names through GitHub's API.

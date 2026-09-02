@@ -277,6 +277,80 @@ async def request_autopr_reconsideration_endpoint(
 
 
 @router.post(
+    "/projects/{project_id}/tasks/{task_id}/autopr/run-now",
+    status_code=201,
+)
+async def request_autopr_run_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Queue this ticket for the next AutoPR pass instead of waiting for the clock."""
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    try:
+        result = await pt_svc.request_autopr_run(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+        )
+    except pt_svc.AutoPRReconsiderationConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@router.post(
+    "/projects/{project_id}/tasks/{task_id}/autopr/run-claim",
+    status_code=201,
+)
+async def claim_autopr_run_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Consume a pending run request — posted by the harness as it starts work."""
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    result = await pt_svc.claim_autopr_run(
+        project_id=project_id,
+        task_id=task_id,
+        actor_user_id=current_user.id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@router.get("/autopr/run-requests")
+async def list_autopr_run_requests_endpoint(
+    project_ids: str = Query(..., description="Comma-separated project ids"),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Pending "run now" requests for the given projects.
+
+    The local dispatcher polls this every minute, so it stays a single bounded
+    query rather than a board bundle. Access is verified per project, so the
+    poller can never learn about a board it could not already open.
+    """
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    raw = [p.strip() for p in (project_ids or "").split(",") if p.strip()]
+    if not raw or len(raw) > 20:
+        raise HTTPException(status_code=400, detail="project_ids must name 1-20 projects")
+    try:
+        parsed = [UUID(p) for p in raw]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="project_ids must be UUIDs")
+    for project_id in parsed:
+        await _verify_project_access(project_id, current_user)
+    return {"requests": await pt_svc.list_autopr_run_requests(parsed)}
+
+
+@router.post(
     "/projects/{project_id}/tasks/{task_id}/autopr/context-request",
     status_code=201,
 )

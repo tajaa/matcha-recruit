@@ -21,6 +21,10 @@ MAX_ITERATIONS="${AUTOPR_DASHBOARD_MAX_ITERATIONS:-0}"
 PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
+GH_CACHED="${AUTOPR_GH_CACHED:-$SCRIPT_DIR/gh-cached.sh}"
+# Step detail for the run in flight: the only GitHub read in this pane, and
+# the only one worth refreshing on the minute.
+RUN_DETAIL_TTL_SECONDS="${AUTOPR_WORK_RUN_DETAIL_TTL_SECONDS:-45}"
 
 RUN_ID=""
 RUN_STATUS="idle"
@@ -45,7 +49,9 @@ refresh_workflow_status() {
     RUN_LANE="$(printf '%s' "$active" | jq -r '.lane // ""' 2>/dev/null)"
     STEP_LINE=""
     if [ -n "$RUN_ID" ] && [ "$RUN_STATUS" != idle ]; then
-        details="$($GH_BIN run view "$RUN_ID" --repo "$REPO" --json jobs 2>/dev/null || printf '{"jobs":[]}')"
+        details="$("$GH_CACHED" "$RUN_DETAIL_TTL_SECONDS" "run-$RUN_ID" \
+            "$GH_BIN" run view "$RUN_ID" --repo "$REPO" --json jobs 2>/dev/null \
+            || printf '{"jobs":[]}')"
         STEP_LINE="$(printf '%s' "$details" | jq -r '
           [.jobs[]? as $job | $job.steps[]? |
             select(.status == "in_progress") | ($job.name + " · " + .name)][0] // empty

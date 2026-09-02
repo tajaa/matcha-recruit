@@ -18,6 +18,17 @@ GIT_BIN="${AUTOPR_GIT_BIN:-/usr/bin/git}"
 # Four live panes share one GitHub token. A 30-second overview plus the detail
 # panes could exhaust the hourly core budget and prevent workflow dispatch.
 REFRESH_SECONDS="${AUTOPR_DASHBOARD_REFRESH_SECONDS:-60}"
+# GitHub is rate-limited per hour and these panes are read by a human a few
+# times a day. Redraw on the same cadence, but only re-ask GitHub this often.
+PR_LIST_TTL_SECONDS="${AUTOPR_DASHBOARD_PR_TTL_SECONDS:-300}"
+BOARD_TTL_SECONDS="${AUTOPR_DASHBOARD_BOARD_TTL_SECONDS:-180}"
+# The active run's step line is the one thing worth refreshing quickly, and
+# only while a run is actually in flight.
+RUN_DETAIL_TTL_SECONDS="${AUTOPR_DASHBOARD_RUN_DETAIL_TTL_SECONDS:-45}"
+# The selector re-asks GitHub about every candidate card, so it is the most
+# expensive probe on the board. Its answer changes on run boundaries, not
+# between two redraws.
+SELECT_TTL_SECONDS="${AUTOPR_DASHBOARD_SELECT_TTL_SECONDS:-300}"
 PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-actions-runner/_work/matcha-recruit/matcha-recruit}"
 CACHE_DIR="${AUTOPR_DASHBOARD_CACHE_DIR:-$USER_HOME/Library/Caches/matcha-kanban-autopr/dashboard}"
@@ -89,22 +100,39 @@ duration_between() {
     format_duration_seconds $((end_epoch - start_epoch))
 }
 
-cache_age() {
+cache_age_seconds() {
     local path="$1" modified now age
     modified="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null || printf 0)"
     now="$(dashboard_now_epoch)"
     age=$((now - modified))
     [ "$age" -ge 0 ] 2>/dev/null || age=0
-    format_duration_seconds "$age"
+    printf '%s' "$age"
 }
 
-# fetch_json DATA_VAR STATE_VAR CACHE_KEY COMMAND...
+cache_age() {
+    format_duration_seconds "$(cache_age_seconds "$1")"
+}
+
+# fetch_json DATA_VAR STATE_VAR CACHE_KEY TTL_SECONDS COMMAND...
+# TTL 0 means "always ask" (the run snapshot already has its own TTL).
 # STATE is "live", "stale <age>", or "unavailable". Last-known-good data is
 # deliberately retained during transient GitHub/board failures.
 fetch_json() {
-    local data_var="$1" state_var="$2" key="$3" output cache tmp state
-    shift 3
+    local data_var="$1" state_var="$2" key="$3" ttl="$4" output cache tmp state age
+    shift 4
     cache="$CACHE_DIR/$key.json"
+    # Observer freshness, not dispatch freshness: within TTL the pane redraws
+    # from its own cache instead of spending another GitHub request. The
+    # dispatcher never reads these files.
+    if [ "$ttl" -gt 0 ] 2>/dev/null && [ -s "$cache" ]; then
+        age="$(cache_age_seconds "$cache")"
+        if [ "$age" -lt "$ttl" ] 2>/dev/null \
+            && jq -e 'type == "array" or type == "object"' "$cache" >/dev/null 2>&1; then
+            printf -v "$data_var" '%s' "$(<"$cache")"
+            printf -v "$state_var" '%s' live
+            return
+        fi
+    fi
     if output="$("$@" 2>/dev/null)" \
         && printf '%s' "$output" | jq -e 'type == "array" or type == "object"' >/dev/null 2>&1; then
         state=live
@@ -163,6 +191,7 @@ render_dashboard() {
     local open_kanban open_errors open_audits open_prs merged_prs cards bot_prs plan selected selected_rc
     local kanban_state error_state audit_state admin_state open_kanban_state open_errors_state
     local open_audits_state merged_state board_state bot_pr_state plan_state all_states source_state
+    local selected_cache empty_marker
     local active run_id run_lane run_status run_created run_title run_elapsed run_started current_id8=""
     local run_details run_details_state step_line phase branch id8 active_card project card_title
     local dispatch_line dispatch_ts dispatch_action dispatch_reason dispatch_time
@@ -173,7 +202,7 @@ render_dashboard() {
     local plan_input_dir plan_id plan_merge_count plan_release_blockers plan_position plan_number plan_title plan_blocked
 
     cutoff="$(utc_24_hours_ago)"
-    fetch_json runs kanban_state runs-all env AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
+    fetch_json runs kanban_state runs-all 0 env AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
         AUTOPR_GH_BIN="$GH_BIN" "$RUN_SNAPSHOT"
     error_state="$kanban_state"
     audit_state="$kanban_state"
@@ -183,23 +212,23 @@ render_dashboard() {
     audit_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.lane == "self-audit")]')"
     admin_updates_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.lane == "admin-updates")]')"
 
-    fetch_json open_kanban open_kanban_state prs-open-kanban "$GH_BIN" pr list --repo "$REPO" \
+    fetch_json open_kanban open_kanban_state prs-open-kanban "$PR_LIST_TTL_SECONDS" "$GH_BIN" pr list --repo "$REPO" \
         --state open --label autopr --limit 100 \
         --json number,title,isDraft,headRefName,createdAt,updatedAt,labels,url
-    fetch_json open_errors open_errors_state prs-open-errors "$GH_BIN" pr list --repo "$REPO" \
+    fetch_json open_errors open_errors_state prs-open-errors "$PR_LIST_TTL_SECONDS" "$GH_BIN" pr list --repo "$REPO" \
         --state open --label autofix --limit 100 \
         --json number,title,isDraft,headRefName,createdAt,updatedAt,labels,url
-    fetch_json open_audits open_audits_state prs-open-audits "$GH_BIN" pr list --repo "$REPO" \
+    fetch_json open_audits open_audits_state prs-open-audits "$PR_LIST_TTL_SECONDS" "$GH_BIN" pr list --repo "$REPO" \
         --state open --label autopr-self-audit --limit 100 \
         --json number,title,isDraft,headRefName,createdAt,updatedAt,labels,url
     open_prs="$(jq -cn --argjson kanban "$open_kanban" --argjson errors "$open_errors" \
         --argjson audit "$open_audits" '$kanban + $errors + $audit | unique_by(.number) | sort_by(.updatedAt // "") | reverse')"
-    fetch_json merged_prs merged_state prs-merged "$GH_BIN" pr list --repo "$REPO" \
+    fetch_json merged_prs merged_state prs-merged "$PR_LIST_TTL_SECONDS" "$GH_BIN" pr list --repo "$REPO" \
         --state merged --limit 100 \
         --json number,title,createdAt,mergedAt,headRefName,labels,url
 
-    fetch_json cards board_state board-cards "$SCRIPT_DIR/collect.sh"
-    fetch_json bot_prs bot_pr_state bot-pr-context env GITHUB_REPOSITORY="$REPO" \
+    fetch_json cards board_state board-cards "$BOARD_TTL_SECONDS" "$SCRIPT_DIR/collect.sh"
+    fetch_json bot_prs bot_pr_state bot-pr-context "$PR_LIST_TTL_SECONDS" env GITHUB_REPOSITORY="$REPO" \
         "$SCRIPT_DIR/collect-pr-context.sh"
     plan='{"schema_version":1,"plan_id":"unavailable","work_order":[],"merge_order":[],"release_blockers":[],"ready_prs_excluded":[]}'
     plan_state=unavailable
@@ -220,10 +249,47 @@ render_dashboard() {
         plan_state=live
     fi
     write_card_snapshot "$cards"
-    selected="$(AUTOPR_SELECT_READ_ONLY=true GITHUB_REPOSITORY="$REPO" \
-        "$SCRIPT_DIR/select.sh" <(printf '%s' "$cards") 2>/dev/null)"
-    selected_rc=$?
-    [ "$selected_rc" -eq 0 ] || selected=""
+    # The selector asks GitHub about every candidate card, so it is the most
+    # expensive probe here. Cache its answer: what it would pick next changes
+    # on run boundaries, not between two redraws. An empty answer ("nothing to
+    # do") is cached as an explicit marker so it does not re-run every tick.
+    selected=""
+    # Default to "failed" so no path below can render a selector verdict it
+    # never actually obtained.
+    selected_rc=1
+    selected_cache="$CACHE_DIR/next-selection.json"
+    # The cached answer carries the selector's exit status with it. Rendering
+    # reads that status (0 = a pick, 3 = nothing eligible, anything else =
+    # failed), so a warm cache hit must restore it too — otherwise every
+    # redraw inside the TTL reports a healthy selector as broken.
+    empty_marker='if type == "object" and (has("autopr_dashboard_rc") or (.autopr_dashboard_empty // false)) then true else false end'
+    if [ -s "$selected_cache" ] \
+        && [ "$(cache_age_seconds "$selected_cache")" -lt "$SELECT_TTL_SECONDS" ] 2>/dev/null; then
+        if [ "$(jq -r "$empty_marker" "$selected_cache" 2>/dev/null || printf false)" = true ]; then
+            selected_rc="$(jq -r '.autopr_dashboard_rc // 3' "$selected_cache" 2>/dev/null || printf 3)"
+            [[ "$selected_rc" =~ ^[0-9]+$ ]] || selected_rc=3
+        else
+            selected="$(jq -r 'tojson' "$selected_cache" 2>/dev/null || printf '')"
+            [ -z "$selected" ] || selected_rc=0
+        fi
+    else
+        selected="$(AUTOPR_SELECT_READ_ONLY=true GITHUB_REPOSITORY="$REPO" \
+            "$SCRIPT_DIR/select.sh" <(printf '%s' "$cards") 2>/dev/null)"
+        selected_rc=$?
+        [ "$selected_rc" -eq 0 ] || selected=""
+        # Only a definitive verdict is cacheable. A selector FAILURE (rate
+        # limit, crash) stored as the empty marker would be served for the
+        # next five minutes as "nothing to do" — the opposite of the
+        # last-known-good policy every other source on this board follows.
+        if { [ "$selected_rc" -eq 0 ] || [ "$selected_rc" -eq 3 ]; } \
+            && mkdir -p "$CACHE_DIR" 2>/dev/null; then
+            if [ -n "$selected" ]; then
+                (umask 077; printf '%s' "$selected" > "$selected_cache") 2>/dev/null || true
+            else
+                (umask 077; printf '{"autopr_dashboard_rc":3}' > "$selected_cache") 2>/dev/null || true
+            fi
+        fi
+    fi
 
     all_states="$kanban_state $error_state $audit_state $admin_state $open_kanban_state $open_errors_state $open_audits_state $merged_state $board_state $bot_pr_state $plan_state"
     if [[ "$all_states" == *unavailable* ]]; then
@@ -241,7 +307,12 @@ render_dashboard() {
           || TZ="$PACIFIC_TZ" date '+%a %b %d · %I:%M:%S %p %Z')" \
         "$source_state" "$REFRESH_SECONDS"
 
-    dispatch_line="$(tail -n 1 "$DISPATCH_LOG" 2>/dev/null || true)"
+    # The one-minute request watcher shares this log with the five-minute
+    # scheduler. Its idle ticks are bookkeeping, not a scheduling signal, so
+    # skip them here (and in older logs that still carry them) rather than
+    # letting them mask the scheduler's real last action.
+    dispatch_line="$(tail -n 400 "$DISPATCH_LOG" 2>/dev/null \
+        | grep -v '"reason":"no-run-request"' | tail -n 1 || true)"
     dispatch_ts="$(printf '%s' "$dispatch_line" | jq -r '.timestamp // empty' 2>/dev/null)"
     dispatch_action="$(printf '%s' "$dispatch_line" | jq -r '.action // empty' 2>/dev/null)"
     dispatch_reason="$(printf '%s' "$dispatch_line" | jq -r '.reason // empty' 2>/dev/null)"
@@ -263,7 +334,7 @@ render_dashboard() {
         run_title="$(printf '%s' "$active" | jq -r '.displayTitle // empty')"
         run_elapsed="$(duration_between "$run_created" '')"
         run_started="$(iso_to_pacific "$run_created")"
-        fetch_json run_details run_details_state "run-$run_id" "$GH_BIN" run view "$run_id" --repo "$REPO" --json jobs
+        fetch_json run_details run_details_state "run-$run_id" "$RUN_DETAIL_TTL_SECONDS" "$GH_BIN" run view "$run_id" --repo "$REPO" --json jobs
         step_line="$(printf '%s' "$run_details" | jq -r '
           [.jobs[]? as $job | $job.steps[]? | select(.status == "in_progress") | ($job.name + " · " + .name)][0] // empty
         ' 2>/dev/null)"

@@ -2,11 +2,25 @@
 
 `.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
 `silent-error-autofix.yml` and `autopr-self-audit.yml`. `msandbox` is the authoritative
-master switch. While it is ON, a local macOS LaunchAgent is the sole automatic
-five-minute clock and dispatches only when no AutoPR lane is queued or active. A
-production-error pass gets the next slot when its last completion is at least ten
-minutes old; then a self-audit gets one when its last completion is at least six hours
-old; otherwise Kanban advances.
+master switch. While it is ON, two local macOS LaunchAgents are the sole automatic
+clock, and both dispatch only when no AutoPR lane is queued or active. The scheduler
+ticks every five minutes: a production-error pass gets the next slot when its last
+completion is at least ten minutes old; then a self-audit gets one when its last
+completion is at least six hours old; then Kanban advances **only if its own last pass
+is at least twenty minutes old**, otherwise the tick is a logged `kanban-not-due` skip.
+The second agent (`com.matcha.kanban-autopr-request-watch`, one minute, the same
+`dispatch-if-idle.sh --if-requested`) exists so a human never waits on that twenty
+minutes: pressing **Run AutoPR now** on a card queues a request, the watcher sees it via
+one bounded query against our own API (`GET /matcha-work/autopr/run-requests`), and
+dispatches Kanban immediately. An idle watch tick makes no GitHub API call at all,
+starts no observer panes, takes no dispatch lock, and writes no line to the shared
+dispatch log — it costs one bounded, timeout-capped board query and a heartbeat file.
+A probe failure never forces a run, and a five-minute floor between forced dispatches
+(burned only once a dispatch actually lands) keeps a card that cannot be selected from
+spinning the runner. Three bounds make "cannot be selected" terminal rather than
+permanent: `select.sh` consumes the request of any run-requested card the pass declines
+or defers, the server refuses a request for a board outside the four the harness polls,
+and a request that nothing claims within 30 minutes expires on its own.
 GitHub's manual workflow dispatch remains the recovery path but also fails closed when
 `msandbox` is OFF. There is deliberately no second GitHub cron:
 a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
@@ -109,13 +123,27 @@ changes.
 ## Local tmux dashboard
 
 While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
-`matcha-autopr` session on its next five-minute tick if the session is missing. Detaching
+`matcha-autopr` session on its next tick if the session is missing. Detaching
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
 considered healthy: if any of the four panes is dead or missing, the helper replaces the
 whole observer session. Autonomous model startup fails closed until all four panes are
 live. The overview owns the full-height left side; the right side stacks live agent work,
 active PR detail, and automation health. This keeps the operational answer readable from
 across a room while retaining drill-down detail in the same tmux window.
+
+The panes are observers and are budgeted like observers. Every GitHub read they make
+goes through `gh-cached.sh TTL KEY <command>`: open/merged PR lists and the selector
+probe hold for five minutes, the board bundle for three, and the in-flight run's step
+detail for 45 seconds. Before that, four panes each re-listed PRs on their own timer and
+the overview additionally re-ran `select.sh` — which asks GitHub about every candidate
+card — on every redraw, which is what pushed the hourly REST budget. The dispatcher
+deliberately does **not** use this cache: it reads `run-snapshot.sh` with a short TTL and
+`ALLOW_STALE=false`, because acting on stale run state can double-dispatch. Empty command
+output is a cacheable answer, not a miss — "this branch has no PR yet" is the normal
+state during an investigation, and treating it as a failure re-asked GitHub every minute.
+A selector **crash** is never cached, though: only an actual pick or an actual
+"nothing eligible" is stored, alongside the exit status the NEXT pane branches on, so a
+rate-limited selector reads as failed rather than as an empty queue.
 
 The LaunchAgent does not execute the repo-backed `msandbox` symlink directly:
 macOS can deny background agents access to `~/Documents` even when Terminal has
@@ -204,8 +232,9 @@ second scheduler.
    not receive a merge position. PR comments are untrusted planning evidence, never
    executable instructions.
 5. **`select.sh`** — picks one planned card GitHub hasn't already handled. Branch key is
-   `bot/task-<id8>` (first 8 hex of the task UUID). A pending decision-bound additional
-   context event is highest priority, followed by related rework and planned Todo work;
+   `bot/task-<id8>` (first 8 hex of the task UUID). An explicit **Run AutoPR now** request
+   ranks first, then a pending decision-bound additional
+   context event, followed by related rework and planned Todo work;
    the plan keeps each related cluster together. Without a plan it safely falls back to
    reconsideration, Changes Requested, then Todo. Rework is better-specified —
    it has a written `review_note` — and unblocks a PR already in flight. For `todo`, any PR at all on
@@ -222,8 +251,25 @@ second scheduler.
    current no-spec/awaiting-answers note. That event makes the card eligible once without deleting audit
    history or pretending the card moved; a later AutoPR outcome replaces the note and
    therefore consumes the signal. New context submitted after an earlier failed-attempt
-   marker can bypass that old cooldown once. A failed attempt otherwise cools down
-   for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
+   marker can bypass that old cooldown once. **Run AutoPR now** is the same class of
+   authorization and behaves the same way: it queues an `autopr_run_request` history
+   event (no schema change, same shape as the reconsideration event), which makes the
+   card eligible regardless of assignment, outranks the no-spec ledger and the Todo
+   "any PR means skip" rule, and beats a cooldown older than the request.
+   `investigate.sh` posts the matching `autopr_run_claim` the moment it actually picks
+   the card up — that claim, not the run's outcome, is what stops the one-minute watcher
+   re-dispatching for a card whose run then crashes. `select.sh` posts the same claim for
+   any run-requested card it passes over (an ALREADY-SCOPED card whose linked PR is open,
+   a card blocked by the open-PR cap, a card GitHub could not be read for), so the
+   invariant is **one button press costs at most one forced run**: the card's "Queued for
+   AutoPR" chip clears and the human can press again once the blocker is gone. The
+   read-only dashboard probe (`AUTOPR_SELECT_READ_ONLY=true`) never claims anything.
+   Requests are only accepted for the four boards in `KANBAN_AUTOPR_PROJECT_IDS`
+   (defined once in `project_task_service.py`, shared with the PR webhook's board check),
+   and any request older than 30 minutes stops counting as pending everywhere — the
+   watcher's poll, the card chip, and the idempotency check all read the same window.
+   A failed attempt otherwise cools down
+   for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
    `autopr` PRs (question-only drafts use their separate cap).
 6. **`investigate.sh`** — the trusted host builds one context bundle containing the card,

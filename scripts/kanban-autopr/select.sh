@@ -68,25 +68,63 @@ awaiting_input_has_new_feedback() {
         || { [ -n "$new_review" ] && [ "$new_review" != "$old_review" ]; }
 }
 
+iso_to_epoch() {
+    local iso="$1" prefix
+    [ -n "$iso" ] || { printf 0; return; }
+    prefix="$(printf '%s' "$iso" | cut -c1-19)"
+    date -u -j -f "%Y-%m-%dT%H:%M:%S" "$prefix" +%s 2>/dev/null \
+        || date -u -d "$iso" +%s 2>/dev/null \
+        || printf 0
+}
+
+# A "run now" request is consumed by the pass that considers it, not only by
+# the card that wins the pass. investigate.sh claims the card it picks up;
+# this claims every run-requested card this pass declines or defers. Without
+# it the one-minute watcher keeps forcing a Kanban dispatch for a card the
+# selector can never choose — an ALREADY-SCOPED card whose linked PR is open,
+# or a card blocked by the open-PR cap — and the forced lane then runs more
+# often than the twenty-minute schedule it is supposed to bypass. The
+# invariant this restores: one button press costs at most one forced run.
+consume_run_request() {
+    local card="$1" project_id task_id
+    [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] && return 0
+    project_id="$(printf '%s' "$card" | jq -r '.project_id // empty')"
+    task_id="$(printf '%s' "$card" | jq -r '.task_id // empty')"
+    [ -n "$project_id" ] && [ -n "$task_id" ] || return 0
+    # mw_api dies on a non-2xx response; a failed claim must never abort the
+    # selection pass, so keep that exit inside a subshell.
+    ( mw_api POST "/matcha-work/projects/$project_id/tasks/$task_id/autopr/run-claim" '{}' ) \
+        >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not consume the run request for %s\n' \
+            "$task_id" >&2
+}
+
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
-#                 RECONSIDERATION_PENDING RECONSIDERATION_AT
+#                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
 # Echoes "skip", "investigate", or "rework" (rework = push to the existing
 # open PR rather than opening a new one).
 already_handled() {
     local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
-    local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}" branch="bot/task-$id8"
+    local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
+    local run_requested_at="${8:-}" branch="bot/task-$id8"
+    # An explicit "run now" from the card is the same class of authorization as
+    # decision-bound context: it overrides the cooldown, the durable no-spec
+    # ledger, and (in Todo) the historical PR ledger.
+    local human_signal_epoch=0 reconsideration_epoch run_requested_epoch
+    reconsideration_epoch="$(iso_to_epoch "$reconsideration_at")"
+    run_requested_epoch="$(iso_to_epoch "$run_requested_at")"
+    [ "$reconsideration_epoch" -le "$human_signal_epoch" ] || human_signal_epoch="$reconsideration_epoch"
+    [ "$run_requested_epoch" -le "$human_signal_epoch" ] || human_signal_epoch="$run_requested_epoch"
+    local run_requested=false
+    [ -z "$run_requested_at" ] || run_requested=true
 
     local attempt_marker="$ATTEMPTS_DIR/$id8"
     if [ -f "$attempt_marker" ]; then
-        local age_s attempt_epoch reconsideration_epoch=0 reconsideration_prefix
+        local age_s attempt_epoch
         attempt_epoch="$(date -r "$attempt_marker" +%s 2>/dev/null || echo 0)"
-        if [ -n "$reconsideration_at" ]; then
-            reconsideration_prefix="$(printf '%s' "$reconsideration_at" | cut -c1-19)"
-            reconsideration_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$reconsideration_prefix" +%s 2>/dev/null || date -u -d "$reconsideration_at" +%s 2>/dev/null || echo 0)"
-        fi
-        age_s=$(( $(date +%s) - $(date -r "$attempt_marker" +%s 2>/dev/null || echo 0) ))
+        age_s=$(( $(date +%s) - attempt_epoch ))
         if [ "$age_s" -lt $((ATTEMPT_COOLDOWN_MINUTES * 60)) ] \
-            && [ "$reconsideration_epoch" -le "$attempt_epoch" ]; then
+            && [ "$human_signal_epoch" -le "$attempt_epoch" ]; then
             echo skip
             return
         fi
@@ -96,7 +134,8 @@ already_handled() {
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
     if [[ "$progress_note" == *"[autopr:no-spec "* ]] \
-        && [ "$reconsideration_pending" != true ]; then
+        && [ "$reconsideration_pending" != true ] \
+        && [ "$run_requested" != true ]; then
         # Full ISO timestamp, not just a date: BSD `date -j -f` fills any
         # field the format string doesn't specify from the CURRENT time, not
         # midnight — a date-only marker parsed on a later run would silently
@@ -142,7 +181,8 @@ already_handled() {
     # may be closed or merged precisely because the operator reported that the
     # issue remains. Investigation starts again from current main and publish
     # will update an open PR or create a new draft for a closed/merged one.
-    if [ "$column" = "todo" ] && [ "$reconsideration_pending" = true ]; then
+    if [ "$column" = "todo" ] \
+        && { [ "$reconsideration_pending" = true ] || [ "$run_requested" = true ]; }; then
         echo investigate
         return
     fi
@@ -172,7 +212,7 @@ already_handled() {
         if [ "$state" = "OPEN" ]; then
             labels="$(printf '%s' "$prs" | jq -r '.[0].labels[]?.name')"
             if printf '%s\n' "$labels" | grep -qx 'autopr-awaiting-input'; then
-                if [ "$reconsideration_pending" = true ]; then
+                if [ "$reconsideration_pending" = true ] || [ "$run_requested" = true ]; then
                     # Context supplied on the card or by replying to Espresso
                     # is equivalent to new PR feedback. It is already bound to
                     # the exact live decision, so rework the existing draft
@@ -224,9 +264,10 @@ already_handled() {
 ranked="$(jq -c '
     sort_by(
         (.autopr_plan.work_position //
-          (if (.autopr_reconsideration_pending // false) then 0
-           elif .board_column == "changes_requested" then 1
-           else 2 end)),
+          (if ((.autopr_run_requested_at // null) != null) then 0
+           elif (.autopr_reconsideration_pending // false) then 1
+           elif .board_column == "changes_requested" then 2
+           else 3 end)),
         (.last_moved_at // .created_at)
     )
 ' "$CARDS_FILE")"
@@ -241,15 +282,24 @@ for ((i = 0; i < n; i++)); do
     pr_number="$(printf '%s' "$card" | jq -r '.pr_number // empty')"
     reconsideration_pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
+    run_requested_at="$(printf '%s' "$card" | jq -r '.autopr_run_requested_at // empty')"
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
-        "$reconsideration_pending" "$reconsideration_at")"
+        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at")"
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and
         # still eligible, so skip this one and keep looking rather than
         # bailing the whole run.
+        [ -z "$run_requested_at" ] || consume_run_request "$card"
         continue
+    fi
+    # A terminal skip is an answer to the request, not a reason to re-ask.
+    # The card keeps whatever made it unselectable (an open linked PR, a
+    # cooldown, unreadable GitHub feedback); the human sees the button return
+    # and can press it again once that changes.
+    if [ "$decision" = skip ] && [ -n "$run_requested_at" ]; then
+        consume_run_request "$card"
     fi
     if [ "$decision" = investigate ] || [ "$decision" = rework ]; then
         # The tmux dashboard asks the same selector what would run next. Its

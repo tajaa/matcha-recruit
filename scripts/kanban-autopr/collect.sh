@@ -52,6 +52,13 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 )
               )
               or (
+                # "Run AutoPR now" on the card. An explicit human request is
+                # work authorization on its own, exactly like a reconsideration,
+                # so it does not depend on assignment.
+                (.board_column == "todo" or .board_column == "changes_requested")
+                and (.autopr_run_requested_at // null) != null
+              )
+              or (
                 # A worker can consume an explicit additional-context directive
                 # by repeating the very refusal that directive overrides.
                 # Admit those cards as bounded recovery probes; only a matching
@@ -92,6 +99,7 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 autopr_reconsideration_pending: ($t.autopr_reconsideration_pending // false),
                 autopr_reconsideration_event_id: $t.autopr_reconsideration_event_id,
                 autopr_reconsideration_at: $t.autopr_reconsideration_at,
+                autopr_run_requested_at: $t.autopr_run_requested_at,
                 assigned_to_autopr: ($t.assigned_email == $email),
                 # Keep attachment metadata available for ranking/debugging,
                 # but never put short-lived signed storage URLs in card.json.
@@ -143,7 +151,9 @@ done
 # Unassigned cards were admitted only as recovery probes. Keep them only when
 # the explicit context event above restored durable one-run authorization.
 out="$(printf '%s' "$out" | jq -c '
-  map(select(.assigned_to_autopr or (.autopr_reconsideration_pending // false)))
+  map(select(.assigned_to_autopr
+             or (.autopr_reconsideration_pending // false)
+             or ((.autopr_run_requested_at // null) != null)))
   | map(del(.assigned_to_autopr))
 ')"
 

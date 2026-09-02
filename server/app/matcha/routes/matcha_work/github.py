@@ -344,12 +344,18 @@ _KANBAN_AUTOPR_REPO = os.environ.get("KANBAN_AUTOPR_REPO", "tajaa/matcha-recruit
 # in sync with scripts/seed/autopr_bot.py's PROJECTS list). Even a PR that
 # legitimately lands in this repo — a human's own hand-made branch, not the
 # bot's — must not be able to move a card in an unrelated project.
-_KANBAN_AUTOPR_PROJECT_IDS = {
-    "7f728636-3219-4d83-9df3-a4682e3242de",  # WerkWerk
-    "fade10b4-36ff-4c60-af59-5cc6058285ab",  # Beetlejuse
-    "84823d21-c752-4abd-9696-4c93c8b3c21e",  # Gummfit
-    "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
-}
+# The board list itself lives in project_task_service, so the webhook and the
+# "Run AutoPR now" gate can never disagree about which projects the harness
+# watches. Imported lazily, like every other pt_svc use in this module.
+
+
+def _kanban_autopr_project_ids() -> set[str]:
+    from app.matcha.services.matcha_work.project_task_service import (
+        KANBAN_AUTOPR_PROJECT_IDS,
+    )
+
+    return KANBAN_AUTOPR_PROJECT_IDS
+
 
 _AUTOPR_PROGRESS_NOTE = "🤖 AUTO SETUP"
 _AUTOPR_LEGACY_PROGRESS_NOTE = "from auto setup"
@@ -477,7 +483,7 @@ async def _resolve_pull_request_tasks(payload: dict) -> list[dict]:
 
     unique_tasks = {}
     for task in tasks:
-        if str(task["project_id"]) in _KANBAN_AUTOPR_PROJECT_IDS:
+        if str(task["project_id"]) in _kanban_autopr_project_ids():
             unique_tasks[str(task["id"])] = task
     return list(unique_tasks.values())
 

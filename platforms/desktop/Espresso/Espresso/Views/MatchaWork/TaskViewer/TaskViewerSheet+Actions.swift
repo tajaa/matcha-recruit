@@ -238,6 +238,30 @@ extension TaskViewerSheet {
         }
     }
 
+    /// Ask the AutoPR harness to pick this ticket up on its next minute tick
+    /// rather than on the twenty-minute sweep. The request is consumed when the
+    /// harness claims the card, so pressing it twice is harmless.
+    func requestAutoPRRun() async {
+        guard let pid = viewModel.project?.id, !requestingAutoPRRun else { return }
+        requestingAutoPRRun = true
+        autoPRRunError = nil
+        defer { requestingAutoPRRun = false }
+        do {
+            _ = try await MatchaWorkService.shared.requestAutoPRRun(
+                projectId: pid,
+                taskId: task.id
+            )
+            didRequestAutoPRRun = true
+            await viewModel.loadTasks()
+            // The reload is authoritative from here on. Leaving the optimistic
+            // flag set would pin "Queued for AutoPR" for the life of the sheet,
+            // so the button never returns once the harness claims the request.
+            didRequestAutoPRRun = false
+        } catch {
+            autoPRRunError = error.localizedDescription
+        }
+    }
+
     func submitReject() async {
         let note = rejectNote.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !note.isEmpty, !submitting else { return }

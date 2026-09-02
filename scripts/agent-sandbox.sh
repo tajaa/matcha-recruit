@@ -99,6 +99,11 @@ AUTOPR_STATE_DIR="${AUTOPR_STATE_DIR:-$HOME/.local/state/matcha-agent-sandbox}"
 AUTOPR_ENABLE_FILE="${AUTOPR_ENABLE_FILE:-$AUTOPR_STATE_DIR/autopr-enabled}"
 AUTOPR_INSTALL_ROOT="${AUTOPR_DISPATCH_INSTALL_ROOT:-$HOME/.local/share/matcha-kanban-autopr}"
 AUTOPR_LAUNCH_AGENT_PLIST="${AUTOPR_LAUNCH_AGENT_PLIST:-$HOME/Library/LaunchAgents/com.matcha.kanban-autopr-dispatch.plist}"
+# Second agent, same dispatcher script: the one-minute "Run AutoPR now"
+# watcher. It is governed by this master switch like the scheduler, but its
+# absence is never fatal — an older install simply has no immediate lane.
+AUTOPR_WATCH_LAUNCH_LABEL="${AUTOPR_WATCH_LAUNCH_LABEL:-com.matcha.kanban-autopr-request-watch}"
+AUTOPR_WATCH_LAUNCH_AGENT_PLIST="${AUTOPR_WATCH_LAUNCH_AGENT_PLIST:-$HOME/Library/LaunchAgents/$AUTOPR_WATCH_LAUNCH_LABEL.plist}"
 AUTOPR_LAUNCHCTL_BIN="${AUTOPR_LAUNCHCTL_BIN:-/bin/launchctl}"
 AUTOPR_TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 AUTOPR_TMUX_SESSION="${AUTOPR_TMUX_SESSION:-matcha-autopr}"
@@ -696,6 +701,14 @@ enable_autopr_control_plane() {
         return 1
     fi
 
+    if [ -f "$AUTOPR_WATCH_LAUNCH_AGENT_PLIST" ]; then
+        "$AUTOPR_LAUNCHCTL_BIN" enable "$domain/$AUTOPR_WATCH_LAUNCH_LABEL" >/dev/null 2>&1 || true
+        "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$AUTOPR_WATCH_LAUNCH_LABEL" >/dev/null 2>&1 \
+            || "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_WATCH_LAUNCH_AGENT_PLIST" \
+                >/dev/null 2>&1 \
+            || echo "warning: immediate-run watcher could not be loaded" >&2
+    fi
+
     # Best-effort: `msandbox off`/`stop` booted the self-hosted runner out, so
     # bring it back. A separately administered runner (AUTOPR_MANAGE_RUNNER=0)
     # or a missing plist only warns — it does not fail the master switch, which
@@ -717,6 +730,10 @@ disable_autopr_control_plane() {
         # only until the next login. Persist the off state via a launchd
         # override so nothing ticks again until `msandbox start` re-enables it.
         "$AUTOPR_LAUNCHCTL_BIN" disable "$domain/$label" >/dev/null 2>&1 || true
+        # The request watcher shares the dispatcher and its master gate, but
+        # stop it explicitly too: a killed switch must leave nothing ticking.
+        "$AUTOPR_LAUNCHCTL_BIN" bootout "$domain/$AUTOPR_WATCH_LAUNCH_LABEL" >/dev/null 2>&1 || true
+        "$AUTOPR_LAUNCHCTL_BIN" disable "$domain/$AUTOPR_WATCH_LAUNCH_LABEL" >/dev/null 2>&1 || true
     fi
     if [ -x "$AUTOPR_TMUX_BIN" ] \
         && "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null; then
