@@ -41,9 +41,7 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
-# Runtime extension is a one-attempt harness approval, not durable product
-# authority. Persist only directives that are meant to survive later question
-# rounds on the card.
+# A runtime extension is not standing product authority.
 DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | map(select(. == "draft_pr" or . == "trust_still_broken")) | join(",")' "$DECISION_FILE")"
 DIRECTIVE_MARKER=""
 [ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
@@ -101,9 +99,7 @@ progress_note_with_origin() {
     # nesting it every round. Preserve any human-authored text after it.
     if [[ "$structured_existing" == "from auto setup"* ]] \
         || [[ "$structured_existing" == "🤖 AUTO SETUP"* ]]; then
-        # Question rounds append a multiline, system-authored answer form.
-        # Only the first line can contain the preserved human suffix; do not
-        # carry obsolete questions into the next result.
+        # Drop the prior system-authored answer form.
         structured_existing="${structured_existing%%$'\n'*}"
     fi
     remainder="$(printf '%s' "$structured_existing" | sed -E \

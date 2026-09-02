@@ -130,11 +130,9 @@ already_handled() {
         fi
     fi
 
-    # A runtime-limited pass is intentionally not an automatic retry loop.
-    # Its partial work is checkpointed, and the owner must either add bounded
-    # context (including --extend-runtime for a 40-minute attempt) or press Run
-    # AutoPR for another ordinary 20-minute attempt.
-    if [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"* ]] \
+    # A timed-out card waits for an explicit continuation or run-now request.
+    if { [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES"* ]] \
+        || [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"* ]]; } \
         && [ "$reconsideration_pending" != true ] \
         && [ "$run_requested" != true ]; then
         echo skip

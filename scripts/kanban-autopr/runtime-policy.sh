@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Resolve the bounded investigation timeout for one selected card. Twenty
-# minutes is the ordinary ceiling. A decision-bound --extend-runtime reply
-# from an authorized project member grants one 40-minute attempt; the grant is
-# intentionally not a standing card directive and must be renewed after every
-# extended attempt that also times out.
+# Resolve the runtime for a normal investigation or an approved continuation.
 #
 # Usage: runtime-policy.sh CARD OUTPUT
 set -euo pipefail
@@ -15,15 +11,15 @@ source "$SCRIPT_DIR/lib.sh"
 CARD_FILE="${1:?usage: runtime-policy.sh CARD OUTPUT}"
 OUTPUT_FILE="${2:?missing output path}"
 NORMAL_MINUTES="${AUTOPR_NORMAL_RUNTIME_MINUTES:-20}"
-EXTENDED_MINUTES="${AUTOPR_EXTENDED_RUNTIME_MINUTES:-40}"
+EXTENDED_MINUTES="${AUTOPR_EXTENDED_RUNTIME_MINUTES:-10}"
 PROJECT_ID="$(jq -r '.project_id // empty' "$CARD_FILE")"
 TASK_ID="$(jq -r '.task_id // empty' "$CARD_FILE")"
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/autopr-runtime-policy-XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 case "$NORMAL_MINUTES:$EXTENDED_MINUTES" in
-    20:40) ;;
-    *) die "runtime limits are fixed at 20 normal / 40 approved minutes" ;;
+    20:10) ;;
+    *) die "runtime limits are fixed at 20 normal / 10 approved minutes" ;;
 esac
 [ -n "$PROJECT_ID" ] && [ -n "$TASK_ID" ] || die "selected card is missing its ids"
 

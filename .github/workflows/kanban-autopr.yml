@@ -32,10 +32,8 @@ env:
 jobs:
   build:
     runs-on: [self-hosted, macOS, opencode]
-    # A card gets 20 investigation minutes normally or one owner-approved
-    # 40-minute attempt. Leave enough job headroom for collection, validation,
-    # publication, and the always-run checkpoint/cleanup path.
-    timeout-minutes: 90
+    # Leave headroom around the bounded investigation for validation and publishing.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -265,9 +263,7 @@ jobs:
       - name: Fail incomplete investigation
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
         run: |
-          # The prior always-run step copied partial sandbox work into protected
-          # local checkpoint storage. Discard only the trusted checkout's
-          # unverified edits; a later attempt can restore the sandbox patch.
+          # Partial work is already safe in the local checkpoint.
           git reset --hard HEAD
           git clean -fd
           echo "Investigation failed before producing a valid report. Any partial output was checkpointed before cleanup." >> "$GITHUB_STEP_SUMMARY"

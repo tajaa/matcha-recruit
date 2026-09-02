@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Preserve and recover interrupted Kanban AutoPR model work in the real
-# repository's protected .git metadata. Nothing is uploaded to GitHub: partial
-# model output can contain ticket evidence and remains mode-600 on the trusted
-# Mac. A later attempt restores the patch only inside the disposable msandbox.
+# Save interrupted model work under protected .git metadata for a later run.
 #
 # Usage:
 #   checkpoint.sh save CARD REPORT DECISION STARTED_AT_EPOCH TIMEOUT_MINUTES
@@ -63,7 +60,10 @@ save_checkpoint() {
     local card_file="$1" report_file="$2" decision_file="$3"
     local started_at="$4" timeout_minutes="$5" task_id id8 project_id
     local root run_key checkpoint_dir base_sha patch_bytes=0 patch_saved=false
-    local elapsed=0 runtime_limited=false note
+    local changed_file_count=0 changed_files_json='[]' changed_files_summary=''
+    local report_saved=false decision_saved=false transcript_saved=false
+    local elapsed=0 runtime_limited=false note reason done progress_excerpt=''
+    local saved_outputs='' file_label='' extra_file_count=0
 
     task_id="$(card_identity "$card_file")"
     id8="$(jq -r '.id8 // empty' "$card_file")"
@@ -71,7 +71,7 @@ save_checkpoint() {
     [[ "$id8" =~ ^[0-9a-fA-F]{8}$ ]] || die "invalid checkpoint id8"
     [[ "$project_id" =~ ^[0-9a-fA-F-]{36}$ ]] || die "invalid checkpoint project id"
     [[ "$started_at" =~ ^[0-9]+$ ]] || die "invalid investigation start time"
-    [[ "$timeout_minutes" =~ ^(20|40)$ ]] || die "invalid investigation timeout"
+    [[ "$timeout_minutes" =~ ^(10|20)$ ]] || die "invalid investigation timeout"
 
     root="$(task_root "$card_file")"
     run_key="${GITHUB_RUN_ID:-local}-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -80,9 +80,7 @@ save_checkpoint() {
     mkdir -p "$checkpoint_dir"
     chmod 700 "$CHECKPOINT_ROOT" "$root" "$checkpoint_dir"
 
-    # A killed docker-exec can leave Codex running after the Actions step has
-    # ended. Quiesce only this lane's dedicated container before reading its
-    # worktree; the global msandbox master switch remains untouched.
+    # Stop this lane's container before copying its worktree.
     if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" != 1 ] \
         && [ -x "${AUTOPR_MSANDBOX_BIN:-}" ]; then
         env AGENT_SANDBOX_PROJECT_NAME="${AUTOPR_SANDBOX_PROJECT_NAME:-matcha-kanban-autopr-sandbox}" \
@@ -99,10 +97,19 @@ save_checkpoint() {
         && [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] \
         && git -C "$SANDBOX_WORKSPACE" cat-file -e "$base_sha^{commit}" 2>/dev/null; then
         git -C "$SANDBOX_WORKSPACE" add --intent-to-add --all -- .
+        git -C "$SANDBOX_WORKSPACE" diff --name-only "$base_sha" -- . \
+            > "$checkpoint_dir/changed-files.txt"
+        chmod 600 "$checkpoint_dir/changed-files.txt"
+        changed_files_json="$(jq -Rsc \
+            'split("\n") | map(select(length > 0))' \
+            "$checkpoint_dir/changed-files.txt")"
+        changed_file_count="$(jq 'length' <<< "$changed_files_json")"
+        changed_files_summary="$(jq -r '.[0:6] | join(", ")' \
+            <<< "$changed_files_json")"
         git -C "$SANDBOX_WORKSPACE" diff --binary --full-index "$base_sha" -- . \
             > "$checkpoint_dir/model.patch"
         patch_bytes="$(wc -c < "$checkpoint_dir/model.patch" | tr -d '[:space:]')"
-        if [ "$patch_bytes" -le "$MAX_PATCH_BYTES" ]; then
+        if [ "$patch_bytes" -gt 0 ] && [ "$patch_bytes" -le "$MAX_PATCH_BYTES" ]; then
             chmod 600 "$checkpoint_dir/model.patch"
             patch_saved=true
         else
@@ -120,6 +127,23 @@ save_checkpoint() {
         chmod 600 "$checkpoint_dir/transcript.log"
     fi
 
+    [ ! -s "$checkpoint_dir/report.md" ] || report_saved=true
+    [ ! -s "$checkpoint_dir/decision.json" ] || decision_saved=true
+    [ ! -s "$checkpoint_dir/transcript.log" ] || transcript_saved=true
+    if [ "$report_saved" = true ]; then
+        progress_excerpt="$(jq -Rs -r '
+          split("\n")
+          | map(
+              gsub("\\r"; "")
+              | gsub("^[[:space:]]*(#+|[-*])[[:space:]]*"; "")
+              | gsub("[[:space:]]+"; " ")
+              | select(length > 0)
+              | select((ascii_downcase == "summary") | not)
+            )
+          | (.[0] // "")[0:320]
+        ' "$checkpoint_dir/report.md" 2>/dev/null || true)"
+    fi
+
     elapsed=$(( $(date +%s) - started_at ))
     if [ "$elapsed" -ge $((timeout_minutes * 60 - 45)) ]; then
         runtime_limited=true
@@ -129,20 +153,65 @@ save_checkpoint() {
         --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg base_sha "$base_sha" \
         --argjson elapsed_seconds "$elapsed" --argjson timeout_minutes "$timeout_minutes" \
         --argjson runtime_limited "$runtime_limited" --argjson patch_saved "$patch_saved" \
-        --argjson patch_bytes "$patch_bytes" \
+        --argjson patch_bytes "$patch_bytes" --argjson changed_file_count "$changed_file_count" \
+        --argjson changed_files "$changed_files_json" --arg progress_excerpt "$progress_excerpt" \
+        --argjson report_saved "$report_saved" --argjson decision_saved "$decision_saved" \
+        --argjson transcript_saved "$transcript_saved" \
         '{schema_version:1,task_id:$task_id,id8:$id8,run_id:$run_id,
           created_at:$created_at,base_sha:$base_sha,elapsed_seconds:$elapsed_seconds,
           timeout_minutes:$timeout_minutes,runtime_limited:$runtime_limited,
-          patch_saved:$patch_saved,patch_bytes:$patch_bytes}' \
+          patch_saved:$patch_saved,patch_bytes:$patch_bytes,
+          changed_file_count:$changed_file_count,changed_files:$changed_files,
+          report_saved:$report_saved,decision_saved:$decision_saved,
+          transcript_saved:$transcript_saved,progress_excerpt:$progress_excerpt}' \
         > "$checkpoint_dir/metadata.json"
     chmod 600 "$checkpoint_dir/metadata.json"
     printf '%s\n' "$run_key" > "$root/active"
     chmod 600 "$root/active"
 
     if [ "$runtime_limited" = true ]; then
-        note="🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED · checkpoint ${GITHUB_RUN_ID:-local} · note: Partial work is preserved. Add additional context with --extend-runtime to approve one 40-minute retry."
+        if [ "$timeout_minutes" -eq 20 ]; then
+            reason="The first 20-minute investigation ended before AutoPR produced a publishable result."
+        else
+            reason="The approved 10-minute continuation ended before AutoPR produced a publishable result."
+        fi
+        if [ "$changed_file_count" -eq 1 ]; then
+            file_label="1 file"
+        else
+            file_label="$changed_file_count files"
+        fi
+        if [ "$changed_file_count" -gt 6 ]; then
+            extra_file_count=$((changed_file_count - 6))
+            changed_files_summary="$changed_files_summary, plus $extra_file_count more"
+        fi
+        if [ "$patch_saved" = true ]; then
+            done="Saved a partial patch touching $file_label: $changed_files_summary."
+        elif [ "$changed_file_count" -gt 0 ]; then
+            done="AutoPR touched $file_label, but the patch exceeded the checkpoint size limit and was not saved: $changed_files_summary."
+        else
+            done="No code patch was ready when the run stopped."
+        fi
+        [ "$report_saved" != true ] || saved_outputs="partial report"
+        if [ "$decision_saved" = true ]; then
+            [ -z "$saved_outputs" ] || saved_outputs="$saved_outputs, "
+            saved_outputs="${saved_outputs}decision draft"
+        fi
+        if [ "$transcript_saved" = true ]; then
+            [ -z "$saved_outputs" ] || saved_outputs="$saved_outputs, "
+            saved_outputs="${saved_outputs}run transcript"
+        fi
+        [ -z "$saved_outputs" ] || done="$done Also saved: $saved_outputs."
+        note="$(jq -nr \
+            --arg run_id "${GITHUB_RUN_ID:-local}" --arg reason "$reason" \
+            --arg done "$done" --arg progress "$progress_excerpt" '
+              "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint \($run_id)\n" +
+              "Why more time: \($reason)\n" +
+              "Done so far: \($done)\n" +
+              (if $progress == "" then "" else "Latest progress: \($progress)\n" end) +
+              "Next step: Approve 10 more minutes to continue from the saved checkpoint."
+            ')"
         mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
-            "$(jq -n --arg note "$note" '{progress_note:$note}')" >/dev/null \
+            "$(jq -n --arg note "$note" '{progress_note:$note,board_column:"changes_requested"}')" >/dev/null \
             || printf 'kanban-autopr: warning: checkpoint saved but the card pause note could not be written\n' >&2
     fi
 

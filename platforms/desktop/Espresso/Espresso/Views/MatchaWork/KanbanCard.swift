@@ -12,9 +12,11 @@ struct KanbanCardView: View {
     /// Count of distinct subtasks a commit may have completed (pending accept).
     /// Drives the purple "commits may have finished N" badge on the card face.
     var pendingCommitCount: Int = 0
+    var autoPRRuntimeApprovalInFlight = false
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
+    let onApproveAutoPRRuntime: () -> Void
 
     @State private var hovering = false
 
@@ -44,10 +46,7 @@ struct KanbanCardView: View {
 
     private var assigneeDisplay: String? { task.displayAssignee }
 
-    /// Question-only AutoPR drafts used to collapse to an opaque one-line
-    /// status on the card, leaving the actual questions visible only on
-    /// GitHub. New notes embed the answer form; surface its beginning directly
-    /// on the Kanban card so the next action is discoverable before opening it.
+    /// Pull the answer form out of AutoPR's progress note for the card face.
     private var autoPRQuestionPreview: String? {
         guard let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
               note.lowercased().contains("awaiting answers") else { return nil }
@@ -58,6 +57,18 @@ struct KanbanCardView: View {
         let questions = note[range.upperBound...]
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return questions.isEmpty ? nil : questions
+    }
+
+    private var autoPRRuntimeDetails: String? {
+        guard let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+              note.hasPrefix("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+                || note.hasPrefix("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
+        else { return nil }
+        let lines = note.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count > 1 else {
+            return "The last run stopped at its time limit. Its partial work is saved."
+        }
+        return lines.dropFirst().joined(separator: "\n")
     }
 
     var body: some View {
@@ -94,7 +105,34 @@ struct KanbanCardView: View {
             .padding(.bottom, 9)
 
             VStack(alignment: .leading, spacing: 9) {
-                if let questions = autoPRQuestionPreview {
+                if let details = autoPRRuntimeDetails {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("AUTO SETUP · NEEDS 10 MORE MINUTES", systemImage: "timer")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.orange)
+                        Text(details)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.76))
+                            .lineLimit(8)
+                            .multilineTextAlignment(.leading)
+                        if task.autoprReconsiderationPending == true {
+                            Label("10-minute continuation queued", systemImage: "clock.arrow.circlepath")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(appState.themeText.opacity(0.7))
+                        } else {
+                            Button(action: onApproveAutoPRRuntime) {
+                                Label(
+                                    autoPRRuntimeApprovalInFlight ? "Approving…" : "Approve 10 more minutes",
+                                    systemImage: "play.circle.fill"
+                                )
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.orange)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(autoPRRuntimeApprovalInFlight)
+                        }
+                    }
+                } else if let questions = autoPRQuestionPreview {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("AUTO SETUP · ANSWERS NEEDED", systemImage: "questionmark.circle.fill")
                             .font(.system(size: 9, weight: .semibold))

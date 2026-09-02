@@ -40,10 +40,7 @@ RESUME_PATCH=""
 PRIOR_CHECKPOINT_FILE="$WORK_DIR/prior-checkpoint.json"
 printf 'null\n' > "$PRIOR_CHECKPOINT_FILE"
 
-# A previous timeout may have preserved a partial patch and bounded outputs in
-# protected .git metadata. Restore the patch only inside the disposable
-# msandbox and attach the textual artifacts so Codex can continue its own
-# reasoning instead of repeating twenty minutes of work.
+# Resume a prior checkpoint only inside the disposable sandbox.
 prior_checkpoint="$($SCRIPT_DIR/checkpoint.sh latest "$CARD_FILE")"
 if [ -n "$prior_checkpoint" ]; then
     if [ -s "$prior_checkpoint/metadata.json" ]; then

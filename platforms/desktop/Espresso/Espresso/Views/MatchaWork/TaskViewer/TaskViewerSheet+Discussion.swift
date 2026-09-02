@@ -114,7 +114,7 @@ extension TaskViewerSheet {
                 TextField(
                     isAddingAutoPRContext
                         ? (autoPRNeedsRuntimeApproval
-                            ? "Keep --extend-runtime to approve this retry…"
+                            ? "Keep --extend-runtime to approve 10 more minutes…"
                             : (autoPRIsAwaitingAnswers
                                 ? "Enter numbered answers (1-a, 2-b, …)…"
                                 : "Add evidence or explain what AutoPR missed…"))

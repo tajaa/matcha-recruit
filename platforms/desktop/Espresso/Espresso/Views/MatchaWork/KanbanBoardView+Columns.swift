@@ -278,9 +278,11 @@ extension KanbanBoardView {
             elementName: task.elementName
                 ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
             pendingCommitCount: viewModel.pendingSuggestionCount(taskId: task.id),
+            autoPRRuntimeApprovalInFlight: approvingAutoPRRuntimeTaskIds.contains(task.id),
             onTap: { open(task) },
             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
-            onMoveColumn: { col in move(taskId: task.id, to: col) }
+            onMoveColumn: { col in move(taskId: task.id, to: col) },
+            onApproveAutoPRRuntime: { approveAutoPRRuntime(for: task) }
         )
         // Glide across columns when the replay clears its overrides.
         .matchedGeometryEffect(id: task.id, in: cardNS)
@@ -294,6 +296,27 @@ extension KanbanBoardView {
     private func open(_ task: MWProjectTask) {
         acknowledge(task.id)
         viewingTask = task
+    }
+
+    private func approveAutoPRRuntime(for task: MWProjectTask) {
+        guard let projectId = viewModel.project?.id,
+              let progressNote = task.progressNote,
+              !approvingAutoPRRuntimeTaskIds.contains(task.id) else { return }
+        approvingAutoPRRuntimeTaskIds.insert(task.id)
+        Task {
+            defer { approvingAutoPRRuntimeTaskIds.remove(task.id) }
+            do {
+                _ = try await MatchaWorkService.shared.requestAutoPRReconsideration(
+                    projectId: projectId,
+                    taskId: task.id,
+                    body: "--extend-runtime",
+                    expectedProgressNote: progressNote
+                )
+                await viewModel.loadTasks()
+            } catch {
+                viewModel.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     /// Yellow ring marks tickets moved/added OR carrying unviewed updates (a

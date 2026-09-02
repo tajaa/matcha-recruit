@@ -315,11 +315,12 @@ second scheduler.
    or evidence produces a question-only draft PR, not a no-spec marker. The normal
    investigation ceiling is 20 minutes. A run that reaches it is stopped, its bounded
    patch/report/decision fragments and final 2 MB of terminal output are stored mode-600
-   under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`, and the card becomes
-   `PAUSED: RUNTIME APPROVAL REQUIRED`; it does not spin on every scheduler tick. From
-   that exact card decision, **Approve 40-minute retry** submits the explicit
-   `--extend-runtime` directive. That grants one 40-minute attempt only: it is never
-   inferred from ordinary prose and is not carried into later cycles. The retry restores
+   under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`. The card moves to
+   `changes_requested` and shows why the run stopped, which files and outputs were saved,
+   and the latest partial-report summary. It does not spin on every scheduler tick. The
+   card's **Approve 10 more minutes** button submits the explicit `--extend-runtime`
+   directive for one 10-minute continuation. Approval is never inferred from ordinary
+   prose and is not carried into later cycles. The continuation restores
    the partial patch only inside the disposable msandbox and attaches the saved textual
    output as untrusted context. If the patch no longer applies to current code, the text
    remains available and the retry starts from a clean tree. Successful recovery

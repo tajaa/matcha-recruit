@@ -102,12 +102,8 @@ git -C "$SANDBOX_WORKSPACE" config core.hooksPath /dev/null
 mkdir -p "$IO_DIR/input" "$IO_DIR/output"
 printf '%s\n' "$MODEL_BASE_SHA" > "$IO_DIR/model-base-sha"
 
-# An interrupted Kanban run may leave a protected host-side checkpoint. Apply
-# its untrusted model patch only inside this disposable clone; the ordinary
-# patch-size/mode checks below and publish.sh's path guard still decide what
-# may reach the trusted checkout or GitHub. If main/review feedback moved far
-# enough that the patch no longer applies, retain the textual checkpoint input
-# and continue cleanly instead of making the saved work a new blocker.
+# Apply saved model work only in the disposable clone. Later patch checks still
+# decide whether it may reach the trusted checkout.
 if [ -n "$RESUME_PATCH" ]; then
     if [ -f "$RESUME_PATCH" ] \
         && [ "$(wc -c < "$RESUME_PATCH" | tr -d '[:space:]')" -le "$MAX_PATCH_BYTES" ] \

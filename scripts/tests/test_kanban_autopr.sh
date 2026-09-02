@@ -26,11 +26,11 @@ check "local dispatcher is the workflow's only automatic clock" \
 check "workflow resolves the active production build before collecting cards" \
     $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" && echo 0 || echo 1)
 
-check "workflow gives ordinary investigations 20 minutes and requires a trusted extension for 40" \
+check "workflow gives ordinary investigations 20 minutes and approved continuations 10" \
     $(grep -qF 'runtime-policy.sh' "$workflow" \
       && grep -qF 'timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes) }}' "$workflow" \
       && grep -qF 'AUTOPR_NORMAL_RUNTIME_MINUTES:-20' "$AUTOPR_DIR/runtime-policy.sh" \
-      && grep -qF 'AUTOPR_EXTENDED_RUNTIME_MINUTES:-40' "$AUTOPR_DIR/runtime-policy.sh" \
+      && grep -qF 'AUTOPR_EXTENDED_RUNTIME_MINUTES:-10' "$AUTOPR_DIR/runtime-policy.sh" \
       && echo 0 || echo 1)
 
 check "failed investigations checkpoint before the trusted checkout is reset" \
@@ -298,6 +298,7 @@ cat > "$TMP_DIR/bin/curl" <<'EOF'
 output_file=""
 write_status=0
 url=""
+[ -z "${AUTOPR_TEST_CURL_ARGS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_CURL_ARGS"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o) output_file="$2"; shift 2 ;;
@@ -526,8 +527,28 @@ check "interrupted model work is checkpointed outside the disposable workspace" 
     $([ "$latest_checkpoint" = "$checkpoint_path" ] \
       && grep -q 'recovered.ts' "$checkpoint_path/model.patch" \
       && grep -q 'partial transcript' "$checkpoint_path/transcript.log" \
-      && jq -e '.patch_saved == true and .runtime_limited == false' \
+      && jq -e '.patch_saved == true and .runtime_limited == false and .changed_file_count == 2' \
         "$checkpoint_path/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+timeout_started_at="$(( $(date +%s) - 1200 ))"
+runtime_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/checkpoint-curl-args" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=timeout-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/checkpoint-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20)"
+check "timed-out work moves to Changes Requested with a readable approval card" \
+    $(jq -e '.runtime_limited == true and .changed_file_count == 2
+        and .progress_excerpt == "partial"' \
+        "$runtime_checkpoint_path/metadata.json" >/dev/null \
+      && grep -q 'changes_requested' "$TMP_DIR/checkpoint-curl-args" \
+      && grep -q 'Why more time' "$TMP_DIR/checkpoint-curl-args" \
+      && grep -q 'Done so far' "$TMP_DIR/checkpoint-curl-args" \
+      && grep -q 'Approve 10 more minutes' "$TMP_DIR/checkpoint-curl-args" \
       && echo 0 || echo 1)
 
 cat > "$TMP_DIR/bin/codex" <<'EOF'
@@ -777,8 +798,8 @@ EOF
 AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
     "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
     "$TMP_DIR/extended-runtime-policy.json"
-check "a decision-bound runtime approval grants exactly one 40-minute attempt" \
-    $(jq -e '.minutes == 40 and .extended == true and .directives == ["extend_runtime"]' \
+check "a decision-bound runtime approval grants a 10-minute continuation" \
+    $(jq -e '.minutes == 10 and .extended == true and .directives == ["extend_runtime"]' \
       "$TMP_DIR/extended-runtime-policy.json" >/dev/null && echo 0 || echo 1)
 
 jq '.[0].metadata.body = "Here is more evidence, but no time approval."' \

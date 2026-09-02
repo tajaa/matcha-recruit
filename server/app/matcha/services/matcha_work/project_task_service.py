@@ -171,8 +171,10 @@ def _is_autopr_waiting_for_answers_note(note: str) -> bool:
 
 
 def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
-    return (note or "").strip().startswith(
-        "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"
+    normalized = (note or "").strip()
+    return (
+        normalized.startswith("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+        or normalized.startswith("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
     )
 
 

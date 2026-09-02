@@ -219,13 +219,13 @@ async def test_awaiting_answers_accepts_chat_or_ticket_context(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_runtime_pause_accepts_one_run_extension_approval(monkeypatch):
+async def test_runtime_pause_accepts_ten_minute_continuation(monkeypatch):
     from app.matcha.services.matcha_work import project_task_service as svc
 
     current = (
-        "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED · checkpoint 123 · "
-        "note: Partial work is preserved. Add additional context with "
-        "--extend-runtime to approve one 40-minute retry."
+        "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 123\n"
+        "Why more time: The first 20-minute investigation ended before AutoPR produced a publishable result.\n"
+        "Done so far: Saved a partial report and run transcript."
     )
     conn = _ReconsiderationConn(current, board_column="changes_requested")
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))

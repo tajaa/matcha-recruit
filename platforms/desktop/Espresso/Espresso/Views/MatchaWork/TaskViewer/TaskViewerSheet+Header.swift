@@ -37,9 +37,9 @@ extension TaskViewerSheet {
     }
 
     var autoPRNeedsRuntimeApproval: Bool {
-        autoSetupProgressNote?.hasPrefix(
-            "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"
-        ) == true
+        guard let note = autoSetupProgressNote else { return false }
+        return note.hasPrefix("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+            || note.hasPrefix("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
     }
 
     /// A short, human-readable state for the ticket detail banner. The full
@@ -48,7 +48,7 @@ extension TaskViewerSheet {
     var autoSetupStatus: (label: String, color: Color, icon: String) {
         let note = (autoSetupProgressNote ?? "").lowercased()
         if autoPRNeedsRuntimeApproval {
-            return ("RUNTIME APPROVAL REQUIRED", .orange, "timer")
+            return ("APPROVAL NEEDED FOR 10 MORE MINUTES", .orange, "timer")
         }
         if autoPRIsAwaitingAnswers {
             return ("AWAITING ANSWERS", .orange, "questionmark.circle.fill")
@@ -228,14 +228,14 @@ extension TaskViewerSheet {
     }
 
     var autoPRContextActionLabel: String {
-        if autoPRNeedsRuntimeApproval { return "Approve 40-minute retry" }
+        if autoPRNeedsRuntimeApproval { return "Approve 10 more minutes" }
         if autoPRIsAwaitingAnswers { return "Answer AutoPR questions" }
         return "Add additional context"
     }
 
     var autoPRContextInstructions: String {
         if autoPRNeedsRuntimeApproval {
-            return "Keep --extend-runtime in this reply to approve one 40-minute retry. The saved patch and model output will be restored inside the AutoPR sandbox."
+            return "Keep --extend-runtime in this reply to approve 10 more minutes. AutoPR will continue from its saved work."
         }
         if autoPRIsAwaitingAnswers {
             return "Enter numbered answers to the questions above (for example: 1-a, 2-b), plus any context or screenshots AutoPR should use."
