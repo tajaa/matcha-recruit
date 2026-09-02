@@ -61,6 +61,10 @@ check "rework uses current main and an immutable control-plane snapshot" \
       && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish.sh"' "$workflow" \
       && echo 0 || echo 1)
 
+check "idle runs do not invoke uninitialized task cleanup" \
+    $(grep -qF "if: always() && steps.select.outputs.skip == 'false'" "$workflow" \
+      && echo 0 || echo 1)
+
 check "workflow and dispatcher require the msandbox master switch" \
     $(grep -qF './scripts/agent-sandbox.sh autopr-ready' "$workflow" \
       && grep -qF '[ -f "$ENABLE_FILE" ]' "$AUTOPR_DIR/dispatch-if-idle.sh" \
