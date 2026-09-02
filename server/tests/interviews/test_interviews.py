@@ -69,10 +69,9 @@ class TestInterviewType:
 # ---------------------------------------------------------------------------
 
 class TestTutorSessionCreate:
-    def test_valid_interview_prep(self):
-        m = TutorSessionCreate(mode="interview_prep", interview_role="CTO")
-        assert m.mode == "interview_prep"
-        assert m.interview_role == "CTO"
+    def test_interview_prep_is_retired(self):
+        with pytest.raises(ValidationError):
+            TutorSessionCreate(mode="interview_prep")
 
     def test_valid_language_test(self):
         m = TutorSessionCreate(mode="language_test", language="es")
@@ -81,12 +80,12 @@ class TestTutorSessionCreate:
 
     def test_valid_duration_values(self):
         for d in (2, 5, 8):
-            m = TutorSessionCreate(mode="interview_prep", duration_minutes=d)
+            m = TutorSessionCreate(mode="language_test", language="en", duration_minutes=d)
             assert m.duration_minutes == d
 
     def test_invalid_duration_rejected(self):
         with pytest.raises(ValidationError):
-            TutorSessionCreate(mode="interview_prep", duration_minutes=10)
+            TutorSessionCreate(mode="language_test", language="en", duration_minutes=10)
 
     def test_invalid_mode_rejected(self):
         with pytest.raises(ValidationError):
@@ -102,11 +101,10 @@ class TestTutorSessionCreate:
             assert m.mode == mode
 
     def test_defaults(self):
-        m = TutorSessionCreate(mode="interview_prep")
-        assert m.language is None
+        m = TutorSessionCreate(mode="language_test", language="en")
+        assert m.language == "en"
         assert m.duration_minutes is None
         assert m.company_id is None
-        assert m.interview_role is None
         assert m.is_practice is False
 
 

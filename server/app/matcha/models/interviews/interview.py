@@ -292,11 +292,10 @@ class InvestigationInterviewStart(BaseModel):
 
 class TutorSessionCreate(BaseModel):
     """Request to create a tutor session."""
-    mode: Literal["interview_prep", "language_test", "culture", "candidate", "screening"]
+    mode: Literal["language_test", "culture", "candidate", "screening"]
     company_id: Optional[UUID] = None  # Required for company interview modes
     language: Optional[Literal["en", "es"]] = None  # Required for language_test mode
     duration_minutes: Optional[Literal[2, 5, 8]] = None  # Session duration: 2, 5, or 8 minutes
-    interview_role: Optional[str] = None  # For interview_prep: role being interviewed for
     is_practice: bool = False  # If true, session is ephemeral (not analyzed/saved)
 
 

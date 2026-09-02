@@ -1,8 +1,8 @@
 import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
-  AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
+  AlertTriangle, BookOpen, BarChart2, Sparkles, Building2,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
-  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
+  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Link2, Activity,
   Coins, FileSignature, CalendarClock, Radio, HardHat,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -22,8 +22,6 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/ops/schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
       { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
-      { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },
-      { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
       { to: '/app/labor', icon: Handshake, label: 'Labor Relations', feature: 'labor_relations' },
     ],
   },
@@ -48,7 +46,6 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/risk-profile', icon: Gauge, label: 'Risk Profile', feature: 'risk_profile' },
       { to: '/app/controls-evidence', icon: FileCheck, label: 'Proof of Controls', feature: 'controls_evidence' },
       { to: '/app/limit-adequacy', icon: Scale, label: 'Limit Adequacy', feature: 'limit_adequacy' },
-      { to: '/app/driver-risk', icon: Car, label: 'Driver Risk', feature: 'driver_risk' },
       { to: '/app/property', icon: Building2, label: 'Commercial Property', feature: 'property' },
       { to: '/app/tcor', icon: Coins, label: 'Total Cost of Risk', feature: 'tcor' },
       { to: '/app/coi', icon: FileText, label: 'Certificate Tracking', feature: 'coi_tracking' },
@@ -77,7 +74,6 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/locations', icon: MapPin, label: 'Locations', feature: 'incidents' },
       { to: '/app/er-copilot', icon: Scale, label: 'ER Copilot' },
       { to: '/app/risk-assessment', icon: BarChart2, label: 'Risk Assessment' },
-      { to: '/app/resident-care', icon: HeartPulse, label: 'Resident-Care Risk', feature: 'resident_care' },
       { to: '/app/legal-pilot', icon: Gavel, label: 'Legal Pilot', feature: 'legal_defense' },
     ],
   },
