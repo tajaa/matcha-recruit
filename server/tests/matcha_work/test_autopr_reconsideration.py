@@ -51,7 +51,7 @@ def _connection_context(conn):
     return _AsyncContext(conn)
 
 
-def test_operator_directives_require_leading_marker_and_accept_natural_phrasing():
+def test_operator_directives_accept_clear_work_commands_in_bound_context():
     from app.matcha.services.matcha_work import project_task_service as svc
 
     directives, route = svc._parse_autopr_directives(
@@ -63,11 +63,22 @@ def test_operator_directives_require_leading_marker_and_accept_natural_phrasing(
 
     assert directives == ["draft_pr", "trust_still_broken"]
     assert route == "/app/jobs"
-    assert svc._parse_autopr_directives("you need to draft this PR") == ([], None)
+    assert svc._parse_autopr_directives("you need to draft this PR") == (["draft_pr"], None)
+    assert svc._parse_autopr_directives("you can work on this.") == (["draft_pr"], None)
+    assert svc._parse_autopr_directives("Please go ahead and work on this ticket") == (
+        ["draft_pr"],
+        None,
+    )
     assert svc._parse_autopr_directives("--test-route=https://evil.example/x") == ([], None)
     assert svc._parse_autopr_directives(
         "--do not draft a PR yet, ask questions first"
     ) == ([], None)
+    assert svc._parse_autopr_directives("Do not work on this yet") == ([], None)
+    assert svc._parse_autopr_directives("You can not work on this yet") == ([], None)
+    assert svc._parse_autopr_directives("The expected behavior is to create a PR") == (
+        [],
+        None,
+    )
     assert svc._parse_autopr_directives("--no draft PR yet") == ([], None)
     assert svc._parse_autopr_directives("--draft prevention notes") == ([], None)
 
@@ -188,7 +199,7 @@ async def test_reconsideration_persists_trusted_directive_policy(monkeypatch):
         task_id=uuid4(),
         actor_user_id=uuid4(),
         expected_progress_note=current,
-        body="--draft-pr\n--trust-still-broken\n--test-route=/app/jobs",
+        body="you can work on this.\n--trust-still-broken\n--test-route=/app/jobs",
     )
 
     metadata = json.loads(conn.insert_args[4])

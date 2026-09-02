@@ -81,7 +81,7 @@ _autopr_directive_policy_ok() {
          or .no_safe_action_reason != "already_fixed")
       and (($directives | index("draft_pr")) == null
          or .outcome != "no_safe_action"
-         or (.no_safe_action_reason | IN("migration_required", "policy_blocked", "external_dependency")))
+         or (.no_safe_action_reason | IN("policy_blocked", "external_dependency")))
     ' "$decision_file" >/dev/null
 }
 

@@ -38,6 +38,7 @@ TYPES = {
     "task_progress": "Task Update",
     "task_rejected": "Sent Back for Changes",
     "task_comment": "New Comment",
+    "autopr_result": "AutoPR Result",
     # NOT channel_-prefixed on purpose: the desktop banner path suppresses
     # channel_* types (chat toasts own those), and a call invite must banner.
     "call_started": "Call Started",

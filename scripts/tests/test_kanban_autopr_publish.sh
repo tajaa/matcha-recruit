@@ -75,6 +75,8 @@ else
     printf '%s' "$payload" > "$AUTOPR_TEST_ACTIVITY"
   elif [[ "$url" == */autopr/context-request ]]; then
     printf '%s' "$payload" > "$AUTOPR_TEST_CONTEXT_REQUEST"
+  elif [[ "$url" == */autopr/result-notification ]]; then
+    printf '%s' "$payload" > "$AUTOPR_TEST_RESULT_NOTIFICATION"
   else
     printf '%s' "$payload" > "$AUTOPR_TEST_CARD_PATCH"
   fi
@@ -123,6 +125,7 @@ EOF
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
     ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 )
 
@@ -149,6 +152,11 @@ check "card remains Changes Requested with a visible auto-setup note" \
   $(jq -e '.board_column == "changes_requested" and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")) and (.progress_note | endswith("note: Needs the canonical term before labels and tests can be updated safely."))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 check "publisher replies to the triggering additional-context note" \
   $(jq -e '.kind == "note" and .reply_to == "eeeeeeee-0000-4000-8000-000000000001" and (.body | contains("still needs human answers in PR #501"))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
+check "publisher sends a decision-bound result notification to the context author" \
+  $(jq -e '.reconsideration_event_id == "eeeeeeee-0000-4000-8000-000000000001"
+      and (.expected_progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))
+      and (.message | contains("still needs human answers in PR #501"))' \
+    "$TMP_DIR/result-notification.json" >/dev/null && echo 0 || echo 1)
 check "awaiting-input publication asks in project chat against the exact decision" \
   $(jq -e '(.reason | contains("canonical term")) and (.expected_progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))' "$TMP_DIR/context-request.json" >/dev/null && echo 0 || echo 1)
 
@@ -157,7 +165,7 @@ unicode_truncated="$(printf '%s' "$unicode_sample" | jq -Rrs '.[0:600]')"
 check "context-request truncation preserves UTF-8 at the boundary" \
   $([ "$(printf '%s' "$unicode_truncated" | jq -Rrs 'length')" = 600 ] \
     && [[ "$unicode_truncated" == *🙂 ]] \
-    && grep -q "jq -Rrs '\.\[0:600\]'" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
+    && grep -q "jq -Rsr '\.\[0:600\]'" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
     && echo 0 || echo 1)
 
 cat > "$TMP_DIR/already-fixed-card.json" <<'EOF'
@@ -176,6 +184,7 @@ EOF
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
     ./scripts/kanban-autopr/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
 )
 
@@ -230,6 +239,65 @@ label_failure_rc=$?
 set -e
 check "required triage label failure stops before the card is suppressed" \
   $([ "$label_failure_rc" != 0 ] && [ ! -e "$TMP_DIR/card-patch.json" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/raw-implementation.json" <<'EOF'
+{"schema_version":1,"outcome":"implementation","confidence":{"requirements_clarity":{"score":30,"reason":"request is explicit"},"evidence_quality":{"score":20,"reason":"schema boundary is known"},"code_localization":{"score":20,"reason":"migration is localized"},"verification_strength":{"score":15,"reason":"migration can be reviewed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["scoped schema change"]},"questions":[],"safe_changes_present":true,"no_safe_action_reason":null}
+EOF
+cat > "$TMP_DIR/forced-policy.json" <<'EOF'
+{"directives":["draft_pr"],"test_route":null}
+EOF
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+  "$TMP_DIR/raw-implementation.json" "$TMP_DIR/implementation.json"
+mkdir -p "$TEST_REPO/server/alembic/versions"
+printf '"""reviewed migration"""\n' > "$TEST_REPO/server/alembic/versions/task_test.py"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>&1
+migration_without_directive_rc=$?
+set -e
+check "migration versions remain blocked without a trusted draft directive" \
+  $([ "$migration_without_directive_rc" != 0 ] \
+    && [ ! -e "$TEST_REPO/server/alembic/versions/task_test.py" ] \
+    && echo 0 || echo 1)
+
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+  "$TMP_DIR/raw-implementation.json" "$TMP_DIR/forced-implementation.json" \
+  "$TMP_DIR/forced-policy.json"
+mkdir -p "$TEST_REPO/server/alembic/versions"
+printf '"""reviewed migration"""\n' > "$TEST_REPO/server/alembic/versions/task_test.py"
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/forced-implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+)
+check "trusted draft directive may publish a migration version for review" \
+  $(git -C "$TEST_REPO" show --name-only --format= HEAD \
+    | grep -qx 'server/alembic/versions/task_test.py' && echo 0 || echo 1)
+
+printf 'unsafe = True\n' > "$TEST_REPO/server/alembic/env.py"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/forced-implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>&1
+alembic_runner_rc=$?
+set -e
+check "draft directive still rejects Alembic runner and configuration changes" \
+  $([ "$alembic_runner_rc" != 0 ] && [ ! -e "$TEST_REPO/server/alembic/env.py" ] \
+    && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

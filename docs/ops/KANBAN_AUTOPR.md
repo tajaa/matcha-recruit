@@ -174,8 +174,9 @@ second scheduler.
    backend/worker/nginx log signals. Codex receives those files and a commit list
    between each live image and the checked-out branch, but never SSH or database
    credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
-   fix or an unapplied migration. It may diagnose migration drift but the path guard still
-   forbids it from authoring or applying a migration.
+   fix or an unapplied migration. It may diagnose migration drift. The path guard allows
+   it to author a migration version only after a trusted `draft_pr` instruction and
+   always forbids applying a migration.
 2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
@@ -238,9 +239,13 @@ second scheduler.
    so the agent must choose prerequisite/build-on/separate boundaries in queue context.
    Additional-context events are untrusted but escalated evidence: the agent must trace
    the newly described uncovered scenario and cannot repeat `already_fixed` merely
-   because a generic patch exists. Lines beginning `--draft-pr` or the natural-language
-   `--you need to draft this PR` become trusted decision-bound policy and mechanically
-   reject another `already_fixed` exit. `--trust-still-broken` (including the matching
+   because a generic patch exists. A clear affirmative work command in that exact
+   decision-bound reply—such as `you can work on this` or `you need to draft this PR`—
+   becomes trusted `draft_pr` policy even without a magic prefix. `--draft-pr` remains
+   the explicit form. Negated commands do not activate it. The policy mechanically
+   rejects both `already_fixed` and `migration_required`: when needed, the draft may
+   author only `server/alembic/versions/*.py` for human review and must never apply it.
+   `--trust-still-broken` (including the matching
    natural-language form) accepts that the described scenario fails, while
    `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test
    tenant. The coding model never receives those credentials. It must inspect correlated
@@ -248,8 +253,9 @@ second scheduler.
    role, reproduction steps, and screenshot. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
-   next local cycle then updates the same draft. No-spec is reserved for already-fixed
-   work, migrations, policy boundaries, and external dependencies.
+   next local cycle then updates the same draft. Without a trusted draft directive,
+   no-spec remains available for already-fixed work, migrations, policy boundaries,
+   and external dependencies.
 7. **Cross-lane scope check** — for a fresh implementation patch, the shared
    `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
@@ -274,8 +280,10 @@ second scheduler.
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
-   fix is. A card that genuinely needs a migration or infra change cannot be auto-PR'd —
-   that's the intended outcome; it takes the no-spec path and says why. PR titles begin
+   fix is. Trusted `draft_pr` policy adds one narrow allowlist entry for
+   `server/alembic/versions/*.py`; Alembic environment/configuration files remain denied,
+   and the workflow never applies migrations. Without that policy a migration still
+   takes the no-spec path and says why. PR titles begin
    with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`
    is triaged visually. Question drafts also carry `autopr-awaiting-input`; those drafts
    do not consume the ten-PR implementation cap. PR body carries
@@ -307,8 +315,9 @@ second scheduler.
    PR's title, body, and triage labels before writing the durable no-spec card note, so the
    prior round cannot remain visible as the current decision. When a run was triggered
    by additional context, the publisher also posts a threaded outcome reply to that
-   history event: PR drafted/updated, questions still needed, or the no-safe-action
-   decision still applies.
+   history event and a decision-bound bell/push notification to its author: PR
+   drafted/updated, questions still needed, or the no-safe-action decision still
+   applies. Notification delivery is required so consuming the event cannot be silent.
    Awaiting-input and `already_fixed` outcomes also post one idempotent Espresso
    message into the project's discussion channel. It starts with the existing
    `⟦ticket:<id>|<title>|<column>⟧` token, so the ticket is clickable in Espresso.
