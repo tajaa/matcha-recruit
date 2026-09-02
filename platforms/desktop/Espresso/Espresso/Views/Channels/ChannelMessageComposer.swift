@@ -28,11 +28,15 @@ struct ChannelMessageComposer: View {
     @Binding var replyingTo: ChannelMessage?
     @Binding var editingMessage: ChannelMessage?
     @Binding var isUploading: Bool
-    @Binding var lastTypingSentAt: Date
 
     /// The live draft. Local @State so typing only re-renders the composer, not
     /// `ChannelDetailView.body` / the message list.
     @State private var text: String = ""
+    /// Local, not a `@Binding` to the parent. It used to point at
+    /// `ChannelDetailView`'s @State, so every 2.5s of sustained typing wrote
+    /// parent state and re-rendered the whole message list — defeating the
+    /// isolation this composer exists to provide.
+    @State private var lastTypingSentAt: Date = .distantPast
 
     var body: some View {
         VStack(spacing: 8) {

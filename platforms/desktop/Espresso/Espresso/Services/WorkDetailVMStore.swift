@@ -18,8 +18,9 @@ final class WorkDetailVMStore {
     static let shared = WorkDetailVMStore()
     private init() {}
 
-    /// Last-recently-used entities to keep warm. Typical usage ping-pongs
-    /// between a handful of tabs; 6 covers that without unbounded growth.
+    /// Least-recently-used entities to keep warm, **per kind** (see `lru`).
+    /// Typical usage ping-pongs between a handful of tabs; 6 of each covers
+    /// that without unbounded growth.
     private let cap = 6
 
     // All detail VMs are Foundation/SwiftUI portable. Views remain responsible
@@ -27,8 +28,13 @@ final class WorkDetailVMStore {
     private var projectVMs: [String: ProjectDetailViewModel] = [:]
     private var threadVMs: [String: ThreadDetailViewModel] = [:]
     private var channelVMs: [String: ChannelChatViewModel] = [:]
-    /// MRU-first list of keys ("p:<id>" / "t:<id>" / "c:<id>").
-    private var lru: [String] = []
+    /// MRU-first keys ("p:<id>" / "t:<id>" / "c:<id>"), tracked **per kind**.
+    /// One shared list meant `cap` was spent across projects, threads and
+    /// channels together: three projects, two threads and two channels was
+    /// enough to evict the first project, and a project VM is by far the most
+    /// expensive to rebuild (it drives the cold `/bundle` + skeleton path).
+    /// Each kind now gets its own `cap`.
+    private var lru: [String: [String]] = [:]
 
     // MARK: - Vend
 
@@ -66,7 +72,9 @@ final class WorkDetailVMStore {
     /// Pass the prefixed key, e.g. `evict("p:\(projectId)")`.
     func evict(_ key: String) {
         remove(key)
-        lru.removeAll { $0 == key }
+        if let kind = Self.kind(of: key) {
+            lru[kind]?.removeAll { $0 == key }
+        }
     }
 
     func evictProject(_ id: String) { evict("p:\(id)") }
@@ -89,11 +97,21 @@ final class WorkDetailVMStore {
     // MARK: - LRU bookkeeping
 
     private func touch(_ key: String) {
-        lru.removeAll { $0 == key }
-        lru.insert(key, at: 0)
-        while lru.count > cap, let evicted = lru.popLast() {
+        guard let kind = Self.kind(of: key) else { return }
+        var keys = lru[kind] ?? []
+        keys.removeAll { $0 == key }
+        keys.insert(key, at: 0)
+        while keys.count > cap, let evicted = keys.popLast() {
             remove(evicted)
         }
+        lru[kind] = keys
+    }
+
+    /// The kind prefix of a namespaced key ("p" / "t" / "c"), or nil if the key
+    /// is malformed.
+    private static func kind(of key: String) -> String? {
+        guard let sep = key.firstIndex(of: ":") else { return nil }
+        return String(key[..<sep])
     }
 
     /// Remove the VM behind a key from whichever dictionary owns it.

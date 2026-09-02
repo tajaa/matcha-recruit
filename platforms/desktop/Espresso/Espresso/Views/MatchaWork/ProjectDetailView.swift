@@ -56,6 +56,22 @@ struct ProjectDetailView: View {
         return !["recruiting", "blog", "collab", "discipline"].contains(t)
     }
 
+    /// True for the layouts that actually mount `ChatPanelView` and therefore
+    /// need `chatVM`. Collab projects render `ChannelDetailView` for their chat
+    /// tab (`collabChatView`) and never touch the thread VM — loading it there
+    /// pulled a full, unpaginated message history on EVERY project switch for a
+    /// view that is never shown.
+    var usesThreadChat: Bool {
+        viewModel.project?.projectType != "collab"
+    }
+
+    /// Load the project's chat thread, but only where it gets rendered.
+    func loadActiveThreadIfNeeded() {
+        threadLoadTask?.cancel()
+        guard usesThreadChat, let chatId = viewModel.activeChatId else { return }
+        threadLoadTask = Task { await chatVM.loadThread(id: chatId) }
+    }
+
     var selectedModelValue: String? {
         mwModelOptions.first { $0.id == selectedModelId }?.value
     }
@@ -135,10 +151,7 @@ struct ProjectDetailView: View {
             presenceVM.stop()
         }
         .onChange(of: viewModel.activeChatId) {
-            threadLoadTask?.cancel()
-            if let chatId = viewModel.activeChatId {
-                threadLoadTask = Task { await chatVM.loadThread(id: chatId) }
-            }
+            loadActiveThreadIfNeeded()
         }
         // Chat streams mutate project data (sections for blog, posting for
         // recruiting, etc.) via server-side directives.

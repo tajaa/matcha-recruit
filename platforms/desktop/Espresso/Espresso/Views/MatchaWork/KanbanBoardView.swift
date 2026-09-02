@@ -266,14 +266,19 @@ struct KanbanBoardView: View {
             if !doneWeeklyReset && !isPipeline {
                 await viewModel.loadAllDoneTasks()
             }
+            // Always reload suggestions from the server: the push webhook
+            // scans server-side on merge, so suggestions can exist even when
+            // the auto-scan below short-circuits on its cooldown. Without this
+            // the card badges wouldn't appear until a manual scan.
+            await viewModel.loadCommitSuggestions()
             // Auto-pick up merged commits → subtask check-offs (gated 10-min
             // cooldown; no-op if no repo connected). "Done = merged."
-            await viewModel.autoScanCommitsIfStale()
-            // Always reload from the server too: the push webhook scans
-            // server-side on merge, so suggestions can exist even when the
-            // auto-scan above short-circuits on its cooldown. Without this the
-            // card badges wouldn't appear until a manual scan.
-            await viewModel.loadCommitSuggestions()
+            //
+            // Detached, and ordered last: this hop goes server→GitHub, so
+            // awaiting it inline made the board's mount wait on a third-party
+            // API on every cold project switch. Its results land through the
+            // normal task/suggestion refresh.
+            Task { await viewModel.autoScanCommitsIfStale() }
         }
         // Tasks usually arrive after the board mounts — run the replay the
         // moment they do (maybeReplay is idempotent, guarded by didReplay), and

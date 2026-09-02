@@ -38,11 +38,12 @@ extension ProjectDetailViewModel {
                 var seeded: [String: [MWProjectFile]] = [:]
                 for t in list {
                     if let atts = t.attachments { seeded[t.id] = atts }
-                    // Seed the unviewed-updates baseline so a ticket's existing
-                    // history isn't flagged as new on first sight (we have
-                    // recentEventIds here, at the board level).
-                    TicketUpdatesStore.shared.baselineIfNeeded(t)
                 }
+                // Seed the unviewed-updates baseline so a ticket's existing
+                // history isn't flagged as new on first sight (we have
+                // recentEventIds here, at the board level). Batched: one
+                // persist + one observation bump for the whole board.
+                TicketUpdatesStore.shared.baselineIfNeeded(list)
                 taskFiles = seeded
                 isLoadingTasks = false
             }
@@ -133,15 +134,15 @@ extension ProjectDetailViewModel {
     /// aux instances so a project open in two panes doesn't double-toast.
     @MainActor
     func attachTaskRealtime(currentUserId: String?, projectId: String, showToasts: Bool = true) {
-        print("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil") project=\(projectId) toasts=\(showToasts)")
+        mwLog("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil") project=\(projectId) toasts=\(showToasts)")
         self.currentUserId = currentUserId
         let handlers = ProjectWebSocket.TaskEventHandlers(
             onCreated: { [weak self] dict in
-                print("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
+                mwLog("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
                 guard let self else { return }
                 let actorId = dict["actor_id"] as? String
                 if let actorId, actorId == self.currentUserId {
-                    print("[ProjectVM] onTaskCreated suppressed — self-echo")
+                    mwLog("[ProjectVM] onTaskCreated suppressed — self-echo")
                     return
                 }
                 if let task = Self.decodeTask(dict) {
@@ -160,7 +161,7 @@ extension ProjectDetailViewModel {
                 }
             },
             onUpdated: { [weak self] dict in
-                print("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
+                mwLog("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
                 guard let self else { return }
                 let actorId = dict["actor_id"] as? String
                 if let task = Self.decodeTask(dict) {
@@ -185,7 +186,7 @@ extension ProjectDetailViewModel {
                 }
             },
             onDeleted: { [weak self] taskId, actorId in
-                print("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
+                mwLog("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
                 guard let self else { return }
                 if let actorId, actorId == self.currentUserId { return }
                 Task { @MainActor in
@@ -630,7 +631,7 @@ extension ProjectDetailViewModel {
                 }
             }
         } catch {
-            print("[Kanban] toggleTaskComplete PATCH failed task=\(id): \(error)")
+            mwLog("[Kanban] toggleTaskComplete PATCH failed task=\(id): \(error)")
             await loadTasks()
             await MainActor.run { errorMessage = "Toggle failed: \(error.localizedDescription)" }
         }

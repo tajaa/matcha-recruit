@@ -110,6 +110,16 @@ final class ProjectWebSocket: NSObject {
         let pageKey: String?
     }
 
+    /// Event types that are meaningful only for the project currently joined.
+    /// `task.*` is deliberately absent — those fan out through
+    /// `dispatchTaskEvent`, which does its own per-owner project filtering so
+    /// cached/background VMs keep receiving board updates.
+    private static let projectScopedEventTypes: Set<String> = [
+        "presence", "presence_update", "user_joined_project", "user_left_project",
+        "cursor", "caret",
+        "section_locked", "section_unlocked", "section_lock_denied", "section_content",
+    ]
+
     struct CursorPayload {
         let userId: String
         let xPct: Double
@@ -127,21 +137,21 @@ final class ProjectWebSocket: NSObject {
 
     func connect() {
         guard !isConnecting && !isConnected else {
-            print("[ProjectWS] connect skipped — isConnecting=\(isConnecting) isConnected=\(isConnected)")
+            mwLog("[ProjectWS] connect skipped — isConnecting=\(isConnecting) isConnected=\(isConnected)")
             return
         }
         guard let token = APIClient.shared.accessToken else {
-            print("[ProjectWS] connect skipped — no access token")
+            mwLog("[ProjectWS] connect skipped — no access token")
             return
         }
         // Suffix-anchored derivation (APIClient.wsBase) — the old global
         // "/api" replace corrupted api.* hosts, silently killing realtime.
         let wsBase = APIClient.shared.wsBase
         guard let url = URL(string: "\(wsBase)/ws/projects") else {
-            print("[ProjectWS] connect skipped — invalid URL base=\(wsBase)")
+            mwLog("[ProjectWS] connect skipped — invalid URL base=\(wsBase)")
             return
         }
-        print("[ProjectWS] connect initiated → \(wsBase)/ws/projects")
+        mwLog("[ProjectWS] connect initiated → \(wsBase)/ws/projects")
         isConnecting = true
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -171,7 +181,7 @@ final class ProjectWebSocket: NSObject {
     /// Idempotent on the same (project, page) pair — useful when SwiftUI
     /// re-fires .task blocks.
     func joinProject(projectId: String, pageKey: String) {
-        print("[ProjectWS] join_project project=\(projectId) page=\(pageKey)")
+        mwLog("[ProjectWS] join_project project=\(projectId) page=\(pageKey)")
         currentProjectId = projectId
         currentPageKey = pageKey
         send(["type": "join_project", "project_id": projectId, "page_key": pageKey])
@@ -302,7 +312,20 @@ final class ProjectWebSocket: NSObject {
         if type != "pong" && type != "cursor" && type != "caret" {
             // Skip pong/cursor/caret to keep the log readable. Everything
             // else (presence, task.*, error) prints once per event.
-            print("[ProjectWS] recv type=\(type)")
+            mwLog("[ProjectWS] recv type=\(type)")
+        }
+
+        // Presence/co-edit callbacks are singletons owned by the CURRENT
+        // ProjectDetailView, so a frame from a project we're still joined to
+        // but no longer looking at would land in the live view's state (ghost
+        // cursors, spurious @Observable invalidations). `task.*` already
+        // filters by project via dispatchTaskEvent; do the same here. Frames
+        // without a project_id are passed through unchanged.
+        if let frameProject = obj["project_id"] as? String,
+           let joined = currentProjectId,
+           frameProject != joined,
+           Self.projectScopedEventTypes.contains(type) {
+            return
         }
 
         switch type {
@@ -371,7 +394,7 @@ final class ProjectWebSocket: NSObject {
             // Server sent {"type":"error","message":"..."}.
             // join_project gates on membership so a permission error here
             // means we shouldn't retry, just stay disconnected on the page.
-            print("[ProjectWS] server error: \(obj["message"] ?? "<no message>")")
+            mwLog("[ProjectWS] server error: \(obj["message"] ?? "<no message>")")
         default: break
         }
     }
@@ -404,7 +427,7 @@ final class ProjectWebSocket: NSObject {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
-        print("[ProjectWS] schedule reconnect — delay=\(reconnectDelay)s")
+        mwLog("[ProjectWS] schedule reconnect — delay=\(reconnectDelay)s")
         isConnected = false
         isConnecting = false
         pingTask?.cancel(); pingTask = nil
@@ -422,7 +445,7 @@ final class ProjectWebSocket: NSObject {
             // us in a backoff loop forever. Shared singleton task in
             // AuthService dedups with any concurrent REST refresh.
             let refreshed = await AuthService.shared.refreshIfNeeded()
-            print("[ProjectWS] reconnect token refresh=\(refreshed)")
+            mwLog("[ProjectWS] reconnect token refresh=\(refreshed)")
             await MainActor.run {
                 self.reconnectTask = nil
                 self.connect()

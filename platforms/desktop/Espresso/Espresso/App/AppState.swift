@@ -15,6 +15,11 @@ import AppKit
 @Observable
 class AppState {
     var isAuthenticated: Bool = false
+    /// True from launch until the first `restoreSession()` settles. Without
+    /// this there is no third state, so the app rendered the full LoginView —
+    /// animated glows and all — for the whole `/auth/refresh` round-trip, then
+    /// swapped to the workspace. That flash is what "loads slow" looked like.
+    var isRestoring: Bool = true
     var currentUser: UserInfo? = nil
     var selectedThreadId: String? = nil
     var selectedProjectId: String? = nil
