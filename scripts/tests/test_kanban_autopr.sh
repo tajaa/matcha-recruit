@@ -47,11 +47,18 @@ check "model process is stripped of production SSH credentials" \
     $(grep -qF 'env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
 
 check "workflow forces Codex through the dedicated AutoPR msandbox" \
-    $(grep -qF 'AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh' "$workflow" \
+    $(grep -qF 'AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh' "$workflow" \
       && grep -qF 'AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox' "$workflow" \
       && grep -qF 'run-codex-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
       && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-sol' "$AUTOPR_DIR/investigate.sh" \
       && grep -qF 'AUTOPR_CODEX_REASONING_EFFORT=medium' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+check "rework uses current main and an immutable control-plane snapshot" \
+    $(grep -qF 'git merge --no-edit main' "$workflow" \
+      && grep -qF 'git archive main scripts/kanban-autopr scripts/error-autofix' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish.sh"' "$workflow" \
       && echo 0 || echo 1)
 
 check "workflow and dispatcher require the msandbox master switch" \
@@ -636,6 +643,33 @@ jq '.no_safe_action_reason = "migration_required"' \
 forced_migration_rc=$?
 check "decision-bound draft directive requires authoring a needed migration" \
     $([ "$forced_migration_rc" != 0 ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/pending-directive-card.json" <<'EOF'
+{"autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"old-event"}
+EOF
+cat > "$TMP_DIR/pending-directive-history.json" <<'EOF'
+[
+  {"id":"unrelated","metadata":{"kind":"autopr_additional_context","body":"draft this PR"}},
+  {"id":"old-event","metadata":{"kind":"autopr_additional_context","body":"just go ahead and do it anyways"}}
+]
+EOF
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/pending-directive-card.json" \
+    --history "$TMP_DIR/pending-directive-history.json" \
+    --output "$TMP_DIR/resolved-old-directive.json"
+check "pre-upgrade decision-bound context still grants the requested draft" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "old-event"' \
+      "$TMP_DIR/resolved-old-directive.json" >/dev/null && echo 0 || echo 1)
+
+jq '.[1].metadata.body = "do not go ahead and do it"' \
+    "$TMP_DIR/pending-directive-history.json" > "$TMP_DIR/negated-directive-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --card "$TMP_DIR/pending-directive-card.json" \
+    --history "$TMP_DIR/negated-directive-history.json" \
+    --output "$TMP_DIR/resolved-negated-directive.json"
+check "negated historical context does not grant draft authority" \
+    $(jq -e '.directives == []' "$TMP_DIR/resolved-negated-directive.json" >/dev/null \
+      && echo 0 || echo 1)
 
 env -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
     python3 "$AUTOPR_DIR/collect-test-tenant-evidence.py" \

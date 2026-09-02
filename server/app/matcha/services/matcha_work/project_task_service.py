@@ -130,6 +130,12 @@ _AUTOPR_WORK_COMMAND_RE = re.compile(
     r"(?:work\s+on|implement|start\s+work\s+on)\s+"
     r"(?:this|it|the\s+(?:ticket|card|pr|pull\s+request))\b"
 )
+_AUTOPR_GO_AHEAD_COMMAND_RE = re.compile(
+    r"^(?:(?:please\s+)?(?:just\s+)?)?go\s+ahead"
+    r"(?:\s+and\s+(?:do|fix|handle|implement)\s+(?:it|this))?"
+    r"(?:\s+(?:with\s+)?(?:it|this))?"
+    r"(?:\s+anyways?)?[.!]*$"
+)
 _AUTOPR_FORCE_NEGATION_RE = re.compile(
     r"(?:\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}"
     r"\b(?:work|implement|draft|create|open)\b)"
@@ -166,9 +172,10 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
         explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
         natural_draft = bool(_AUTOPR_DRAFT_COMMAND_RE.search(instruction))
         natural_work = bool(_AUTOPR_WORK_COMMAND_RE.search(instruction))
+        natural_go_ahead = bool(_AUTOPR_GO_AHEAD_COMMAND_RE.search(instruction))
         force_is_negated = bool(_AUTOPR_FORCE_NEGATION_RE.search(instruction))
         if (
-            (explicit_draft or natural_draft or natural_work)
+            (explicit_draft or natural_draft or natural_work or natural_go_ahead)
             and not force_is_negated
             and "draft_pr" not in directives
         ):
