@@ -16,7 +16,19 @@ RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.j
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
+# checkpoint.sh reads this to tell a genuine step timeout from a crash: only a
+# run that was killed may pause the card behind a human approval. A harness or
+# model failure must fail loudly and stay selectable instead.
+INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
+[ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
+_investigate_cleanup() {
+    local status=$?
+    [ -z "$INVESTIGATION_EXIT_FILE" ] \
+        || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
+        || true
+    rm -rf "$WORK_DIR"
+}
+trap _investigate_cleanup EXIT
 
 # The report must live outside the git workspace: `git add --all` in
 # publish.sh would otherwise stage a file the model wrote under its own
@@ -36,6 +48,22 @@ ID8="$(jq -r '.id8' "$CARD_FILE")"
 
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
+RESUME_PATCH=""
+PRIOR_CHECKPOINT_FILE="$WORK_DIR/prior-checkpoint.json"
+printf 'null\n' > "$PRIOR_CHECKPOINT_FILE"
+
+# Resume a prior checkpoint only inside the disposable sandbox.
+prior_checkpoint="$($SCRIPT_DIR/checkpoint.sh latest "$CARD_FILE")"
+if [ -n "$prior_checkpoint" ]; then
+    if [ -s "$prior_checkpoint/metadata.json" ]; then
+        cp "$prior_checkpoint/metadata.json" "$PRIOR_CHECKPOINT_FILE"
+    fi
+    [ ! -s "$prior_checkpoint/model.patch" ] || RESUME_PATCH="$prior_checkpoint/model.patch"
+    for checkpoint_input in report.md decision.json transcript.log; do
+        [ ! -s "$prior_checkpoint/$checkpoint_input" ] \
+            || ATTACH_ARGS+=(-f "$prior_checkpoint/$checkpoint_input")
+    done
+fi
 
 # Consume any "run now" request as soon as this card is actually picked up.
 # The claim is what stops the one-minute watcher re-dispatching for a card
@@ -64,10 +92,21 @@ printf '%s' "$files" > "$WORK_DIR/files.json"
 # directives. Card prose, comments, PR bodies, and unrelated history remain
 # untrusted evidence. Resolve structured metadata plus the same event's body
 # so context submitted before a parser upgrade remains actionable.
+# Reuse the policy the runtime step already resolved when it hands one over.
+# Resolving twice against two different reads of the board history lets the
+# budgeted runtime and the authority stated in the model's prompt disagree
+# about the same run.
 DIRECTIVE_FILE="$WORK_DIR/directive-policy.json"
-python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
-    --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
-    --output "$DIRECTIVE_FILE"
+if [ -n "${AUTOPR_DIRECTIVE_POLICY_FILE:-}" ] && [ -s "${AUTOPR_DIRECTIVE_POLICY_FILE}" ]; then
+    jq '{directives:(.directives // []),
+         test_route:(.test_route // null),
+         source_event_id:(.source_event_id // null)}' \
+        "$AUTOPR_DIRECTIVE_POLICY_FILE" > "$DIRECTIVE_FILE"
+else
+    python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
+        --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
+        --output "$DIRECTIVE_FILE"
+fi
 
 # An approved test tenant may be exercised by the trusted browser harness.
 # Credentials never enter context.json or msandbox; only a screenshot and
@@ -201,9 +240,10 @@ jq -n \
     --slurpfile test_tenant_evidence "$TEST_TENANT_EVIDENCE_FILE" \
     --slurpfile production_errors "$WORK_DIR/production-errors.json" \
     --slurpfile changes_since_production "$WORK_DIR/changes-since-production.json" \
+    --slurpfile prior_checkpoint "$PRIOR_CHECKPOINT_FILE" \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], directive_policy: $directive_policy[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
 
 if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
@@ -270,11 +310,15 @@ fi
 
 run_codex() {
     [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
-    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
-        AUTOPR_CODEX_MODEL=gpt-5.6-sol \
-        AUTOPR_CODEX_REASONING_EFFORT=medium \
-        "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
+    runner_env=(
+        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY
+        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD
+        AUTOPR_CODEX_MODEL=gpt-5.6-sol
+        AUTOPR_CODEX_REASONING_EFFORT=medium
+        AUTOPR_TASK_ID="$TASK_ID"
+    )
+    [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
+    "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
         "${ATTACH_ARGS[@]}"
 }
 
@@ -343,3 +387,4 @@ jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
 mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
 mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+"$SCRIPT_DIR/checkpoint.sh" consume "$CARD_FILE"

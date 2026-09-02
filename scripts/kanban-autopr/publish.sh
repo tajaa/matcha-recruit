@@ -41,7 +41,8 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
-DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | join(",")' "$DECISION_FILE")"
+# A runtime extension is not standing product authority.
+DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | map(select(. == "draft_pr" or . == "trust_still_broken")) | join(",")' "$DECISION_FILE")"
 DIRECTIVE_MARKER=""
 [ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
 ALLOW_MIGRATION_VERSION=false
@@ -93,25 +94,52 @@ else
 fi
 
 progress_note_with_origin() {
-    local marker="$1" existing="$2" remainder
+    local marker="$1" existing="$2" header body preserved remainder
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
-    remainder="$(printf '%s' "$existing" | sed -E \
+    header="${existing%%$'\n'*}"
+    if [ "$header" = "$existing" ]; then
+        body=""
+    else
+        body="${existing#*$'\n'}"
+    fi
+    if [[ "$header" != "from auto setup"* ]] && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        # Entirely human-authored: nothing of it is this system's to rewrite.
+        header="$existing"
+        body=""
+    fi
+    # Drop only the machine-written blocks below the header: the pause report
+    # and the question form (always written last). Everything else on those
+    # lines is the operator's and survives the next cycle.
+    preserved="$(printf '%s\n' "$body" | awk '
+        /^Answers needed — reply below with the numbered choices:/ { exit }
+        /^(Why more time|Done so far|Latest progress|Next step):/ { next }
+        NF { seen = 1 }
+        seen { lines[n++] = $0 }
+        END {
+            while (n > 0 && lines[n-1] ~ /^[[:space:]]*$/) n--
+            for (i = 0; i < n; i++) print lines[i]
+        }
+    ')"
+    remainder="$(printf '%s' "$header" | sed -E \
         's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
+    # PAUSED belongs in this alternation: checkpoint.sh writes it, so without
+    # it every recovery run would re-append its own stale pause header here.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
-    if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+    if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
         printf '%s · %s' "$marker" "$remainder"
-    elif [ -n "$existing" ] \
-        && [[ "$existing" != "from auto setup"* ]] \
-        && [[ "$existing" != "🤖 AUTO SETUP"* ]]; then
-        printf '%s · %s' "$marker" "$existing"
+    elif [ -n "$header" ] \
+        && [[ "$header" != "from auto setup"* ]] \
+        && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        printf '%s · %s' "$marker" "$header"
     else
         printf '%s' "$marker"
     fi
+    [ -z "$preserved" ] || printf '\n%s' "$preserved"
 }
 
 report_summary() {
@@ -468,6 +496,12 @@ card_column=in_progress
 origin_note="$(progress_note_with_origin \
     "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
+if [ "$AWAITING_HUMAN" = true ]; then
+    card_questions="$(autopr_render_card_questions "$DECISION_FILE")"
+    [ -z "$card_questions" ] || origin_note="$origin_note
+
+$card_questions"
+fi
 replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \

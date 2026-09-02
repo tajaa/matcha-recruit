@@ -170,6 +170,14 @@ def _is_autopr_waiting_for_answers_note(note: str) -> bool:
     )
 
 
+def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
+    normalized = (note or "").strip()
+    return (
+        normalized.startswith("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+        or normalized.startswith("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
+    )
+
+
 def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
     """Parse operator-owned directives from decision-bound context.
 
@@ -206,6 +214,13 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
             ))
         ) and "trust_still_broken" not in directives:
             directives.append("trust_still_broken")
+        if marked and instruction in {
+            "extend-runtime",
+            "extend runtime",
+            "allow-more-time",
+            "allow more time",
+        } and "extend_runtime" not in directives:
+            directives.append("extend_runtime")
         route_match = _AUTOPR_TEST_ROUTE_RE.search(directive_text) if marked else None
         if route_match:
             candidate = route_match.group(1).rstrip(".,;)")
@@ -334,7 +349,14 @@ async def request_autopr_reconsideration(
                     "The AutoPR decision changed; refresh the ticket and try again"
                 )
             waiting_for_answers = _is_autopr_waiting_for_answers_note(current_note)
-            if not _AUTOPR_NO_SPEC_RE.search(current_note) and not waiting_for_answers:
+            waiting_for_runtime_approval = _is_autopr_waiting_for_runtime_approval_note(
+                current_note
+            )
+            if (
+                not _AUTOPR_NO_SPEC_RE.search(current_note)
+                and not waiting_for_answers
+                and not waiting_for_runtime_approval
+            ):
                 raise AutoPRReconsiderationConflict(
                     "This ticket no longer has an AutoPR decision awaiting context"
                 )

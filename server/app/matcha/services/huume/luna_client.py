@@ -8,9 +8,14 @@ objects to Responses API inputs and translates Luna function calls back.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import math
+import random
+import re
 import time
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,6 +27,23 @@ from app.core.services.ai_usage import record_openai_response
 
 
 _RESPONSES_URL = "https://api.openai.com/v1/responses"
+_MAX_RATE_LIMIT_RETRIES = 2
+_DEFAULT_TOTAL_TIMEOUT_SECONDS = 55.0
+_MIN_RETRY_ATTEMPT_SECONDS = 1.0
+_MAX_FALLBACK_DELAY_SECONDS = 30.0
+_RETRY_JITTER_SECONDS = 0.5
+_DURATION_PART_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)(ms|[smhd])", re.IGNORECASE)
+_RETRY_MESSAGE_RE = re.compile(
+    r"try again in\s+((?:[0-9]+(?:\.[0-9]+)?(?:ms|[smhd])\s*)+)",
+    re.IGNORECASE,
+)
+_RESET_HEADERS = (
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-reset-tokens",
+    "x-ratelimit-reset-project-tokens",
+)
+
+_RequestHook = Callable[[], Awaitable[None]]
 
 
 def _schema(schema: Any) -> dict[str, Any]:
@@ -125,6 +147,73 @@ def _http_error_detail(exc: httpx.HTTPError) -> str:
     return f"HTTP {response.status_code}: {response.text[:1000]}"
 
 
+def _duration_seconds(value: Any) -> float | None:
+    """Parse OpenAI reset durations such as ``100ms`` or ``6m0s``."""
+    matches = list(_DURATION_PART_RE.finditer(str(value or "")))
+    if not matches:
+        return None
+    multipliers = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+    return sum(
+        float(match.group(1)) * multipliers[match.group(2).lower()]
+        for match in matches
+    )
+
+
+def _rate_limit_delay(response: httpx.Response, retry_number: int) -> float:
+    """Return a provider-safe delay with jitter for a transient 429."""
+    jitter = random.uniform(0.0, _RETRY_JITTER_SECONDS)
+    retry_after = response.headers.get("retry-after")
+    if retry_after:
+        try:
+            delay = float(retry_after)
+            if math.isfinite(delay) and delay >= 0:
+                # Retry-After is a minimum. Never cap or shorten it; the total
+                # request budget below decides whether a retry can fit.
+                return delay + jitter
+        except ValueError:
+            pass
+
+    retry_message_delay = None
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            message_match = _RETRY_MESSAGE_RE.search(str(error.get("message") or ""))
+            if message_match:
+                retry_message_delay = _duration_seconds(message_match.group(1))
+    except (TypeError, ValueError):
+        pass
+    if retry_message_delay is not None:
+        # The error message describes when this specific request can fit again;
+        # reset headers describe when an entire bucket returns to its initial
+        # state, which can be much later (for example 9.675s vs. 6m0s).
+        return retry_message_delay + jitter
+
+    candidates = [response.headers.get(name) for name in _RESET_HEADERS]
+    parsed = [delay for candidate in candidates if (delay := _duration_seconds(candidate)) is not None]
+    if parsed:
+        # A 429 may be constrained by requests, organization tokens, or
+        # project tokens. Waiting for the longest advertised reset is the safe
+        # choice when the response does not identify a single dimension.
+        return max(parsed) + jitter
+    fallback = min(10.0 * (2 ** retry_number), _MAX_FALLBACK_DELAY_SECONDS)
+    return fallback + jitter
+
+
+def _is_retryable_rate_limit(exc: httpx.HTTPStatusError) -> bool:
+    if exc.response.status_code != 429:
+        return False
+    try:
+        payload = exc.response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        return not (
+            isinstance(error, dict)
+            and "insufficient_quota" in (error.get("code"), error.get("type"))
+        )
+    except (TypeError, ValueError):
+        return True
+
+
 class _LunaModels:
     def __init__(self) -> None:
         self._previous_response_id: str | None = None
@@ -148,10 +237,21 @@ class _LunaModels:
             })
         return outputs
 
-    async def generate_content(self, *, model: str, contents: list[Any], config: Any):
+    async def generate_content(
+        self,
+        *,
+        model: str,
+        contents: list[Any],
+        config: Any,
+        timeout_seconds: float = _DEFAULT_TOTAL_TIMEOUT_SECONDS,
+        before_request: _RequestHook | None = None,
+        after_request: _RequestHook | None = None,
+    ):
         settings = get_settings()
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required for Huume Luna")
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
         follow_up = self._previous_response_id is not None
         payload: dict[str, Any] = {
             "model": model,
@@ -176,29 +276,86 @@ class _LunaModels:
             payload["text"] = {"format": {"type": "json_object"}}
 
         started = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    _RESPONSES_URL,
-                    headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                    json=payload,
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            error_detail = _http_error_detail(exc)
-            await record_openai_response(
-                model=model,
-                latency_ms=int((time.monotonic() - started) * 1000),
-                error=error_detail,
-                status="timeout" if isinstance(exc, httpx.TimeoutException) else "error",
-            )
-            raise RuntimeError(f"OpenAI Responses request failed: {error_detail}") from exc
+        deadline = started + timeout_seconds
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            for retry_number in range(_MAX_RATE_LIMIT_RETRIES + 1):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("OpenAI Responses request deadline elapsed before an API attempt")
+                if before_request is not None:
+                    await before_request()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("OpenAI Responses request deadline elapsed before an API attempt")
+
+                attempt_started = time.monotonic()
+                try:
+                    async with asyncio.timeout(remaining):
+                        response = await client.post(
+                            _RESPONSES_URL,
+                            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                            json=payload,
+                        )
+                except asyncio.CancelledError:
+                    await record_openai_response(
+                        model=model,
+                        latency_ms=int((time.monotonic() - attempt_started) * 1000),
+                        error="OpenAI Responses request cancelled",
+                        status="timeout",
+                    )
+                    raise
+                except TimeoutError as exc:
+                    error_detail = f"request exceeded {timeout_seconds:g}s total deadline"
+                    await record_openai_response(
+                        model=model,
+                        latency_ms=int((time.monotonic() - attempt_started) * 1000),
+                        error=error_detail,
+                        status="timeout",
+                    )
+                    raise RuntimeError(f"OpenAI Responses request failed: {error_detail}") from exc
+                except httpx.HTTPError as exc:
+                    error_detail = _http_error_detail(exc)
+                    await record_openai_response(
+                        model=model,
+                        latency_ms=int((time.monotonic() - attempt_started) * 1000),
+                        error=error_detail,
+                        status="timeout" if isinstance(exc, httpx.TimeoutException) else "error",
+                    )
+                    raise RuntimeError(f"OpenAI Responses request failed: {error_detail}") from exc
+                finally:
+                    if after_request is not None:
+                        await after_request()
+
+                try:
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    error_detail = _http_error_detail(exc)
+                    await record_openai_response(
+                        model=model,
+                        latency_ms=int((time.monotonic() - attempt_started) * 1000),
+                        error=error_detail,
+                        status="error",
+                    )
+                    if (
+                        retry_number >= _MAX_RATE_LIMIT_RETRIES
+                        or not _is_retryable_rate_limit(exc)
+                    ):
+                        raise RuntimeError(f"OpenAI Responses request failed: {error_detail}") from exc
+                    delay = _rate_limit_delay(response, retry_number)
+                    remaining = deadline - time.monotonic()
+                    if delay + _MIN_RETRY_ATTEMPT_SECONDS > remaining:
+                        raise RuntimeError(
+                            "OpenAI Responses request failed: "
+                            f"{error_detail} (retry delay {delay:.3f}s exceeds the remaining "
+                            f"{max(remaining, 0.0):.3f}s request budget)"
+                        ) from exc
+                    await asyncio.sleep(delay)
         try:
             data = response.json()
         except (TypeError, ValueError) as exc:
             await record_openai_response(
                 model=model,
-                latency_ms=int((time.monotonic() - started) * 1000),
+                latency_ms=int((time.monotonic() - attempt_started) * 1000),
                 error=f"Invalid Responses JSON: {exc}",
                 status="error",
             )
@@ -206,7 +363,7 @@ class _LunaModels:
         if not isinstance(data, dict):
             await record_openai_response(
                 model=model,
-                latency_ms=int((time.monotonic() - started) * 1000),
+                latency_ms=int((time.monotonic() - attempt_started) * 1000),
                 error="OpenAI Responses payload must be an object",
                 status="error",
             )
@@ -240,7 +397,7 @@ class _LunaModels:
         )
         await record_openai_response(
             model=model,
-            latency_ms=int((time.monotonic() - started) * 1000),
+            latency_ms=int((time.monotonic() - attempt_started) * 1000),
             response=data,
         )
         return SimpleNamespace(

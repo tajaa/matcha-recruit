@@ -70,10 +70,9 @@ def task_draft_declarations() -> list[types.FunctionDeclaration]:
         items=types.Schema(type=types.Type.STRING),
     )
     return [
-        *_read_declarations(),
         _tool(
             "draft_ticket",
-            "Finish with one repo-grounded, reviewable kanban ticket draft.",
+            "Finish with one architecture-guide-grounded, reviewable kanban ticket draft.",
             {
                 "title": string("Short imperative title, at most 80 characters"),
                 "description": string("Concise Markdown that explains scope and acceptance criteria"),
@@ -83,7 +82,7 @@ def task_draft_declarations() -> list[types.FunctionDeclaration]:
                 "assignee_name": string("Exact collaborator name, or an empty string"),
                 "element_name": string("Exact project element name, or an empty string"),
                 "subtasks": strings("Three to six short, ordered, verifiable checklist steps"),
-                "sources": strings("Repository citations as path:line or path:start-end"),
+                "sources": strings("CLAUDE.md or AGENTS.md citations as path:line or path:start-end"),
             },
             [
                 "title", "description", "priority", "category", "board_column",

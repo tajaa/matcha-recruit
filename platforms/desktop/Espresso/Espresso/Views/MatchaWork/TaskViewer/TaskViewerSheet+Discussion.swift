@@ -113,7 +113,11 @@ extension TaskViewerSheet {
             HStack(spacing: 6) {
                 TextField(
                     isAddingAutoPRContext
-                        ? "Add evidence or explain what AutoPR missed…"
+                        ? (autoPRNeedsRuntimeApproval
+                            ? "Keep --extend-runtime to approve 10 more minutes…"
+                            : (autoPRIsAwaitingAnswers
+                                ? "Enter numbered answers (1-a, 2-b, …)…"
+                                : "Add evidence or explain what AutoPR missed…"))
                         : (replyingToNote == nil ? "Add a note…" : "Write a reply…"),
                     text: $newNote
                 )

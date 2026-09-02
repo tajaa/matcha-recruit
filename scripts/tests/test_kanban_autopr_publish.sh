@@ -155,7 +155,14 @@ check "publisher does not checkpoint feedback that investigation never consumed"
 check "question draft title exposes criticality and confidence" \
   $(grep -q '🔴 \[C42\] \[QUESTIONS\] fix: Clarify terminology' "$TMP_DIR/gh.log" && echo 0 || echo 1)
 check "card remains Changes Requested with a visible auto-setup note" \
-  $(jq -e '.board_column == "changes_requested" and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")) and (.progress_note | endswith("note: Needs the canonical term before labels and tests can be updated safely."))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+  $(jq -e '.board_column == "changes_requested"
+      and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))
+      and (.progress_note | contains("note: Needs the canonical term before labels and tests can be updated safely."))' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+check "an awaiting-answers card carries the answer form the operator replies to" \
+  $(jq -e '(.progress_note | contains("Answers needed — reply below with the numbered choices:"))
+      and (.progress_note | contains("1. Which term is canonical?"))' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 check "publisher replies to the triggering additional-context note" \
   $(jq -e '.kind == "note" and .reply_to == "eeeeeeee-0000-4000-8000-000000000001" and (.body | contains("still needs human answers in PR #501"))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
 check "publisher sends a decision-bound result notification to the context author" \

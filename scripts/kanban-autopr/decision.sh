@@ -160,13 +160,27 @@ autopr_render_questions() {
     jq -r '
       if (.questions | length) == 0 then empty else
         "## Answers needed\n\n" +
-        ([.questions[] |
-          "1. " + .question + "\n" +
-          (.options | map("   - " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
-          "   - Suggested default: " + .default_assumption + "\n" +
-          "   - Why this blocks implementation: " + .why_blocking
+        ([.questions | to_entries[] |
+          ((.key + 1) | tostring) + ". " + .value.question + "\n" +
+          (.value.options | map("   - " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
+          "   - Suggested default: " + .value.default_assumption + "\n" +
+          "   - Why this blocks implementation: " + .value.why_blocking
         ] | join("\n\n")) +
-        "\n\nReply on this PR. The next local cycle will ingest a new human comment or review and update this same draft."
+        "\n\nAnswer in the linked Kanban ticket with **Add additional context**, or reply on this PR. The next local cycle will ingest either answer and update this same draft."
+      end
+    ' "$decision_file"
+}
+
+autopr_render_card_questions() {
+    local decision_file="$1"
+    jq -r '
+      if (.questions | length) == 0 then empty else
+        "Answers needed — reply below with the numbered choices:\n" +
+        ([.questions | to_entries[] |
+          ((.key + 1) | tostring) + ". " + .value.question + "\n" +
+          (.value.options | map("   " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
+          "   Suggested default: " + .value.default_assumption
+        ] | join("\n\n"))
       end
     ' "$decision_file"
 }

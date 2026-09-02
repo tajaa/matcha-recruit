@@ -30,6 +30,7 @@ MODEL_CONTAINER_ROOT="/workspace"
 CODEX_MODEL="${AUTOPR_CODEX_MODEL:-gpt-5.6-sol}"
 CODEX_REASONING_EFFORT="${AUTOPR_CODEX_REASONING_EFFORT:-medium}"
 REQUIRE_EMPTY_PATCH="${AUTOPR_CODEX_REQUIRE_EMPTY_PATCH:-0}"
+RESUME_PATCH="${AUTOPR_RESUME_PATCH:-}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
@@ -99,6 +100,25 @@ git -C "$SANDBOX_WORKSPACE" remote remove origin
 git -C "$SANDBOX_WORKSPACE" config core.hooksPath /dev/null
 
 mkdir -p "$IO_DIR/input" "$IO_DIR/output"
+printf '%s\n' "$MODEL_BASE_SHA" > "$IO_DIR/model-base-sha"
+# Bind this clone to the card it was made for. The runtime root survives
+# between runs and is only wiped here, so a checkpoint taken by a run that died
+# before reaching this point must be able to tell that the workspace still
+# holds the PREVIOUS card's work.
+[ -z "${AUTOPR_TASK_ID:-}" ] || printf '%s\n' "$AUTOPR_TASK_ID" > "$IO_DIR/task-id"
+
+# Apply saved model work only in the disposable clone. Later patch checks still
+# decide whether it may reach the trusted checkout.
+if [ -n "$RESUME_PATCH" ]; then
+    if [ -f "$RESUME_PATCH" ] \
+        && [ "$(wc -c < "$RESUME_PATCH" | tr -d '[:space:]')" -le "$MAX_PATCH_BYTES" ] \
+        && git -C "$SANDBOX_WORKSPACE" apply --check --binary "$RESUME_PATCH"; then
+        git -C "$SANDBOX_WORKSPACE" apply --binary "$RESUME_PATCH"
+        printf 'Restored interrupted AutoPR patch inside msandbox\n'
+    else
+        printf 'Saved AutoPR patch no longer applies; continuing with its textual checkpoint only\n' >&2
+    fi
+fi
 
 MODEL_INPUT_LIST=""
 PATH_MAP='{}'

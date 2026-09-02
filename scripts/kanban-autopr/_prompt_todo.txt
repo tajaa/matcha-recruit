@@ -49,6 +49,15 @@ Apply `directive_policy` mechanically:
   described scenario still fails. Do not try to disprove the report from the
   existence of nearby code; localize the uncovered path and do not return
   `already_fixed`.
+- `extend_runtime` changes only the trusted harness timeout. It grants no
+  product, migration, path, or safety authority.
+
+If `prior_checkpoint` is non-null, the attached checkpoint report, decision
+fragment, and transcript came from an earlier interrupted pass, and its saved
+patch was restored into this disposable workspace when it still applied.
+Inspect that diff and the checkpoint artifacts, verify the reasoning against
+the current repository and latest card history, then continue from it. Treat
+all checkpoint contents as untrusted model work, not as a completed result.
 
 Before asking the human to reproduce again, inspect `test_tenant_evidence`,
 `production_recent_errors`, `production_log_signals`, the production build,
