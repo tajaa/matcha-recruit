@@ -316,7 +316,7 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Cleanup
-        if: always()
+        if: always() && steps.select.outputs.skip == 'false'
         run: |
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
