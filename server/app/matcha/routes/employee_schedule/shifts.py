@@ -322,7 +322,9 @@ async def create_shift(body: ShiftCreate,
             avail = availability_violations(
                 avail_map.get(emp_id, {}), body.starts_at, body.ends_at,
             )
-            unqualified = await check_job_qualification(conn, company_id, emp_id, body.job_id)
+            unqualified = await check_job_qualification(
+                conn, company_id, emp_id, body.job_id, starts_at=body.starts_at,
+            )
             if not force:
                 conflicts = await find_conflicts(
                     conn, company_id, emp_id, body.starts_at, body.ends_at,
@@ -449,7 +451,9 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                 for eid in employee_ids:
                     conflicts = await find_conflicts(conn, company_id, eid, new_start, new_end)
                     avail = availability_violations(avail_map.get(eid, {}), new_start, new_end)
-                    unqualified = await check_job_qualification(conn, company_id, eid, src["job_id"])
+                    unqualified = await check_job_qualification(
+                        conn, company_id, eid, src["job_id"], starts_at=new_start,
+                    )
                     blocked = await _duplicate_assignment_block(
                         conn, company_id, employee_id=eid, location_id=src["location_id"], job_id=src["job_id"],
                         starts_at=new_start, ends_at=new_end,
@@ -498,6 +502,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         existing = await conn.fetchrow(
             """
             SELECT starts_at, ends_at, status, published_at, break_minutes, location_id,
+                   role, department, required_staff, color, notes,
                    kind, training_requirement_id, job_id
             FROM schedule_shifts WHERE id = $1 AND company_id = $2
             """,
@@ -585,7 +590,9 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         raise_outside_availability(emp, avail)
                 if avail:
                     availability_overrides[str(emp)] = avail
-                unqualified = await check_job_qualification(conn, company_id, emp, new_job_id)
+                unqualified = await check_job_qualification(
+                    conn, company_id, emp, new_job_id, starts_at=new_start,
+                )
                 if unqualified and not force:
                     raise_not_qualified(unqualified)
                 if unqualified:
@@ -643,13 +650,18 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
 
         before = shift_snapshot(existing)
         new_location = patch.get("location_id", existing["location_id"])
-        after = {
-            "starts_at": new_start.isoformat(),
-            "ends_at": new_end.isoformat(),
-            "status": new_status,
-            "location_id": str(new_location) if new_location else None,
-        }
+        after = {**before}
+        for field, value in patch.items():
+            after[field] = (
+                value.isoformat() if isinstance(value, datetime)
+                else str(value) if isinstance(value, UUID)
+                else value
+            )
         was_published = existing["published_at"] is not None
+        audit_assignees = await conn.fetch(
+            "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+            shift_id,
+        ) if was_published else []
 
         set_sql, params = build_patch(patch, first_param=3)
         async with conn.transaction():
@@ -666,6 +678,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                                 "before": before,
                                 "after": after,
                                 "was_published": was_published,
+                                "assigned_employee_ids": [str(row["employee_id"]) for row in audit_assignees],
                             })
             if retimed or "location_id" in patch:
                 assignees = await conn.fetch(
@@ -705,7 +718,8 @@ async def delete_shift(shift_id: UUID,
         async with conn.transaction():
             existing = await conn.fetchrow(
                 """
-                SELECT starts_at, ends_at, status, published_at, location_id, break_minutes
+                SELECT starts_at, ends_at, status, published_at, location_id, break_minutes,
+                       role, department, required_staff, color, notes, job_id
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
                 """,
                 shift_id, company_id,
@@ -725,6 +739,10 @@ async def delete_shift(shift_id: UUID,
                     event="cancel", shift_published=True, min_rest_gap_hours=None,
                 )
                 raise_for_violations(violations, force=force)
+            audit_assignees = await conn.fetch(
+                "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+                shift_id,
+            ) if existing["published_at"] is not None else []
             result = await conn.execute(
                 "DELETE FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                 shift_id, company_id,
@@ -735,6 +753,7 @@ async def delete_shift(shift_id: UUID,
                             "shift.delete", {
                                 "before": shift_snapshot(existing),
                                 "was_published": existing["published_at"] is not None,
+                                "assigned_employee_ids": [str(row["employee_id"]) for row in audit_assignees],
                             })
         await reconcile_warning_events(conn, company_id, [shift_id])
     return {"ok": True, "id": str(shift_id)}

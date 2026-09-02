@@ -1,0 +1,152 @@
+name: AutoPR self audit
+
+on:
+  workflow_dispatch:
+
+# The Mac dispatcher is the only clock. This lane audits the automation
+# itself, then lets Codex repair only a sealed allowlist inside msandbox.
+# Every publication is a draft PR; no self-audit change is auto-merged.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autopr-self-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: [self-hosted, macOS, opencode]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          clean: false
+
+      - name: Require msandbox master switch
+        run: |
+          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+            echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
+            exit 1
+          fi
+
+      - name: Configure GitHub CLI and label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth status
+          gh label create autopr-self-audit --color 5319E7 \
+            --description "Drafted by the sealed AutoPR self-audit lane" --force >/dev/null 2>&1 || true
+
+      - name: Reset interrupted audit branches
+        run: |
+          git worktree prune
+          current="$(git branch --show-current)"
+          if [[ "$current" == bot/autopr-audit-* ]]; then git switch main; fi
+          git branch --list 'bot/autopr-audit-*' | xargs -r -n1 git branch -D || true
+
+      - name: Run deterministic audit
+        id: audit
+        run: |
+          ./scripts/autopr-self-audit/audit.sh \
+            --json "$RUNNER_TEMP/autopr-audit.json" \
+            --summary "$RUNNER_TEMP/autopr-audit.md"
+          cat "$RUNNER_TEMP/autopr-audit.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "repairable=$(jq -r '.repairable_failures' "$RUNNER_TEMP/autopr-audit.json")" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$(jq -r '.fingerprint' "$RUNNER_TEMP/autopr-audit.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Create detached repair checkout
+        if: steps.audit.outputs.repairable != '0'
+        # Publication pushes detached HEAD explicitly. The runner checkout
+        # never owns the PR branch and therefore cannot block later checkout.
+        run: git switch --detach main
+
+      - name: Investigate and repair inside msandbox
+        id: investigate
+        if: steps.audit.outputs.repairable != '0'
+        timeout-minutes: 15
+        continue-on-error: true
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-autopr-self-audit-sandbox
+          AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox
+        run: |
+          ./scripts/autopr-self-audit/investigate.sh \
+            "$RUNNER_TEMP/autopr-audit.json" \
+            "$RUNNER_TEMP/autopr-audit-report.md" \
+            "$RUNNER_TEMP/autopr-audit-decision.json"
+
+      - name: Fail incomplete repair investigation
+        if: steps.audit.outputs.repairable != '0' && steps.investigate.outcome != 'success'
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+          echo "The repair model failed before producing a validated result; a later audit may retry." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Read repair decision
+        id: decision
+        if: steps.investigate.outcome == 'success'
+        run: |
+          cat "$RUNNER_TEMP/autopr-audit-decision.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "safe=$(jq -r '.safe_changes_present' "$RUNNER_TEMP/autopr-audit-decision.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify repaired contracts
+        if: steps.decision.outputs.safe == 'true'
+        run: |
+          ./scripts/autopr-self-audit/verify.sh \
+            "$RUNNER_TEMP/autopr-audit.json" \
+            "$RUNNER_TEMP/autopr-audit-after.json" \
+            "$RUNNER_TEMP/autopr-audit-verification.md"
+          cat "$RUNNER_TEMP/autopr-audit-verification.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record operator-only conclusion
+        if: steps.investigate.outcome == 'success' && steps.decision.outputs.safe != 'true'
+        run: |
+          cat > "$RUNNER_TEMP/autopr-audit-verification.md" <<'EOF'
+          ## Verification
+
+          No repository verification ran because the evidence requires operator action or had no safe reproducible fix.
+          EOF
+          cat "$RUNNER_TEMP/autopr-audit-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write commit subject
+        if: steps.decision.outputs.safe == 'true'
+        timeout-minutes: 5
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-autopr-self-audit-sandbox
+          AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox
+        run: |
+          ./scripts/kanban-autopr/write-commit-subject.sh fix "$RUNNER_TEMP/autopr-audit-commit-subject.json" \
+            -f "$RUNNER_TEMP/autopr-audit.json" \
+            -f "$RUNNER_TEMP/autopr-audit-decision.json" \
+            -f "$RUNNER_TEMP/autopr-audit-report.md" \
+            -f "$RUNNER_TEMP/autopr-audit-verification.md"
+
+      - name: Publish draft repair PR
+        if: steps.investigate.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/autopr-self-audit/publish.sh \
+            "$RUNNER_TEMP/autopr-audit.json" \
+            "$RUNNER_TEMP/autopr-audit-decision.json" \
+            "$RUNNER_TEMP/autopr-audit-report.md" \
+            "$RUNNER_TEMP/autopr-audit-verification.md" \
+            "$RUNNER_TEMP/autopr-audit-commit-subject.json"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          env AGENT_SANDBOX_PROJECT_NAME=matcha-autopr-self-audit-sandbox \
+            AGENT_SANDBOX_AUTOPR=1 \
+            SANDBOX_WORKSPACE_DIR="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/workspace" \
+            SANDBOX_AWS_DIR="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/empty-aws" \
+            SANDBOX_CODEX_AUTH_FILE="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/codex-auth/auth.json" \
+            ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
+          git reset --hard >/dev/null 2>&1 || true
+          git clean -fd >/dev/null 2>&1 || true
+          git switch --detach main >/dev/null 2>&1 || true
+          git worktree prune || true

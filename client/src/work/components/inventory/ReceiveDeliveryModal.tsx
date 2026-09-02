@@ -10,6 +10,7 @@ type DraftLine = ReceiptLine & {
   selectedItemId: string
   createNew: boolean
   editableQty: number
+  editableUnitPrice: string
   expiresOn: string
   commitError?: string
 }
@@ -20,6 +21,7 @@ function toDraftLine(line: ReceiptLine): DraftLine {
     selectedItemId: line.item_id ?? '',
     createNew: !line.item_id,
     editableQty: line.quantity ?? 0,
+    editableUnitPrice: line.unit_price === null ? '' : String(line.unit_price),
     expiresOn: '',
   }
 }
@@ -100,6 +102,9 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
           // flip a stranger's order to received.
           order_id: !l.createNew && l.selectedItemId === l.item_id ? (l.open_order_id ?? undefined) : undefined,
           expires_on: l.expiresOn || undefined,
+          vendor_sku: l.vendor_sku,
+          unit_price: l.editableUnitPrice === '' ? null : Number(l.editableUnitPrice),
+          pack_size: l.pack_size,
         })),
       })
       setDuplicateWarning(null)
@@ -177,6 +182,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
                     {[line.unit, line.pack_size].filter(Boolean).join(' · ')}
                   </div>
                 )}
+                {(line.vendor_sku || line.unit_price !== null) && <div className="text-xs text-zinc-500">{line.vendor_sku ? `Supplier SKU ${line.vendor_sku}` : 'Supplier line'} · review the price used for future buying guidance</div>}
                 {line.commitError && (
                   <div className="text-xs text-red-400">{line.commitError}</div>
                 )}
@@ -205,6 +211,16 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
                     value={line.editableQty}
                     onChange={(e) => updateLine(idx, { editableQty: Number(e.target.value) })}
                     className="w-24 text-sm rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={line.editableUnitPrice}
+                    onChange={(e) => updateLine(idx, { editableUnitPrice: e.target.value })}
+                    placeholder="Unit price"
+                    title="Reviewed supplier unit price (optional)"
+                    className="w-28 text-sm rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1"
                   />
                   <input
                     type="date"

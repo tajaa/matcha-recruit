@@ -44,8 +44,10 @@ REQUEST_SELECT = """
            r.review_notes, r.reviewed_at, r.created_at,
            e.first_name, e.last_name,
            te.first_name AS target_first_name, te.last_name AS target_last_name,
-           s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
-           cs.starts_at AS counter_shift_starts_at, cs.ends_at AS counter_shift_ends_at
+            s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
+            s.role AS shift_role, s.department AS shift_department,
+            cs.starts_at AS counter_shift_starts_at, cs.ends_at AS counter_shift_ends_at,
+            cs.role AS counter_shift_role, cs.department AS counter_shift_department
     FROM schedule_requests r
     JOIN employees e ON e.id = r.employee_id
     LEFT JOIN employees te ON te.id = r.target_employee_id
@@ -294,7 +296,10 @@ def raise_outside_availability(employee_id: UUID, violations: list[dict]) -> Non
     raise HTTPException(status_code=409, detail=availability_detail(employee_id, violations))
 
 
-async def check_job_qualification(conn, company_id: UUID, employee_id: UUID, job_id) -> Optional[dict]:
+async def check_job_qualification(
+    conn, company_id: UUID, employee_id: UUID, job_id,
+    *, starts_at: datetime,
+) -> Optional[dict]:
     """None when the shift carries no job (ungated — every pre-empsched04
     shift, or any shift with no job picked) or the employee is on that job's
     qualified list. Otherwise the 409 detail dict, for the caller to raise
@@ -313,10 +318,14 @@ async def check_job_qualification(conn, company_id: UUID, employee_id: UUID, job
                EXISTS (
                    SELECT 1 FROM schedule_job_employees je
                    WHERE je.job_id = j.id AND je.employee_id = $3
+                     AND je.company_id = $2
+                     AND je.qualification_status = 'active'
+                     AND (je.qualified_from IS NULL OR je.qualified_from <= $4)
+                     AND (je.qualified_until IS NULL OR je.qualified_until >= $4)
                ) AS qualified
         FROM schedule_jobs j WHERE j.id = $1 AND j.company_id = $2
         """,
-        job_id, company_id, employee_id,
+        job_id, company_id, employee_id, starts_at.date(),
     )
     if row is None or row["qualified"]:
         return None
@@ -510,12 +519,16 @@ def serialize_request(r) -> dict:
         "shift_id": str(r["shift_id"]) if r["shift_id"] else None,
         "shift_starts_at": _iso(r["shift_starts_at"]) if "shift_starts_at" in r else None,
         "shift_ends_at": _iso(r["shift_ends_at"]) if "shift_ends_at" in r else None,
+        "shift_role": r.get("shift_role"),
+        "shift_department": r.get("shift_department"),
         "target_employee_id": str(r["target_employee_id"]) if r["target_employee_id"] else None,
         "target_employee_name": _display_name(r.get("target_first_name"), r.get("target_last_name")),
         "counter_shift_id": str(r["counter_shift_id"]) if r.get("counter_shift_id") else None,
         "counterparty_confirmed_at": _iso(r["counterparty_confirmed_at"]) if r.get("counterparty_confirmed_at") else None,
         "counter_shift_starts_at": _iso(r["counter_shift_starts_at"]) if r.get("counter_shift_starts_at") else None,
         "counter_shift_ends_at": _iso(r["counter_shift_ends_at"]) if r.get("counter_shift_ends_at") else None,
+        "counter_shift_role": r.get("counter_shift_role"),
+        "counter_shift_department": r.get("counter_shift_department"),
         "unavailable_start": _iso(r["unavailable_start"]),
         "unavailable_end": _iso(r["unavailable_end"]),
         "reason": r["reason"],
@@ -549,17 +562,29 @@ async def fetch_roster(conn, company_id: UUID, location_id: Optional[UUID] = Non
         *params,
     )
     job_ids_by_employee: dict[str, list[str]] = {}
+    job_qualifications_by_employee: dict[str, list[dict]] = {}
     if rows:
         job_rows = await conn.fetch(
             """
-            SELECT je.employee_id, je.job_id
+            SELECT je.employee_id, je.job_id, je.qualified_from, je.qualified_until,
+                   (je.qualified_from IS NULL OR je.qualified_from <= CURRENT_DATE)
+                   AND (je.qualified_until IS NULL OR je.qualified_until >= CURRENT_DATE)
+                     AS currently_effective
             FROM schedule_job_employees je
             WHERE je.company_id = $1 AND je.employee_id = ANY($2::uuid[])
+              AND je.qualification_status = 'active'
             """,
             company_id, [r["id"] for r in rows],
         )
         for jr in job_rows:
-            job_ids_by_employee.setdefault(str(jr["employee_id"]), []).append(str(jr["job_id"]))
+            employee_key = str(jr["employee_id"])
+            if jr["currently_effective"]:
+                job_ids_by_employee.setdefault(employee_key, []).append(str(jr["job_id"]))
+            job_qualifications_by_employee.setdefault(employee_key, []).append({
+                "job_id": str(jr["job_id"]),
+                "qualified_from": jr["qualified_from"].isoformat() if jr["qualified_from"] else None,
+                "qualified_until": jr["qualified_until"].isoformat() if jr["qualified_until"] else None,
+            })
     return [
         {
             "id": str(r["id"]),
@@ -567,6 +592,7 @@ async def fetch_roster(conn, company_id: UUID, location_id: Optional[UUID] = Non
             "job_title": r["job_title"],
             "department": r["department"],
             "job_ids": job_ids_by_employee.get(str(r["id"]), []),
+            "job_qualifications": job_qualifications_by_employee.get(str(r["id"]), []),
         }
         for r in rows
     ]

@@ -24,11 +24,11 @@ const STEPS: GuideStep[] = [
     detail: <span>Start with a separate job for each area where the qualified roster is different.</span>,
   },
   {
-    eyebrow: '02 / Set the roster',
-    title: 'Choose who is qualified',
-    body: 'Expand a job, check the employees who are qualified, and save the roster. Everyone stays visible in the schedule, including people who are not checked.',
+    eyebrow: '02 / Define eligibility',
+    title: 'Set qualifications and credential rules',
+    body: 'Expand a job to choose qualified employees and add required credentials, such as a Food Handler Card. In the employee record’s Credentials tab, upload the document and confirm its expiration date when approving it.',
     icon: ClipboardCheck,
-    detail: <span>The server is the source of truth. The amber marker in the roster is only a preview of the assignment check.</span>,
+    detail: <span>Required credentials belong to the job, so they affect only relevant work. An extracted or unconfirmed expiration date is never trusted for scheduling.</span>,
   },
   {
     eyebrow: '03 / Attach the work',
@@ -56,7 +56,7 @@ const STEPS: GuideStep[] = [
     title: 'Place people where they belong',
     body: 'Drag a roster person onto a shift to assign them. Drag an assignment chip to another shift to move them, or click a person and then a shift if you prefer not to drag.',
     icon: Users,
-    detail: <span>Conflicts, availability, staffing limits, and scheduling-law checks still apply. An unqualified assignment can be overridden deliberately and is audit-logged.</span>,
+    detail: <span>Roster qualifications can be overridden deliberately and are audit-logged. Conflicts, availability, staffing limits, and missing or expired required credentials cannot be overridden.</span>,
   },
   {
     eyebrow: '07 / Review and publish',
@@ -68,7 +68,7 @@ const STEPS: GuideStep[] = [
   {
     eyebrow: '08 / Ask Huume',
     title: 'Build shifts by talking, not clicking',
-    body: 'Use Ask Huume in the top bar to describe what you need in plain language, or dictate by voice. Huume drafts the shifts or template changes and you review before anything saves.',
+    body: 'Use Ask Huume in the top bar to build the whole week from confirmed availability, describe a smaller change in plain language, or dictate by voice. Huume shows a proposal first; generated schedules land as editable drafts and only you publish them.',
     icon: Sparkles,
     detail: <span>Every AI-drafted change lands as an editable draft first — nothing is assigned or published without your confirmation.</span>,
   },
@@ -80,11 +80,11 @@ const STEPS: GuideStep[] = [
     detail: <span>A guidance note does not block the shift. Read it, resolve it, or record a waiver attestation before you publish.</span>,
   },
   {
-    eyebrow: '10 / Eligibility and swaps',
-    title: 'Eligibility and shift-transfer changes go through review',
-    body: 'A credential expiring (like a work permit) opens a location-scoped eligibility case instead of silently blocking assignment; a manager reviews and decides. Employee-initiated swaps and pickups need the other employee to confirm before a manager approves them.',
+    eyebrow: '10 / Keep cards current',
+    title: 'Food-handler expiry protection runs automatically',
+    body: 'Two weeks before a Food Handler Card expires, the employee and relevant managers receive a reminder. At expiry, future affected shifts are removed and every new assignment, move, Huume change, and publish is blocked until a renewed card is approved.',
     icon: ArrowLeftRight,
-    detail: <span>Nothing reassigns itself. Expiring credentials fail closed until reviewed, and every eligibility decision is audit-logged.</span>,
+    detail: <span>This protection starts only when Food Handler Card is required for the job. Approving a replacement card clears the scheduling block; every enforcement decision is audit-logged.</span>,
   },
 ]
 

@@ -27,20 +27,31 @@ struct KanbanBoardView: View {
     @State var inlineAddTitle: String = ""
     @State var hoveredEmptyColumn: String?
     @State private var searchText = ""
-    /// Done column collapses to the 5 most-recently-completed; expand shows all.
-    @State var doneExpanded = false
+    /// Number of completed cards rendered in Done. The backlog can contain
+    /// hundreds of tasks, so reveal it in small batches instead of mounting
+    /// every card when the user asks for earlier work.
+    @State var doneVisibleCount = 5
     /// Done column policy. `true` (default): the column resets every Monday and
     /// shows only what was finished this Pacific week — otherwise the board's
     /// completed pile grows without bound and buries the week's actual wins.
-    /// `false`: the all-time cumulative list, capped at 5 with a "show more".
-    /// Either way nothing is archived or deleted — the expander reveals the
-    /// rest, and the cards stay in `done` on the server.
+    /// `false`: the all-time cumulative list. Either way nothing is archived
+    /// or deleted — "Show more" reveals five cards at a time, and the cards
+    /// stay in `done` on the server.
     @AppStorage("kanban-done-weekly-reset") var doneWeeklyReset = true
     /// AI ticket drafting (natural language → reviewable draft).
     @State private var aiDrafting = false
     @State private var aiDraft: MWTaskDraft?
     @State private var showAIReview = false
     @State private var aiError: String?
+    /// Retained so the (up to 5-minute) agent poll is actually cancellable —
+    /// an unstructured `Task {}` with no handle left the compose bar spinning
+    /// with no way out and made `Task.checkCancellation()` in the service dead
+    /// code.
+    @State private var aiDraftTask: Task<Void, Never>?
+    /// Bumped on every submit and every cancel. A cancelled run can still land
+    /// its completion handler after the user has started a new draft, so each
+    /// handler checks it owns the current generation before touching state.
+    @State private var aiDraftGeneration = 0
     /// Header model selector (shared with threads/blog via the same AppStorage key).
     @AppStorage("mw-model") private var selectedModelId = "flash"
     private var selectedModelValue: String? {
@@ -210,7 +221,12 @@ struct KanbanBoardView: View {
                 if isPipeline {
                     pipelineSummaryBar
                 } else {
-                    AIComposeBar(isDrafting: aiDrafting, error: aiError) { submitAIDraft(prompt: $0) }
+                    AIComposeBar(
+                        isDrafting: aiDrafting,
+                        error: aiError,
+                        onCancel: cancelAIDraft,
+                        onDraft: { submitAIDraft(prompt: $0) }
+                    )
                 }
                 if showListView {
                     KanbanListView(
@@ -250,14 +266,19 @@ struct KanbanBoardView: View {
             if !doneWeeklyReset && !isPipeline {
                 await viewModel.loadAllDoneTasks()
             }
+            // Always reload suggestions from the server: the push webhook
+            // scans server-side on merge, so suggestions can exist even when
+            // the auto-scan below short-circuits on its cooldown. Without this
+            // the card badges wouldn't appear until a manual scan.
+            await viewModel.loadCommitSuggestions()
             // Auto-pick up merged commits → subtask check-offs (gated 10-min
             // cooldown; no-op if no repo connected). "Done = merged."
-            await viewModel.autoScanCommitsIfStale()
-            // Always reload from the server too: the push webhook scans
-            // server-side on merge, so suggestions can exist even when the
-            // auto-scan above short-circuits on its cooldown. Without this the
-            // card badges wouldn't appear until a manual scan.
-            await viewModel.loadCommitSuggestions()
+            //
+            // Detached, and ordered last: this hop goes server→GitHub, so
+            // awaiting it inline made the board's mount wait on a third-party
+            // API on every cold project switch. Its results land through the
+            // normal task/suggestion refresh.
+            Task { await viewModel.autoScanCommitsIfStale() }
         }
         // Tasks usually arrive after the board mounts — run the replay the
         // moment they do (maybeReplay is idempotent, guarded by didReplay), and
@@ -457,24 +478,48 @@ struct KanbanBoardView: View {
         guard !prompt.isEmpty, !aiDrafting, let pid = viewModel.project?.id else { return }
         aiDrafting = true
         aiError = nil
-        Task {
+        aiDraftTask?.cancel()
+        aiDraftGeneration += 1
+        let generation = aiDraftGeneration
+        aiDraftTask = Task {
             do {
                 let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(projectId: pid, prompt: prompt, model: selectedModelValue)
                 await MainActor.run {
+                    guard generation == aiDraftGeneration else { return }
                     aiDrafting = false
+                    aiDraftTask = nil
                     aiDraft = draft
                     showAIReview = true
                 }
+            } catch is CancellationError {
+                // cancelAIDraft already reset the bar.
             } catch {
                 await MainActor.run {
+                    guard generation == aiDraftGeneration else { return }
                     aiDrafting = false
+                    aiDraftTask = nil
                     if case APIError.httpError(let code, _) = error, code == 429 {
-                        aiError = "Daily AI limit reached (50 per 24 hours). Create tickets manually or try again later."
+                        aiError = "AI drafting limit reached. Create tickets manually or try again later."
+                    } else if case APIError.httpError(let code, _) = error, code == 402 {
+                        aiError = "This workspace has reached its AI token budget."
+                    } else if case APIError.httpError(let code, _) = error, code == 409 {
+                        aiError = "Espresso is already drafting a ticket for you in this project."
+                    } else if case APIError.httpError(let code, _) = error, code == 403 {
+                        aiError = "You have read-only access to this project."
                     } else {
                         aiError = "Couldn't draft that — try rephrasing."
                     }
                 }
             }
         }
+    }
+
+    /// User-initiated escape from a long agent run. The server run finishes on
+    /// its own; this only stops the client waiting on it.
+    private func cancelAIDraft() {
+        aiDraftTask?.cancel()
+        aiDraftTask = nil
+        aiDraftGeneration += 1
+        aiDrafting = false
     }
 }

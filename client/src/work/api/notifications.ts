@@ -12,7 +12,7 @@ export interface MWNotification {
 }
 
 export function getNotifications(unreadOnly = false, limit = 30) {
-  return api.get<{ notifications: MWNotification[] }>(
+  return api.get<{ notifications: MWNotification[]; total: number }>(
     `/matcha-work/notifications?unread_only=${unreadOnly}&limit=${limit}`
   )
 }

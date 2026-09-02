@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 
 // Redeems an employee-portal invite (server/app/matcha/routes/onboarding/invitations.py,
 // table employee_invitations) — the link sent in the new-hire welcome email
@@ -78,8 +79,7 @@ export default function EmployeeInviteAccept() {
         setSubmitError(data.detail ?? 'Could not create your account')
         return
       }
-      localStorage.setItem('matcha_access_token', data.access_token)
-      localStorage.setItem('matcha_refresh_token', data.refresh_token)
+      setAuthTokens(data.access_token, data.refresh_token)
       invalidateMeCache()
       navigate('/portal')
     } catch {

@@ -1,9 +1,10 @@
-import { Loader2, X, Trash2, ListChecks, Undo2, CheckCircle2, Plus, Copy, ClipboardCopy, Check } from 'lucide-react'
+import { Loader2, X, Trash2, ListChecks, Undo2, CheckCircle2, Plus, Copy, ClipboardCopy, Check, Bot } from 'lucide-react'
 import type { MWProjectTask, MWTaskAttachment, BoardColumn, TaskPriority } from '../../../types'
 import TaskAttachments from './TaskAttachments'
 import { KANBAN_COLUMNS } from '../../../utils/kanbanColumns'
 import { PRIORITIES } from './constants'
 import { useTaskDetailPanel } from './useTaskDetailPanel'
+import { autoPRProgressBanner } from '../../../utils/autoprProgress'
 
 interface TaskDetailPanelProps {
   projectId: string
@@ -28,6 +29,7 @@ export default function TaskDetailPanel({
   onSubtaskCountChange,
   onAttachmentsChange,
 }: TaskDetailPanelProps) {
+  const autoPRBanner = autoPRProgressBanner(task.progress_note, task.pr_number)
   const {
     setAttachments,
     duplicating,
@@ -117,6 +119,33 @@ export default function TaskDetailPanel({
               </select>
             </label>
           </div>
+
+          {/* Durable AutoPR outcome. This belongs inside the ticket as well as
+              on the compact card so "no PR" is an explained state, not a
+              silent absence that sends the owner hunting through Actions. */}
+          {autoPRBanner ? (
+            <div
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${
+                autoPRBanner.kind === 'ready'
+                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                  : autoPRBanner.kind === 'already_fixed' || autoPRBanner.kind === 'status'
+                    ? 'border-sky-500/35 bg-sky-500/10 text-sky-300'
+                    : 'border-orange-500/40 bg-orange-500/10 text-orange-300'
+              }`}
+              title={task.progress_note ?? undefined}
+            >
+              <Bot className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-semibold">AUTO SETUP</p>
+                <p className="mt-0.5 text-xs leading-relaxed">{autoPRBanner.message}</p>
+              </div>
+            </div>
+          ) : task.progress_note?.trim() ? (
+            <div className="rounded-lg border border-w-line bg-w-surface/60 px-3 py-2.5">
+              <p className="text-xs font-medium text-w-dim">Progress</p>
+              <p className="mt-1 text-sm text-w-text">{task.progress_note}</p>
+            </div>
+          ) : null}
 
           {/* Review send-back / approve — only while sitting in Review */}
           {task.board_column === 'review' && (

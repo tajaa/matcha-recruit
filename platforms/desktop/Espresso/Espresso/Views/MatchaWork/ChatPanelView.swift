@@ -14,7 +14,12 @@ struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
     var lightMode: Bool = false
     var selectedModel: String? = nil
-    @State private var inputText = ""
+    /// External seed for `ChatMessageComposer`. The live draft lives inside the
+    /// composer (local @State) so typing re-renders only it, not this body and
+    /// the message list it holds. Bump the nonce to push a value in — clear
+    /// after a send, or fill from a suggestion card.
+    @State private var draftSeed = ""
+    @State private var draftNonce = 0
 
     private var greetingText: String {
         let name: String
@@ -48,17 +53,20 @@ struct ChatPanelView: View {
 
     // Matches server-side `SendMessageRequest.content` Field(max_length=4000)
     private static let messageCharLimit = 4000
-    private var trimmedInputCount: Int {
-        inputText.trimmingCharacters(in: .whitespacesAndNewlines).count
-    }
-    private var isOverLimit: Bool { trimmedInputCount > Self.messageCharLimit }
 
-    private func send() {
-        var content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Push a value into the composer without binding it per keystroke.
+    private func prefillDraft(_ value: String) {
+        draftSeed = value
+        draftNonce &+= 1
+    }
+
+    private func send(_ raw: String) {
+        var content = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = pendingFiles
         // Allow sending with files but no text — server replies asking what the
         // user wants rather than auto-analyzing.
-        guard (!content.isEmpty || !files.isEmpty), !viewModel.isStreaming, !isOverLimit else { return }
+        guard (!content.isEmpty || !files.isEmpty), !viewModel.isStreaming,
+              content.count <= Self.messageCharLimit else { return }
         // Weave in a referenced ticket (from "Chat about this ticket") as a
         // compact reply-style prefix so the sent message reads like a reply and
         // the AI gets the ticket as context. Captured + cleared on send.
@@ -68,7 +76,7 @@ struct ChatPanelView: View {
             content = content.isEmpty ? prefix : "\(prefix)\n\n\(content)"
             appState.pendingTicketRef = nil
         }
-        inputText = ""
+        prefillDraft("")
         pendingFiles = []
         Task {
             var attachments: [MWMessageAttachment] = []
@@ -486,59 +494,16 @@ struct ChatPanelView: View {
     }
 
     @ViewBuilder private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            Button { pickFiles() } label: {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 17))
-                    .foregroundColor(
-                        viewModel.isUploadingImages
-                        ? Color.secondary.opacity(0.35)
-                        : .secondary
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isUploadingImages)
-            .help("Attach files — images, PDF, DOC/DOCX, TXT, MD, CSV, JSON")
-
-            TextField(inputPlaceholder, text: $inputText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundColor(appState.themeText)
-                .lineLimit(1...6)
-                .padding(.vertical, 8)
-                .onChange(of: inputText) { _, newValue in
-                    // Hard cap: trim past the limit so paste-bombs can't bypass send-disable
-                    if newValue.count > Self.messageCharLimit {
-                        inputText = String(newValue.prefix(Self.messageCharLimit))
-                    }
-                }
-                .onKeyPress(keys: [.return], phases: .down) { press in
-                    if press.modifiers.contains(.shift) {
-                        inputText += "\n"
-                        return .handled
-                    }
-                    send()
-                    return .handled
-                }
-
-            if trimmedInputCount > Self.messageCharLimit - 500 {
-                Text("\(trimmedInputCount)/\(Self.messageCharLimit)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(isOverLimit ? .red : .secondary)
-                    .help("Messages are capped at \(Self.messageCharLimit) characters")
-            }
-
-            Button { send() } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(
-                        inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOverLimit
-                        ? appState.themeTextSecondary : appState.themeAccent
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming || isOverLimit)
-        }
+        ChatMessageComposer(
+            placeholder: inputPlaceholder,
+            charLimit: Self.messageCharLimit,
+            isStreaming: viewModel.isStreaming,
+            isUploadingImages: viewModel.isUploadingImages,
+            seed: draftSeed,
+            seedNonce: draftNonce,
+            onSend: { send($0) },
+            onPickFiles: { pickFiles() }
+        )
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(appState.themeCard)
@@ -644,38 +609,38 @@ extension ChatPanelView {
                 icon: "rectangle.on.rectangle",
                 text: "Build a presentation with slides and speaker notes",
                 lightMode: lightMode
-            ) { inputText = "Create a presentation on this topic with slides and speaker notes." }
+            ) { prefillDraft("Create a presentation on this topic with slides and speaker notes.") }
             SuggestionCard(
                 title: "Executive summary",
                 icon: "chart.bar.doc.horizontal",
                 text: "One-pager summarizing key metrics and decisions",
                 lightMode: lightMode
-            ) { inputText = "Create a 1-page executive summary presentation with key highlights." }
+            ) { prefillDraft("Create a 1-page executive summary presentation with key highlights.") }
             SuggestionCard(
                 title: "Pitch deck",
                 icon: "arrow.up.forward.circle.fill",
                 text: "Persuasive slides for a pitch or proposal",
                 lightMode: lightMode
-            ) { inputText = "Build a pitch deck with problem, solution, market, and ask slides." }
+            ) { prefillDraft("Build a pitch deck with problem, solution, market, and ask slides.") }
         } else {
             SuggestionCard(
                 title: "Draft an offer letter",
                 icon: "doc.text.fill",
                 text: "Create a job offer letter for a Software Engineer candidate",
                 lightMode: lightMode
-            ) { inputText = "Draft an offer letter for a Software Engineer candidate named Jane." }
+            ) { prefillDraft("Draft an offer letter for a Software Engineer candidate named Jane.") }
             SuggestionCard(
                 title: "Performance review",
                 icon: "star.fill",
                 text: "Write a performance review highlighting key accomplishments",
                 lightMode: lightMode
-            ) { inputText = "Write a performance review highlighting key achievements and growth areas." }
+            ) { prefillDraft("Write a performance review highlighting key achievements and growth areas.") }
             SuggestionCard(
                 title: "Onboarding workbook",
                 icon: "book.fill",
                 text: "Build an onboarding guide or workbook for a new hire",
                 lightMode: lightMode
-            ) { inputText = "Create an onboarding workbook for a new engineer starting next week." }
+            ) { prefillDraft("Create an onboarding workbook for a new engineer starting next week.") }
         }
     }
 
@@ -771,57 +736,16 @@ extension ChatPanelView {
                     
                     ticketRefBar
 
-                    HStack(alignment: .bottom, spacing: 10) {
-                        Button { pickFiles() } label: {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 17))
-                                .foregroundColor(
-                                    viewModel.isUploadingImages
-                                    ? Color.secondary.opacity(0.35)
-                                    : .secondary
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isUploadingImages)
-                        .help("Attach files — images, PDF, DOC/DOCX, TXT, MD, CSV, JSON")
-
-                        TextField(inputPlaceholder, text: $inputText, axis: .vertical)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14))
-                            .foregroundColor(appState.themeText)
-                            .lineLimit(1...6)
-                            .padding(.vertical, 8)
-                            .onChange(of: inputText) { _, newValue in
-                                if newValue.count > Self.messageCharLimit {
-                                    inputText = String(newValue.prefix(Self.messageCharLimit))
-                                }
-                            }
-                            .onKeyPress(keys: [.return], phases: .down) { press in
-                                if press.modifiers.contains(.shift) {
-                                    inputText += "\n"
-                                    return .handled
-                                }
-                                send()
-                                return .handled
-                            }
-
-                        if trimmedInputCount > Self.messageCharLimit - 500 {
-                            Text("\(trimmedInputCount)/\(Self.messageCharLimit)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(isOverLimit ? .red : .secondary)
-                        }
-
-                        Button { send() } label: {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 28))
-                                .foregroundColor(
-                                    inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOverLimit
-                                    ? appState.themeTextSecondary : appState.themeAccent
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming || isOverLimit)
-                    }
+                    ChatMessageComposer(
+                        placeholder: inputPlaceholder,
+                        charLimit: Self.messageCharLimit,
+                        isStreaming: viewModel.isStreaming,
+                        isUploadingImages: viewModel.isUploadingImages,
+                        seed: draftSeed,
+                        seedNonce: draftNonce,
+                        onSend: { send($0) },
+                        onPickFiles: { pickFiles() }
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)

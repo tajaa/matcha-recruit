@@ -501,7 +501,8 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         # reads is proposal_id, merged in below by schedule_skill.propose —
         # not reconstructed from these on the confirm turn.
         "fields": (
-            "kind", "changes", "location_name", "target_employee_name", "target_date", "target_time_hint",
+            "kind", "changes", "all_vacant_shifts", "location_name", "target_shift_id",
+            "target_employee_name", "target_date", "target_time_hint",
             "target_staffing_hint", "target_role_hint",
             "to_employee_name", "second_employee_name", "second_date", "second_time_hint", "second_role_hint",
             "new_date", "new_start_time", "new_end_time", "shift_by_minutes",
@@ -511,6 +512,20 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "refused_label": "Schedule change refused",
         "done_label": "Schedule updated",
         "failed_label": "Schedule change not applied",
+        "done_status": "applied",
+    },
+    "build_week_schedule": {
+        "action_type": "schedule_week_draft",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": (
+            "source_mode", "week_template_id", "exclude_employee_ids",
+            "employee_hour_caps",
+        ),
+        "staged_label": "Staged: generated week",
+        "refused_label": "Generated week refused",
+        "done_label": "Applied generated week",
+        "failed_label": "Generated week not applied",
         "done_status": "applied",
     },
 }
@@ -688,6 +703,7 @@ async def run_huume_turn(
             "discipline_from_incident": "disciplinary action",
             "discipline_draft": "discipline write-up",
             "schedule_change": "schedule change",
+            "schedule_week_draft": "generated weekly schedule",
             "schedule_note": "assignment note",
             "meal_break_waiver": "meal-break waiver",
             "work_permit": "work permit",
@@ -793,6 +809,25 @@ async def run_huume_turn(
                 step = recorder.record(
                     tool=name, kind="read", label="Reviewed schedule overview",
                     status="ok" if ok else "rejected", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "get_week_build_readiness":
+                from app.matcha.services.scheduling.week_builder import get_week_build_readiness
+                if not surface_context.is_schedule or not surface_context.location_id or not surface_context.week_start:
+                    step = recorder.record(
+                        tool=name, kind="read", label="Schedule context unavailable", status="rejected",
+                    )
+                    return {"status": "refused", "message": "This tool requires a scoped schedule workspace."}, step
+                result = await get_week_build_readiness(
+                    company_id=company_id,
+                    location_id=surface_context.location_id,
+                    week_start=surface_context.week_start,
+                )
+                step = recorder.record(
+                    tool=name, kind="read", label="Checked week-building readiness",
+                    status="ok" if result.get("status") == "ok" else "rejected",
+                    detail=result.get("message"),
                 )
                 return _json_safe(result), step
 
@@ -1405,12 +1440,12 @@ async def run_huume_turn(
                 spec = _HR_OPS_TOOL_SPECS[name]
                 staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
                 if (
-                    name == "propose_schedule_change"
+                    name in {"propose_schedule_change", "build_week_schedule"}
                     and confirming
                     and not _has_explicit_schedule_confirmation(history)
                 ):
                     message = (
-                        "That schedule change is still waiting for your explicit confirmation. "
+                        "That schedule proposal is still waiting for your explicit confirmation. "
                         "Reply \"confirm\" to apply it, or tell me what to change."
                     )
                     step = recorder.record(
@@ -1463,6 +1498,53 @@ async def run_huume_turn(
                             "message": message,
                         }, step
                     staged.update({k: v for k, v in proposed.items() if k != "status"})
+                if name == "build_week_schedule" and not confirming:
+                    from app.matcha.services.scheduling.week_builder import propose_week_draft
+                    if not surface_context.is_schedule or not surface_context.location_id or not surface_context.week_start:
+                        message = "Building a whole week requires a scoped schedule workspace."
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Generated week not staged",
+                            status="rejected", detail=message,
+                        )
+                        return {"status": "refused", "message": message}, step
+                    proposed = await propose_week_draft(
+                        company_id=company_id,
+                        actor_user_id=user_id,
+                        thread_id=thread_id,
+                        location_id=surface_context.location_id,
+                        week_start=surface_context.week_start,
+                        source_mode=str(args.get("source_mode") or "auto"),
+                        week_template_id=args.get("week_template_id"),
+                        exclude_employee_ids=args.get("exclude_employee_ids"),
+                        employee_hour_caps=args.get("employee_hour_caps"),
+                    )
+                    proposal_status = proposed.get("status")
+                    if proposal_status != "ready":
+                        message = str(proposed.get("message") or "That week could not be built.")
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Generated week not staged",
+                            status="rejected", detail=message,
+                        )
+                        response = {"status": proposal_status or "refused", "message": message}
+                        if proposed.get("week_templates") is not None:
+                            response["week_templates"] = proposed["week_templates"]
+                        return _json_safe(response), step
+                    if (
+                        isinstance(pre_turn_action, dict)
+                        and pre_turn_action.get("type") == "schedule_week_draft"
+                        and pre_turn_action.get("status") == "proposed"
+                        and pre_turn_action.get("generation_run_id")
+                    ):
+                        from app.matcha.services.scheduling.week_builder import cancel_week_draft
+                        await cancel_week_draft(
+                            company_id=company_id,
+                            generation_run_id=UUID(str(pre_turn_action["generation_run_id"])),
+                        )
+                    staged.update({
+                        key: value for key, value in proposed.items() if key != "status"
+                    })
+                    staged["location_id"] = str(surface_context.location_id)
+                    staged["week_start"] = surface_context.week_start.isoformat()
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
@@ -1484,6 +1566,12 @@ async def run_huume_turn(
                         response["invoice_number"] = staged.get("invoice_number")
                         response["line_count"] = len(staged.get("lines") or [])
                         response["dup_warning"] = staged.get("dup_warning")
+                    if name == "build_week_schedule":
+                        response["summary"] = staged.get("summary")
+                        response["metrics"] = staged.get("metrics")
+                        response["unfilled"] = staged.get("unfilled")
+                        response["schedule_preview"] = staged.get("schedule_preview")
+                        response["preview_truncated"] = staged.get("preview_truncated")
                     return _json_safe(response), step
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label=spec["refused_label"], status="rejected", detail=verdict.message)
@@ -1572,6 +1660,13 @@ async def run_huume_turn(
                         cancel_msg = "Cancelled — that disciplinary action will not be filed."
                     elif staged.get("type") == "discipline_decision":
                         cancel_msg = "Cancelled — no approval decision was recorded."
+                    elif staged.get("type") == "schedule_week_draft":
+                        from app.matcha.services.scheduling.week_builder import cancel_week_draft
+                        await cancel_week_draft(
+                            company_id=company_id,
+                            generation_run_id=UUID(str(staged["generation_run_id"])),
+                        )
+                        cancel_msg = "Cancelled — that generated week will not be applied."
                     else:
                         cancel_msg = "Cancelled — that write-up will not be filed."
                     return {"status": "ok", "message": cancel_msg}, step

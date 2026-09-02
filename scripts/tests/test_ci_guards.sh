@@ -27,6 +27,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UPDATE_EC2="$REPO_ROOT/scripts/update-ec2.sh"
 BUILD_PUSH="$REPO_ROOT/scripts/build-and-push.sh"
+CI_WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
 
 PASS=0
 FAIL=0
@@ -169,11 +170,43 @@ fi
 # observation dispatch. The monitor is intentionally outside the swap path, so
 # deleting its call would silently restore the original observability gap.
 ################################################################################
-if grep -q 'trigger_post_deploy_monitor matcha' "$UPDATE_EC2" \
-    && grep -q 'post-deploy-error-regression.yml' "$UPDATE_EC2"; then
-    check "update-ec2.sh retains post-deploy error-monitor dispatch" 0
+if grep -q 'trigger_post_deploy_automations matcha' "$UPDATE_EC2" \
+    && grep -q 'post-deploy-error-regression.yml' "$UPDATE_EC2" \
+    && grep -q 'admin-updates-autopublish.yml' "$UPDATE_EC2" \
+    && grep -q 'post-deploy-fix-verification.yml' "$UPDATE_EC2"; then
+    check "update-ec2.sh retains post-deploy observation and fix-verification dispatches" 0
 else
-    check "update-ec2.sh retains post-deploy error-monitor dispatch" 1
+    check "update-ec2.sh retains post-deploy observation and fix-verification dispatches" 1
+fi
+
+if ! grep -q 'server/scripts/generate_changelog.py' "$UPDATE_EC2"; then
+    check "deploy no longer races the production publisher with legacy Gemini generation" 0
+else
+    check "deploy no longer races the production publisher with legacy Gemini generation" 1
+fi
+
+################################################################################
+# Case 9 — known main-branch failures must be matched exactly. A blanket
+# continue-on-error made PR #350 appear green even when unrelated tests broke.
+################################################################################
+if grep -q 'continue-on-error:' "$CI_WORKFLOW"; then
+    check "PR CI has no blanket continue-on-error escape hatch" 1
+else
+    check "PR CI has no blanket continue-on-error escape hatch" 0
+fi
+if grep -qF 'unexpected Vitest failures' "$CI_WORKFLOW" \
+    && grep -qF '7c1de748641e' "$CI_WORKFLOW" \
+    && grep -qF "cannot import name 'internal_mobility'" "$CI_WORKFLOW"; then
+    check "PR CI fingerprints each pre-existing main-branch failure" 0
+else
+    check "PR CI fingerprints each pre-existing main-branch failure" 1
+fi
+
+if ! grep -q 'cut -c1-1000' "$REPO_ROOT/.github/workflows/record-production-verification.yml" \
+    && grep -q "jq -Rrs '\.\[0:1000\]'" "$REPO_ROOT/.github/workflows/record-production-verification.yml"; then
+    check "manual production evidence truncation is Unicode-safe" 0
+else
+    check "manual production evidence truncation is Unicode-safe" 1
 fi
 echo
 echo "----------------------------------------"

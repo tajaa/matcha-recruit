@@ -49,7 +49,7 @@ extension AppState {
             let isCurrentChannel = self.selectedChannelId == msg.channelId
             let active = self.isSceneActive
             let enabled = ChannelNotificationManager.shared.appNotificationsEnabled
-            print(
+            mwLog(
                 "[AppState] onMessageGlobal channel=\(msg.channelId) "
                 + "self=\(isSelf) current=\(isCurrentChannel) "
                 + "sceneActive=\(active) enabled=\(enabled)"
@@ -80,7 +80,7 @@ extension AppState {
                 // don't double-cue.
                 if ChannelNotificationManager.shared.appNotificationsEnabled,
                    appFrontmost {
-                    print("[AppState] pushing channel toast — \(msg.senderName) in \(channelName)")
+                    mwLog("[AppState] pushing channel toast — \(msg.senderName) in \(channelName)")
                     let isAttachmentOnly =
                         msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         && !msg.attachments.isEmpty
@@ -134,11 +134,11 @@ extension AppState {
     private func installBroadcastHandlers() {
         let bsvc = BroadcastService.shared
         ChannelsWebSocket.shared.onBroadcastStarted = { event in
-            print("[AppState] WS broadcast.started channel=\(event.channelId)")
+            mwLog("[AppState] WS broadcast.started channel=\(event.channelId)")
             Task { @MainActor in await bsvc.handleBroadcastStarted(event) }
         }
         ChannelsWebSocket.shared.onBroadcastEnded = { event in
-            print("[AppState] WS broadcast.ended channel=\(event.channelId)")
+            mwLog("[AppState] WS broadcast.ended channel=\(event.channelId)")
             Task { @MainActor in await bsvc.handleBroadcastEnded(event) }
         }
         ChannelsWebSocket.shared.onBroadcastPublisherChanged = { event in
@@ -161,11 +161,11 @@ extension AppState {
         let csvc = CallService.shared
         csvc.currentUserId = currentUser?.id
         ChannelsWebSocket.shared.onCallStarted = { event in
-            print("[AppState] WS call.started channel=\(event.channelId)")
+            mwLog("[AppState] WS call.started channel=\(event.channelId)")
             Task { @MainActor in csvc.handleCallStarted(event) }
         }
         ChannelsWebSocket.shared.onCallEnded = { event in
-            print("[AppState] WS call.ended channel=\(event.channelId)")
+            mwLog("[AppState] WS call.ended channel=\(event.channelId)")
             Task { @MainActor in await csvc.handleCallEnded(event) }
         }
         ChannelsWebSocket.shared.onCallInvited = { event in

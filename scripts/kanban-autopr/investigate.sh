@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ask OpenCode to implement (todo) or address feedback on (rework) one
+# Ask Codex to implement (todo) or address feedback on (rework) one
 # kanban card, and write a structured report. Leaves any fix unstaged in the
 # working tree; never commits.
 #
@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib.sh"
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"
 RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.json}"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -48,6 +48,27 @@ files="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" 2>/
 printf '%s' "$subtasks" > "$WORK_DIR/subtasks.json"
 printf '%s' "$history" > "$WORK_DIR/history.json"
 printf '%s' "$files" > "$WORK_DIR/files.json"
+
+# Only the exact decision-bound reconsideration event may grant operator
+# directives. Card prose, comments, PR bodies, and unrelated history remain
+# untrusted evidence. Resolve structured metadata plus the same event's body
+# so context submitted before a parser upgrade remains actionable.
+DIRECTIVE_FILE="$WORK_DIR/directive-policy.json"
+python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
+    --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
+    --output "$DIRECTIVE_FILE"
+
+# An approved test tenant may be exercised by the trusted browser harness.
+# Credentials never enter context.json or msandbox; only a screenshot and
+# bounded same-origin console/network status reach the coding model.
+TEST_TENANT_EVIDENCE_FILE="$WORK_DIR/test-tenant-evidence.json"
+TEST_TENANT_SCREENSHOT="$WORK_DIR/test-tenant-reproduction.png"
+EVIDENCE_PYTHON="${AUTOPR_EVIDENCE_PYTHON:-$REPO_ROOT/server/venv/bin/python}"
+[ -x "$EVIDENCE_PYTHON" ] || EVIDENCE_PYTHON=python3
+"$EVIDENCE_PYTHON" "$SCRIPT_DIR/collect-test-tenant-evidence.py" \
+    --policy "$DIRECTIVE_FILE" \
+    --output "$TEST_TENANT_EVIDENCE_FILE" \
+    --screenshot "$TEST_TENANT_SCREENSHOT"
 
 # Production access stays in this trusted shell. Give the coding model bounded,
 # redacted diagnostics only: recent error reports, recent error-level container
@@ -134,7 +155,7 @@ while IFS= read -r file; do
     [ "$declared_size" -le "$MAX_SINGLE_ATTACHMENT_BYTES" ] 2>/dev/null || continue
     [ $((downloaded_bytes + declared_size)) -le "$MAX_ATTACHMENT_BYTES" ] 2>/dev/null || continue
 
-    safe_name="$(printf '%s' "$filename" | tr -cs '[:alnum:]._- ' '_' | cut -c1-120)"
+    safe_name="$(printf '%s' "$filename" | tr -cs '[:alnum:]_. -' '_' | cut -c1-120)"
     [ -n "$safe_name" ] || safe_name="attachment"
     local_path="$ATTACHMENT_DIR/$(printf '%02d' $((downloaded_count + 1)))-$safe_name"
 
@@ -165,17 +186,23 @@ jq -n \
     --slurpfile subtasks "$WORK_DIR/subtasks.json" \
     --slurpfile history "$WORK_DIR/history.json" \
     --slurpfile files "$WORK_DIR/files.json" \
+    --slurpfile directive_policy "$DIRECTIVE_FILE" \
+    --slurpfile test_tenant_evidence "$TEST_TENANT_EVIDENCE_FILE" \
     --slurpfile production_errors "$WORK_DIR/production-errors.json" \
     --slurpfile changes_since_production "$WORK_DIR/changes-since-production.json" \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    '{card: $card[0], directive_policy: $directive_policy[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
+
+if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
+    ATTACH_ARGS+=( -f "$TEST_TENANT_SCREENSHOT" )
+fi
 
 # Put the structured brief first, then the locally downloaded evidence. macOS
 # still ships Bash 3.2, where expanding an empty array under `set -u` raises an
 # "unbound variable" error. Branch explicitly so cards without attachments
-# reach OpenCode instead of failing before the investigation starts.
+# reach Codex instead of failing before the investigation starts.
 if [ "${#ATTACH_ARGS[@]}" -gt 0 ]; then
     ATTACH_ARGS=(-f "$CONTEXT_FILE" "${ATTACH_ARGS[@]}")
 else
@@ -205,45 +232,54 @@ else
     PROMPT_FILE="$SCRIPT_DIR/_prompt_todo.txt"
 fi
 
-PROMPT_TEXT="$(sed -e "s#REPORT_PATH#$REPORT_FILE#g" -e "s#DECISION_PATH#$RAW_DECISION_FILE#g" "$PROMPT_FILE")"
-
 # Defense in depth: this step's workflow env should already omit these, but
-# strip them here too in case a future edit adds them back. Mirror the model's
-# terminal output to one local, mode-600 observer log: GitHub does not expose
-# an in-progress step's stdout, while the operator explicitly needs to see
-# OpenCode/OpenAI investigate and edit the task live in tmux.
+# strip them here too in case a future edit adds them back. The production path
+# invokes a dedicated msandbox bridge; direct host execution exists only as an
+# explicit local test seam and is rejected inside GitHub Actions. Mirror the
+# sandboxed model's terminal output to one local, mode-600 observer log: GitHub
+# does not expose an in-progress step's stdout, while the operator explicitly
+# needs to see Codex investigate and edit the task live in tmux.
 LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
+SANDBOX_RUNNER="${AUTOPR_SANDBOX_RUNNER:-$SCRIPT_DIR/run-codex-sandboxed.sh}"
+TEST_DIRECT="${AUTOPR_SANDBOX_TEST_DIRECT:-0}"
+[ "$TEST_DIRECT" != 1 ] || [ "${GITHUB_ACTIONS:-}" != true ] \
+    || die "direct Codex execution is forbidden in GitHub Actions"
 live_log_ready=false
 if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
     if (umask 077; {
-        printf 'MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM\n'
-        printf 'run %s · task %s · mode %s · started %s\n\n' \
-            "${GITHUB_RUN_ID:-local}" "$ID8" "$MODE" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+        printf 'MATCHA KANBAN AUTOPR · CODEX LIVE STREAM\n'
+        printf 'run %s · task %s · mode %s · execution %s · started %s\n\n' \
+            "${GITHUB_RUN_ID:-local}" "$ID8" "$MODE" \
+            "$([ "$TEST_DIRECT" = 1 ] && printf test-direct || printf msandbox)" \
+            "$(date '+%Y-%m-%d %H:%M:%S %Z')"
     } > "$LIVE_LOG") 2>/dev/null; then
         live_log_ready=true
     fi
 fi
 
-run_opencode() {
+run_codex() {
+    [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
     env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        opencode run --auto --model openai/gpt-5.6-terra --variant high \
-        "${ATTACH_ARGS[@]}" \
-        -- "$PROMPT_TEXT"
+        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
+        AUTOPR_CODEX_MODEL=gpt-5.6-sol \
+        AUTOPR_CODEX_REASONING_EFFORT=medium \
+        "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
+        "${ATTACH_ARGS[@]}"
 }
 
 if [ "$live_log_ready" = true ]; then
-    run_opencode 2>&1 | tee -a "$LIVE_LOG"
-    opencode_rc="${PIPESTATUS[0]}"
+    run_codex 2>&1 | tee -a "$LIVE_LOG"
+    codex_rc="${PIPESTATUS[0]}"
 else
-    run_opencode
-    opencode_rc=$?
+    run_codex
+    codex_rc=$?
 fi
-if [ "$opencode_rc" -ne 0 ]; then
-    [ "$live_log_ready" != true ] || printf '\n[FAILED] OpenCode exited %s at %s\n' \
-        "$opencode_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
-    die "OpenCode investigation exited $opencode_rc"
+if [ "$codex_rc" -ne 0 ]; then
+    [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
+        "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+    die "Codex investigation exited $codex_rc"
 fi
-[ "$live_log_ready" != true ] || printf '\n[COMPLETE] OpenCode finished at %s\n' \
+[ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \
     "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
 
 if [ ! -s "$REPORT_FILE" ]; then
@@ -256,10 +292,10 @@ for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; 
     fi
 done
 
-# OpenCode's JSON is data, not authority. Keep the normalized result outside
+# Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
-"$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized"
+"$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE"
 jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     '. + {feedback_checkpoint: $checkpoint}' \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"

@@ -87,7 +87,7 @@ def test_fetch_shifts_and_fetch_roster_location_filters_are_deliberately_asymmet
 
     assert "location_id = ${len(params)} OR s.location_id IS NULL" in shifts_fn
     assert "work_location_id = ${len(params)}" in roster_fn
-    assert "IS NULL" not in roster_fn
+    assert "work_location_id IS NULL" not in roster_fn
 
 
 # ── week bounds + summary ───────────────────────────────────────────────────

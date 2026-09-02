@@ -23,6 +23,7 @@ from app.matcha.services.scheduling.schedule_rules import (
     availability_violations,
     sunday_indexed_weekday,
 )
+from app.matcha.services.scheduling.schedule_profiles import fetch_effective_job_employee_ids
 from app.matcha.services.scheduling.shift_writes import fetch_availability
 
 _SHIFT_CAP = 3
@@ -138,6 +139,12 @@ async def find_coverage_candidates(
         busy = {str(r["employee_id"]) for r in busy_rows} | assigned_ids
         free = [r for r in roster if str(r["id"]) not in busy]
 
+        qualified_ids = await fetch_effective_job_employee_ids(
+            conn, company_id=company_id, job_id=shift.get("job_id"),
+            employee_ids=[r["id"] for r in free], as_of=starts_at.date(),
+        )
+        free = [r for r in free if r["id"] in qualified_ids]
+
         avail_map = await fetch_availability(conn, company_id, [r["id"] for r in free])
         survivors = [
             r for r in free
@@ -181,7 +188,7 @@ async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, r
     if role_hint:
         return await conn.fetch(
             """
-            SELECT id, starts_at, ends_at, role, required_staff, location_id
+            SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
             FROM schedule_shifts
             WHERE company_id = $1 AND status = 'published'
               AND starts_at < $3 AND ends_at > $2
@@ -193,7 +200,7 @@ async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, r
         )
     return await conn.fetch(
         """
-        SELECT id, starts_at, ends_at, role, required_staff, location_id
+        SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
         FROM schedule_shifts
         WHERE company_id = $1 AND status = 'published'
           AND starts_at < $3 AND ends_at > $2

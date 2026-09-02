@@ -9,6 +9,9 @@ from app.matcha.models.scheduling.employee_schedule import (
     AvailabilityReplace, CounterpartyAccept, ScheduleRequestCreate,
 )
 from app.matcha.dependencies import require_employee_record
+from app.matcha.services.scheduling.time_off_guard import (
+    PUBLISHED_WEEK_TIME_OFF_DETAIL, has_published_schedule_week,
+)
 
 from ._shared import _schedule_dep
 
@@ -19,9 +22,10 @@ router = APIRouter()
 async def get_my_schedule(
     start: datetime = Query(...),
     end: datetime = Query(...),
+    team: bool = Query(False),
     employee: dict = Depends(require_employee_record),
 ):
-    """The signed-in employee's PUBLISHED shifts overlapping [start, end)."""
+    """Published shifts for the signed-in employee or their company team."""
     from app.matcha.routes.employee_schedule._shared import fetch_shifts
 
     if end <= start:
@@ -29,8 +33,16 @@ async def get_my_schedule(
     async with get_connection() as conn:
         shifts = await fetch_shifts(
             conn, employee["org_id"], start, end,
-            status="published", employee_id=employee["id"],
+            status="published", employee_id=None if team else employee["id"],
         )
+    if team:
+        # Team visibility supports finding coverage without exposing private
+        # manager notes, individualized guidance, or assignment controls.
+        for shift in shifts:
+            shift["assignments"] = [
+                {key: assignment[key] for key in ("employee_id", "name", "job_title", "status")}
+                for assignment in shift["assignments"]
+            ]
     return {"shifts": shifts}
 
 
@@ -101,6 +113,13 @@ async def create_my_schedule_request(
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
+        if (
+            body.request_type == "unavailable"
+            and await has_published_schedule_week(
+                conn, company_id, body.unavailable_start, body.unavailable_end,
+            )
+        ):
+            raise HTTPException(status_code=409, detail=PUBLISHED_WEEK_TIME_OFF_DETAIL)
         if body.request_type == "pickup" and body.target_employee_id is not None:
             raise HTTPException(status_code=422, detail="Pickup offers cannot name a target employee")
         # swap/drop/pickup must reference a PUBLISHED shift the employee is actually on.
@@ -139,21 +158,37 @@ async def create_my_schedule_request(
                     status_code=409,
                     detail="That coworker is no longer active and can't take the shift",
                 )
+        if body.counter_shift_id is not None:
+            counter = await conn.fetchrow(
+                """
+                SELECT s.status
+                FROM schedule_shifts s
+                JOIN schedule_shift_assignments a
+                  ON a.shift_id = s.id AND a.employee_id = $2 AND a.status <> 'declined'
+                WHERE s.id = $1 AND s.company_id = $3
+                """,
+                body.counter_shift_id, body.target_employee_id, company_id,
+            )
+            if not counter or counter["status"] != "published":
+                raise HTTPException(
+                    status_code=404,
+                    detail="Selected coworker shift is no longer available",
+                )
 
         async with conn.transaction():
             request_id = await conn.fetchval(
                 """
                 INSERT INTO schedule_requests
-                    (company_id, employee_id, request_type, shift_id, target_employee_id,
+                    (company_id, employee_id, request_type, shift_id, target_employee_id, counter_shift_id,
                      unavailable_start, unavailable_end, reason, status)
-                VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,
+                VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,
                         CASE WHEN $3::text IN ('pickup', 'swap')
-                             THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
+                              THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
                 RETURNING id
                 """,
                 company_id, employee["id"], body.request_type, body.shift_id,
-                body.target_employee_id, body.unavailable_start, body.unavailable_end,
-                body.reason,
+                body.target_employee_id, body.counter_shift_id, body.unavailable_start,
+                body.unavailable_end, body.reason,
             )
             await log_audit(
                 conn, company_id, "request", request_id, employee.get("user_id"),
@@ -208,9 +243,11 @@ async def accept_schedule_request(
             if request["request_type"] == "swap":
                 if request["target_employee_id"] != employee["id"]:
                     raise HTTPException(status_code=403, detail="Swap is addressed to another employee")
-                counter_shift_id = body.counter_shift_id
+                counter_shift_id = request["counter_shift_id"] or body.counter_shift_id
                 if counter_shift_id is None:
                     raise HTTPException(status_code=422, detail="counter_shift_id is required for a swap")
+                if request["counter_shift_id"] and body.counter_shift_id not in (None, request["counter_shift_id"]):
+                    raise HTTPException(status_code=422, detail="Accept the shift selected in the swap request")
                 if counter_shift_id == request["shift_id"]:
                     raise HTTPException(status_code=422, detail="A swap needs two different shifts")
             elif request["request_type"] == "pickup":
@@ -305,6 +342,9 @@ async def withdraw_schedule_request(
 ):
     """Withdraw an offer or a counterparty acceptance before manager review."""
     from app.matcha.routes.employee_schedule._shared import log_audit
+    from app.matcha.services.scheduling.schedule_request_notifications import (
+        mark_manager_ready_notifications_resolved,
+    )
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
@@ -327,13 +367,18 @@ async def withdraw_schedule_request(
                 await conn.execute(
                     """UPDATE schedule_requests
                        SET target_employee_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE target_employee_id END,
-                           counter_shift_id = NULL, counterparty_confirmed_at = NULL,
+                           counter_shift_id = CASE WHEN request_type = 'pickup' THEN NULL ELSE counter_shift_id END,
+                           counterparty_confirmed_at = NULL,
                            status = 'awaiting_counterparty', updated_at = NOW()
                        WHERE id = $1""",
                     request_id,
                 )
             else:
                 raise HTTPException(status_code=403, detail="You cannot withdraw this request")
+            if row["status"] == "awaiting_manager":
+                await mark_manager_ready_notifications_resolved(
+                    conn, company_id=company_id, request_id=request_id,
+                )
             await log_audit(
                 conn, company_id, "request", request_id, employee.get("user_id"),
                 "request.withdraw", {"employee_id": str(employee["id"])},
@@ -343,15 +388,17 @@ async def withdraw_schedule_request(
 
 @router.get("/me/schedule/availability", dependencies=_schedule_dep)
 async def get_my_availability(employee: dict = Depends(require_employee_record)):
+    from app.matcha.services.scheduling.schedule_profiles import (
+        fetch_availability_windows, fetch_schedule_profile,
+    )
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            "SELECT weekday, start_time, end_time FROM schedule_employee_availability "
-            "WHERE company_id = $1 AND employee_id = $2 ORDER BY weekday, start_time",
-            employee["org_id"], employee["id"],
+        windows = await fetch_availability_windows(
+            conn, company_id=employee["org_id"], employee_id=employee["id"],
         )
-    return {"windows": [
-        {"weekday": r["weekday"], "start_time": str(r["start_time"])[:5],
-         "end_time": str(r["end_time"])[:5]} for r in rows]}
+        profile = await fetch_schedule_profile(
+            conn, company_id=employee["org_id"], employee_id=employee["id"],
+        )
+    return {"availability_state": profile.availability_state, "windows": windows}
 
 
 @router.put("/me/schedule/availability", dependencies=_schedule_dep)
@@ -359,28 +406,18 @@ async def replace_my_availability(
     body: AvailabilityReplace,
     employee: dict = Depends(require_employee_record),
 ):
-    """Full replacement. Empty windows list clears availability entirely
-    (= back to fully available)."""
-    from app.matcha.routes.employee_schedule._shared import log_audit
+    """Full replacement; omitted state preserves legacy empty=always behavior."""
+    from app.matcha.services.scheduling.schedule_profiles import replace_availability_core
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
         async with conn.transaction():
-            await conn.execute(
-                "DELETE FROM schedule_employee_availability WHERE company_id = $1 AND employee_id = $2",
-                company_id, employee["id"],
+            result = await replace_availability_core(
+                conn, company_id=company_id, employee_id=employee["id"],
+                availability_state=body.availability_state, windows=body.windows,
+                actor_user_id=employee.get("user_id"), actor_kind="employee",
             )
-            for w in body.windows:
-                await conn.execute(
-                    "INSERT INTO schedule_employee_availability "
-                    "(company_id, employee_id, weekday, start_time, end_time) "
-                    "VALUES ($1,$2,$3,$4,$5)",
-                    company_id, employee["id"], w.weekday, w.start_time, w.end_time,
-                )
-            await log_audit(conn, company_id, "availability", employee["id"],
-                            employee.get("user_id"), "availability.update",
-                            {"windows": len(body.windows), "actor": "employee"})
-    return {"saved": len(body.windows)}
+    return {"saved": result["saved"], "availability_state": result["state"]}
 
 
 @router.delete("/me/schedule/requests/{request_id}", dependencies=_schedule_dep)
@@ -389,17 +426,25 @@ async def cancel_my_schedule_request(
     employee: dict = Depends(require_employee_record),
 ):
     """Backward-compatible cancellation endpoint for requests I filed."""
+    from app.matcha.services.scheduling.schedule_request_notifications import (
+        mark_manager_ready_notifications_resolved,
+    )
+
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE schedule_requests
-            SET status = 'cancelled', updated_at = NOW()
-            WHERE id = $1 AND employee_id = $2
-              AND status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')
-            RETURNING id
-            """,
-            request_id, employee["id"],
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Pending request not found")
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE schedule_requests
+                SET status = 'cancelled', updated_at = NOW()
+                WHERE id = $1 AND employee_id = $2
+                  AND status IN ('pending', 'awaiting_counterparty', 'awaiting_manager')
+                RETURNING id
+                """,
+                request_id, employee["id"],
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Pending request not found")
+            await mark_manager_ready_notifications_resolved(
+                conn, company_id=employee["org_id"], request_id=request_id,
+            )
     return {"status": "cancelled", "request_id": str(request_id)}

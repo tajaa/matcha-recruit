@@ -1,0 +1,19 @@
+# Narrow override used only by the trusted Kanban AutoPR bridge. It layers on
+# top of docker-compose.sandbox.yml after that bridge has made a mode-600 copy
+# of the already-working host Codex auth file. The main interactive sandbox
+# deliberately does not include this file.
+services:
+  workspace:
+    # The interactive sandbox publishes its dedicated development port range
+    # for a human browser. AutoPR runs alongside that sandbox and needs outbound
+    # access to the already-running host services, but it never needs inbound
+    # host ports. Compose merges sequence fields across overlays unless they
+    # are explicitly reset, so `ports: []` alone would leave the base ports in
+    # place and make the autonomous worker fail before Codex starts.
+    ports: !reset []
+    volumes:
+      # A model process must be able to read a Codex credential to call
+      # its provider. This is precisely one copied auth file, read-only—not a
+      # host-home mount—and excludes history, logs, databases, GitHub/Matcha/
+      # SSH credentials, and browser state.
+      - ${SANDBOX_CODEX_AUTH_FILE:?AutoPR requires a staged Codex auth file}:/home/agent/.codex/auth.json:ro

@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import type { HuumeAction, HuumeActionSendOffer } from '../../../types'
 import { actionIcon, DONE_LABELS } from '../../../utils/huumeActionMeta'
+import { fmtDayLabel, fmtTime } from '../../../../types/employeeSchedule'
 
 interface ActionDocViewerProps {
   action: Exclude<HuumeAction, HuumeActionSendOffer>
@@ -67,6 +68,8 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return 'Eligibility Decision'
     case 'schedule_change':
       return `Schedule Change${action.target_employee_name ? ` — ${action.target_employee_name}` : ''}`
+    case 'schedule_week_draft':
+      return 'Generated Weekly Schedule'
   }
 }
 
@@ -272,6 +275,58 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Date" value={action.target_date ?? action.new_date ?? action.date} />
           </div>
           <Prose>{action.pill_text}</Prose>
+        </>
+      )}
+
+      {action.type === 'schedule_week_draft' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Week of" value={action.week_start} />
+            <Meta label="Demand source" value={action.source_mode === 'template' ? 'Saved template' : 'Existing draft shifts'} />
+            {action.auto_generated && <Meta label="Prepared" value="Automatically by Huume" />}
+            <Meta label="Shifts" value={action.metrics?.shift_count} />
+            <Meta label="Positions filled" value={action.metrics?.filled_positions} />
+            <Meta label="Positions needed" value={action.metrics?.required_positions} />
+            <Meta label="Still open" value={action.metrics?.open_positions} />
+          </div>
+          <Prose>{action.summary}</Prose>
+          {!!action.schedule_preview?.length && (
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Proposed shifts</div>
+              <div className="space-y-1.5">
+                {action.schedule_preview.map((shift) => (
+                  <div key={shift.shift_key} className="rounded border border-current/10 px-2 py-1.5 text-[11px]">
+                    <div className="font-medium">
+                      {fmtDayLabel(shift.starts_at)} · {fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}
+                      {shift.role ? ` · ${shift.role}` : ''}
+                    </div>
+                    <div className="mt-0.5 opacity-65">
+                      {shift.assignment_names.length
+                        ? shift.assignment_names.join(', ')
+                        : 'Open'} · {shift.assignment_names.length}/{shift.required_staff} staffed
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {action.preview_truncated && (
+                <p className="mt-1 text-[10px] opacity-50">Additional shifts are saved in this proposal and will appear in the editor after confirmation.</p>
+              )}
+            </div>
+          )}
+          {!!action.unfilled?.length && (
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Open positions</div>
+              <div className="space-y-1">
+                {action.unfilled.map((item, index) => (
+                  <div key={`${item.shift_key ?? 'shift'}-${index}`} className={`rounded border px-2 py-1.5 text-[11px] ${chipRed}`}>
+                    {item.starts_at ? `${fmtDayLabel(item.starts_at)} · ${fmtTime(item.starts_at)}` : 'Shift'}
+                    {item.role ? ` · ${item.role}` : ''} — {item.reason ?? 'No eligible employee'}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="text-[11px] opacity-60">Confirmation adds this proposal to the editor as drafts. Review or edit it there, then publish when ready.</p>
         </>
       )}
 

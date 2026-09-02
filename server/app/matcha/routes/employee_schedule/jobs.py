@@ -7,12 +7,14 @@ atomic roster operation.
 
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import (
-    JobCreate, JobCredentialRequirementsReplace, JobEmployeesReplace, JobUpdate,
+    EmployeeJobsReplace, JobCreate, JobCredentialRequirementsReplace,
+    JobEmployeesReplace, JobUpdate,
 )
 from ...services.scheduling.job_credential_requirements import (
     fetch_job_credential_requirements,
@@ -20,6 +22,9 @@ from ...services.scheduling.job_credential_requirements import (
     replace_job_credential_requirements,
 )
 from ...services.scheduling.schedule_rules import build_patch
+from ...services.scheduling.schedule_profiles import (
+    fetch_employee_jobs, replace_employee_jobs_core,
+)
 from ._shared import (
     assert_employee_in_company, assert_location_in_company, log_audit,
     require_company_id, serialize_job,
@@ -59,6 +64,40 @@ async def _validate_employee_ids(conn, company_id: UUID, employee_ids: list[UUID
     for employee_id in unique_ids:
         await assert_employee_in_company(conn, company_id, employee_id)
     return unique_ids
+
+
+@router.get("/employees/{employee_id}/jobs")
+async def get_employee_jobs(employee_id: UUID, current_user=Depends(require_admin_or_client)):
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_employee_in_company(conn, company_id, employee_id)
+        assignments = await fetch_employee_jobs(
+            conn, company_id=company_id, employee_id=employee_id,
+        )
+    return {"employee_id": str(employee_id), "assignments": assignments}
+
+
+@router.put("/employees/{employee_id}/jobs")
+async def replace_employee_jobs(
+    employee_id: UUID, body: EmployeeJobsReplace,
+    current_user=Depends(require_admin_or_client),
+):
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_employee_in_company(conn, company_id, employee_id)
+        try:
+            async with conn.transaction():
+                assignments = await replace_employee_jobs_core(
+                    conn, company_id=company_id, employee_id=employee_id,
+                    assignments=body.assignments, actor_user_id=current_user.id,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(
+                status_code=409, detail="Employee already has another active primary job",
+            ) from exc
+    return {"employee_id": str(employee_id), "assignments": assignments}
 
 
 @router.get("/jobs")

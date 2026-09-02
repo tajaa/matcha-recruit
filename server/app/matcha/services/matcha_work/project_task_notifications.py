@@ -34,6 +34,204 @@ _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 
+async def post_autopr_context_request(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: UUID,
+    expected_progress_note: str,
+    reason: str,
+) -> bool:
+    """Post one decision-bound Espresso request into the project chat.
+
+    The exact progress note is stored in message metadata. A reply can safely
+    become an ``autopr_additional_context`` event only while that same decision
+    is still current. Repeated publisher attempts are idempotent for the same
+    task+decision. Returns False when the task/decision/chat no longer exists.
+    """
+    expected = (expected_progress_note or "").strip()
+    why = " ".join((reason or "").split())[:600]
+    if not expected or not why:
+        raise ValueError("AutoPR context requests require a decision and reason")
+
+    from .project_service import ensure_discussion_channel
+    from .project_agent.chat import broadcast_espresso_message, persist_espresso_message
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT t.title, t.board_column, t.progress_note,
+                      p.company_id,
+                      (p.project_data->>'discussion_channel_id')::uuid AS channel_id
+               FROM mw_tasks t
+               JOIN mw_projects p ON p.id=t.project_id
+               WHERE t.id=$1 AND t.project_id=$2""",
+            task_id,
+            project_id,
+        )
+    if not row or (row["progress_note"] or "").strip() != expected:
+        return False
+
+    channel_id = row["channel_id"]
+    if channel_id is None:
+        try:
+            channel_id = await ensure_discussion_channel(project_id, actor_user_id)
+        except Exception:
+            logger.warning(
+                "Failed to resolve AutoPR context channel project=%s", project_id,
+                exc_info=True,
+            )
+            return False
+    if channel_id is None:
+        return False
+
+    payload = None
+    async with get_connection() as conn:
+        async with conn.transaction():
+            # The task row is the serialization point for this decision. The
+            # freshness recheck, duplicate check, and insert all happen while
+            # holding the same row lock and transaction.
+            row = await conn.fetchrow(
+                """SELECT t.title, t.board_column, t.progress_note,
+                          p.company_id,
+                          (p.project_data->>'discussion_channel_id')::uuid AS channel_id
+                   FROM mw_tasks t
+                   JOIN mw_projects p ON p.id=t.project_id
+                   WHERE t.id=$1 AND t.project_id=$2
+                   FOR UPDATE OF t""",
+                task_id,
+                project_id,
+            )
+            if not row or (row["progress_note"] or "").strip() != expected:
+                return False
+            channel_id = row["channel_id"]
+            if channel_id is None:
+                return False
+            already_posted = await conn.fetchval(
+                """SELECT EXISTS(
+                       SELECT 1 FROM channel_messages
+                       WHERE channel_id=$1
+                         AND metadata->>'kind'='autopr_context_request'
+                         AND metadata->>'task_id'=$2
+                         AND metadata->>'expected_progress_note'=$3
+                   )""",
+                channel_id,
+                str(task_id),
+                expected,
+            )
+            if already_posted:
+                return True
+
+            safe_title = " ".join((row["title"] or "ticket").split())
+            safe_title = safe_title.replace("⟦", "").replace("⟧", "").replace("|", "/")[:200]
+            column = (row["board_column"] or "todo").replace("_", " ").title()
+            content = (
+                f"⟦ticket:{task_id}|{safe_title}|{column}⟧\n"
+                f"This ticket needs additional context because {why} "
+                "Reply to this Espresso message with the missing detail, or add it "
+                "from the ticket. You can attach screenshots. Start a line with "
+                "`--draft-pr`, or say `you can work on this`, to require a draft. Use "
+                "`--trust-still-broken` to reject "
+                "another already-fixed conclusion; add `--test-route=/app/...` for an "
+                "approved test-tenant replay. Your reply is bound to this exact decision."
+            )
+            payload = await persist_espresso_message(
+                conn,
+                row["company_id"],
+                channel_id,
+                content,
+                metadata={
+                    "kind": "autopr_context_request",
+                    "project_id": str(project_id),
+                    "task_id": str(task_id),
+                    "expected_progress_note": expected,
+                },
+            )
+    await broadcast_espresso_message(payload)
+    return True
+
+
+async def post_autopr_result_notification(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    reconsideration_event_id: UUID,
+    expected_progress_note: str,
+    message: str,
+) -> bool:
+    """Notify the author of one decision-bound AutoPR result exactly once.
+
+    The current task note and the triggering additional-context event are both
+    verified while the task row is locked. That lock serializes retries, so
+    the notification lookup plus insert is idempotent without a new database
+    constraint. Returns False when the decision or event is stale.
+    """
+    expected = (expected_progress_note or "").strip()
+    result_message = (message or "").strip()
+    if not expected or not result_message:
+        raise ValueError("AutoPR result notifications require a decision and message")
+    if len(result_message) > 1_600:
+        raise ValueError("AutoPR result notification message must be 1-1600 characters")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                """SELECT t.title, t.progress_note, t.company_id,
+                          p.name AS project_title
+                   FROM mw_tasks t
+                   LEFT JOIN mw_projects p ON p.id=t.project_id
+                   WHERE t.id=$1 AND t.project_id=$2
+                   FOR UPDATE OF t""",
+                task_id,
+                project_id,
+            )
+            if not task or (task["progress_note"] or "").strip() != expected:
+                return False
+
+            recipient_id = await conn.fetchval(
+                """SELECT actor_user_id
+                   FROM mw_task_history
+                   WHERE id=$1 AND task_id=$2 AND project_id=$3
+                     AND event_type='activity'
+                     AND metadata->>'kind'='autopr_additional_context'
+                     AND actor_user_id IS NOT NULL""",
+                reconsideration_event_id,
+                task_id,
+                project_id,
+            )
+            if recipient_id is None:
+                return False
+
+            already_notified = await conn.fetchval(
+                """SELECT EXISTS(
+                       SELECT 1 FROM mw_notifications
+                       WHERE user_id=$1 AND type='autopr_result'
+                         AND metadata->>'reconsideration_event_id'=$2
+                   )""",
+                recipient_id,
+                str(reconsideration_event_id),
+            )
+            if already_notified:
+                return True
+
+            await notif_svc.create_notification(
+                user_id=recipient_id,
+                company_id=task["company_id"],
+                type="autopr_result",
+                title=f"AutoPR result: {task['title']}",
+                body=result_message,
+                link=f"/work?project={project_id}&task={task_id}",
+                metadata={
+                    "project_id": str(project_id),
+                    "task_id": str(task_id),
+                    "project_title": task["project_title"],
+                    "task_title": task["title"],
+                    "reconsideration_event_id": str(reconsideration_event_id),
+                },
+                send_email=False,
+            )
+    return True
+
+
 async def broadcast_channel_message(channel_id: UUID, payload: dict) -> None:
     """Fan out a persisted channel message through the established bridge.
 

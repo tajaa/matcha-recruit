@@ -447,21 +447,30 @@ struct ChannelMessageRowView: View {
     /// True while inside the 15-minute author edit/delete window. The server
     /// enforces the same window; this only hides the affordance past it.
     private var withinEditWindow: Bool {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: msg.createdAt) ?? ISO8601DateFormatter().date(from: msg.createdAt)
-        guard let date else { return false }
+        guard let date = PacificDateFormatter.parse(msg.createdAt) else { return false }
         return Date().timeIntervalSince(date) <= 15 * 60
     }
 
+    /// Local-time clock formatter. Held static for the same reason
+    /// `PacificDateFormatter` holds its own: each `DateFormatter` /
+    /// `ISO8601DateFormatter` allocation builds ICU state (~10–50µs), and this
+    /// runs per row per render. `DateFormatter` read methods are thread-safe,
+    /// and nothing here mutates it after setup, so sharing one is safe.
+    private static let clockFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    /// Compiled once. `NSRegularExpression(pattern:)` compiles the pattern on
+    /// every init, and this used to run per row per render.
+    private static let mentionRegex = try? NSRegularExpression(
+        pattern: #"(?<=^|\s)@([A-Za-z0-9._-]{2,32})\b"#
+    )
+
     private func formatTimestamp(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date else { return "" }
-        let display = DateFormatter()
-        display.dateFormat = "HH:mm"
-        return display.string(from: date)
+        guard let date = PacificDateFormatter.parse(iso) else { return "" }
+        return Self.clockFmt.string(from: date)
     }
 
     private func mentionAttributedContent(_ text: String, mentionedUserIds: [String]?) -> AttributedString {
@@ -475,8 +484,7 @@ struct ChannelMessageRowView: View {
                 return (local.lowercased(), m)
             }
         )
-        let pattern = #"(?<=^|\s)@([A-Za-z0-9._-]{2,32})\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return attributed }
+        guard let regex = Self.mentionRegex else { return attributed }
         let nsContent = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsContent.length))
         for m in matches.reversed() {
@@ -484,16 +492,24 @@ struct ChannelMessageRowView: View {
             let handleRange = m.range(at: 1)
             guard handleRange.location != NSNotFound else { continue }
             let handle = nsContent.substring(with: handleRange).lowercased()
-            guard let member = memberByHandle[handle] else { continue }
-            // If the server stamped resolved IDs, only chip those; otherwise
-            // chip every membership-resolved handle (REST-fetched older msgs).
-            if !resolved.isEmpty && !resolved.contains(member.userId) { continue }
             let chipNSRange = NSRange(location: handleRange.location - 1, length: handleRange.length + 1)
             guard chipNSRange.location >= 0,
                   chipNSRange.location + chipNSRange.length <= nsContent.length,
                   let stringRange = Range(chipNSRange, in: text),
                   let attrRange = Range(stringRange, in: attributed)
             else { continue }
+            // Espresso is a virtual project-chat mention. Its inactive service
+            // identity never joins channels, so it cannot appear in the member
+            // map or server-resolved mentioned_user_ids list.
+            if handle == "espresso" {
+                attributed[attrRange].foregroundColor = appState.themeAccent
+                attributed[attrRange].font = .system(size: 13, weight: .semibold)
+                continue
+            }
+            guard let member = memberByHandle[handle] else { continue }
+            // If the server stamped resolved IDs, only chip those; otherwise
+            // chip every membership-resolved handle (REST-fetched older msgs).
+            if !resolved.isEmpty && !resolved.contains(member.userId) { continue }
             let isMe = member.userId == currentUserId
             attributed[attrRange].foregroundColor = isMe ? .yellow : appState.themeAccent
             attributed[attrRange].font = .system(size: 13, weight: .semibold)

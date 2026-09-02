@@ -1,7 +1,7 @@
 import { api } from '../client'
 
 // pages/admin/Settings.tsx hand-rolled ten `fetch()` calls with its own
-// `authHeaders()` reading matcha_access_token straight out of localStorage.
+// `authHeaders()` reading matcha_access_token straight out of browser storage.
 // That skipped api/client.ts's 401-refresh-and-retry, so once the admin's
 // access token aged out every call on the page failed — and because the page
 // swallows errors (`catch {}`, `if (res.ok)`), the failure rendered as an

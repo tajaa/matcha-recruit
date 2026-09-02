@@ -74,6 +74,41 @@ async def test_notification_claims_then_marks_delivery_sent(monkeypatch):
     assert any("ON CONFLICT (request_id, recipient_user_id, event_type)" in query for query in conn.claims)
 
 
+@pytest.mark.asyncio
+async def test_resolved_request_marks_every_matching_manager_alert_read():
+    company_id = uuid4()
+    request_id = uuid4()
+
+    class _Conn:
+        def __init__(self):
+            self.query = ""
+            self.args = ()
+
+        async def execute(self, query, *args):
+            self.query = query
+            self.args = args
+            return "UPDATE 2"
+
+    conn = _Conn()
+    updated = await notifications.mark_manager_ready_notifications_resolved(
+        conn, company_id=company_id, request_id=request_id,
+    )
+
+    assert updated == 2
+    assert "type = 'schedule_request_pending'" in conn.query
+    assert "is_read = FALSE" in conn.query
+    assert "metadata->>'request_id' = $2" in conn.query
+    assert conn.args == (company_id, str(request_id))
+
+
+def test_every_manager_ready_exit_resolves_its_alerts():
+    root = Path(__file__).parents[2] / "app/matcha/routes"
+    manager = (root / "employee_schedule/requests.py").read_text()
+    portal = (root / "employee_portal/schedule.py").read_text()
+    assert "await mark_manager_ready_notifications_resolved(" in manager
+    assert portal.count("await mark_manager_ready_notifications_resolved(") == 2
+
+
 def test_recovery_reclaims_only_stale_unsent_delivery_claims():
     service = Path(__file__).parents[2] / "app/matcha/services/scheduling/schedule_request_notifications.py"
     worker = Path(__file__).parents[2] / "app/workers/tasks/schedule_request_notifications.py"

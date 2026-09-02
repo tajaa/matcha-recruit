@@ -1,9 +1,8 @@
 """Admin endpoints for the AI usage ledger (/admin/ai-usage).
 
-Reads `ai_usage_log`, written by every Gemini call via the
-`get_genai_client()` -> `ai_usage.wrap_client()` instrumentation
-(app/core/services/ai_usage.py). Read-only over that table — nothing here
-writes a row; the wrapper is the only writer.
+Reads `ai_usage_log`, written by the Gemini client wrapper and the direct
+OpenAI Responses recorder in app/core/services/ai_usage.py. Read-only over
+that table — nothing here writes a row.
 """
 from __future__ import annotations
 
@@ -35,10 +34,9 @@ _ROLLUP_COLUMNS = """
     SUM(thinking_tokens) AS thinking_tokens,
     SUM(cached_tokens) AS cached_tokens,
     COUNT(*) FILTER (WHERE status <> 'ok') AS errors,
-    -- NULL cost has two causes, both meaning "the true total is undercounted":
-    -- an unpriced model (see ai_usage.PRICING), or a timed-out/errored call
-    -- that carries no token counts at all (compute_cost returns None rather
-    -- than 0 for exactly that reason — see ai_usage.py).
+    -- NULL remains meaningful for unpriced models and calls that failed before
+    -- returning token usage. OpenAI Luna responses are locally priced from
+    -- their exact provider token counters, like Gemini responses.
     COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unknown_cost_calls,
     AVG(latency_ms) AS avg_latency_ms,
     PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_latency_ms
@@ -82,7 +80,8 @@ async def ai_usage_summary(since_hours: int = 24):
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
             GROUP BY feature
-            ORDER BY SUM(cost_usd) DESC NULLS LAST, COUNT(*) DESC
+            ORDER BY SUM(cost_usd) DESC NULLS LAST,
+                     COUNT(*) DESC
             """,
             str(since_hours),
         )
@@ -92,7 +91,8 @@ async def ai_usage_summary(since_hours: int = 24):
             FROM ai_usage_log
             WHERE created_at > NOW() - ($1 || ' hours')::interval
             GROUP BY provider, model
-            ORDER BY SUM(cost_usd) DESC NULLS LAST, COUNT(*) DESC
+            ORDER BY SUM(cost_usd) DESC NULLS LAST,
+                     COUNT(*) DESC
             """,
             str(since_hours),
         )
@@ -187,7 +187,9 @@ async def ai_usage_calls(
         rows = await conn.fetch(
             f"""
             SELECT id, provider, model, feature, method, input_tokens, output_tokens,
-                   thinking_tokens, cached_tokens, cost_usd, latency_ms, status, error, created_at
+                   thinking_tokens, cached_tokens, cache_write_tokens, cost_usd,
+                   latency_ms, status, error,
+                   provider_response_id, provider_status, service_tier, created_at
             FROM ai_usage_log
             WHERE {' AND '.join(filters)}
             ORDER BY id DESC
@@ -209,10 +211,14 @@ async def ai_usage_calls(
                 "output_tokens": r["output_tokens"],
                 "thinking_tokens": r["thinking_tokens"],
                 "cached_tokens": r["cached_tokens"],
+                "cache_write_tokens": r["cache_write_tokens"],
                 "cost_usd": float(r["cost_usd"]) if r["cost_usd"] is not None else None,
                 "latency_ms": r["latency_ms"],
                 "status": r["status"],
                 "error": r["error"],
+                "provider_response_id": r["provider_response_id"],
+                "provider_status": r["provider_status"],
+                "service_tier": r["service_tier"],
                 "created_at": r["created_at"].isoformat(),
             }
             for r in rows

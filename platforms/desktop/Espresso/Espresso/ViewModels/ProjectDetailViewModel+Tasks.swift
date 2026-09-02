@@ -38,11 +38,12 @@ extension ProjectDetailViewModel {
                 var seeded: [String: [MWProjectFile]] = [:]
                 for t in list {
                     if let atts = t.attachments { seeded[t.id] = atts }
-                    // Seed the unviewed-updates baseline so a ticket's existing
-                    // history isn't flagged as new on first sight (we have
-                    // recentEventIds here, at the board level).
-                    TicketUpdatesStore.shared.baselineIfNeeded(t)
                 }
+                // Seed the unviewed-updates baseline so a ticket's existing
+                // history isn't flagged as new on first sight (we have
+                // recentEventIds here, at the board level). Batched: one
+                // persist + one observation bump for the whole board.
+                TicketUpdatesStore.shared.baselineIfNeeded(list)
                 taskFiles = seeded
                 isLoadingTasks = false
             }
@@ -133,15 +134,15 @@ extension ProjectDetailViewModel {
     /// aux instances so a project open in two panes doesn't double-toast.
     @MainActor
     func attachTaskRealtime(currentUserId: String?, projectId: String, showToasts: Bool = true) {
-        print("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil") project=\(projectId) toasts=\(showToasts)")
+        mwLog("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil") project=\(projectId) toasts=\(showToasts)")
         self.currentUserId = currentUserId
         let handlers = ProjectWebSocket.TaskEventHandlers(
             onCreated: { [weak self] dict in
-                print("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
+                mwLog("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
                 guard let self else { return }
                 let actorId = dict["actor_id"] as? String
                 if let actorId, actorId == self.currentUserId {
-                    print("[ProjectVM] onTaskCreated suppressed — self-echo")
+                    mwLog("[ProjectVM] onTaskCreated suppressed — self-echo")
                     return
                 }
                 if let task = Self.decodeTask(dict) {
@@ -160,7 +161,7 @@ extension ProjectDetailViewModel {
                 }
             },
             onUpdated: { [weak self] dict in
-                print("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
+                mwLog("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
                 guard let self else { return }
                 let actorId = dict["actor_id"] as? String
                 if let task = Self.decodeTask(dict) {
@@ -185,7 +186,7 @@ extension ProjectDetailViewModel {
                 }
             },
             onDeleted: { [weak self] taskId, actorId in
-                print("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
+                mwLog("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
                 guard let self else { return }
                 if let actorId, actorId == self.currentUserId { return }
                 Task { @MainActor in
@@ -266,16 +267,36 @@ extension ProjectDetailViewModel {
     @MainActor
     func replacePreservingAggregates(_ updated: MWProjectTask) {
         guard let i = tasks.firstIndex(where: { $0.id == updated.id }) else { return }
+        let previous = tasks[i]
         var merged = updated
-        if merged.reviewCycleCount == nil { merged.reviewCycleCount = tasks[i].reviewCycleCount }
-        if merged.subtaskTotal == nil { merged.subtaskTotal = tasks[i].subtaskTotal }
-        if merged.subtaskDone == nil { merged.subtaskDone = tasks[i].subtaskDone }
-        if merged.updateCount == nil { merged.updateCount = tasks[i].updateCount }
-        if merged.recentEventIds == nil { merged.recentEventIds = tasks[i].recentEventIds }
-        if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = tasks[i].assignedAvatarUrl }
-        if merged.createdBy == nil { merged.createdBy = tasks[i].createdBy }
-        if merged.createdByName == nil { merged.createdByName = tasks[i].createdByName }
-        if merged.createdByAvatarUrl == nil { merged.createdByAvatarUrl = tasks[i].createdByAvatarUrl }
+        if merged.reviewCycleCount == nil { merged.reviewCycleCount = previous.reviewCycleCount }
+        if merged.subtaskTotal == nil { merged.subtaskTotal = previous.subtaskTotal }
+        if merged.subtaskDone == nil { merged.subtaskDone = previous.subtaskDone }
+        if merged.updateCount == nil { merged.updateCount = previous.updateCount }
+        if merged.recentEventIds == nil { merged.recentEventIds = previous.recentEventIds }
+        if merged.progressNote != previous.progressNote {
+            // A reconsideration event is bound to one exact AutoPR decision.
+            // Single-task/WS payloads omit the list-only event fields, so a
+            // changed decision must consume the cached pending state instead
+            // of carrying it forward until the next full list refresh.
+            if merged.autoprReconsiderationPending == nil {
+                merged.autoprReconsiderationPending = false
+            }
+        } else {
+            if merged.autoprReconsiderationPending == nil {
+                merged.autoprReconsiderationPending = previous.autoprReconsiderationPending
+            }
+            if merged.autoprReconsiderationEventId == nil {
+                merged.autoprReconsiderationEventId = previous.autoprReconsiderationEventId
+            }
+            if merged.autoprReconsiderationAt == nil {
+                merged.autoprReconsiderationAt = previous.autoprReconsiderationAt
+            }
+        }
+        if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = previous.assignedAvatarUrl }
+        if merged.createdBy == nil { merged.createdBy = previous.createdBy }
+        if merged.createdByName == nil { merged.createdByName = previous.createdByName }
+        if merged.createdByAvatarUrl == nil { merged.createdByAvatarUrl = previous.createdByAvatarUrl }
         tasks[i] = merged
     }
 
@@ -610,7 +631,7 @@ extension ProjectDetailViewModel {
                 }
             }
         } catch {
-            print("[Kanban] toggleTaskComplete PATCH failed task=\(id): \(error)")
+            mwLog("[Kanban] toggleTaskComplete PATCH failed task=\(id): \(error)")
             await loadTasks()
             await MainActor.run { errorMessage = "Toggle failed: \(error.localizedDescription)" }
         }

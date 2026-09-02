@@ -147,6 +147,139 @@ def _channel_recently_ems_drafted(channel_id_str: str) -> bool:
     return deadline is not None and deadline >= time.monotonic()
 
 
+def _autopr_context_reference(raw_metadata) -> Optional[dict]:
+    """Return a validated Espresso AutoPR context pointer, if present."""
+    if isinstance(raw_metadata, str):
+        try:
+            raw_metadata = json.loads(raw_metadata)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(raw_metadata, dict) or raw_metadata.get("kind") != "autopr_context_request":
+        return None
+    try:
+        project_id = UUID(str(raw_metadata.get("project_id")))
+        task_id = UUID(str(raw_metadata.get("task_id")))
+    except (TypeError, ValueError):
+        return None
+    expected = str(raw_metadata.get("expected_progress_note") or "").strip()
+    if not expected:
+        return None
+    return {
+        "project_id": project_id,
+        "task_id": task_id,
+        "expected_progress_note": expected,
+    }
+
+
+async def _bg_apply_autopr_context_reply(
+    channel_id_str: str,
+    user,
+    content: str,
+    reference: dict,
+    attachments: Optional[list] = None,
+) -> None:
+    """Turn a direct reply to Espresso into decision-bound card evidence."""
+    try:
+        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+        from app.matcha.services.matcha_work.project_task_service import (
+            AutoPRReconsiderationConflict,
+            request_autopr_reconsideration,
+        )
+
+        project_id = reference["project_id"]
+        task_id = reference["task_id"]
+        channel_id = UUID(channel_id_str)
+        text = re.sub(
+            r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
+        ).strip()
+        async with get_connection() as conn:
+            project = await conn.fetchrow(
+                """SELECT p.company_id,
+                          EXISTS(
+                            SELECT 1 FROM mw_project_collaborators pc
+                            WHERE pc.project_id=p.id AND pc.user_id=$3
+                              AND pc.status='active'
+                          ) AS is_collaborator,
+                          EXISTS(
+                            SELECT 1 FROM clients c
+                            WHERE c.user_id=$3 AND c.company_id=p.company_id
+                          ) OR EXISTS(
+                            SELECT 1 FROM employees e
+                            WHERE e.user_id=$3 AND e.org_id=p.company_id
+                          ) AS is_same_company
+                   FROM mw_projects p
+                   WHERE p.id=$1
+                     AND p.project_data->>'discussion_channel_id'=$2""",
+                project_id,
+                channel_id_str,
+                user.id,
+            )
+        if not project:
+            return
+        if not (
+            project["is_collaborator"]
+            or project["is_same_company"]
+            or (getattr(user, "role", "") or "").lower() == "admin"
+        ):
+            await post_as_espresso(
+                project["company_id"], channel_id,
+                "I can only attach context from someone who can access this project.",
+            )
+            return
+        if not text and not attachments:
+            await post_as_espresso(
+                project["company_id"], channel_id,
+                "Please include the missing detail or a screenshot in your reply, or add it from the ticket.",
+            )
+            return
+        attachment_ids = []
+        if attachments:
+            from app.matcha.services.matcha_work.project_file_service import (
+                sync_channel_attachments_to_task,
+            )
+            async with get_connection() as conn:
+                attachment_ids = await sync_channel_attachments_to_task(
+                    conn, project_id, task_id, user.id, attachments,
+                )
+            if not attachment_ids and not text:
+                await post_as_espresso(
+                    project["company_id"], channel_id,
+                    "I couldn't attach that screenshot to the ticket. Please upload it from the ticket and resend the context.",
+                )
+                return
+        try:
+            result = await request_autopr_reconsideration(
+                project_id=project_id,
+                task_id=task_id,
+                actor_user_id=user.id,
+                expected_progress_note=reference["expected_progress_note"],
+                body=text or None,
+                attachment_ids=attachment_ids or None,
+            )
+        except AutoPRReconsiderationConflict:
+            await post_as_espresso(
+                project["company_id"], channel_id,
+                "That AutoPR decision changed before this reply arrived. Open the linked ticket to review its current state.",
+            )
+            return
+        if result is None:
+            return
+        directives = set(result.get("autopr_directives") or [])
+        directive_note = ""
+        if "draft_pr" in directives:
+            directive_note += " The draft-PR requirement is active."
+        if "trust_still_broken" in directives:
+            directive_note += " The still-broken assertion is active."
+        await post_as_espresso(
+            project["company_id"], channel_id,
+            "Thanks — I attached your reply and any screenshots as escalated AutoPR context."
+            + directive_note
+            + " This ticket now goes ahead of routine rework in the next plan.",
+        )
+    except Exception:
+        logger.warning("AutoPR context reply failed", exc_info=True)
+
+
 async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
     """Mirror a message's attachments into the linked collab project's Files,
     on its own connection and off the send hot path. The reverse JSONB lookup
@@ -166,6 +299,175 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
                 )
     except Exception:
         logger.warning("channel->project Files sync failed", exc_info=True)
+
+
+async def _bg_dispatch_espresso_mention(
+    channel_id_str: str,
+    user,
+    content: str,
+    trigger_message_id: UUID,
+) -> bool:
+    """Queue one read-only repo question for a linked project discussion.
+
+    Channel membership is not treated as repository authorization: same-tenant
+    users or active project collaborators are re-checked before the process-
+    global GitHub read token can be used. Returns whether a project discussion
+    claimed the mention; raw ``@espresso`` text elsewhere stays ordinary chat.
+    """
+    claimed = False
+    try:
+        from app.core.feature_flags import merge_company_features
+        from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
+        from app.matcha.services.matcha_work.project_agent.guards import can_ask_project_agent
+        from app.matcha.services.billing import token_budget_service
+        from app.workers.tasks.project_agent import run_repo_question
+
+        async with get_connection() as conn:
+            project = await conn.fetchrow(
+                """SELECT p.id, p.company_id, p.github_repo,
+                          c.enabled_features, c.signup_source
+                   FROM mw_projects p
+                   JOIN companies c ON c.id=p.company_id
+                   WHERE p.project_data->>'discussion_channel_id'=$1""",
+                channel_id_str,
+            )
+            if not project:
+                return False
+            claimed = True
+            company_id = project["company_id"]
+            channel_id = UUID(channel_id_str)
+            features = merge_company_features(
+                project["enabled_features"], project["signup_source"],
+            )
+            if not features.get("matcha_work"):
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Espresso repository questions aren't enabled for this workspace.",
+                )
+                return True
+
+            collaborator_role = await conn.fetchval(
+                """SELECT role FROM mw_project_collaborators
+                   WHERE project_id=$1 AND user_id=$2 AND status='active'""",
+                project["id"], user.id,
+            )
+            sender_role = (getattr(user, "role", "") or "").lower()
+            sender_company_id = None
+            if sender_role in ("client", "individual"):
+                sender_company_id = await conn.fetchval(
+                    "SELECT company_id FROM clients WHERE user_id=$1", user.id,
+                )
+            elif sender_role == "employee":
+                sender_company_id = await conn.fetchval(
+                    "SELECT org_id FROM employees WHERE user_id=$1", user.id,
+                )
+            if not can_ask_project_agent(
+                sender_company_id=sender_company_id,
+                project_company_id=company_id,
+                collaborator_role=collaborator_role,
+            ):
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "I can only inspect the repository for people who can access this project.",
+                )
+                return True
+            if not project["github_repo"]:
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Connect a GitHub repository in Elements before asking me about the app.",
+                )
+                return True
+
+            # Strip the first virtual-agent mention before persisting the task;
+            # keep every other character exactly as the user wrote it.
+            question = re.sub(
+                r"(?i)(?:(?<=^)|(?<=\s))@espresso\b", "", content or "", count=1,
+            ).strip()
+            if not question:
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Ask me a question about how this project or its connected repository works.",
+                )
+                return True
+            if sender_role != "admin":
+                try:
+                    await token_budget_service.check_token_budget(company_id)
+                except HTTPException:
+                    await post_as_espresso(
+                        company_id, channel_id,
+                        "This workspace has reached its Matcha Work AI token budget.",
+                    )
+                    return True
+            try:
+                await check_rate_limit(str(company_id), "espresso_repo_question", 20, 3600)
+            except HTTPException:
+                await post_as_espresso(
+                    company_id, channel_id,
+                    "Espresso has reached this workspace's hourly repo-question limit. Please try again later.",
+                )
+                return True
+
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))", str(project["id"]),
+                )
+                live = await conn.fetchval(
+                    """SELECT EXISTS(
+                           SELECT 1 FROM mw_project_agent_runs
+                           WHERE project_id=$1 AND kind='repo_question'
+                             AND status IN ('queued','running')
+                             AND COALESCE(started_at, created_at) > NOW() - INTERVAL '15 minutes'
+                       )""",
+                    project["id"],
+                )
+                if live:
+                    await post_as_espresso(
+                        company_id, channel_id,
+                        "I'm already answering a repository question for this project. Ask me again when that answer lands.",
+                    )
+                    return True
+                run_id = await conn.fetchval(
+                    """INSERT INTO mw_project_agent_runs
+                       (company_id, project_id, channel_id, requested_by,
+                        trigger_message_id, agent_key, kind, prompt, status)
+                       VALUES ($1,$2,$3,$4,$5,'espresso','repo_question',$6,'queued')
+                       ON CONFLICT (trigger_message_id, agent_key) DO NOTHING
+                       RETURNING id""",
+                    company_id, project["id"], channel_id, user.id,
+                    trigger_message_id, question,
+                )
+            if run_id is None:
+                return True
+            try:
+                run_repo_question.delay(str(run_id))
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue Espresso project-agent run=%s", run_id,
+                )
+                failed_run_id = await conn.fetchval(
+                    """UPDATE mw_project_agent_runs
+                       SET status='failed', completed_at=NOW(),
+                           error='Task enqueue failed before worker delivery.'
+                       WHERE id=$1 AND status='queued'
+                       RETURNING id""",
+                    run_id,
+                )
+                if failed_run_id is not None:
+                    await post_as_espresso(
+                        company_id,
+                        channel_id,
+                        "I couldn't queue that repository question right now. Please try again.",
+                    )
+                    return True
+
+        await post_as_espresso(
+            company_id, channel_id,
+            "I’m reading the connected repository now. I’ll post a source-linked answer here when the task finishes.",
+        )
+        return True
+    except Exception:
+        logger.warning("Espresso project-agent dispatch failed", exc_info=True)
+        return claimed
 
 
 async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str, trigger_message_id) -> bool:
@@ -3621,6 +3923,7 @@ async def channel_websocket(
                     import json as _json
                     attachments_json = _json.dumps(attachments) if attachments else "[]"
                     reply_target_type: Optional[str] = None
+                    reply_target_metadata: dict = {}
                     async with get_connection() as conn:
                         try:
                             access = await load_channel_access(
@@ -3661,12 +3964,22 @@ async def channel_websocket(
                                 # reply targets a Huume system-message pill
                                 # (a possible clarify answer) without a
                                 # second query.
-                                reply_target_type = await conn.fetchval(
-                                    "SELECT message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
+                                reply_target = await conn.fetchrow(
+                                    "SELECT message_type, metadata FROM channel_messages WHERE id = $1 AND channel_id = $2",
                                     reply_uuid, ch_uuid,
                                 )
-                                if reply_target_type is None:
+                                if reply_target is None:
                                     reply_uuid = None
+                                else:
+                                    reply_target_type = reply_target["message_type"]
+                                    raw_reply_metadata = reply_target["metadata"]
+                                    if isinstance(raw_reply_metadata, str):
+                                        try:
+                                            raw_reply_metadata = _json.loads(raw_reply_metadata)
+                                        except (TypeError, ValueError):
+                                            raw_reply_metadata = {}
+                                    if isinstance(raw_reply_metadata, dict):
+                                        reply_target_metadata = raw_reply_metadata
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -3809,6 +4122,26 @@ async def channel_websocket(
                             # existing clarify-first path for replies to EMS system
                             # messages, while preventing two Huume workflows from
                             # responding to one code request.
+                            # Espresso is an independent read-only project agent;
+                            # unlike Huume it never enters the EMS dispatch tree.
+                            autopr_context_ref = _autopr_context_reference(reply_target_metadata)
+                            if is_new_message and autopr_context_ref is not None:
+                                # A direct reply to Espresso's decision-bound
+                                # request is card evidence, even without an
+                                # @espresso mention. Do not also send it to the
+                                # generic read-only repository-question agent.
+                                _spawn_bg(_bg_apply_autopr_context_reply(
+                                    str(ch_uuid), user, row["content"], autopr_context_ref,
+                                    broadcast_attachments,
+                                ))
+                            if (
+                                is_new_message
+                                and "espresso" in mention_handles
+                                and autopr_context_ref is None
+                            ):
+                                _spawn_bg(_bg_dispatch_espresso_mention(
+                                    str(ch_uuid), user, row["content"], row["id"],
+                                ))
                             if is_new_message and "huume" in mention_handles:
                                 _spawn_bg(_bg_dispatch_huume_mention(
                                     str(ch_uuid), str(row["id"]),

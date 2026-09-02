@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, Loader2, Save, Send, Sparkles, X } from 'lucide-react'
+import { BriefcaseBusiness, CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, Loader2, Save, Send, Sparkles, X } from 'lucide-react'
 import type { ScheduleSaveState, } from '../../../hooks/employees/useScheduleEditor'
 import type { CompanyLocation } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../shared/LocationPicker'
@@ -21,6 +21,10 @@ interface ScheduleEditorToolbarProps {
   onPublish(): void
   onExit(): void
   onHelp(): void
+  jobsOpen: boolean
+  jobsDisabled: boolean
+  credentialsEnabled: boolean
+  onToggleJobs(): void
   chatOpen: boolean
   huumeSelectionCount: number
   onToggleChat(): void
@@ -37,6 +41,7 @@ export default function ScheduleEditorToolbar({
   weekStart, summary, saveState, lastSavedAt, editPublished, publishing,
   locations, locationId, onChangeLocation,
   onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
+  jobsOpen, jobsDisabled, credentialsEnabled, onToggleJobs,
   chatOpen, huumeSelectionCount, onToggleChat,
 }: ScheduleEditorToolbarProps) {
   return (
@@ -46,6 +51,7 @@ export default function ScheduleEditorToolbar({
           <X className="h-3.5 w-3.5" /> Exit editor
         </button>
         <button onClick={onHelp} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-100" title="How to use the schedule editor"><HelpCircle className="h-3.5 w-3.5" /> How to use</button>
+        <button onClick={onToggleJobs} disabled={jobsDisabled} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${jobsOpen ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title={credentialsEnabled ? 'Configure location jobs and their required credentials' : 'Configure location jobs'}><BriefcaseBusiness className="h-3.5 w-3.5" /> {credentialsEnabled ? 'Jobs & credentials' : 'Jobs'}</button>
         <button onClick={onToggleChat} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${chatOpen ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title="Ask Huume about this schedule"><Sparkles className="h-3.5 w-3.5" /> Ask Huume</button>
         <div className="h-5 w-px bg-zinc-800" />
         <button onClick={onPreviousWeek} className="rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100" aria-label="Previous week"><ChevronLeft className="h-4 w-4" /></button>

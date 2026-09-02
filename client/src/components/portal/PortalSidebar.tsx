@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { LayoutDashboard, CalendarClock, HeartPulse, MessageCircleQuestion } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
-import { resetAuthCaches } from '../../api/authReset'
+import { logoutSession } from '../../api/client'
 import { useState } from 'react'
 
 interface NavItem {
@@ -12,7 +12,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: '/portal', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/portal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/portal/schedule', icon: CalendarClock, label: 'My Schedule', feature: 'employee_schedule' },
   { to: '/portal/benefits', icon: HeartPulse, label: 'My Benefits', feature: 'benefits_admin' },
   { to: '/portal/ask-hr', icon: MessageCircleQuestion, label: 'Ask HR', feature: 'ask_hr' },
@@ -22,14 +22,17 @@ export default function PortalSidebar() {
   const { pathname } = useLocation()
   const { me, hasFeature } = useMe()
   const [logoutHover, setLogoutHover] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
 
   const navItems = NAV.filter((item) => !item.feature || hasFeature(item.feature))
 
   function handleLogout() {
-    localStorage.removeItem('matcha_access_token')
-    localStorage.removeItem('matcha_refresh_token')
-    resetAuthCaches()
-    window.location.href = '/login'
+    // logoutSession does two sequential round-trips (refresh, then revoke)
+    // before it navigates, so without this the button stays live and repeat
+    // clicks stack duplicate revocation requests.
+    if (loggingOut) return
+    setLoggingOut(true)
+    void logoutSession()
   }
 
   return (
@@ -41,8 +44,7 @@ export default function PortalSidebar() {
 
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-auto">
         {navItems.map((item) => {
-          const active =
-            item.to === '/portal' ? pathname === '/portal' : pathname.startsWith(item.to)
+          const active = pathname === item.to || pathname.startsWith(`${item.to}/`)
           const Icon = item.icon
           return (
             <Link
@@ -67,11 +69,12 @@ export default function PortalSidebar() {
         </div>
         <button
           onClick={handleLogout}
+          disabled={loggingOut}
           onMouseEnter={() => setLogoutHover(true)}
           onMouseLeave={() => setLogoutHover(false)}
           className={`w-full text-xs text-left px-2 py-1.5 rounded transition-colors ${
             logoutHover ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500'
-          }`}
+          } disabled:opacity-50`}
         >
           Sign out
         </button>

@@ -1,11 +1,13 @@
 name: Silent error autofix
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
   workflow_dispatch:
 
-# This must run on Finch's Mac. It uses that user's authenticated OpenCode
+# GitHub's best-effort cron left multi-hour gaps. The same Mac LaunchAgent
+# that owns the Kanban lane is now the sole one-minute clock and gives this
+# incident lane priority whenever its last completed pass is stale.
+
+# This must run on Finch's Mac. It uses that user's authenticated Codex
 # profile; no model credential is stored in GitHub.
 permissions:
   contents: write
@@ -19,7 +21,7 @@ concurrency:
 jobs:
   investigate:
     runs-on: [self-hosted, macOS, opencode]
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -31,6 +33,13 @@ jobs:
           # that gitignored directory every run and silently disables client
           # verification (CLIENT_DEPS_READY always false).
           clean: false
+
+      - name: Require msandbox master switch
+        run: |
+          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+            echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
+            exit 1
+          fi
 
       - name: Reset any stray bot branch from a prior interrupted run
         run: |
@@ -53,8 +62,17 @@ jobs:
         run: |
           for l in "autofix|1D76DB|Opened by the silent-error autofix bot" \
                    "autofix-superseded|6B7280|Draft superseded by a merged human PR" \
+                   "autofix-duplicate|6B7280|Duplicate of an older open pull request" \
+                   "covers-prod-error|0E8A16|Also covers a production error incident" \
+                   "possible-duplicate|FBCA04|May overlap another open pull request" \
                    "needs-work|D93F0B|Verification found a new test failure" \
                    "autofix-nofix|CFD3D7|Investigated but no safe fix found" \
+                   "criticality:red|B60205|Production, safety, security, data, or compliance critical" \
+                   "criticality:orange|D93F0B|Material regression or broad workflow impact" \
+                   "criticality:yellow|FBCA04|Scoped or recoverable production behavior" \
+                   "confidence:high|0E8A16|Autofix confidence 75-100" \
+                   "confidence:medium|FBCA04|Autofix confidence 45-74" \
+                   "confidence:low|D93F0B|Autofix confidence 0-44" \
                    "sev:high|B60205|" "sev:med|D4C5F9|" "sev:low|0E8A16|"; do
             IFS='|' read -r name color desc <<< "$l"
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
@@ -74,6 +92,14 @@ jobs:
           install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
           printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
 
+      - name: Retry pending fix-ready emails
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: ./scripts/error-autofix/notify-review-ready.sh --reconcile
+
       - name: Collect actionable server and client errors
         id: collect
         timeout-minutes: 3
@@ -81,7 +107,7 @@ jobs:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
           # 24 hours is the lookback, not the cadence. The workflow runs every
-          # 10 minutes; the wider window prevents runner downtime or a long
+          # 5 minutes; the wider window prevents runner downtime or a long
           # investigation from making an unresolved incident disappear.
           if ./scripts/error-autofix/collect.sh --hours 24 --limit 25 > "$RUNNER_TEMP/incidents.json"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -158,8 +184,14 @@ jobs:
         if: steps.select.outputs.skip == 'false'
         timeout-minutes: 12
         continue-on-error: true
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-error-autofix-sandbox
+          AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-error-autofix-sandbox
         run: |
-          ./scripts/error-autofix/investigate.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/correlated-log.txt"
+          ./scripts/error-autofix/investigate.sh \
+            "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" \
+            "$RUNNER_TEMP/decision.json" "$RUNNER_TEMP/correlated-log.txt"
 
       - name: Fail incomplete investigation
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome != 'success'
@@ -174,26 +206,126 @@ jobs:
           echo "Investigation failed before producing a valid report; this incident remains eligible for retry." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
+      - name: Read validated triage decision
+        id: triage
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        run: |
+          echo "safe_changes=$(jq -r '.safe_changes_present' "$RUNNER_TEMP/decision.json")" >> "$GITHUB_OUTPUT"
+          jq '{outcome, confidence_score, confidence_band, criticality}' "$RUNNER_TEMP/decision.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check whether an open PR already covers this fix
+        id: coverage
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true'
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOPR_SCOPE_DEDUPE_MODE: enforce
+        run: |
+          ./scripts/autopr-scope/check-open-prs.sh \
+            --lane error --identity "${{ steps.select.outputs.key }}" \
+            --evidence "$RUNNER_TEMP/incident.json" --report "$RUNNER_TEMP/report.md" \
+            --output "$RUNNER_TEMP/coverage.json"
+          jq . "$RUNNER_TEMP/coverage.json" >> "$GITHUB_STEP_SUMMARY"
+          decision="$(jq -r '.decision' "$RUNNER_TEMP/coverage.json")"
+          confidence="$(jq -r '.confidence' "$RUNNER_TEMP/coverage.json")"
+          mode="$(jq -r '.mode' "$RUNNER_TEMP/coverage.json")"
+          if [ "$mode" = enforce ] && [ "$decision" = covered ] && [ "$confidence" = high ]; then
+            echo "covered=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "covered=false" >> "$GITHUB_OUTPUT"
+          fi
+          [ "$(jq -r '.possible_duplicate' "$RUNNER_TEMP/coverage.json")" != true ] || echo "possible_duplicate=true" >> "$GITHUB_OUTPUT"
+
+      - name: Link production incident to its covering PR
+        if: steps.coverage.outputs.covered == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/error-autofix/record-coverage.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/coverage.json" "$RUNNER_TEMP/decision.json"
+
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 8
         run: |
           ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
         env:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
+      - name: Record verification deferred for no-safe-fix
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true'
+        run: |
+          cat > "$RUNNER_TEMP/verification.md" <<'EOF'
+          ## Verification
+
+          No verification ran because the investigation produced no code change.
+          EOF
+
+      - name: Write commit subject
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
+        timeout-minutes: 5
+        env:
+          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_SANDBOX_PROJECT_NAME: matcha-error-autofix-sandbox
+          AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-error-autofix-sandbox
+        run: |
+          ./scripts/kanban-autopr/write-commit-subject.sh fix "$RUNNER_TEMP/commit-subject.json" \
+            -f "$RUNNER_TEMP/incident.json" -f "$RUNNER_TEMP/decision.json" \
+            -f "$RUNNER_TEMP/report.md" -f "$RUNNER_TEMP/verification.md"
+
       - name: Publish PR (or no-fix issue)
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
+        run: |
+          ./scripts/error-autofix/publish.sh \
+            "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/decision.json" \
+            "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
+            "$RUNNER_TEMP/commit-subject.json"
+
+      - name: Resolve review-ready PR
+        id: review_pr
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/error-autofix/publish.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md"
+          if [ "${{ steps.coverage.outputs.covered }}" = true ]; then
+            pr_number="$(jq -r '.covering_pr' "$RUNNER_TEMP/coverage.json")"
+          else
+            pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" \
+              --head "bot/err-${{ steps.select.outputs.key }}" --state open --limit 1 \
+              --json number --jq '.[0].number // empty')"
+          fi
+          [ -n "$pr_number" ] || { echo "Review-ready PR could not be resolved" >&2; exit 1; }
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Email Aaron that the fix is ready for review
+        if: steps.review_pr.outputs.number != ''
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SSH_KEY: ${{ runner.temp }}/matcha-prod-notify.pem
+          AUTOFIX_REVIEW_EMAIL: aaron@hey-matcha.com
+        run: |
+          install -m 600 /dev/null "$SSH_KEY"
+          trap 'rm -f "$SSH_KEY"' EXIT
+          printf '%s\n' "$EC2_SSH_KEY" > "$SSH_KEY"
+          ./scripts/error-autofix/notify-review-ready.sh \
+            --pr "${{ steps.review_pr.outputs.number }}" \
+            --incident "$RUNNER_TEMP/incident.json" \
+            --decision "$RUNNER_TEMP/decision.json"
 
       - name: Cleanup
         if: always()
         run: |
-          rm -f "$RUNNER_TEMP/matcha-prod.pem"
+          rm -f "$RUNNER_TEMP/matcha-prod.pem" "$RUNNER_TEMP/matcha-prod-notify.pem"
+          env AGENT_SANDBOX_PROJECT_NAME=matcha-error-autofix-sandbox \
+            AGENT_SANDBOX_AUTOPR=1 \
+            SANDBOX_WORKSPACE_DIR="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/workspace" \
+            SANDBOX_AWS_DIR="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/empty-aws" \
+            SANDBOX_CODEX_AUTH_FILE="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/codex-auth/auth.json" \
+            ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
           git reset --hard >/dev/null 2>&1 || true
           git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -v "^$(git rev-parse --show-toplevel)\$" | xargs -r -n1 git worktree remove --force || true
           git worktree prune || true

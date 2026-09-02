@@ -440,7 +440,7 @@ async def commit_sales_route(
             result = await sales_commit_service.commit_sales_import(
                 conn, company_id=company_id, user_id=user.id, location_id=body.location_id,
                 business_date=body.business_date, source=body.source, filename=body.filename,
-                gmail_message_id=body.gmail_message_id, import_id=body.import_id, force=body.force,
+                gmail_message_id=body.gmail_message_id, import_id=body.import_id,
                 lines=[line.model_dump() for line in body.lines],
             )
         except ValueError as exc:
@@ -742,7 +742,8 @@ async def commit_receipt_route(
 
     lines = [
         {"item_id": line.item_id, "new_item_name": line.new_item_name,
-         "quantity": line.quantity, "order_id": line.order_id, "expires_on": line.expires_on}
+         "quantity": line.quantity, "order_id": line.order_id, "expires_on": line.expires_on,
+         "vendor_sku": line.vendor_sku, "unit_price": line.unit_price, "pack_size": line.pack_size}
         for line in body.lines
     ]
     async with get_connection() as conn:

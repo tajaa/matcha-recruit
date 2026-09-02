@@ -89,7 +89,7 @@ export function MobilePreview({ title, subject, preheader, html, designJson, def
           </div>
           <iframe
             title="Newsletter preview"
-            sandbox="allow-same-origin"
+            sandbox=""
             srcDoc={previewDoc}
             className="block"
             style={{ width: viewportPx, height: 700, border: 0, background: clientBg }}

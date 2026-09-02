@@ -3,20 +3,21 @@
 # or publish a question draft when the card needs a human answer. The board is
 # where this user works, not GitHub Issues.
 #
-# Usage: ./publish.sh card.json decision.json report.md verification.md
+# Usage: ./publish.sh card.json decision.json report.md verification.md publication-copy.json
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 # shellcheck source=./decision.sh
 source "$SCRIPT_DIR/decision.sh"
 
-CARD_FILE="${1:?usage: publish.sh card.json decision.json report.md verification.md}"
-DECISION_FILE="${2:?usage: publish.sh card.json decision.json report.md verification.md}"
-REPORT_FILE="${3:?usage: publish.sh card.json decision.json report.md verification.md}"
-VERIFICATION_FILE="${4:?usage: publish.sh card.json decision.json report.md verification.md}"
+CARD_FILE="${1:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+DECISION_FILE="${2:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+REPORT_FILE="${3:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+VERIFICATION_FILE="${4:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
+PUBLICATION_COPY_FILE="${5:?usage: publish.sh card.json decision.json report.md verification.md publication-copy.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
@@ -31,6 +32,8 @@ PROD_BUILD_NUMBER="$(jq -r '.production.build_number // empty' "$CARD_FILE")"
 PROD_BACKEND_SHA="$(jq -r '.production.containers.backend.git_sha // empty' "$CARD_FILE")"
 PROD_FRONTEND_SHA="$(jq -r '.production.containers.frontend.git_sha // empty' "$CARD_FILE")"
 EXISTING_PROGRESS_NOTE="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+EXISTING_PR_NUMBER="$(jq -r '.pr_number // empty' "$CARD_FILE")"
+RECONSIDERATION_EVENT_ID="$(jq -r '.autopr_reconsideration_event_id // empty' "$CARD_FILE")"
 OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
 CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
 CONFIDENCE_BAND="$(jq -r '.confidence_band' "$DECISION_FILE")"
@@ -38,16 +41,46 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
+DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | join(",")' "$DECISION_FILE")"
+DIRECTIVE_MARKER=""
+[ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
+ALLOW_MIGRATION_VERSION=false
+case ",$DIRECTIVE_CSV," in
+    *,draft_pr,*) ALLOW_MIGRATION_VERSION=true ;;
+esac
+PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
+PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
+COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
+    || die "publication copy is missing a commit subject"
+CARD_NOTE="$(jq -er '.card_note | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
+    || die "publication copy is missing a card note"
 NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
+POSSIBLE_DUPLICATE="${AUTOPR_POSSIBLE_DUPLICATE:-0}"
 NOTE_STATE="ready_for_review"
-NOTE_STATE_LABEL="ready for review"
 if [ "$AWAITING_HUMAN" = true ]; then
     NOTE_STATE="awaiting_answers"
-    NOTE_STATE_LABEL="awaiting answers"
 elif [ "$OUTCOME" = no_safe_action ]; then
     NOTE_STATE="no_safe_action"
-    NOTE_STATE_LABEL="no safe action"
 fi
+
+auto_setup_status() {
+    if [ "$AWAITING_HUMAN" = true ]; then
+        printf 'BLOCKED: AWAITING ANSWERS'
+        return
+    fi
+    if [ "$OUTCOME" = no_safe_action ]; then
+        case "$NO_SAFE_ACTION_REASON" in
+            already_fixed) printf 'NO PR: ALREADY FIXED' ;;
+            migration_required) printf 'NO PR: MIGRATION REQUIRED' ;;
+            policy_blocked) printf 'NO PR: POLICY BLOCKED' ;;
+            external_dependency) printf 'NO PR: EXTERNAL DEPENDENCY' ;;
+            *) printf 'NO PR: HUMAN ACTION REQUIRED' ;;
+        esac
+        return
+    fi
+    printf 'READY FOR REVIEW'
+}
+AUTO_SETUP_STATUS="$(auto_setup_status)"
 
 [ -n "$PROD_BUILD_NUMBER" ] || die "card context is missing the production build number"
 [ -n "$PROD_BACKEND_SHA" ] || die "card context is missing the production backend SHA"
@@ -64,13 +97,86 @@ progress_note_with_origin() {
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
     remainder="$(printf '%s' "$existing" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · )?//')"
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+    # New notes put the state first so the narrow card face shows the reason
+    # for a stall before build provenance. Keep accepting the legacy lowercase
+    # prefix above so an upgrade does not duplicate an existing human note.
+    remainder="$(printf '%s' "$remainder" | sed -E \
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
         printf '%s · %s' "$marker" "$remainder"
-    elif [ -n "$existing" ] && [[ "$existing" != "from auto setup"* ]]; then
+    elif [ -n "$existing" ] \
+        && [[ "$existing" != "from auto setup"* ]] \
+        && [[ "$existing" != "🤖 AUTO SETUP"* ]]; then
         printf '%s · %s' "$marker" "$existing"
     else
         printf '%s' "$marker"
+    fi
+}
+
+report_summary() {
+    awk '
+      /^### Summary[[:space:]]*$/ { capture=1; next }
+      /^### / && capture { exit }
+      capture { print }
+    ' "$REPORT_FILE" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' \
+        | jq -Rsr '.[0:1200]'
+}
+
+post_reconsideration_reply() {
+    local pr_number="${1:-}" expected_note="${2:-}" summary message fixed_pr
+    [ -n "$RECONSIDERATION_EVENT_ID" ] || return 0
+    [ -n "$expected_note" ] || die "reconsideration result is missing its decision note"
+    summary="$(report_summary)"
+    case "$OUTCOME" in
+        implementation)
+            message="AutoPR accepted this additional context and drafted PR #$pr_number."
+            ;;
+        partial_implementation|questions_only)
+            message="AutoPR reviewed this additional context but still needs human answers in PR #$pr_number."
+            ;;
+        no_safe_action)
+            if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+                fixed_pr="${pr_number:-$EXISTING_PR_NUMBER}"
+                if [[ "$fixed_pr" =~ ^[0-9]+$ ]]; then
+                    message="After reviewing your additional context, AutoPR still found this request already fixed in PR #$fixed_pr."
+                else
+                    message="After reviewing your additional context, AutoPR still found this request already fixed."
+                fi
+            else
+                message="After reviewing your additional context, AutoPR found that the no-PR decision still applies ($NO_SAFE_ACTION_REASON)."
+            fi
+            ;;
+        *) return 0 ;;
+    esac
+    [ -z "$summary" ] || message="$message $summary"
+    if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" \
+        "$(jq -n --arg body "$message" --arg reply "$RECONSIDERATION_EVENT_ID" \
+            '{kind:"note",body:$body,reply_to:$reply}')" >/dev/null); then
+        printf 'kanban-autopr: warning: could not post reconsideration result for task %s\n' "$TASK_ID" >&2
+    fi
+    # The activity thread is durable history, but the AutoPR account can be
+    # the same identity as the reporter and ordinary comment notifications
+    # deliberately suppress self-notification. This decision-bound endpoint
+    # targets the original context author and is required: a run must not
+    # silently consume their instruction.
+    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/result-notification" \
+        "$(jq -n --arg event "$RECONSIDERATION_EVENT_ID" --arg note "$expected_note" \
+            --arg message "$message" \
+            '{reconsideration_event_id:$event,expected_progress_note:$note,message:$message}')" \
+        >/dev/null
+}
+
+post_context_request() {
+    local reason="$1" expected_note="$2"
+    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rsr '.[0:600]')"
+    if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
+        "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
+            '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
+        # The card/PR state remains authoritative; surface chat delivery loss
+        # without rolling back an otherwise complete publication.
+        printf 'kanban-autopr: warning: could not post Espresso context request for task %s\n' \
+            "$TASK_ID" >&2
     fi
 }
 
@@ -93,6 +199,7 @@ render_body() {
         echo "<!-- matcha-autopr-criticality: $CRITICALITY -->"
         echo "<!-- matcha-autopr-confidence-score: $CONFIDENCE_SCORE -->"
         echo "<!-- matcha-autopr-note-state: $NOTE_STATE -->"
+        echo "<!-- matcha-production-verification: $PRODUCTION_VERIFICATION_B64 -->"
         [ -z "$NO_SAFE_ACTION_REASON" ] || echo "<!-- matcha-autopr-no-safe-action-reason: $NO_SAFE_ACTION_REASON -->"
         echo "<!-- matcha-feedback-comment-id: ${comment_id:-none} -->"
         echo "<!-- matcha-feedback-review-id: ${review_id:-none} -->"
@@ -114,6 +221,22 @@ render_body() {
         echo
         cat "$VERIFICATION_FILE"
         echo
+        echo "## Production verification"
+        jq -r '
+          .production_verification |
+          "**Target** " + .target + " · **Mode** " + .mode + "\n\n" +
+          .reason + "\n\n" +
+          (if .mode == "automatic_http" then
+             (.checks | map("- `GET " + .path + "` → " + (.expected_status | tostring) +
+               (if (.body_contains // "") != "" then "; contains `" + .body_contains + "`" else "" end) +
+               (if (.body_absent // "") != "" then "; excludes `" + .body_absent + "`" else "" end)) | join("\n"))
+           else
+             (.steps | to_entries | map(((.key + 1) | tostring) + ". " + .value) | join("\n"))
+           end)
+        ' "$DECISION_FILE"
+        echo
+        echo "_This check becomes eligible only after this merge is present in the deployed production SHA._"
+        echo
         echo "_Built by [this workflow run]($RUN_URL)._"
     } > "$output_file"
 }
@@ -134,6 +257,7 @@ replace_triage_labels() {
     args+=(--add-label autopr --add-label "$desired_criticality" --add-label "$desired_confidence")
     [ "$MODE" != rework ] || args+=(--add-label autopr-rework)
     [ "$AWAITING_HUMAN" != true ] || args+=(--add-label autopr-awaiting-input)
+    [ "$POSSIBLE_DUPLICATE" != 1 ] || args+=(--add-label possible-duplicate)
     if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
         args+=(--add-label needs-work)
     elif printf '%s\n' "$labels" | grep -qx needs-work; then
@@ -145,12 +269,22 @@ replace_triage_labels() {
 cd "$REPO_ROOT"
 git add --all
 
-# Path guard: denylist is what stops the bot rewriting its own harness or
-# CI. The allowlist is strictly stronger — it closes every path the denylist
-# didn't think to name. A card that genuinely needs a migration or infra
-# change cannot be auto-PR'd; that is the correct conservative outcome, and
-# the no-spec path below says so on the card.
-unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^deploy/|^scripts/|^server/alembic/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+# Path guard: denylist is what stops the bot rewriting its own harness or CI.
+# The allowlist is strictly stronger. A decision-bound draft_pr directive may
+# additionally author a migration *version* for human review; it never permits
+# migration configuration/runner changes and this script never applies it.
+changed_paths="$(git diff --cached --no-renames --name-only)"
+unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
+    unsafe_migrations="$(printf '%s\n' "$changed_paths" \
+        | grep -E '^server/alembic/' \
+        | grep -vE '^server/alembic/versions/[^/]+\.py$' || true)"
+else
+    unsafe_migrations="$(printf '%s\n' "$changed_paths" | grep -E '^server/alembic/' || true)"
+fi
+if [ -n "$unsafe_migrations" ]; then
+    unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
+fi
 if [ -n "$unsafe_paths" ]; then
     echo "Refusing unsafe automated change:" >&2
     printf '%s\n' "$unsafe_paths" >&2
@@ -158,9 +292,13 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-disallowed_paths="$(git diff --cached --no-renames --name-only | grep -vE '^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$' || true)"
+allowed_paths_re='^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
+if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
+    allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[^/]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
+fi
+disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
-    echo "Refusing change outside server/app, server/tests, client/src, or Espresso source:" >&2
+    echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
@@ -183,6 +321,15 @@ case "$CATEGORY" in
     fix|bug) PREFIX="fix" ;;
     *) PREFIX="chore" ;;
 esac
+[ "${COMMIT_SUBJECT#"$PREFIX: "}" != "$COMMIT_SUBJECT" ] \
+    || die "publication commit subject must start with $PREFIX:"
+[[ "$COMMIT_SUBJECT" != *$'\n'* && "$COMMIT_SUBJECT" != *$'\r'* ]] \
+    || die "publication commit subject must be one line"
+[ "${#COMMIT_SUBJECT}" -le 72 ] || die "publication commit subject exceeds 72 characters"
+[[ "$CARD_NOTE" != *$'\n'* && "$CARD_NOTE" != *$'\r'* && "$CARD_NOTE" != *'·'* ]] \
+    || die "publication card note contains a forbidden separator or newline"
+[ -n "$CARD_NOTE" ] && [ "${#CARD_NOTE}" -le 240 ] \
+    || die "publication card note must be 1-240 characters"
 
 # The decision must agree with the actual working tree. Do not turn a model
 # mismatch into a permanent no-spec marker, and never publish product changes
@@ -227,7 +374,7 @@ TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
 if [ "$OUTCOME" = no_safe_action ]; then
     git reset --hard >/dev/null 2>&1
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
-    note_prefix="from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL"
+    note_prefix="🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL"
     if [ "$MODE" = rework ]; then
         [ -n "$existing_open_pr" ] || die "rework no-safe-action has no open PR for $BRANCH"
         BODY_FILE="$(mktemp)"
@@ -236,18 +383,26 @@ if [ "$OUTCOME" = no_safe_action ]; then
         replace_triage_labels "$existing_open_pr"
         pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$existing_open_pr"
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$note_prefix · PR #$existing_open_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
                 '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
+        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+            post_context_request "$CARD_NOTE" "$origin_note"
+        fi
+        post_reconsideration_reply "$existing_open_pr" "$origin_note"
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     else
         origin_note="$(progress_note_with_origin \
-            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL · $no_spec" \
+            "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
+        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
+            post_context_request "$CARD_NOTE" "$origin_note"
+        fi
+        post_reconsideration_reply "" "$origin_note"
         echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
     fi
     exit 0
@@ -263,12 +418,12 @@ if [ "$AWAITING_HUMAN" = true ] && [ -z "$existing_open_pr" ]; then
 fi
 
 if [ "$has_diff" = true ]; then
-    git commit -m "$PREFIX: $TITLE" >/dev/null
+    git commit -m "$COMMIT_SUBJECT" >/dev/null
     git push --force-with-lease --set-upstream origin "$BRANCH"
 elif [ -z "$existing_open_pr" ]; then
     # GitHub needs a head commit to host a draft with questions, but this empty
     # commit deliberately changes no product files.
-    git commit --allow-empty -m "$PREFIX: $TITLE (questions)" >/dev/null
+    git commit --allow-empty -m "$COMMIT_SUBJECT" >/dev/null
     git push --force-with-lease --set-upstream origin "$BRANCH"
 fi
 
@@ -293,12 +448,17 @@ pr_url="${GITHUB_SERVER_URL:-https://github.com}/$REPO/pull/$published_pr"
 card_column=in_progress
 [ "$AWAITING_HUMAN" != true ] || card_column=changes_requested
 origin_note="$(progress_note_with_origin \
-    "from auto setup · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE · $NOTE_STATE_LABEL" \
+    "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
 replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \
         --arg note "$origin_note" \
         '{pr_url: $url, pr_number: $num, board_column: $col, progress_note: $note}')" >/dev/null
+if [ "$AWAITING_HUMAN" = true ]; then
+    context_questions="$(jq -r '[.questions[]?.question] | join(" ")' "$DECISION_FILE")"
+    post_context_request "$CARD_NOTE $context_questions You can attach a screenshot in your Espresso reply or on the ticket." "$origin_note"
+fi
+post_reconsideration_reply "$published_pr" "$origin_note"
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"

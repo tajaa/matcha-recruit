@@ -102,7 +102,16 @@ async def _classify_role_via_gemini(
             config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=64),
         )
 
-        key = response.text.strip().strip('"').strip("'")
+        response_text = response.text
+        if not response_text or not response_text.strip():
+            # Gemini can legitimately return no text when a candidate is
+            # blocked or otherwise has no usable content. That is an
+            # unclassified role, not an application exception; callers
+            # already degrade safely when this function returns None.
+            logger.warning("Gemini returned no role classification for '%s'", job_title)
+            return None
+
+        key = response_text.strip().strip('"').strip("'")
         for r in role_rows:
             if r["key"] == key:
                 return dict(r)

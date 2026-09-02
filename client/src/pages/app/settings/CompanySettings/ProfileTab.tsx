@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Button, Input } from '../../../../components/ui'
+import { Button } from '../../../../components/ui'
 import { LABEL } from '../../../../components/ui/typography'
 import { INDUSTRY_OPTIONS } from '../../../../data/industryConstants'
 import { api } from '../../../../api/client'
@@ -21,10 +21,6 @@ export function ProfileTab({ company, setCompany, updateField, showAddons }: Pro
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Specialties
-  const [editingSpecialties, setEditingSpecialties] = useState(false)
-  const [specialtyDraft, setSpecialtyDraft] = useState('')
-
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file || !company) return
@@ -38,22 +34,6 @@ export function ProfileTab({ company, setCompany, updateField, showAddons }: Pro
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
-  }
-
-  function handleAddSpecialty() {
-    const trimmed = specialtyDraft.trim()
-    if (!trimmed || !company) return
-    const current = company.healthcare_specialties || []
-    if (current.includes(trimmed)) { setSpecialtyDraft(''); return }
-    const updated = [...current, trimmed]
-    updateField('healthcare_specialties', updated)
-    setSpecialtyDraft('')
-  }
-
-  function handleRemoveSpecialty(s: string) {
-    if (!company) return
-    const updated = (company.healthcare_specialties || []).filter((x) => x !== s)
-    updateField('healthcare_specialties', updated)
   }
 
   return (
@@ -94,38 +74,6 @@ export function ProfileTab({ company, setCompany, updateField, showAddons }: Pro
             </dl>
           </div>
 
-          {/* Healthcare Specialties */}
-          <div className={PANEL}>
-            <h3 className={`${LABEL} mb-3`}>Healthcare Specialties</h3>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {(company.healthcare_specialties || []).length === 0 && (
-                <p className="text-xs text-zinc-600 italic">No specialties set</p>
-              )}
-              {(company.healthcare_specialties || []).map((s) => (
-                <span key={s} className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.08] text-zinc-300">
-                  {s}
-                  <button type="button" onClick={() => handleRemoveSpecialty(s)} className="text-zinc-600 hover:text-zinc-300 transition-colors ml-0.5">&times;</button>
-                </span>
-              ))}
-            </div>
-            {editingSpecialties ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  label=""
-                  value={specialtyDraft}
-                  onChange={(e) => setSpecialtyDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSpecialty() } }}
-                  placeholder="e.g. Cardiology"
-                  autoFocus
-                  className="!py-1 text-sm flex-1"
-                />
-                <Button size="sm" onClick={handleAddSpecialty} disabled={!specialtyDraft.trim()}>Add</Button>
-                <Button size="sm" variant="ghost" onClick={() => { setEditingSpecialties(false); setSpecialtyDraft('') }}>Done</Button>
-              </div>
-            ) : (
-              <Button size="sm" variant="ghost" onClick={() => setEditingSpecialties(true)}>+ Add Specialty</Button>
-            )}
-          </div>
         </div>
 
         {/* Sidebar: logo */}

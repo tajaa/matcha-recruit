@@ -23,6 +23,19 @@ if [ "$1" = new-session ]; then
   mkdir "$AUTOPR_TEST_SESSION" 2>/dev/null || { echo "duplicate session" >&2; exit 1; }
   exit 0
 fi
+if [ "$1" = list-panes ]; then
+  if [ -e "${AUTOPR_TEST_BROKEN_SESSION:-/nonexistent}" ]; then
+    printf '%s\n' 0 1 0 0
+  else
+    printf '%s\n' 0 0 0 0
+  fi
+  exit 0
+fi
+if [ "$1" = kill-session ]; then
+  rm -rf "$AUTOPR_TEST_SESSION"
+  [ -z "${AUTOPR_TEST_BROKEN_SESSION:-}" ] || rm -f "$AUTOPR_TEST_BROKEN_SESSION"
+  exit 0
+fi
 if [ "$1" = display-message ]; then printf '%%0\n'; exit 0; fi
 if [ "$1" = split-window ]; then
   count=0
@@ -43,14 +56,29 @@ AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
 check "tmux observer creates one session with four panes" \
   $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] \
     && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 3 ] \
-    && grep -q '^split-window -h -p 50 ' "$TMP_DIR/tmux.log" \
+    && grep -q '^split-window -h -p 42 ' "$TMP_DIR/tmux.log" \
     && [ "$(grep -c '^split-window -v -p 50 ' "$TMP_DIR/tmux.log")" = 2 ] \
     && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
-  $(grep -q '24h queue + PR dashboard' "$TMP_DIR/tmux.log" \
-    && grep -q 'live OpenCode / OpenAI work' "$TMP_DIR/tmux.log" \
-    && grep -q 'timer + runner health' "$TMP_DIR/tmux.log" \
-    && grep -q 'active PR + live diff' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+  $(grep -q 'operations overview · Pacific time' "$TMP_DIR/tmux.log" \
+    && grep -q 'live agent detail' "$TMP_DIR/tmux.log" \
+    && grep -q 'automation health' "$TMP_DIR/tmux.log" \
+    && grep -q 'active PR detail' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+check "tmux observer preserves a large mouse-scrollable history" \
+  $(grep -q '^set-option -t matcha-autopr history-limit 100000' "$TMP_DIR/tmux.log" \
+    && grep -q '^set-option -t matcha-autopr mouse on' "$TMP_DIR/tmux.log" \
+    && echo 0 || echo 1)
+
+: > "$TMP_DIR/broken-session"
+AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
+  AUTOPR_TEST_SESSION="$TMP_DIR/session" AUTOPR_TEST_SPLITS="$TMP_DIR/splits" \
+  AUTOPR_TEST_BROKEN_SESSION="$TMP_DIR/broken-session" \
+  "$AUTOPR_DIR/ensure-dashboard.sh" >/dev/null
+check "dashboard helper replaces an existing session with a dead pane" \
+  $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 2 ] \
+    && grep -q '^kill-session ' "$TMP_DIR/tmux.log" \
+    && [ ! -e "$TMP_DIR/broken-session" ] \
+    && echo 0 || echo 1)
 
 rm -rf "$TMP_DIR/session" "$TMP_DIR/ensure.lock"
 : > "$TMP_DIR/tmux.log"
@@ -76,9 +104,16 @@ check "simultaneous dashboard starts create exactly one tmux session" \
 VIEW_DIR="$TMP_DIR/view"
 mkdir "$VIEW_DIR"
 cp "$AUTOPR_DIR/dashboard.sh" "$VIEW_DIR/dashboard.sh"
+cp "$AUTOPR_DIR/plan.py" "$VIEW_DIR/plan.py"
 cat > "$VIEW_DIR/collect.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' '[{"task_id":"a","id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","last_moved_at":"2026-08-27T00:00:00Z","created_at":"2026-08-27T00:00:00Z","progress_note":""},{"task_id":"b","id8":"bbbb0000","project_title":"MATCHA","title":"Polish reports","board_column":"todo","last_moved_at":"2026-08-27T01:00:00Z","created_at":"2026-08-27T01:00:00Z","progress_note":""}]'
+EOF
+cat > "$VIEW_DIR/collect-pr-context.sh" <<'EOF'
+#!/usr/bin/env bash
+[ "${GITHUB_REPOSITORY:-}" = "tajaa/matcha-recruit" ] || exit 1
+[ "${AUTOPR_TEST_PR_CONTEXT_FAIL:-false}" != true ] || exit 1
+printf '%s\n' '[{"number":307,"title":"fix: Intake","isDraft":true,"state":"OPEN","headRefName":"bot/task-aaaa0000","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","createdAt":"2099-08-27T00:00:00Z","updatedAt":"2099-08-27T01:00:00Z","labels":["autopr"],"reviewDecision":null,"checks":[],"files":["server/app/intake.py"],"comments":[{"author":"reviewer","body":"still fails for emailed intake"}],"reviews":[]}]'
 EOF
 cat > "$VIEW_DIR/select.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -90,24 +125,77 @@ cat > "$TMP_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
   printf '%s\n' '[{"databaseId":900,"status":"in_progress","conclusion":null,"event":"workflow_dispatch","createdAt":"2099-08-27T01:00:00Z","updatedAt":"2099-08-27T01:01:00Z","url":"x","displayTitle":"Kanban autopr"}]'
+elif [ "$1 $2" = "run view" ]; then
+  printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
 elif [ "$1 $2" = "pr list" ] && [[ "$*" == *"--state open"* ]]; then
-  printf '%s\n' '[{"number":307,"title":"🟡 [C91] fix: Intake","isDraft":true,"headRefName":"bot/task-aaaa0000","updatedAt":"2099-08-27T01:00:00Z","labels":[{"name":"autopr"}],"url":"x"}]'
+  printf '%s\n' '[{"number":307,"title":"🟡 [C91] fix: Intake","isDraft":true,"headRefName":"bot/task-aaaa0000","createdAt":"2099-08-27T00:00:00Z","updatedAt":"2099-08-27T01:00:00Z","labels":[{"name":"autopr"}],"url":"x"}]'
 elif [ "$1 $2" = "pr list" ]; then
-  printf '%s\n' '[{"number":306,"title":"🟠 [C80] fix: Reports","mergedAt":"2099-08-27T00:00:00Z","url":"x"}]'
+  printf '%s\n' '[{"number":306,"title":"🟠 [C80] fix: Reports","createdAt":"2099-08-27T00:00:00Z","mergedAt":"2099-08-27T01:00:00Z","headRefName":"bot/task-bbbbbbbb","labels":[{"name":"autopr"}],"url":"x"},{"number":305,"title":"fix: Error recovery","createdAt":"2099-08-27T00:00:00Z","mergedAt":"2099-08-27T00:30:00Z","headRefName":"bot/err-305","labels":[{"name":"autofix"}],"url":"x"}]'
 fi
 EOF
 chmod +x "$TMP_DIR/gh"
 
+cat > "$TMP_DIR/dispatch.log" <<'EOF'
+{"timestamp":"2099-08-27T01:30:00Z","action":"dispatch","reason":"kanban-pass"}
+EOF
+dashboard_now="$(jq -nr '"2099-08-27T02:30:00Z" | fromdateiso8601')"
+
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
-  AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
-check "24-hour dashboard shows now, next, queue, open PRs, and history" \
-  $(grep -q 'WORKFLOW NOW' "$TMP_DIR/dashboard.out" \
-    && grep -q 'UP NEXT' "$TMP_DIR/dashboard.out" \
-    && grep -q 'BOARD QUEUE' "$TMP_DIR/dashboard.out" \
-    && grep -q 'OPEN AUTO PRS' "$TMP_DIR/dashboard.out" \
-    && grep -q 'MERGED AUTO PRS · LAST 24 HOURS' "$TMP_DIR/dashboard.out" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
+check "control board shows cross-queue plan, exact next, PR timing, and Pacific history" \
+  $(grep -q 'MATCHA AUTOPR CONTROL BOARD' "$TMP_DIR/dashboard.out" \
+    && grep -q 'NOW · INVESTIGATING · 1h 30m' "$TMP_DIR/dashboard.out" \
+    && grep -q 'NEXT · EXACT SELECTOR RESULT' "$TMP_DIR/dashboard.out" \
+    && grep -q 'QUEUE · 2 tracked' "$TMP_DIR/dashboard.out" \
+    && grep -q 'PLAN · ' "$TMP_DIR/dashboard.out" \
+    && grep -q 'NOT-READY PRS ONLY' "$TMP_DIR/dashboard.out" \
+    && grep -q 'MERGE ORDER · 1 draft(s)' "$TMP_DIR/dashboard.out" \
+    && grep -q 'OPEN BOT PRS · AGE' "$TMP_DIR/dashboard.out" \
+    && grep -q 'RECENT BOT PRS · OPEN → MERGE · PACIFIC' "$TMP_DIR/dashboard.out" \
+    && grep -q '#305.*ERROR' "$TMP_DIR/dashboard.out" \
+    && ! grep -q '#305.*AWAITING DEPLOY/CHECK' "$TMP_DIR/dashboard.out" \
+    && grep -q 'RECENT RUNS · DURATION · PACIFIC' "$TMP_DIR/dashboard.out" \
+    && grep -q '6:00 PM PDT' "$TMP_DIR/dashboard.out" \
     && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
     && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_PR_CONTEXT_FAIL=true \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-no-pr-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-no-pr-context.out"
+check "PR-context failure cannot produce a live release plan" \
+  $(grep -q 'PLAN · unavailable · NOT-READY PRS ONLY' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && grep -q 'unavailable · existing queue remains visible below' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && ! grep -q '  RELEASE gh workflow run' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && echo 0 || echo 1)
+
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-selector-error.out"
+check "selector failure is explicit instead of looking like an empty queue" \
+  $(grep -q 'Selector failed (exit 1); this does not mean the queue is empty.' "$TMP_DIR/dashboard-selector-error.out" \
+    && echo 0 || echo 1)
+
+cat > "$TMP_DIR/gh-unavailable" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$TMP_DIR/gh-unavailable"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-unavailable" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-stale.out"
+check "GitHub failure retains cached data and labels the overview stale" \
+  $(grep -q 'STALE · showing last-known-good data' "$TMP_DIR/dashboard-stale.out" \
+    && grep -q '#307' "$TMP_DIR/dashboard-stale.out" && echo 0 || echo 1)
 
 cat > "$TMP_DIR/git-pr" <<'EOF'
 #!/usr/bin/env bash
@@ -152,27 +240,55 @@ fi
 EOF
 chmod +x "$TMP_DIR/gh-work"
 cat > "$TMP_DIR/live-work.log" <<'EOF'
-MATCHA KANBAN AUTOPR · OPENCODE LIVE STREAM
-OpenCode: reading project files
-OpenCode: editing the scheduling guard
+MATCHA KANBAN AUTOPR · CODEX LIVE STREAM
+Codex: reading project files
+Codex: editing the scheduling guard
 Bearer this-token-must-not-render
 sk-abcdefghijklmnopqrstuvwxyz123456
 -----BEGIN TEST PRIVATE KEY-----
 private-key-body-must-not-render
 -----END TEST PRIVATE KEY-----
-OpenCode: running focused tests
+Codex: running focused tests
 EOF
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
 check "live-work pane shows model activity and redacts common credentials" \
-  $(grep -q 'LIVE OPENCODE / OPENAI WORK' "$TMP_DIR/work-pane.out" \
+  $(grep -q 'LIVE CODEX WORK' "$TMP_DIR/work-pane.out" \
     && grep -q 'STEP build · Investigate' "$TMP_DIR/work-pane.out" \
     && grep -q 'editing the scheduling guard' "$TMP_DIR/work-pane.out" \
     && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-pane.out" \
     && grep -q '\[REDACTED PRIVATE KEY\]' "$TMP_DIR/work-pane.out" \
     && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-pane.out" \
     && ! grep -q 'this-token-must-not-render' "$TMP_DIR/work-pane.out" \
+    && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_MAX_ITERATIONS=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-history.out"
+check "interactive live-work pane appends sanitized output without clearing history" \
+  $(grep -q 'append-only history' "$TMP_DIR/work-history.out" \
+    && grep -q 'Scroll with mouse/trackpad or Ctrl-b \[' "$TMP_DIR/work-history.out" \
+    && grep -q 'Codex: reading project files' "$TMP_DIR/work-history.out" \
+    && grep -q '\[REDACTED_OPENAI_KEY\]' "$TMP_DIR/work-history.out" \
+    && ! grep -q 'private-key-body-must-not-render' "$TMP_DIR/work-history.out" \
+    && ! grep -qF '|| clear' "$AUTOPR_DIR/watch-work.sh" \
+    && echo 0 || echo 1)
+
+cat > "$TMP_DIR/msandbox-health" <<'EOF'
+#!/usr/bin/env bash
+case "${AUTOPR_TEST_SANDBOX_STATE:-absent}" in
+  error) printf 'docker unavailable\n' >&2; exit 1 ;;
+  *) printf '%s\n' "${AUTOPR_TEST_SANDBOX_STATE:-absent}" ;;
+esac
+EOF
+chmod +x "$TMP_DIR/msandbox-health"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  AUTOPR_TEST_SANDBOX_STATE=created "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-created.out"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  AUTOPR_TEST_SANDBOX_STATE=running "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-running.out"
+check "health pane distinguishes a blocked container from a running worker" \
+  $(grep -q 'blocked · container state created' "$TMP_DIR/health-created.out" \
+    && grep -q 'running · matcha-kanban-autopr-sandbox' "$TMP_DIR/health-running.out" \
     && echo 0 || echo 1)
 
 echo

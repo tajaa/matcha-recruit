@@ -33,7 +33,6 @@ struct ChannelDetailView: View {
     @State var isDragOver = false
     @State var replyingTo: ChannelMessage? = nil
     @State var hoveredMessageId: String? = nil
-    @State var lastTypingSentAt: Date = .distantPast
     @State var showInviteSheet = false
     @State var showManageMembers = false
     @State var pendingMessageDelete: ChannelMessage? = nil
@@ -153,6 +152,7 @@ struct ChannelDetailView: View {
                     userHandle: userHandle,
                     members: vm.channel?.members ?? [],
                     currentUserId: appState.currentUser?.id ?? "",
+                    supportsEspressoAgent: vm.channel?.projectId != nil,
                     maxAttachments: maxAttachments,
                     typingPing: { ws.sendTyping(channelId: channelId) },
                     onSend: { send($0) },
@@ -163,8 +163,7 @@ struct ChannelDetailView: View {
                     pendingAttachments: $pendingAttachments,
                     replyingTo: $replyingTo,
                     editingMessage: $editingMessage,
-                    isUploading: $isUploading,
-                    lastTypingSentAt: $lastTypingSentAt
+                    isUploading: $isUploading
                 )
                 .onDrop(of: [UTType.fileURL], isTargeted: $isDragOver) { providers in
                     handleFileDrop(providers)

@@ -1,6 +1,7 @@
 """Per-model pricing config and cost calculator for dollar-based billing.
 
-Prices sourced from https://ai.google.dev/pricing (Feb 2026).
+Gemini prices: https://ai.google.dev/pricing. OpenAI Luna prices:
+https://developers.openai.com/api/docs/models/gpt-5.6-luna.
 """
 
 from __future__ import annotations
@@ -9,12 +10,14 @@ from decimal import Decimal, ROUND_UP
 
 # Price per 1M tokens (input / output) for each supported model
 MODEL_PRICING: dict[str, dict[str, Decimal]] = {
-    # OpenAI GPT-5.6 Luna — Huume's Responses API tool loop. Must stay in
-    # sync with core.services.ai_usage.PRICING so saved Huume-run cost and
-    # the admin AI ledger never disagree.
+    # OpenAI GPT-5.6 Luna — Huume's Responses API tool loop. This table is
+    # used only for Matcha-work's internal usage-event accounting; the admin
+    # AI ledger leaves OpenAI cost NULL and treats provider billing as the
+    # dollar source of truth.
     "gpt-5.6-luna": {
-        "input_per_1m": Decimal("1.00"),
-        "output_per_1m": Decimal("6.00"),
+        "input_per_1m": Decimal("0.20"),
+        "cached_input_per_1m": Decimal("0.02"),
+        "output_per_1m": Decimal("1.20"),
     },
     # Gemini 3.5 Flash — pricing TBD (placeholder = prior 3-flash-preview
     # tier of $0.50 in / $3.00 out; revisit when Google publishes 3.5 GA pricing).
@@ -98,6 +101,7 @@ def calculate_call_cost(
     prompt_tokens: int | None,
     completion_tokens: int | None,
     thinking_tokens: int | None = None,
+    cached_tokens: int | None = None,
 ) -> Decimal:
     """Calculate the dollar cost of a single AI call based on model and token counts.
 
@@ -105,12 +109,20 @@ def calculate_call_cost(
     """
     pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
 
-    input_cost = Decimal(prompt_tokens or 0) * pricing["input_per_1m"] / Decimal("1000000")
-    # Thinking tokens bill at the output rate (matches ai_usage.compute_cost).
-    output_cost = (
-        Decimal((completion_tokens or 0) + (thinking_tokens or 0))
-        * pricing["output_per_1m"] / Decimal("1000000")
-    )
+    prompt_count = max(prompt_tokens or 0, 0)
+    cached_count = min(max(cached_tokens or 0, 0), prompt_count)
+    cached_price = pricing.get("cached_input_per_1m", pricing["input_per_1m"])
+    input_cost = (
+        Decimal(prompt_count - cached_count) * pricing["input_per_1m"]
+        + Decimal(cached_count) * cached_price
+    ) / Decimal("1000000")
+    # Responses output_tokens already includes its reasoning-token breakdown.
+    # Gemini candidates_token_count excludes thoughts_token_count, so only the
+    # Gemini-shaped rows need the separate thinking counter added.
+    output_count = completion_tokens or 0
+    if model != "gpt-5.6-luna":
+        output_count += thinking_tokens or 0
+    output_cost = Decimal(output_count) * pricing["output_per_1m"] / Decimal("1000000")
 
     total = (input_cost + output_cost).quantize(Decimal("0.000001"), rounding=ROUND_UP)
 

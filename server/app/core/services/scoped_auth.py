@@ -30,37 +30,37 @@ from uuid import UUID
 from jose import JWTError, jwt
 
 from app.config import get_settings
+from app.core.services.session_tokens import (
+    access_token_stale,
+    issue_stamp_ms,
+    refresh_token_times,
+    token_predates_watermark,
+)
 
 __all__ = ["ScopedTokenHelpers", "make_token_helpers", "is_token_revoked"]
 
 
-def is_token_revoked(iat, tokens_valid_after) -> bool:
-    """True if a token (by its ``iat`` epoch) predates the account's revocation
-    watermark. Tokens minted before the feature shipped (no iat) or accounts
-    that never revoked (NULL watermark) are never revoked.
+def is_token_revoked(iat, tokens_valid_after, iat_ms=None) -> bool:
+    """True if a token predates the account's revocation watermark. Tokens
+    minted before the feature shipped (no iat) or accounts that never revoked
+    (NULL watermark) are never revoked.
 
-    The watermark is floored to whole seconds before comparing: `iat` is a JWT
-    claim (whole seconds), but a logout's `NOW()` carries microseconds. Without
-    the floor, a login in the same wall-clock second as a logout mints a token
-    whose truncated `iat` reads as strictly earlier than the microsecond
-    watermark — a legitimate just-logged-in session would immediately 401 as
-    "revoked" until the clock ticked over to the next second.
+    Delegates to the shared comparison so Cappe and Tell-Us inherit the exact
+    millisecond check rather than the whole-second fallback — see
+    ``token_predates_watermark`` for why the precision matters in both
+    directions (a same-second re-login must survive; a token minted a
+    fraction of a second before a logout must not).
 
     Scope-independent, so it is a plain function rather than a bound helper.
     """
-    if tokens_valid_after is None or iat is None:
-        return False
-    try:
-        return float(iat) < int(tokens_valid_after.timestamp())
-    except (TypeError, ValueError, AttributeError):
-        return False
+    return token_predates_watermark(iat, iat_ms, tokens_valid_after)
 
 
 @dataclass(frozen=True)
 class ScopedTokenHelpers:
     scope: str
     create_access_token: Callable[..., str]
-    create_refresh_token: Callable[[UUID, str], str]
+    create_refresh_token: Callable[..., str]
     decode_token: Callable[..., Optional[dict]]
 
 
@@ -73,7 +73,8 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
         expires_delta: Optional[timedelta] = None,
     ) -> str:
         settings = get_settings()
-        expire = datetime.now(timezone.utc) + (
+        issued_at = datetime.now(timezone.utc)
+        expire = issued_at + (
             expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes)
         )
         payload = {
@@ -81,22 +82,29 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
             "email": email,
             "scope": scope,
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": issued_at,
+            # Whole-second `iat` cannot distinguish a token minted just before
+            # a logout from one minted just after. See token_predates_watermark.
+            "iat_ms": issue_stamp_ms(issued_at),
             "type": "access",
         }
         return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
-    def create_refresh_token(account_id: UUID, email: str) -> str:
+    def create_refresh_token(
+        account_id: UUID,
+        email: str,
+        session_started_at: Optional[int] = None,
+    ) -> str:
         settings = get_settings()
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.jwt_refresh_token_expire_days
-        )
+        issued_at, started_at, expire = refresh_token_times(session_started_at)
         payload = {
             "sub": str(account_id),
             "email": email,
             "scope": scope,
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": issued_at,
+            "iat_ms": issue_stamp_ms(issued_at),
+            "session_started_at": started_at,
             "type": "refresh",
         }
         return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
@@ -130,6 +138,8 @@ def make_token_helpers(scope: str) -> ScopedTokenHelpers:
         if payload.get("scope") != scope:
             return None
         if expected_type and payload.get("type") != expected_type:
+            return None
+        if payload.get("type") == "access" and access_token_stale(payload.get("iat")):
             return None
         if "sub" not in payload:
             return None

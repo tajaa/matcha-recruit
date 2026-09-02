@@ -71,6 +71,10 @@ _SCHEDULE_EDIT_PROPERTIES = {
         type=types.Type.STRING,
         enum=["reassign", "assign", "unassign", "retime", "cancel", "swap"],
     ),
+    "target_shift_id": types.Schema(
+        type=types.Type.STRING,
+        description="Exact shift id returned by get_schedule_overview.",
+    ),
     "target_employee_name": types.Schema(type=types.Type.STRING),
     "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
     "target_time_hint": types.Schema(
@@ -245,8 +249,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "cancel_staged", "write",
         "Cancel a staged action or discard a staged onboarding plan when the "
         "admin changes their mind. target='action' voids whatever's pending "
-        "— a send_offer or a draft_discipline write-up (it will no longer "
-        "execute even if confirmed). target='plan' discards the onboarding "
+        "(it will no longer execute even if confirmed). target='plan' discards the onboarding "
         "plan for offer_id — refused once it's already executing or done, "
         "since steps that already ran can't be undone from here. Pass "
         "offer_id whenever more than one plan is active.",
@@ -847,6 +850,57 @@ TOOLS: tuple[HuumeTool, ...] = (
         intent_hints=("what needs attention", "review this week", "schedule overview", "check the schedule"),
     ),
     _tool(
+        "get_week_build_readiness", "read",
+        "Check whether Huume has enough confirmed availability and staffing "
+        "demand to build the selected location's entire week. Returns the "
+        "available demand sources, roster readiness, and exact blockers. "
+        "Call this before building a week when the inputs are uncertain.",
+        properties={},
+        discovery=True,
+        intent_hints=("build this week", "create the schedule", "schedule readiness", "staff the week"),
+    ),
+    _tool(
+        "build_week_schedule", "staged",
+        "Build and stage a deterministic whole-week schedule proposal from "
+        "confirmed employee availability and either the week's existing draft "
+        "shifts or a saved week template. Existing assignments are preserved. "
+        "Nothing is added to the editor until the manager confirms on a LATER "
+        "turn with the exact confirm_id; the resulting shifts remain drafts.",
+        properties={
+            "source_mode": types.Schema(
+                type=types.Type.STRING, enum=["auto", "existing", "template"],
+                description="Use auto unless the manager selected a specific source.",
+            ),
+            "week_template_id": types.Schema(
+                type=types.Type.STRING,
+                description="Required when source_mode=template; use an id returned by readiness.",
+            ),
+            "exclude_employee_ids": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="Employees the manager explicitly asked not to schedule in this proposal.",
+            ),
+            "employee_hour_caps": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "employee_id": types.Schema(type=types.Type.STRING),
+                        "max_weekly_minutes": types.Schema(type=types.Type.INTEGER),
+                    },
+                    required=["employee_id", "max_weekly_minutes"],
+                ),
+                description="Optional manager overrides that can only tighten weekly hour caps.",
+            ),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit when staging; after explicit approval, echo the staged confirm_id exactly.",
+            ),
+        },
+        required=[],
+        discovery=True,
+        intent_hints=("build my week", "generate weekly schedule", "fill the whole schedule", "make this week's schedule"),
+    ),
+    _tool(
         "find_shift_coverage", "read",
         "Find who is free to cover shifts on one date — use for 'who can "
         "cover / replace / fill in for X' questions. date must be YYYY-MM-DD. "
@@ -870,7 +924,10 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Stage one schedule proposal for the admin to confirm. Use `changes` "
         "to batch up to four related edits (swap, reassign, assign, unassign, "
         "retime, or cancel) into one confirmation; use the legacy flat `kind` "
-        "fields for one edit or a brand new shift. Do not mix creates and edits. "
+        "fields for one edit or a brand new shift. When the manager explicitly "
+        "asks to assign one employee to every vacant shift in the selected "
+        "editor week, set all_vacant_shifts=true and to_employee_name instead "
+        "of enumerating changes. Do not mix creates and edits. "
         "Nothing happens until they confirm on a LATER turn by calling this "
         "again with EXACTLY the same confirm_id. Use real names/dates from "
         "lookup_context(topic='schedule') or find_shift_coverage — never "
@@ -890,6 +947,10 @@ TOOLS: tuple[HuumeTool, ...] = (
                 min_items=1,
                 max_items=4,
                 description="One to four edit operations resolved and confirmed as one proposal. Creates are not allowed here.",
+            ),
+            "all_vacant_shifts": types.Schema(
+                type=types.Type.BOOLEAN,
+                description="True only when the manager explicitly requested assigning to every vacant shift in the selected editor week.",
             ),
             "location_name": types.Schema(
                 type=types.Type.STRING,

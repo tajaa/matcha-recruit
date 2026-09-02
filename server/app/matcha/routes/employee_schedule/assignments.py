@@ -163,7 +163,10 @@ async def move_employee_assignment(
             )
             if target_availability and not force:
                 raise_outside_availability(body.employee_id, target_availability)
-            unqualified = await check_job_qualification(conn, company_id, body.employee_id, target["job_id"])
+            unqualified = await check_job_qualification(
+                conn, company_id, body.employee_id, target["job_id"],
+                starts_at=target["starts_at"],
+            )
             if unqualified and not force:
                 raise_not_qualified(unqualified)
 
@@ -248,7 +251,10 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
         availability = availability_violations(
             avail_map[body.employee_id], shift["starts_at"], shift["ends_at"],
         )
-        unqualified = await check_job_qualification(conn, company_id, body.employee_id, shift["job_id"])
+        unqualified = await check_job_qualification(
+            conn, company_id, body.employee_id, shift["job_id"],
+            starts_at=shift["starts_at"],
+        )
         if not force:
             conflicts = await find_conflicts(
                 conn, company_id, body.employee_id,

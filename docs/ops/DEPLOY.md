@@ -34,3 +34,34 @@ and growth from its own initial snapshot; it is a regression signal, not an
 exact request error-rate calculation. A detected spike opens a deduplicated
 `deploy-regression` GitHub issue with normalized messages and query-free paths
 only. It never creates a PR, changes production data, or blocks deployment.
+
+## Post-deploy admin updates
+
+The same successful-swap hook also dispatches
+`admin-updates-autopublish.yml`. It runs on the self-hosted `matcha-autopr` Mac,
+checks active backend/frontend commit ancestry and production migration state,
+then has Luna/high draft the feature description and usage steps inside the
+credential-free AutoPR sandbox. A strict validator and fixed transaction publish
+only confirmed deployed entries; partial backend/frontend releases wait until all
+required components are live. Dispatch failure never rolls back a healthy deploy,
+but workflow failure opens a deduplicated ops issue. Full runbook:
+`docs/ops/ADMIN_UPDATES_AUTOPUBLISH.md`.
+
+## Post-deploy AutoPR fix verification
+
+The successful-swap hook also dispatches `post-deploy-fix-verification.yml` for laptop
+and GitHub Actions deploys. It examines only merged `autopr` PRs carrying a validated
+production-verification trailer and only after the PR's merge commit is contained in the
+deployed SHA for its required target.
+
+Safe public GET assertions run automatically and label/comment the PR
+`production-verified` or `production-verification-failed`. Authenticated, stateful, and
+visual plans are never guessed from CI: the workflow posts the reviewed steps and labels
+the PR `production-verification-needed`. Failed automatic checks are not repeated on
+every later deploy; after resolving the cause, remove the failure label to request a new
+check. The AutoPR dashboard shows the resulting state for Kanban AutoPRs only.
+The operator records a completed manual check through
+`record-production-verification.yml`; it accepts only a merged PR with that outstanding
+label and writes the actor, bounded evidence, result, and workflow link back to the PR.
+As with the other post-deploy dispatches, dispatch failure warns but does not roll back a
+healthy blue/green swap.

@@ -309,15 +309,21 @@ _AUTOPR_CRITICALITY_RE = re.compile(
 _AUTOPR_CONFIDENCE_SCORE_RE = re.compile(
     r"<!--\s*matcha-autopr-confidence-score:\s*([0-9]{1,3})\s*-->", re.IGNORECASE
 )
-_AUTOPR_NOTE_STATE_RE = re.compile(
-    r"<!--\s*matcha-autopr-note-state:\s*(awaiting_answers|ready_for_review|no_safe_action)\s*-->",
-    re.IGNORECASE,
-)
-_AUTOPR_STRUCTURED_NOTE_RE = re.compile(
+_AUTOPR_LEGACY_STRUCTURED_NOTE_RE = re.compile(
     r"^from auto setup · build [0-9]+ · prod "
     r"(?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40})"
     r"(?: · PR #[0-9]+)?"
     r"(?: · [^·]+ C[0-9]+ · (?:awaiting answers|ready for review|no safe action))?"
+    r"(?: · \[autopr:no-spec [^]]+\] "
+    r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
+    re.IGNORECASE,
+)
+_AUTOPR_STRUCTURED_NOTE_RE = re.compile(
+    r"^🤖 AUTO SETUP · [^·]+"
+    r"(?: · build [0-9]+)?"
+    r"(?: · prod (?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40}))?"
+    r"(?: · PR #[0-9]+)?"
+    r"(?: · [^·]+ C[0-9]+)?"
     r"(?: · \[autopr:no-spec [^]]+\] "
     r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
     re.IGNORECASE,
@@ -345,7 +351,8 @@ _KANBAN_AUTOPR_PROJECT_IDS = {
     "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
 }
 
-_AUTOPR_PROGRESS_NOTE = "from auto setup"
+_AUTOPR_PROGRESS_NOTE = "🤖 AUTO SETUP"
+_AUTOPR_LEGACY_PROGRESS_NOTE = "from auto setup"
 
 
 def _with_autopr_progress_note(
@@ -360,13 +367,14 @@ def _with_autopr_progress_note(
     Reconstruct it from machine trailers on merge as a recovery path if the PR
     was created but the card PATCH failed.
     """
-    marker = _AUTOPR_PROGRESS_NOTE
+    # A merged PR is no longer merely "ready"; state that outcome first so
+    # the narrow card face shows it before build provenance.
+    marker = f"{_AUTOPR_PROGRESS_NOTE} · MERGED: READY FOR REVIEW"
     build_match = _PRODUCTION_BUILD_RE.search(pr_body)
     backend_match = _PRODUCTION_BACKEND_SHA_RE.search(pr_body)
     frontend_match = _PRODUCTION_FRONTEND_SHA_RE.search(pr_body)
     criticality_match = _AUTOPR_CRITICALITY_RE.search(pr_body)
     confidence_match = _AUTOPR_CONFIDENCE_SCORE_RE.search(pr_body)
-    note_state_match = _AUTOPR_NOTE_STATE_RE.search(pr_body)
     if build_match:
         marker += f" · build {build_match.group(1)}"
         if backend_match and frontend_match:
@@ -376,48 +384,55 @@ def _with_autopr_progress_note(
                 marker += f" · prod {backend_sha}"
             else:
                 marker += f" · prod backend {backend_sha} / frontend {frontend_sha}"
-        if pr_number is not None:
-            marker += f" · PR #{pr_number}"
-    if criticality_match and confidence_match and note_state_match:
+    if pr_number is not None:
+        marker += f" · PR #{pr_number}"
+    if criticality_match and confidence_match:
         emoji = {"red": "🔴", "orange": "🟠", "yellow": "🟡"}[
             criticality_match.group(1).lower()
         ]
-        note_state = {
-            "awaiting_answers": "awaiting answers",
-            "ready_for_review": "ready for review",
-            "no_safe_action": "no safe action",
-        }[note_state_match.group(1).lower()]
-        marker += f" · {emoji} C{confidence_match.group(1)} · {note_state}"
+        marker += f" · {emoji} C{confidence_match.group(1)}"
 
     current = (existing or "").strip()
     if not current:
         return marker
     if current.casefold().startswith(marker.casefold()):
         return current
-    if current.casefold() == _AUTOPR_PROGRESS_NOTE.casefold():
+    auto_prefixes = (_AUTOPR_PROGRESS_NOTE, _AUTOPR_LEGACY_PROGRESS_NOTE)
+    if any(current.casefold() == prefix.casefold() for prefix in auto_prefixes):
         return marker
-    if current.casefold().startswith(f"{_AUTOPR_PROGRESS_NOTE} · ".casefold()):
+    if any(
+        current.casefold().startswith(f"{prefix} · ".casefold())
+        for prefix in auto_prefixes
+    ):
         # A later rework PR has a new build/PR marker. Replace the old system
         # prefix while retaining text a human wrote after it.
         if marker != _AUTOPR_PROGRESS_NOTE:
-            structured = _AUTOPR_STRUCTURED_NOTE_RE.match(current)
+            structured = (
+                _AUTOPR_STRUCTURED_NOTE_RE.match(current)
+                or _AUTOPR_LEGACY_STRUCTURED_NOTE_RE.match(current)
+            )
             if structured:
                 remainder = current[structured.end():].removeprefix(" · ")
             else:
-                remainder = current[len(_AUTOPR_PROGRESS_NOTE):].removeprefix(" · ")
+                matched_prefix = next(
+                    prefix for prefix in auto_prefixes
+                    if current.casefold().startswith(prefix.casefold())
+                )
+                remainder = current[len(matched_prefix):].removeprefix(" · ")
             return f"{marker} · {remainder}" if remainder else marker
         return current
     return f"{marker} · {current}"
 
 
-async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
+async def _resolve_pull_request_tasks(payload: dict) -> list[dict]:
     repo_full_name = (payload.get("repository") or {}).get("full_name") or ""
     if repo_full_name != _KANBAN_AUTOPR_REPO:
-        return None
+        return []
 
     pr = payload.get("pull_request") or {}
     body = pr.get("body") or ""
     head_ref = (pr.get("head") or {}).get("ref") or ""
+    pr_number = pr.get("number")
 
     task_id: Optional[str] = None
     m = _TASK_TRAILER_RE.search(body)
@@ -433,22 +448,38 @@ async def _resolve_pull_request_task(payload: dict) -> Optional[dict]:
                 )
             if row:
                 task_id = row["id"]
-    if not task_id:
-        return None
-
     async with get_connection() as conn:
-        task = await conn.fetchrow(
-            """SELECT id, project_id, board_column, progress_note,
-                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
-                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
-                      ((to_jsonb(mw_tasks) ? 'pr_url') AND
-                       (to_jsonb(mw_tasks) ? 'pr_number')) AS pr_columns_exist
-               FROM mw_tasks WHERE id = $1""",
-            UUID(task_id),
-        )
-    if not task or str(task["project_id"]) not in _KANBAN_AUTOPR_PROJECT_IDS:
-        return None
-    return task
+        select_sql = """SELECT id, project_id, board_column, progress_note,
+                                to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                                (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                                ((to_jsonb(mw_tasks) ? 'pr_url') AND
+                                 (to_jsonb(mw_tasks) ? 'pr_number')) AS pr_columns_exist
+                           FROM mw_tasks"""
+        tasks = []
+        if task_id:
+            primary_task = await conn.fetchrow(
+                select_sql + " WHERE id = $1",
+                UUID(task_id),
+            )
+            if primary_task:
+                tasks.append(primary_task)
+        if isinstance(pr_number, int):
+            # Cross-lane scope ownership deliberately links a card to an
+            # existing PR whose body and branch belong to another bot. The
+            # exact persisted PR number therefore resolves every linked card,
+            # including secondary cards beside a trailer-owned primary task.
+            linked_tasks = await conn.fetch(
+                select_sql
+                + " WHERE to_jsonb(mw_tasks) ->> 'pr_number' = $1 ORDER BY created_at",
+                str(pr_number),
+            )
+            tasks.extend(linked_tasks)
+
+    unique_tasks = {}
+    for task in tasks:
+        if str(task["project_id"]) in _KANBAN_AUTOPR_PROJECT_IDS:
+            unique_tasks[str(task["id"])] = task
+    return list(unique_tasks.values())
 
 
 async def _handle_pull_request_event(payload: dict) -> dict:
@@ -457,36 +488,46 @@ async def _handle_pull_request_event(payload: dict) -> dict:
     card can never be dragged backwards by a webhook replay."""
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
-    task = await _resolve_pull_request_task(payload)
-    if not task:
+    tasks = await _resolve_pull_request_tasks(payload)
+    if not tasks:
         return {"ok": True, "task": None}
 
     action = payload.get("action") or ""
     pr = payload.get("pull_request") or {}
-    column = task["board_column"]
-    # Older schemas can still process the lifecycle transition; only the
-    # optional link persistence must wait for the migration. Dict fixtures from
-    # before this compatibility field was added retain the migrated-schema path.
-    pr_columns_exist = (
-        "pr_columns_exist" not in task or bool(task["pr_columns_exist"])
-    )
+    task_ids = [str(task["id"]) for task in tasks]
+
+    def result(**extra) -> dict:
+        response = {"ok": True, "task": task_ids[0], **extra}
+        if len(task_ids) > 1:
+            response["tasks"] = task_ids
+        return response
 
     if action in ("opened", "reopened"):
-        if column == "todo":
-            patch = {"board_column": "in_progress"}
-            if pr_columns_exist:
-                patch.update({
-                    "pr_url": pr.get("html_url"),
-                    "pr_number": pr.get("number"),
-                })
-            await pt_svc.update_project_task(
-                task["project_id"], task["id"], patch,
-            )
-        return {"ok": True, "task": str(task["id"])}
+        for task in tasks:
+            if task["board_column"] == "todo":
+                patch = {"board_column": "in_progress"}
+                # Older schemas can still process the lifecycle transition;
+                # only optional link persistence waits for the migration.
+                pr_columns_exist = (
+                    "pr_columns_exist" not in task
+                    or bool(task["pr_columns_exist"])
+                )
+                if pr_columns_exist:
+                    patch.update({
+                        "pr_url": pr.get("html_url"),
+                        "pr_number": pr.get("number"),
+                    })
+                await pt_svc.update_project_task(
+                    task["project_id"], task["id"], patch,
+                )
+        return result()
 
     if action == "closed":
         merged = bool(pr.get("merged"))
-        if merged and column != "done":
+        for task in tasks:
+            column = task["board_column"]
+            if not merged or column == "done":
+                continue
             patch = {}
             progress_note = _with_autopr_progress_note(
                 task["progress_note"],
@@ -495,6 +536,10 @@ async def _handle_pull_request_event(payload: dict) -> dict:
             )
             if progress_note != task["progress_note"]:
                 patch["progress_note"] = progress_note
+            pr_columns_exist = (
+                "pr_columns_exist" not in task
+                or bool(task["pr_columns_exist"])
+            )
             if pr_columns_exist:
                 if pr.get("html_url") and pr["html_url"] != task["pr_url"]:
                     patch["pr_url"] = pr["html_url"]
@@ -504,7 +549,7 @@ async def _handle_pull_request_event(payload: dict) -> dict:
                 patch["board_column"] = "review"
             if patch:
                 await pt_svc.update_project_task(task["project_id"], task["id"], patch)
-        return {"ok": True, "task": str(task["id"]), "merged": merged}
+        return result(merged=merged)
 
     return {"ignored": action}
 

@@ -14,7 +14,9 @@ extension TaskViewerSheet {
         VStack(alignment: .leading, spacing: 8) {
             discussionHeader
 
-            noteComposer
+            if !isAddingAutoPRContext {
+                noteComposer
+            }
 
             // One combined thread, newest-first (current-round comments land on
             // top). Each row carries a Round-N chip and prior-round comments are
@@ -103,11 +105,18 @@ extension TaskViewerSheet {
 
     var noteComposer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let replying = replyingToNote {
+            if isAddingAutoPRContext {
+                autoPRContextReplyBanner
+            } else if let replying = replyingToNote {
                 replyingToBanner(replying)
             }
             HStack(spacing: 6) {
-                TextField(replyingToNote == nil ? "Add a note…" : "Write a reply…", text: $newNote)
+                TextField(
+                    isAddingAutoPRContext
+                        ? "Add evidence or explain what AutoPR missed…"
+                        : (replyingToNote == nil ? "Add a note…" : "Write a reply…"),
+                    text: $newNote
+                )
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundColor(appState.themeText)
@@ -140,7 +149,8 @@ extension TaskViewerSheet {
                     if addingNote {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Add").font(.system(size: 12, weight: .semibold))
+                        Text(isAddingAutoPRContext ? "Submit" : "Add")
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(canSubmitNote ? .mwInkStrong : .secondary)
                     }
                 }
@@ -150,8 +160,15 @@ extension TaskViewerSheet {
 
             // Self-check: people often type an actionable to-do as a note. When
             // the text reads like a task, offer to capture it as a subtask instead.
-            if looksLikeSubtask(newNote) {
+            if !isAddingAutoPRContext && looksLikeSubtask(newNote) {
                 subtaskNudge
+            }
+
+            if let error = autoPRContextError, isAddingAutoPRContext {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundColor(.mwAttention)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if !pendingAttachments.isEmpty {
@@ -166,6 +183,39 @@ extension TaskViewerSheet {
                 }
             }
         }
+    }
+
+    private var autoPRContextReplyBanner: some View {
+        HStack(spacing: 6) {
+            Rectangle()
+                .fill(Color.mwInkStrong)
+                .frame(width: 2)
+                .cornerRadius(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Additional context for AUTO SETUP")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.mwInkStrong)
+                Text(autoSetupStatus.label)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                isAddingAutoPRContext = false
+                autoPRContextError = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Cancel additional context")
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(appState.themeText.opacity(0.07))
+        .cornerRadius(5)
     }
 
     private var subtaskNudge: some View {

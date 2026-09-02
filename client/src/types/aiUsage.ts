@@ -48,10 +48,14 @@ export type AiUsageCall = {
   output_tokens: number | null
   thinking_tokens: number | null
   cached_tokens: number | null
+  cache_write_tokens: number | null
   cost_usd: number | null
   latency_ms: number | null
   status: AiUsageStatus
   error: string | null
+  provider_response_id?: string | null
+  provider_status?: string | null
+  service_tier?: string | null
   created_at: string
 }
 

@@ -24,7 +24,7 @@ export function MerlinPreviewView({
           ref={iframeRef}
           title="Live preview"
           srcDoc={preview}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           className="h-full w-full border-0 bg-white"
         />
       ) : (

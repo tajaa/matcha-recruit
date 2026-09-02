@@ -8,6 +8,9 @@ struct ChannelMessageComposer: View {
     let userHandle: String
     let members: [ChannelMember]
     let currentUserId: String
+    /// Project discussions expose a virtual @espresso mention even though the
+    /// inactive service identity is intentionally not a channel member.
+    let supportsEspressoAgent: Bool
     let maxAttachments: Int
     let typingPing: () -> Void
     /// Send the current draft. Text is passed up because the composer now owns
@@ -25,11 +28,15 @@ struct ChannelMessageComposer: View {
     @Binding var replyingTo: ChannelMessage?
     @Binding var editingMessage: ChannelMessage?
     @Binding var isUploading: Bool
-    @Binding var lastTypingSentAt: Date
 
     /// The live draft. Local @State so typing only re-renders the composer, not
     /// `ChannelDetailView.body` / the message list.
     @State private var text: String = ""
+    /// Local, not a `@Binding` to the parent. It used to point at
+    /// `ChannelDetailView`'s @State, so every 2.5s of sustained typing wrote
+    /// parent state and re-rendered the whole message list — defeating the
+    /// isolation this composer exists to provide.
+    @State private var lastTypingSentAt: Date = .distantPast
 
     var body: some View {
         VStack(spacing: 8) {
@@ -142,15 +149,20 @@ struct ChannelMessageComposer: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     Divider().opacity(0.3)
-                    ForEach(Array(mentionMatches.enumerated()), id: \.element.userId) { idx, member in
-                        let handle = member.email.split(separator: "@").first.map(String.init) ?? ""
-                        Button { applyMention(member) } label: {
+                    ForEach(Array(mentionMatches.enumerated()), id: \.element.id) { idx, match in
+                        Button { applyMention(match) } label: {
                             HStack {
-                                Text(member.name)
+                                Text(match.name)
                                     .font(.system(size: 12))
                                     .foregroundColor(appState.themeText.opacity(0.9))
+                                if match.isAgent {
+                                    Text("REPO AGENT")
+                                        .font(.system(size: 8, weight: .semibold))
+                                        .tracking(0.7)
+                                        .foregroundColor(appState.themeAccent.opacity(0.8))
+                                }
                                 Spacer()
-                                Text("@\(handle)")
+                                Text("@\(match.handle)")
                                     .font(.system(size: 11))
                                     .foregroundColor(appState.themeAccent)
                             }
@@ -301,24 +313,46 @@ struct ChannelMessageComposer: View {
         return (q, after)
     }
 
-    private var mentionMatches: [ChannelMember] {
+    private struct MentionMatch: Identifiable {
+        let id: String
+        let name: String
+        let handle: String
+        let isAgent: Bool
+    }
+
+    private var mentionMatches: [MentionMatch] {
         guard let q = activeMentionQuery?.query.lowercased() else { return [] }
-        return members
+        var matches: [MentionMatch] = []
+        if supportsEspressoAgent && "espresso".hasPrefix(q) {
+            matches.append(MentionMatch(
+                id: "agent:espresso",
+                name: "Espresso",
+                handle: "espresso",
+                isAgent: true
+            ))
+        }
+        matches.append(contentsOf: members
             .filter { $0.userId != currentUserId }
             .filter { m in
                 let handle = m.email.split(separator: "@").first.map { $0.lowercased() } ?? ""
                 return handle.hasPrefix(q) || m.name.lowercased().hasPrefix(q)
             }
-            .prefix(6)
-            .map { $0 }
+            .map { member in
+                MentionMatch(
+                    id: "user:\(member.userId)",
+                    name: member.name,
+                    handle: member.email.split(separator: "@").first.map(String.init) ?? "",
+                    isAgent: false
+                )
+            })
+        return Array(matches.prefix(6))
     }
 
-    private func applyMention(_ member: ChannelMember) {
+    private func applyMention(_ match: MentionMatch) {
         guard let active = activeMentionQuery else { return }
-        let handle = member.email.split(separator: "@").first.map(String.init) ?? ""
-        guard !handle.isEmpty else { return }
+        guard !match.handle.isEmpty else { return }
         let head = String(text[..<active.tokenStart])
         let tail = String(text[text.index(active.tokenStart, offsetBy: active.query.count)...])
-        text = head + handle + " " + tail
+        text = head + match.handle + " " + tail
     }
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BaseSocket } from './baseSocket'
+import { clearAuthTokens, setAuthTokens } from '../../api/authStorage'
 
 // A minimal WebSocket stand-in. jsdom has no WebSocket, and the behaviour under
 // test is entirely about how BaseSocket reacts to open/message/close — so a fake
@@ -60,14 +61,14 @@ describe('BaseSocket', () => {
   beforeEach(() => {
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
-    localStorage.setItem('matcha_access_token', 'tok-1')
+    setAuthTokens('tok-1', 'refresh-1')
     vi.useFakeTimers()
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
-    localStorage.clear()
+    clearAuthTokens()
   })
 
   it('sends the token as a subprotocol, never in the URL', () => {
@@ -80,7 +81,7 @@ describe('BaseSocket', () => {
   })
 
   it('does not connect without a token', () => {
-    localStorage.removeItem('matcha_access_token')
+    clearAuthTokens()
     new TestSocket().connect()
     expect(FakeWebSocket.instances).toHaveLength(0)
   })

@@ -5,15 +5,15 @@ Wraps the `genai.Client` returned by `genai_client.get_genai_client()` so every
 async — logs its model, caller ("feature"), token counts, cost, latency, and
 outcome to `ai_usage_log`, with zero changes at any of the ~100 call sites.
 
-This is the LEDGER (what did we spend, and where). `rate_limiter.py` /
-`api_rate_limits` is the separate, pre-existing GUARD (are we about to spend too
-much) — untouched by this module, and not reused for storage: the guard only
-ever needed a call count, this needs the full row.
+This is the LEDGER (what did we use, where, and what cost can be attributed
+locally). `rate_limiter.py` / `api_rate_limits` is the separate, pre-existing
+GUARD (are we about to spend too much) — untouched by this module, and not
+reused for storage: the guard only ever needed a call count, this needs the full
+row.
 
-v1 known gaps (see admin UI / API docs for how these surface):
+Known gaps (see admin UI / API docs for how these surface):
   - Live-API sessions (voice interviews) are not wrapped — `client.aio.live` is
     a distinct surface this module doesn't touch. Two call sites total today.
-  - Cached-token discount is ignored in cost math (slight overestimate).
   - No per-company attribution — feature-level only. A nullable company_id
     column can be added later without reshaping this module.
 
@@ -45,12 +45,17 @@ logger = logging.getLogger(__name__)
 LOGGING_ENABLED = os.getenv("AI_USAGE_LOGGING", "1") != "0"
 
 # --- Pricing --------------------------------------------------------------
-# USD per 1M tokens, (input_price, output_price). Verified against
-# ai.google.dev/gemini-api/docs/pricing as of 2026-07-21. A model absent here
+# USD per 1M tokens, (input_price, output_price). Gemini rates were verified
+# against ai.google.dev/gemini-api/docs/pricing; OpenAI Luna rates against
+# developers.openai.com/api/docs/models/gpt-5.6-luna as of 2026-09-01. A model
+# absent here
 # logs cost_usd=NULL rather than a guessed number — the admin UI surfaces
 # "unpriced" calls so a real row gets added instead of a fabricated price.
 PRICING: dict[tuple[str, str], tuple[float, float]] = {
-    ("openai", "gpt-5.6-luna"): (1.00, 6.00),
+    # Responses output_tokens already includes reasoning tokens. The provider
+    # payload also splits cached reads and cache writes out of input_tokens;
+    # compute_cost applies their $0.02/M and 1.25x write rates respectively.
+    ("openai", "gpt-5.6-luna"): (0.20, 1.20),
     ("gemini", "gemini-3.7-flash"): (1.50, 7.50),  # fleet quality tier (rate mirrors 3.6-flash pending 3.7 GA)
     ("gemini", "gemini-3.6-flash"): (1.50, 7.50),  # kept for already-logged rows
     ("gemini", "gemini-3.5-flash"): (1.50, 9.00),
@@ -70,6 +75,10 @@ PRICING: dict[tuple[str, str], tuple[float, float]] = {
     # start logging unpriced calls.
     ("gemini", "gemini-3.1-flash-image"): (0.30, 30.00),
     ("gemini", "gemini-3.1-flash-image-preview"): (0.30, 30.00),
+}
+
+_CACHED_INPUT_PRICING: dict[tuple[str, str], float] = {
+    ("openai", "gpt-5.6-luna"): 0.02,
 }
 
 # Overrides `_feature_label()`'s stack-derived label for every wrapped call
@@ -145,6 +154,7 @@ _SPLIT_SERVICE_PACKAGES = {
     "legal_defense",
     "matcha_work_ai",
     "matcha_work_document",
+    "project_agent",
     "project_service",
     "risk_assessment_service",
 }
@@ -197,35 +207,71 @@ def _strip_model_prefix(model: str) -> str:
     return model[len("models/"):] if model.startswith("models/") else model
 
 
+def _pricing_key(provider: str, model: str) -> tuple[str, str]:
+    """Map provider snapshots onto their published pricing alias."""
+    normalized = _strip_model_prefix(model)
+    if provider == "openai" and normalized.startswith("gpt-5.6-luna-"):
+        normalized = "gpt-5.6-luna"
+    return provider, normalized
+
+
 def compute_cost(provider: str, model: str, input_tokens: Optional[int],
-                  output_tokens: Optional[int], thinking_tokens: Optional[int]) -> Optional[float]:
-    """Thinking tokens bill as output tokens (Gemini pricing treats them as
-    generated output). Returns None for an unpriced model, or when there is no
-    usage metadata at all (a timed-out/errored call carries no token counts —
-    that's UNKNOWN cost, not zero cost. Google still bills a call that timed
-    out mid-generation; recording 0 here would say the opposite)."""
-    if input_tokens is None and output_tokens is None and thinking_tokens is None:
+                  output_tokens: Optional[int], thinking_tokens: Optional[int],
+                  cached_tokens: Optional[int] = None,
+                  cache_write_tokens: Optional[int] = None) -> Optional[float]:
+    """Return the token-derived USD cost for one provider response.
+
+    Gemini reports thinking separately from candidates, so both are billed as
+    output. OpenAI Responses includes reasoning in output_tokens already. Its
+    input total includes cached reads and cache writes, which have distinct
+    Luna rates. Returns None when the model is unpriced or no usage metadata
+    survived an errored/timed-out call.
+    """
+    if all(value is None for value in (
+        input_tokens, output_tokens, thinking_tokens, cached_tokens, cache_write_tokens,
+    )):
         return None
-    prices = PRICING.get((provider, _strip_model_prefix(model)))
+    key = _pricing_key(provider, model)
+    prices = PRICING.get(key)
     if prices is None:
         return None
     in_price, out_price = prices
-    out_total = (output_tokens or 0) + (thinking_tokens or 0)
-    return (input_tokens or 0) * in_price / 1_000_000 + out_total * out_price / 1_000_000
+    input_total = max(input_tokens or 0, 0)
+    cached_total = min(max(cached_tokens or 0, 0), input_total)
+    write_total = min(max(cache_write_tokens or 0, 0), input_total - cached_total)
+    uncached_total = input_total - cached_total - write_total
+    cached_price = _CACHED_INPUT_PRICING.get(key, in_price)
+    input_cost = (
+        uncached_total * in_price
+        + cached_total * cached_price
+        + write_total * in_price * 1.25
+    )
+    output_total = max(output_tokens or 0, 0)
+    if provider != "openai":
+        output_total += max(thinking_tokens or 0, 0)
+
+    # GPT-5.6 applies long-context rates to the full request above 272K input.
+    input_multiplier = 2.0 if provider == "openai" and input_total > 272_000 else 1.0
+    output_multiplier = 1.5 if provider == "openai" and input_total > 272_000 else 1.0
+    return (
+        input_cost * input_multiplier
+        + output_total * out_price * output_multiplier
+    ) / 1_000_000
 
 
-def _extract_usage(resp: Any) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
-    """(input, output, thinking, cached) tokens from a response's usage_metadata.
+def _extract_usage(resp: Any) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """(input, output, thinking, cached, cache-write) tokens from usage metadata.
     Every field access is null-safe — embed_content responses, and some stream
     chunks, carry no usage_metadata at all."""
     um = getattr(resp, "usage_metadata", None)
     if um is None:
-        return None, None, None, None
+        return None, None, None, None, None
     return (
         getattr(um, "prompt_token_count", None),
         getattr(um, "candidates_token_count", None),
         getattr(um, "thoughts_token_count", None),
         getattr(um, "cached_content_token_count", None),
+        getattr(um, "cache_write_token_count", None),
     )
 
 
@@ -240,13 +286,17 @@ async def _insert_row(row: dict[str, Any], *, direct: bool = False) -> None:
                 """
                 INSERT INTO ai_usage_log
                     (provider, model, feature, method, input_tokens, output_tokens,
-                     thinking_tokens, cached_tokens, cost_usd, latency_ms, status, error)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                     thinking_tokens, cached_tokens, cache_write_tokens, cost_usd,
+                     latency_ms, status, error, provider_response_id, provider_status,
+                     service_tier)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                        $13, $14, $15, $16)
                 """,
                 row["provider"], row["model"], row["feature"], row["method"],
                 row["input_tokens"], row["output_tokens"], row["thinking_tokens"],
-                row["cached_tokens"], row["cost_usd"], row["latency_ms"], row["status"],
-                row["error"],
+                row["cached_tokens"], row["cache_write_tokens"], row["cost_usd"],
+                row["latency_ms"], row["status"], row["error"],
+                row["provider_response_id"], row["provider_status"], row["service_tier"],
             )
     except Exception:  # noqa: BLE001 — telemetry must never break a model call
         logger.warning("ai_usage: failed to record call", exc_info=True)
@@ -304,8 +354,11 @@ def _record(row: dict[str, Any]) -> None:
 
 def _build_row(*, provider: str, model: str, method: str, feature: str,
                 latency_ms: int, status: str, error: Optional[str] = None,
-                usage: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] = (None, None, None, None)) -> dict[str, Any]:
-    input_tokens, output_tokens, thinking_tokens, cached_tokens = usage
+                usage: tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]] = (None, None, None, None, None),
+                provider_response_id: Optional[str] = None,
+                provider_status: Optional[str] = None,
+                service_tier: Optional[str] = None) -> dict[str, Any]:
+    input_tokens, output_tokens, thinking_tokens, cached_tokens, cache_write_tokens = usage
     return {
         "provider": provider,
         "model": _strip_model_prefix(model),
@@ -315,32 +368,75 @@ def _build_row(*, provider: str, model: str, method: str, feature: str,
         "output_tokens": output_tokens,
         "thinking_tokens": thinking_tokens,
         "cached_tokens": cached_tokens,
-        "cost_usd": compute_cost(provider, model, input_tokens, output_tokens, thinking_tokens),
+        "cache_write_tokens": cache_write_tokens,
+        "cost_usd": compute_cost(
+            provider, model, input_tokens, output_tokens, thinking_tokens,
+            cached_tokens, cache_write_tokens,
+        ),
         "latency_ms": latency_ms,
         "status": status,
         "error": error[:500] if error else None,
+        "provider_response_id": provider_response_id[:200] if provider_response_id else None,
+        "provider_status": provider_status[:50] if provider_status else None,
+        "service_tier": service_tier[:50] if service_tier else None,
     }
 
 
 async def record_openai_response(
-    *, model: str, latency_ms: int, input_tokens: Optional[int] = None,
+    *, model: str, latency_ms: int, response: Optional[dict[str, Any]] = None,
+    input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None, thinking_tokens: Optional[int] = None,
-    cached_tokens: Optional[int] = None, error: Optional[str] = None,
+    cached_tokens: Optional[int] = None, cache_write_tokens: Optional[int] = None,
+    error: Optional[str] = None,
+    status: Optional[str] = None,
 ) -> None:
-    """Record one direct Responses API call without requiring the OpenAI SDK.
+    """Record exact usage from one direct Responses API call.
 
     Most existing callers are Gemini SDK proxies. Huume uses a small httpx
-    adapter for Responses tool calls, so it explicitly forwards equivalent
-    usage here and retains the same feature-scoped admin ledger.
+    adapter for Responses calls. Successful callers pass the provider payload
+    so this function owns the Responses schema mapping; explicit token fields
+    remain as a compatibility fallback for callers without a retained payload.
+
+    Dollar cost is derived from exact response token counters and the published
+    Luna rates. OpenAI's organization Costs API remains invoice-authoritative,
+    but cannot group billed dollars by Matcha's per-call feature labels.
     """
     if not LOGGING_ENABLED:
         return
-    await _record_async(_build_row(
-        provider="openai", model=model, method="responses.create",
+    payload = response if isinstance(response, dict) else {}
+    usage = payload.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    input_details = usage.get("input_tokens_details")
+    input_details = input_details if isinstance(input_details, dict) else {}
+    output_details = usage.get("output_tokens_details")
+    output_details = output_details if isinstance(output_details, dict) else {}
+
+    actual_model = payload.get("model")
+    actual_model = actual_model if isinstance(actual_model, str) and actual_model else model
+    provider_response_id = payload.get("id")
+    provider_response_id = provider_response_id if isinstance(provider_response_id, str) else None
+    provider_status = payload.get("status")
+    provider_status = provider_status if isinstance(provider_status, str) else None
+    service_tier = payload.get("service_tier")
+    service_tier = service_tier if isinstance(service_tier, str) else None
+
+    row = _build_row(
+        provider="openai", model=actual_model, method="responses.create",
         feature=_feature_label(), latency_ms=latency_ms,
-        status="error" if error else "ok", error=error,
-        usage=(input_tokens, output_tokens, thinking_tokens, cached_tokens),
-    ))
+        status=status if status in {"ok", "error", "timeout"} else ("error" if error else "ok"),
+        error=error,
+        usage=(
+            usage.get("input_tokens", input_tokens),
+            usage.get("output_tokens", output_tokens),
+            output_details.get("reasoning_tokens", thinking_tokens),
+            input_details.get("cached_tokens", cached_tokens),
+            input_details.get("cache_write_tokens", cache_write_tokens),
+        ),
+        provider_response_id=provider_response_id,
+        provider_status=provider_status,
+        service_tier=service_tier,
+    )
+    await _record_async(row)
 
 
 # --- Client proxy -----------------------------------------------------------
@@ -386,7 +482,7 @@ class _WrappedModels:
         if self._is_async:
             async def _agen() -> Any:
                 t0 = time.perf_counter()
-                usage = (None, None, None, None)
+                usage = (None, None, None, None, None)
                 status, error = "ok", None
                 try:
                     async for chunk in real_fn(*args, **kwargs):
@@ -409,7 +505,7 @@ class _WrappedModels:
 
         def _gen() -> Any:
             t0 = time.perf_counter()
-            usage = (None, None, None, None)
+            usage = (None, None, None, None, None)
             status, error = "ok", None
             try:
                 for chunk in real_fn(*args, **kwargs):

@@ -23,7 +23,11 @@ ATTEMPTS_DIR="$CACHE_DIR/attempts"
 [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || mkdir -p "$ATTEMPTS_DIR"
 
 NOTHING_TO_DO=3
-MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-3}"
+# The AutoPR review queue is deliberately bounded, but ten open implementation
+# drafts lets the four supported projects make progress without a three-PR
+# bottleneck. The workflow sets this explicitly; this default also keeps local
+# dashboard/selector probes consistent when they run outside Actions.
+MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"
 ATTEMPT_COOLDOWN_MINUTES="${AUTOPR_ATTEMPT_COOLDOWN_MINUTES:-15}"
 
 count="$(jq 'length' "$CARDS_FILE")"
@@ -64,17 +68,25 @@ awaiting_input_has_new_feedback() {
         || { [ -n "$new_review" ] && [ "$new_review" != "$old_review" ]; }
 }
 
-# already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE
+# already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
+#                 RECONSIDERATION_PENDING RECONSIDERATION_AT
 # Echoes "skip", "investigate", or "rework" (rework = push to the existing
 # open PR rather than opening a new one).
 already_handled() {
-    local id8="$1" column="$2" last_moved="$3" progress_note="$4" branch="bot/task-$id8"
+    local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
+    local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}" branch="bot/task-$id8"
 
     local attempt_marker="$ATTEMPTS_DIR/$id8"
     if [ -f "$attempt_marker" ]; then
-        local age_s
+        local age_s attempt_epoch reconsideration_epoch=0 reconsideration_prefix
+        attempt_epoch="$(date -r "$attempt_marker" +%s 2>/dev/null || echo 0)"
+        if [ -n "$reconsideration_at" ]; then
+            reconsideration_prefix="$(printf '%s' "$reconsideration_at" | cut -c1-19)"
+            reconsideration_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$reconsideration_prefix" +%s 2>/dev/null || date -u -d "$reconsideration_at" +%s 2>/dev/null || echo 0)"
+        fi
         age_s=$(( $(date +%s) - $(date -r "$attempt_marker" +%s 2>/dev/null || echo 0) ))
-        if [ "$age_s" -lt $((ATTEMPT_COOLDOWN_MINUTES * 60)) ]; then
+        if [ "$age_s" -lt $((ATTEMPT_COOLDOWN_MINUTES * 60)) ] \
+            && [ "$reconsideration_epoch" -le "$attempt_epoch" ]; then
             echo skip
             return
         fi
@@ -83,7 +95,8 @@ already_handled() {
     # No-spec ledger lives on the card itself, not GitHub — this stops a
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
-    if [[ "$progress_note" == *"[autopr:no-spec "* ]]; then
+    if [[ "$progress_note" == *"[autopr:no-spec "* ]] \
+        && [ "$reconsideration_pending" != true ]; then
         # Full ISO timestamp, not just a date: BSD `date -j -f` fills any
         # field the format string doesn't specify from the CURRENT time, not
         # midnight — a date-only marker parsed on a later run would silently
@@ -99,6 +112,29 @@ already_handled() {
             echo skip
             return
         fi
+    fi
+
+    # A card may be owned by a PR from the other automation lane, so its head
+    # branch will not be bot/task-$id8. The explicit link written by
+    # record-coverage.sh is the durable association.
+    if [[ "$progress_note" == "🤖 AUTO SETUP · ALREADY SCOPED"* ]] && [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+        local linked_pr linked_state
+        if ! linked_pr="$(gh pr view "$pr_number" --repo "$REPO" --json state)"; then
+            echo skip
+            return
+        fi
+        linked_state="$(printf '%s' "$linked_pr" | jq -r '.state // empty')"
+        case "$linked_state" in
+            OPEN|MERGED)
+                echo skip
+                return ;;
+            CLOSED)
+                echo investigate
+                return ;;
+            *)
+                echo skip
+                return ;;
+        esac
     fi
 
     local prs n
@@ -126,6 +162,15 @@ already_handled() {
         if [ "$state" = "OPEN" ]; then
             labels="$(printf '%s' "$prs" | jq -r '.[0].labels[]?.name')"
             if printf '%s\n' "$labels" | grep -qx 'autopr-awaiting-input'; then
+                if [ "$reconsideration_pending" = true ]; then
+                    # Context supplied on the card or by replying to Espresso
+                    # is equivalent to new PR feedback. It is already bound to
+                    # the exact live decision, so rework the existing draft
+                    # immediately instead of waiting for a duplicate GitHub
+                    # comment.
+                    echo rework
+                    return
+                fi
                 body="$(printf '%s' "$prs" | jq -r '.[0].body // ""')"
                 pr_number="$(printf '%s' "$prs" | jq -r '.[0].number // empty')"
                 if ! snapshot="$(feedback_snapshot "$pr_number")"; then
@@ -140,6 +185,13 @@ already_handled() {
             else
                 echo rework
             fi
+        elif [ "$state" = "MERGED" ] \
+            && { [[ "$progress_note" == "from auto setup"* ]] \
+                || [[ "$progress_note" == "🤖 AUTO SETUP"* ]]; }; then
+            # Defense in depth for a missed merge webhook. The workflow's
+            # reconciliation step moves this card to Review; until that write
+            # succeeds, never mistake the merged bot branch for fresh work.
+            echo skip
         else
             echo investigate
         fi
@@ -155,12 +207,18 @@ already_handled() {
     echo investigate
 }
 
-# Rank: changes_requested before todo (already-specified rework unblocks a
-# PR in flight), then oldest last_moved_at (falling back to created_at) first
-# within each group.
+# Rank from the cross-queue plan when present. The planner sees every Todo /
+# Changes Requested card plus every open bot PR and keeps related work
+# contiguous. The fallback preserves safe standalone use. A pending explicit
+# reconsideration is first even without a plan: new human evidence is a direct
+# rebuttal of the prior no-safe-action decision and must not sit behind routine
+# rework.
 ranked="$(jq -c '
     sort_by(
-        (if .board_column == "changes_requested" then 0 else 1 end),
+        (.autopr_plan.work_position //
+          (if (.autopr_reconsideration_pending // false) then 0
+           elif .board_column == "changes_requested" then 1
+           else 2 end)),
         (.last_moved_at // .created_at)
     )
 ' "$CARDS_FILE")"
@@ -172,8 +230,12 @@ for ((i = 0; i < n; i++)); do
     column="$(printf '%s' "$card" | jq -r '.board_column')"
     last_moved="$(printf '%s' "$card" | jq -r '.last_moved_at // .created_at')"
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
+    pr_number="$(printf '%s' "$card" | jq -r '.pr_number // empty')"
+    reconsideration_pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
+    reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
 
-    decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note")"
+    decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
+        "$reconsideration_pending" "$reconsideration_at")"
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and

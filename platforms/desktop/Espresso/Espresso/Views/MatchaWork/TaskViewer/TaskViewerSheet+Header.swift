@@ -7,6 +7,156 @@ import SwiftUI
 
 extension TaskViewerSheet {
 
+    // MARK: - Automation provenance
+
+    /// The sheet is opened with a task snapshot, while project WebSocket
+    /// updates continue to mutate the view model. AutoPR state must follow the
+    /// live row so a completed reconsideration does not remain visually queued
+    /// until the sheet is closed and reopened.
+    var liveAutoPRTask: MWProjectTask {
+        viewModel.tasks.first(where: { $0.id == task.id }) ?? task
+    }
+
+    /// AutoPR writes its durable ticket state into `progress_note`. The board
+    /// card already previews that field, but the detail sheet must repeat it:
+    /// opening a ticket should never hide the fact that an autonomous system
+    /// selected it, nor the reason it did or did not create a PR.
+    var autoSetupProgressNote: String? {
+        let note = liveAutoPRTask.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard note.hasPrefix("🤖 AUTO SETUP") || note.lowercased().hasPrefix("from auto setup") else {
+            return nil
+        }
+        return note
+    }
+
+    /// A short, human-readable state for the ticket detail banner. The full
+    /// machine-written note remains visible below it, including build/PR/card
+    /// identifiers, so this is a summary rather than a lossy replacement.
+    var autoSetupStatus: (label: String, color: Color, icon: String) {
+        let note = (autoSetupProgressNote ?? "").lowercased()
+        if note.contains("awaiting answers") || note.contains("answers needed") {
+            return ("AWAITING ANSWERS", .orange, "questionmark.circle.fill")
+        }
+        if note.contains("already fixed") {
+            return ("NO PR · ALREADY FIXED", .mwInkStrong, "checkmark.circle.fill")
+        }
+        if note.contains("migration required") {
+            return ("NO PR · MIGRATION REQUIRED", .orange, "cylinder.split.1x2.fill")
+        }
+        if note.contains("policy blocked") || note.contains("external dependency") {
+            return ("BLOCKED", .orange, "exclamationmark.triangle.fill")
+        }
+        if note.contains("merged") || note.contains("ready for review") {
+            return ("READY FOR REVIEW", .mwInkStrong, "arrow.right.circle.fill")
+        }
+        return ("AUTOMATION IN PROGRESS", .mwInkStrong, "cpu")
+    }
+
+    /// Persistent provenance shown directly below the ticket metadata. Unlike
+    /// the one-line card preview, this deliberately renders the full note so a
+    /// reviewer can see the exact AutoPR decision after opening the card.
+    @ViewBuilder
+    var autoSetupBanner: some View {
+        if let note = autoSetupProgressNote {
+            let status = autoSetupStatus
+            if appState.isGraphite {
+                VStack(alignment: .leading, spacing: 6) {
+                    asciiRule("AUTO SETUP · \(status.label)")
+                    Text(note)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(appState.themeText)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    autoPRReconsiderationControl
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: status.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(status.color)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("AUTO SETUP · \(status.label)")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundColor(status.color)
+                        Text(note)
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.themeText.opacity(0.8))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        autoPRReconsiderationControl
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(status.color.opacity(0.08))
+                .cornerRadius(8)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.24), lineWidth: 1))
+            }
+        }
+    }
+
+    var canRequestAutoPRReconsideration: Bool {
+        guard let note = autoSetupProgressNote else { return false }
+        let liveTask = liveAutoPRTask
+        let normalizedNote = note.lowercased()
+        let isAwaitingAnswers = note.hasPrefix("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")
+            || (normalizedNote.hasPrefix("from auto setup") && normalizedNote.contains("answers needed"))
+        let isNoSafeAction = note.contains("[autopr:no-spec ")
+            && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
+                .contains(where: note.contains)
+        return liveTask.status != "cancelled"
+            && ["todo", "changes_requested"].contains(liveTask.boardColumn)
+            && (isAwaitingAnswers || isNoSafeAction)
+    }
+
+    var autoPRReconsiderationIsPending: Bool {
+        let liveTask = liveAutoPRTask
+        let submittedDecisionIsCurrent = didSubmitAutoPRContext
+            && liveTask.progressNote == task.progressNote
+        return submittedDecisionIsCurrent || liveTask.autoprReconsiderationPending == true
+    }
+
+    @ViewBuilder
+    var autoPRReconsiderationControl: some View {
+        if canRequestAutoPRReconsideration {
+            if autoPRReconsiderationIsPending {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Reconsideration queued")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(.mwInkStrong)
+                .padding(.top, 3)
+            } else if isAddingAutoPRContext {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Explain what AutoPR missed or attach evidence. Use --draft-pr to require a draft, --trust-still-broken to reject another already-fixed result, and --test-route=/app/... for a test-tenant replay.")
+                        .font(.system(size: 10))
+                        .foregroundColor(appState.themeTextSecondary)
+                    noteComposer
+                }
+                .padding(.top, 3)
+            } else {
+                Button {
+                    replyingToNote = nil
+                    autoPRContextError = nil
+                    isAddingAutoPRContext = true
+                    Task { @MainActor in isNoteFieldFocused = true }
+                } label: {
+                    Label("Add additional context", systemImage: "arrowshape.turn.up.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.mwInkStrong)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 3)
+                .help("Give AutoPR new evidence and ask it to reconsider this decision")
+            }
+        }
+    }
+
     // MARK: - "You are here" phase
 
     struct StatePhase {

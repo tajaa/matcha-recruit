@@ -7,6 +7,9 @@
  * Install once at app boot via `installErrorReporter()`.
  */
 
+import { getAccessToken } from './authStorage'
+import { normalizeSensitivePath } from '../utils/urlSecurity'
+
 // Deliberately duplicates client.ts API_BASE — importing it back would create a
 // module cycle (client.ts imports this file at line 2), with a TDZ hazard.
 // Keep the trailing-slash strip in sync with client.ts's API_BASE.
@@ -35,9 +38,9 @@ function _fingerprint(p: ClientErrorPayload): string {
 function _redactUrl(raw: string): string {
   try {
     const u = new URL(raw, window.location.origin)
-    return `${u.origin}${u.pathname}`
+    return `${u.origin}${normalizeSensitivePath(u.pathname)}`
   } catch {
-    return raw.split(/[?#]/)[0]
+    return normalizeSensitivePath(raw.split(/[?#]/)[0])
   }
 }
 
@@ -92,7 +95,7 @@ async function _send(payload: ClientErrorPayload): Promise<void> {
 
     // Raw read, not ensureFreshToken(): importing client.ts here would create
     // the module cycle noted at the top of this file.
-    const token = localStorage.getItem('matcha_access_token')
+    const token = getAccessToken()
     // Use raw fetch — must NOT go through api.request or we infinite loop on
     // any reporter-generated error.
     await fetch(`${BASE}/client-errors`, {
@@ -110,7 +113,7 @@ async function _send(payload: ClientErrorPayload): Promise<void> {
         // /report/:token) or a query string — drop the query/fragment and
         // scrub before the endpoint lands in the error store.
         api_endpoint: payload.api_endpoint
-          ? _scrub(payload.api_endpoint.split(/[?#]/)[0])
+          ? _scrub(normalizeSensitivePath(payload.api_endpoint.split(/[?#]/)[0]))
           : undefined,
         context: (() => {
           const scrubbed = payload.context

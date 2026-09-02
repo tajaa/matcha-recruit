@@ -1,5 +1,6 @@
 """DB service for the inventory order queue."""
 
+import json
 from datetime import date
 from typing import Optional
 from uuid import UUID
@@ -80,7 +81,8 @@ async def cancel_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID)
 
 async def mark_received(
     conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None, note: Optional[str] = None,
-    source_message_id: Optional[UUID] = None,
+    source_message_id: Optional[UUID] = None, received_on: Optional[date] = None,
+    expires_on: Optional[date] = None, unit_cost=None, location_id: Optional[UUID] = None,
 ) -> Optional[dict]:
     order = await conn.fetchrow(
         "SELECT * FROM inventory_orders WHERE id = $1 AND company_id = $2 AND status IN ('queued', 'ordered')",
@@ -104,9 +106,9 @@ async def mark_received(
         return None
     movement = inserted[0]
     await lots_service.record_lot(
-        conn, company_id=company_id, item_id=order["item_id"], location_id=None,
-        received_movement_id=movement["id"], quantity=received_qty, received_on=date.today(),
-        expires_on=None, lot_code=None, unit_cost=None, created_by=user_id,
+        conn, company_id=company_id, item_id=order["item_id"], location_id=location_id,
+        received_movement_id=movement["id"], quantity=received_qty, received_on=received_on or date.today(),
+        expires_on=expires_on, lot_code=None, unit_cost=unit_cost, created_by=user_id,
     )
     row = await conn.fetchrow(
         """

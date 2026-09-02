@@ -10,6 +10,9 @@ from app.matcha.models.employees.employee import (
     PTOBalanceResponse, PTORequestCreate, PTORequestResponse, PTOSummary,
 )
 from app.matcha.dependencies import require_employee_record
+from app.matcha.services.scheduling.time_off_guard import (
+    PUBLISHED_WEEK_TIME_OFF_DETAIL, has_published_schedule_week,
+)
 
 from ._shared import _pto_dep
 
@@ -140,6 +143,14 @@ async def submit_pto_request(
         )
 
     async with get_connection() as conn:
+        if await has_published_schedule_week(
+            conn, employee["org_id"], request.start_date, request.end_date,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=PUBLISHED_WEEK_TIME_OFF_DETAIL,
+            )
+
         # Check for overlapping requests
         overlap = await conn.fetchval(
             """SELECT COUNT(*) FROM pto_requests

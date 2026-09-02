@@ -15,6 +15,9 @@ from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
 from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
+from ...services.scheduling.schedule_request_notifications import (
+    mark_manager_ready_notifications_resolved,
+)
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
@@ -71,7 +74,9 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     outside = availability_violations(availability[employee_id], shift["starts_at"], shift["ends_at"])
     if outside and not force:
         raise_outside_availability(employee_id, outside)
-    unqualified = await check_job_qualification(conn, company_id, employee_id, shift["job_id"])
+    unqualified = await check_job_qualification(
+        conn, company_id, employee_id, shift["job_id"], starts_at=shift["starts_at"],
+    )
     if unqualified and not force:
         raise_not_qualified(unqualified)
     violations = await check_shift_compliance(
@@ -162,7 +167,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                 removed = await remove_assignment_core(
                     conn, company_id, shift_id=req["shift_id"], employee_id=req["employee_id"],
                     actor_user_id=current_user.id, shift_row=offered,
-                    audit_details={"request_id": str(request_id)},
+                    audit_details={"request_id": str(request_id), "request_type": req["request_type"]},
                 )
                 if not removed:
                     raise HTTPException(status_code=409, detail="Offered shift is no longer assigned to its owner")
@@ -172,7 +177,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                     removed_counter = await remove_assignment_core(
                         conn, company_id, shift_id=req["counter_shift_id"], employee_id=req["target_employee_id"],
                         actor_user_id=current_user.id, shift_row=counter,
-                        audit_details={"request_id": str(request_id)},
+                        audit_details={"request_id": str(request_id), "request_type": req["request_type"]},
                     )
                     if not removed_counter:
                         raise HTTPException(status_code=409, detail="Counter shift is no longer assigned to its owner")
@@ -222,6 +227,9 @@ async def review_request(request_id: UUID, body: RequestReview,
                    reviewed_by = $5, reviewed_at = NOW(), updated_at = NOW()
                    WHERE id = $1 AND company_id = $2""",
                 request_id, company_id, new_status, body.review_notes, current_user.id,
+            )
+            await mark_manager_ready_notifications_resolved(
+                conn, company_id=company_id, request_id=request_id,
             )
             shift_start = None
             if req["shift_id"]:

@@ -238,6 +238,16 @@ describe('deriveHuumeArtifacts', () => {
     expect(result).toEqual([{ kind: 'action', key: 'action:inventory_receipt:c1', action }])
   })
 
+  it('yields an action artifact for a generated weekly schedule', () => {
+    const action: HuumeAction = {
+      type: 'schedule_week_draft', status: 'proposed', confirm_id: 'c1',
+      generation_run_id: 'g1', location_id: 'l1', week_start: '2026-08-23',
+      source_mode: 'existing', metrics: { filled_positions: 8, required_positions: 10 },
+    }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:schedule_week_draft:c1', action }])
+  })
+
   it('omits handbook when pending_drafts is empty', () => {
     const result = deriveHuumeArtifacts({ plans: {}, handbook: { session_id: 's1', pending_drafts: [] } })
     expect(result).toEqual([])

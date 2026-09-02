@@ -1,8 +1,9 @@
-import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock, MoreHorizontal, GitPullRequest } from 'lucide-react'
+import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock, MoreHorizontal, GitPullRequest, Bot } from 'lucide-react'
 import type { MWProjectTask } from '../../types'
 import Avatar from '../../../components/shared/Avatar'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 import { KANBAN_TEMPLATES } from '../../utils/kanbanTemplates'
+import { autoPRProgressBanner } from '../../utils/autoprProgress'
 
 /** Chip color for a task's category — reuses the same per-template color the
  *  "+" compose menu uses (KANBAN_TEMPLATES.colorClass), so a "Bug" card and
@@ -93,6 +94,7 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   // and checklist off the visible height.
   const imageAttachments = attachments.filter((a) => (a.content_type ?? '').startsWith('image/')).slice(0, 3)
   const reviewNote = task.review_note?.trim()
+  const autoPRBanner = autoPRProgressBanner(task.progress_note, task.pr_number)
 
   // Left-edge accent — critical/high only. Medium is the default priority, so
   // marking it would put an accent on nearly every card; absence = normal.
@@ -164,15 +166,29 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       </div>
 
       {/* Progress note ("where we're at") */}
-      {task.progress_note?.trim() && (
+      {autoPRBanner ? (
+        <div
+          className={`mt-2 flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium ${
+            autoPRBanner.kind === 'ready'
+              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+              : autoPRBanner.kind === 'already_fixed' || autoPRBanner.kind === 'status'
+                ? 'border-sky-500/35 bg-sky-500/10 text-sky-300'
+                : 'border-orange-500/40 bg-orange-500/10 text-orange-300'
+          }`}
+          title={task.progress_note ?? undefined}
+        >
+          <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="line-clamp-2"><strong>AUTO SETUP</strong> · {autoPRBanner.message}</span>
+        </div>
+      ) : task.progress_note?.trim() ? (
         <p className="mt-1.5 truncate pl-6 text-xs italic text-w-dim">{task.progress_note}</p>
-      )}
+      ) : null}
 
       {/* Why it bounced — shown while sitting in the rework lane */}
       {task.board_column === 'changes_requested' && reviewNote && (
         <div className="mt-1.5 flex items-start gap-1 pl-6 text-xs text-orange-400/90">
           <RefreshCw className="mt-0.5 h-3 w-3 shrink-0" />
-          <span className="line-clamp-2">{reviewNote}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words">{reviewNote}</span>
         </div>
       )}
 

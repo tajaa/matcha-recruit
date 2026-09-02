@@ -5,6 +5,10 @@ import type {
   AssignmentMovePayload, AssignmentMoveResponse,
   ScheduleJob, JobPayload, JobCredentialRequirement, RosterEmployee,
   AssignmentNotePayload, MealBreakWaiverAttestation,
+  AvailabilityState, EmployeeJobAssignment, EmployeeJobAssignmentPayload,
+  EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
+  ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
+  ScheduleAuditFilters, ScheduleAuditResponse,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -46,10 +50,71 @@ export function replaceJobCredentialRequirements(jobId: string, requirements: Jo
   )
 }
 
+export function fetchEmployeeJobs(employeeId: string) {
+  return api.get<{ employee_id: string; assignments: EmployeeJobAssignment[] }>(
+    `/employee-schedule/employees/${employeeId}/jobs`,
+  )
+}
+
+export function replaceEmployeeJobs(employeeId: string, jobs: EmployeeJobAssignmentPayload[]) {
+  return api.put<{ employee_id: string; assignments: EmployeeJobAssignment[] }>(
+    `/employee-schedule/employees/${employeeId}/jobs`, { assignments: jobs },
+  )
+}
+
+export function fetchEmployeeScheduleProfile(employeeId: string) {
+  return api.get<EmployeeScheduleProfile>(`/employee-schedule/profiles/${employeeId}`)
+}
+
+export function updateEmployeeScheduleProfile(employeeId: string, payload: EmployeeScheduleProfilePayload) {
+  return api.put<EmployeeScheduleProfile>(`/employee-schedule/profiles/${employeeId}`, payload)
+}
+
+export function updateEmployeeSchedulingDetails(
+  employeeId: string,
+  payload: {
+    jobs?: { assignments: EmployeeJobAssignmentPayload[] }
+    availability: { availability_state: Exclude<AvailabilityState, 'unconfirmed'>; windows: AvailabilityWindow[] }
+    profile: EmployeeScheduleProfilePayload
+  },
+) {
+  return api.put<{
+    employee_id: string
+    assignments: EmployeeJobAssignment[] | null
+    availability_state: AvailabilityState
+    saved_windows: number
+    profile: EmployeeScheduleProfile
+  }>(`/employee-schedule/profiles/${employeeId}/details`, payload)
+}
+
 /** For a `?shift=` deep link (the Huume `[[shift:…]]` pill) that carries no
  *  location — resolves which location to scope the page to. */
 export function fetchShift(shiftId: string) {
   return api.get<Shift>(`/employee-schedule/shifts/${shiftId}`)
+}
+
+function scheduleAuditQuery(filters: ScheduleAuditFilters): string {
+  const query = new URLSearchParams()
+  if (filters.start) query.set('start', filters.start)
+  if (filters.end) query.set('end', filters.end)
+  if (filters.shiftId) query.set('shift_id', filters.shiftId)
+  if (filters.actorUserId) query.set('actor_user_id', filters.actorUserId)
+  if (filters.employeeId) query.set('employee_id', filters.employeeId)
+  if (filters.limit != null) query.set('limit', String(filters.limit))
+  if (filters.offset != null) query.set('offset', String(filters.offset))
+  const value = query.toString()
+  return value ? `?${value}` : ''
+}
+
+export function fetchScheduleAuditLogs(filters: ScheduleAuditFilters) {
+  return api.get<ScheduleAuditResponse>(`/employee-schedule/audit-logs${scheduleAuditQuery(filters)}`)
+}
+
+export function exportScheduleAuditLogs(filters: Omit<ScheduleAuditFilters, 'limit' | 'offset'>) {
+  return api.download(
+    `/employee-schedule/audit-logs/export${scheduleAuditQuery(filters)}`,
+    'published-shift-audit-log.csv',
+  )
 }
 
 export function updateAssignmentNote(shiftId: string, employeeId: string, payload: AssignmentNotePayload) {
@@ -172,8 +237,13 @@ export function updateWeekTemplate(id: string, payload: Partial<WeekTemplatePayl
   return api.put<WeekTemplate>(`/employee-schedule/week-templates/${id}`, payload)
 }
 
+/** Reconciles the editor's complete block list in one server-side transaction. */
+export function replaceWeekTemplate(id: string, payload: WeekTemplateReplacePayload) {
+  return api.put<WeekTemplate>(`/employee-schedule/week-templates/${id}/contents`, payload)
+}
+
 export function deleteWeekTemplate(id: string) {
-  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/week-templates/${id}`)
+  return api.delete<{ ok: boolean; id: string; paused_auto_schedules: number }>(`/employee-schedule/week-templates/${id}`)
 }
 
 export function addTemplateBlock(weekTemplateId: string, payload: BlockPayload) {
@@ -198,16 +268,36 @@ export function generateFromWeekTemplate(weekTemplateId: string, startDate: stri
   )
 }
 
+// ---- Admin: Huume schedule automation ----
+
+export function fetchAutoSchedule(locationId: string) {
+  return api.get<{ rule: ScheduleAutomationRule | null }>(
+    `/employee-schedule/auto-schedules?location_id=${encodeURIComponent(locationId)}`,
+  )
+}
+
+export function saveAutoSchedule(locationId: string, payload: ScheduleAutomationPayload) {
+  return api.put<ScheduleAutomationRule>(`/employee-schedule/auto-schedules/${locationId}`, payload)
+}
+
+export function runAutoScheduleNow(locationId: string) {
+  return api.post<{ status: string; message: string; week_start: string; generation_run_id?: string }>(
+    `/employee-schedule/auto-schedules/${locationId}/run-now`, {},
+  )
+}
+
 // ---- Admin: availability ----
 
 export interface AvailabilityWindow { weekday: number; start_time: string; end_time: string }
 
 export function fetchEmployeeAvailability(employeeId: string) {
-  return api.get<{ windows: AvailabilityWindow[] }>(`/employee-schedule/availability/${employeeId}`)
+  return api.get<{ availability_state: AvailabilityState; windows: AvailabilityWindow[] }>(`/employee-schedule/availability/${employeeId}`)
 }
 
-export function saveEmployeeAvailability(employeeId: string, windows: AvailabilityWindow[]) {
-  return api.put<{ saved: number }>(`/employee-schedule/availability/${employeeId}`, { windows })
+export function saveEmployeeAvailability(employeeId: string, windows: AvailabilityWindow[], state?: AvailabilityState) {
+  return api.put<{ saved: number; availability_state: AvailabilityState }>(
+    `/employee-schedule/availability/${employeeId}`, { windows, ...(state ? { availability_state: state } : {}) },
+  )
 }
 
 // ---- Admin: request review ----
@@ -254,6 +344,12 @@ export function fetchMySchedule(start: string, end: string) {
   )
 }
 
+export function fetchMyTeamSchedule(start: string, end: string) {
+  return api.get<{ shifts: Shift[] }>(
+    `/v1/portal/me/schedule?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&team=true`,
+  )
+}
+
 export function fetchMyRequests() {
   return api.get<{ requests: ScheduleRequest[] }>('/v1/portal/me/schedule/requests')
 }
@@ -280,6 +376,7 @@ export interface MyRequestPayload {
   request_type: 'swap' | 'drop' | 'pickup' | 'unavailable'
   shift_id?: string | null
   target_employee_id?: string | null
+  counter_shift_id?: string | null
   unavailable_start?: string | null
   unavailable_end?: string | null
   reason?: string | null

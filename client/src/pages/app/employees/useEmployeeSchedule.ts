@@ -7,7 +7,7 @@ import {
   toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
 
-export type EmployeeScheduleTab = 'schedule' | 'templates' | 'requests' | 'intelligence'
+export type EmployeeScheduleTab = 'schedule' | 'templates' | 'auto-schedules' | 'requests' | 'audit' | 'intelligence'
 
 export function useEmployeeSchedule(
   initialDate?: string,

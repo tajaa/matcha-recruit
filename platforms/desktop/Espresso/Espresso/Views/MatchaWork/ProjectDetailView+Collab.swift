@@ -139,18 +139,26 @@ extension ProjectDetailView {
         }
         .background(ThemeRadialBackground())
         .onChange(of: viewModel.project?.id) { _, _ in
-            // Lazy-create the per-project discussion channel. Cancel any
-            // in-flight ensure call so rapid project switches don't stack
-            // duplicate "Setting up the collab channel…" loaders.
+            // Cancel any in-flight ensure call so rapid project switches don't
+            // stack duplicate "Setting up the collab channel…" loaders.
             ensureChannelTask?.cancel()
             collabDiscussionChannelId = nil
             collabChannelLoadError = nil
-            ensureChannelTask = Task { await ensureCollabDiscussionChannel() }
+            ensureCollabChannelIfChatVisible()
         }
-        .task {
-            ensureChannelTask?.cancel()
-            ensureChannelTask = Task { await ensureCollabDiscussionChannel() }
-        }
+        .task { ensureCollabChannelIfChatVisible() }
+        // Boards open on Kanban, so the channel is usually created for a tab
+        // nobody is on — wait until Chat is actually selected.
+        .onChange(of: collabPanel) { _, _ in ensureCollabChannelIfChatVisible() }
+    }
+
+    /// Create/resolve the per-project discussion channel only when the Chat
+    /// tab is actually showing. This used to fire on every project switch —
+    /// a POST per switch for a view the user usually isn't looking at.
+    func ensureCollabChannelIfChatVisible() {
+        guard collabPanel == .chat, collabDiscussionChannelId == nil else { return }
+        ensureChannelTask?.cancel()
+        ensureChannelTask = Task { await ensureCollabDiscussionChannel() }
     }
 
     @ViewBuilder
@@ -377,10 +385,8 @@ extension ProjectDetailView {
     /// Returns the member whose caret is currently in the given section, if
     /// any. Used to render the "X is editing" badge on the section list.
     func remoteEditor(for sectionId: String) -> ProjectWebSocket.PresenceMember? {
-        guard let entry = presenceVM.remoteCarets.first(where: { $0.value.sectionId == sectionId }) else {
-            return nil
-        }
-        return presenceVM.members.first { $0.id == entry.key }
+        // Memoized on the VM — this is called once per section per render.
+        presenceVM.editorsBySection()[sectionId]
     }
 
     /// The lock holder's caret in this section, for in-text rendering in the

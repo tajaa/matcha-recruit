@@ -33,11 +33,13 @@ class _Conn:
     def __init__(self, existing=None):
         self.existing = existing
         self.fetchrow_calls = []
+        self.execute_calls = []
 
     def transaction(self):
         return _Transaction()
 
     async def execute(self, query, *params):
+        self.execute_calls.append((query, params))
         return None
 
     async def fetchrow(self, query, *params):
@@ -46,6 +48,8 @@ class _Conn:
             return {"is_active": True}
         if "FROM schedule_assistant_sessions" in query:
             return self.existing
+        if "FROM schedule_generation_runs" in query:
+            return None
         if "INSERT INTO mw_threads" in query:
             return {
                 "id": uuid4(),
@@ -55,6 +59,9 @@ class _Conn:
         if "INSERT INTO schedule_assistant_sessions" in query:
             return {"id": uuid4()}
         raise AssertionError(f"unexpected fetchrow query: {query}")
+
+    async def fetchval(self, *_args):
+        return None
 
 
 class _AllowedScope:
@@ -129,6 +136,96 @@ async def test_existing_session_uses_existing_id_and_coerces_json_state(monkeypa
     assert result["current_state"]["huume_action"]["status"] == "proposed"
     assert result["version"] == 7
     assert not any("INSERT INTO mw_threads" in query for query in conn.fetchrow_calls)
+
+
+@pytest.mark.asyncio
+async def test_session_adopts_automatic_week_proposal_for_review(monkeypatch):
+    company_id, user_id, location_id = uuid4(), uuid4(), uuid4()
+    existing_session_id, thread_id, generation_id = uuid4(), uuid4(), uuid4()
+    week_start = date(2026, 8, 30)
+    conn = _Conn({
+        "id": existing_session_id,
+        "thread_id": thread_id,
+        "current_state": json.dumps({
+            "huume_surface": {"kind": "schedule_assistant"},
+        }),
+        "version": 7,
+    })
+    original_fetchrow = conn.fetchrow
+
+    async def fetchrow(query, *params):
+        if "FROM schedule_generation_runs" in query:
+            return {
+                "id": generation_id,
+                "location_id": location_id,
+                "week_start": week_start,
+                "source_mode": "template",
+                "week_template_id": uuid4(),
+                "proposal": json.dumps({
+                    "metrics": {"shift_count": 2},
+                    "unfilled": [],
+                    "review": {
+                        "summary": "Prepared two shifts.",
+                        "schedule_preview": [{"shift_key": "one"}],
+                        "preview_truncated": False,
+                    },
+                }),
+                "metrics": json.dumps({"shift_count": 2}),
+            }
+        return await original_fetchrow(query, *params)
+
+    conn.fetchrow = fetchrow
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *args, **kwargs: _allow_scope())
+    monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
+
+    result = await session.get_or_create_schedule_assistant_session(
+        company_id=company_id, user_id=user_id, actor_role="manager",
+        location_id=location_id, week_start=week_start,
+    )
+
+    action = result["current_state"]["huume_action"]
+    assert action["generation_run_id"] == str(generation_id)
+    assert action["auto_generated"] is True
+    assert action["summary"] == "Prepared two shifts."
+    assert action["schedule_preview"] == [{"shift_key": "one"}]
+    assert action["confirm_id"]
+    assert result["version"] == 8
+    assert any("UPDATE mw_threads" in query for query, _params in conn.execute_calls)
+
+
+@pytest.mark.asyncio
+async def test_session_refreshes_proposal_applied_by_another_manager(monkeypatch):
+    company_id, user_id, location_id = uuid4(), uuid4(), uuid4()
+    existing_session_id, thread_id, generation_id = uuid4(), uuid4(), uuid4()
+    conn = _Conn({
+        "id": existing_session_id,
+        "thread_id": thread_id,
+        "current_state": json.dumps({
+            "huume_action": {
+                "type": "schedule_week_draft",
+                "status": "proposed",
+                "generation_run_id": str(generation_id),
+            },
+        }),
+        "version": 3,
+    })
+
+    async def fetchval(*_args):
+        return "applied"
+
+    conn.fetchval = fetchval
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *args, **kwargs: _allow_scope())
+    monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
+
+    result = await session.get_or_create_schedule_assistant_session(
+        company_id=company_id, user_id=user_id, actor_role="manager",
+        location_id=location_id, week_start=date(2026, 8, 30),
+    )
+
+    assert result["current_state"]["huume_action"]["status"] == "applied"
+    assert result["version"] == 4
 
 
 async def _allow_scope():

@@ -1,3 +1,68 @@
+export type InventoryNetworkSummary = {
+  location_count: number
+  matched_item_groups: number
+  transfer_count: number
+  shortages_fully_covered: number
+  remaining_reorder_count: number
+  attention_count: number
+  inventory_value_moved: number | null
+}
+
+export type InventoryNetworkTransfer = {
+  item_name: string
+  unit: string | null
+  quantity: number
+  from_item_id: string
+  from_location_id: string
+  from_location_name: string
+  from_current_quantity: number
+  from_target_quantity: number
+  from_post_transfer_quantity: number
+  to_item_id: string
+  to_location_id: string
+  to_location_name: string
+  to_current_quantity: number
+  to_target_quantity: number
+  to_post_transfer_quantity: number
+  receiver_remaining_shortage: number
+  runout_date: string | null
+  order_by_date: string | null
+  days_of_cover_added: number | null
+  inventory_value: number | null
+  coverage: 'full' | 'partial'
+  confidence: 'low' | 'medium' | 'high'
+  rationale: string
+}
+
+export type InventoryNetworkShortage = {
+  item_id: string
+  item_name: string
+  unit: string | null
+  location_id: string
+  location_name: string
+  shortage_quantity: number
+  suggested_order_quantity: number
+  runout_date: string | null
+  order_by_date: string | null
+  confidence: 'low' | 'medium' | 'high'
+}
+
+export type InventoryNetworkAttention = {
+  item_id: string
+  item_name: string
+  location_id: string
+  location_name: string
+  status: 'count_required' | 'insufficient_history'
+}
+
+export type InventoryNetworkPlan = {
+  forecast_start: string
+  summary: InventoryNetworkSummary
+  transfers: InventoryNetworkTransfer[]
+  remaining_shortages: InventoryNetworkShortage[]
+  attention: InventoryNetworkAttention[]
+}
+
 export type MWTaskType =
   | 'chat'
   | 'offer_letter'
@@ -784,6 +849,45 @@ export interface HuumeActionScheduleChange {
   employee_names?: string[] | null
 }
 
+export interface HuumeActionScheduleWeekDraft {
+  type: 'schedule_week_draft'
+  status: 'proposed' | 'applied' | 'failed' | 'cancelled'
+  confirm_id: string
+  generation_run_id: string
+  location_id: string
+  week_start: string
+  source_mode: 'existing' | 'template'
+  week_template_id?: string | null
+  summary?: string | null
+  metrics?: {
+    shift_count?: number
+    required_positions?: number
+    fixed_positions?: number
+    overstaffed_positions?: number
+    proposed_positions?: number
+    filled_positions?: number
+    open_positions?: number
+  }
+  unfilled?: Array<{
+    shift_key?: string
+    starts_at?: string
+    role?: string | null
+    reason?: string
+  }>
+  schedule_preview?: Array<{
+    shift_key: string
+    starts_at: string
+    ends_at: string
+    role?: string | null
+    required_staff: number
+    assignment_names: string[]
+    existing_assignment_count?: number
+  }>
+  preview_truncated?: boolean
+  origin?: 'manual' | 'automatic'
+  auto_generated?: boolean
+}
+
 export interface HuumeActionScheduleNote {
   type: 'schedule_note'
   status: 'proposed' | 'created' | 'failed' | 'cancelled'
@@ -848,6 +952,7 @@ export type HuumeAction =
   | HuumeActionInventoryItemArchive
   | HuumeActionInventoryReceipt
   | HuumeActionScheduleChange
+  | HuumeActionScheduleWeekDraft
   | HuumeActionScheduleNote
   | HuumeActionMealBreakWaiver
   | HuumeActionWorkPermit

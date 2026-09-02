@@ -188,7 +188,7 @@ async def list_pending_comments(current_user: CurrentUser = Depends(require_admi
     """Admin: List all pending comments."""
     async with get_connection() as conn:
         query = """
-            SELECT c.*,
+            SELECT c.id, c.post_id, c.user_id, c.content, c.status, c.created_at,
                    COALESCE(u.email, c.author_name, 'Anonymous') as author_name,
                    p.title as post_title
             FROM blog_comments c
@@ -463,7 +463,7 @@ async def list_comments(slug: str):
              raise HTTPException(status_code=404, detail="Blog post not found")
 
         query = """
-            SELECT c.*,
+            SELECT c.id, c.post_id, c.user_id, c.content, c.status, c.created_at,
                    COALESCE(u.email, c.author_name, 'Anonymous') as author_name
             FROM blog_comments c
             LEFT JOIN users u ON c.user_id = u.id

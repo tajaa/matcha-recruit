@@ -63,6 +63,12 @@ struct MatchaApp: App {
                         .environment(appState)
                         .environment(broadcastService)
                         .environment(callService)
+                } else if appState.isRestoring {
+                    // A stored session is being refreshed. Showing LoginView
+                    // here made a returning user watch the sign-in form for the
+                    // length of a network round-trip before the workspace
+                    // appeared.
+                    SessionRestoreView()
                 } else {
                     LoginView()
                         .environment(appState)
@@ -115,5 +121,35 @@ struct MatchaApp: App {
                 .environment(appState)
                 .preferredColorScheme(colorScheme)
         }
+    }
+}
+
+/// Launch splash shown while `restoreSession()` is in flight. Deliberately
+/// static: it reuses LoginView's platinum backdrop and mark so the handoff to
+/// either destination is a crossfade, not a scene change, and it starts no
+/// `repeatForever` animations for a view that is usually on screen well under
+/// a second.
+private struct SessionRestoreView: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.platinumRadialCenter,
+                    Color.platinumBg,
+                    Color.platinumRadialEdge,
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                EspressoMark(size: 68)
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.platinumSecondary)
+            }
+        }
+        .frame(minWidth: 420, minHeight: 320)
     }
 }

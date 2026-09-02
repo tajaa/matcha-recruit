@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from app.matcha.services.inventory import sales_commit
 from app.matcha.services.inventory import sales_mappings
 
@@ -94,7 +96,7 @@ def test_recipe_sales_deplete_each_component_and_save_mapping_in_commit_transact
     result = _run(sales_commit.commit_sales_import(
         conn, company_id='company-1', user_id='user-1', location_id=None,
         business_date='2026-08-25', source='upload', filename='sales.csv',
-        gmail_message_id=None, force=False, lines=[_recipe_line()],
+        gmail_message_id=None, lines=[_recipe_line()],
     ))
 
     assert result['items_affected'] == 4
@@ -131,7 +133,7 @@ def test_unmapped_sibling_does_not_save_reviewed_recipe(monkeypatch):
     result = _run(sales_commit.commit_sales_import(
         conn, company_id='company-1', user_id='user-1', location_id=None,
         business_date='2026-08-25', source='upload', filename='sales.csv',
-        gmail_message_id=None, force=False,
+        gmail_message_id=None,
         lines=[_recipe_line(), {'sold_name': 'Unknown drink', 'quantity': 1, 'status': 'unmapped'}],
     ))
 
@@ -165,7 +167,7 @@ def test_foreign_mapping_id_is_rejected_without_persisting_it():
     result = _run(sales_commit.commit_sales_import(
         conn, company_id='company-1', user_id='user-1', location_id=None,
         business_date='2026-08-25', source='upload', filename='sales.csv',
-        gmail_message_id=None, force=False,
+        gmail_message_id=None,
         lines=[{
             'sold_name': 'Vanilla latte', 'quantity': 1, 'mapping_id': 'foreign-mapping',
             'components': [{'item_id': 'attacker-supplied', 'quantity_per_sale': 1}],
@@ -175,3 +177,159 @@ def test_foreign_mapping_id_is_rejected_without_persisting_it():
     assert result['errors'] == [{'row': 1, 'item': 'Vanilla latte', 'error': 'sales mapping not found'}]
     sales_line_args = next(args for query, args in conn.executed if 'INSERT INTO inventory_sales_lines' in query)
     assert sales_line_args[6] is None
+
+
+def test_committed_period_error_does_not_offer_an_impossible_override():
+    class CommittedPeriodConn(FakeConn):
+        async def fetchval(self, query, *args):
+            if "status='committed'" in query:
+                return 'committed-import'
+            return await super().fetchval(query, *args)
+
+    with pytest.raises(
+        sales_commit.DuplicateSalesPeriodError,
+        match=r'^Sales for 2026-08-25 have already been committed\.$',
+    ):
+        _run(sales_commit.commit_sales_import(
+            CommittedPeriodConn(),
+            company_id='company-1', user_id='user-1', location_id=None,
+            business_date='2026-08-25', source='upload', filename='sales.csv',
+            gmail_message_id=None, lines=[_recipe_line()],
+        ))
+
+
+@pytest.mark.parametrize('include_status', [True, False])
+def test_all_ignored_sales_discard_the_import_without_checking_the_committed_period(
+    monkeypatch, include_status,
+):
+    class DuplicatePeriodConn(FakeConn):
+        async def fetchval(self, query, *args):
+            if "status='committed'" in query:
+                raise AssertionError('all-ignored reviews must not check the committed period')
+            return await super().fetchval(query, *args)
+
+    conn = DuplicatePeriodConn()
+    saved = []
+    movement_calls = []
+
+    async def validate_mapping(*_args, **_kwargs):
+        return None
+
+    async def upsert_mapping(*_args, **kwargs):
+        saved.append(kwargs)
+        return {'id': 'ignored-mapping', 'components': []}
+
+    async def record_movements(*_args, **_kwargs):
+        movement_calls.append(True)
+
+    monkeypatch.setattr(sales_commit.sales_mappings, 'validate_mapping', validate_mapping)
+    monkeypatch.setattr(sales_commit.sales_mappings, 'upsert_mapping', upsert_mapping)
+    monkeypatch.setattr(sales_commit.movements_service, 'record_movements', record_movements)
+
+    line = {
+        'sold_name': 'Vanilla latte', 'quantity': 1,
+        'new_mapping': {'kind': 'ignore', 'components': []},
+    }
+    if include_status:
+        line['status'] = 'ignored'
+
+    result = _run(sales_commit.commit_sales_import(
+        conn, company_id='company-1', user_id='user-1', location_id=None,
+        business_date='2026-08-25', source='upload', filename='sales.csv',
+        gmail_message_id=None,
+        lines=[line],
+    ))
+
+    assert result['unmapped'] == 0
+    assert saved[0]['kind'] == 'ignore'
+    assert movement_calls == []
+    status_update = next(args for query, args in conn.executed if 'SET status=$2' in query)
+    assert status_update[1] == 'discarded'
+
+
+def test_all_ignored_discarded_pos_batch_is_idempotent():
+    class DiscardedIgnoredBatchConn(FakeConn):
+        async def fetchrow(self, query, *args):
+            if 'connection_id=$2' in query:
+                return {
+                    'id': 'import-1', 'status': 'discarded',
+                    'location_id': None, 'business_date': '2026-08-25',
+                }
+            return await super().fetchrow(query, *args)
+
+        async def fetchval(self, query, *args):
+            if 'FROM inventory_sales_lines' in query:
+                return True
+            return await super().fetchval(query, *args)
+
+    result = _run(sales_commit.commit_sales_import(
+        DiscardedIgnoredBatchConn(),
+        company_id='company-1', user_id=None, location_id=None,
+        business_date='2026-08-25', source='square', filename='square:batch-1',
+        gmail_message_id=None,
+        lines=[{'sold_name': 'Gift card', 'quantity': 1, 'status': 'ignored'}],
+        connection_id='connection-1', external_batch_id='batch-1',
+    ))
+
+    assert result['import_id'] == 'import-1'
+    assert result['duplicate'] is True
+
+
+def test_manually_discarded_nonignored_import_still_refuses_commit():
+    class DiscardedMappedImportConn(FakeConn):
+        async def fetchrow(self, query, *args):
+            if 'FROM inventory_sales_imports WHERE id=$1' in query:
+                return {
+                    'id': 'import-1', 'status': 'discarded', 'location_id': None,
+                    'business_date': '2026-08-25', 'source': 'upload',
+                    'connection_id': None, 'external_batch_id': None,
+                }
+            return await super().fetchrow(query, *args)
+
+        async def fetchval(self, query, *args):
+            if 'FROM inventory_sales_lines' in query:
+                return False
+            return await super().fetchval(query, *args)
+
+    with pytest.raises(ValueError, match='Sales import was already discarded'):
+        _run(sales_commit.commit_sales_import(
+            DiscardedMappedImportConn(),
+            company_id='company-1', user_id='user-1', location_id=None,
+            business_date='2026-08-25', source='upload', filename='sales.csv',
+            gmail_message_id=None,
+            lines=[_recipe_line()], import_id='import-1',
+        ))
+
+
+def test_period_constraint_race_returns_duplicate_error_and_removes_new_draft(monkeypatch):
+    class PeriodConflict(Exception):
+        constraint_name = 'uniq_inventory_sales_imports_period'
+
+    class RaceConn(FakeConn):
+        async def execute(self, query, *args):
+            if 'SET status=$2' in query:
+                raise PeriodConflict()
+            await super().execute(query, *args)
+
+    async def record_movements(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(sales_commit, 'UniqueViolationError', PeriodConflict)
+    monkeypatch.setattr(sales_commit.movements_service, 'record_movements', record_movements)
+    conn = RaceConn()
+
+    with pytest.raises(
+        sales_commit.DuplicateSalesPeriodError,
+        match=r'^Sales for 2026-08-25 have already been committed\.$',
+    ):
+        _run(sales_commit.commit_sales_import(
+            conn, company_id='company-1', user_id='user-1', location_id=None,
+            business_date='2026-08-25', source='upload', filename='sales.csv',
+            gmail_message_id=None,
+            lines=[{
+                'sold_name': 'Vanilla latte', 'quantity': 1, 'status': 'mapped',
+                'components': [{'item_id': 'cup', 'quantity_per_sale': 1}],
+            }],
+        ))
+
+    assert any('DELETE FROM inventory_sales_imports' in query for query, _args in conn.executed)

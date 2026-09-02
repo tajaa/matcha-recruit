@@ -1,9 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer
+
+
+JsonDecimal = Annotated[
+    Decimal,
+    PlainSerializer(lambda value: float(value), return_type=float, when_used="json"),
+]
 
 MovementKind = Literal["out", "in", "stockout", "adjust", "sale", "waste"]
 WasteReason = Literal[
@@ -86,6 +92,7 @@ class MovementOut(BaseModel):
 class OrderCreate(BaseModel):
     item_id: UUID
     quantity: Optional[Decimal] = None
+    buying_line_id: Optional[UUID] = None
 
 
 class OrderAction(BaseModel):
@@ -110,6 +117,9 @@ class ReceiptCommitLine(BaseModel):
     quantity: float = Field(gt=0)        # the user-CONFIRMED count (invoice figure is only the prefill)
     order_id: Optional[UUID] = None      # open order to mark_received against
     expires_on: Optional[date] = None    # per-line override; falls back to shelf_life_days if unset
+    vendor_sku: Optional[str] = Field(default=None, max_length=80)
+    unit_price: Optional[Decimal] = Field(default=None, ge=0)
+    pack_size: Optional[str] = Field(default=None, max_length=80)
 
 
 class ReceiptCommit(BaseModel):
@@ -187,7 +197,6 @@ class SalesCommit(BaseModel):
     source: Literal["upload", "email", "square", "toast"] = "upload"
     filename: Optional[str] = None
     gmail_message_id: Optional[str] = None
-    force: bool = False
     lines: list[SalesLine]
 
 
@@ -289,6 +298,152 @@ class ForecastAIDraftRequest(BaseModel):
     location_id: Optional[UUID] = None
     horizon_start: Optional[date] = None
     manager_context: str = Field(min_length=1, max_length=4000)
+
+
+class ForecastNetworkSummaryOut(BaseModel):
+    location_count: int
+    matched_item_groups: int
+    transfer_count: int
+    shortages_fully_covered: int
+    remaining_reorder_count: int
+    attention_count: int
+    inventory_value_moved: Optional[JsonDecimal] = None
+
+
+class ForecastNetworkTransferOut(BaseModel):
+    item_name: str
+    unit: Optional[str] = None
+    quantity: JsonDecimal
+    from_item_id: UUID
+    from_location_id: UUID
+    from_location_name: str
+    from_current_quantity: JsonDecimal
+    from_target_quantity: JsonDecimal
+    from_post_transfer_quantity: JsonDecimal
+    to_item_id: UUID
+    to_location_id: UUID
+    to_location_name: str
+    to_current_quantity: JsonDecimal
+    to_target_quantity: JsonDecimal
+    to_post_transfer_quantity: JsonDecimal
+    receiver_remaining_shortage: JsonDecimal
+    runout_date: Optional[date] = None
+    order_by_date: Optional[date] = None
+    days_of_cover_added: Optional[JsonDecimal] = None
+    inventory_value: Optional[JsonDecimal] = None
+    coverage: Literal["full", "partial"]
+    confidence: Literal["low", "medium", "high"]
+    rationale: str
+
+
+class ForecastNetworkShortageOut(BaseModel):
+    item_id: UUID
+    item_name: str
+    unit: Optional[str] = None
+    location_id: UUID
+    location_name: str
+    shortage_quantity: JsonDecimal
+    suggested_order_quantity: JsonDecimal
+    runout_date: Optional[date] = None
+    order_by_date: Optional[date] = None
+    confidence: Literal["low", "medium", "high"]
+
+
+class ForecastNetworkAttentionOut(BaseModel):
+    item_id: UUID
+    item_name: str
+    location_id: UUID
+    location_name: str
+    status: Literal["count_required", "insufficient_history"]
+
+
+class ForecastNetworkPlanOut(BaseModel):
+    forecast_start: date
+    summary: ForecastNetworkSummaryOut
+    transfers: list[ForecastNetworkTransferOut]
+    remaining_shortages: list[ForecastNetworkShortageOut]
+    attention: list[ForecastNetworkAttentionOut]
+
+
+class SupplierCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    contact_email: Optional[str] = Field(default=None, max_length=320)
+    contact_phone: Optional[str] = Field(default=None, max_length=80)
+    payment_terms: Optional[str] = Field(default=None, max_length=120)
+
+
+class SupplierItemUpsert(BaseModel):
+    supplier_id: UUID
+    location_id: Optional[UUID] = None
+    vendor_sku: Optional[str] = Field(default=None, max_length=80)
+    purchase_unit: Optional[str] = Field(default=None, max_length=50)
+    pack_size_label: Optional[str] = Field(default=None, max_length=80)
+    units_per_pack: Decimal = Field(default=Decimal("1"), gt=0)
+    minimum_order_quantity: Decimal = Field(default=Decimal("0"), ge=0)
+    unit_price: Optional[Decimal] = Field(default=None, ge=0)
+    freight_flat: Optional[Decimal] = Field(default=None, ge=0)
+    lead_time_days: Optional[int] = Field(default=None, ge=0, le=180)
+    price_observed_on: Optional[date] = None
+    preferred: bool = False
+    active: bool = True
+
+
+class BuyingRunCreate(BaseModel):
+    forecast_run_id: UUID
+    location_id: Optional[UUID] = None
+
+
+class BuyingAlternativeOut(BaseModel):
+    supplier_id: UUID
+    supplier_name: str
+    purchase_quantity: JsonDecimal
+    expected_arrival: Optional[date] = None
+    landed_cost: Optional[JsonDecimal] = None
+    eligible: bool
+    reason: str
+
+
+class BuyingLineOut(BaseModel):
+    id: Optional[UUID] = None
+    item_id: UUID
+    item_name: str
+    unit: Optional[str] = None
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
+    action: Literal["count_first", "hold", "buy", "expedite"]
+    needed_quantity: Optional[JsonDecimal] = None
+    transfer_quantity: JsonDecimal = Decimal("0")
+    purchase_quantity: Optional[JsonDecimal] = None
+    supplier_id: Optional[UUID] = None
+    supplier_item_id: Optional[UUID] = None
+    supplier_name: Optional[str] = None
+    order_by_date: Optional[date] = None
+    expected_arrival: Optional[date] = None
+    projected_runout: Optional[date] = None
+    landed_cost: Optional[JsonDecimal] = None
+    confidence: Literal["low", "medium", "high"]
+    price_confirmation_required: bool = False
+    rationale: str
+    alternatives: list[BuyingAlternativeOut] = Field(default_factory=list)
+
+
+class BuyingSummaryOut(BaseModel):
+    count_first: int
+    hold: int
+    buy: int
+    expedite: int
+    total_landed_cost: Optional[JsonDecimal] = None
+    unpriced_count: int
+
+
+class BuyingPlanOut(BaseModel):
+    id: Optional[UUID] = None
+    forecast_run_id: UUID
+    location_id: Optional[UUID] = None
+    input_fingerprint: str
+    created_at: Optional[datetime] = None
+    summary: BuyingSummaryOut
+    lines: list[BuyingLineOut]
 
 
 class POSLocationBindingUpsert(BaseModel):

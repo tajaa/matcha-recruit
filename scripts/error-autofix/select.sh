@@ -29,6 +29,36 @@ ATTEMPT_COOLDOWN_HOURS=2
 count="$(jq 'length' "$INCIDENTS_FILE")"
 [ "$count" -gt 0 ] || exit "$NOTHING_TO_DO"
 
+# Build the durable cross-lane ledger from exact comment markers. GitHub search
+# indexing is deliberately not involved: enumerate labeled PRs, then read each
+# comment collection directly. A label without a marker (or vice versa) is not
+# enough to suppress an incident.
+COVERAGE_LEDGER="$(mktemp "${RUNNER_TEMP:-/tmp}/autofix-coverage-ledger-XXXXXX")"
+trap 'rm -f "$COVERAGE_LEDGER"' EXIT
+printf '[]\n' > "$COVERAGE_LEDGER"
+if ! coverage_prs="$(gh pr list --repo "$REPO" --state all --label covers-prod-error --limit 100 \
+    --json number,state,mergedAt,closedAt,createdAt)"; then
+    die "could not read covering PR ledger"
+fi
+printf '%s' "$coverage_prs" | jq -e 'type == "array"' >/dev/null 2>&1 \
+    || die "covering PR ledger returned invalid JSON"
+while IFS= read -r coverage_pr; do
+    coverage_number="$(printf '%s' "$coverage_pr" | jq -r '.number')"
+    if ! coverage_comments="$(gh api "repos/$REPO/issues/$coverage_number/comments?per_page=100")"; then
+        die "could not read comments for covering PR #$coverage_number"
+    fi
+    printf '%s' "$coverage_comments" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        || die "comments for covering PR #$coverage_number returned invalid JSON"
+    while IFS= read -r coverage_key; do
+        [ -n "$coverage_key" ] || continue
+        jq --arg key "$coverage_key" --argjson pr "$coverage_pr" \
+            '. + [($pr + {stable_key:$key})]' "$COVERAGE_LEDGER" > "$COVERAGE_LEDGER.next"
+        mv "$COVERAGE_LEDGER.next" "$COVERAGE_LEDGER"
+    done < <(printf '%s' "$coverage_comments" | jq -r '.[].body // ""' \
+        | grep -oE '<!-- matcha-autofix-coverage-error: [0-9a-f]{12} -->' \
+        | sed -E 's/.*: ([0-9a-f]{12}) -->/\1/' || true)
+done < <(printf '%s' "$coverage_prs" | jq -c 'sort_by(.createdAt)[]')
+
 # Backstop against a dedup bug nobody has found yet: never let a bad day
 # produce an unbounded number of open bot PRs.
 open_autofix_prs="$(gh pr list --repo "$REPO" --state open --label autofix --limit 100 --json number --jq 'length')"
@@ -41,6 +71,45 @@ fi
 # Echoes "skip" or "investigate".
 already_handled() {
     local key="$1" last_seen="$2" branch="bot/err-$key"
+
+    local association association_state association_time association_grace
+    association="$(jq -c --arg key "$key" '
+        [.[] | select(.stable_key == $key)] as $matches
+        | if any($matches[]; .state == "OPEN") then
+            [$matches[] | select(.state == "OPEN")] | sort_by(.createdAt) | .[0]
+          elif any($matches[]; .state == "MERGED") then
+            # A recurrent incident can accumulate several merged owners. The
+            # newest merge controls deploy grace; choosing the oldest would
+            # immediately reopen while the latest fix is still undeployed.
+            [$matches[] | select(.state == "MERGED")]
+            | sort_by(.mergedAt // .createdAt) | last
+          else
+            [$matches[] | select(.state == "CLOSED")]
+            | sort_by(.closedAt // .createdAt) | last // empty
+          end
+    ' "$COVERAGE_LEDGER")"
+    if [ -n "$association" ]; then
+        association_state="$(printf '%s' "$association" | jq -r '.state')"
+        case "$association_state" in
+            OPEN)
+                echo skip
+                return ;;
+            MERGED)
+                association_time="$(printf '%s' "$association" | jq -r '.mergedAt // empty')"
+                if [ -n "$association_time" ]; then
+                    association_grace="$(_iso_plus_hours "$association_time" "$DEPLOY_GRACE_HOURS")"
+                    if [[ ! "$last_seen" > "$association_grace" ]]; then
+                        echo skip
+                        return
+                    fi
+                fi ;;
+            CLOSED)
+                # Closed without merge no longer owns the scope. The incident
+                # becomes eligible immediately; the normal attempt cooldown
+                # below still prevents a tight retry loop.
+                ;;
+        esac
+    fi
 
     local attempt_marker="$ATTEMPTS_DIR/$key"
     if [ -f "$attempt_marker" ]; then

@@ -121,9 +121,12 @@ extension AppState {
     }
 
     func restoreSession() async {
-        guard let user = await AuthService.shared.restoreSession() else { return }
+        let user = await AuthService.shared.restoreSession()
+        // One transaction, so the splash never flickers through LoginView on
+        // its way to the workspace.
         await MainActor.run {
-            didLogin(user: user)
+            if let user { didLogin(user: user) }
+            isRestoring = false
         }
     }
 
@@ -143,9 +146,13 @@ extension AppState {
         // refresh each time made the app visibly re-render. Once per 10s.
         if Date().timeIntervalSince(lastSceneActiveAt) < 10 { return }
         lastSceneActiveAt = Date()
-        await refreshSubscription()
-        await refreshEntitlements()
-        await refreshBetaFeatures()
+        // Concurrent: these are three independent GETs, and running them in
+        // series cost three sequential round-trips on the launch path (this
+        // fires from both `scenePhase` and didBecomeActiveNotification).
+        async let subscription: Void = refreshSubscription()
+        async let entitlements: Void = refreshEntitlements()
+        async let betaFeatures: Void = refreshBetaFeatures()
+        _ = await (subscription, entitlements, betaFeatures)
         // Best-effort heartbeat so presence flips green immediately.
         Task { try? await MatchaWorkService.shared.sendHeartbeat() }
         // Kick the inbox + notification badges immediately on resume so users

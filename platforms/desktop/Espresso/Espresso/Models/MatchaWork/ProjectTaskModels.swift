@@ -2,9 +2,9 @@ import Foundation
 
 // MARK: - Task draft
 
-/// AI-generated ticket draft (Gemini Flash Lite) returned by
-/// `POST /projects/{id}/tasks/ai-draft`. Not persisted — the user reviews/edits
-/// it in `AIDraftReviewSheet`, then creates via the normal task POST.
+/// AI-generated ticket draft returned by the one-shot endpoint or Espresso's
+/// durable project-agent run. The user reviews/edits it in
+/// `AIDraftReviewSheet`, then creates via the normal task POST.
 struct MWTaskDraft: Codable {
     var title: String
     var description: String?
@@ -18,9 +18,13 @@ struct MWTaskDraft: Codable {
     /// AI-suggested checklist steps. Reviewed/edited in AIDraftReviewSheet, then
     /// created as mw_subtasks after the task on Create.
     var subtasks: [String]?
+    /// Live repository evidence read by the project agent. Advisory only; it
+    /// is shown during review and is not copied into the created task.
+    var groundingSources: [String]?
 
     enum CodingKeys: String, CodingKey {
         case title, description, priority, category, subtasks
+        case groundingSources = "grounding_sources"
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"
         case assignedName = "assigned_name"
@@ -187,6 +191,12 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     /// the first move. Drives the "Moved …" stamp on the kanban card.
     var lastMovedAt: String?
     var attachments: [MWProjectFile]?
+    /// List-query-only signal that a human challenged the task's current
+    /// AutoPR no-PR decision. It stays true until AutoPR writes a new
+    /// progress_note, which consumes the decision-bound history event.
+    var autoprReconsiderationPending: Bool? = nil
+    var autoprReconsiderationEventId: String? = nil
+    var autoprReconsiderationAt: String? = nil
 
     // ── Pipeline position (independent of kanban board_column) ──
     // Defaults to "lead" on the server; nil until the migration runs.
@@ -236,6 +246,9 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case subtaskDone = "subtask_done"
         case updateCount = "update_count"
         case recentEventIds = "recent_event_ids"
+        case autoprReconsiderationPending = "autopr_reconsideration_pending"
+        case autoprReconsiderationEventId = "autopr_reconsideration_event_id"
+        case autoprReconsiderationAt = "autopr_reconsideration_at"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"

@@ -1,0 +1,10 @@
+# Optional development overlay. Portless sessions are the default; a session
+# gets a unique host port block only when it is explicitly created with --dev.
+services:
+  workspace:
+    ports:
+      - "127.0.0.1:${SANDBOX_HOST_BACKEND_PORT:?backend port required}:${BACKEND_PORT:-8001}"
+      - "127.0.0.1:${SANDBOX_HOST_FRONTEND_PORT:?frontend port required}:${FRONTEND_PORT:-5174}"
+      - "127.0.0.1:${SANDBOX_HOST_TELLUS_PORT:?tellus port required}:${TELLUS_PORT:-5191}"
+      - "127.0.0.1:${SANDBOX_HOST_OCEANLAB_PORT:?oceanlab port required}:${OCEANLAB_PORT:-5201}"
+      - "127.0.0.1:${SANDBOX_HOST_CHAT_PORT:?chat port required}:${CHAT_PORT:-8080}"

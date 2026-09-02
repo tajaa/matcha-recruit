@@ -5,6 +5,9 @@ export type ShiftKind = 'work' | 'training'
 export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
 export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable'
 export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
+export type AvailabilityState = 'unconfirmed' | 'always_available' | 'windows'
+export type QualificationStatus = 'active' | 'training' | 'suspended'
+export type ScheduleAutomationCadence = 'weekly' | 'once'
 
 export type BreakGuidanceRequirement = {
   kind: 'meal' | 'rest'
@@ -77,6 +80,49 @@ export interface Shift {
   assignments: ShiftAssignment[]
 }
 
+export type ScheduleAuditAction =
+  | 'shift.update'
+  | 'shift.delete'
+  | 'assignment.create'
+  | 'assignment.delete'
+
+export type ScheduleAuditEmployee = {
+  id: string
+  name: string | null
+}
+
+export type ScheduleAuditEntry = {
+  id: string
+  timestamp: string
+  shift_id: string | null
+  action: ScheduleAuditAction
+  modifying_user: {
+    id: string | null
+    name: string | null
+    email: string | null
+  }
+  assigned_employees: ScheduleAuditEmployee[]
+  fields: string[]
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  details: Record<string, unknown>
+}
+
+export type ScheduleAuditResponse = {
+  logs: ScheduleAuditEntry[]
+  total: number
+}
+
+export type ScheduleAuditFilters = {
+  start?: string
+  end?: string
+  shiftId?: string
+  actorUserId?: string
+  employeeId?: string
+  limit?: number
+  offset?: number
+}
+
 export interface ScheduleSummary {
   total_shifts: number
   published: number
@@ -91,6 +137,11 @@ export interface RosterEmployee {
   job_title: string | null
   department: string | null
   job_ids: string[]
+  job_qualifications?: Array<{
+    job_id: string
+    qualified_from: string | null
+    qualified_until: string | null
+  }>
 }
 
 export type JobCredentialRequirement = {
@@ -115,6 +166,37 @@ export type ScheduleJob = {
   employee_ids: string[]
   credential_requirements: JobCredentialRequirement[]
 }
+
+export type EmployeeJobAssignment = {
+  job_id: string
+  job_name: string
+  location_id: string | null
+  is_primary: boolean
+  qualification_status: QualificationStatus
+  qualified_from: string | null
+  qualified_until: string | null
+  notes: string | null
+  credential_requirements: JobCredentialRequirement[]
+}
+
+export type EmployeeJobAssignmentPayload = Omit<EmployeeJobAssignment, 'job_name' | 'location_id' | 'credential_requirements'>
+
+export type EmployeeScheduleProfile = {
+  employee_id: string
+  availability_state: AvailabilityState
+  availability_confirmed_at: string | null
+  min_weekly_minutes: number | null
+  target_weekly_minutes: number | null
+  max_weekly_minutes: number | null
+  max_consecutive_days: number | null
+  allow_overtime: boolean
+  prefer_extra_hours: boolean
+}
+
+export type EmployeeScheduleProfilePayload = Partial<Pick<EmployeeScheduleProfile,
+  'min_weekly_minutes' | 'target_weekly_minutes' |
+  'max_weekly_minutes' | 'max_consecutive_days' | 'allow_overtime' | 'prefer_extra_hours'
+>>
 
 export type JobPayload = {
   name?: string
@@ -231,6 +313,55 @@ export interface WeekTemplatePayload {
   blocks?: BlockPayload[]
 }
 
+export interface WeekTemplateReplacePayload {
+  name: string
+  blocks: WeekTemplateBlockReplacePayload[]
+}
+
+export interface WeekTemplateBlockReplacePayload {
+  id?: string
+  name: string
+  role: string | null
+  start_time: string
+  end_time: string
+  break_minutes: number
+  required_staff: number
+  days_of_week: number[]
+}
+
+export interface ScheduleAutomationRule {
+  id: string
+  location_id: string
+  location_name: string | null
+  timezone: string
+  enabled: boolean
+  cadence: ScheduleAutomationCadence
+  week_template_id: string | null
+  week_template_name: string | null
+  run_weekday: number | null
+  run_date: string | null
+  run_time: string
+  target_weeks_ahead: number | null
+  target_week_start: string | null
+  next_run_at: string | null
+  last_attempt_at: string | null
+  last_completed_at: string | null
+  last_status: string | null
+  last_message: string | null
+  last_generation_run_id: string | null
+}
+
+export interface ScheduleAutomationPayload {
+  enabled: boolean
+  cadence: ScheduleAutomationCadence
+  week_template_id: string
+  run_weekday: number | null
+  run_date: string | null
+  run_time: string
+  target_weeks_ahead: number | null
+  target_week_start: string | null
+}
+
 export interface ScheduleRequest {
   id: string
   employee_id: string
@@ -239,12 +370,16 @@ export interface ScheduleRequest {
   shift_id: string | null
   shift_starts_at: string | null
   shift_ends_at: string | null
+  shift_role?: string | null
+  shift_department?: string | null
   target_employee_id: string | null
   target_employee_name?: string | null
   counter_shift_id: string | null
   counterparty_confirmed_at: string | null
   counter_shift_starts_at: string | null
   counter_shift_ends_at: string | null
+  counter_shift_role?: string | null
+  counter_shift_department?: string | null
   unavailable_start: string | null
   unavailable_end: string | null
   reason: string | null

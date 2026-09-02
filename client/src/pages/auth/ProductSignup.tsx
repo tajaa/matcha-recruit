@@ -9,6 +9,7 @@ import { productPriceDollars } from '../../utils/tier'
 import { PRODUCT_NAV_CATALOG } from '../../data/productNavCatalog'
 import type { ProductDefinition } from '../../types/dashboard'
 import { API_BASE } from '../../api/client'
+import { setAuthTokens } from '../../api/authStorage'
 /**
  * Signup for an admin-composed product (/admin/products → /p/:slug/signup).
  *
@@ -95,8 +96,7 @@ export default function ProductSignup() {
         return
       }
 
-      localStorage.setItem('matcha_access_token', regData.access_token)
-      localStorage.setItem('matcha_refresh_token', regData.refresh_token)
+      setAuthTokens(regData.access_token, regData.refresh_token)
       invalidateMeCache()
 
       // Free product, broker-pays or admin invite: already active.

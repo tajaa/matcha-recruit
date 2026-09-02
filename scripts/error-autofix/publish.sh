@@ -3,17 +3,21 @@
 # a body assembled from the incident + report + verification table) or, if
 # there is no diff, open/update a tracking issue instead.
 #
-# Usage: ./publish.sh incident.json report.md verification.md
+# Usage: ./publish.sh incident.json decision.json report.md verification.md [commit-subject.json]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
+# shellcheck source=./decision.sh
+source "$SCRIPT_DIR/decision.sh"
 
-INCIDENT_FILE="${1:?usage: publish.sh incident.json report.md verification.md}"
-REPORT_FILE="${2:?usage: publish.sh incident.json report.md verification.md}"
-VERIFICATION_FILE="${3:?usage: publish.sh incident.json report.md verification.md}"
+INCIDENT_FILE="${1:?usage: publish.sh incident.json decision.json report.md verification.md}"
+DECISION_FILE="${2:?usage: publish.sh incident.json decision.json report.md verification.md}"
+REPORT_FILE="${3:?usage: publish.sh incident.json decision.json report.md verification.md}"
+VERIFICATION_FILE="${4:?usage: publish.sh incident.json decision.json report.md verification.md}"
+COMMIT_SUBJECT_FILE="${5:-}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 KEY="$(jq -r '.stable_key' "$INCIDENT_FILE")"
@@ -29,6 +33,11 @@ LAST_SEEN="$(jq -r '.last_seen // ""' "$INCIDENT_FILE")"
 ERROR_ID="$(jq -r '.error_id // ""' "$INCIDENT_FILE")"
 REQUEST_ID="$(jq -r '.request_id // ""' "$INCIDENT_FILE")"
 TRACEBACK="$(jq -r '.traceback // ""' "$INCIDENT_FILE")"
+SAFE_CHANGES="$(jq -r '.safe_changes_present' "$DECISION_FILE")"
+CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
+CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
+CONFIDENCE_BAND="$(jq -r '.confidence_band' "$DECISION_FILE")"
+CRITICALITY_EMOJI="$(error_criticality_emoji "$CRITICALITY")"
 
 BRANCH="bot/err-$KEY"
 
@@ -72,6 +81,18 @@ if [ -n "$unsafe_reporting_change" ]; then
     exit 1
 fi
 
+# The model's decision and its patch must agree. Treat disagreement as an
+# incomplete investigation, not as a no-fix issue or a reviewable PR.
+if git diff --cached --quiet; then
+    [ "$SAFE_CHANGES" = false ] \
+        || die "triage claimed a safe fix but produced no code diff"
+else
+    if [ "$SAFE_CHANGES" != true ]; then
+        git reset --hard >/dev/null 2>&1
+        die "triage claimed no safe fix but changed the working tree"
+    fi
+fi
+
 sev_for() {
     if [ "$LEVEL" = "CRITICAL" ] || [ "$OCC" -gt 50 ]; then
         echo high
@@ -110,6 +131,7 @@ available evidence.
 **Endpoint** \`$METHOD $PATH_\`
 **Occurrences** $OCC · first seen $FIRST_SEEN · last seen $LAST_SEEN
 **Source** $SOURCE · **Level** $LEVEL
+**Triage** $CRITICALITY_EMOJI $CRITICALITY · confidence $CONFIDENCE_SCORE/100 ($CONFIDENCE_BAND)
 $( [ -n "$ADMIN_LINK" ] && echo "**Admin** [$ERROR_ID]($ADMIN_LINK)" )
 
 $(cat "$REPORT_FILE" 2>/dev/null || echo '_(no report file)_')
@@ -135,9 +157,16 @@ $TRACEBACK
 fi
 
 # ---- diff exists: open (or update) the PR ----
+[ -n "$COMMIT_SUBJECT_FILE" ] && [ -s "$COMMIT_SUBJECT_FILE" ] \
+    || die "safe fix is missing its Luna commit subject"
+COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$COMMIT_SUBJECT_FILE")" \
+    || die "commit subject output is invalid"
+[[ "$COMMIT_SUBJECT" == fix:\ * && "$COMMIT_SUBJECT" != *$'\n'* && "$COMMIT_SUBJECT" != *$'\r'* ]] \
+    || die "commit subject must be one line starting with fix:"
+[ "${#COMMIT_SUBJECT}" -le 72 ] || die "commit subject exceeds 72 characters"
 git config user.name "matcha-error-bot"
 git config user.email "matcha-error-bot@users.noreply.github.com"
-git commit -m "fix: $EXC in $PATH_" >/dev/null
+git commit -m "$COMMIT_SUBJECT" >/dev/null
 git push --force-with-lease --set-upstream origin "$BRANCH"
 
 NEW_FAILURES="${AUTOFIX_NEW_FAILURES:-0}"
@@ -146,12 +175,16 @@ RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/$REPO/actions/runs/${GITHUB_RU
 BODY_FILE="$(mktemp)"
 {
     echo "<!-- autofix-key: $KEY -->"
+    echo "<!-- matcha-autofix-notify-review: $KEY -->"
+    echo "<!-- matcha-autopr-criticality: $CRITICALITY -->"
+    echo "<!-- matcha-autopr-confidence-score: $CONFIDENCE_SCORE -->"
     echo
     echo "## $EXC in $PATH_"
     echo
     echo "**Endpoint** \`$METHOD $PATH_\`"
     echo "**Occurrences** $OCC · first seen $FIRST_SEEN · last seen $LAST_SEEN"
     echo "**Source** $SOURCE · **Level** $LEVEL · **Fingerprint** \`$KEY\`"
+    echo "**Triage** $CRITICALITY_EMOJI $CRITICALITY · confidence $CONFIDENCE_SCORE/100 ($CONFIDENCE_BAND)"
     [ -n "$ADMIN_LINK" ] && echo "**Admin** [$ERROR_ID]($ADMIN_LINK)"
     echo
     cat "$REPORT_FILE"
@@ -185,7 +218,7 @@ BODY_FILE="$(mktemp)"
     echo "_Investigated by [this workflow run]($RUN_URL)._"
 } > "$BODY_FILE"
 
-TITLE="fix: $EXC in $PATH_"
+TITLE="$CRITICALITY_EMOJI [C$CONFIDENCE_SCORE] fix: $EXC in $PATH_"
 
 # `gh pr view <branch>` matches a PR for that head branch REGARDLESS of
 # state — including one already merged or closed. select.sh's re-open path
@@ -205,6 +238,11 @@ fi
 
 gh pr edit "$BRANCH" --repo "$REPO" --add-label autofix >/dev/null 2>&1 || true
 gh pr edit "$BRANCH" --repo "$REPO" --add-label "sev:$SEV" >/dev/null 2>&1 || true
+gh pr edit "$BRANCH" --repo "$REPO" --add-label "criticality:$CRITICALITY" >/dev/null 2>&1 || true
+gh pr edit "$BRANCH" --repo "$REPO" --add-label "confidence:$CONFIDENCE_BAND" >/dev/null 2>&1 || true
+if [ "${AUTOPR_POSSIBLE_DUPLICATE:-0}" = 1 ]; then
+    gh pr edit "$BRANCH" --repo "$REPO" --add-label possible-duplicate >/dev/null 2>&1 || true
+fi
 if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
     gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true
 fi

@@ -64,11 +64,14 @@ celery_app = Celery(
         "app.workers.tasks.source_snapshots",
         "app.workers.tasks.debug_error",
         "app.workers.tasks.huume_code",
+        "app.workers.tasks.project_agent",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
+        "app.workers.tasks.schedule_eligibility",
         "app.workers.tasks.schedule_warning_events",
         "app.workers.tasks.schedule_daily_digest",
         "app.workers.tasks.schedule_request_notifications",
+        "app.workers.tasks.schedule_auto_generation",
         "app.workers.tasks.inventory_waste_sweeps",
         "app.workers.tasks.tellus_shoutout_scan",
     ],
@@ -232,6 +235,11 @@ def on_worker_ready(**kwargs):
         reconcile_stale_runs.delay()
     except Exception:
         logger.exception("[Worker] Failed to enqueue Huume-code reconciliation")
+    try:
+        from app.workers.tasks.project_agent import reconcile_stale_runs as reconcile_project_agent_runs
+        reconcile_project_agent_runs.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue project-agent reconciliation")
 
     task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
     flags = _scheduler_flags(task_keys)

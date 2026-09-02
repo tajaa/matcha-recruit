@@ -47,6 +47,9 @@ struct TaskViewerSheet: View {
     @State var isSummarizing = false
     @State var newNote = ""
     @State var addingNote = false
+    @State var isAddingAutoPRContext = false
+    @State var didSubmitAutoPRContext = false
+    @State var autoPRContextError: String?
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -275,6 +278,12 @@ struct TaskViewerSheet: View {
             // One status line — folds the old status/priority pills and the
             // "you are here" banner together so the top isn't a stack of blocks.
             metaLine
+
+            // AutoPR provenance is durable ticket context, not a card-only
+            // preview. Keep the full stored note visible whenever this ticket
+            // is opened so a person can distinguish automated work from their
+            // own and see exactly why the automation acted or stopped.
+            autoSetupBanner
 
             if PacificDateFormatter.absolute(task.createdAt) != nil
                 || PacificDateFormatter.absolute(task.lastMovedAt) != nil {

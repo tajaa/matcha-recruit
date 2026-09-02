@@ -24,6 +24,7 @@ from app.matcha.models.scheduling.employee_schedule import (
     ShiftCreate,
     ShiftUpdate,
     WeekTemplateCreate,
+    WeekTemplateReplace,
     WeekTemplateUpdate,
 )
 
@@ -184,12 +185,70 @@ def test_week_template_update_is_a_true_patch():
     assert WeekTemplateUpdate(location_id=None).model_dump(exclude_unset=True) == {"location_id": None}
 
 
+def test_week_template_replace_accepts_existing_and_new_blocks():
+    body = WeekTemplateReplace(name="Standard Week", blocks=[
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "name": "Front-door opening shift",
+            "role": "Usher",
+            "start_time": "09:00",
+            "end_time": "17:00",
+            "days_of_week": [1, 2, 3, 4, 5],
+        },
+        {
+            "name": "Weekend crew",
+            "start_time": "10:00",
+            "end_time": "18:00",
+            "days_of_week": [0, 6],
+        },
+    ])
+    assert str(body.blocks[0].id) == "11111111-1111-1111-1111-111111111111"
+    assert body.blocks[1].id is None
+
+
+def test_week_template_replace_only_retains_editor_owned_block_fields():
+    body = WeekTemplateReplace(name="Standard Week", blocks=[{
+        "name": "Opening",
+        "start_time": "09:00",
+        "end_time": "17:00",
+        "department": "Operations",
+        "color": "#123456",
+        "notes": "Managed elsewhere",
+        "job_id": "22222222-2222-2222-2222-222222222222",
+    }])
+
+    assert set(body.blocks[0].model_dump()) == {
+        "id", "name", "role", "start_time", "end_time", "break_minutes",
+        "required_staff", "days_of_week",
+    }
+
+
+def test_week_template_replace_rejects_duplicate_existing_block_ids():
+    block = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "name": "Opening",
+        "start_time": "09:00",
+        "end_time": "17:00",
+    }
+    with pytest.raises(ValidationError, match="block ids must be unique"):
+        WeekTemplateReplace(name="Standard Week", blocks=[block, block])
+
+
 # ── employee requests ───────────────────────────────────────────────────────
 
 def test_swap_and_drop_require_a_shift():
     for request_type in ("swap", "drop"):
         with pytest.raises(ValidationError):
             ScheduleRequestCreate(request_type=request_type, reason="cover me")
+
+
+def test_swap_requires_a_specific_counter_shift():
+    with pytest.raises(ValidationError, match="counter_shift_id is required"):
+        ScheduleRequestCreate(
+            request_type="swap",
+            shift_id="11111111-1111-1111-1111-111111111111",
+            target_employee_id="22222222-2222-2222-2222-222222222222",
+        )
 
 
 def test_unavailable_requires_a_date_range():

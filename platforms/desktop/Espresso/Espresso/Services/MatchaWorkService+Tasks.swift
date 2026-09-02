@@ -233,6 +233,47 @@ extension MatchaWorkService {
         )
     }
 
+    struct AutoPRReconsiderationResponse: Decodable {
+        let ok: Bool
+        let activityId: String
+        let createdAt: String
+        let autoprReconsiderationPending: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case ok
+            case activityId = "activity_id"
+            case createdAt = "created_at"
+            case autoprReconsiderationPending = "autopr_reconsideration_pending"
+        }
+    }
+
+    /// Add evidence that challenges one exact AutoPR no-PR decision. The
+    /// expected note makes stale submissions fail with 409 instead of silently
+    /// attaching themselves to a newer agent finding.
+    func requestAutoPRReconsideration(
+        projectId: String,
+        taskId: String,
+        body: String?,
+        attachmentIds: [String]? = nil,
+        expectedProgressNote: String
+    ) async throws -> AutoPRReconsiderationResponse {
+        struct Req: Encodable {
+            let body: String?
+            let attachment_ids: [String]?
+            let expected_progress_note: String
+        }
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/reconsider",
+            body: Req(
+                body: body,
+                attachment_ids: (attachmentIds?.isEmpty ?? true) ? nil : attachmentIds,
+                expected_progress_note: expectedProgressNote
+            )
+        )
+    }
+
     /// Reviewer sends a task back for changes: server bounces review →
     /// changes_requested, stores the note, and emails the assignee. Returns the
     /// updated task.
@@ -258,15 +299,108 @@ extension MatchaWorkService {
         )
     }
 
-    /// Natural-language → structured ticket draft via Gemini (no DB write).
+    /// Natural-language → structured ticket draft. Repo-connected projects use
+    /// Espresso's durable read-only agent and poll its audited background run;
+    /// projects without a repository retain the legacy one-shot draft path.
     /// `model` is the header selector's value (same plumbing as threads).
-    func draftTaskFromPrompt(projectId: String, prompt: String, model: String? = nil) async throws -> MWTaskDraft {
+    ///
+    /// `useAgent` is opt-out for surfaces where a multi-minute queued run is the
+    /// wrong shape. The agent run also holds a one-live-run-per-(project, user)
+    /// lock, so routing an incidental action through it would 409 against a
+    /// board draft the same person already started.
+    func draftTaskFromPrompt(
+        projectId: String,
+        prompt: String,
+        model: String? = nil,
+        useAgent: Bool = true
+    ) async throws -> MWTaskDraft {
+        guard useAgent else {
+            return try await draftTaskOneShot(projectId: projectId, prompt: prompt, model: model)
+        }
+        do {
+            return try await draftTaskWithAgent(projectId: projectId, prompt: prompt, model: model)
+        } catch APIError.httpError(let code, _) where code == 412 {
+            return try await draftTaskOneShot(projectId: projectId, prompt: prompt, model: model)
+        }
+    }
+
+    private func draftTaskOneShot(projectId: String, prompt: String, model: String?) async throws -> MWTaskDraft {
         struct Req: Encodable { let prompt: String; let model: String? }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/ai-draft",
             body: Req(prompt: prompt, model: model)
         )
+    }
+
+    private func draftTaskWithAgent(projectId: String, prompt: String, model: String?) async throws -> MWTaskDraft {
+        struct Req: Encodable {
+            let prompt: String
+            let model: String?
+            let request_key: String
+        }
+        struct Started: Decodable {
+            let runId: String
+            enum CodingKeys: String, CodingKey { case runId = "run_id" }
+        }
+        struct RunStatus: Decodable {
+            let status: String
+            let draft: MWTaskDraft?
+            let error: String?
+        }
+
+        let request = Req(prompt: prompt, model: model, request_key: UUID().uuidString)
+        let path = "\(basePath)/projects/\(projectId)/tasks/agent-draft"
+        let started: Started
+        do {
+            started = try await client.request(method: "POST", path: path, body: request)
+        } catch {
+            // The request key makes this POST application-level idempotent, so
+            // one retry after an ambiguous network/proxy failure cannot queue a
+            // duplicate agent task.
+            let retryable: Bool
+            if case APIError.networkUnavailable(_) = error { retryable = true }
+            else if case APIError.serviceUnavailable(_) = error { retryable = true }
+            else { retryable = false }
+            guard retryable else { throw error }
+            try await Task.sleep(for: .milliseconds(900))
+            started = try await client.request(method: "POST", path: path, body: request)
+        }
+
+        var consecutivePollFailures = 0
+        for _ in 0..<150 {
+            try Task.checkCancellation()
+            let run: RunStatus
+            do {
+                run = try await client.request(
+                    method: "GET",
+                    path: "\(path)/\(started.runId)"
+                )
+                consecutivePollFailures = 0
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The run keeps executing server-side, so giving up on one bad
+                // poll strands it — and the one-live-run guard then 409s the
+                // user's retry for up to 15 minutes. Ride out a blip instead.
+                consecutivePollFailures += 1
+                guard consecutivePollFailures < 5 else { throw error }
+                try await Task.sleep(for: .seconds(2))
+                continue
+            }
+            switch run.status {
+            case "done":
+                guard let draft = run.draft else {
+                    throw APIError.noData
+                }
+                return draft
+            case "failed":
+                throw APIError.httpError(502, run.error ?? "Espresso couldn't finish the ticket draft.")
+            default:
+                try await Task.sleep(for: .seconds(2))
+            }
+        }
+        throw APIError.httpError(504, "Espresso is still drafting. Try again in a moment.")
     }
 
     func deleteProjectTask(projectId: String, taskId: String) async throws {

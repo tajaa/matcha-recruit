@@ -118,6 +118,35 @@ final class WorkDetailVMStoreTests: XCTestCase {
         XCTAssertFalse(store.channelVM("c1") === vms["c1"], "c1 is now LRU and should be gone")
     }
 
+    /// The cap is per KIND, not shared across all of them. A session that
+    /// ping-pongs between projects, threads and channels used to spend one
+    /// budget of 6 across all three, so a handful of tabs evicted project VMs —
+    /// the most expensive kind to rebuild.
+    func testCapIsPerKindNotSharedAcrossKinds() {
+        let store = WorkDetailVMStore.shared
+        let project = store.projectVM("p1")
+        let thread = store.threadVM("t1")
+
+        // Fill the channel kind past its own cap.
+        for i in 0..<7 { store.channelVM("c\(i)") }
+
+        XCTAssertTrue(store.projectVM("p1") === project,
+                      "channel churn must not evict a project VM")
+        XCTAssertTrue(store.threadVM("t1") === thread,
+                      "channel churn must not evict a thread VM")
+    }
+
+    func testEachKindEvictsWithinItsOwnBudget() {
+        let store = WorkDetailVMStore.shared
+        var projects: [String: ProjectDetailViewModel] = [:]
+        for i in 0..<6 { projects["p\(i)"] = store.projectVM("p\(i)") }
+
+        store.projectVM("p6") // 7th project — pushes p0 out of the project LRU
+
+        XCTAssertFalse(store.projectVM("p0") === projects["p0"],
+                       "the project kind still evicts its own LRU at cap")
+    }
+
     // MARK: - Logout clear (the data-leak fix)
 
     func testClearAllDropsEveryCachedVMAcrossAllKinds() {

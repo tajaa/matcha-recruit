@@ -9,13 +9,15 @@ interface RosterPanelProps {
   selectedEmployeeId: string | null
   onSelectEmployee(employeeId: string | null): void
   requiredJobId?: string | null
+  requiredJobDate?: string | null
 }
 
-function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
+function EmployeeRow({ employee, flags, selected, requiredJobId, requiredJobDate, onSelect }: {
   employee: RosterEmployee
   flags?: { overdue_training: number; lapsed_credentials: number; warnings?: string[]; blocking_credentials?: string[] }
   selected: boolean
   requiredJobId?: string | null
+  requiredJobDate?: string | null
   onSelect(): void
 }) {
   const blockedReasons = flags?.blocking_credentials ?? []
@@ -26,7 +28,14 @@ function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
     disabled: blocked,
   })
   const warnings = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
-  const unqualified = !!requiredJobId && !employee.job_ids.includes(requiredJobId)
+  const effectiveQualifications = employee.job_qualifications
+  const unqualified = !!requiredJobId && (effectiveQualifications
+    ? !effectiveQualifications.some((qualification) => (
+      qualification.job_id === requiredJobId
+      && (!requiredJobDate || qualification.qualified_from == null || qualification.qualified_from <= requiredJobDate)
+      && (!requiredJobDate || qualification.qualified_until == null || qualification.qualified_until >= requiredJobDate)
+    ))
+    : !employee.job_ids.includes(requiredJobId))
   return (
     <button
       ref={setNodeRef}
@@ -51,7 +60,7 @@ function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
   )
 }
 
-export default function RosterPanel({ roster, rosterFlags, selectedEmployeeId, onSelectEmployee, requiredJobId }: RosterPanelProps) {
+export default function RosterPanel({ roster, rosterFlags, selectedEmployeeId, onSelectEmployee, requiredJobId, requiredJobDate }: RosterPanelProps) {
   const [query, setQuery] = useState('')
   const { setNodeRef, isOver } = useDroppable({ id: 'schedule-unassign', data: { kind: 'unassign' } })
   const filtered = useMemo(() => {
@@ -71,7 +80,7 @@ export default function RosterPanel({ roster, rosterFlags, selectedEmployeeId, o
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find an employee" className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-7 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600" />
       </label>
       <div className="min-h-0 max-h-64 space-y-1 overflow-y-auto pr-1 lg:max-h-none lg:flex-1">
-        {filtered.map((employee) => <EmployeeRow key={employee.id} employee={employee} flags={rosterFlags?.[employee.id]} requiredJobId={requiredJobId} selected={employee.id === selectedEmployeeId} onSelect={() => onSelectEmployee(employee.id === selectedEmployeeId ? null : employee.id)} />)}
+        {filtered.map((employee) => <EmployeeRow key={employee.id} employee={employee} flags={rosterFlags?.[employee.id]} requiredJobId={requiredJobId} requiredJobDate={requiredJobDate} selected={employee.id === selectedEmployeeId} onSelect={() => onSelectEmployee(employee.id === selectedEmployeeId ? null : employee.id)} />)}
         {filtered.length === 0 && <p className="px-2 py-3 text-xs text-zinc-600">No employees match.</p>}
       </div>
       <div ref={setNodeRef} className={`mt-3 rounded-lg border border-dashed px-2.5 py-2 text-center text-[10px] text-zinc-600 ${isOver ? 'border-red-400/70 bg-red-500/10 text-red-300' : 'border-zinc-800'}`}>

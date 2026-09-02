@@ -63,7 +63,7 @@ async def _run() -> dict:
                     conn, company_id=source["company_id"], user_id=None,
                     location_id=source["location_id"], business_date=parsed["business_date"],
                     source="email", filename=attachment["filename"],
-                    gmail_message_id=message["id"], force=False,
+                    gmail_message_id=message["id"],
                     lines=resolved,
                     note="POS mailbox import",
                     raw={"business_date": parsed["business_date"], "lines": resolved},

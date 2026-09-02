@@ -53,6 +53,9 @@ Thumbs.db
 # Screenshots
 Screenshot *.png
 .screenshots/
+# Explicitly imported msandbox evidence. These files are user-selected local
+# inputs for Codex/Claude/OpenCode and must never enter a commit or AutoPR.
+.msandbox/attachments/
 
 # Logs
 *.log

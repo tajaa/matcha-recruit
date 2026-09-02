@@ -24,7 +24,7 @@ from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import (
     WeekTemplateCreate, WeekTemplateUpdate, BlockCreate, BlockUpdate,
-    GenerateFromWeekTemplate,
+    WeekTemplateReplace, GenerateFromWeekTemplate,
 )
 from ...services.scheduling.schedule_rules import build_patch
 from ...services.scheduling.shift_writes import generate_week_template_shifts
@@ -144,10 +144,25 @@ async def update_week_template(week_template_id: UUID, body: WeekTemplateUpdate,
 @router.delete("/week-templates/{week_template_id}")
 async def delete_week_template(week_template_id: UUID, current_user=Depends(require_admin_or_client)):
     """ON DELETE CASCADE removes the child blocks; schedule_shifts.template_id
-    SET NULLs on each (existing behavior, unchanged)."""
+    SET NULLs on each. Any auto schedule using this template is paused so its
+    already-queued occurrence becomes stale instead of recurring as not-ready."""
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
+            paused_rules = await conn.fetch(
+                """
+                UPDATE schedule_automation_rules
+                SET week_template_id = NULL, enabled = false, next_run_at = NULL,
+                    schedule_version = schedule_version + 1,
+                    last_status = 'template_deleted',
+                    last_message = 'Paused because its saved week template was deleted.',
+                    updated_at = NOW(), updated_by = $3
+                WHERE company_id = $1 AND week_template_id = $2
+                RETURNING id, location_id
+                """,
+                company_id, week_template_id, current_user.id,
+            )
             result = await conn.execute(
                 "DELETE FROM schedule_week_templates WHERE id = $1 AND company_id = $2",
                 week_template_id, company_id,
@@ -155,16 +170,99 @@ async def delete_week_template(week_template_id: UUID, current_user=Depends(requ
             if result == "DELETE 0":
                 raise HTTPException(status_code=404, detail="Week template not found")
             await log_audit(conn, company_id, "week_template", week_template_id, current_user.id,
-                            "week_template.delete", {})
-    return {"ok": True, "id": str(week_template_id)}
+                            "week_template.delete", {"paused_auto_schedules": len(paused_rules)})
+            for rule in paused_rules:
+                await log_audit(
+                    conn, company_id, "schedule_automation", rule["id"], current_user.id,
+                    "schedule_automation.pause_template_deleted",
+                    {"location_id": str(rule["location_id"]), "week_template_id": str(week_template_id)},
+                )
+    return {"ok": True, "id": str(week_template_id), "paused_auto_schedules": len(paused_rules)}
+
+
+@router.put("/week-templates/{week_template_id}/contents")
+async def replace_week_template_contents(
+    week_template_id: UUID, body: WeekTemplateReplace,
+    current_user=Depends(require_admin_or_client),
+):
+    """Atomically reconcile the complete block list shown by the template editor.
+
+    Existing block IDs are updated in place so historical generated shifts keep
+    their template links. New blocks are inserted and omitted IDs are deleted,
+    all in the same transaction as the parent rename.
+    """
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        async with conn.transaction():
+            tpl = await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
+            existing_rows = await conn.fetch(
+                f"SELECT {_BLOCK_COLS} FROM schedule_shift_templates "
+                "WHERE week_template_id = $1 FOR UPDATE",
+                week_template_id,
+            )
+            existing_ids = {row["id"] for row in existing_rows}
+            supplied_ids = {block.id for block in body.blocks if block.id is not None}
+            unknown_ids = supplied_ids - existing_ids
+            if unknown_ids:
+                raise HTTPException(status_code=404, detail="Template block not found")
+
+            tpl = await conn.fetchrow(
+                f"""
+                UPDATE schedule_week_templates SET name = $3, updated_at = NOW()
+                WHERE id = $1 AND company_id = $2
+                RETURNING {_WEEK_COLS}
+                """,
+                week_template_id, company_id, body.name.strip(),
+            )
+            if not tpl:
+                raise HTTPException(status_code=404, detail="Week template not found")
+
+            added = 0
+            updated = 0
+            for block in body.blocks:
+                if block.id is None:
+                    new_block = BlockCreate(**block.model_dump(exclude={"id"}))
+                    await _insert_block(
+                        conn, company_id, week_template_id, tpl["location_id"], new_block, current_user.id,
+                    )
+                    added += 1
+                    continue
+                await conn.execute(
+                    """
+                    UPDATE schedule_shift_templates
+                    SET name = $3, role = $4, start_time = $5,
+                        end_time = $6, break_minutes = $7, required_staff = $8,
+                        days_of_week = $9::jsonb, updated_at = NOW()
+                    WHERE id = $1 AND week_template_id = $2
+                    """,
+                    block.id, week_template_id, block.name.strip(), block.role,
+                    block.start_time, block.end_time,
+                    block.break_minutes, block.required_staff,
+                    json.dumps(sorted(set(block.days_of_week))),
+                )
+                updated += 1
+
+            removed_ids = list(existing_ids - supplied_ids)
+            if removed_ids:
+                await conn.execute(
+                    "DELETE FROM schedule_shift_templates WHERE id = ANY($1::uuid[])",
+                    removed_ids,
+                )
+            await log_audit(
+                conn, company_id, "week_template", week_template_id, current_user.id,
+                "week_template.reconcile_blocks",
+                {"added": added, "updated": updated, "removed": len(removed_ids)},
+            )
+            blocks = await _fetch_blocks(conn, week_template_id)
+    return serialize_week_template(tpl, blocks)
 
 
 @router.post("/week-templates/{week_template_id}/blocks")
 async def add_block(week_template_id: UUID, body: BlockCreate, current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        tpl = await _fetch_week_template_or_404(conn, company_id, week_template_id)
         async with conn.transaction():
+            tpl = await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
             block = await _insert_block(conn, company_id, week_template_id, tpl["location_id"], body, current_user.id)
             await log_audit(conn, company_id, "week_template_block", block["id"], current_user.id,
                             "week_template.block.add", {"name": body.name, "week_template_id": str(week_template_id)})
@@ -179,9 +277,8 @@ async def update_block(week_template_id: UUID, block_id: UUID, body: BlockUpdate
     if "days_of_week" in patch and patch["days_of_week"] is not None:
         patch["days_of_week"] = json.dumps(sorted(set(patch["days_of_week"])))
     async with get_connection() as conn:
-        await _fetch_week_template_or_404(conn, company_id, week_template_id)
-        await assert_job_in_company(conn, company_id, patch.get("job_id"))
         if not patch:
+            await _fetch_week_template_or_404(conn, company_id, week_template_id)
             row = await conn.fetchrow(
                 f"SELECT {_BLOCK_COLS} FROM schedule_shift_templates "
                 "WHERE id = $1 AND week_template_id = $2",
@@ -192,6 +289,8 @@ async def update_block(week_template_id: UUID, block_id: UUID, body: BlockUpdate
             return serialize_block(row)
         set_sql, params = build_patch(patch, first_param=3, casts={"days_of_week": "jsonb"})
         async with conn.transaction():
+            await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
+            await assert_job_in_company(conn, company_id, patch.get("job_id"))
             row = await conn.fetchrow(
                 f"""
                 UPDATE schedule_shift_templates SET {set_sql}, updated_at = NOW()
@@ -211,8 +310,8 @@ async def update_block(week_template_id: UUID, block_id: UUID, body: BlockUpdate
 async def delete_block(week_template_id: UUID, block_id: UUID, current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        await _fetch_week_template_or_404(conn, company_id, week_template_id)
         async with conn.transaction():
+            await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
             result = await conn.execute(
                 "DELETE FROM schedule_shift_templates WHERE id = $1 AND week_template_id = $2",
                 block_id, week_template_id,
@@ -261,6 +360,18 @@ async def generate_from_week_template(week_template_id: UUID, body: GenerateFrom
 async def _fetch_week_template_or_404(conn, company_id: UUID, week_template_id: UUID):
     tpl = await conn.fetchrow(
         f"SELECT {_WEEK_COLS} FROM schedule_week_templates WHERE id = $1 AND company_id = $2",
+        week_template_id, company_id,
+    )
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Week template not found")
+    return tpl
+
+
+async def _fetch_week_template_for_update_or_404(conn, company_id: UUID, week_template_id: UUID):
+    """Lock the parent before mutating it or its child block collection."""
+    tpl = await conn.fetchrow(
+        f"SELECT {_WEEK_COLS} FROM schedule_week_templates "
+        "WHERE id = $1 AND company_id = $2 FOR UPDATE",
         week_template_id, company_id,
     )
     if not tpl:

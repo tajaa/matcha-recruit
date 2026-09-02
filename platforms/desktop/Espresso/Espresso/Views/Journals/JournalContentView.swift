@@ -149,18 +149,7 @@ struct JournalContentView: View {
         sizeOverride: CGFloat? = nil,
         weight: Font.Weight = .regular,
     ) -> Text {
-        var attr: AttributedString
-        if let parsed = try? AttributedString(
-            markdown: source,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace,
-            ),
-        ) {
-            attr = parsed
-        } else {
-            attr = AttributedString(source)
-        }
-        applyHighlight(&attr)
+        let attr = InlineMarkdownCache.shared.attributed(for: source)
         let size = sizeOverride ?? fontSize
         let font: Font
         switch fontFamily {
@@ -169,32 +158,6 @@ struct JournalContentView: View {
         default:           font = .system(size: size, weight: weight)
         }
         return Text(attr).font(font).foregroundColor(baseColor.opacity(0.92))
-    }
-
-    /// Walk the attributed string right-to-left for `==…==`, applying
-    /// `backgroundColor` to the inner range *in place* (preserving any
-    /// nested bold/italic/strike runs) and then deleting the surrounding
-    /// `==` markers. Right-to-left keeps earlier ranges valid as we mutate.
-    private func applyHighlight(_ attr: inout AttributedString) {
-        let raw = String(attr.characters)
-        // Capture group: lazy match between markers, no embedded `==`.
-        guard let regex = try? NSRegularExpression(pattern: "==(.+?)==") else { return }
-        let nsRaw = raw as NSString
-        let matches = regex.matches(in: raw, range: NSRange(location: 0, length: nsRaw.length))
-        for m in matches.reversed() {
-            guard let outerStr = Range(m.range, in: raw),
-                  let innerStr = Range(m.range(at: 1), in: raw),
-                  let outerAttr = Range<AttributedString.Index>(outerStr, in: attr),
-                  let innerAttr = Range<AttributedString.Index>(innerStr, in: attr) else { continue }
-            // Apply highlight to inner content (keeps nested attributes).
-            attr[innerAttr].backgroundColor = Color.yellow.opacity(0.35)
-            // Strip the trailing `==`, then the leading one. Right-side
-            // delete first so the leading bound stays valid.
-            let trailStart = attr.index(outerAttr.upperBound, offsetByCharacters: -2)
-            attr.removeSubrange(trailStart..<outerAttr.upperBound)
-            let leadEnd = attr.index(outerAttr.lowerBound, offsetByCharacters: 2)
-            attr.removeSubrange(outerAttr.lowerBound..<leadEnd)
-        }
     }
 
     private func headingSize(_ level: Int) -> CGFloat {
@@ -495,5 +458,73 @@ enum JournalMarkdownExport {
             result.replaceSubrange(r, with: "<a href=\"\(url)\">\(text)</a>")
         }
         return result
+    }
+}
+
+/// Process-wide cache of parsed inline markdown, including the `==highlight==`
+/// extension. Re-renders — or scrolling the same block past twice — used to
+/// re-parse every run and recompile the highlight regex on every body
+/// evaluation, for every block of every visible message.
+///
+/// Values are boxed `AttributedString`s rather than `NSAttributedString`:
+/// `backgroundColor` lives in the SwiftUI attribute scope and does not survive
+/// a round-trip through AppKit, so caching the converted form would silently
+/// drop the highlight. Font and color are applied per call by `inlineText`, so
+/// they are deliberately not part of the key.
+final class InlineMarkdownCache {
+    static let shared = InlineMarkdownCache()
+
+    private final class Box {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
+    private let cache = NSCache<NSString, Box>()
+    private init() { cache.countLimit = 500 }
+
+    /// Compiled once. `NSRegularExpression(pattern:)` compiles its pattern on
+    /// every init, and this ran per block, per body evaluation.
+    /// Capture group: lazy match between markers, no embedded `==`.
+    private static let highlightRegex = try? NSRegularExpression(pattern: "==(.+?)==")
+
+    func attributed(for source: String) -> AttributedString {
+        let key = source as NSString
+        if let hit = cache.object(forKey: key) { return hit.value }
+        var attr = (try? AttributedString(
+            markdown: source,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            ),
+        )) ?? AttributedString(source)
+        Self.applyHighlight(&attr)
+        cache.setObject(Box(attr), forKey: key)
+        return attr
+    }
+
+    /// Walk the attributed string right-to-left for `==…==`, applying
+    /// `backgroundColor` to the inner range *in place* (preserving any
+    /// nested bold/italic/strike runs) and then deleting the surrounding
+    /// `==` markers. Right-to-left keeps earlier ranges valid as we mutate.
+    static func applyHighlight(_ attr: inout AttributedString) {
+        let raw = String(attr.characters)
+        // Cheap early-out: most runs have no highlight at all, and this skips
+        // both the regex run and the NSString bridge below.
+        guard raw.contains("=="), let regex = highlightRegex else { return }
+        let nsRaw = raw as NSString
+        let matches = regex.matches(in: raw, range: NSRange(location: 0, length: nsRaw.length))
+        for m in matches.reversed() {
+            guard let outerStr = Range(m.range, in: raw),
+                  let innerStr = Range(m.range(at: 1), in: raw),
+                  let outerAttr = Range<AttributedString.Index>(outerStr, in: attr),
+                  let innerAttr = Range<AttributedString.Index>(innerStr, in: attr) else { continue }
+            // Apply highlight to inner content (keeps nested attributes).
+            attr[innerAttr].backgroundColor = Color.yellow.opacity(0.35)
+            // Strip the trailing `==`, then the leading one. Right-side
+            // delete first so the leading bound stays valid.
+            let trailStart = attr.index(outerAttr.upperBound, offsetByCharacters: -2)
+            attr.removeSubrange(trailStart..<outerAttr.upperBound)
+            let leadEnd = attr.index(outerAttr.lowerBound, offsetByCharacters: 2)
+            attr.removeSubrange(outerAttr.lowerBound..<leadEnd)
+        }
     }
 }

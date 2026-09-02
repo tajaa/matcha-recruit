@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import { API_BASE } from '../../api/client'
+import { getAccessToken } from '../../api/authStorage'
 type NewsletterVariant = 'caramel' | 'matcha'
 
 // Default 'caramel' = the ivory product-page theme (gold accent). 'matcha' =
@@ -72,7 +73,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
     // Deliberate raw read (documented exception): the token is attribution-only
     // on this optional-auth endpoint, and ensureFreshToken would bounce an
     // anonymous marketing-page visitor with a dead session to /login on submit.
-    const token = localStorage.getItem('matcha_access_token')
+    const token = getAccessToken()
     if (token) headers.Authorization = `Bearer ${token}`
 
     try {

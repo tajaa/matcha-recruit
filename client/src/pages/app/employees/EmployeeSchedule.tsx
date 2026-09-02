@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
-  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp,
+  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp, CalendarClock,
+  History,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
+  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, replaceWeekTemplate, deleteWeekTemplate,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
   fetchEligibilityCases, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
@@ -29,6 +30,14 @@ import ScheduleHelperWizard from '../../../components/employees/onboarding/Sched
 import { useMe } from '../../../hooks/useMe'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../../components/shared/LocationPicker'
+import AutoSchedulesTab from '../../../components/employees/AutoSchedulesTab'
+import ScheduleAuditLog from '../../../components/employees/ScheduleAuditLog'
+import {
+  MAX_BREAK_MINUTES,
+  MAX_REQUIRED_STAFF,
+  validateShiftFields,
+} from '../../../components/employees/schedule-editor/shiftValidation'
+import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../../api/employees/scheduleAssistant'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 const SCHEDULE_GUIDE_STORAGE_KEY = 'matcha.employee-schedule.guide.v1'
@@ -50,6 +59,7 @@ export default function EmployeeSchedule() {
   const [guideOpen, setGuideOpen] = useState(() => {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
   })
+  const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
@@ -82,6 +92,20 @@ export default function EmployeeSchedule() {
       }, { replace: true })
     }
   }, [intelligenceEnabled, meLoading, requestedTab, setScheduleTab, setSearchParams, tab])
+
+  useEffect(() => {
+    let cancelled = false
+    setAutomaticSuggestion(null)
+    if (!locationId || tab !== 'schedule') return () => { cancelled = true }
+    void getScheduleSuggestionStatus(locationId, weekStart)
+      .then((result) => {
+        if (!cancelled) setAutomaticSuggestion(result.available ? result : null)
+      })
+      .catch(() => {
+        if (!cancelled) setAutomaticSuggestion(null)
+      })
+    return () => { cancelled = true }
+  }, [locationId, tab, weekStart])
 
   function setTab(nextTab: EmployeeScheduleTab) {
     setScheduleTab(nextTab)
@@ -148,10 +172,12 @@ export default function EmployeeSchedule() {
         <div className="flex items-center gap-1">
           <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
           <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
+          <TabButton active={tab === 'auto-schedules'} onClick={() => setTab('auto-schedules')} icon={<CalendarClock className="h-4 w-4" />}>Auto schedules</TabButton>
           <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
+          <TabButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<History className="h-4 w-4" />}>Audit log</TabButton>
           {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
         </div>
-        <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
+        {tab !== 'audit' && <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />}
       </div>
 
       <div className="min-w-0 space-y-6 p-5">
@@ -169,6 +195,19 @@ export default function EmployeeSchedule() {
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish week{summary?.draft ? ` (${summary.draft})` : ''}
             </button>
           </div>
+
+          {automaticSuggestion?.week_start && locationId && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2 text-xs text-emerald-100">
+              <Sparkles className="h-4 w-4 shrink-0 text-emerald-300" />
+              <span>Huume prepared a suggested schedule for the week of {automaticSuggestion.week_start}.</span>
+              <Link
+                to={`/ops/schedule/editor?week=${automaticSuggestion.week_start}&location=${locationId}`}
+                className="ml-auto font-medium text-emerald-300 hover:text-emerald-200"
+              >
+                Review suggestion
+              </Link>
+            </div>
+          )}
 
           {!locationId && !locationsLoading ? (
             <div className="flex items-center justify-center h-64 text-sm text-zinc-500">Select a location to view its schedule.</div>
@@ -208,7 +247,9 @@ export default function EmployeeSchedule() {
       )}
 
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
+      {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} />}
       {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
+      {tab === 'audit' && <ScheduleAuditLog />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
       <ScheduleHelperWizard open={guideOpen} onClose={closeGuide} />
@@ -217,7 +258,7 @@ export default function EmployeeSchedule() {
 }
 
 function parseScheduleTab(value: string | null): EmployeeScheduleTab {
-  if (value === 'templates' || value === 'requests' || value === 'intelligence') return value
+  if (value === 'templates' || value === 'auto-schedules' || value === 'requests' || value === 'audit' || value === 'intelligence') return value
   return 'schedule'
 }
 
@@ -528,7 +569,8 @@ function fmtClock(hhmm: string): string {
 }
 
 /** Length of the window in hours, wrapping past midnight the same way save() does. */
-function spanHours(start: string, end: string): number {
+function spanHours(start: string, end: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return null
   const [sh, sm] = start.split(':').map(Number)
   const [eh, em] = end.split(':').map(Number)
   const mins = (eh * 60 + em) - (sh * 60 + sm)
@@ -573,8 +615,9 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   }, [editing, trainingEnabled])
 
   const overnight = end <= start
+  const durationHours = spanHours(start, end)
 
-  function buildPayload(): ShiftPayload {
+  function buildPayload(requiredStaff: number, plannedBreak: number): ShiftPayload {
     const startDay = editing ? shift!.starts_at.slice(0, 10) : day
     const endDay = overnight ? addDays(startDay, 1) : startDay
     const payload: ShiftPayload = {
@@ -582,8 +625,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       notes: notes.trim() || null,
-      break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
-      required_staff: Math.max(1, Math.round(Number(required) || 1)),
+      break_minutes: plannedBreak,
+      required_staff: requiredStaff,
     }
     if (!editing && kind === 'training' && requirementId) {
       payload.kind = 'training'
@@ -594,13 +637,24 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   }
 
   async function save() {
+    const validation = validateShiftFields({
+      date: editing ? shift!.starts_at.slice(0, 10) : day,
+      start,
+      end,
+      requiredStaff: required,
+      breakMinutes,
+    })
+    if (!validation.valid) {
+      toast(validation.error, 'error')
+      return
+    }
     if (!editing && kind === 'training' && !requirementId) {
       toast('Select a training requirement for this session', 'error')
       return
     }
     setBusy(true)
     try {
-      const payload = buildPayload()
+      const payload = buildPayload(validation.requiredStaff, validation.breakMinutes)
       if (editing) {
         // PUT is a true PATCH, but every field here is one the form owns, so
         // sending the lot is the same write. `status` is deliberately NOT sent —
@@ -637,15 +691,19 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
     <div className="space-y-1.5">
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Start</span>
-        <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="time" required value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">End</span>
-        <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="time" required value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <div className="text-[11px] text-zinc-400 font-medium">
-        {fmtClock(start)}–{fmtClock(end)}
-        <span className="text-zinc-600"> · {spanHours(start, end)}h{overnight ? ' · next day' : ''}</span>
+        {durationHours === null ? 'Select start and end times' : (
+          <>
+            {fmtClock(start)}–{fmtClock(end)}
+            <span className="text-zinc-600"> · {durationHours}h{overnight ? ' · next day' : ''}</span>
+          </>
+        )}
       </div>
       <label className="block">
         {/* Labelled rather than placeholder-only: "Role (optional)" clips to
@@ -656,11 +714,11 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
-        <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="number" min="1" max={MAX_REQUIRED_STAFF} step="1" required value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
-        <input type="number" min="0" step="5" value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
         <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Used by scheduling-law checks when employees are assigned.</span>
       </label>
       <label className="block">
@@ -699,6 +757,7 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<WeekTemplate | null>(null)
 
   const load = useCallback(async () => {
     if (!locationId) {
@@ -710,6 +769,14 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
   }, [locationId])
   useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
+  function handleDeleted(templateId: string) {
+    if (editing?.id === templateId) {
+      setAdding(false)
+      setEditing(null)
+    }
+    void load()
+  }
+
   if (!locationId) return <p className="text-sm text-zinc-600">Select a location to manage its week templates.</p>
   if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 
@@ -717,23 +784,24 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-zinc-200">Shift templates</h3>
-        <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
+        <button onClick={() => { setEditing(null); setAdding(true) }} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
       </div>
-      {adding && <Card className="p-4"><TemplateForm locationId={locationId} onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
+      {adding && <Card className="p-4"><TemplateForm key={editing?.id ?? 'new'} locationId={locationId} template={editing ?? undefined} onDone={() => { setAdding(false); setEditing(null); load() }} onCancel={() => { setAdding(false); setEditing(null) }} /></Card>}
       {templates.length === 0 && !adding ? (
         <p className="text-sm text-zinc-600">No templates yet — create one to generate recurring shifts.</p>
       ) : (
         <div className="space-y-2">
-          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} />)}
+          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onDeleted={() => handleDeleted(t.id)} onGenerated={onGenerated} onEdit={() => { setEditing(t); setAdding(true) }} />)}
         </div>
       )}
     </div>
   )
 }
 
-function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void }) {
+function TemplateRow({ tpl, onDeleted, onGenerated, onEdit }: { tpl: WeekTemplate; onDeleted: () => void; onGenerated: () => void; onEdit: () => void }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
   const today = toISODate(new Date())
   const [from, setFrom] = useState(today)
@@ -742,7 +810,16 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
 
   async function remove() {
     setBusy(true)
-    try { await deleteWeekTemplate(tpl.id); onChanged() } finally { setBusy(false) }
+    try {
+      const result = await deleteWeekTemplate(tpl.id)
+      setConfirmDelete(false)
+      onDeleted()
+      if (result.paused_auto_schedules) {
+        toast(`Paused ${result.paused_auto_schedules} auto schedule${result.paused_auto_schedules === 1 ? '' : 's'} that used this template.`, 'info')
+      }
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    } finally { setBusy(false) }
   }
   async function generate() {
     setGenBusy(true)
@@ -775,8 +852,19 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
           </div>
         </div>
         <button onClick={() => setGenOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"><Sparkles className="h-3.5 w-3.5" /> Generate</button>
-        <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
+        <button onClick={onEdit} disabled={busy} aria-label={`Edit ${tpl.name}`} className="text-zinc-500 hover:text-zinc-100 p-1"><Pencil className="h-4 w-4" /></button>
+        <button onClick={() => setConfirmDelete(true)} disabled={busy} aria-label={`Delete ${tpl.name}`} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
       </div>
+      {confirmDelete && (
+        <div role="alertdialog" aria-modal="true" aria-labelledby={`delete-template-${tpl.id}`} className="mt-3 rounded-lg border border-red-900/60 bg-red-950/20 p-3">
+          <p id={`delete-template-${tpl.id}`} className="text-sm text-zinc-200">Delete “{tpl.name}”?</p>
+          <p className="mt-1 text-xs text-zinc-500">Its shift blocks will be removed. Previously generated shifts will remain. Any auto schedule using this template will be paused.</p>
+          <div className="mt-3 flex items-center gap-2">
+            <button onClick={() => setConfirmDelete(false)} disabled={busy} className="text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
+            <button onClick={remove} disabled={busy} className="inline-flex items-center gap-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Delete template</button>
+          </div>
+        </div>
+      )}
       {genOpen && (
         <div className="mt-3 flex items-end gap-2 flex-wrap border-t border-zinc-800 pt-3">
           <label className="block"><span className="text-[10px] text-zinc-500 uppercase">From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} mt-1`} /></label>
@@ -788,61 +876,134 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onCha
   )
 }
 
-function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; onDone: () => void; onCancel: () => void }) {
-  const [name, setName] = useState('')
-  const [role, setRole] = useState('')
-  const [start, setStart] = useState('09:00')
-  const [end, setEnd] = useState('17:00')
-  const [breakMinutes, setBreakMinutes] = useState('0')
-  const [required, setRequired] = useState('1')
-  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
-  const [busy, setBusy] = useState(false)
+type TemplateBlockDraft = {
+  id: number | string
+  name: string
+  role: string
+  start: string
+  end: string
+  breakMinutes: string
+  required: string
+  days: number[]
+}
 
-  function toggleDay(d: number) {
-    setDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b))
+const MAX_TEMPLATE_BLOCKS = 40
+
+function newTemplateBlock(id: number): TemplateBlockDraft {
+  return {
+    id,
+    name: '',
+    role: '',
+    start: '09:00',
+    end: '17:00',
+    breakMinutes: '0',
+    required: '1',
+    days: [1, 2, 3, 4, 5],
   }
+}
+
+function TemplateForm({ locationId, template, onDone, onCancel }: { locationId: string; template?: WeekTemplate; onDone: () => void; onCancel: () => void }) {
+  const [name, setName] = useState(() => template?.name ?? '')
+  const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => template
+    ? template.blocks.map((block) => ({
+      id: block.id,
+      name: block.name,
+      role: block.role ?? '',
+      start: block.start_time.slice(0, 5),
+      end: block.end_time.slice(0, 5),
+      breakMinutes: String(block.break_minutes),
+      required: String(block.required_staff),
+      days: block.days_of_week,
+    }))
+    : [newTemplateBlock(1)])
+  const [busy, setBusy] = useState(false)
+  const blocksValid = blocks.every((block) => block.days.length > 0)
+
+  function updateBlock(id: number | string, patch: Partial<TemplateBlockDraft>) {
+    setBlocks((current) => current.map((block) => block.id === id ? { ...block, ...patch } : block))
+  }
+
+  function toggleDay(id: number | string, day: number) {
+    const block = blocks.find((item) => item.id === id)
+    if (!block) return
+    updateBlock(id, {
+      days: block.days.includes(day)
+        ? block.days.filter((item) => item !== day)
+        : [...block.days, day].sort((a, b) => a - b),
+    })
+  }
+
+  function addBlock() {
+    setBlocks((current) => {
+      if (current.length >= MAX_TEMPLATE_BLOCKS) return current
+      const nextId = Math.max(0, ...current.map((block) => typeof block.id === 'number' ? block.id : 0)) + 1
+      return [...current, newTemplateBlock(nextId)]
+    })
+  }
+
   async function save() {
-    if (!name.trim()) return
+    if (!name.trim() || blocks.length === 0 || !blocksValid) return
     setBusy(true)
     try {
-      await createWeekTemplate({
-        name: name.trim(),
-        location_id: locationId,
-        blocks: [{
-          name: name.trim(),
-          role: role.trim() || null,
-          start_time: `${start}:00`, end_time: `${end}:00`,
-          break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
-          required_staff: Math.max(1, Math.round(Number(required) || 1)),
-          days_of_week: days,
-        }],
+      const blockPayload = (block: TemplateBlockDraft, index: number) => ({
+        id: typeof block.id === 'string' ? block.id : undefined,
+        name: block.name.trim() || block.role.trim() || `Shift ${index + 1}`,
+        role: block.role.trim() || null,
+        start_time: `${block.start}:00`, end_time: `${block.end}:00`,
+        break_minutes: Math.max(0, Math.round(Number(block.breakMinutes) || 0)),
+        required_staff: Math.max(1, Math.round(Number(block.required) || 1)),
+        days_of_week: block.days,
       })
+      if (!template) {
+        await createWeekTemplate({
+          name: name.trim(), location_id: locationId,
+          blocks: blocks.map((block, index) => {
+            const { id: _id, ...payload } = blockPayload(block, index)
+            return payload
+          }),
+        })
+      } else {
+        await replaceWeekTemplate(template.id, { name: name.trim(), blocks: blocks.map(blockPayload) })
+      }
       onDone()
     } finally { setBusy(false) }
   }
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Name</span><input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Role</span><input value={role} onChange={(e) => setRole(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Start</span><input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-1`} /></label>
-      </div>
-      <div className="grid max-w-sm grid-cols-2 gap-2">
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Planned break (minutes)</span><input type="number" min="0" step="5" value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-1`} /></label>
-      </div>
-      <div>
-        <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
-        <div className="flex gap-1 mt-1">
-          {WEEKDAY_LABELS.map((lbl, i) => (
-            <button key={i} onClick={() => toggleDay(i)} className={`w-9 py-1 rounded-md text-xs border ${days.includes(i) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
-          ))}
-        </div>
+    <div className="space-y-4">
+      <label className="block max-w-md"><span className="text-[10px] text-zinc-500 uppercase">Template name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Standard operating week" className={`${inputCls} mt-1`} /></label>
+      <div className="space-y-3">
+        {blocks.map((block, index) => (
+          <div key={block.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-300">Shift {index + 1}</span>
+              {blocks.length > 1 && <button type="button" onClick={() => setBlocks((current) => current.filter((item) => item.id !== block.id))} className="text-xs text-zinc-500 hover:text-red-400">Remove shift</button>}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Role</span><input value={block.role} onChange={(e) => updateBlock(block.id, { role: e.target.value })} className={`${inputCls} mt-1`} /></label>
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Start</span><input type="time" value={block.start} onChange={(e) => updateBlock(block.id, { start: e.target.value })} className={`${inputCls} mt-1`} /></label>
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={block.end} onChange={(e) => updateBlock(block.id, { end: e.target.value })} className={`${inputCls} mt-1`} /></label>
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={block.required} onChange={(e) => updateBlock(block.id, { required: e.target.value })} className={`${inputCls} mt-1`} /></label>
+            </div>
+            <div className="grid max-w-sm grid-cols-2 gap-2">
+              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Planned break (minutes)</span><input type="number" min="0" step="5" value={block.breakMinutes} onChange={(e) => updateBlock(block.id, { breakMinutes: e.target.value })} className={`${inputCls} mt-1`} /></label>
+            </div>
+            <div>
+              <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
+              <div className="flex gap-1 mt-1">
+                {WEEKDAY_LABELS.map((lbl, day) => (
+                  <button type="button" key={day} aria-label={`${lbl} for shift ${index + 1}`} aria-pressed={block.days.includes(day)} onClick={() => toggleDay(block.id, day)} className={`w-9 py-1 rounded-md text-xs border ${block.days.includes(day) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
+                ))}
+              </div>
+              {block.days.length === 0 && <div className="mt-1 text-xs text-red-400">Select at least one day for this shift.</div>}
+            </div>
+          </div>
+        ))}
+        <button type="button" onClick={addBlock} disabled={blocks.length >= MAX_TEMPLATE_BLOCKS} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 disabled:cursor-not-allowed disabled:text-zinc-600"><Plus className="h-3.5 w-3.5" /> Add shift</button>
+        {blocks.length >= MAX_TEMPLATE_BLOCKS && <div className="text-xs text-zinc-500">Maximum 40 shifts per template.</div>}
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
+        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0 || !blocksValid} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {template ? 'Save changes' : 'Save template'}</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>

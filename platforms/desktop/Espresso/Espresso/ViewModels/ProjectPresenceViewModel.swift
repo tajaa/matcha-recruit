@@ -15,9 +15,13 @@ import SwiftUI
 @MainActor
 @Observable
 final class ProjectPresenceViewModel {
-    private(set) var members: [ProjectWebSocket.PresenceMember] = []
+    private(set) var members: [ProjectWebSocket.PresenceMember] = [] {
+        didSet { presenceVersion &+= 1 }
+    }
     private(set) var remoteCursors: [String: ProjectWebSocket.CursorPayload] = [:]
-    private(set) var remoteCarets: [String: ProjectWebSocket.CaretPayload] = [:]
+    private(set) var remoteCarets: [String: ProjectWebSocket.CaretPayload] = [:] {
+        didSet { presenceVersion &+= 1 }
+    }
     /// Sections currently held by *another* editor (section_id → holder). Our
     /// own granted lock never lands here (the server excludes the holder from
     /// the `section_locked` broadcast); a `section_lock_denied` for a section we
@@ -38,9 +42,28 @@ final class ProjectPresenceViewModel {
     /// Connect (or reuse existing connection), join the project on the given
     /// sub-tab, and wire callbacks into local state.
     func start(projectId: String, pageKey: String) {
+        let ws = ProjectWebSocket.shared
+        // Leave the project we were in first. A project→project switch reuses
+        // ProjectDetailView, so `.onDisappear` — the only other caller of
+        // stop() — never fires, and every switch used to leave the old project
+        // and page rooms joined server-side for the rest of the session. That
+        // cost a membership + DB access check + presence broadcast per switch,
+        // and kept delivering that project's traffic.
+        if let previous = self.projectId, previous != projectId {
+            ws.leaveProject(projectId: previous)
+            flushTask?.cancel()
+            flushTask = nil
+            pendingCursors.removeAll()
+            pendingCarets.removeAll()
+            members = []
+            remoteCursors = [:]
+            remoteCarets = [:]
+            lockedSections = [:]
+            liveSections = [:]
+            lastContentSend = [:]
+        }
         self.projectId = projectId
         self.pageKey = pageKey
-        let ws = ProjectWebSocket.shared
         ws.connect()
         ws.onPresence = { [weak self] members in
             self?.members = members
@@ -67,12 +90,19 @@ final class ProjectPresenceViewModel {
             self.members.removeAll { $0.id == userId }
             self.remoteCursors.removeValue(forKey: userId)
             self.remoteCarets.removeValue(forKey: userId)
+            // Drop any buffered frame too, or the next flush resurrects them.
+            self.pendingCursors.removeValue(forKey: userId)
+            self.pendingCarets.removeValue(forKey: userId)
         }
         ws.onCursor = { [weak self] payload in
-            self?.remoteCursors[payload.userId] = payload
+            guard let self else { return }
+            self.pendingCursors[payload.userId] = payload
+            self.schedulePresenceFlush()
         }
         ws.onCaret = { [weak self] payload in
-            self?.remoteCarets[payload.userId] = payload
+            guard let self else { return }
+            self.pendingCarets[payload.userId] = payload
+            self.schedulePresenceFlush()
         }
         ws.onSectionLocked = { [weak self] sectionId, userId, name in
             self?.lockedSections[sectionId] = SectionLockHolder(userId: userId, name: name)
@@ -158,11 +188,75 @@ final class ProjectPresenceViewModel {
         )
     }
 
+    // MARK: - Memoized section → editor map
+
+    @ObservationIgnored private var presenceVersion = 0
+    @ObservationIgnored private var editorsKey: Int?
+    @ObservationIgnored private var editorsValue: [String: ProjectWebSocket.PresenceMember] = [:]
+
+    /// The member whose caret sits in each section.
+    ///
+    /// Memoized because the notes list asks this once per section per render,
+    /// and the direct form was two linear scans (`remoteCarets.first(where:)`
+    /// then `members.first(where:)`) — O(sections x peers) at peer-typing
+    /// frequency. Same `@ObservationIgnored` version-counter shape as
+    /// `ProjectDetailViewModel.groupedColumns`; reading `members` /
+    /// `remoteCarets` here still registers observation, so views refresh.
+    func editorsBySection() -> [String: ProjectWebSocket.PresenceMember] {
+        let carets = remoteCarets
+        let roster = members
+        if editorsKey == presenceVersion { return editorsValue }
+        var byId: [String: ProjectWebSocket.PresenceMember] = [:]
+        for m in roster { byId[m.id] = m }
+        var map: [String: ProjectWebSocket.PresenceMember] = [:]
+        for (userId, caret) in carets {
+            if let member = byId[userId] { map[caret.sectionId] = member }
+        }
+        editorsValue = map
+        editorsKey = presenceVersion
+        return map
+    }
+
+    // MARK: - Receive-side coalescing
+
+    @ObservationIgnored private var pendingCursors: [String: ProjectWebSocket.CursorPayload] = [:]
+    @ObservationIgnored private var pendingCarets: [String: ProjectWebSocket.CaretPayload] = [:]
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+
+    /// Sends are throttled (50ms cursor / 100ms caret) but receives were not:
+    /// every inbound frame from every peer wrote observable state directly, so
+    /// N peers typing invalidated the board at N x their key rate. Buffer and
+    /// apply on a 100ms tick — the same budget the send side uses.
+    private func schedulePresenceFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard let self, !Task.isCancelled else { return }
+            self.flushPresence()
+        }
+    }
+
+    private func flushPresence() {
+        flushTask = nil
+        if !pendingCursors.isEmpty {
+            remoteCursors.merge(pendingCursors) { _, new in new }
+            pendingCursors.removeAll(keepingCapacity: true)
+        }
+        if !pendingCarets.isEmpty {
+            remoteCarets.merge(pendingCarets) { _, new in new }
+            pendingCarets.removeAll(keepingCapacity: true)
+        }
+    }
+
     func stop() {
-        print("[PresenceVM] stop — clearing ProjectWS callbacks")
+        mwLog("[PresenceVM] stop — clearing ProjectWS callbacks")
         let ws = ProjectWebSocket.shared
         if let pid = projectId { ws.leaveProject(projectId: pid) }
         ws.clearCallbacks()
+        flushTask?.cancel()
+        flushTask = nil
+        pendingCursors.removeAll()
+        pendingCarets.removeAll()
         members = []
         remoteCursors = [:]
         remoteCarets = [:]

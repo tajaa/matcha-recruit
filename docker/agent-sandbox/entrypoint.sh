@@ -13,6 +13,7 @@ AGENT_GID="$(id -g agent)"
 sync_dependency_tree() {
     local source_dir=$1
     local destination_dir=$2
+    local kind=$3
     local installed_version=""
 
     if [[ -f "${destination_dir}/.agent-sandbox-template" ]]; then
@@ -20,25 +21,45 @@ sync_dependency_tree() {
     fi
 
     if [[ "$installed_version" != "$template_version" ]]; then
+        if [[ "${MSANDBOX_INITIALIZE_DEPENDENCIES:-0}" != "1" && -n "${MSANDBOX_SESSION_ID:-}" ]]; then
+            echo "dependency volume is not initialized for this controller image: ${destination_dir}" >&2
+            return 1
+        fi
         mkdir -p "$destination_dir"
-        rsync -a --delete "${source_dir}/" "${destination_dir}/"
+        # Session-local Vite cache volumes may be mounted below node_modules.
+        # Excluding that mountpoint keeps rsync --delete from trying to remove
+        # a live nested filesystem during first-use dependency initialization.
+        rsync -a --delete --exclude='.vite/' "${source_dir}/" "${destination_dir}/"
+        if [[ "$kind" == "python-venv" ]]; then
+            # Virtualenv activation scripts contain their original image path.
+            # Rewrite once, before sealing the content-addressed volume.
+            for executable in "${destination_dir}"/bin/*; do
+                if [[ -f "$executable" ]] && grep -Iq . "$executable"; then
+                    sed -i 's|/opt/bootstrap/server-venv|/workspace/server/venv|g' "$executable"
+                fi
+            done
+        fi
         printf '%s\n' "$template_version" > "${destination_dir}/.agent-sandbox-template"
         chown -R "${AGENT_UID}:${AGENT_GID}" "$destination_dir"
     fi
 }
 
-sync_dependency_tree /opt/bootstrap/server-venv /workspace/server/venv
-sync_dependency_tree /opt/bootstrap/client-node_modules /workspace/client/node_modules
-sync_dependency_tree /opt/bootstrap/tellus-node_modules /workspace/client/tellus/node_modules
-sync_dependency_tree /opt/bootstrap/oceanlab-node_modules /workspace/client/oceanlab/node_modules
+sync_dependency_tree /opt/bootstrap/server-venv /workspace/server/venv python-venv
+sync_dependency_tree /opt/bootstrap/client-node_modules /workspace/client/node_modules node
+sync_dependency_tree /opt/bootstrap/tellus-node_modules /workspace/client/tellus/node_modules node
+sync_dependency_tree /opt/bootstrap/oceanlab-node_modules /workspace/client/oceanlab/node_modules node
 
-# Python virtualenv activation scripts contain their original build location.
-# Rewrite text files after the copy so commands use the named-volume venv.
-for executable in /workspace/server/venv/bin/*; do
-    if [[ -f "$executable" ]] && grep -Iq . "$executable"; then
-        sed -i 's|/opt/bootstrap/server-venv|/workspace/server/venv|g' "$executable"
-    fi
-done
+# Create the nested mountpoints while the initializer owns the writable shared
+# dependency volumes. Docker cannot create them later after those parent
+# volumes have been mounted read-only into an agent session.
+install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
+    /workspace/client/node_modules/.vite \
+    /workspace/client/tellus/node_modules/.vite \
+    /workspace/client/oceanlab/node_modules/.vite
+
+if [[ "${MSANDBOX_INITIALIZE_DEPENDENCIES:-0}" == "1" ]]; then
+    exec "$@"
+fi
 
 # State dirs for all three agents plus git/gh config, all inside the
 # sandbox_home named volume. /home/agent/.aws is a read-only bind mount from
@@ -53,5 +74,11 @@ install -d -o "${AGENT_UID}" -g "${AGENT_GID}" \
     /home/agent/.config/git \
     /home/agent/.cache \
     /home/agent/.npm
+
+# `docker compose up` returns as soon as the container process starts, while
+# first-use dependency-volume synchronization can still be running. The host
+# controller waits for this marker before it lets an agent or test command in.
+touch /run/msandbox-ready
+chown "${AGENT_UID}:${AGENT_GID}" /run/msandbox-ready
 
 exec gosu agent "$@"

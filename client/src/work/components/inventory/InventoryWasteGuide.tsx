@@ -15,19 +15,39 @@ const STEPS: Step[] = [
   { key: 'par', label: 'PAR', title: 'Use predictive PARs with guardrails', description: 'Review an item recommendation, apply it deliberately, or enroll a stable item in automatic updates.', location: 'Inventory → select an item → Predictive par; portfolio controls: Inventory → Forecast', bullets: ['Forecasting needs committed sales and mappings before it can recommend a PAR.', 'Maximum drift blocks a surprising automatic change.', 'PAR history explains every applied update.'], icon: SlidersHorizontal, destination: (base) => `${base}/inventory/forecast#waste-par` },
 ]
 
+const WASTE_GUIDE_STORAGE_KEY = 'matcha-inventory-waste-guide-v1'
+
+function storageHasSeen(getStorage: () => Storage, key: string) {
+  try {
+    return getStorage().getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+function guideWasSeen(autoOpenKey: string) {
+  const key = `${WASTE_GUIDE_STORAGE_KEY}:${autoOpenKey}`
+  return storageHasSeen(() => localStorage, key) || storageHasSeen(() => sessionStorage, key)
+}
+
+function markGuideSeen(autoOpenKey: string) {
+  const key = `${WASTE_GUIDE_STORAGE_KEY}:${autoOpenKey}`
+  try { localStorage.setItem(key, '1') } catch { /* storage may be blocked */ }
+  try { sessionStorage.setItem(key, '1') } catch { /* storage may be blocked */ }
+}
+
 export default function InventoryWasteGuide({ open, onClose, initialStep = 0, autoOpenKey }: { open: boolean; onClose: () => void; initialStep?: number; autoOpenKey?: string }) {
   const base = useWorkBase()
   const navigate = useNavigate()
   const location = useLocation()
-  const requestedStep = Number(new URLSearchParams(location.search).get('inventoryGuideStep'))
-  const routeStep = Number.isInteger(requestedStep) && requestedStep >= 0 && requestedStep < STEPS.length ? requestedStep : initialStep
+  const requestedStepValue = new URLSearchParams(location.search).get('inventoryGuideStep')
+  const requestedStep = requestedStepValue === null ? Number.NaN : Number(requestedStepValue)
+  const hasRouteStep = Number.isInteger(requestedStep) && requestedStep >= 0 && requestedStep < STEPS.length
+  const routeStep = hasRouteStep ? requestedStep : initialStep
   const [step, setStep] = useState(routeStep)
   const [autoDismissed, setAutoDismissed] = useState(false)
   const steps = useMemo<WizardStep[]>(() => STEPS.map(({ key, label }) => ({ key, label })), [])
-  // This guide intentionally reopens on every dashboard visit. Managers must
-  // actively skip it for the current visit rather than silently missing a
-  // newly introduced inventory-waste control.
-  const shouldAutoOpen = Boolean(autoOpenKey) && !autoDismissed
+  const shouldAutoOpen = autoOpenKey !== undefined && !autoDismissed && !guideWasSeen(autoOpenKey)
   const current = STEPS[step]
   const Icon = current.icon
 
@@ -37,14 +57,27 @@ export default function InventoryWasteGuide({ open, onClose, initialStep = 0, au
     const anchor = document.getElementById(location.hash.slice(1))
     if (anchor) requestAnimationFrame(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }, [location.hash])
-  function close() { setAutoDismissed(true); onClose() }
+  function close() {
+    if (autoOpenKey !== undefined) markGuideSeen(autoOpenKey)
+    setAutoDismissed(true)
+    if (hasRouteStep) {
+      const search = new URLSearchParams(location.search)
+      search.delete('inventoryGuideStep')
+      navigate({
+        pathname: location.pathname,
+        search: search.size ? `?${search.toString()}` : '',
+        hash: location.hash,
+      }, { replace: true })
+    }
+    onClose()
+  }
   const isAtCurrentSection = `${location.pathname}${location.hash}` === STEPS[step].destination(base)
   function moveTo(nextStep: number) {
     const destination = STEPS[nextStep].destination(base)
     navigate(`${destination.split('#')[0]}?inventoryGuideStep=${nextStep}${destination.includes('#') ? `#${destination.split('#')[1]}` : ''}`)
   }
 
-  return <Modal open={open || shouldAutoOpen} onClose={close} bare>
+  return <Modal open={open || shouldAutoOpen || hasRouteStep} onClose={close} bare>
     <div className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-w-line bg-w-surface shadow-2xl">
       <div className="flex items-center justify-between border-b border-w-line px-5 py-4"><div className="flex items-center gap-2 text-sm font-medium text-w-text"><PackageCheck className="h-4 w-4 text-w-accent" />Waste & predictive PAR guide</div><button type="button" onClick={close} className="rounded-md p-1.5 text-w-dim hover:bg-w-surface2 hover:text-w-text" aria-label="Close waste guide"><X className="h-4 w-4" /></button></div>
       <div className="overflow-x-auto border-b border-w-line px-5 py-4"><WizardStepper steps={steps} activeIndex={step} /></div>

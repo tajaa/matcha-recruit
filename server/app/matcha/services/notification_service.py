@@ -38,6 +38,7 @@ TYPES = {
     "task_progress": "Task Update",
     "task_rejected": "Sent Back for Changes",
     "task_comment": "New Comment",
+    "autopr_result": "AutoPR Result",
     # NOT channel_-prefixed on purpose: the desktop banner path suppresses
     # channel_* types (chat toasts own those), and a call invite must banner.
     "call_started": "Call Started",
@@ -261,6 +262,26 @@ async def get_notifications(
             *params,
         )
     return [dict(r) for r in rows]
+
+
+async def count_notifications(
+    user_id: UUID,
+    *,
+    company_id: UUID | None = None,
+    unread_only: bool = False,
+) -> int:
+    """Count notifications using the same user/company/read scope as the list."""
+    where = "WHERE user_id = $1"
+    params: list = [user_id]
+    if company_id is not None:
+        params.append(company_id)
+        where += f" AND (company_id = ${len(params)} OR company_id IS NULL)"
+    if unread_only:
+        where += " AND is_read = FALSE"
+
+    async with get_connection() as conn:
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM mw_notifications {where}", *params)
+    return int(total or 0)
 
 
 async def get_unread_count(user_id: UUID, company_id: UUID | None = None) -> int:

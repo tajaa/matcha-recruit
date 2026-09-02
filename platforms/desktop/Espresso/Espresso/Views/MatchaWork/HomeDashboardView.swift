@@ -186,7 +186,7 @@ struct HomeDashboardView: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundColor(appState.themeText)
                 Spacer(minLength: 8)
-                Button { Task { await loadAll() } } label: {
+                Button { Task { await loadAll(forceRefresh: true) } } label: {
                     if isLoading {
                         ProgressView().controlSize(.small).tint(appState.themeTextSecondary)
                     } else {
@@ -729,17 +729,25 @@ struct HomeDashboardView: View {
 
     // MARK: - Loading
 
-    private func loadAll() async {
-        isLoading = true
+    /// `forceRefresh` is opt-in: every return to Home used to bypass the
+    /// service caches for projects/threads/journals, so navigating away and
+    /// back was always three uncached round-trips. The explicit Refresh button
+    /// still forces.
+    private func loadAll(forceRefresh: Bool = false) async {
+        // Spinner only on a genuine cold load — a warm return keeps the cards
+        // on screen while it revalidates, matching the SWR shape in
+        // ProjectDetailViewModel.loadProject.
+        let isCold = projects.isEmpty && threads.isEmpty && openTasks.isEmpty
+        if isCold { isLoading = true }
         errorMessage = nil
         defer { isLoading = false }
 
         // All 6 start concurrently. Primary 4 are fatal; journals/channels are supplemental.
-        async let projectsTask: [MWProject] = MatchaWorkService.shared.listProjects(forceRefresh: true)
-        async let threadsTask: [MWThread] = MatchaWorkService.shared.listThreads(forceRefresh: true)
+        async let projectsTask: [MWProject] = MatchaWorkService.shared.listProjects(forceRefresh: forceRefresh)
+        async let threadsTask: [MWThread] = MatchaWorkService.shared.listThreads(forceRefresh: forceRefresh)
         async let tasksTask: [MWOpenTask] = MatchaWorkService.shared.listOpenTasks()
         async let activityTask: [MWActivityItem] = MatchaWorkService.shared.listRecentActivity()
-        async let journalsTask: [MWJournal] = MatchaWorkService.shared.listJournals(forceRefresh: true)
+        async let journalsTask: [MWJournal] = MatchaWorkService.shared.listJournals(forceRefresh: forceRefresh)
         async let channelsTask: [ChannelSummary] = ChannelsService.shared.listChannels()
 
         do {

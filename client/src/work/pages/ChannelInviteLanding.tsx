@@ -7,6 +7,7 @@ import {
   type ChannelInviteInfo,
 } from '../api/channels'
 import { useMe, invalidateMeCache } from '../../hooks/useMe'
+import { setAuthTokens } from '../../api/authStorage'
 
 /**
  * Public landing for a channel invite (`/join-channel/:code`).
@@ -79,8 +80,7 @@ export default function ChannelInviteLanding() {
         password,
         ...(emailBound ? {} : { email: email.trim() }),
       })
-      localStorage.setItem('matcha_access_token', res.access_token)
-      localStorage.setItem('matcha_refresh_token', res.refresh_token)
+      setAuthTokens(res.access_token, res.refresh_token)
       invalidateMeCache()
       navigate(`/werk/channels/${res.channel_id}`, { replace: true })
     } catch (err) {
