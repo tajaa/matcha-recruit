@@ -16,15 +16,16 @@ from app.matcha.services.huume.luna_client import get_luna_client
 from app.matcha.services.huume.routing import LUNA
 
 from . import store
-from .agent import _fold_usage, _has_source_citation, _safe_for_audit
+from .agent import _fold_usage, _safe_for_audit
 from .prompt import build_task_draft_system_prompt
 from .tools import task_draft_declarations
 
 
 logger = logging.getLogger(__name__)
 
-_MAX_MODEL_CALLS = 18
-_WALL_SECONDS = 240.0
+_MAX_MODEL_CALLS = 3
+_WALL_SECONDS = 90.0
+_GUIDANCE_PATHS = ("CLAUDE.md", "AGENTS.md")
 _PRIORITIES = {"critical", "high", "medium", "low"}
 _CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix"}
 _COLUMNS = {"todo", "in_progress", "review", "done"}
@@ -36,6 +37,14 @@ _AI_USAGE_FEATURE = "matcha.espresso.task_draft"
 # character in the set, so "2FA login flow" lost its "2" and "3D map export"
 # lost its "3" — this only removes a real bullet or "1." / "1)" marker.
 _LIST_PREFIX = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
+
+
+def _is_citation_for_loaded_guide(citation: str, files_read: set[str]) -> bool:
+    candidate = str(citation or "").strip()
+    return any(
+        re.fullmatch(rf"{re.escape(path)}:\d+(?:-\d+)?", candidate)
+        for path in files_read
+    )
 
 
 def _clean_list(
@@ -121,6 +130,7 @@ def _context_block(
     collaborators: list[dict],
     elements: list[dict],
     recent_done: list[str],
+    guidance: dict,
 ) -> str:
     people = ", ".join(str(row.get("name")) for row in collaborators if row.get("name")) or "(none)"
     element_lines: list[str] = []
@@ -140,7 +150,10 @@ def _context_block(
         f"Base branch: {base_branch[:200]}\nCollaborators: {people[:2000]}\n"
         "Elements:\n" + ("\n".join(element_lines) or "(none)") + "\n"
         "Recently completed:\n" + done + "\n</project>\n\n"
-        f"<request>\n{request}\n</request>"
+        f"<request>\n{request}\n</request>\n\n"
+        f"<repository_guidance path={guidance['path']!r}>\n"
+        f"{guidance['content']}\n"
+        "</repository_guidance>"
     )
 
 
@@ -158,10 +171,9 @@ async def run_task_draft(
     elements: list[dict],
     recent_done: list[str],
 ) -> dict:
-    """Draft one ticket using only audited repository reads."""
+    """Draft one ticket from the repository's root architecture guide."""
     started = time.monotonic()
     client = get_luna_client()
-    tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
     seq = 0
@@ -194,51 +206,8 @@ async def run_task_draft(
         return result
 
     async def call_tool(name: str, args: dict) -> dict:
-        nonlocal tree, draft
+        nonlocal draft
         try:
-            if name == "list_files":
-                if tree is None:
-                    tree = await store.repo_tree(repo, base_branch)
-                prefix = str(args.get("prefix") or "").strip().lstrip("/")
-                paths = [
-                    item["path"] for item in tree
-                    if not prefix or item.get("path", "").startswith(prefix)
-                ][:800]
-                return await step(
-                    name, "read", "Listed repository files", args,
-                    {"files": paths, "truncated": len(paths) == 800},
-                )
-
-            if name == "search_repo":
-                query = str(args.get("query") or "").strip()
-                if not query:
-                    return await step(
-                        name, "read", "Search refused", args,
-                        {"error": "Provide a focused search term."}, "error",
-                    )
-                if tree is None:
-                    tree = await store.repo_tree(repo, base_branch)
-                result = {
-                    "matches": await store.search_snapshot(project_id, query),
-                    "path_matches": [
-                        item["path"] for item in tree
-                        if query.lower() in item.get("path", "").lower()
-                    ][:40],
-                }
-                return await step(name, "read", f"Searched for {query[:80]}", args, result)
-
-            if name == "read_file":
-                path = str(args.get("path") or "").strip().lstrip("/")
-                result = await store.read_repo_file(
-                    repo,
-                    base_branch,
-                    path,
-                    start_line=int(args.get("start_line") or 1),
-                    end_line=int(args["end_line"]) if args.get("end_line") is not None else None,
-                )
-                files_read.add(path)
-                return await step(name, "read", f"Read {path}", args, result)
-
             if name == "draft_ticket":
                 raw_sources = _clean_list(
                     args.get("sources"),
@@ -263,7 +232,8 @@ async def run_task_draft(
                         {"error": "Include at least two verifiable checklist steps."}, "error",
                     )
                 if not raw_sources or any(
-                    not _has_source_citation(source, files_read) for source in raw_sources
+                    not _is_citation_for_loaded_guide(source, files_read)
+                    for source in raw_sources
                 ):
                     return await step(
                         name, "finish", "Draft lacks valid sources", args,
@@ -283,19 +253,57 @@ async def run_task_draft(
                 )
 
             return await step(
-                name, "read", "Unknown tool", args,
+                name, "finish", "Unknown tool", args,
                 {"error": f"Unknown tool: {name}"}, "error",
             )
         except Exception as exc:
             logger.warning("task-draft agent tool failed: %s", name, exc_info=True)
             return await step(
                 name,
-                "finish" if name == "draft_ticket" else "read",
+                "finish",
                 f"{name} failed",
                 args,
                 {"error": str(exc)[:1000]},
                 "error",
             )
+
+    guidance: dict | None = None
+    for path in _GUIDANCE_PATHS:
+        try:
+            guidance = await store.read_repo_file(
+                repo,
+                base_branch,
+                path,
+                start_line=1,
+                end_line=400,
+            )
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("task-draft architecture guide read failed: %s", path, exc_info=True)
+            await step(
+                "read_guidance",
+                "read",
+                f"Failed to read {path}",
+                {"path": path},
+                {"error": str(exc)[:1000]},
+                "error",
+            )
+            raise RuntimeError(f"Espresso couldn't read the repository guide {path}: {exc}") from exc
+        files_read.add(path)
+        await step(
+            "read_guidance",
+            "read",
+            f"Read repository guide {path}",
+            {"path": path, "start_line": 1, "end_line": 400},
+            guidance,
+        )
+        break
+
+    if guidance is None:
+        raise RuntimeError(
+            "Espresso needs a root CLAUDE.md or AGENTS.md to draft a grounded ticket."
+        )
 
     contents = [types.Content(role="user", parts=[types.Part(text=_context_block(
         project_title=project_title,
@@ -305,6 +313,7 @@ async def run_task_draft(
         collaborators=collaborators,
         elements=elements,
         recent_done=recent_done,
+        guidance=guidance,
     ))])]
     config = types.GenerateContentConfig(
         system_instruction=build_task_draft_system_prompt(),
