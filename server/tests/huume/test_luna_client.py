@@ -124,3 +124,58 @@ async def test_generate_content_records_exact_response_and_requests_high_reasoni
     assert result.usage_metadata.thoughts_token_count == 25
     assert result.usage_metadata.cached_content_token_count == 30
     assert result.usage_metadata.cache_write_token_count == 10
+
+
+@pytest.mark.asyncio
+async def test_generate_content_retries_transient_token_rate_limit(monkeypatch):
+    responses = [
+        httpx.Response(
+            429,
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+            json={
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Rate limit reached. Please try again in 9.675s.",
+                },
+            },
+        ),
+        httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+            json={"id": "resp_retry", "output_text": "Done.", "output": [], "usage": {}},
+        ),
+    ]
+    sleeps = []
+    recorded = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            return responses.pop(0)
+
+    async def sleep(delay):
+        sleeps.append(delay)
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="test-key"))
+    monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(luna_client.asyncio, "sleep", sleep)
+    monkeypatch.setattr(luna_client, "record_openai_response", record)
+
+    result = await _LunaModels().generate_content(
+        model="gpt-5.6-luna",
+        contents=[types.Content(role="user", parts=[types.Part(text="Help")])],
+        config=SimpleNamespace(system_instruction="Be useful", tools=[]),
+    )
+
+    assert sleeps == [pytest.approx(9.925)]
+    assert not responses
+    assert result.text == "Done."
+    assert len(recorded) == 1

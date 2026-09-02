@@ -8,8 +8,10 @@ objects to Responses API inputs and translates Luna function calls back.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import re
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -22,6 +24,9 @@ from app.core.services.ai_usage import record_openai_response
 
 
 _RESPONSES_URL = "https://api.openai.com/v1/responses"
+_MAX_RATE_LIMIT_RETRIES = 2
+_MAX_RATE_LIMIT_DELAY_SECONDS = 30.0
+_RETRY_DELAY_RE = re.compile(r"(?:try again in\s+)?([0-9]+(?:\.[0-9]+)?)(ms|s)\b", re.IGNORECASE)
 
 
 def _schema(schema: Any) -> dict[str, Any]:
@@ -125,6 +130,50 @@ def _http_error_detail(exc: httpx.HTTPError) -> str:
     return f"HTTP {response.status_code}: {response.text[:1000]}"
 
 
+def _rate_limit_delay(response: httpx.Response, retry_number: int) -> float:
+    """Return a bounded provider-requested delay for a transient 429."""
+    retry_after = response.headers.get("retry-after")
+    if retry_after:
+        try:
+            return min(float(retry_after) + 0.25, _MAX_RATE_LIMIT_DELAY_SECONDS)
+        except ValueError:
+            pass
+    candidates = [response.headers.get("x-ratelimit-reset-tokens")]
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            candidates.append(error.get("message"))
+    except (TypeError, ValueError):
+        pass
+
+    for candidate in candidates:
+        match = _RETRY_DELAY_RE.search(str(candidate or ""))
+        if not match:
+            continue
+        delay = float(match.group(1))
+        if match.group(2).lower() == "ms":
+            delay /= 1000
+        # A small buffer avoids retrying just before the rolling token window
+        # has replenished by the amount reported by the provider.
+        return min(delay + 0.25, _MAX_RATE_LIMIT_DELAY_SECONDS)
+    return min(10.0 * (retry_number + 1), _MAX_RATE_LIMIT_DELAY_SECONDS)
+
+
+def _is_retryable_rate_limit(exc: httpx.HTTPStatusError) -> bool:
+    if exc.response.status_code != 429:
+        return False
+    try:
+        payload = exc.response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        return not (
+            isinstance(error, dict)
+            and "insufficient_quota" in (error.get("code"), error.get("type"))
+        )
+    except (TypeError, ValueError):
+        return True
+
+
 class _LunaModels:
     def __init__(self) -> None:
         self._previous_response_id: str | None = None
@@ -178,12 +227,22 @@ class _LunaModels:
         started = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    _RESPONSES_URL,
-                    headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                    json=payload,
-                )
-                response.raise_for_status()
+                for retry_number in range(_MAX_RATE_LIMIT_RETRIES + 1):
+                    response = await client.post(
+                        _RESPONSES_URL,
+                        headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                        json=payload,
+                    )
+                    try:
+                        response.raise_for_status()
+                        break
+                    except httpx.HTTPStatusError as exc:
+                        if (
+                            retry_number >= _MAX_RATE_LIMIT_RETRIES
+                            or not _is_retryable_rate_limit(exc)
+                        ):
+                            raise
+                        await asyncio.sleep(_rate_limit_delay(response, retry_number))
         except httpx.HTTPError as exc:
             error_detail = _http_error_detail(exc)
             await record_openai_response(
