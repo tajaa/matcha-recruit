@@ -124,7 +124,7 @@ report_summary() {
 }
 
 post_reconsideration_reply() {
-    local pr_number="${1:-}" expected_note="${2:-}" summary message fixed_pr
+    local pr_number="${1:-}" expected_note="${2:-}" summary message fixed_pr notification_error
     [ -n "$RECONSIDERATION_EVENT_ID" ] || return 0
     [ -n "$expected_note" ] || die "reconsideration result is missing its decision note"
     summary="$(report_summary)"
@@ -158,13 +158,24 @@ post_reconsideration_reply() {
     # The activity thread is durable history, but the AutoPR account can be
     # the same identity as the reporter and ordinary comment notifications
     # deliberately suppress self-notification. This decision-bound endpoint
-    # targets the original context author and is required: a run must not
-    # silently consume their instruction.
-    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/result-notification" \
+    # targets the original context author. During a rolling deployment the
+    # workflow can reach production before the endpoint does; do not turn an
+    # already-published PR/card update into a false failure for that one known
+    # compatibility case. Authentication and all other API errors remain fatal.
+    if ! notification_error="$(mw_api POST \
+        "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/result-notification" \
         "$(jq -n --arg event "$RECONSIDERATION_EVENT_ID" --arg note "$expected_note" \
             --arg message "$message" \
             '{reconsideration_event_id:$event,expected_progress_note:$note,message:$message}')" \
-        >/dev/null
+        2>&1 >/dev/null)"; then
+        if [[ "$notification_error" == *"HTTP 404:"* ]]; then
+            printf 'kanban-autopr: warning: result notification endpoint is not deployed; PR/card publication for task %s remains complete\n' \
+                "$TASK_ID" >&2
+        else
+            printf '%s\n' "$notification_error" >&2
+            return 1
+        fi
+    fi
 }
 
 post_context_request() {

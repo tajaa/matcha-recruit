@@ -77,6 +77,12 @@ else
     printf '%s' "$payload" > "$AUTOPR_TEST_CONTEXT_REQUEST"
   elif [[ "$url" == */autopr/result-notification ]]; then
     printf '%s' "$payload" > "$AUTOPR_TEST_RESULT_NOTIFICATION"
+    result_status="${AUTOPR_TEST_RESULT_NOTIFICATION_STATUS:-200}"
+    if [ "$result_status" != 200 ]; then
+      [ -z "$output_file" ] || printf '{"detail":"notification failure"}' > "$output_file"
+      printf '%s' "$result_status"
+      exit 0
+    fi
   else
     printf '%s' "$payload" > "$AUTOPR_TEST_CARD_PATCH"
   fi
@@ -181,15 +187,37 @@ EOF
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_RESULT_NOTIFICATION_STATUS=404 \
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
     ./scripts/kanban-autopr/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
-)
+) 2>"$TMP_DIR/result-notification-404.stderr"
 
 check "already-fixed reconsideration leaves a threaded note with the covering PR" \
   $(jq -e '.kind == "note" and .reply_to == "ffffffff-0000-4000-8000-000000000002" and (.body | startswith("After reviewing your additional context, AutoPR still found this request already fixed in PR #364."))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
+check "missing result-notification route does not fail completed publication" \
+  $(grep -q 'result notification endpoint is not deployed; PR/card publication for task aaaa0000-0000-4000-8000-000000000001 remains complete' \
+    "$TMP_DIR/result-notification-404.stderr" && echo 0 || echo 1)
+
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_RESULT_NOTIFICATION_STATUS=500 \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
+) >/dev/null 2>"$TMP_DIR/result-notification-500.stderr"
+notification_500_rc=$?
+set -e
+check "result-notification server failures remain fatal" \
+  $([ "$notification_500_rc" != 0 ] \
+    && grep -q 'HTTP 500:.*notification failure' "$TMP_DIR/result-notification-500.stderr" \
+    && echo 0 || echo 1)
 
 cat > "$TMP_DIR/rework-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"rework","progress_note":"from auto setup · build 849 · prod 1111111 · PR #501 · 🔴 C42 · awaiting answers · Human note","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
