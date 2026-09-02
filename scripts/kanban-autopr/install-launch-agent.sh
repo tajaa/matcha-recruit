@@ -53,6 +53,10 @@ stop_launch_agent() {
 
 start_launch_agent() {
     local domain="gui/$(id -u)"
+    # `msandbox off` writes a persistent launchd disable override for this
+    # label. Bootstrap fails outright while that override is set, so clear it
+    # on the only path that is actually authorized to start the timer.
+    "$LAUNCHCTL_BIN" enable "$domain/$LABEL" >/dev/null 2>&1 || true
     "$LAUNCHCTL_BIN" bootstrap "$domain" "$PLIST_DESTINATION"
     "$LAUNCHCTL_BIN" kickstart -k "$domain/$LABEL"
     "$LAUNCHCTL_BIN" print "$domain/$LABEL"

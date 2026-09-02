@@ -435,6 +435,9 @@ start_actions_runner() {
         echo "AutoPR note: runner LaunchAgent plist not found at $AUTOPR_RUNNER_LAUNCH_AGENT_PLIST; leaving the self-hosted runner as-is." >&2
         return 0
     fi
+    # `stop_actions_runner` persistently disables the label, which makes a
+    # later `bootstrap` fail outright. Clear the override before loading.
+    "$AUTOPR_LAUNCHCTL_BIN" enable "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
     "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 \
         || "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_RUNNER_LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
     "$AUTOPR_LAUNCHCTL_BIN" kickstart "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
@@ -447,6 +450,11 @@ stop_actions_runner() {
     [ -x "$AUTOPR_LAUNCHCTL_BIN" ] || return 0
     local domain="gui/$(id -u)"
     "$AUTOPR_LAUNCHCTL_BIN" bootout "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
+    # `bootout` only unloads for this login session. The plist is a LaunchAgent
+    # with RunAtLoad+KeepAlive, so the next login would silently resurrect the
+    # runner without the operator ever typing `msandbox`. `disable` writes a
+    # persistent launchd override, so "off" survives logout and reboot.
+    "$AUTOPR_LAUNCHCTL_BIN" disable "$domain/$AUTOPR_RUNNER_LAUNCH_LABEL" >/dev/null 2>&1 || true
 }
 
 autopr_system_ready() {
@@ -668,6 +676,9 @@ enable_autopr_control_plane() {
         disable_autopr_control_plane
         return 1
     fi
+    # `disable_autopr_control_plane` persistently disables the label so a login
+    # cannot re-arm the timer; clear that override before loading it again.
+    "$AUTOPR_LAUNCHCTL_BIN" enable "$domain/$label" >/dev/null 2>&1 || true
     if ! "$AUTOPR_LAUNCHCTL_BIN" print "$domain/$label" >/dev/null 2>&1 \
         && ! "$AUTOPR_LAUNCHCTL_BIN" bootstrap "$domain" "$AUTOPR_LAUNCH_AGENT_PLIST"; then
         echo "AutoPR startup failed: LaunchAgent could not be loaded." >&2
@@ -702,6 +713,10 @@ disable_autopr_control_plane() {
     local domain="gui/$(id -u)" label="com.matcha.kanban-autopr-dispatch"
     if [ -x "$AUTOPR_LAUNCHCTL_BIN" ]; then
         "$AUTOPR_LAUNCHCTL_BIN" bootout "$domain/$label" >/dev/null 2>&1 || true
+        # RunAtLoad on the installed LaunchAgent means a plain `bootout` lasts
+        # only until the next login. Persist the off state via a launchd
+        # override so nothing ticks again until `msandbox start` re-enables it.
+        "$AUTOPR_LAUNCHCTL_BIN" disable "$domain/$label" >/dev/null 2>&1 || true
     fi
     if [ -x "$AUTOPR_TMUX_BIN" ] \
         && "$AUTOPR_TMUX_BIN" has-session -t "$AUTOPR_TMUX_SESSION" 2>/dev/null; then

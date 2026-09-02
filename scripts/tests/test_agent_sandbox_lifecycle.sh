@@ -79,10 +79,18 @@ case "$*" in
     *github-actions-runner*) flag="$AUTOPR_TEST_ROOT/runner.loaded" ;;
     *) flag="$AUTOPR_TEST_ROOT/launchagent.loaded" ;;
 esac
+# Model launchd's persistent disable override: while a label is disabled,
+# `bootstrap`/`kickstart` fail instead of loading it, which is what makes
+# `msandbox off` survive a logout rather than being undone by RunAtLoad.
 case "$1" in
     print) [ -f "$flag" ] ;;
-    bootstrap|kickstart) : > "$flag" ;;
+    bootstrap|kickstart)
+        if [ -f "$flag.disabled" ]; then exit 1; fi
+        : > "$flag"
+        ;;
     bootout) rm -f "$flag" ;;
+    disable) : > "$flag.disabled" ;;
+    enable) rm -f "$flag.disabled" ;;
 esac
 EOF
 
@@ -229,6 +237,13 @@ check "bare msandbox starts the primary sandbox and complete AutoPR control plan
 
 run_msandbox off >/dev/null
 
+check "msandbox off persistently disables the timer and runner LaunchAgents" \
+    $([ -f "$TMP_DIR/launchagent.loaded.disabled" ] \
+      && [ -f "$TMP_DIR/runner.loaded.disabled" ] \
+      && [ ! -e "$TMP_DIR/launchagent.loaded" ] \
+      && [ ! -e "$TMP_DIR/runner.loaded" ] \
+      && echo 0 || echo 1)
+
 set +e
 env PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_ROOT="$TMP_DIR" \
     AGENT_SANDBOX_SKIP_HOST_SERVICES=1 AGENT_SANDBOX_AUTOPR=1 \
@@ -243,6 +258,16 @@ check "dedicated AutoPR lane fails closed after msandbox off" \
     $([ "$off_rc" != 0 ] \
       && [ ! -e "$TMP_DIR/matcha-kanban-autopr-sandbox.running" ] \
       && echo 0 || echo 1)
+
+run_msandbox start >/dev/null
+check "msandbox start clears the persistent disable and reloads both LaunchAgents" \
+    $([ ! -e "$TMP_DIR/launchagent.loaded.disabled" ] \
+      && [ ! -e "$TMP_DIR/runner.loaded.disabled" ] \
+      && [ -f "$TMP_DIR/launchagent.loaded" ] \
+      && [ -f "$TMP_DIR/runner.loaded" ] \
+      && echo 0 || echo 1)
+# Restore the stopped precondition the rollback check below depends on.
+run_msandbox off >/dev/null
 
 : > "$TMP_DIR/dashboard.broken"
 set +e

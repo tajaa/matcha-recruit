@@ -309,6 +309,13 @@ executor instead of running a gated no-op — it also idles the sibling
 `schema-drift-checks.yml` and `silent-error-autofix.yml`, which share this
 runner, plus `autopr-self-audit.yml` and `admin-updates-autopublish.yml`, until the next `msandbox start` (or
 `AUTOPR_MANAGE_RUNNER=0` to opt out).
+Both LaunchAgents ship `RunAtLoad` (the runner also `KeepAlive`), so a plain
+`bootout` would last only until the next login and the Mac would silently
+resume dispatching and accepting jobs without the operator typing `msandbox`.
+Shutdown therefore also writes a persistent `launchctl disable` override for
+both labels; `msandbox start` and `install-launch-agent.sh` clear it with
+`launchctl enable` right before bootstrapping. Off survives logout and reboot,
+and only an explicit start turns it back on.
 The dispatcher, GitHub workflow, and dedicated model launcher independently
 require the marker, running primary workspace, loaded timer, and four live
 dashboard panes.
