@@ -20,7 +20,7 @@ from ._shared import (
     find_conflicts, raise_conflict, raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
     fetch_locked_shift_pair, check_job_qualification, raise_not_qualified,
-    reconcile_warning_events,
+    reconcile_warning_events, lock_scheduling_employees,
 )
 from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
@@ -98,6 +98,7 @@ async def move_employee_assignment(
             shifts = await fetch_locked_shift_pair(
                 conn, company_id, body.from_shift_id, body.to_shift_id,
             )
+            await lock_scheduling_employees(conn, company_id, [body.employee_id])
             source = shifts.get(str(body.from_shift_id))
             target = shifts.get(str(body.to_shift_id))
             if source is None or target is None:
@@ -248,53 +249,59 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                           current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        shift = await fetch_shift_for_write(conn, company_id, shift_id)
-        assert_shift_open_for_assignment(shift)
-        await assert_employee_in_company(conn, company_id, body.employee_id)
-        await assert_employee_schedulable_at(conn, company_id, body.employee_id, shift["location_id"])
-        avail_map = await fetch_availability(conn, company_id, [body.employee_id])
-        availability = availability_violations(
-            avail_map[body.employee_id], shift["starts_at"], shift["ends_at"],
-        )
-        unqualified = await check_job_qualification(
-            conn, company_id, body.employee_id, shift["job_id"],
-            starts_at=shift["starts_at"],
-        )
-        if not force:
-            conflicts = await find_conflicts(
-                conn, company_id, body.employee_id,
-                shift["starts_at"], shift["ends_at"],
-                exclude_shift_id=shift_id,
-            )
-            if conflicts:
-                raise_conflict(body.employee_id, conflicts)
-            if shift["assigned_count"] >= shift["required_staff"]:
-                raise_shift_full(shift["assigned_count"], shift["required_staff"])
-            if availability:
-                raise_outside_availability(body.employee_id, availability)
-            if unqualified:
-                raise_not_qualified(unqualified)
-        break_plan = await resolve_shift_break_plan(
-            conn, company_id, location_id=shift["location_id"],
-            starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-            employee_id=body.employee_id,
-        )
-        effective_break = max(
-            int(shift["break_minutes"] or 0),
-            minimum_meal_break_minutes(break_plan),
-        )
-        # Compliance runs regardless of force — a minor-hour BLOCK (422) can't be
-        # overridden, advisories (409) can.
-        violations = await check_shift_compliance(
-            conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"],
-            starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-            break_minutes=effective_break,
-            employee_id=body.employee_id, exclude_shift_id=shift_id,
-            fw_event="assign", fw_shift_published=(shift["status"] == "published"),
-            shift_kind=shift["kind"], training_requirement_id=shift["training_requirement_id"],
-        )
-        raise_for_violations(violations, force=force)
         async with conn.transaction():
+            # Lock before every state-dependent check.  This serializes
+            # cancellation, retiming, capacity changes, and competing
+            # assignments through the same shift row.
+            shift = await fetch_shift_for_write(conn, company_id, shift_id)
+            assert_shift_open_for_assignment(shift)
+            await assert_employee_in_company(conn, company_id, body.employee_id)
+            await assert_employee_schedulable_at(
+                conn, company_id, body.employee_id, shift["location_id"],
+            )
+            avail_map = await fetch_availability(conn, company_id, [body.employee_id])
+            availability = availability_violations(
+                avail_map[body.employee_id], shift["starts_at"], shift["ends_at"],
+            )
+            unqualified = await check_job_qualification(
+                conn, company_id, body.employee_id, shift["job_id"],
+                starts_at=shift["starts_at"],
+            )
+            if not force:
+                conflicts = await find_conflicts(
+                    conn, company_id, body.employee_id,
+                    shift["starts_at"], shift["ends_at"],
+                    exclude_shift_id=shift_id,
+                )
+                if conflicts:
+                    raise_conflict(body.employee_id, conflicts)
+                if shift["assigned_count"] >= shift["required_staff"]:
+                    raise_shift_full(shift["assigned_count"], shift["required_staff"])
+                if availability:
+                    raise_outside_availability(body.employee_id, availability)
+                if unqualified:
+                    raise_not_qualified(unqualified)
+            break_plan = await resolve_shift_break_plan(
+                conn, company_id, location_id=shift["location_id"],
+                starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+                employee_id=body.employee_id,
+            )
+            effective_break = max(
+                int(shift["break_minutes"] or 0),
+                minimum_meal_break_minutes(break_plan),
+            )
+            # Compliance runs regardless of force — a minor-hour BLOCK (422)
+            # cannot be overridden; advisories (409) can.
+            violations = await check_shift_compliance(
+                conn, company_id, location_id=shift["location_id"], job_id=shift["job_id"],
+                starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+                break_minutes=effective_break,
+                employee_id=body.employee_id, exclude_shift_id=shift_id,
+                fw_event="assign", fw_shift_published=(shift["status"] == "published"),
+                shift_kind=shift["kind"],
+                training_requirement_id=shift["training_requirement_id"],
+            )
+            raise_for_violations(violations, force=force)
             await apply_assignment_core(
                 conn, company_id, shift_row=shift, employee_id=body.employee_id,
                 actor_user_id=current_user.id,
@@ -322,18 +329,18 @@ async def unassign_employee(shift_id: UUID, employee_id: UUID,
                             current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        shift = await fetch_shift_for_write(conn, company_id, shift_id)
-        if shift["status"] == "published":
-            # Full check_shift_compliance would also re-run meal-break/OT/minor
-            # checks that don't make sense for a REMOVAL (they exist to gate
-            # scheduling someone, not un-scheduling them) — just the FW half.
-            violations = await _fair_workweek_advisories(
-                conn, company_id, location_id=shift["location_id"],
-                starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-                event="unassign", shift_published=True, min_rest_gap_hours=None,
-            )
-            raise_for_violations(violations, force=force)
         async with conn.transaction():
+            shift = await fetch_shift_for_write(conn, company_id, shift_id)
+            if shift["status"] == "published":
+                # Full check_shift_compliance would also re-run meal-break/OT/minor
+                # checks that don't make sense for a REMOVAL (they exist to gate
+                # scheduling someone, not un-scheduling them) — just the FW half.
+                violations = await _fair_workweek_advisories(
+                    conn, company_id, location_id=shift["location_id"],
+                    starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+                    event="unassign", shift_published=True, min_rest_gap_hours=None,
+                )
+                raise_for_violations(violations, force=force)
             await conn.execute(
                 "DELETE FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
                 shift_id, employee_id,

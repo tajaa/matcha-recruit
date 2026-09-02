@@ -35,6 +35,7 @@ def test_direct_assignment_fetch_shape_includes_shift_id():
     class Connection:
         async def fetchrow(self, query, *args):
             assert "SELECT s.id," in query
+            assert "FOR UPDATE" in query
             return {"id": args[0]}
 
     row = _run(fetch_shift_for_write(Connection(), COMPANY_ID, shift_id))
@@ -98,6 +99,8 @@ class _Connection:
         raise AssertionError(f"unexpected fetchrow: {' '.join(query.split())[:100]}")
 
     async def fetchval(self, query, *args):
+        if "pg_advisory_xact_lock" in query:
+            return None
         if "SELECT 1" in query:
             shift_id, employee_id = args
             return 1 if (shift_id, employee_id) in self.assignments else None

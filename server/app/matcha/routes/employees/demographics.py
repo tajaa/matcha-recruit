@@ -8,9 +8,7 @@ from pydantic import BaseModel
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.services.scheduling.schedule_guidance import (
-    refresh_assignment_break_guidance_and_minimum,
-)
+from app.workers.tasks.schedule_break_refresh import enqueue_employee_schedule_break_refresh
 
 router = APIRouter()
 
@@ -59,22 +57,11 @@ async def update_date_of_birth(
                 company_id,
                 body.date_of_birth,
             )
-            future_assignments = await conn.fetch(
-                """
-                SELECT s.id AS shift_id
-                FROM schedule_shift_assignments a
-                JOIN schedule_shifts s ON s.id = a.shift_id
-                WHERE a.company_id = $1 AND a.employee_id = $2
-                  AND s.status <> 'cancelled' AND s.starts_at::date >= CURRENT_DATE
-                ORDER BY s.id
-                """,
-                company_id, employee_id,
-            )
-            for assignment in future_assignments:
-                await refresh_assignment_break_guidance_and_minimum(
-                    conn, company_id, shift_id=assignment["shift_id"],
-                    employee_id=employee_id, actor_user_id=current_user.id,
-                    source="employee_date_of_birth_update",
-                )
+
+        enqueue_employee_schedule_break_refresh(
+            company_id=company_id, employee_id=employee_id,
+            actor_user_id=current_user.id,
+            source="employee_date_of_birth_update",
+        )
 
     return {"minor_status": _minor_status(body.date_of_birth), "updated": True}

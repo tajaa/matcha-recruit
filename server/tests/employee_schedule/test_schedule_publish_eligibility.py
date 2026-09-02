@@ -38,16 +38,23 @@ def test_publish_gate_locks_assignments_and_blocks_expired_credentials():
     employee_id = uuid4()
     conn = PublishConn([{"shift_id": shift["id"], "employee_id": employee_id}])
 
-    with mock.patch.object(
-        shifts,
-        "check_shift_compliance",
-        mock.AsyncMock(return_value=[{
-            "check": "schedule_eligibility",
-            "severity": "block",
-            "code": "credential_expired",
-            "message": "Food Handler Card expired 2025-01-10 and blocks new scheduling.",
-        }]),
-    ) as check:
+    with (
+        mock.patch.object(
+            shifts, "_resolve_break_plans_for_ids",
+            mock.AsyncMock(return_value=[object()]),
+        ),
+        mock.patch.object(shifts, "minimum_meal_break_minutes", return_value=30),
+        mock.patch.object(
+            shifts,
+            "check_shift_compliance",
+            mock.AsyncMock(return_value=[{
+                "check": "schedule_eligibility",
+                "severity": "block",
+                "code": "credential_expired",
+                "message": "Food Handler Card expired 2025-01-10 and blocks new scheduling.",
+            }]),
+        ) as check,
+    ):
         with pytest.raises(HTTPException) as exc:
             asyncio.run(shifts._lock_and_assert_publish_assignments_eligible(
                 conn, uuid4(), [shift],

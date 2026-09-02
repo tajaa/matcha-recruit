@@ -60,6 +60,13 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const [requirementId, setRequirementId] = useState(shift?.training_requirement_id ?? '')
   const [requirements, setRequirements] = useState<TrainingRequirement[]>([])
   const [validationError, setValidationError] = useState<string | null>(null)
+  const persistedBreakMinutes = shift?.break_minutes
+
+  useEffect(() => {
+    if (!breakDirty && persistedBreakMinutes !== undefined) {
+      setBreakMinutes(String(persistedBreakMinutes))
+    }
+  }, [breakDirty, persistedBreakMinutes])
 
   useEffect(() => {
     if (!trainingEnabled || editing) return

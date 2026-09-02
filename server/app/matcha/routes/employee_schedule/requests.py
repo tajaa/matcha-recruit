@@ -25,7 +25,7 @@ from ._shared import (
     INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
     check_job_qualification, find_conflicts, raise_conflict, raise_not_qualified,
     fetch_availability, availability_violations, raise_outside_availability,
-    reconcile_warning_events, fetch_locked_shift_pair,
+    reconcile_warning_events, fetch_locked_shift_pair, lock_scheduling_employees,
 )
 from ._compliance import check_shift_compliance, raise_for_violations
 
@@ -132,6 +132,12 @@ async def review_request(request_id: UUID, body: RequestReview,
                         raise HTTPException(status_code=409, detail="Swap is missing its counterparty shift")
                     shift_ids.append(req["counter_shift_id"])
                 locked = await fetch_locked_shift_pair(conn, company_id, *shift_ids)
+                await lock_scheduling_employees(
+                    conn, company_id,
+                    [employee_id for employee_id in (
+                        req["employee_id"], req["target_employee_id"],
+                    ) if employee_id is not None],
+                )
                 offered = locked.get(str(req["shift_id"]))
                 if offered is None or offered["status"] != "published":
                     raise HTTPException(status_code=409, detail="Offered shift is no longer published")

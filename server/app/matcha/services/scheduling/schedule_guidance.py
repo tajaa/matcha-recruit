@@ -207,6 +207,58 @@ async def resolve_shift_break_plans(
     return plans
 
 
+async def resolve_open_shift_break_plans(
+    conn,
+    company_id: UUID,
+    *,
+    location_id: UUID | None,
+    windows: Sequence[tuple[datetime, datetime]],
+) -> list[BreakPlan]:
+    """Resolve many open-shift windows with one rules read per local date."""
+    if not windows:
+        return []
+    if location_id is None:
+        return [
+            evaluate_break_plan(
+                starts_at=starts_at, ends_at=ends_at,
+                timezone=ZoneInfo("UTC"), rules=(),
+            )
+            for starts_at, ends_at in windows
+        ]
+
+    timezone_name = await conn.fetchval(
+        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+        location_id, company_id,
+    )
+    try:
+        location_timezone = ZoneInfo(timezone_name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        location_timezone = ZoneInfo("UTC")
+
+    resolved_by_date = {}
+    plans: list[BreakPlan] = []
+    for starts_at, ends_at in windows:
+        shift_date = reinterpret_schedule_wall_time(starts_at, location_timezone).date()
+        resolved = resolved_by_date.get(shift_date)
+        if resolved is None:
+            resolved = await resolve_break_rules(
+                conn, company_id=company_id, location_id=location_id,
+                shift_date=shift_date,
+            )
+            resolved_by_date[shift_date] = resolved
+        effective_timezone = resolved.timezone or location_timezone
+        plan = evaluate_break_plan(
+            starts_at=starts_at, ends_at=ends_at,
+            timezone=effective_timezone, rules=resolved.rules,
+        )
+        plans.append(replace(
+            plan,
+            status="error" if resolved.source == "error" else plan.status,
+            advisories=tuple((*plan.advisories, *resolved.advisories)),
+        ))
+    return plans
+
+
 async def refresh_assignment_break_guidance(
     conn,
     company_id: UUID,

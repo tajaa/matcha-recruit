@@ -114,6 +114,12 @@ async def find_conflicts(
     Used to block accidental double-booking on the assignment paths; callers
     expose a `force` override for deliberate back-to-back/overlap scheduling.
     """
+    # A transaction-scoped employee lock makes "check then assign" atomic
+    # across different target shifts.  Without it, two requests can lock two
+    # different shift rows, both observe no conflict, and double-book the same
+    # person.  Write callers run this inside their mutation transaction;
+    # preview callers merely hold the lock for these two read statements.
+    await lock_scheduling_employees(conn, company_id, [employee_id])
     rows = await conn.fetch(
         """
         SELECT s.id, s.starts_at, s.ends_at, s.role, s.status
@@ -137,6 +143,17 @@ async def find_conflicts(
         }
         for r in rows
     ]
+
+
+async def lock_scheduling_employees(
+    conn, company_id: UUID, employee_ids: list[UUID],
+) -> None:
+    """Take stable transaction locks for cross-shift conflict decisions."""
+    for employee_id in sorted(set(employee_ids)):
+        await conn.fetchval(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            f"schedule-assignment:{company_id}:{employee_id}",
+        )
 
 
 async def fetch_availability(
@@ -620,7 +637,7 @@ async def generate_week_template_shifts(
     from .schedule_rules import template_windows
     from .shift_compliance import check_shift_compliance
     from .schedule_breaks import minimum_meal_break_minutes
-    from .schedule_guidance import resolve_shift_break_plan
+    from .schedule_guidance import resolve_open_shift_break_plans
 
     series_id = uuid4()
     total_created = 0
@@ -628,6 +645,8 @@ async def generate_week_template_shifts(
     compliance_warnings: list[dict] = []
     per_block: list[dict] = []
 
+    prepared: list[dict] = []
+    windows_by_location: dict[UUID | None, list[tuple[int, int, datetime, datetime]]] = {}
     for blk in blocks:
         days = blk["days_of_week"]
         if isinstance(days, str):
@@ -645,16 +664,32 @@ async def generate_week_template_shifts(
         if not starts:
             continue
         total_created += len(starts)
-        effective_breaks: list[int] = []
-        for starts_at, ends_at in zip(starts, ends):
-            plan = await resolve_shift_break_plan(
-                conn, company_id, location_id=blk["location_id"],
-                starts_at=starts_at, ends_at=ends_at,
-            )
-            effective_breaks.append(max(
-                int(blk["break_minutes"] or 0),
-                minimum_meal_break_minutes(plan),
-            ))
+        entry_index = len(prepared)
+        prepared.append({"block": blk, "starts": starts, "ends": ends, "plans": []})
+        location_windows = windows_by_location.setdefault(blk["location_id"], [])
+        location_windows.extend(
+            (entry_index, window_index, starts_at, ends_at)
+            for window_index, (starts_at, ends_at) in enumerate(zip(starts, ends))
+        )
+
+    # Resolve location metadata once and rule sets once per local calendar
+    # date, rather than issuing several queries for every materialized shift.
+    for location_id, indexed_windows in windows_by_location.items():
+        plans = await resolve_open_shift_break_plans(
+            conn, company_id, location_id=location_id,
+            windows=[(item[2], item[3]) for item in indexed_windows],
+        )
+        for (entry_index, _window_index, _starts_at, _ends_at), plan in zip(indexed_windows, plans):
+            prepared[entry_index]["plans"].append(plan)
+
+    for entry in prepared:
+        blk = entry["block"]
+        starts = entry["starts"]
+        ends = entry["ends"]
+        effective_breaks = [
+            max(int(blk["break_minutes"] or 0), minimum_meal_break_minutes(plan))
+            for plan in entry["plans"]
+        ]
 
         # One compliance check per block (not per shift, not once for the
         # whole template) — each block can have a different time

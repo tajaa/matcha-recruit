@@ -95,7 +95,10 @@ class ShiftUpdate(BaseModel):
     role: Optional[str] = Field(None, max_length=150)
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
-    break_minutes: Optional[int] = Field(None, ge=0, le=1440)
+    # Omission means "leave unchanged"; explicit null is not a valid stored
+    # value.  Keeping the annotation non-null also makes OpenAPI tell clients
+    # the truth while exclude_unset still distinguishes an omitted field.
+    break_minutes: int = Field(default=None, ge=0, le=1440)  # type: ignore[assignment]
     break_mode: Optional[Literal["auto", "manual"]] = None
     required_staff: Optional[int] = Field(None, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
@@ -105,6 +108,13 @@ class ShiftUpdate(BaseModel):
 
     _utc = field_validator("starts_at", "ends_at")(_as_utc)
 
+    @field_validator("break_minutes", mode="before")
+    @classmethod
+    def _reject_null_break_minutes(cls, value):
+        if value is None:
+            raise ValueError("break_minutes cannot be null")
+        return value
+
     @model_validator(mode="after")
     def _check_window(self) -> "ShiftUpdate":
         # Only when the caller sent both — a one-sided retime is checked against
@@ -112,7 +122,7 @@ class ShiftUpdate(BaseModel):
         if self.starts_at is not None and self.ends_at is not None:
             if self.ends_at <= self.starts_at:
                 raise ValueError("ends_at must be after starts_at")
-        if self.break_mode == "manual" and "break_minutes" not in self.model_fields_set:
+        if self.break_mode == "manual" and self.break_minutes is None:
             raise ValueError("manual break_mode requires break_minutes")
         return self
 

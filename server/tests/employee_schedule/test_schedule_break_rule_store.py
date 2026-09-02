@@ -4,6 +4,10 @@ import asyncio
 from datetime import date
 from uuid import uuid4
 
+import pytest
+
+from app.core.models.schedule_break_rules import BreakRuleSetImport
+from app.core.services.schedule_break_rule_import import review_break_rule_set
 from app.matcha.services.scheduling.schedule_break_rule_store import resolve_break_rules
 
 
@@ -221,3 +225,45 @@ def test_aggregate_meal_break_cannot_exceed_shift_api_limit():
 
     assert result.source == "error"
     assert "1440" in result.advisories[0]["metadata"]["reason"]
+
+
+def test_import_rejects_rules_the_runtime_parser_cannot_enforce():
+    with pytest.raises(ValueError, match="whole numbers"):
+        BreakRuleSetImport(
+            jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
+            rules={"meal_periods": [{
+                "trigger_after_minutes": 300,
+                "duration_minutes": "thirty",
+            }]},
+            citation="Authority", source_type="manual",
+        )
+
+
+def test_approval_revalidates_the_locked_persisted_payload():
+    class Transaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class Connection:
+        def transaction(self):
+            return Transaction()
+
+        async def fetchrow(self, query, *_args):
+            assert "FOR UPDATE" in query
+            return {
+                "id": uuid4(), "jurisdiction_id": uuid4(),
+                "rules": {"meal_periods": [{
+                    "trigger_after_minutes": 300,
+                    "duration_minutes": "invalid",
+                }]},
+                "citation": "Authority",
+            }
+
+    with pytest.raises(ValueError, match="whole numbers"):
+        _run(review_break_rule_set(
+            Connection(), rule_set_id=uuid4(), decision="approved",
+            actor_user_id=uuid4(),
+        ))

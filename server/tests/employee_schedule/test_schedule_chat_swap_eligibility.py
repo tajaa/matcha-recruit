@@ -22,6 +22,7 @@ class SwapConn:
             second_shift["id"]: [{"employee_id": second_employee}],
         }
         self.executed = []
+        self.locked_shift_ids = []
 
     def transaction(self):
         return _Transaction()
@@ -30,7 +31,21 @@ class SwapConn:
         assert "FROM schedule_shifts" in query
         return self.shifts.get(shift_id)
 
-    async def fetch(self, query, shift_id):
+    async def fetchval(self, query, *_args):
+        assert "pg_advisory_xact_lock" in query
+        return None
+
+    async def fetch(self, query, *args):
+        if "FROM schedule_shifts" in query:
+            self.locked_shift_ids = args[1]
+            return [{"id": shift_id} for shift_id in args[1]]
+        if "shift_id = ANY" in query:
+            return [
+                assignment
+                for shift_id in args[0]
+                for assignment in self.assignments[shift_id]
+            ]
+        shift_id = args[0]
         assert "schedule_shift_assignments" in query
         return self.assignments[shift_id]
 
@@ -105,5 +120,6 @@ def test_huume_swap_checks_destination_eligibility_before_writes():
         ))
 
     assert "Food Handler Card expired 2025-01-10" in result
+    assert conn.locked_shift_ids == sorted([first_id, second_id])
     remove.assert_not_awaited()
     apply.assert_not_awaited()

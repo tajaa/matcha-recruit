@@ -119,4 +119,29 @@ describe('ShiftInspector validation', () => {
       break_minutes: 30,
     }))
   })
+
+  it('shows the generated break returned after an Auto save', () => {
+    const baseShift = {
+      id: 'shift-1', starts_at: '2026-08-31T09:00:00Z', ends_at: '2026-08-31T17:00:00Z',
+      role: null, job_id: null, department: null, break_minutes: 0,
+      required_staff: 1, notes: null, kind: 'work', training_requirement_id: null,
+      assignments: [],
+    }
+    const props = {
+      defaults: null, locationId: 'loc-1', locationName: 'Downtown', roster: [], jobs: [],
+      trainingEnabled: false, readOnly: false, saving: false,
+      onCreate: vi.fn().mockResolvedValue(undefined),
+      onUpdate: vi.fn().mockResolvedValue(undefined),
+      onDelete: vi.fn().mockResolvedValue(undefined),
+      onAssignmentUpdated: vi.fn().mockResolvedValue(undefined), onClose: vi.fn(),
+    }
+    const view = render(<ShiftInspector {...props} shift={baseShift as never} />)
+    expect(screen.getByLabelText('Planned break (minutes)')).toHaveValue(0)
+
+    view.rerender(
+      <ShiftInspector {...props} shift={{ ...baseShift, break_minutes: 30 } as never} />,
+    )
+
+    expect(screen.getByLabelText('Planned break (minutes)')).toHaveValue(30)
+  })
 })

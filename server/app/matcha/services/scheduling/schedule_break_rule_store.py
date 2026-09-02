@@ -194,6 +194,15 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
     return parsed
 
 
+def validate_break_rule_payload(payload: Any, citation: str = "") -> None:
+    """Validate persisted/imported rules with the runtime parser.
+
+    Keeping one parser for import, approval, and resolution prevents an
+    approved payload from silently degrading to an empty rule set at runtime.
+    """
+    _rules_from_payload(UUID(int=0), payload, citation)
+
+
 def _location_timezone(value: str | None) -> ZoneInfo | None:
     if not value:
         return None

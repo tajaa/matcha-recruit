@@ -69,6 +69,7 @@ celery_app = Celery(
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",
         "app.workers.tasks.schedule_warning_events",
+        "app.workers.tasks.schedule_break_refresh",
         "app.workers.tasks.schedule_daily_digest",
         "app.workers.tasks.schedule_request_notifications",
         "app.workers.tasks.schedule_auto_generation",
@@ -240,6 +241,11 @@ def on_worker_ready(**kwargs):
         reconcile_project_agent_runs.delay()
     except Exception:
         logger.exception("[Worker] Failed to enqueue project-agent reconciliation")
+    try:
+        from app.workers.tasks.schedule_break_refresh import recover_stale_employee_schedule_breaks
+        recover_stale_employee_schedule_breaks.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue schedule-break recovery")
 
     task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
     flags = _scheduler_flags(task_keys)

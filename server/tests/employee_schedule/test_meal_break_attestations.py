@@ -28,8 +28,19 @@ def test_waiver_endpoint_scopes_to_company_and_returns_only_effective_attestatio
     assert "FROM employee_compliance_attestations a" in source
     assert "WHERE a.company_id = $1 AND a.employee_id = $2" in source
     assert "ORDER BY a.effective_from DESC, a.confirmed_at DESC" in source
-    assert "s.starts_at::date >= GREATEST($3, CURRENT_DATE)" in source
-    assert "refresh_assignment_break_guidance_and_minimum" in source
+    assert "enqueue_employee_schedule_break_refresh" in source
+    worker = Path(__file__).parents[2] / "app/workers/tasks/schedule_break_refresh.py"
+    worker_source = worker.read_text()
+    assert "LEFT JOIN business_locations l ON l.id = s.location_id" in worker_source
+    assert "LEFT JOIN pg_timezone_names tz ON tz.name = l.timezone" in worker_source
+    assert "NOW() AT TIME ZONE COALESCE(tz.name, 'UTC')" in worker_source
+    assert "GREATEST(" in worker_source
+    assert "LIMIT $6" in worker_source
+    assert "$4::timestamptz" in worker_source
+    assert "recover_stale_employee_schedule_breaks" in worker_source
+    assert "jurisdiction_descendants" in worker_source
+    assert "r.updated_at > a.guidance_evaluated_at" in worker_source
+    assert "refresh_assignment_break_guidance_and_minimum" in worker_source
 
 
 def test_guidance_evaluates_waivers_on_the_location_calendar_day():
