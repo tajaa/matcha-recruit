@@ -3,6 +3,7 @@
 #
 # Usage:
 #   checkpoint.sh save CARD REPORT DECISION STARTED_AT_EPOCH TIMEOUT_MINUTES
+#   checkpoint.sh snapshot CARD
 #   checkpoint.sh latest CARD
 #   checkpoint.sh consume CARD
 set -euo pipefail
@@ -36,6 +37,12 @@ CHECKPOINT_MAX_AGE_HOURS="${AUTOPR_CHECKPOINT_MAX_AGE_HOURS:-24}"
 # status) is the only trustworthy evidence that the step was killed at its
 # time limit rather than failing on its own.
 INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
+# In-flight snapshots run against a LIVE container, which owns
+# $SANDBOX_WORKSPACE/.git/index. Keep a private index outside the workspace so
+# a snapshot never contends for index.lock with the model's own git commands,
+# and persist it across snapshots so its stat cache keeps each pass cheap.
+SNAPSHOT_INDEX="${AUTOPR_SNAPSHOT_INDEX:-$RUNTIME_ROOT/snapshot.index}"
+SNAPSHOT_INDEX_BASE="$SNAPSHOT_INDEX.base"
 
 card_identity() {
     local card_file="$1" task_id
@@ -90,6 +97,28 @@ prune_checkpoints() {
         -mtime "+$CHECKPOINT_RETENTION_DAYS" -delete 2>/dev/null || true
 }
 
+# The card this sandbox clone was created for, or empty when it carries no
+# stamp (a clone from before this guard, or one never reached by the bridge).
+sandbox_workspace_task_id() {
+    [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/task-id" ] || return 0
+    tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/task-id" \
+        | tr '[:upper:]' '[:lower:]'
+}
+
+# The clone's model base SHA, but ONLY when the clone belongs to $1 and that
+# commit is really present. Empty otherwise, which is what makes a leftover
+# workspace from another card unharvestable.
+sandbox_base_sha() {
+    local task_id="$1" base_sha
+    [ "$(sandbox_workspace_task_id)" = "$task_id" ] || return 0
+    [ -d "$SANDBOX_WORKSPACE/.git" ] || return 0
+    [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha" ] || return 0
+    base_sha="$(tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha")"
+    [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+    git -C "$SANDBOX_WORKSPACE" cat-file -e "$base_sha^{commit}" 2>/dev/null || return 0
+    printf '%s' "$base_sha"
+}
+
 bounded_copy() {
     local source_file="$1" destination="$2" max_bytes="$3" size
     [ -s "$source_file" ] || return 0
@@ -100,6 +129,27 @@ bounded_copy() {
         head -c "$max_bytes" "$source_file" > "$destination"
     fi
     chmod 600 "$destination"
+}
+
+# bounded_copy through a temp file, so a reader never sees a half-written
+# input. Returns non-zero when there was nothing to copy.
+atomic_bounded_copy() {
+    local source_file="$1" destination="$2" max_bytes="$3"
+    [ -s "$source_file" ] || return 1
+    bounded_copy "$source_file" "$destination.tmp" "$max_bytes"
+    [ -s "$destination.tmp" ] || { rm -f "$destination.tmp"; return 1; }
+    mv "$destination.tmp" "$destination"
+}
+
+write_transcript() {
+    local destination="$1"
+    [ -s "$LIVE_LOG" ] || return 1
+    tail -c $((MAX_TRANSCRIPT_BYTES * 4)) "$LIVE_LOG" \
+        | LC_ALL=C sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" -e 's/\r//g' \
+        | tail -c "$MAX_TRANSCRIPT_BYTES" > "$destination.tmp"
+    [ -s "$destination.tmp" ] || { rm -f "$destination.tmp"; return 1; }
+    chmod 600 "$destination.tmp"
+    mv "$destination.tmp" "$destination"
 }
 
 # True when the investigation was killed rather than exiting on its own. A
@@ -158,6 +208,94 @@ preserved_note_parts() {
     printf '%s\t%s' "$extras" "$preserved"
 }
 
+# One in-flight snapshot, taken WHILE the model is still working.
+# save_checkpoint is a separate workflow step: it never runs if this machine or
+# the runner process dies outright, and the next run's `rm -rf` on the sandbox
+# then destroys the only copy. This timer is what turns a hard kill into losing
+# minutes of model work instead of the entire investigation.
+snapshot_checkpoint() {
+    local card_file="$1" task_id id8 base_sha root run_key dir seeded
+    local patch_bytes=0 patch_saved=false changed_files_json='[]' changed_file_count=0
+    local report_saved=false decision_saved=false transcript_saved=false
+
+    task_id="$(card_identity "$card_file")"
+    id8="$(jq -r '.id8 // empty' "$card_file")"
+    base_sha="$(sandbox_base_sha "$task_id")"
+    [ -n "$base_sha" ] || return 0
+
+    root="$CHECKPOINT_ROOT/$task_id"
+    run_key="${GITHUB_RUN_ID:-local}-inflight"
+    dir="$root/$run_key"
+    umask 077
+    mkdir -p "$dir"
+    chmod 700 "$CHECKPOINT_ROOT" "$root" "$dir"
+
+    seeded="$(cat "$SNAPSHOT_INDEX_BASE" 2>/dev/null || true)"
+    if [ "$seeded" != "$base_sha" ]; then
+        rm -f "$SNAPSHOT_INDEX"
+        GIT_INDEX_FILE="$SNAPSHOT_INDEX" git -C "$SANDBOX_WORKSPACE" \
+            read-tree "$base_sha" 2>/dev/null || return 0
+        printf '%s' "$base_sha" > "$SNAPSHOT_INDEX_BASE"
+    fi
+    if ! GIT_INDEX_FILE="$SNAPSHOT_INDEX" git -C "$SANDBOX_WORKSPACE" \
+            add --all -- . 2>/dev/null \
+        || ! GIT_INDEX_FILE="$SNAPSHOT_INDEX" git -C "$SANDBOX_WORKSPACE" \
+            diff --cached --name-only "$base_sha" -- . > "$dir/changed-files.txt.tmp" 2>/dev/null \
+        || ! GIT_INDEX_FILE="$SNAPSHOT_INDEX" git -C "$SANDBOX_WORKSPACE" \
+            diff --cached --binary --full-index "$base_sha" -- . > "$dir/model.patch.tmp" 2>/dev/null; then
+        # The model is mid-write; the next pass sees a settled tree.
+        rm -f "$dir/changed-files.txt.tmp" "$dir/model.patch.tmp"
+        return 0
+    fi
+
+    patch_bytes="$(wc -c < "$dir/model.patch.tmp" | tr -d '[:space:]')"
+    if [ "$patch_bytes" -gt 0 ] && [ "$patch_bytes" -le "$MAX_PATCH_BYTES" ]; then
+        chmod 600 "$dir/model.patch.tmp" "$dir/changed-files.txt.tmp"
+        mv "$dir/changed-files.txt.tmp" "$dir/changed-files.txt"
+        mv "$dir/model.patch.tmp" "$dir/model.patch"
+        patch_saved=true
+        changed_files_json="$(jq -Rsc \
+            'split("\n") | map(select(length > 0))' "$dir/changed-files.txt")"
+        changed_file_count="$(jq 'length' <<< "$changed_files_json")"
+    else
+        rm -f "$dir/changed-files.txt.tmp" "$dir/model.patch.tmp"
+    fi
+
+    ! atomic_bounded_copy "$SANDBOX_WORKSPACE/.git/autopr-io/output/report.md" \
+        "$dir/report.md" "$MAX_REPORT_BYTES" || report_saved=true
+    ! atomic_bounded_copy "$SANDBOX_WORKSPACE/.git/autopr-io/output/decision.json" \
+        "$dir/decision.json" "$MAX_DECISION_BYTES" || decision_saved=true
+    ! write_transcript "$dir/transcript.log" || transcript_saved=true
+
+    jq -n \
+        --arg task_id "$task_id" --arg id8 "$id8" --arg run_id "${GITHUB_RUN_ID:-local}" \
+        --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg base_sha "$base_sha" \
+        --argjson patch_saved "$patch_saved" --argjson patch_bytes "$patch_bytes" \
+        --argjson changed_file_count "$changed_file_count" \
+        --argjson changed_files "$changed_files_json" \
+        --argjson report_saved "$report_saved" --argjson decision_saved "$decision_saved" \
+        --argjson transcript_saved "$transcript_saved" \
+        '{schema_version:1,task_id:$task_id,id8:$id8,run_id:$run_id,
+          created_at:$created_at,base_sha:$base_sha,inflight:true,
+          runtime_limited:false,elapsed_seconds:null,timeout_minutes:null,
+          patch_saved:$patch_saved,patch_bytes:$patch_bytes,
+          changed_file_count:$changed_file_count,changed_files:$changed_files,
+          report_saved:$report_saved,decision_saved:$decision_saved,
+          transcript_saved:$transcript_saved,progress_excerpt:""}' \
+        > "$dir/metadata.json.tmp"
+    chmod 600 "$dir/metadata.json.tmp"
+    mv "$dir/metadata.json.tmp" "$dir/metadata.json"
+
+    # Only claim the resume pointer once there is real work behind it.
+    if [ "$patch_saved" = true ] || [ "$report_saved" = true ] \
+        || [ "$decision_saved" = true ]; then
+        printf '%s\n' "$run_key" > "$root/active.tmp"
+        chmod 600 "$root/active.tmp"
+        mv "$root/active.tmp" "$root/active"
+        printf '%s\n' "$dir"
+    fi
+}
+
 save_checkpoint() {
     local card_file="$1" report_file="$2" decision_file="$3"
     local started_at="$4" timeout_minutes="$5" task_id id8 project_id
@@ -198,23 +336,14 @@ save_checkpoint() {
     # as this card's checkpoint, folding unreviewed edits into the wrong PR.
     # run-codex-sandboxed.sh stamps the workspace with the card it belongs to;
     # no stamp, no harvest.
-    if [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/task-id" ]; then
-        workspace_task_id="$(tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/task-id" \
-            | tr '[:upper:]' '[:lower:]')"
-    fi
-
-    base_sha=""
-    if [ "$workspace_task_id" = "$task_id" ] \
-        && [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha" ]; then
-        base_sha="$(tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha")"
-    elif [ -n "$workspace_task_id" ]; then
+    workspace_task_id="$(sandbox_workspace_task_id)"
+    base_sha="$(sandbox_base_sha "$task_id")"
+    if [ -z "$base_sha" ] && [ -n "$workspace_task_id" ] \
+        && [ "$workspace_task_id" != "$task_id" ]; then
         printf 'kanban-autopr: sandbox workspace belongs to task %s, not %s; skipping its patch\n' \
             "$workspace_task_id" "$task_id" >&2
     fi
-    if [ -n "$base_sha" ] \
-        && [ -d "$SANDBOX_WORKSPACE/.git" ] \
-        && [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] \
-        && git -C "$SANDBOX_WORKSPACE" cat-file -e "$base_sha^{commit}" 2>/dev/null; then
+    if [ -n "$base_sha" ]; then
         git -C "$SANDBOX_WORKSPACE" add --intent-to-add --all -- .
         git -C "$SANDBOX_WORKSPACE" diff --name-only "$base_sha" -- . \
             > "$checkpoint_dir/changed-files.txt"
@@ -241,12 +370,7 @@ save_checkpoint() {
     fi
     bounded_copy "$report_file" "$checkpoint_dir/report.md" "$MAX_REPORT_BYTES"
     bounded_copy "$decision_file" "$checkpoint_dir/decision.json" "$MAX_DECISION_BYTES"
-    if [ -s "$LIVE_LOG" ]; then
-        tail -c $((MAX_TRANSCRIPT_BYTES * 4)) "$LIVE_LOG" \
-            | LC_ALL=C sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" -e 's/\r//g' \
-            | tail -c "$MAX_TRANSCRIPT_BYTES" > "$checkpoint_dir/transcript.log"
-        chmod 600 "$checkpoint_dir/transcript.log"
-    fi
+    write_transcript "$checkpoint_dir/transcript.log" || true
 
     [ ! -s "$checkpoint_dir/report.md" ] || report_saved=true
     [ ! -s "$checkpoint_dir/decision.json" ] || decision_saved=true
@@ -287,8 +411,13 @@ save_checkpoint() {
           transcript_saved:$transcript_saved,progress_excerpt:$progress_excerpt}' \
         > "$checkpoint_dir/metadata.json"
     chmod 600 "$checkpoint_dir/metadata.json"
-    printf '%s\n' "$run_key" > "$root/active"
-    chmod 600 "$root/active"
+    # A run that died before the model produced anything must not steal the
+    # resume pointer from an in-flight snapshot or an earlier round's work.
+    if [ "$patch_saved" = true ] || [ "$report_saved" = true ] \
+        || [ "$decision_saved" = true ] || [ ! -f "$root/active" ]; then
+        printf '%s\n' "$run_key" > "$root/active"
+        chmod 600 "$root/active"
+    fi
     prune_checkpoints "$root"
 
     if [ "$runtime_limited" = true ]; then
@@ -363,6 +492,10 @@ case "${1:-}" in
         [ "$#" -eq 6 ] || die "usage: checkpoint.sh save CARD REPORT DECISION STARTED_AT_EPOCH TIMEOUT_MINUTES"
         save_checkpoint "$2" "$3" "$4" "$5" "$6"
         ;;
+    snapshot)
+        [ "$#" -eq 2 ] || die "usage: checkpoint.sh snapshot CARD"
+        snapshot_checkpoint "$2"
+        ;;
     latest)
         [ "$#" -eq 2 ] || die "usage: checkpoint.sh latest CARD"
         latest_checkpoint "$2"
@@ -372,6 +505,6 @@ case "${1:-}" in
         consume_checkpoint "$2"
         ;;
     *)
-        die "usage: checkpoint.sh save|latest|consume ..."
+        die "usage: checkpoint.sh save|snapshot|latest|consume ..."
         ;;
 esac

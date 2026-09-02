@@ -318,7 +318,13 @@ second scheduler.
    are stored mode-600 under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`. The
    sandbox clone is stamped with the card it was created for and a checkpoint harvests
    it only on a match, so a run killed before the model started can never save the
-   previous card's work under this one. Checkpoints are pruned to the newest three per
+   previous card's work under this one. That end-of-run save is a separate workflow
+   step, so it does not run at all if the machine or the runner process dies outright;
+   the investigation therefore also snapshots itself every 4 minutes while the model is
+   still working (`checkpoint.sh snapshot`, bounded and self-terminating), writing
+   through a private git index so it never contends with the live container for
+   `.git/index`. A hard kill costs the last few minutes, not the whole run. A save that
+   harvested nothing never takes the resume pointer away from that snapshot. Checkpoints are pruned to the newest three per
    card (14-day floor across all cards) and stop being resumable after 24 hours. Only a
    run that was actually killed pauses the card: investigate.sh records its own exit
    status, so a crash or a rejected decision late in the window fails the run loudly and

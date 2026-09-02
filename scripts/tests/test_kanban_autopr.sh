@@ -661,6 +661,83 @@ check "the resumed transcript stays small enough to leave the model room to work
       && [ "$(wc -c < "$checkpoint_path/transcript.log" | tr -d '[:space:]')" -le 131072 ] \
       && echo 0 || echo 1)
 
+# checkpoint.sh save only runs as its own workflow step. A hard kill (machine
+# death, SIGKILL, Docker restart) skips it entirely and the next run wipes the
+# sandbox, so the investigation snapshots itself on a timer while the model
+# still holds the workspace.
+SNAPSHOT_RUNTIME="$TMP_DIR/snapshot-runtime"
+mkdir -p "$SNAPSHOT_RUNTIME"
+git clone --quiet "$SANDBOX_TEST_REPO" "$SNAPSHOT_RUNTIME/workspace"
+snapshot_base="$(git -C "$SNAPSHOT_RUNTIME/workspace" rev-parse HEAD)"
+mkdir -p "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/output"
+printf '%s\n' "$snapshot_base" \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/model-base-sha"
+printf '55556666-0000-4000-8000-000000000055\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/task-id"
+printf 'export const inflight = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts"
+printf '%s\n' '### Summary' 'still working' \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/output/report.md"
+cat > "$TMP_DIR/snapshot-card.json" <<'EOF'
+{"task_id":"55556666-0000-4000-8000-000000000055","id8":"55556666","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+snapshot_index_before="$(shasum "$SNAPSHOT_RUNTIME/workspace/.git/index" | cut -d' ' -f1)"
+snapshot_dir="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+snapshot_latest="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/snapshot-card.json")"
+snapshot_index_after="$(shasum "$SNAPSHOT_RUNTIME/workspace/.git/index" | cut -d' ' -f1)"
+check "an in-flight snapshot captures live model work and becomes resumable" \
+    $([ -n "$snapshot_dir" ] && [ "$snapshot_dir" = "$snapshot_latest" ] \
+      && grep -q 'inflight.ts' "$snapshot_dir/model.patch" \
+      && git -C "$SANDBOX_TEST_REPO" apply --check --binary "$snapshot_dir/model.patch" \
+      && jq -e '.inflight == true and .patch_saved == true and .report_saved == true' \
+        "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+check "snapshots never fight the live container for its git index" \
+    $([ "$snapshot_index_before" = "$snapshot_index_after" ] \
+      && [ -f "$SNAPSHOT_RUNTIME/snapshot.index" ] \
+      && echo 0 || echo 1)
+
+snapshot_foreign="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/foreign-card.json")"
+check "an in-flight snapshot refuses a sandbox belonging to another card" \
+    $([ -z "$snapshot_foreign" ] && echo 0 || echo 1)
+
+# The pointer is the whole value of a snapshot: an empty later save must not
+# take it away.
+empty_save_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=empty-save-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/snapshot-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 2>/dev/null)"
+still_resumable="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/snapshot-card.json")"
+check "an empty save never steals the resume pointer from real saved work" \
+    $([ -n "$empty_save_path" ] && [ "$still_resumable" = "$snapshot_dir" ] \
+      && echo 0 || echo 1)
+
+check "the investigation snapshots itself on a bounded, self-terminating timer" \
+    $(grep -qF 'checkpoint.sh" snapshot' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'AUTOPR_SNAPSHOT_INTERVAL_SECONDS:-240' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'kill -0 "$parent"' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'kill "$SNAPSHOT_PID"' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
 cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 prompt="${!#}"

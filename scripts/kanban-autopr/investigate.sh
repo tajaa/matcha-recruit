@@ -21,8 +21,10 @@ WORK_DIR="$(mktemp -d)"
 # model failure must fail loudly and stay selectable instead.
 INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
 [ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
+SNAPSHOT_PID=""
 _investigate_cleanup() {
     local status=$?
+    [ -z "$SNAPSHOT_PID" ] || kill "$SNAPSHOT_PID" 2>/dev/null || true
     [ -z "$INVESTIGATION_EXIT_FILE" ] \
         || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
         || true
@@ -349,6 +351,30 @@ codex_pass() {
     done
 }
 
+# Snapshot the live sandbox on a timer. checkpoint.sh save runs as a separate
+# workflow step, so it never runs at all if this process is killed outright
+# (machine death, SIGKILL, a Docker restart) — and the next run wipes the
+# sandbox clone. Without this, that class of failure loses the whole
+# investigation rather than the last few minutes of it.
+SNAPSHOT_INTERVAL_SECONDS="${AUTOPR_SNAPSHOT_INTERVAL_SECONDS:-240}"
+SNAPSHOT_MAX_PASSES="${AUTOPR_SNAPSHOT_MAX_PASSES:-15}"
+start_inflight_snapshots() {
+    [ "$SNAPSHOT_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null || return 0
+    local parent=$$
+    (
+        # Bounded, and self-terminating once this shell is gone: an orphaned
+        # loop must never outlive the investigation and repoint a checkpoint
+        # the next run is already reading.
+        for _ in $(seq 1 "$SNAPSHOT_MAX_PASSES"); do
+            sleep "$SNAPSHOT_INTERVAL_SECONDS"
+            kill -0 "$parent" 2>/dev/null || exit 0
+            "$SCRIPT_DIR/checkpoint.sh" snapshot "$CARD_FILE" >/dev/null 2>&1 || true
+        done
+    ) &
+    SNAPSHOT_PID=$!
+}
+
+start_inflight_snapshots
 codex_pass
 
 # One corrective retry when the returned outcome contradicts the card owner's
