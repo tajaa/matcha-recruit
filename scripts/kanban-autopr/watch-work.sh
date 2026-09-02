@@ -19,6 +19,8 @@ REFRESH_SECONDS="${AUTOPR_WORK_REFRESH_SECONDS:-2}"
 STATUS_REFRESH_SECONDS="${AUTOPR_WORK_STATUS_REFRESH_SECONDS:-60}"
 MAX_ITERATIONS="${AUTOPR_DASHBOARD_MAX_ITERATIONS:-0}"
 PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
 
 RUN_ID=""
 RUN_STATUS="idle"
@@ -27,7 +29,7 @@ STEP_LINE=""
 LAST_STATUS_REFRESH=0
 
 refresh_workflow_status() {
-    local now runs kanban_runs error_runs audit_runs admin_updates_runs active details
+    local now runs active details
     now="$(date +%s)"
     if [ "${AUTOPR_DASHBOARD_ONCE:-0}" != 1 ] \
         && [ $((now - LAST_STATUS_REFRESH)) -lt "$STATUS_REFRESH_SECONDS" ]; then
@@ -35,19 +37,7 @@ refresh_workflow_status() {
     fi
     LAST_STATUS_REFRESH="$now"
 
-    kanban_runs="$($GH_BIN run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 \
-        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
-    error_runs="$($GH_BIN run list --repo "$REPO" --workflow "$ERROR_WORKFLOW" --limit 10 \
-        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
-    audit_runs="$($GH_BIN run list --repo "$REPO" --workflow "$AUDIT_WORKFLOW" --limit 10 \
-        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
-    admin_updates_runs="$($GH_BIN run list --repo "$REPO" --workflow "$ADMIN_UPDATES_WORKFLOW" --limit 10 \
-        --json databaseId,status,createdAt 2>/dev/null || printf '[]')"
-    runs="$(jq -cn --argjson kanban "$kanban_runs" --argjson errors "$error_runs" --argjson audit "$audit_runs" \
-      --argjson admin_updates "$admin_updates_runs" '
-      (($kanban | map(. + {lane:"kanban"})) + ($errors | map(. + {lane:"errors"})) +
-       ($audit | map(. + {lane:"self-audit"})) + ($admin_updates | map(. + {lane:"admin-updates"})))
-      | sort_by(.createdAt // "") | reverse')"
+    runs="$(AUTOPR_REPO="$REPO" AUTOPR_GH_BIN="$GH_BIN" "$RUN_SNAPSHOT" 2>/dev/null || printf '[]')"
     active="$(printf '%s' "$runs" | jq -c \
         '[.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))][0] // .[0] // {}' 2>/dev/null)"
     RUN_ID="$(printf '%s' "$active" | jq -r '.databaseId // empty' 2>/dev/null)"

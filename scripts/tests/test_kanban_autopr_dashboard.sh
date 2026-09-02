@@ -105,6 +105,7 @@ VIEW_DIR="$TMP_DIR/view"
 mkdir "$VIEW_DIR"
 cp "$AUTOPR_DIR/dashboard.sh" "$VIEW_DIR/dashboard.sh"
 cp "$AUTOPR_DIR/plan.py" "$VIEW_DIR/plan.py"
+cp "$AUTOPR_DIR/run-snapshot.sh" "$VIEW_DIR/run-snapshot.sh"
 cat > "$VIEW_DIR/collect.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' '[{"task_id":"a","id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","last_moved_at":"2026-08-27T00:00:00Z","created_at":"2026-08-27T00:00:00Z","progress_note":""},{"task_id":"b","id8":"bbbb0000","project_title":"MATCHA","title":"Polish reports","board_column":"todo","last_moved_at":"2026-08-27T01:00:00Z","created_at":"2026-08-27T01:00:00Z","progress_note":""}]'
@@ -124,7 +125,7 @@ chmod +x "$VIEW_DIR"/*.sh
 cat > "$TMP_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
-  printf '%s\n' '[{"databaseId":900,"status":"in_progress","conclusion":null,"event":"workflow_dispatch","createdAt":"2099-08-27T01:00:00Z","updatedAt":"2099-08-27T01:01:00Z","url":"x","displayTitle":"Kanban autopr"}]'
+  printf '%s\n' '[{"databaseId":900,"status":"in_progress","conclusion":null,"event":"workflow_dispatch","createdAt":"2099-08-27T01:00:00Z","updatedAt":"2099-08-27T01:01:00Z","url":"x","displayTitle":"Kanban autopr","workflowName":"Kanban autopr"}]'
 elif [ "$1 $2" = "run view" ]; then
   printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
 elif [ "$1 $2" = "pr list" ] && [[ "$*" == *"--state open"* ]]; then
@@ -233,7 +234,7 @@ check "PR pane shows real metadata, labels, worktree files, and live diff" \
 cat > "$TMP_DIR/gh-work" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
-  printf '%s\n' '[{"databaseId":900,"status":"in_progress","createdAt":"2099-08-27T01:00:00Z"}]'
+  printf '%s\n' '[{"databaseId":900,"status":"in_progress","createdAt":"2099-08-27T01:00:00Z","workflowName":"Kanban autopr"}]'
 elif [ "$1 $2" = "run view" ]; then
   printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
 fi
@@ -252,6 +253,7 @@ Codex: running focused tests
 EOF
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/work-github-cache" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
 check "live-work pane shows model activity and redacts common credentials" \
   $(grep -q 'LIVE CODEX WORK' "$TMP_DIR/work-pane.out" \
@@ -264,6 +266,7 @@ check "live-work pane shows model activity and redacts common credentials" \
     && echo 0 || echo 1)
 
 AUTOPR_DASHBOARD_MAX_ITERATIONS=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/work-github-cache" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-history.out"
 check "interactive live-work pane appends sanitized output without clearing history" \
   $(grep -q 'append-only history' "$TMP_DIR/work-history.out" \

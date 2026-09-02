@@ -17,10 +17,12 @@ PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 MAX_DIFF_LINES="${AUTOPR_PR_DIFF_LINES:-80}"
 MAX_FILE_LINES="${AUTOPR_PR_FILE_LINES:-3}"
 CARD_SNAPSHOT="${AUTOPR_CARD_SNAPSHOT:-$USER_HOME/Library/Caches/matcha-kanban-autopr/cards.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
 
 workflow_is_active() {
-    "$GH_BIN" run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 --json status 2>/dev/null \
-        | jq -e 'any(.[]; .status | IN("queued", "in_progress", "requested", "waiting", "pending"))' >/dev/null 2>&1
+    AUTOPR_REPO="$REPO" AUTOPR_GH_BIN="$GH_BIN" "$RUN_SNAPSHOT" 2>/dev/null \
+        | jq -e 'any(.[]; .lane == "kanban" and (.status | IN("queued", "in_progress", "requested", "waiting", "pending")))' >/dev/null 2>&1
 }
 
 runner_task_branch() {
