@@ -16,7 +16,19 @@ RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.j
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
+# checkpoint.sh reads this to tell a genuine step timeout from a crash: only a
+# run that was killed may pause the card behind a human approval. A harness or
+# model failure must fail loudly and stay selectable instead.
+INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
+[ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
+_investigate_cleanup() {
+    local status=$?
+    [ -z "$INVESTIGATION_EXIT_FILE" ] \
+        || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
+        || true
+    rm -rf "$WORK_DIR"
+}
+trap _investigate_cleanup EXIT
 
 # The report must live outside the git workspace: `git add --all` in
 # publish.sh would otherwise stage a file the model wrote under its own
@@ -80,10 +92,21 @@ printf '%s' "$files" > "$WORK_DIR/files.json"
 # directives. Card prose, comments, PR bodies, and unrelated history remain
 # untrusted evidence. Resolve structured metadata plus the same event's body
 # so context submitted before a parser upgrade remains actionable.
+# Reuse the policy the runtime step already resolved when it hands one over.
+# Resolving twice against two different reads of the board history lets the
+# budgeted runtime and the authority stated in the model's prompt disagree
+# about the same run.
 DIRECTIVE_FILE="$WORK_DIR/directive-policy.json"
-python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
-    --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
-    --output "$DIRECTIVE_FILE"
+if [ -n "${AUTOPR_DIRECTIVE_POLICY_FILE:-}" ] && [ -s "${AUTOPR_DIRECTIVE_POLICY_FILE}" ]; then
+    jq '{directives:(.directives // []),
+         test_route:(.test_route // null),
+         source_event_id:(.source_event_id // null)}' \
+        "$AUTOPR_DIRECTIVE_POLICY_FILE" > "$DIRECTIVE_FILE"
+else
+    python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
+        --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
+        --output "$DIRECTIVE_FILE"
+fi
 
 # An approved test tenant may be exercised by the trusted browser harness.
 # Credentials never enter context.json or msandbox; only a screenshot and
@@ -292,6 +315,7 @@ run_codex() {
         -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD
         AUTOPR_CODEX_MODEL=gpt-5.6-sol
         AUTOPR_CODEX_REASONING_EFFORT=medium
+        AUTOPR_TASK_ID="$TASK_ID"
     )
     [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
     "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \

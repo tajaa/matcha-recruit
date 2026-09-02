@@ -303,7 +303,9 @@ extension KanbanBoardView {
               let progressNote = task.progressNote,
               !approvingAutoPRRuntimeTaskIds.contains(task.id) else { return }
         approvingAutoPRRuntimeTaskIds.insert(task.id)
-        Task {
+        // This extension is not actor-isolated, so a bare `Task` would run the
+        // @State and @Observable writes below off the main actor.
+        Task { @MainActor in
             defer { approvingAutoPRRuntimeTaskIds.remove(task.id) }
             do {
                 _ = try await MatchaWorkService.shared.requestAutoPRReconsideration(

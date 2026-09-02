@@ -20,7 +20,22 @@ LIVE_LOG="${AUTOPR_LIVE_LOG:-$HOME/Library/Logs/matcha-kanban-autopr-live.log}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
 MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
-MAX_TRANSCRIPT_BYTES="${AUTOPR_CHECKPOINT_MAX_TRANSCRIPT_BYTES:-2097152}"
+# The transcript is re-attached as a model input on the approved continuation.
+# A multi-megabyte tail of ANSI-laden scrollback would consume most of that
+# run's context window; a bounded, escape-stripped tail carries the signal.
+MAX_TRANSCRIPT_BYTES="${AUTOPR_CHECKPOINT_MAX_TRANSCRIPT_BYTES:-131072}"
+# Nothing else ever reclaims a checkpoint (`consume` only clears the active
+# pointer, by design), and the runner's workspace is checked out with
+# `clean: false`, so bound the footprint here.
+CHECKPOINT_MAX_PER_TASK="${AUTOPR_CHECKPOINT_MAX_PER_TASK:-3}"
+CHECKPOINT_RETENTION_DAYS="${AUTOPR_CHECKPOINT_RETENTION_DAYS:-14}"
+# A patch that still applies weeks later is not evidence that it is still the
+# right patch for today's main. Resume only recent work.
+CHECKPOINT_MAX_AGE_HOURS="${AUTOPR_CHECKPOINT_MAX_AGE_HOURS:-24}"
+# investigate.sh records its own exit status here. Absence (or a signal
+# status) is the only trustworthy evidence that the step was killed at its
+# time limit rather than failing on its own.
+INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
 
 card_identity() {
     local card_file="$1" task_id
@@ -33,6 +48,18 @@ task_root() {
     printf '%s/%s' "$CHECKPOINT_ROOT" "$(card_identity "$1")"
 }
 
+checkpoint_age_seconds() {
+    local dir="$1" created epoch=0 now
+    created="$(jq -r '.created_at // empty' "$dir/metadata.json" 2>/dev/null || true)"
+    if [ -n "$created" ]; then
+        epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$created" +%s 2>/dev/null \
+            || date -u -d "$created" +%s 2>/dev/null || printf 0)"
+    fi
+    [ "$epoch" -gt 0 ] 2>/dev/null || epoch="$(date -r "$dir" +%s 2>/dev/null || printf 0)"
+    now="$(date +%s)"
+    printf '%s' "$(( now - epoch ))"
+}
+
 latest_checkpoint() {
     local card_file="$1" root active checkpoint
     root="$(task_root "$card_file")"
@@ -41,7 +68,26 @@ latest_checkpoint() {
     checkpoint="$(tr -d '\r\n' < "$active")"
     [[ "$checkpoint" =~ ^[A-Za-z0-9._-]+$ ]] || return 0
     [ -d "$root/$checkpoint" ] || return 0
+    # An expired checkpoint stays on disk for forensics but is no longer
+    # resumable: applying stale model work into a fresh branch would fold
+    # unreviewed edits from another week into today's PR diff.
+    [ "$(checkpoint_age_seconds "$root/$checkpoint")" \
+        -le $((CHECKPOINT_MAX_AGE_HOURS * 3600)) ] || return 0
     printf '%s\n' "$root/$checkpoint"
+}
+
+prune_checkpoints() {
+    local root="$1" kept=0 entry
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        kept=$((kept + 1))
+        [ "$kept" -gt "$CHECKPOINT_MAX_PER_TASK" ] || continue
+        rm -rf -- "$root/${entry%/}"
+    done < <(cd "$root" && ls -1td -- */ 2>/dev/null || true)
+    find "$CHECKPOINT_ROOT" -mindepth 2 -maxdepth 2 -type d \
+        -mtime "+$CHECKPOINT_RETENTION_DAYS" -exec rm -rf -- {} + 2>/dev/null || true
+    find "$CHECKPOINT_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'consumed-*' \
+        -mtime "+$CHECKPOINT_RETENTION_DAYS" -delete 2>/dev/null || true
 }
 
 bounded_copy() {
@@ -56,6 +102,62 @@ bounded_copy() {
     chmod 600 "$destination"
 }
 
+# True when the investigation was killed rather than exiting on its own. A
+# harness or model failure late in the window is NOT a legitimate conclusion
+# and must never write the marker that blocks the card behind a human
+# approval; only a real timeout may.
+investigation_was_killed() {
+    local status
+    [ -n "$INVESTIGATION_EXIT_FILE" ] && [ -s "$INVESTIGATION_EXIT_FILE" ] || return 0
+    status="$(tr -dc '0-9' < "$INVESTIGATION_EXIT_FILE" | head -c 5)"
+    [ -n "$status" ] || return 0
+    [ "$status" -ge 128 ]
+}
+
+# The pause note replaces the card's progress_note wholesale, so every durable
+# marker the rest of the system reads out of that field has to be carried
+# forward: the standing [autopr:directives …] grant, the [autopr:no-spec …]
+# ledger, and any question form or human-authored text below the header.
+preserved_note_parts() {
+    local card_file="$1" existing header body
+    existing="$(jq -r '.progress_note // ""' "$card_file")"
+    if [ -z "$existing" ]; then
+        printf '\t'
+        return
+    fi
+    header="${existing%%$'\n'*}"
+    if [ "$header" = "$existing" ]; then
+        body=""
+    else
+        body="${existing#*$'\n'}"
+    fi
+    local extras='' directives_marker no_spec_marker
+    directives_marker="$(printf '%s' "$header" \
+        | grep -o '\[autopr:directives [^]]*\]' | head -1 || true)"
+    no_spec_marker="$(printf '%s' "$header" | sed -nE \
+        's/.*(\[autopr:no-spec [^]]*\] (already_fixed|migration_required|policy_blocked|external_dependency)).*/\1/p' \
+        | head -1 || true)"
+    [ -z "$directives_marker" ] || extras=" · $directives_marker"
+    [ -z "$no_spec_marker" ] || extras="$extras · $no_spec_marker"
+
+    # A non-system note is entirely human-authored; keep all of it.
+    case "$header" in
+        "🤖 AUTO SETUP"*|"from auto setup"*) ;;
+        *) body="$existing" ;;
+    esac
+    local preserved
+    preserved="$(printf '%s\n' "$body" | awk '
+        /^(Why more time|Done so far|Latest progress|Next step):/ { next }
+        NF { seen = 1 }
+        seen { lines[n++] = $0 }
+        END {
+            while (n > 0 && lines[n-1] ~ /^[[:space:]]*$/) n--
+            for (i = 0; i < n; i++) print lines[i]
+        }
+    ')"
+    printf '%s\t%s' "$extras" "$preserved"
+}
+
 save_checkpoint() {
     local card_file="$1" report_file="$2" decision_file="$3"
     local started_at="$4" timeout_minutes="$5" task_id id8 project_id
@@ -64,6 +166,7 @@ save_checkpoint() {
     local report_saved=false decision_saved=false transcript_saved=false
     local elapsed=0 runtime_limited=false note reason done progress_excerpt=''
     local saved_outputs='' file_label='' extra_file_count=0
+    local workspace_task_id='' header_extras='' preserved_note='' preserved_parts
 
     task_id="$(card_identity "$card_file")"
     id8="$(jq -r '.id8 // empty' "$card_file")"
@@ -89,11 +192,27 @@ save_checkpoint() {
             "${AUTOPR_MSANDBOX_BIN}" stop >/dev/null 2>&1 || true
     fi
 
-    base_sha=""
-    if [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha" ]; then
-        base_sha="$(tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha")"
+    # The sandbox runtime root survives between runs and is only wiped when a
+    # run actually reaches the model. A run killed during pre-model evidence
+    # collection would otherwise harvest the PREVIOUS card's clone and save it
+    # as this card's checkpoint, folding unreviewed edits into the wrong PR.
+    # run-codex-sandboxed.sh stamps the workspace with the card it belongs to;
+    # no stamp, no harvest.
+    if [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/task-id" ]; then
+        workspace_task_id="$(tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/task-id" \
+            | tr '[:upper:]' '[:lower:]')"
     fi
-    if [ -d "$SANDBOX_WORKSPACE/.git" ] \
+
+    base_sha=""
+    if [ "$workspace_task_id" = "$task_id" ] \
+        && [ -f "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha" ]; then
+        base_sha="$(tr -d '\r\n' < "$SANDBOX_WORKSPACE/.git/autopr-io/model-base-sha")"
+    elif [ -n "$workspace_task_id" ]; then
+        printf 'kanban-autopr: sandbox workspace belongs to task %s, not %s; skipping its patch\n' \
+            "$workspace_task_id" "$task_id" >&2
+    fi
+    if [ -n "$base_sha" ] \
+        && [ -d "$SANDBOX_WORKSPACE/.git" ] \
         && [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] \
         && git -C "$SANDBOX_WORKSPACE" cat-file -e "$base_sha^{commit}" 2>/dev/null; then
         git -C "$SANDBOX_WORKSPACE" add --intent-to-add --all -- .
@@ -123,7 +242,9 @@ save_checkpoint() {
     bounded_copy "$report_file" "$checkpoint_dir/report.md" "$MAX_REPORT_BYTES"
     bounded_copy "$decision_file" "$checkpoint_dir/decision.json" "$MAX_DECISION_BYTES"
     if [ -s "$LIVE_LOG" ]; then
-        tail -c "$MAX_TRANSCRIPT_BYTES" "$LIVE_LOG" > "$checkpoint_dir/transcript.log"
+        tail -c $((MAX_TRANSCRIPT_BYTES * 4)) "$LIVE_LOG" \
+            | LC_ALL=C sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" -e 's/\r//g' \
+            | tail -c "$MAX_TRANSCRIPT_BYTES" > "$checkpoint_dir/transcript.log"
         chmod 600 "$checkpoint_dir/transcript.log"
     fi
 
@@ -145,7 +266,7 @@ save_checkpoint() {
     fi
 
     elapsed=$(( $(date +%s) - started_at ))
-    if [ "$elapsed" -ge $((timeout_minutes * 60 - 45)) ]; then
+    if [ "$elapsed" -ge $((timeout_minutes * 60 - 45)) ] && investigation_was_killed; then
         runtime_limited=true
     fi
     jq -n \
@@ -168,6 +289,7 @@ save_checkpoint() {
     chmod 600 "$checkpoint_dir/metadata.json"
     printf '%s\n' "$run_key" > "$root/active"
     chmod 600 "$root/active"
+    prune_checkpoints "$root"
 
     if [ "$runtime_limited" = true ]; then
         if [ "$timeout_minutes" -eq 20 ]; then
@@ -201,17 +323,25 @@ save_checkpoint() {
             saved_outputs="${saved_outputs}run transcript"
         fi
         [ -z "$saved_outputs" ] || done="$done Also saved: $saved_outputs."
+        preserved_parts="$(preserved_note_parts "$card_file")"
+        header_extras="${preserved_parts%%$'\t'*}"
+        preserved_note="${preserved_parts#*$'\t'}"
         note="$(jq -nr \
             --arg run_id "${GITHUB_RUN_ID:-local}" --arg reason "$reason" \
-            --arg done "$done" --arg progress "$progress_excerpt" '
-              "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint \($run_id)\n" +
+            --arg done "$done" --arg progress "$progress_excerpt" \
+            --arg extras "$header_extras" --arg preserved "$preserved_note" '
+              "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint \($run_id)\($extras)\n" +
               "Why more time: \($reason)\n" +
               "Done so far: \($done)\n" +
               (if $progress == "" then "" else "Latest progress: \($progress)\n" end) +
-              "Next step: Approve 10 more minutes to continue from the saved checkpoint."
+              "Next step: Approve 10 more minutes to continue from the saved checkpoint." +
+              (if $preserved == "" then "" else "\n\n" + $preserved end)
             ')"
-        mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
-            "$(jq -n --arg note "$note" '{progress_note:$note,board_column:"changes_requested"}')" >/dev/null \
+        # mw_api dies on a non-2xx response; a failed card write must not
+        # abort the checkpoint before it reports where the work was saved.
+        ( mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
+            "$(jq -n --arg note "$note" '{progress_note:$note,board_column:"changes_requested"}')" ) \
+            >/dev/null 2>&1 \
             || printf 'kanban-autopr: warning: checkpoint saved but the card pause note could not be written\n' >&2
     fi
 

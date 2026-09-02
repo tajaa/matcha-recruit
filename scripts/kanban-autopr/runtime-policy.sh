@@ -33,14 +33,23 @@ python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
     --card "$CARD_FILE" --history "$HISTORY_FILE" \
     --output "$WORK_DIR/directive-policy.json"
 
+# The 10 minutes are a continuation of saved work, not a replacement budget
+# for a fresh investigation. Without a resumable checkpoint the directive would
+# HALVE a from-scratch run and all but guarantee another pause, so it only
+# applies when there is actually something to continue from.
+checkpoint="$("$SCRIPT_DIR/checkpoint.sh" latest "$CARD_FILE" 2>/dev/null || true)"
+
 extended=false
 minutes="$NORMAL_MINUTES"
 if jq -e '(.directives // []) | index("extend_runtime") != null' \
-    "$WORK_DIR/directive-policy.json" >/dev/null; then
+    "$WORK_DIR/directive-policy.json" >/dev/null \
+    && [ -n "$checkpoint" ]; then
     extended=true
     minutes="$EXTENDED_MINUTES"
 fi
 
 jq --argjson minutes "$minutes" --argjson extended "$extended" \
-    '. + {minutes:$minutes,extended:$extended}' \
+    --arg checkpoint "$checkpoint" \
+    '. + {minutes:$minutes,extended:$extended,
+          checkpoint:(if $checkpoint == "" then null else $checkpoint end)}' \
     "$WORK_DIR/directive-policy.json" > "$OUTPUT_FILE"

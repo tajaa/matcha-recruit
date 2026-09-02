@@ -314,17 +314,31 @@ second scheduler.
    role, reproduction steps, and screenshot. Missing product intent
    or evidence produces a question-only draft PR, not a no-spec marker. The normal
    investigation ceiling is 20 minutes. A run that reaches it is stopped, its bounded
-   patch/report/decision fragments and final 2 MB of terminal output are stored mode-600
-   under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`. The card moves to
+   patch/report/decision fragments and final 128 KB of escape-stripped terminal output
+   are stored mode-600 under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`. The
+   sandbox clone is stamped with the card it was created for and a checkpoint harvests
+   it only on a match, so a run killed before the model started can never save the
+   previous card's work under this one. Checkpoints are pruned to the newest three per
+   card (14-day floor across all cards) and stop being resumable after 24 hours. Only a
+   run that was actually killed pauses the card: investigate.sh records its own exit
+   status, so a crash or a rejected decision late in the window fails the run loudly and
+   leaves the card selectable instead of parking it behind an approval button.
+   The card moves to
    `changes_requested` and shows why the run stopped, which files and outputs were saved,
-   and the latest partial-report summary. It does not spin on every scheduler tick. The
+   and the latest partial-report summary. The pause note carries forward the standing
+   `[autopr:directives …]` grant, the `[autopr:no-spec …]` ledger, and any pending
+   question form, so nothing durable is lost to the pause. It does not spin on every
+   scheduler tick. The
    card's **Approve 10 more minutes** button submits the explicit `--extend-runtime`
    directive for one 10-minute continuation. Approval is never inferred from ordinary
-   prose and is not carried into later cycles. The continuation restores
+   prose and is not carried into later cycles, and it only applies when a resumable
+   checkpoint exists — a from-scratch investigation always keeps its full 20 minutes.
+   The continuation restores
    the partial patch only inside the disposable msandbox and attaches the saved textual
    output as untrusted context. If the patch no longer applies to current code, the text
    remains available and the retry starts from a clean tree. Successful recovery
-   deactivates but does not delete the checkpoint.
+   deactivates but does not delete the checkpoint. A paused card also reopens on new
+   feedback on the draft PR it already has, not only from the ticket side.
 
    The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the

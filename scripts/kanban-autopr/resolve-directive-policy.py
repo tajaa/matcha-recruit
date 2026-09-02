@@ -201,9 +201,14 @@ def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dic
         if not _RECOVERABLE_NOTE_RE.search(prior_note):
             continue
         stored = str(metadata.get("autopr_directives") or "").split(",")
-        directives = [item for item in stored if item in _KNOWN_DIRECTIVES]
+        # Only a standing directive may be recovered from an old event. A
+        # one-shot runtime approval bound to a cycle that is already over is
+        # not authority for this one.
+        directives = [item for item in stored if item in _STANDING_DIRECTIVES]
         parsed, parsed_route = _parse_bound_body(str(metadata.get("body") or ""))
-        directives = list(dict.fromkeys([*directives, *parsed]))
+        directives = list(dict.fromkeys(
+            [*directives, *(item for item in parsed if item in _STANDING_DIRECTIVES)]
+        ))
         if not (_STANDING_DIRECTIVES & set(directives)):
             continue
         test_route = metadata.get("autopr_test_route") or parsed_route

@@ -186,7 +186,7 @@ jobs:
           "$AUTOPR_CONTROL_ROOT/kanban-autopr/runtime-policy.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/runtime-policy.json"
           echo "minutes=$(jq -r '.minutes' "$RUNNER_TEMP/runtime-policy.json")" >> "$GITHUB_OUTPUT"
-          jq '{minutes,extended,approval_event_id:.source_event_id}' \
+          jq '{minutes,extended,checkpoint,approval_event_id:.source_event_id}' \
             "$RUNNER_TEMP/runtime-policy.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create or check out task branch
@@ -226,7 +226,7 @@ jobs:
       - name: Investigate
         id: investigate
         if: steps.select.outputs.skip == 'false'
-        timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes) }}
+        timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes || '20') }}
         continue-on-error: true
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
@@ -235,6 +235,11 @@ jobs:
           # step's GitHub, Matcha, or production credentials through.
           AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
+          # One resolution of the owner's directives for the whole run: the
+          # budgeted runtime and the authority in the model's prompt must not
+          # come from two different reads of the board history.
+          AUTOPR_DIRECTIVE_POLICY_FILE: ${{ runner.temp }}/runtime-policy.json
+          AUTOPR_INVESTIGATION_EXIT_FILE: ${{ runner.temp }}/investigation-exit-code
         run: |
           date +%s > "$RUNNER_TEMP/investigation-started-at"
           "$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
@@ -247,11 +252,15 @@ jobs:
         env:
           AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox
+          # Present only if investigate.sh exited on its own. Its absence is
+          # what distinguishes a real timeout (pause the card for approval)
+          # from a crash (fail the run, leave the card selectable).
+          AUTOPR_INVESTIGATION_EXIT_FILE: ${{ runner.temp }}/investigation-exit-code
         run: |
           started_at="$(cat "$RUNNER_TEMP/investigation-started-at" 2>/dev/null || date +%s)"
           checkpoint="$($AUTOPR_CONTROL_ROOT/kanban-autopr/checkpoint.sh save \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
-            "$started_at" "${{ steps.runtime.outputs.minutes }}")"
+            "$started_at" "${{ steps.runtime.outputs.minutes || '20' }}")"
           echo "path=$checkpoint" >> "$GITHUB_OUTPUT"
           {
             echo "## Interrupted investigation checkpoint"

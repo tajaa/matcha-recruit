@@ -28,7 +28,7 @@ check "workflow resolves the active production build before collecting cards" \
 
 check "workflow gives ordinary investigations 20 minutes and approved continuations 10" \
     $(grep -qF 'runtime-policy.sh' "$workflow" \
-      && grep -qF 'timeout-minutes: ${{ fromJSON(steps.runtime.outputs.minutes) }}' "$workflow" \
+      && grep -qF "timeout-minutes: \${{ fromJSON(steps.runtime.outputs.minutes || '20') }}" "$workflow" \
       && grep -qF 'AUTOPR_NORMAL_RUNTIME_MINUTES:-20' "$AUTOPR_DIR/runtime-policy.sh" \
       && grep -qF 'AUTOPR_EXTENDED_RUNTIME_MINUTES:-10' "$AUTOPR_DIR/runtime-policy.sh" \
       && echo 0 || echo 1)
@@ -501,6 +501,8 @@ checkpoint_base="$(git -C "$CHECKPOINT_RUNTIME/workspace" rev-parse HEAD)"
 mkdir -p "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/output"
 printf '%s\n' "$checkpoint_base" \
     > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/model-base-sha"
+printf 'cccccccc-0000-4000-8000-000000000003\n' \
+    > "$CHECKPOINT_RUNTIME/workspace/.git/autopr-io/task-id"
 printf 'export const existing = false;\n' \
     > "$CHECKPOINT_RUNTIME/workspace/client/src/existing.ts"
 printf 'export const recovered = true;\n' \
@@ -549,6 +551,114 @@ check "timed-out work moves to Changes Requested with a readable approval card" 
       && grep -q 'Why more time' "$TMP_DIR/checkpoint-curl-args" \
       && grep -q 'Done so far' "$TMP_DIR/checkpoint-curl-args" \
       && grep -q 'Approve 10 more minutes' "$TMP_DIR/checkpoint-curl-args" \
+      && echo 0 || echo 1)
+
+# The pause note replaces progress_note wholesale, so it has to carry forward
+# every durable marker the rest of the system reads out of that field.
+cat > "$TMP_DIR/checkpoint-card-with-note.json" <<'EOF'
+{"task_id":"11112222-0000-4000-8000-000000000011","id8":"11112222","project_id":"dddddddd-0000-4000-8000-000000000004","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod abc · PR #7 · 🟡 C42 · [autopr:directives draft_pr] · note: n\nAnswers needed — reply below with the numbered choices:\n1. Which term is canonical?"}
+EOF
+: > "$TMP_DIR/preserved-curl-args"
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/preserved-curl-args" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=preserve-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/checkpoint-card-with-note.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20 >/dev/null
+check "the pause note keeps the standing directive grant and the pending questions" \
+    $(grep -q 'autopr:directives draft_pr' "$TMP_DIR/preserved-curl-args" \
+      && grep -q 'Which term is canonical' "$TMP_DIR/preserved-curl-args" \
+      && grep -q 'PAUSED: APPROVE 10 MORE MINUTES' "$TMP_DIR/preserved-curl-args" \
+      && echo 0 || echo 1)
+
+# A harness or model failure is not a legitimate conclusion: it must never
+# write the marker that blocks the card behind a human approval.
+cat > "$TMP_DIR/crash-card.json" <<'EOF'
+{"task_id":"22223333-0000-4000-8000-000000000022","id8":"22223333","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+cat > "$TMP_DIR/signal-card.json" <<'EOF'
+{"task_id":"33334444-0000-4000-8000-000000000033","id8":"33334444","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+: > "$TMP_DIR/crash-curl-args"
+printf '1\n' > "$TMP_DIR/investigation-exit-code"
+crash_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/crash-curl-args" \
+    AUTOPR_INVESTIGATION_EXIT_FILE="$TMP_DIR/investigation-exit-code" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=crash-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/crash-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20)"
+check "a crash inside the time limit checkpoints without pausing the card" \
+    $(jq -e '.runtime_limited == false' "$crash_checkpoint_path/metadata.json" >/dev/null \
+      && [ ! -s "$TMP_DIR/crash-curl-args" ] \
+      && echo 0 || echo 1)
+
+# A killed run either leaves no status behind or reports a signal.
+printf '143\n' > "$TMP_DIR/investigation-exit-code"
+signal_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_TEST_CURL_ARGS="$TMP_DIR/signal-curl-args" \
+    AUTOPR_INVESTIGATION_EXIT_FILE="$TMP_DIR/investigation-exit-code" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=signal-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/signal-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$timeout_started_at" 20)"
+check "a signal-killed investigation still pauses for approval" \
+    $(jq -e '.runtime_limited == true' "$signal_checkpoint_path/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+rm -f "$TMP_DIR/investigation-exit-code"
+
+# A workspace left behind by another card must never be harvested: its patch
+# would reach the wrong PR.
+cat > "$TMP_DIR/foreign-card.json" <<'EOF'
+{"task_id":"eeeeeeee-0000-4000-8000-000000000005","id8":"eeeeeeee","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+foreign_checkpoint_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=foreign-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/foreign-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 2>/dev/null)"
+check "a sandbox left over from another card is never checkpointed as this one" \
+    $(jq -e '.patch_saved == false and .changed_file_count == 0' \
+        "$foreign_checkpoint_path/metadata.json" >/dev/null \
+      && [ ! -e "$foreign_checkpoint_path/model.patch" ] \
+      && echo 0 || echo 1)
+
+cat > "$TMP_DIR/prune-card.json" <<'EOF'
+{"task_id":"44445555-0000-4000-8000-000000000044","id8":"44445555","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+for prune_run in prune-1 prune-2 prune-3; do
+    PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+        AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+        AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+        AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+        AUTOPR_CHECKPOINT_MAX_PER_TASK=2 \
+        AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+        AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID="$prune_run" \
+        "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/prune-card.json" \
+        "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 \
+        >/dev/null 2>&1
+    sleep 1
+done
+check "checkpoints are bounded instead of accumulating under .git forever" \
+    $([ "$(find "$TMP_DIR/checkpoints/44445555-0000-4000-8000-000000000044" \
+        -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')" = 2 ] \
+      && echo 0 || echo 1)
+
+check "the resumed transcript stays small enough to leave the model room to work" \
+    $(grep -qF 'AUTOPR_CHECKPOINT_MAX_TRANSCRIPT_BYTES:-131072' "$AUTOPR_DIR/checkpoint.sh" \
+      && [ "$(wc -c < "$checkpoint_path/transcript.log" | tr -d '[:space:]')" -le 131072 ] \
       && echo 0 || echo 1)
 
 cat > "$TMP_DIR/bin/codex" <<'EOF'
@@ -795,16 +905,49 @@ EOF
 cat > "$TMP_DIR/runtime-history.json" <<'EOF'
 [{"id":"runtime-event","metadata":{"kind":"autopr_additional_context","body":"--extend-runtime"}}]
 EOF
+# The 10 minutes continue saved work, so the approval only shortens a run that
+# actually has a checkpoint to resume.
+RUNTIME_CHECKPOINTS="$TMP_DIR/runtime-checkpoints"
+runtime_task_root="$RUNTIME_CHECKPOINTS/aaaaaaaa-0000-4000-8000-000000000001"
+mkdir -p "$runtime_task_root/run-1"
+jq -n --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,created_at:$created_at,patch_saved:true}' \
+    > "$runtime_task_root/run-1/metadata.json"
+printf 'run-1\n' > "$runtime_task_root/active"
+
 AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
     "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
     "$TMP_DIR/extended-runtime-policy.json"
 check "a decision-bound runtime approval grants a 10-minute continuation" \
     $(jq -e '.minutes == 10 and .extended == true and .directives == ["extend_runtime"]' \
       "$TMP_DIR/extended-runtime-policy.json" >/dev/null && echo 0 || echo 1)
 
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/empty-checkpoints" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/unresumable-runtime-policy.json"
+check "a runtime approval never halves a from-scratch investigation" \
+    $(jq -e '.minutes == 20 and .extended == false and .checkpoint == null' \
+      "$TMP_DIR/unresumable-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+runtime_stale_root="$TMP_DIR/stale-checkpoints/aaaaaaaa-0000-4000-8000-000000000001"
+mkdir -p "$runtime_stale_root/run-old"
+jq -n '{schema_version:1,created_at:"2026-01-01T00:00:00Z",patch_saved:true}' \
+    > "$runtime_stale_root/run-old/metadata.json"
+printf 'run-old\n' > "$runtime_stale_root/active"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/stale-checkpoints" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/stale-runtime-policy.json"
+check "an expired checkpoint is neither resumed nor treated as a continuation" \
+    $(jq -e '.minutes == 20 and .extended == false and .checkpoint == null' \
+      "$TMP_DIR/stale-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
 jq '.[0].metadata.body = "Here is more evidence, but no time approval."' \
     "$TMP_DIR/runtime-history.json" > "$TMP_DIR/normal-runtime-history.json"
 AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
     "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
     "$TMP_DIR/normal-runtime-policy.json"
 check "ordinary additional context remains capped at 20 minutes" \
@@ -866,6 +1009,20 @@ python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
 check "a migration-required repeat cannot consume the owner's draft authorization" \
     $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
       "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
+
+# Recovery exists for standing product authority. A one-shot runtime approval
+# bound to a cycle that is already over must not ride along with it.
+jq '.[0].metadata.autopr_directives = "draft_pr,extend_runtime"
+    | .[0].metadata.body = "go ahead and do it\n--extend-runtime"' \
+    "$TMP_DIR/consumed-directive-history.json" > "$TMP_DIR/consumed-runtime-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-directive-card.json" \
+    --history "$TMP_DIR/consumed-runtime-history.json" \
+    --output "$TMP_DIR/recovered-runtime-directive.json"
+check "recovery never resurrects a spent runtime approval" \
+    $(jq -e '.directives == ["draft_pr"]' \
+      "$TMP_DIR/recovered-runtime-directive.json" >/dev/null && echo 0 || echo 1)
 
 cat > "$TMP_DIR/standing-directive-card.json" <<'EOF'
 {"board_column":"todo","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · 🟡 C60 · [autopr:directives draft_pr,extend_runtime]","autopr_reconsideration_pending":false}
@@ -934,6 +1091,11 @@ elif [[ "$*" == *"--label autopr"* ]]; then
 elif [[ "$*" == *"--head bot/task-77777777"* ]] && [ -n "${AUTOPR_TEST_PRIOR_TASK_PR:-}" ]; then
     printf '[{"state":"%s","createdAt":"2026-01-01T00:00:00Z","number":77,"labels":[{"name":"autopr"}],"body":""}]\n' \
         "$AUTOPR_TEST_PRIOR_TASK_PR"
+elif [[ "$*" == *"--head bot/task-aaaaaaaa"* ]] && [ -n "${AUTOPR_TEST_PAUSED_PR:-}" ]; then
+    printf '[{"state":"OPEN","createdAt":"2026-01-01T00:00:00Z","number":91,"labels":[{"name":"autopr"},{"name":"autopr-awaiting-input"}],"body":"<!-- matcha-feedback-comment-id: %s -->"}]\n' \
+        "${AUTOPR_TEST_PAUSED_PR_SEEN_COMMENT:-old-comment}"
+elif [[ "$*" == *"pr view"* && "$*" == *"--json comments,reviews"* ]]; then
+    printf '{"comments":[{"id":"new-comment","body":"here is the answer","author":{"login":"haley"}}],"reviews":[]}\n'
 else
     printf '[]\n'
 fi
@@ -1000,6 +1162,24 @@ runtime_approved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-re
 check "new decision-bound context reopens a runtime-limited card" \
     $([ "$(printf '%s' "$runtime_approved" | jq -r '.id8')" = "aaaaaaaa" ] \
       && echo 0 || echo 1)
+
+# Answering on the draft PR is a documented alternate path, so the pause must
+# not hide a card whose open awaiting-input draft just received a reply.
+runtime_pr_answer="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_PAUSED_PR=1 \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-pr-answer-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-paused-card.json")"
+check "a PR reply reopens a runtime-limited card that already has a draft" \
+    $([ "$(printf '%s' "$runtime_pr_answer" | jq -r '.mode')" = "rework" ] \
+      && echo 0 || echo 1)
+
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_PAUSED_PR=1 AUTOPR_TEST_PAUSED_PR_SEEN_COMMENT=new-comment \
+    AUTOPR_CACHE_DIR="$TMP_DIR/runtime-pr-stale-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/runtime-paused-card.json" >/dev/null 2>&1
+runtime_pr_stale_rc=$?
+check "an open draft with no new reply leaves a paused card waiting" \
+    $([ "$runtime_pr_stale_rc" = "3" ] && echo 0 || echo 1)
 
 cat > "$TMP_DIR/reconsideration-cards.json" <<'EOF'
 [

@@ -94,30 +94,52 @@ else
 fi
 
 progress_note_with_origin() {
-    local marker="$1" existing="$2" structured_existing="$2" remainder
+    local marker="$1" existing="$2" header body preserved remainder
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
-    if [[ "$structured_existing" == "from auto setup"* ]] \
-        || [[ "$structured_existing" == "🤖 AUTO SETUP"* ]]; then
-        # Drop the prior system-authored answer form.
-        structured_existing="${structured_existing%%$'\n'*}"
+    header="${existing%%$'\n'*}"
+    if [ "$header" = "$existing" ]; then
+        body=""
+    else
+        body="${existing#*$'\n'}"
     fi
-    remainder="$(printf '%s' "$structured_existing" | sed -E \
+    if [[ "$header" != "from auto setup"* ]] && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        # Entirely human-authored: nothing of it is this system's to rewrite.
+        header="$existing"
+        body=""
+    fi
+    # Drop only the machine-written blocks below the header: the pause report
+    # and the question form (always written last). Everything else on those
+    # lines is the operator's and survives the next cycle.
+    preserved="$(printf '%s\n' "$body" | awk '
+        /^Answers needed — reply below with the numbered choices:/ { exit }
+        /^(Why more time|Done so far|Latest progress|Next step):/ { next }
+        NF { seen = 1 }
+        seen { lines[n++] = $0 }
+        END {
+            while (n > 0 && lines[n-1] ~ /^[[:space:]]*$/) n--
+            for (i = 0; i < n; i++) print lines[i]
+        }
+    ')"
+    remainder="$(printf '%s' "$header" | sed -E \
         's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
+    # PAUSED belongs in this alternation: checkpoint.sh writes it, so without
+    # it every recovery run would re-append its own stale pause header here.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
-    if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+    if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
         printf '%s · %s' "$marker" "$remainder"
-    elif [ -n "$structured_existing" ] \
-        && [[ "$structured_existing" != "from auto setup"* ]] \
-        && [[ "$structured_existing" != "🤖 AUTO SETUP"* ]]; then
-        printf '%s · %s' "$marker" "$structured_existing"
+    elif [ -n "$header" ] \
+        && [[ "$header" != "from auto setup"* ]] \
+        && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        printf '%s · %s' "$marker" "$header"
     else
         printf '%s' "$marker"
     fi
+    [ -z "$preserved" ] || printf '\n%s' "$preserved"
 }
 
 report_summary() {

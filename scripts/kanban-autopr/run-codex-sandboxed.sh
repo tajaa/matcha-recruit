@@ -101,6 +101,11 @@ git -C "$SANDBOX_WORKSPACE" config core.hooksPath /dev/null
 
 mkdir -p "$IO_DIR/input" "$IO_DIR/output"
 printf '%s\n' "$MODEL_BASE_SHA" > "$IO_DIR/model-base-sha"
+# Bind this clone to the card it was made for. The runtime root survives
+# between runs and is only wiped here, so a checkpoint taken by a run that died
+# before reaching this point must be able to tell that the workspace still
+# holds the PREVIOUS card's work.
+[ -z "${AUTOPR_TASK_ID:-}" ] || printf '%s\n' "$AUTOPR_TASK_ID" > "$IO_DIR/task-id"
 
 # Apply saved model work only in the disposable clone. Later patch checks still
 # decide whether it may reach the trusted checkout.

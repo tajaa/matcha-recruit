@@ -32,8 +32,12 @@ extension TaskViewerSheet {
     var autoPRIsAwaitingAnswers: Bool {
         guard let note = autoSetupProgressNote else { return false }
         let normalized = note.lowercased()
+        // publish.sh still recognizes the legacy lowercase note, whose state
+        // segment reads "awaiting answers" and never "answers needed".
         return note.hasPrefix("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS")
-            || (normalized.hasPrefix("from auto setup") && normalized.contains("answers needed"))
+            || (normalized.hasPrefix("from auto setup")
+                && (normalized.contains("answers needed")
+                    || normalized.contains("awaiting answers")))
     }
 
     var autoPRNeedsRuntimeApproval: Bool {
