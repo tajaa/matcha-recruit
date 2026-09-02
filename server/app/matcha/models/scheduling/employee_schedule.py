@@ -51,6 +51,10 @@ class ShiftCreate(BaseModel):
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
     break_minutes: int = Field(0, ge=0, le=1440)
+    # Distinguish an intentional manager value from the legacy clients that
+    # always serialized their zero default.  Missing mode remains compatible
+    # with those clients and is treated as automatic by the route.
+    break_mode: Optional[Literal["auto", "manual"]] = None
     required_staff: int = Field(1, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
@@ -59,7 +63,7 @@ class ShiftCreate(BaseModel):
     # time, not here.
     job_id: Optional[UUID] = None
     # Employees to assign up front (optional).
-    employee_ids: list[UUID] = Field(default_factory=list)
+    employee_ids: list[UUID] = Field(default_factory=list, max_length=99)
     # 'training' ties the shift to a training_requirement — assigning an
     # employee creates/accelerates their training record instead of (not in
     # addition to) matching scheduled_role rules. Immutable after create
@@ -92,6 +96,7 @@ class ShiftUpdate(BaseModel):
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
     break_minutes: Optional[int] = Field(None, ge=0, le=1440)
+    break_mode: Optional[Literal["auto", "manual"]] = None
     required_staff: Optional[int] = Field(None, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
@@ -107,6 +112,8 @@ class ShiftUpdate(BaseModel):
         if self.starts_at is not None and self.ends_at is not None:
             if self.ends_at <= self.starts_at:
                 raise ValueError("ends_at must be after starts_at")
+        if self.break_mode == "manual" and "break_minutes" not in self.model_fields_set:
+            raise ValueError("manual break_mode requires break_minutes")
         return self
 
 

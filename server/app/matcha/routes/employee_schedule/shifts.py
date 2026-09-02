@@ -27,7 +27,9 @@ from ...services.scheduling.schedule_location_readiness import (
 )
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
-from ...services.scheduling.schedule_guidance import resolve_shift_break_plan
+from ...services.scheduling.schedule_guidance import (
+    resolve_shift_break_plan, resolve_shift_break_plans,
+)
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
@@ -45,6 +47,46 @@ from ._compliance import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _locked_break_write(
+    *, requested: int, locked: int, existing: int, minimum: int,
+    manual: bool, legacy_value: bool,
+) -> int:
+    """Resolve a break write after locking without losing a newer increase."""
+    if manual:
+        if locked != existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "shift_changed",
+                    "message": "The shift changed while you were editing it. Reload and try again.",
+                },
+            )
+        return requested
+    if legacy_value and locked == existing:
+        # A legacy API caller may still intentionally lower a compliant value.
+        # It is only automatic when stale or racing a newer write.
+        return max(requested, minimum)
+    return max(requested, locked, minimum)
+
+
+async def _resolve_break_plans_for_ids(
+    conn, company_id: UUID, *, location_id: UUID | None,
+    starts_at: datetime, ends_at: datetime,
+    employee_ids: list[UUID | None],
+):
+    concrete_ids = [employee_id for employee_id in employee_ids if employee_id is not None]
+    if concrete_ids:
+        plans = await resolve_shift_break_plans(
+            conn, company_id, location_id=location_id, starts_at=starts_at,
+            ends_at=ends_at, employee_ids=concrete_ids,
+        )
+        return [plans[employee_id] for employee_id in concrete_ids]
+    return [await resolve_shift_break_plan(
+        conn, company_id, location_id=location_id,
+        starts_at=starts_at, ends_at=ends_at,
+    )]
 
 
 async def _lock_and_assert_publish_assignments_eligible(
@@ -284,18 +326,15 @@ async def create_shift(body: ShiftCreate,
         await assert_location_in_company(conn, company_id, body.location_id)
         await assert_job_in_company(conn, company_id, body.job_id)
         plan_employee_ids = list(dict.fromkeys(body.employee_ids)) or [None]
-        break_plans = [
-            await resolve_shift_break_plan(
-                conn, company_id, location_id=body.location_id,
-                starts_at=body.starts_at, ends_at=body.ends_at,
-                employee_id=employee_id,
-            )
-            for employee_id in plan_employee_ids
-        ]
+        break_plans = await _resolve_break_plans_for_ids(
+            conn, company_id, location_id=body.location_id,
+            starts_at=body.starts_at, ends_at=body.ends_at,
+            employee_ids=plan_employee_ids,
+        )
         generated_minimum = max(
             minimum_meal_break_minutes(plan) for plan in break_plans
         )
-        if "break_minutes" in body.model_fields_set and body.break_minutes < generated_minimum:
+        if body.break_mode == "manual" and body.break_minutes < generated_minimum:
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -525,7 +564,15 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
     """
     company_id = await require_company_id(current_user)
     patch = body.model_dump(exclude_unset=True)
-    break_was_explicit = "break_minutes" in patch
+    break_mode = patch.pop("break_mode", None)
+    legacy_break_value = break_mode is None and "break_minutes" in patch
+    auto_break_requested = break_mode == "auto"
+    if auto_break_requested:
+        # Auto is an instruction, not a database column.  Ignore any value a
+        # caller happened to serialize with it and preserve longer stored
+        # breaks while enforcing the generated minimum below.
+        patch.pop("break_minutes", None)
+    break_was_explicit = break_mode == "manual"
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             """
@@ -538,7 +585,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Shift not found")
-        if not patch:
+        if not patch and (not auto_break_requested or existing["location_id"] is None):
             return await fetch_shift_by_id(conn, company_id, shift_id)
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
@@ -569,7 +616,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         # double-book everyone already on it, so it takes the same guard + force.
         # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
-        compliance_relevant = (
+        compliance_relevant = auto_break_requested or (
             retimed or "break_minutes" in patch or "location_id" in patch or "job_id" in patch
         )
         # Fair Workweek notice/clopening obligations attach to a POSTED shift's
@@ -588,16 +635,14 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 shift_id,
             )
             plan_employee_ids = [row["employee_id"] for row in assignees] or [None]
-            plans = [
-                await resolve_shift_break_plan(
-                    conn, company_id, location_id=new_location,
-                    starts_at=new_start, ends_at=new_end, employee_id=employee_id,
-                )
-                for employee_id in plan_employee_ids
-            ]
+            plans = await _resolve_break_plans_for_ids(
+                conn, company_id, location_id=new_location,
+                starts_at=new_start, ends_at=new_end,
+                employee_ids=plan_employee_ids,
+            )
             generated_minimum = max(minimum_meal_break_minutes(plan) for plan in plans)
             requested_break = patch.get("break_minutes", existing["break_minutes"])
-            if "break_minutes" in patch and requested_break < generated_minimum:
+            if break_was_explicit and requested_break < generated_minimum:
                 raise HTTPException(
                     status_code=422,
                     detail={
@@ -702,29 +747,35 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
 
         new_location = patch.get("location_id", existing["location_id"])
         was_published = existing["published_at"] is not None
+        locked_plans_by_employee = {}
+        locked_guidance_timezone = None
         async with conn.transaction():
             if compliance_relevant and new_status != "cancelled" and new_location is not None:
-                await conn.fetchval(
+                locked_break = int(await conn.fetchval(
                     "SELECT break_minutes FROM schedule_shifts "
                     "WHERE id = $1 AND company_id = $2 FOR UPDATE",
                     shift_id, company_id,
-                )
+                ) or 0)
                 locked_assignees = await conn.fetch(
                     "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
                     shift_id,
                 )
                 locked_employee_ids = [row["employee_id"] for row in locked_assignees] or [None]
-                locked_plans = [
-                    await resolve_shift_break_plan(
-                        conn, company_id, location_id=new_location,
-                        starts_at=new_start, ends_at=new_end, employee_id=employee_id,
-                    )
-                    for employee_id in locked_employee_ids
-                ]
+                locked_plans = await _resolve_break_plans_for_ids(
+                    conn, company_id, location_id=new_location,
+                    starts_at=new_start, ends_at=new_end,
+                    employee_ids=locked_employee_ids,
+                )
                 locked_minimum = max(
                     minimum_meal_break_minutes(plan) for plan in locked_plans
                 )
-                write_break = patch.get("break_minutes", existing["break_minutes"])
+                locked_plans_by_employee = dict(zip(locked_employee_ids, locked_plans))
+                if locked_assignees:
+                    locked_guidance_timezone = await conn.fetchval(
+                        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+                        new_location, company_id,
+                    ) or "UTC"
+                write_break = int(patch.get("break_minutes", existing["break_minutes"]) or 0)
                 if write_break < locked_minimum:
                     if break_was_explicit:
                         raise HTTPException(
@@ -738,7 +789,17 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                                 ),
                             },
                         )
-                    patch["break_minutes"] = locked_minimum
+                    write_break = locked_minimum
+                write_break = _locked_break_write(
+                    requested=write_break,
+                    locked=locked_break,
+                    existing=int(existing["break_minutes"] or 0),
+                    minimum=locked_minimum,
+                    manual=break_was_explicit,
+                    legacy_value=legacy_break_value,
+                )
+                if write_break != locked_break or auto_break_requested:
+                    patch["break_minutes"] = write_break
 
             before = shift_snapshot(existing)
             after = {**before}
@@ -778,6 +839,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         conn, company_id, shift_id=shift_id,
                         employee_id=assignee["employee_id"], location_id=new_location,
                         starts_at=new_start, ends_at=new_end,
+                        plan=locked_plans_by_employee.get(assignee["employee_id"]),
+                        timezone_name=locked_guidance_timezone,
                     )
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,

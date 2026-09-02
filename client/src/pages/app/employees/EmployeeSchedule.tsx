@@ -601,6 +601,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const [role, setRole] = useState(shift?.role ?? '')
   const [notes, setNotes] = useState(shift?.notes ?? '')
   const [breakMinutes, setBreakMinutes] = useState(shift ? String(shift.break_minutes) : '')
+  const [breakDirty, setBreakDirty] = useState(false)
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
 
@@ -625,6 +626,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       notes: notes.trim() || null,
+      break_mode: plannedBreak === undefined ? 'auto' : 'manual',
       ...(plannedBreak === undefined ? {} : { break_minutes: plannedBreak }),
       required_staff: requiredStaff,
     }
@@ -652,13 +654,10 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       toast('Select a training requirement for this session', 'error')
       return
     }
-    if (editing && validation.breakMinutes === undefined) {
-      toast('Planned break is required when editing an existing shift', 'error')
-      return
-    }
     setBusy(true)
     try {
-      const payload = buildPayload(validation.requiredStaff, validation.breakMinutes)
+      const plannedBreak = editing && !breakDirty ? undefined : validation.breakMinutes
+      const payload = buildPayload(validation.requiredStaff, plannedBreak)
       if (editing) {
         // PUT is a true PATCH, but every field here is one the form owns, so
         // sending the lot is the same write. `status` is deliberately NOT sent —
@@ -722,7 +721,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
-        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required={editing} value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} placeholder="Auto" className={`${inputCls} mt-0.5`} />
+        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" value={breakMinutes} onChange={(e) => { setBreakMinutes(e.target.value); setBreakDirty(true) }} placeholder="Auto" className={`${inputCls} mt-0.5`} />
         <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Leave blank to generate the approved legal minimum. You can add time later, but cannot save below that minimum.</span>
       </label>
       <label className="block">

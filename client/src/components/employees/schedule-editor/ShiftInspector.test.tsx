@@ -25,6 +25,34 @@ function renderInspector() {
   return onCreate
 }
 
+function renderEditingInspector() {
+  const onUpdate = vi.fn().mockResolvedValue(undefined)
+  render(
+    <ShiftInspector
+      shift={{
+        id: 'shift-1', starts_at: '2026-08-31T09:00:00Z', ends_at: '2026-08-31T17:00:00Z',
+        role: null, job_id: null, department: null, break_minutes: 0,
+        required_staff: 1, notes: null, kind: 'work', training_requirement_id: null,
+        assignments: [],
+      } as never}
+      defaults={null}
+      locationId="loc-1"
+      locationName="Downtown"
+      roster={[]}
+      jobs={[]}
+      trainingEnabled={false}
+      readOnly={false}
+      saving={false}
+      onCreate={vi.fn().mockResolvedValue(undefined)}
+      onUpdate={onUpdate}
+      onDelete={vi.fn().mockResolvedValue(undefined)}
+      onAssignmentUpdated={vi.fn().mockResolvedValue(undefined)}
+      onClose={vi.fn()}
+    />,
+  )
+  return onUpdate
+}
+
 describe('ShiftInspector validation', () => {
   it('leaves a new shift break blank so the server generates it', async () => {
     const onCreate = renderInspector()
@@ -34,6 +62,7 @@ describe('ShiftInspector validation', () => {
 
     await waitFor(() => expect(onCreate).toHaveBeenCalled())
     expect(onCreate.mock.calls[0][0]).not.toHaveProperty('break_minutes')
+    expect(onCreate.mock.calls[0][0]).toHaveProperty('break_mode', 'auto')
   })
 
   it('shows required-field errors without creating malformed shifts', async () => {
@@ -70,6 +99,24 @@ describe('ShiftInspector validation', () => {
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       required_staff: 99,
       break_minutes: 1440,
+      break_mode: 'manual',
     })))
+  })
+
+  it('uses Auto for an untouched edit and Manual after the manager changes the break', async () => {
+    const onUpdate = renderEditingInspector()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled())
+    expect(onUpdate.mock.calls[0][0]).toHaveProperty('break_mode', 'auto')
+    expect(onUpdate.mock.calls[0][0]).not.toHaveProperty('break_minutes')
+
+    fireEvent.change(screen.getByLabelText('Planned break (minutes)'), { target: { value: '30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2))
+    expect(onUpdate.mock.calls[1][0]).toEqual(expect.objectContaining({
+      break_mode: 'manual',
+      break_minutes: 30,
+    }))
   })
 })

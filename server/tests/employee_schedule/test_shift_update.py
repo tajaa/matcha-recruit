@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
-from app.matcha.models.scheduling.employee_schedule import ShiftUpdate
+from app.matcha.models.scheduling.employee_schedule import ShiftCreate, ShiftUpdate
 from app.matcha.routes.employee_schedule import shifts as route
 
 
@@ -19,6 +20,36 @@ ACTOR_ID = uuid4()
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_break_mode_preserves_legacy_payloads_and_requires_manual_value():
+    starts_at = datetime(2026, 8, 12, 8, 0, tzinfo=timezone.utc)
+    legacy = ShiftCreate(
+        starts_at=starts_at,
+        ends_at=datetime(2026, 8, 12, 16, 0, tzinfo=timezone.utc),
+        break_minutes=0,
+    )
+    assert legacy.break_mode is None
+
+    with pytest.raises(ValueError, match="manual break_mode requires break_minutes"):
+        ShiftUpdate(break_mode="manual")
+
+
+def test_automatic_break_write_preserves_a_concurrent_manager_increase():
+    assert route._locked_break_write(
+        requested=45, locked=60, existing=30, minimum=45,
+        manual=False, legacy_value=False,
+    ) == 60
+
+
+def test_manual_break_write_detects_a_concurrent_change():
+    with pytest.raises(HTTPException) as exc:
+        route._locked_break_write(
+            requested=45, locked=60, existing=30, minimum=30,
+            manual=True, legacy_value=False,
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "shift_changed"
 
 
 class _Transaction:

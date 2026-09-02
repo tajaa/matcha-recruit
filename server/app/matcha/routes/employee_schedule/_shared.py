@@ -348,7 +348,7 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     """
     row = await conn.fetchrow(
         """
-        SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
+        SELECT s.id, s.starts_at, s.ends_at, s.status, s.required_staff,
                s.location_id, s.break_minutes, s.role, s.kind,
                s.training_requirement_id, s.job_id,
                (SELECT COUNT(*) FROM schedule_shift_assignments a

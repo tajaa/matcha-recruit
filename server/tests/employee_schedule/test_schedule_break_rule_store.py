@@ -175,3 +175,49 @@ def test_rest_count_bands_create_only_the_new_ordinal_per_threshold():
     assert [(rule.ordinal, rule.trigger_after_minutes) for rule in result.rules] == [
         (1, 240), (2, 360),
     ]
+
+
+def test_malformed_supplied_age_is_rejected_instead_of_becoming_unscoped():
+    location = _location()
+    row = {
+        "id": uuid4(),
+        "rules": {"meal_periods": [{
+            "trigger_after_minutes": 240,
+            "duration_minutes": 30,
+            "maximum_age": "seventeen",
+        }]},
+        "citation": "Minor meal citation", "depth": 0,
+        "industry_code": "retail", "effective_from": date(2026, 1, 1),
+        "effective_to": None,
+    }
+
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[row]), company_id=uuid4(),
+        location_id=location["id"], shift_date=date(2026, 8, 21),
+    ))
+
+    assert result.source == "error"
+    assert result.rules == ()
+    assert result.advisories[0]["code"] == "break_rules_invalid"
+
+
+def test_aggregate_meal_break_cannot_exceed_shift_api_limit():
+    location = _location()
+    row = {
+        "id": uuid4(),
+        "rules": {"meal_periods": [
+            {"ordinal": 1, "trigger_after_minutes": 1, "duration_minutes": 1000},
+            {"ordinal": 2, "trigger_after_minutes": 2, "duration_minutes": 500},
+        ]},
+        "citation": "Bad import", "depth": 0,
+        "industry_code": "retail", "effective_from": date(2026, 1, 1),
+        "effective_to": None,
+    }
+
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[row]), company_id=uuid4(),
+        location_id=location["id"], shift_date=date(2026, 8, 21),
+    ))
+
+    assert result.source == "error"
+    assert "1440" in result.advisories[0]["metadata"]["reason"]

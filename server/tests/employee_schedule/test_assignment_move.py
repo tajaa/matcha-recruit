@@ -17,6 +17,7 @@ from fastapi import HTTPException
 
 from app.matcha.models.scheduling.employee_schedule import AssignmentMove
 from app.matcha.routes.employee_schedule import assignments as route
+from app.matcha.routes.employee_schedule._shared import fetch_shift_for_write
 
 
 COMPANY_ID = uuid4()
@@ -26,6 +27,18 @@ ACTOR_ID = uuid4()
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_direct_assignment_fetch_shape_includes_shift_id():
+    shift_id = uuid4()
+
+    class Connection:
+        async def fetchrow(self, query, *args):
+            assert "SELECT s.id," in query
+            return {"id": args[0]}
+
+    row = _run(fetch_shift_for_write(Connection(), COMPANY_ID, shift_id))
+    assert row["id"] == shift_id
 
 
 def _shift(shift_id: UUID, *, published=False, required_staff=1):
@@ -80,6 +93,8 @@ class _Connection:
             if (shift_id, employee_id) in self.assignments:
                 return {"assigned_by": ACTOR_ID}
             return None
+        if "FROM schedule_shifts" in query and "FOR UPDATE" in query:
+            return self.shifts.get(args[0])
         raise AssertionError(f"unexpected fetchrow: {' '.join(query.split())[:100]}")
 
     async def fetchval(self, query, *args):

@@ -2126,6 +2126,7 @@ async def execute_edit_proposal(
                 SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
                        kind, training_requirement_id, published_at, required_staff
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
+                FOR UPDATE
                 """,
                 shift_id, company_id,
             )

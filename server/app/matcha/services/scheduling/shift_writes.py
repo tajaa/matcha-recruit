@@ -203,28 +203,36 @@ async def create_shift_core(
     from app.matcha.services.scheduling.schedule_guidance import (
         refresh_assignment_break_guidance,
         resolve_shift_break_plan,
+        resolve_shift_break_plans,
     )
 
     import logging
     logger = logging.getLogger(__name__)
 
     plan_employee_ids = list(dict.fromkeys(employee_ids))
-    plans = [
-        await resolve_shift_break_plan(
+    if plan_employee_ids:
+        break_plans = await resolve_shift_break_plans(
             conn, company_id, location_id=location_id, starts_at=starts_at,
-            ends_at=ends_at, employee_id=employee_id,
+            ends_at=ends_at, employee_ids=plan_employee_ids,
         )
-        for employee_id in plan_employee_ids
-    ]
-    if not plans:
-        plans = [await resolve_shift_break_plan(
-            conn, company_id, location_id=location_id, starts_at=starts_at,
-            ends_at=ends_at,
-        )]
+    else:
+        break_plans = {
+            None: await resolve_shift_break_plan(
+                conn, company_id, location_id=location_id, starts_at=starts_at,
+                ends_at=ends_at,
+            )
+        }
+    plans = list(break_plans.values())
     break_minutes = max(
         break_minutes,
         max(minimum_meal_break_minutes(plan) for plan in plans),
     )
+    guidance_timezone = None
+    if location_id is not None and plan_employee_ids:
+        guidance_timezone = await conn.fetchval(
+            "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+            location_id, company_id,
+        ) or "UTC"
 
     shift_id = await conn.fetchval(
         """
@@ -255,6 +263,8 @@ async def create_shift_core(
         await refresh_assignment_break_guidance(
             conn, company_id, shift_id=shift_id, employee_id=emp_id,
             location_id=location_id, starts_at=starts_at, ends_at=ends_at,
+            plan=break_plans[emp_id],
+            timezone_name=guidance_timezone,
         )
         if kind == "training" and training_requirement is not None:
             await assign_training(
@@ -346,20 +356,14 @@ async def apply_assignment_core(
     from app.matcha.services.training.training_assignment import (
         assign_training, evaluate_scheduled_role_rules,
     )
-    from app.matcha.services.scheduling.schedule_breaks import minimum_meal_break_minutes
-    from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
+    from app.matcha.services.scheduling.schedule_guidance import (
+        refresh_assignment_break_guidance_and_minimum,
+    )
 
     import logging
     logger = logging.getLogger(__name__)
 
     shift_id = shift_row["id"]
-    current_break = int(shift_row["break_minutes"] or 0)
-    if shift_row["location_id"] is not None:
-        current_break = int(await conn.fetchval(
-            "SELECT break_minutes FROM schedule_shifts "
-            "WHERE id = $1 AND company_id = $2 FOR UPDATE",
-            shift_id, company_id,
-        ) or 0)
     await conn.execute(
         """
         INSERT INTO schedule_shift_assignments
@@ -369,28 +373,10 @@ async def apply_assignment_core(
         """,
         company_id, shift_id, employee_id, actor_user_id,
     )
-    plan = await refresh_assignment_break_guidance(
+    await refresh_assignment_break_guidance_and_minimum(
         conn, company_id, shift_id=shift_id, employee_id=employee_id,
-        location_id=shift_row["location_id"], starts_at=shift_row["starts_at"],
-        ends_at=shift_row["ends_at"],
+        actor_user_id=actor_user_id, source="automatic_break_assignment",
     )
-    generated_minimum = minimum_meal_break_minutes(plan)
-    if generated_minimum > current_break:
-        await conn.execute(
-            "UPDATE schedule_shifts SET break_minutes = $1, updated_at = NOW() "
-            "WHERE id = $2 AND company_id = $3",
-            generated_minimum, shift_id, company_id,
-        )
-        await log_audit(
-            conn, company_id, "shift", shift_id, actor_user_id, "shift.update",
-            {
-                "fields": ["break_minutes"],
-                "before": {"break_minutes": current_break},
-                "after": {"break_minutes": generated_minimum},
-                "source": "automatic_break_assignment",
-                "employee_id": str(employee_id),
-            },
-        )
     await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
                     "assignment.create", {
                         "employee_id": str(employee_id),
@@ -503,6 +489,7 @@ async def retime_shift_core(
     from app.matcha.services.scheduling.schedule_guidance import (
         refresh_assignment_break_guidance,
         resolve_shift_break_plan,
+        resolve_shift_break_plans,
     )
 
     assignees = await conn.fetch(
@@ -510,16 +497,29 @@ async def retime_shift_core(
         shift_id,
     )
     plan_employee_ids = [row["employee_id"] for row in assignees] or [None]
-    plans = [
-        await resolve_shift_break_plan(
+    if assignees:
+        plans_by_employee = await resolve_shift_break_plans(
             conn, company_id, location_id=existing_row["location_id"],
-            starts_at=new_starts_at, ends_at=new_ends_at, employee_id=employee_id,
+            starts_at=new_starts_at, ends_at=new_ends_at,
+            employee_ids=[row["employee_id"] for row in assignees],
         )
-        for employee_id in plan_employee_ids
-    ]
+    else:
+        plans_by_employee = {
+            None: await resolve_shift_break_plan(
+                conn, company_id, location_id=existing_row["location_id"],
+                starts_at=new_starts_at, ends_at=new_ends_at,
+            )
+        }
+    plans = list(plans_by_employee.values())
     generated_minimum = max(minimum_meal_break_minutes(plan) for plan in plans)
     current_break = int(existing_row["break_minutes"] or 0)
     new_break = max(current_break, generated_minimum)
+    guidance_timezone = None
+    if existing_row["location_id"] is not None and assignees:
+        guidance_timezone = await conn.fetchval(
+            "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+            existing_row["location_id"], company_id,
+        ) or "UTC"
 
     before = shift_snapshot(existing_row)
     after = {
@@ -542,6 +542,8 @@ async def retime_shift_core(
             employee_id=assignee["employee_id"],
             location_id=existing_row["location_id"],
             starts_at=new_starts_at, ends_at=new_ends_at,
+            plan=plans_by_employee[assignee["employee_id"]],
+            timezone_name=guidance_timezone,
         )
     await log_audit(conn, company_id, "shift", shift_id, actor_user_id,
                     "shift.update", {
@@ -617,6 +619,8 @@ async def generate_week_template_shifts(
     """
     from .schedule_rules import template_windows
     from .shift_compliance import check_shift_compliance
+    from .schedule_breaks import minimum_meal_break_minutes
+    from .schedule_guidance import resolve_shift_break_plan
 
     series_id = uuid4()
     total_created = 0
@@ -641,6 +645,16 @@ async def generate_week_template_shifts(
         if not starts:
             continue
         total_created += len(starts)
+        effective_breaks: list[int] = []
+        for starts_at, ends_at in zip(starts, ends):
+            plan = await resolve_shift_break_plan(
+                conn, company_id, location_id=blk["location_id"],
+                starts_at=starts_at, ends_at=ends_at,
+            )
+            effective_breaks.append(max(
+                int(blk["break_minutes"] or 0),
+                minimum_meal_break_minutes(plan),
+            ))
 
         # One compliance check per block (not per shift, not once for the
         # whole template) — each block can have a different time
@@ -651,7 +665,7 @@ async def generate_week_template_shifts(
             await check_shift_compliance(
                 conn, company_id, location_id=blk["location_id"], job_id=blk["job_id"],
                 starts_at=starts[0], ends_at=ends[0],
-                break_minutes=blk["break_minutes"] or 0, shift_kind="work",
+                break_minutes=effective_breaks[0], shift_kind="work",
             )
         )
 
@@ -661,13 +675,14 @@ async def generate_week_template_shifts(
                 (company_id, location_id, template_id, series_id, role,
                  department, starts_at, ends_at, break_minutes,
                  required_staff, color, notes, created_by, job_id)
-            SELECT $1,$2,$3,$4,$5,$6, w.starts_at, w.ends_at, $9,$10,$11,$12,$13,$14
-            FROM unnest($7::timestamptz[], $8::timestamptz[])
-                 AS w(starts_at, ends_at)
+            SELECT $1,$2,$3,$4,$5,$6, w.starts_at, w.ends_at, w.break_minutes,
+                   $10,$11,$12,$13,$14
+            FROM unnest($7::timestamptz[], $8::timestamptz[], $9::integer[])
+                 AS w(starts_at, ends_at, break_minutes)
             RETURNING id
             """,
             company_id, blk["location_id"], blk["id"], series_id, blk["role"],
-            blk["department"], starts, ends, blk["break_minutes"],
+            blk["department"], starts, ends, effective_breaks,
             blk["required_staff"], blk["color"], blk["notes"], created_by, blk["job_id"],
         )
         shift_ids.extend(r["id"] for r in rows)

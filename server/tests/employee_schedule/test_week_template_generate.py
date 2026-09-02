@@ -9,9 +9,14 @@ overnight block rolling to the next day alongside a same-day block — a
 theatre's "Standard Week" needs all three at once.
 """
 
+import asyncio
 from datetime import date, time, timedelta
+from uuid import uuid4
 
 from app.matcha.services.scheduling.schedule_rules import template_windows
+from app.matcha.services.scheduling import (
+    schedule_breaks, schedule_guidance, shift_compliance, shift_writes,
+)
 
 
 def test_two_blocks_cover_disjoint_weekdays():
@@ -47,3 +52,37 @@ def test_apply_range_spans_requested_weeks():
     end = start + timedelta(days=7 * weeks - 1)
     starts, _ = template_windows(start, end, {1, 2, 3, 4, 5}, time(9), time(17))
     assert len(starts) == 10
+
+
+def test_materialized_template_shift_uses_generated_minimum(monkeypatch):
+    captured = {}
+
+    async def resolve(*_args, **_kwargs):
+        return object()
+
+    async def compliance(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(schedule_guidance, "resolve_shift_break_plan", resolve)
+    monkeypatch.setattr(schedule_breaks, "minimum_meal_break_minutes", lambda _plan: 30)
+    monkeypatch.setattr(shift_compliance, "check_shift_compliance", compliance)
+
+    class Connection:
+        async def fetch(self, query, *args):
+            assert "w.break_minutes" in query
+            captured["breaks"] = args[8]
+            return [{"id": uuid4()} for _ in args[6]]
+
+    block = {
+        "id": uuid4(), "name": "Day", "role": None, "department": None,
+        "location_id": uuid4(), "start_time": time(9), "end_time": time(17),
+        "break_minutes": 0, "required_staff": 1, "days_of_week": [1],
+        "color": None, "notes": None, "job_id": None,
+    }
+    result = asyncio.run(shift_writes.generate_week_template_shifts(
+        Connection(), uuid4(), blocks=[block], start_date=date(2026, 7, 13),
+        end_date=date(2026, 7, 13), created_by=uuid4(),
+    ))
+
+    assert result["created"] == 1
+    assert captured["breaks"] == [30]
