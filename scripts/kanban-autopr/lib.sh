@@ -44,6 +44,13 @@ _kanban_autopr_validate_ci_scope() {
         || die "GitHub Actions MATCHA_PROJECT_IDS must contain all four configured Espresso projects"
 }
 
+# Every board call must be bounded. The one-minute request watcher makes this
+# call from inside a LaunchAgent, and an unbounded curl against a stalled host
+# used to be able to sit on the shared dispatch lock until its fifteen-minute
+# stale-lock reclaim, starving the production-error and self-audit lanes.
+MW_CURL_TIMEOUTS=(--connect-timeout "${MATCHA_API_CONNECT_TIMEOUT:-10}"
+                  --max-time "${MATCHA_API_MAX_TIME:-60}")
+
 # Logs in once per job and caches the access token in $RUNNER_TEMP (falls
 # back to a per-process tmp dir outside CI) so every script in the pipeline
 # reuses the same token instead of re-authenticating.
@@ -58,7 +65,7 @@ mw_login() {
         return
     fi
     local resp token
-    resp="$(curl -sS -X POST "$MATCHA_API_URL/auth/login" \
+    resp="$(curl -sS "${MW_CURL_TIMEOUTS[@]}" -X POST "$MATCHA_API_URL/auth/login" \
         -H 'Content-Type: application/json' \
         -d "$(jq -n --arg email "$MATCHA_BOT_EMAIL" --arg password "$MATCHA_BOT_PASSWORD" \
             '{email: $email, password: $password}')")"
@@ -71,7 +78,8 @@ mw_login() {
 
 _mw_api_request() {
     local method="$1" path="$2" body="$3" token="$4" body_file="$5"
-    local -a args=(-sS -o "$body_file" -w '%{http_code}' -X "$method" "$MATCHA_API_URL$path"
+    local -a args=(-sS "${MW_CURL_TIMEOUTS[@]}" -o "$body_file" -w '%{http_code}'
+        -X "$method" "$MATCHA_API_URL$path"
         -H "Authorization: Bearer $token" -H 'Content-Type: application/json')
     [ -z "$body" ] || args+=(-d "$body")
     curl "${args[@]}"

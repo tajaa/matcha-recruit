@@ -385,7 +385,35 @@ async def request_autopr_reconsideration(
     }
 
 
+# The four Espresso boards the kanban-autopr harness actually watches (kept in
+# sync with scripts/seed/autopr_bot.py's PROJECTS list and scripts/kanban-autopr
+# /lib.sh's KANBAN_AUTOPR_PROJECT_IDS). Anything outside this set has no
+# harness polling it, so a run request there could never be claimed — reject it
+# at the door instead of queueing work nothing will pick up.
+KANBAN_AUTOPR_PROJECT_IDS = {
+    "7f728636-3219-4d83-9df3-a4682e3242de",  # WerkWerk
+    "fade10b4-36ff-4c60-af59-5cc6058285ab",  # Beetlejuse
+    "84823d21-c752-4abd-9696-4c93c8b3c21e",  # Gummfit
+    "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
+}
+
 _AUTOPR_RUN_LANES = ("todo", "changes_requested")
+
+# How long a "run now" request can still be waiting for the harness. The local
+# watcher dispatches within a minute and the selector consumes the request in
+# the pass that dispatch triggers, so anything older than this was dropped on
+# the floor — a run killed before select.sh ran, or a board the AutoPR bot does
+# not watch. Bounding it is what stops a stranded request from forcing a Kanban
+# dispatch every five minutes forever, keeps the once-a-minute poll off a
+# full-history scan, and lets the card's "Queued for AutoPR" chip clear itself.
+# A code constant interpolated into SQL below; never user input.
+_AUTOPR_RUN_REQUEST_TTL = "30 minutes"
+
+# The bookkeeping rows this feature writes carry no body and render nothing, so
+# they must not reach the unviewed-updates badge or the ticket activity graph.
+# They share event_type='activity' with real discussion notes and are told
+# apart by metadata kind.
+_AUTOPR_BOOKKEEPING_KINDS = ("autopr_run_request", "autopr_run_claim")
 
 
 async def request_autopr_run(
@@ -402,6 +430,10 @@ async def request_autopr_run(
     request while one is already pending is idempotent — it returns the
     existing timestamp rather than stacking events.
     """
+    if str(project_id) not in KANBAN_AUTOPR_PROJECT_IDS:
+        raise AutoPRReconsiderationConflict(
+            "AutoPR does not watch this board, so it cannot pick up this ticket"
+        )
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
@@ -420,11 +452,12 @@ async def request_autopr_run(
                     "AutoPR only picks up tickets in Todo or Changes Requested"
                 )
             pending_at = await conn.fetchval(
-                """
+                f"""
                 SELECT MAX(h.created_at) FROM mw_task_history h
                 WHERE h.task_id = $1
                   AND h.event_type = 'activity'
                   AND h.metadata->>'kind' = 'autopr_run_request'
+                  AND h.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
                   AND h.created_at > COALESCE((
                         SELECT MAX(c.created_at) FROM mw_task_history c
                         WHERE c.task_id = $1
@@ -502,13 +535,20 @@ async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
     if not project_ids:
         return []
     async with get_connection() as conn:
+        # The TTL predicate is what keeps this a bounded query: it rides
+        # idx_mw_task_history_project_created (project_id, created_at) instead
+        # of walking every history row on four boards, 1440 times a day, to
+        # answer "is anything queued?". The claim lookup is bounded by the same
+        # window — a claim older than the oldest live request cannot matter.
+        # LIMIT is a backstop only; the watcher acts on the queue's existence.
         rows = await conn.fetch(
-            """
+            f"""
             SELECT t.id AS task_id, t.project_id, t.board_column,
                    MAX(h.created_at) AS requested_at
             FROM mw_task_history h
             JOIN mw_tasks t ON t.id = h.task_id
             WHERE h.project_id = ANY($1::uuid[])
+              AND h.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
               AND h.event_type = 'activity'
               AND h.metadata->>'kind' = 'autopr_run_request'
               AND t.status != 'cancelled'
@@ -516,11 +556,13 @@ async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
               AND h.created_at > COALESCE((
                     SELECT MAX(c.created_at) FROM mw_task_history c
                     WHERE c.task_id = h.task_id
+                      AND c.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
                       AND c.event_type = 'activity'
                       AND c.metadata->>'kind' = 'autopr_run_claim'
                   ), '-infinity'::timestamptz)
             GROUP BY t.id, t.project_id, t.board_column
             ORDER BY MAX(h.created_at)
+            LIMIT 200
             """,
             project_ids, list(_AUTOPR_RUN_LANES),
         )
@@ -680,6 +722,16 @@ async def list_project_tasks(
     # Inline the counted-event literals (code constants, not user input) so the
     # badge subqueries stay in lock-step with COUNTED_UPDATE_EVENTS.
     _counted = ", ".join(f"'{e}'" for e in COUNTED_UPDATE_EVENTS)
+    # AutoPR's run-request / run-claim rows ride event_type='activity' but have
+    # no body, so NoteRow renders nothing for them. Counting them would put an
+    # unviewed-updates chip on the card that opening the ticket cannot clear.
+    _bookkeeping = ", ".join(f"'{k}'" for k in _AUTOPR_BOOKKEEPING_KINDS)
+    _skip_bookkeeping3 = (
+        f"AND COALESCE(h3.metadata->>'kind', '') NOT IN ({_bookkeeping})"
+    )
+    _skip_bookkeeping4 = (
+        f"AND COALESCE(h4.metadata->>'kind', '') NOT IN ({_bookkeeping})"
+    )
     # Exclude the viewer's OWN history events from the unviewed-updates badge +
     # count: your own move/comment isn't "an update you haven't seen", so a
     # reviewer who drags a ticket to Done shouldn't then see it ringed yellow.
@@ -752,10 +804,12 @@ async def list_project_tasks(
                    (SELECT COUNT(*) FROM mw_task_history h3
                       WHERE h3.task_id = t.id
                         AND h3.event_type IN ({_counted})
+                        {_skip_bookkeeping3}
                         {_self3}) AS update_count,
                    ARRAY(SELECT h4.id::text FROM mw_task_history h4
                       WHERE h4.task_id = t.id
                         AND h4.event_type IN ({_counted})
+                        {_skip_bookkeeping4}
                         {_self4}
                       ORDER BY h4.created_at DESC
                       LIMIT 100) AS recent_event_ids,
@@ -803,6 +857,9 @@ async def list_project_tasks(
                 WHERE h6.task_id = t.id
                   AND h6.event_type = 'activity'
                   AND h6.metadata->>'kind' = 'autopr_run_request'
+                  -- Same shelf life the dispatcher honours, so the card's
+                  -- "Queued for AutoPR" chip can never outlive the request.
+                  AND h6.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
                   AND h6.created_at > COALESCE((
                         SELECT MAX(h7.created_at) FROM mw_task_history h7
                         WHERE h7.task_id = t.id

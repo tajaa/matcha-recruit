@@ -191,7 +191,7 @@ render_dashboard() {
     local open_kanban open_errors open_audits open_prs merged_prs cards bot_prs plan selected selected_rc
     local kanban_state error_state audit_state admin_state open_kanban_state open_errors_state
     local open_audits_state merged_state board_state bot_pr_state plan_state all_states source_state
-    local selected_cache
+    local selected_cache empty_marker
     local active run_id run_lane run_status run_created run_title run_elapsed run_started current_id8=""
     local run_details run_details_state step_line phase branch id8 active_card project card_title
     local dispatch_line dispatch_ts dispatch_action dispatch_reason dispatch_time
@@ -254,21 +254,39 @@ render_dashboard() {
     # on run boundaries, not between two redraws. An empty answer ("nothing to
     # do") is cached as an explicit marker so it does not re-run every tick.
     selected=""
+    # Default to "failed" so no path below can render a selector verdict it
+    # never actually obtained.
+    selected_rc=1
     selected_cache="$CACHE_DIR/next-selection.json"
+    # The cached answer carries the selector's exit status with it. Rendering
+    # reads that status (0 = a pick, 3 = nothing eligible, anything else =
+    # failed), so a warm cache hit must restore it too — otherwise every
+    # redraw inside the TTL reports a healthy selector as broken.
+    empty_marker='if type == "object" and (has("autopr_dashboard_rc") or (.autopr_dashboard_empty // false)) then true else false end'
     if [ -s "$selected_cache" ] \
         && [ "$(cache_age_seconds "$selected_cache")" -lt "$SELECT_TTL_SECONDS" ] 2>/dev/null; then
-        selected="$(jq -r 'if type == "object" and (.autopr_dashboard_empty // false) then "" else tojson end' \
-            "$selected_cache" 2>/dev/null || printf '')"
+        if [ "$(jq -r "$empty_marker" "$selected_cache" 2>/dev/null || printf false)" = true ]; then
+            selected_rc="$(jq -r '.autopr_dashboard_rc // 3' "$selected_cache" 2>/dev/null || printf 3)"
+            [[ "$selected_rc" =~ ^[0-9]+$ ]] || selected_rc=3
+        else
+            selected="$(jq -r 'tojson' "$selected_cache" 2>/dev/null || printf '')"
+            [ -z "$selected" ] || selected_rc=0
+        fi
     else
         selected="$(AUTOPR_SELECT_READ_ONLY=true GITHUB_REPOSITORY="$REPO" \
             "$SCRIPT_DIR/select.sh" <(printf '%s' "$cards") 2>/dev/null)"
         selected_rc=$?
         [ "$selected_rc" -eq 0 ] || selected=""
-        if mkdir -p "$CACHE_DIR" 2>/dev/null; then
+        # Only a definitive verdict is cacheable. A selector FAILURE (rate
+        # limit, crash) stored as the empty marker would be served for the
+        # next five minutes as "nothing to do" — the opposite of the
+        # last-known-good policy every other source on this board follows.
+        if { [ "$selected_rc" -eq 0 ] || [ "$selected_rc" -eq 3 ]; } \
+            && mkdir -p "$CACHE_DIR" 2>/dev/null; then
             if [ -n "$selected" ]; then
                 (umask 077; printf '%s' "$selected" > "$selected_cache") 2>/dev/null || true
             else
-                (umask 077; printf '{"autopr_dashboard_empty":true}' > "$selected_cache") 2>/dev/null || true
+                (umask 077; printf '{"autopr_dashboard_rc":3}' > "$selected_cache") 2>/dev/null || true
             fi
         fi
     fi
@@ -289,7 +307,12 @@ render_dashboard() {
           || TZ="$PACIFIC_TZ" date '+%a %b %d · %I:%M:%S %p %Z')" \
         "$source_state" "$REFRESH_SECONDS"
 
-    dispatch_line="$(tail -n 1 "$DISPATCH_LOG" 2>/dev/null || true)"
+    # The one-minute request watcher shares this log with the five-minute
+    # scheduler. Its idle ticks are bookkeeping, not a scheduling signal, so
+    # skip them here (and in older logs that still carry them) rather than
+    # letting them mask the scheduler's real last action.
+    dispatch_line="$(tail -n 400 "$DISPATCH_LOG" 2>/dev/null \
+        | grep -v '"reason":"no-run-request"' | tail -n 1 || true)"
     dispatch_ts="$(printf '%s' "$dispatch_line" | jq -r '.timestamp // empty' 2>/dev/null)"
     dispatch_action="$(printf '%s' "$dispatch_line" | jq -r '.action // empty' 2>/dev/null)"
     dispatch_reason="$(printf '%s' "$dispatch_line" | jq -r '.reason // empty' 2>/dev/null)"

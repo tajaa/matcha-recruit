@@ -25,6 +25,18 @@ enum GraphGeom {
         "subtask_rejected", "review_approved",
     ]
 
+    /// AutoPR's run-request / run-claim rows ride `activity` but carry no body,
+    /// so `NoteRow` renders nothing for them. A node with nothing behind it is
+    /// worse than no node — filter them out rather than drawing dead comments.
+    static let bookkeepingKinds: Set<String> = [
+        "autopr_run_request", "autopr_run_claim",
+    ]
+
+    static func isBookkeeping(_ entry: MWTaskHistoryEntry) -> Bool {
+        guard let kind = entry.metadata?["kind"] else { return false }
+        return bookkeepingKinds.contains(kind)
+    }
+
     static func laneX(_ i: Int) -> CGFloat { laneInset + CGFloat(i) * laneSpacing }
 
     /// Gutter width grows with lane count but is capped so the action card keeps

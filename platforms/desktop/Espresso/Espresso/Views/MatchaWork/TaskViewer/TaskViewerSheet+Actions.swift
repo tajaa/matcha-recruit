@@ -253,6 +253,10 @@ extension TaskViewerSheet {
             )
             didRequestAutoPRRun = true
             await viewModel.loadTasks()
+            // The reload is authoritative from here on. Leaving the optimistic
+            // flag set would pin "Queued for AutoPR" for the life of the sheet,
+            // so the button never returns once the harness claims the request.
+            didRequestAutoPRRun = false
         } catch {
             autoPRRunError = error.localizedDescription
         }

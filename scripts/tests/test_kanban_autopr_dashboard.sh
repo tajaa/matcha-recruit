@@ -172,6 +172,63 @@ check "PR-context failure cannot produce a live release plan" \
     && ! grep -q '  RELEASE gh workflow run' "$TMP_DIR/dashboard-no-pr-context.out" \
     && echo 0 || echo 1)
 
+# The selector is the most expensive probe on the board, so its answer is
+# cached for five minutes. A warm hit must render exactly what the cold call
+# rendered — including the selector's exit status, which the NEXT section
+# branches on. Run with a real clock so the cache is actually inside its TTL
+# (the rest of this file uses a year-2099 stamp, which always reads as
+# expired and so never exercised this path).
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'call\n' >> "$AUTOPR_TEST_SELECT_CALLS"
+printf '%s\n' '{"id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","mode":"rework"}'
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+warm_now="$(date +%s)"
+for _ in 1 2; do
+  AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+    AUTOPR_TEST_SELECT_CALLS="$TMP_DIR/select-calls" \
+    AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/warm-cache" \
+    AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+    "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-warm.out"
+done
+check "a cached selection still renders as an exact selector result" \
+  $(grep -q 'NEXT · EXACT SELECTOR RESULT' "$TMP_DIR/dashboard-warm.out" \
+    && grep -q 'Fix intake' "$TMP_DIR/dashboard-warm.out" \
+    && ! grep -q 'Selector failed' "$TMP_DIR/dashboard-warm.out" \
+    && [ "$(wc -l < "$TMP_DIR/select-calls" | tr -d ' ')" = 1 ] && echo 0 || echo 1)
+
+# "Nothing eligible" is a verdict worth caching; a selector CRASH is not.
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 3
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/empty-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > /dev/null
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/empty-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-warm-empty.out"
+check "a cached empty queue survives, and a later crash is not cached as empty" \
+  $(grep -q 'NEXT · NONE ELIGIBLE AFTER CURRENT WORK' "$TMP_DIR/dashboard-warm-empty.out" \
+    && AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+       AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" \
+       AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/crash-cache" \
+       AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" \
+       AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+       "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-crash.out" \
+    && [ ! -e "$TMP_DIR/crash-cache/next-selection.json" ] \
+    && grep -q 'Selector failed (exit 1)' "$TMP_DIR/dashboard-crash.out" \
+    && echo 0 || echo 1)
+
 cat > "$VIEW_DIR/select.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 1

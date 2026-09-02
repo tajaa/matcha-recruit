@@ -77,6 +77,28 @@ iso_to_epoch() {
         || printf 0
 }
 
+# A "run now" request is consumed by the pass that considers it, not only by
+# the card that wins the pass. investigate.sh claims the card it picks up;
+# this claims every run-requested card this pass declines or defers. Without
+# it the one-minute watcher keeps forcing a Kanban dispatch for a card the
+# selector can never choose — an ALREADY-SCOPED card whose linked PR is open,
+# or a card blocked by the open-PR cap — and the forced lane then runs more
+# often than the twenty-minute schedule it is supposed to bypass. The
+# invariant this restores: one button press costs at most one forced run.
+consume_run_request() {
+    local card="$1" project_id task_id
+    [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] && return 0
+    project_id="$(printf '%s' "$card" | jq -r '.project_id // empty')"
+    task_id="$(printf '%s' "$card" | jq -r '.task_id // empty')"
+    [ -n "$project_id" ] && [ -n "$task_id" ] || return 0
+    # mw_api dies on a non-2xx response; a failed claim must never abort the
+    # selection pass, so keep that exit inside a subshell.
+    ( mw_api POST "/matcha-work/projects/$project_id/tasks/$task_id/autopr/run-claim" '{}' ) \
+        >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not consume the run request for %s\n' \
+            "$task_id" >&2
+}
+
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
 # Echoes "skip", "investigate", or "rework" (rework = push to the existing
@@ -269,7 +291,15 @@ for ((i = 0; i < n; i++)); do
         # but a later, lower-ranked card might be `rework` (no new PR) and
         # still eligible, so skip this one and keep looking rather than
         # bailing the whole run.
+        [ -z "$run_requested_at" ] || consume_run_request "$card"
         continue
+    fi
+    # A terminal skip is an answer to the request, not a reason to re-ask.
+    # The card keeps whatever made it unselectable (an open linked PR, a
+    # cooldown, unreadable GitHub feedback); the human sees the button return
+    # and can press it again once that changes.
+    if [ "$decision" = skip ] && [ -n "$run_requested_at" ]; then
+        consume_run_request "$card"
     fi
     if [ "$decision" = investigate ] || [ "$decision" = rework ]; then
         # The tmux dashboard asks the same selector what would run next. Its

@@ -67,13 +67,21 @@ exit "${AUTOPR_TEST_PROBE_EXIT:-3}"
 EOF
 chmod +x "$TMP_DIR/run-request-probe"
 
+# Stand-in for ensure-dashboard.sh. The observer panes it (re)creates are
+# themselves GitHub readers, so only the five-minute scheduler may call it.
+cat > "$TMP_DIR/ensure-dashboard" <<'EOF'
+#!/usr/bin/env bash
+printf 'ensure\n' >> "$AUTOPR_TEST_DASHBOARD_CALLS"
+EOF
+chmod +x "$TMP_DIR/ensure-dashboard"
+
 run_dispatcher() {
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
     AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
     AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/github-cache" \
     AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=0 \
-    AUTOPR_TMUX_DASHBOARD=0 \
+    AUTOPR_TMUX_DASHBOARD="${AUTOPR_TMUX_DASHBOARD:-0}" \
     AUTOPR_RUN_REQUEST_PROBE="$TMP_DIR/run-request-probe" \
     AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
     "$DISPATCHER" "$@" >/dev/null 2>&1
@@ -165,8 +173,27 @@ AUTOPR_TEST_PROBE_EXIT=3 AUTOPR_TEST_PROBE_CALLS="$TMP_DIR/probe.log" \
   run_dispatcher --if-requested
 check "an idle watch tick asks the board and never touches GitHub" \
   $([ ! -e "$TMP_DIR/dispatches" ] && [ ! -e "$TMP_DIR/watch-gh.log" ] \
-    && [ -s "$TMP_DIR/probe.log" ] \
-    && grep -q 'no-run-request' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+    && [ -s "$TMP_DIR/probe.log" ] && echo 0 || echo 1)
+
+check "an idle watch tick leaves the shared dispatch log alone" \
+  $(! grep -q 'no-run-request' "$TMP_DIR/log.jsonl" \
+    && [ -f "$TMP_DIR/state/last-watch-tick" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/dashboard-calls"
+AUTOPR_TEST_DASHBOARD_CALLS="$TMP_DIR/dashboard-calls" \
+  AUTOPR_DASHBOARD_ENSURE="$TMP_DIR/ensure-dashboard" AUTOPR_TMUX_DASHBOARD=1 \
+  AUTOPR_TEST_PROBE_EXIT=3 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "an idle watch tick never re-primes the observer panes" \
+  $([ ! -e "$TMP_DIR/dashboard-calls" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_DASHBOARD_CALLS="$TMP_DIR/dashboard-calls" \
+  AUTOPR_DASHBOARD_ENSURE="$TMP_DIR/ensure-dashboard" AUTOPR_TMUX_DASHBOARD=1 \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "the five-minute scheduler still keeps the observer panes alive" \
+  $([ -s "$TMP_DIR/dashboard-calls" ] && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_PROBE_EXIT=1 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
@@ -186,8 +213,7 @@ rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
 check "a card that cannot be picked up cannot spin the runner every minute" \
-  $([ ! -e "$TMP_DIR/dispatches" ] \
-    && grep -q 'forced-kanban-cooldown' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+  $([ ! -e "$TMP_DIR/dispatches" ] && [ -f "$TMP_DIR/state/last-forced-kanban" ] && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_LIST_FAIL=1 run_dispatcher || list_rc=$?

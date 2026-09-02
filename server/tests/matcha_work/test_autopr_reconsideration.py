@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -388,6 +388,17 @@ class _RunRequestConn:
         raise AssertionError(f"Unexpected query: {query}")
 
 
+def _watched_project_id():
+    """A board the kanban-autopr harness actually polls.
+
+    "Run AutoPR now" is rejected anywhere else: nothing would ever claim the
+    request, so the card would sit queued with no run coming.
+    """
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    return UUID(next(iter(svc.KANBAN_AUTOPR_PROJECT_IDS)))
+
+
 @pytest.mark.asyncio
 async def test_run_now_queues_one_pending_request(monkeypatch):
     from app.matcha.services.matcha_work import project_task_service as svc
@@ -396,7 +407,7 @@ async def test_run_now_queues_one_pending_request(monkeypatch):
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
 
     result = await svc.request_autopr_run(
-        project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+        project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
     )
 
     assert result["already_pending"] is False
@@ -414,7 +425,7 @@ async def test_run_now_is_idempotent_while_a_request_is_unclaimed(monkeypatch):
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
 
     result = await svc.request_autopr_run(
-        project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+        project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
     )
 
     assert result["already_pending"] is True
@@ -432,7 +443,7 @@ async def test_run_now_rejects_lanes_autopr_never_picks_from(monkeypatch):
 
     with pytest.raises(svc.AutoPRReconsiderationConflict):
         await svc.request_autopr_run(
-            project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+            project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
         )
     assert conn.insert_args is None
 
@@ -448,3 +459,22 @@ async def test_run_claim_consumes_the_request(monkeypatch):
 
     assert result["claimed_at"] == conn.created_at.isoformat()
     assert json.loads(conn.insert_args[4]) == {"kind": "autopr_run_claim"}
+
+
+@pytest.mark.asyncio
+async def test_run_now_rejects_a_board_autopr_does_not_watch(monkeypatch):
+    """The harness polls four fixed Espresso projects. A request anywhere else
+    could never be claimed, so it would pin the card at "Queued for AutoPR"
+    while the local watcher forced a dispatch that ignored it."""
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    unwatched = uuid4()
+    assert str(unwatched) not in svc.KANBAN_AUTOPR_PROJECT_IDS
+    with pytest.raises(svc.AutoPRReconsiderationConflict):
+        await svc.request_autopr_run(
+            project_id=unwatched, task_id=uuid4(), actor_user_id=uuid4()
+        )
+    assert conn.insert_args is None

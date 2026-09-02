@@ -292,6 +292,7 @@ while [ "$#" -gt 0 ]; do
         *) shift ;;
     esac
 done
+printf '%s\n' "$url" >> "${AUTOPR_TEST_CURL_URLS:-/dev/null}"
 if [[ "$url" == */auth/login ]]; then
     printf '{"access_token":"stub-token"}'
     exit 0
@@ -889,6 +890,30 @@ run_requested_again="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha
 check "a stale run request does not beat its own cooldown" \
     $([ "$(printf '%s' "$run_requested_again" | jq -r '.id8 // empty')" != "99999999" ] \
       && echo 0 || echo 1)
+
+# A pass that declines a run-requested card must consume the request. Without
+# this the one-minute watcher keeps forcing a Kanban dispatch for a card the
+# selector can never pick, which runs the lane MORE often than the twenty-minute
+# schedule the request was meant to jump.
+rm -f "$TMP_DIR/claim-urls"
+AUTOPR_TEST_CURL_URLS="$TMP_DIR/claim-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" >/dev/null 2>&1
+check "a declined run request is consumed instead of re-forcing every tick" \
+    $(grep -q '/tasks/99999999-0000-4000-8000-000000000009/autopr/run-claim' \
+        "$TMP_DIR/claim-urls" && echo 0 || echo 1)
+
+# The dashboard asks the same selector what would run next. That probe must
+# never consume a human's queued request.
+rm -f "$TMP_DIR/claim-urls"
+AUTOPR_SELECT_READ_ONLY=true AUTOPR_TEST_CURL_URLS="$TMP_DIR/claim-urls" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" >/dev/null 2>&1
+check "the read-only dashboard probe never consumes a run request" \
+    $([ ! -s "$TMP_DIR/claim-urls" ] && echo 0 || echo 1)
 
 prior_pr_retry_ok=0
 for prior_state in CLOSED MERGED; do

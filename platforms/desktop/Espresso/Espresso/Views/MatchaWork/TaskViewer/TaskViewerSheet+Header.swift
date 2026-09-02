@@ -131,6 +131,10 @@ extension TaskViewerSheet {
             && ["todo", "changes_requested"].contains(liveTask.boardColumn)
     }
 
+    /// `didRequestAutoPRRun` only bridges the gap between the POST and the
+    /// reload that follows it; `requestAutoPRRun` clears it again, so the live
+    /// row is what actually decides. A request also has a server-side shelf
+    /// life, which is what lets this chip clear itself if a run never claims it.
     var autoPRRunIsQueued: Bool {
         didRequestAutoPRRun || liveAutoPRTask.autoprRunRequestedAt != nil
     }

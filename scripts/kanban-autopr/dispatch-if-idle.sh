@@ -117,6 +117,12 @@ marker_age_seconds() {
     printf '%s' "$((now - modified))"
 }
 
+# Liveness for the one-minute watcher, kept out of the shared dispatch log so
+# an idle minute leaves no scheduling signal behind. Best-effort by design.
+touch_watch_heartbeat() {
+    mkdir -p "$STATE_DIR" 2>/dev/null && : > "$STATE_DIR/last-watch-tick" 2>/dev/null || true
+}
+
 # Exit status only: 0 = a card is waiting, 1 = nothing to force (queue empty or
 # the board could not be asked). A probe failure must never force a run.
 run_request_pending() {
@@ -142,28 +148,34 @@ main() {
         log_event skip msandbox-off
         exit 0
     fi
-    if [ "${AUTOPR_TMUX_DASHBOARD:-1}" != 0 ] && [ -x "$DASHBOARD_ENSURE" ]; then
-        # Observability must not become a scheduling dependency. Record a pane
-        # startup failure, then continue the authoritative dispatch check.
-        "$DASHBOARD_ENSURE" >/dev/null 2>&1 || log_event error dashboard-start-failed
+    # The watcher lane asks the board first and gives up before doing anything
+    # else, so a minute-by-minute tick costs one bounded query against our own
+    # API and nothing else. This runs BEFORE the dispatch lock and before the
+    # dashboard-ensure pass on purpose: `mw_api` talks to a remote host, and a
+    # stalled request must not hold the lock the five-minute scheduler needs,
+    # nor re-prime the GitHub-reading observer panes sixty times an hour.
+    if [ "$requested_mode" = true ]; then
+        if [ "$(marker_age_seconds "$FORCED_MARKER")" -lt "$FORCED_MIN_INTERVAL_SECONDS" ]; then
+            exit 0
+        fi
+        if ! run_request_pending; then
+            # Silent on the common path: an idle tick every minute would
+            # otherwise bury the scheduler's own signal in the shared log the
+            # dashboard reads, and grow the file five times as fast.
+            touch_watch_heartbeat
+            exit 0
+        fi
+    else
+        if [ "${AUTOPR_TMUX_DASHBOARD:-1}" != 0 ] && [ -x "$DASHBOARD_ENSURE" ]; then
+            # Observability must not become a scheduling dependency. Record a
+            # pane startup failure, then continue the authoritative dispatch
+            # check. Scheduler-only: the panes are themselves GitHub readers.
+            "$DASHBOARD_ENSURE" >/dev/null 2>&1 || log_event error dashboard-start-failed
+        fi
     fi
     if ! acquire_dispatch_lock; then
         log_event skip local-lock
         exit 0
-    fi
-
-    # The watcher lane asks the board first and gives up before touching the
-    # GitHub API, so a minute-by-minute tick costs one bounded query against
-    # our own API and nothing else.
-    if [ "$requested_mode" = true ]; then
-        if [ "$(marker_age_seconds "$FORCED_MARKER")" -lt "$FORCED_MIN_INTERVAL_SECONDS" ]; then
-            log_event skip forced-kanban-cooldown
-            exit 0
-        fi
-        if ! run_request_pending; then
-            log_event skip no-run-request
-            exit 0
-        fi
     fi
 
     local kanban_runs error_runs audit_runs all_runs workflow reason
@@ -183,10 +195,11 @@ main() {
 
     if [ "$requested_mode" = true ]; then
         # An explicit card request outranks the other lanes' schedules: the
-        # human is waiting on this specific ticket.
+        # human is waiting on this specific ticket. The cooldown marker is
+        # burned after the dispatch actually lands, not here — a failed
+        # dispatch must not make the next queued card wait five more minutes.
         workflow="$KANBAN_WORKFLOW"
         reason="kanban-run-request"
-        mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER"
     elif workflow_pass_due "$error_runs" "$ERROR_MAX_AGE_SECONDS"; then
         workflow="$ERROR_WORKFLOW"
         reason="production-error-pass-due"
@@ -203,6 +216,13 @@ main() {
     if ! dispatch_workflow "$workflow" >/dev/null; then
         log_event error "${workflow}-dispatch-failed"
         exit 1
+    fi
+    if [ "$requested_mode" = true ] \
+        && ! { mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER"; }; then
+        # Without the marker the floor between two forced dispatches is gone,
+        # so this is worth a log line rather than an `set -e` exit that leaves
+        # no trace of why the watcher stopped behaving.
+        log_event error forced-marker-write-failed
     fi
     log_event dispatch "$reason"
 }

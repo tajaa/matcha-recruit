@@ -35,12 +35,22 @@ cache_age() {
 mkdir -p "$CACHE_ROOT" 2>/dev/null || true
 chmod 700 "$CACHE_ROOT" 2>/dev/null || true
 
-if [ -s "$CACHE_FILE" ] && [ "$(cache_age)" -lt "$TTL_SECONDS" ] 2>/dev/null; then
+# Cache freshness is file EXISTENCE plus age, not file size: empty output is a
+# real answer, and the most common one on this board. `gh pr list --head
+# bot/task-xxxx --jq '.[0].number // empty'` prints nothing for the whole time
+# a run is mid-investigation, so treating empty as a miss made exactly that
+# branch cost one REST call per pane per minute — the spend this helper exists
+# to remove. Writes are tmp+mv, so a zero-byte file is a cached answer rather
+# than a torn write.
+if [ -f "$CACHE_FILE" ] && [ "$(cache_age)" -lt "$TTL_SECONDS" ] 2>/dev/null; then
     cat "$CACHE_FILE"
     exit 0
 fi
 
-if output="$("$@" 2>/dev/null)" && [ -n "$output" ]; then
+# Only the command's exit status decides success. Callers that need to
+# distinguish "no PR" still see empty output; they just see it without paying
+# GitHub for it again.
+if output="$("$@" 2>/dev/null)"; then
     tmp="$CACHE_FILE.$$"
     if (umask 077; printf '%s' "$output" > "$tmp") 2>/dev/null; then
         mv "$tmp" "$CACHE_FILE" 2>/dev/null || rm -f "$tmp"
@@ -49,7 +59,7 @@ if output="$("$@" 2>/dev/null)" && [ -n "$output" ]; then
     exit 0
 fi
 
-if [ -s "$CACHE_FILE" ]; then
+if [ -f "$CACHE_FILE" ]; then
     cat "$CACHE_FILE"
     exit 0
 fi

@@ -12,9 +12,15 @@ The second agent (`com.matcha.kanban-autopr-request-watch`, one minute, the same
 `dispatch-if-idle.sh --if-requested`) exists so a human never waits on that twenty
 minutes: pressing **Run AutoPR now** on a card queues a request, the watcher sees it via
 one bounded query against our own API (`GET /matcha-work/autopr/run-requests`), and
-dispatches Kanban immediately. An idle watch tick makes no GitHub API call at all, a
-probe failure never forces a run, and a five-minute floor between forced dispatches
-keeps a card that cannot actually be selected from spinning the runner.
+dispatches Kanban immediately. An idle watch tick makes no GitHub API call at all,
+starts no observer panes, takes no dispatch lock, and writes no line to the shared
+dispatch log — it costs one bounded, timeout-capped board query and a heartbeat file.
+A probe failure never forces a run, and a five-minute floor between forced dispatches
+(burned only once a dispatch actually lands) keeps a card that cannot be selected from
+spinning the runner. Three bounds make "cannot be selected" terminal rather than
+permanent: `select.sh` consumes the request of any run-requested card the pass declines
+or defers, the server refuses a request for a board outside the four the harness polls,
+and a request that nothing claims within 30 minutes expires on its own.
 GitHub's manual workflow dispatch remains the recovery path but also fails closed when
 `msandbox` is OFF. There is deliberately no second GitHub cron:
 a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
@@ -132,7 +138,12 @@ detail for 45 seconds. Before that, four panes each re-listed PRs on their own t
 the overview additionally re-ran `select.sh` — which asks GitHub about every candidate
 card — on every redraw, which is what pushed the hourly REST budget. The dispatcher
 deliberately does **not** use this cache: it reads `run-snapshot.sh` with a short TTL and
-`ALLOW_STALE=false`, because acting on stale run state can double-dispatch.
+`ALLOW_STALE=false`, because acting on stale run state can double-dispatch. Empty command
+output is a cacheable answer, not a miss — "this branch has no PR yet" is the normal
+state during an investigation, and treating it as a failure re-asked GitHub every minute.
+A selector **crash** is never cached, though: only an actual pick or an actual
+"nothing eligible" is stored, alongside the exit status the NEXT pane branches on, so a
+rate-limited selector reads as failed rather than as an empty queue.
 
 The LaunchAgent does not execute the repo-backed `msandbox` symlink directly:
 macOS can deny background agents access to `~/Documents` even when Terminal has
@@ -247,7 +258,16 @@ second scheduler.
    "any PR means skip" rule, and beats a cooldown older than the request.
    `investigate.sh` posts the matching `autopr_run_claim` the moment it actually picks
    the card up — that claim, not the run's outcome, is what stops the one-minute watcher
-   re-dispatching for a card whose run then crashes or gets capped.
+   re-dispatching for a card whose run then crashes. `select.sh` posts the same claim for
+   any run-requested card it passes over (an ALREADY-SCOPED card whose linked PR is open,
+   a card blocked by the open-PR cap, a card GitHub could not be read for), so the
+   invariant is **one button press costs at most one forced run**: the card's "Queued for
+   AutoPR" chip clears and the human can press again once the blocker is gone. The
+   read-only dashboard probe (`AUTOPR_SELECT_READ_ONLY=true`) never claims anything.
+   Requests are only accepted for the four boards in `KANBAN_AUTOPR_PROJECT_IDS`
+   (defined once in `project_task_service.py`, shared with the PR webhook's board check),
+   and any request older than 30 minutes stops counting as pending everywhere — the
+   watcher's poll, the card chip, and the idempotency check all read the same window.
    A failed attempt otherwise cools down
    for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
