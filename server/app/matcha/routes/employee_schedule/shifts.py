@@ -452,10 +452,10 @@ async def create_shift(body: ShiftCreate,
                 force=force,
             )
         async with conn.transaction():
-            # Re-resolve UNDER A ROW LOCK so a concurrent rename cannot commit
-            # between this read and the insert below and leave the shift
-            # labelled with the job's old name.
-            job = await assert_job_in_company(
+            # Re-check the job's LOCATION under a row lock: create_shift_core
+            # derives the role label from the same locked row, but only this
+            # call knows which location the shift is being written to.
+            await assert_job_in_company(
                 conn, company_id, body.job_id, location_id=body.location_id,
                 lock=True,
             )
@@ -472,7 +472,7 @@ async def create_shift(body: ShiftCreate,
                         raise_conflict(employee_id, conflicts)
             shift_id = await create_shift_core(
                 conn, company_id,
-                location_id=body.location_id, role=job["name"], department=body.department,
+                location_id=body.location_id, department=body.department,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=effective_break, required_staff=body.required_staff,
                 color=body.color, notes=body.notes, kind=body.kind, job_id=body.job_id,
