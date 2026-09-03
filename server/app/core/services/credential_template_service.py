@@ -4,23 +4,107 @@ Resolves jurisdiction + role-specific credential requirements using a tiered str
 1. Company-specific templates
 2. System-wide templates
 3. Static fallback (credential_inference.py)
-4. Gemini AI research (creates templates for future reuse)
+4. OpenAI Luna research (creates templates for future reuse)
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
-from app.core.services.model_catalog import GEMINI_FLASH
+import httpx
+
+from app.config import get_settings
+from app.core.services.ai_usage import record_openai_response
 
 logger = logging.getLogger(__name__)
+
+_OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+_OPENAI_REQUEST_TIMEOUT_SECONDS = 55.0
+
+
+def _openai_response_text(payload: dict[str, Any]) -> str:
+    """Extract the assistant text from an OpenAI Responses payload."""
+    if isinstance(payload.get("output_text"), str):
+        return payload["output_text"].strip()
+
+    parts: list[str] = []
+    for output in payload.get("output", []):
+        if not isinstance(output, dict) or output.get("type") != "message":
+            continue
+        for content in output.get("content", []):
+            if (
+                isinstance(content, dict)
+                and content.get("type") == "output_text"
+                and isinstance(content.get("text"), str)
+            ):
+                parts.append(content["text"])
+    return "\n".join(parts).strip()
+
+
+def _luna_credentials() -> tuple[str, str] | None:
+    """Return the configured Luna API key and model, if both are available."""
+    settings = get_settings()
+    if not settings.openai_api_key or not settings.openai_luna_model:
+        return None
+    return settings.openai_api_key, settings.openai_luna_model
+
+
+async def _generate_luna_text(
+    prompt: str,
+    *,
+    api_key: str,
+    model: str,
+    max_output_tokens: int,
+    json_output: bool,
+) -> str:
+    """Run one high-reasoning Luna request and record exact provider usage."""
+    request_payload: dict[str, Any] = {
+        "model": model,
+        "input": prompt,
+        "reasoning": {"effort": "high"},
+        "service_tier": "default",
+        "max_output_tokens": max_output_tokens,
+    }
+    if json_output:
+        request_payload["text"] = {"format": {"type": "json_object"}}
+
+    started = time.monotonic()
+    usage_recorded = False
+    try:
+        async with httpx.AsyncClient(timeout=_OPENAI_REQUEST_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                _OPENAI_RESPONSES_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=request_payload,
+            )
+            response.raise_for_status()
+
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise TypeError("OpenAI Responses payload must be an object")
+        await record_openai_response(
+            model=model,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            response=payload,
+        )
+        usage_recorded = True
+        return _openai_response_text(payload)
+    except (httpx.HTTPError, TypeError, ValueError) as exc:
+        if not usage_recorded:
+            await record_openai_response(
+                model=model,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=str(exc),
+                status="timeout" if isinstance(exc, httpx.TimeoutException) else "error",
+            )
+        raise
 
 
 @dataclass
@@ -70,55 +154,52 @@ async def match_job_title_to_role_category(
                 logger.warning("Invalid regex in role_categories.key=%s: %s", row["key"], pat)
                 continue
 
-    # Gemini fallback for unrecognized titles
-    return await _classify_role_via_gemini(conn, title, rows)
+    # Luna fallback for unrecognized titles
+    return await _classify_role_via_luna(conn, title, rows)
 
 
-async def _classify_role_via_gemini(
+async def _classify_role_via_luna(
     conn, job_title: str, role_rows: list
 ) -> Optional[dict[str, Any]]:
-    """Use Gemini to classify an unrecognized job title into a role category."""
+    """Use OpenAI Luna to classify an unrecognized title into a role category."""
     try:
-        from google import genai
-        from app.core.services.genai_client import get_genai_client
-        from google.genai import types
-
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
+        credentials = _luna_credentials()
+        if credentials is None:
             return None
+        api_key, model = credentials
 
         categories = [{"key": r["key"], "label": r["label"]} for r in role_rows]
         prompt = (
             f"Given the job title \"{job_title}\", which of these role categories does it belong to?\n\n"
             f"Categories:\n{json.dumps(categories, indent=2)}\n\n"
-            f"Return ONLY the category key as a plain string. "
-            f"If none fit, return \"non_clinical\"."
+            f"Return ONLY a JSON object with one string field named \"key\". "
+            f"Use \"non_clinical\" if none fit."
         )
 
-        client = get_genai_client(api_key=api_key)
-        response = client.models.generate_content(
-            model=GEMINI_FLASH,
-            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
-            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=64),
+        response_text = await _generate_luna_text(
+            prompt,
+            api_key=api_key,
+            model=model,
+            max_output_tokens=512,
+            json_output=True,
         )
-
-        response_text = response.text
         if not response_text or not response_text.strip():
-            # Gemini can legitimately return no text when a candidate is
-            # blocked or otherwise has no usable content. That is an
-            # unclassified role, not an application exception; callers
-            # already degrade safely when this function returns None.
-            logger.warning("Gemini returned no role classification for '%s'", job_title)
+            logger.warning("Luna returned no role classification for '%s'", job_title)
             return None
 
-        key = response_text.strip().strip('"').strip("'")
+        try:
+            data = json.loads(response_text)
+        except (TypeError, json.JSONDecodeError):
+            logger.warning("Luna returned invalid role classification for '%s'", job_title)
+            return None
+        key = data.get("key") if isinstance(data, dict) else None
         for r in role_rows:
             if r["key"] == key:
                 return dict(r)
 
         return None
     except Exception:
-        logger.exception("Gemini role classification failed for '%s'", job_title)
+        logger.exception("Luna role classification failed for '%s'", job_title)
         return None
 
 
@@ -134,7 +215,7 @@ async def resolve_credential_requirements(
 ) -> list[ResolvedCredentialRequirement]:
     """Main entry point. Resolves credential requirements for an employee.
 
-    Tiered: company templates -> system templates -> static -> Gemini research.
+    Tiered: company templates -> system templates -> static -> Luna research.
     """
     if not job_title:
         return []
@@ -166,7 +247,7 @@ async def resolve_credential_requirements(
     if static_reqs:
         return static_reqs
 
-    # Tier 4: Gemini AI research (creates system-wide templates for reuse)
+    # Tier 4: OpenAI Luna research (creates system-wide templates for reuse)
     return await _resolve_via_research(conn, state, city, role_cat)
 
 
@@ -183,7 +264,7 @@ async def _resolve_from_templates(
             """
             SELECT crt.*, ct.key AS ct_key, ct.label AS ct_label
             FROM credential_requirement_templates crt
-            JOIN credential_types ct ON ct.id = crt.credential_type_id
+            JOIN scoped_credential_types ct ON ct.id = crt.credential_type_id
             WHERE crt.company_id = $1
               AND crt.state = $2
               AND crt.role_category_id = $3
@@ -198,7 +279,7 @@ async def _resolve_from_templates(
             """
             SELECT crt.*, ct.key AS ct_key, ct.label AS ct_label
             FROM credential_requirement_templates crt
-            JOIN credential_types ct ON ct.id = crt.credential_type_id
+            JOIN scoped_credential_types ct ON ct.id = crt.credential_type_id
             WHERE crt.company_id IS NULL
               AND crt.state = $1
               AND crt.role_category_id = $2
@@ -238,7 +319,7 @@ async def _resolve_from_static(
     # Map static document_type keys to credential_types rows
     keys = [r.document_type for r in static]
     ct_rows = await conn.fetch(
-        "SELECT id, key, label FROM credential_types WHERE key = ANY($1)",
+        "SELECT id, key, label FROM scoped_credential_types WHERE key = ANY($1)",
         keys,
     )
     ct_map = {r["key"]: r for r in ct_rows}
@@ -266,7 +347,7 @@ async def _resolve_via_research(
     city: str | None,
     role_cat: dict[str, Any],
 ) -> list[ResolvedCredentialRequirement]:
-    """Research via Gemini, create system-wide templates, return requirements."""
+    """Research via Luna, create system-wide templates, return requirements."""
     await research_credential_requirements(
         conn, state, city, role_cat["id"], company_id=None
     )
@@ -279,7 +360,7 @@ async def _resolve_via_research(
         SELECT crt.id, crt.is_required, crt.due_days, crt.priority, crt.notes,
                ct.id AS ct_id, ct.key AS ct_key, ct.label AS ct_label
         FROM credential_requirement_templates crt
-        JOIN credential_types ct ON ct.id = crt.credential_type_id
+        JOIN scoped_credential_types ct ON ct.id = crt.credential_type_id
         WHERE crt.company_id IS NULL
           AND crt.state = $1
           AND crt.role_category_id = $2
@@ -306,7 +387,7 @@ async def _resolve_via_research(
     ]
 
 
-# ── Gemini AI research ────────────────────────────────────────────────
+# ── OpenAI Luna research ──────────────────────────────────────────────
 
 _STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
@@ -325,6 +406,74 @@ _STATE_NAMES = {
 }
 
 
+def _normalize_credential_label(value: Any) -> str:
+    """Normalize labels for deterministic matching within a tenant catalog."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _normalize_credential_category(value: Any) -> str:
+    """Normalize the category vocabulary used by credential type rows."""
+    return str(value or "").strip().casefold()
+
+
+def _reconcile_tenant_credential_type(
+    req: dict[str, Any],
+    *,
+    custom_by_key: dict[str, dict[str, Any]],
+    custom_by_label: dict[str, list[dict[str, Any]]],
+    visible_by_key: dict[str, dict[str, Any]],
+) -> tuple[bool, dict[str, Any] | None]:
+    """Resolve a model response to one of this tenant's custom types.
+
+    The first return value tells the caller that the response was attempting to
+    use a custom type (including an invalid attempt).  That distinction is
+    important: an opaque ``custom_<uuid>`` key must never fall through to the
+    global catalog insertion path.  Label matching is intentionally limited to
+    a unique, category-matching tenant row and rejects a contradictory visible
+    key, so a hallucinated label cannot bind a different tenant type.
+    """
+    key = str(req.get("credential_type_key") or "").strip()
+    label = _normalize_credential_label(req.get("label"))
+    category = _normalize_credential_category(req.get("category"))
+
+    by_key = custom_by_key.get(key) if key else None
+    if by_key is not None:
+        matches_metadata = (
+            bool(label)
+            and bool(category)
+            and label == _normalize_credential_label(by_key.get("label"))
+            and category == _normalize_credential_category(by_key.get("category"))
+        )
+        return True, by_key if matches_metadata else None
+
+    # A custom key is opaque and tenant-owned.  If it is not one of the
+    # tenant's rows, do not create a same-key global type from model output.
+    if key.startswith("custom_"):
+        return True, None
+
+    candidates = custom_by_label.get(label, []) if label else []
+    if not candidates:
+        return False, None
+
+    # The database enforces this label uniqueness for tenant rows.  Treat
+    # legacy duplicate data as ambiguous rather than choosing an arbitrary
+    # credential type.
+    if len(candidates) != 1:
+        return True, None
+
+    candidate = candidates[0]
+    if not category or category != _normalize_credential_category(candidate.get("category")):
+        return True, None
+
+    # A known global key (or another visible tenant key) contradicts the
+    # normalized-label match and must not be rebound to the custom row.
+    keyed_visible = visible_by_key.get(key) if key else None
+    if keyed_visible is not None and keyed_visible.get("id") != candidate.get("id"):
+        return True, None
+
+    return True, candidate
+
+
 async def research_credential_requirements(
     conn,
     state: str,
@@ -333,18 +482,15 @@ async def research_credential_requirements(
     company_id: UUID | None = None,
     triggered_by: UUID | None = None,
 ) -> list[dict[str, Any]]:
-    """Call Gemini to research jurisdiction-specific credential requirements.
+    """Call OpenAI Luna to research jurisdiction-specific requirements.
 
     Creates credential_requirement_templates and returns the raw result list.
     """
-    from google import genai
-    from app.core.services.genai_client import get_genai_client
-    from google.genai import types
-
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.warning("GEMINI_API_KEY not set, cannot research credentials")
+    credentials = _luna_credentials()
+    if credentials is None:
+        logger.warning("OpenAI Luna is not configured; cannot research credentials")
         return []
+    api_key, model = credentials
 
     role_cat = await conn.fetchrow(
         "SELECT key, label, is_clinical FROM role_categories WHERE id = $1",
@@ -361,20 +507,44 @@ async def research_credential_requirements(
         VALUES ($1, $2, $3, $4, 'running', $5, $6)
         RETURNING id
         """,
-        company_id, state, city, role_category_id, GEMINI_FLASH, triggered_by,
+        company_id, state, city, role_category_id, model, triggered_by,
     )
 
     try:
         # Tenant research may reuse that tenant's custom options, but must not
         # disclose or attach another company's catalog rows.
-        ct_rows = await conn.fetch(
-            "SELECT key FROM credential_types WHERE company_id IS NULL OR company_id = $1",
+        ct_rows = [dict(row) for row in await conn.fetch(
+            """SELECT id, key, label, category, company_id
+               FROM scoped_credential_types
+               WHERE company_id IS NULL OR company_id = $1
+               ORDER BY company_id NULLS FIRST, key""",
             company_id,
-        )
+        )]
         known_keys = {r["key"] for r in ct_rows}
+        visible_by_key = {r["key"]: r for r in ct_rows}
+        custom_rows = [
+            row for row in ct_rows
+            if company_id is not None and row.get("company_id") == company_id
+        ]
+        custom_by_key = {row["key"]: row for row in custom_rows}
+        custom_by_label: dict[str, list[dict[str, Any]]] = {}
+        for row in custom_rows:
+            custom_by_label.setdefault(
+                _normalize_credential_label(row.get("label")), []
+            ).append(row)
 
         state_name = _STATE_NAMES.get(state, state)
         city_context = f"City: {city}" if city else ""
+        custom_context = ""
+        if custom_rows:
+            custom_context = f"""
+TENANT CUSTOM CREDENTIAL OPTIONS (only these options belong to this tenant):
+{json.dumps([
+    {"key": row["key"], "label": row["label"], "category": row["category"]}
+    for row in custom_rows
+], sort_keys=True)}
+When using one of these options, return its exact key, its label, and its category.
+Do not invent or alter a tenant custom key."""
 
         prompt = f"""You are a healthcare HR compliance expert specializing in credentialing requirements.
 
@@ -384,6 +554,7 @@ JURISDICTION: {state_name} ({state})
 {city_context}
 ROLE: {role_cat['label']}
 CLINICAL: {role_cat['is_clinical']}
+{custom_context}
 
 Research and return the COMPLETE list of credentialing requirements including:
 1. State professional licenses (specific license type for this role in this state)
@@ -400,7 +571,7 @@ For EACH requirement, return:
 - credential_type_key: use one of these existing keys if it matches: {json.dumps(sorted(known_keys))}
   Otherwise, use a new snake_case identifier.
 - label: human-readable name
-- category: one of "clinical", "training", "clearance", "insurance", "federal", "background"
+- category: for a tenant custom option, return its exact category; otherwise use one of "clinical", "training", "clearance", "insurance", "federal", "background"
 - is_required: true if legally mandatory, false if recommended/common
 - priority: "blocking" (cannot start without), "standard" (must complete within onboarding), "optional"
 - due_days: typical days from hire date to complete
@@ -411,14 +582,14 @@ Return ONLY a JSON object: {{"requirements": [...]}}
 Do NOT include requirements that don't apply to this role.
 Do NOT fabricate requirements — if unsure, omit."""
 
-        client = get_genai_client(api_key=api_key)
-        response = client.models.generate_content(
-            model=GEMINI_FLASH,
-            contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
-            config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=4096),
+        text = await _generate_luna_text(
+            prompt,
+            api_key=api_key,
+            model=model,
+            max_output_tokens=8192,
+            json_output=True,
         )
-
-        text = response.text.strip()
+        text = text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
         if text.endswith("```"):
@@ -430,16 +601,39 @@ Do NOT fabricate requirements — if unsure, omit."""
 
         # Store templates
         template_count = 0
+        persisted_requirements: list[dict[str, Any]] = []
         for req in requirements:
+            if not isinstance(req, dict):
+                continue
             ct_key = req.get("credential_type_key", "")
-            if not ct_key:
+
+            custom_attempt, custom_type = _reconcile_tenant_credential_type(
+                req,
+                custom_by_key=custom_by_key,
+                custom_by_label=custom_by_label,
+                visible_by_key=visible_by_key,
+            )
+            if custom_attempt and custom_type is None:
+                logger.warning(
+                    "Ignoring invalid or inaccessible tenant custom credential response: key=%r label=%r",
+                    ct_key,
+                    req.get("label"),
+                )
                 continue
 
-            # Ensure credential_type exists
-            ct_id = await conn.fetchval(
-                """SELECT id FROM credential_types
+            # A tenant custom type may be identified by its normalized label
+            # even if Luna omitted the optional key field.  All global types
+            # still require a key, as they did before tenant custom types.
+            if custom_type is None and not ct_key:
+                continue
+
+            # Ensure credential_type exists.  Tenant custom types are resolved
+            # from the scoped catalog above; this query preserves the existing
+            # global/system lookup and insertion behavior for other keys.
+            ct_id = custom_type["id"] if custom_type is not None else await conn.fetchval(
+                """SELECT id FROM scoped_credential_types
                    WHERE key = $1 AND (company_id IS NULL OR company_id = $2)""",
-                ct_key,
+                ct_key.strip() if isinstance(ct_key, str) else ct_key,
                 company_id,
             )
             if not ct_id:
@@ -485,6 +679,14 @@ Do NOT fabricate requirements — if unsure, omit."""
                 req.get("confidence"),
                 review_status,
             )
+            if custom_type is not None:
+                req = {
+                    **req,
+                    "credential_type_key": custom_type["key"],
+                    "label": custom_type["label"],
+                    "category": custom_type["category"],
+                }
+            persisted_requirements.append(req)
             template_count += 1
 
         # Update research log
@@ -497,7 +699,7 @@ Do NOT fabricate requirements — if unsure, omit."""
             template_count, log_id,
         )
 
-        return requirements
+        return persisted_requirements
 
     except Exception as e:
         logger.exception("Credential research failed for %s/%s", state, role_cat["key"])
@@ -534,7 +736,7 @@ async def materialize_uploaded_schedule_blocking_requirement(
         """
         WITH blocking_type AS (
             SELECT id, has_expiration
-              FROM credential_types
+              FROM scoped_credential_types
              WHERE key = $3 AND COALESCE(schedule_blocking, false) = true
         ), upserted AS (
             INSERT INTO employee_credential_requirements
@@ -716,7 +918,7 @@ async def get_employee_credential_requirements(
                ct.category AS credential_type_category, ct.has_expiration, ct.has_number, ct.has_state
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id AND e.org_id = $2
-        JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         WHERE ecr.employee_id = $1
           AND (
               ecr.applies_company_wide = true
@@ -752,7 +954,7 @@ async def find_hidden_credential_types(
     rows = await conn.fetch(
         """
         SELECT ct.id
-        FROM credential_types ct
+        FROM scoped_credential_types ct
         WHERE ct.id = ANY($2::uuid[])
           AND (
               (ct.company_id IS NOT NULL AND ct.company_id <> $1)
@@ -807,7 +1009,7 @@ async def get_templates_for_scope(
         SELECT crt.*, ct.key AS ct_key, ct.label AS ct_label, ct.category AS ct_category,
                rc.key AS role_key, rc.label AS role_label
         FROM credential_requirement_templates crt
-        JOIN credential_types ct ON ct.id = crt.credential_type_id
+        JOIN scoped_credential_types ct ON ct.id = crt.credential_type_id
         JOIN role_categories rc ON rc.id = crt.role_category_id
         WHERE {where}
         ORDER BY rc.sort_order, ct.category, ct.label

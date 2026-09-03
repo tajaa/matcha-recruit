@@ -21,6 +21,8 @@ class CredentialTypeCreate(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("label cannot be empty")
+        if "\x00" in value:
+            raise ValueError("label contains an unsupported null character")
         if any(character in value for character in "\r\n\t"):
             raise ValueError("label must be a single line")
         return value
@@ -35,6 +37,8 @@ class CredentialTypeCreate(BaseModel):
     def normalize_description(cls, value: str | None) -> str | None:
         if value is None:
             return None
+        if "\x00" in value:
+            raise ValueError("description contains an unsupported null character")
         return value.strip() or None
 
 

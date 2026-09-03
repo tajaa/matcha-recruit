@@ -16,6 +16,12 @@ const EXTRACTION_LABEL: Record<string, string> = {
   failed: 'Extraction failed',
 }
 
+type DocumentTypeOption = {
+  value: string
+  label: string
+  hasExpiration: boolean
+}
+
 function ExpirationBadge({ date }: { date: string | null }) {
   if (!date) return null
   const exp = new Date(date)
@@ -57,6 +63,7 @@ function DocumentCard({
   onReclassify,
   onDownload,
   onDelete,
+  documentTypeOptions,
   requiresExpiration = false,
 }: {
   doc: CredentialDocument
@@ -65,15 +72,18 @@ function DocumentCard({
   onReclassify: (documentType: string, expirationDate?: string) => void
   onDownload: () => void
   onDelete: () => void
+  documentTypeOptions: DocumentTypeOption[]
   requiresExpiration?: boolean
 }) {
   const [confirming, setConfirming] = useState(false)
   const [approving, setApproving] = useState(false)
-  const [expirationDate, setExpirationDate] = useState('')
+  const [expirationDate, setExpirationDate] = useState(doc.expires_at?.slice(0, 10) ?? '')
   const [reclassifying, setReclassifying] = useState(false)
   const [documentType, setDocumentType] = useState(doc.document_type)
   const needsExpirationConfirmation = requiresExpiration && !doc.expires_at
   const canApprove = doc.review_status === 'pending' || (doc.review_status === 'approved' && needsExpirationConfirmation)
+  const selectedType = documentTypeOptions.find((option) => option.value === documentType)
+  const reclassificationRequiresExpiration = selectedType?.hasExpiration ?? documentType === 'food_handler_card'
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
@@ -87,7 +97,7 @@ function DocumentCard({
             {doc.expires_at && <ExpirationBadge date={doc.expires_at} />}
           </div>
           <p className="text-[11px] text-zinc-500">
-            {DOC_TYPE_LABELS[doc.document_type] ?? doc.document_type}
+            {documentTypeOptions.find((option) => option.value === doc.document_type)?.label ?? doc.document_type}
             {' · '}
             {doc.file_size ? `${(doc.file_size / 1024).toFixed(0)} KB` : ''}
             {' · '}
@@ -137,12 +147,12 @@ function DocumentCard({
         <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
           <label className="block text-xs text-zinc-400">Document type
             <select value={documentType} onChange={(event) => setDocumentType(event.target.value)} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200">
-              {Object.entries(DOC_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {documentTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
-          {documentType === 'food_handler_card' && <Input label="Card expiration (required for approved documents)" type="date" value={expirationDate} onChange={(event) => setExpirationDate(event.target.value)} />}
+          {reclassificationRequiresExpiration && <Input label="Credential expiration (required for approved documents)" type="date" value={expirationDate} onChange={(event) => setExpirationDate(event.target.value)} />}
           <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => { onReclassify(documentType, expirationDate || undefined); setReclassifying(false) }} disabled={doc.review_status === 'approved' && documentType === 'food_handler_card' && !expirationDate}>Save type</Button>
+            <Button size="sm" onClick={() => { onReclassify(documentType, expirationDate || undefined); setReclassifying(false) }} disabled={doc.review_status === 'approved' && reclassificationRequiresExpiration && !expirationDate}>Save type</Button>
             <Button size="sm" variant="ghost" onClick={() => setReclassifying(false)}>Cancel</Button>
           </div>
         </div>
@@ -294,6 +304,30 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
     expirations,
     handleUpload,
   } = useCredentialManager(employeeId)
+
+  const documentTypeOptionsByKey = new Map<string, DocumentTypeOption>(
+    Object.entries(DOC_TYPE_LABELS).map(([value, label]) => [
+      value,
+      { value, label, hasExpiration: value === 'food_handler_card' },
+    ]),
+  )
+  for (const requirement of requirements) {
+    documentTypeOptionsByKey.set(requirement.credential_type_key, {
+      value: requirement.credential_type_key,
+      label: requirement.credential_type_label,
+      hasExpiration: requirement.has_expiration,
+    })
+  }
+  for (const documentType of Object.keys(docsByType)) {
+    if (!documentTypeOptionsByKey.has(documentType)) {
+      documentTypeOptionsByKey.set(documentType, {
+        value: documentType,
+        label: documentType,
+        hasExpiration: false,
+      })
+    }
+  }
+  const documentTypeOptions = Array.from(documentTypeOptionsByKey.values())
 
   if (loading) return <p className="text-sm text-zinc-500">Loading credentials...</p>
 
@@ -459,6 +493,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
                     onReclassify={(documentType, expirationDate) => reclassify(doc.id, documentType, expirationDate)}
                     onDownload={() => download(doc.id)}
                     onDelete={() => remove(doc.id)}
+                    documentTypeOptions={documentTypeOptions}
                     requiresExpiration={req?.has_expiration ?? doc.document_type === 'food_handler_card'}
                   />
                 ))}

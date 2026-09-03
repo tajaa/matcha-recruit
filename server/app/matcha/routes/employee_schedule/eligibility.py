@@ -38,7 +38,7 @@ async def list_eligibility_cases(
                  FROM schedule_eligibility_cases c
                  JOIN employees e ON e.id=c.employee_id
                  LEFT JOIN employee_credential_requirements ecr ON ecr.id=c.requirement_id
-                 LEFT JOIN credential_types ct ON ct.id=ecr.credential_type_id
+                 LEFT JOIN scoped_credential_types ct ON ct.id=ecr.credential_type_id
                  LEFT JOIN business_locations bl ON bl.id=c.location_id
                  LEFT JOIN schedule_eligibility_case_assignments a ON a.case_id=c.id
               WHERE c.company_id=$1

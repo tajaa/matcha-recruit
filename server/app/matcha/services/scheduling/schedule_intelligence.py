@@ -438,7 +438,7 @@ async def fetch_lapse_items(
             SELECT ecr.employee_id, ct.label AS credential_name, ecr.due_date
             FROM employee_credential_requirements ecr
             JOIN employees e ON e.id = ecr.employee_id
-            LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+            LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
             WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
               AND ecr.status NOT IN ('verified', 'waived') AND ecr.due_date IS NOT NULL
             """,

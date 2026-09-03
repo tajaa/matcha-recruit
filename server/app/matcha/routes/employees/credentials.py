@@ -291,7 +291,7 @@ async def _requirement_for_document_type(
         f"""SELECT ecr.id, ct.has_expiration
               FROM employee_credential_requirements ecr
               JOIN employees e ON e.id=ecr.employee_id AND e.org_id=$3
-              JOIN credential_types ct ON ct.id=ecr.credential_type_id
+              JOIN scoped_credential_types ct ON ct.id=ecr.credential_type_id
              WHERE ecr.employee_id=$1 AND ct.key=$2{lock}""",
         employee_id, document_type, company_id,
     )
@@ -305,7 +305,7 @@ async def _requirement_for_document_type(
                 ON sje.job_id=jr.job_id AND sje.company_id=jr.company_id
              WHERE jr.company_id=$1 AND sje.employee_id=$2
                AND jr.is_required AND jr.credential_type_id=(
-                   SELECT id FROM credential_types WHERE key=$3
+                   SELECT id FROM scoped_credential_types WHERE key=$3
                )""",
         company_id, employee_id, document_type,
     )
@@ -318,7 +318,7 @@ async def _requirement_for_document_type(
             f"""SELECT ecr.id, ct.has_expiration
                   FROM employee_credential_requirements ecr
                   JOIN employees e ON e.id=ecr.employee_id AND e.org_id=$3
-                  JOIN credential_types ct ON ct.id=ecr.credential_type_id
+                  JOIN scoped_credential_types ct ON ct.id=ecr.credential_type_id
                  WHERE ecr.employee_id=$1 AND ct.key=$2{lock}""",
             employee_id, document_type, company_id,
         )
@@ -641,8 +641,6 @@ async def reclassify_credential_document(
 ):
     """Correct a document's credential type and keep requirement evidence consistent."""
     company_id = await get_client_company_id(current_user)
-    if body.document_type not in VALID_DOCUMENT_TYPES:
-        raise HTTPException(status_code=400, detail="Document type is not recognized")
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -661,10 +659,18 @@ async def reclassify_credential_document(
                 document_type=body.document_type,
                 for_update=True,
             )
+            if body.document_type not in VALID_DOCUMENT_TYPES and not new_requirement:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Document type is not recognized for this employee",
+                )
+            requires_expiration = bool(
+                (new_requirement and new_requirement["has_expiration"])
+                or body.document_type == "food_handler_card"
+            )
             if (
                 row["review_status"] == "approved"
-                and new_requirement
-                and new_requirement["has_expiration"]
+                and requires_expiration
                 and body.expiration_date is None
             ):
                 raise HTTPException(
@@ -684,11 +690,13 @@ async def reclassify_credential_document(
             row = await conn.fetchrow(
                 """UPDATE credential_documents
                    SET document_type=$1,
-                       expires_at=CASE WHEN $1='food_handler_card' THEN $2 ELSE NULL END,
+                       expires_at=$2,
                        updated_at=NOW()
                    WHERE id=$3
                    RETURNING *""",
-                body.document_type, body.expiration_date, document_id,
+                body.document_type,
+                body.expiration_date if requires_expiration else None,
+                document_id,
             )
             if row["review_status"] == "approved" and new_requirement:
                 await conn.execute(
@@ -697,7 +705,10 @@ async def reclassify_credential_document(
                            verified_at=NOW(), verified_by=$2, expires_at=$3,
                            waived_at=NULL, waived_by=NULL, waiver_reason=NULL, updated_at=NOW()
                        WHERE id=$4""",
-                    document_id, current_user.id, body.expiration_date, new_requirement["id"],
+                    document_id,
+                    current_user.id,
+                    body.expiration_date if requires_expiration else None,
+                    new_requirement["id"],
                 )
     return _cred_doc_from_row(row)
 

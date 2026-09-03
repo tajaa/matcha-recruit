@@ -5,6 +5,7 @@ from uuid import uuid4
 import asyncpg
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.core.models.credential_templates import CredentialTypeCreate, CredentialTypeVisibilityUpdate
 from app.core.routes.documents import credential_templates as routes
@@ -36,6 +37,8 @@ class _Connection:
         self.fail_filter_item_insert = fail_filter_item_insert
         self.duplicate_label = duplicate_label
         self.calls = []
+        self.base_type = None
+        self.custom_metadata = None
 
     def transaction(self):
         return _Transaction()
@@ -51,24 +54,24 @@ class _Connection:
     async def fetchrow(self, query, *args):
         self.calls.append(("fetchrow", query, args))
         if "INSERT INTO credential_types" in query:
-            return {
+            self.base_type = {
                 "id": self.catalog_type_id,
                 "key": args[0],
-                "label": args[1],
-                "category": args[2],
-                "description": args[3],
-                "has_expiration": args[4],
-                "has_number": args[5],
-                "has_state": args[6],
+                "has_expiration": args[1],
+                "has_number": args[2],
+                "has_state": args[3],
                 "is_system": False,
-                "company_id": args[7],
-                "created_by": args[8],
             }
+            return {"id": self.catalog_type_id}
+        if "SELECT * FROM scoped_credential_types" in query:
+            assert self.base_type is not None
+            assert self.custom_metadata is not None
+            return {**self.base_type, **self.custom_metadata}
         return None
 
     async def fetch(self, query, *args):
         self.calls.append(("fetch", query, args))
-        if "SELECT id FROM credential_types" in query:
+        if "SELECT id FROM scoped_credential_types" in query:
             return [{"id": value} for value in self.existing_ids]
         if "WITH filter_state AS" in query:
             return [{
@@ -77,12 +80,20 @@ class _Connection:
                 "_is_configured": self.configured,
                 "_is_selected": self.catalog_type_id in self.selected_ids,
             }]
-        if "SELECT ct.*" in query or "SELECT * FROM credential_types" in query:
+        if "SELECT ct.*" in query or "SELECT * FROM scoped_credential_types" in query:
             return [{"id": uuid4(), "label": "Food Handler Card"}]
         return []
 
     async def execute(self, query, *args):
         self.calls.append(("execute", query, args))
+        if "INSERT INTO company_credential_types" in query:
+            self.custom_metadata = {
+                "company_id": args[1],
+                "label": args[2],
+                "category": args[3],
+                "description": args[4],
+                "created_by": args[5],
+            }
         if self.fail_filter_item_insert and "INSERT INTO company_credential_type_filter_items" in query:
             raise asyncpg.ForeignKeyViolationError("catalog row disappeared")
         return "OK"
@@ -158,7 +169,18 @@ async def test_create_credential_type_is_tenant_owned_and_selected(monkeypatch):
     assert result["category"] == "clearance"
     assert result["company_id"] == company_id
     insert = next(call for call in conn.calls if call[0] == "fetchrow")
-    assert insert[2][7:] == (company_id, user_id)
+    assert insert[2][1:] == (False, False, False)
+    metadata = next(
+        call for call in conn.calls
+        if call[0] == "execute" and "INSERT INTO company_credential_types" in call[1]
+    )
+    assert metadata[2][1:] == (
+        company_id,
+        "Forklift Certification",
+        "clearance",
+        "Site-specific qualification",
+        user_id,
+    )
     selection = next(
         call for call in conn.calls
         if call[0] == "execute" and "company_credential_type_filter_items" in call[1]
@@ -323,3 +345,19 @@ async def test_write_scope_rejects_an_unscoped_caller():
         await routes.credential_settings_company_id(company_id=None)
 
     assert exc_info.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"label": "Forklift\x00Certification", "category": "clearance"},
+        {
+            "label": "Forklift Certification",
+            "category": "clearance",
+            "description": "Internal\x00qualification",
+        },
+    ],
+)
+def test_create_credential_type_rejects_postgres_null_characters(payload):
+    with pytest.raises(ValidationError):
+        CredentialTypeCreate(**payload)

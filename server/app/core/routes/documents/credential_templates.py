@@ -188,14 +188,14 @@ async def list_credential_types(
 ):
     """List credential types available for this company's dropdowns.
 
-    A NULL ``company_id`` matches no filter row, so an unscoped caller keeps the
-    legacy behavior of seeing the whole catalog.
+    A NULL ``company_id`` matches no tenant rows or filter row, so an unscoped
+    platform admin sees only the shared catalog.
     """
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT ct.*
-            FROM credential_types ct
+            FROM scoped_credential_types ct
             WHERE (ct.company_id IS NULL OR ct.company_id = $1)
               AND (NOT EXISTS (
                 SELECT 1 FROM company_credential_type_filters f
@@ -218,7 +218,7 @@ async def get_credential_type_settings(
 ):
     """Return the full catalog and this company's current dropdown filter.
 
-    An unscoped caller (a platform admin who named no company) still gets the
+    An unscoped caller (a platform admin who named no company) gets the shared
     catalog, flagged ``manageable=False`` so the UI hides the save controls
     instead of writing to whichever tenant happens to be oldest.
     """
@@ -235,7 +235,7 @@ async def get_credential_type_settings(
             SELECT ct.*, filter_state.is_configured AS _is_configured,
                    item.credential_type_id IS NOT NULL AS _is_selected
             FROM filter_state
-            LEFT JOIN credential_types ct
+            LEFT JOIN scoped_credential_types ct
               ON ct.company_id IS NULL OR ct.company_id = $1
             LEFT JOIN company_credential_type_filter_items item
               ON item.company_id = $1 AND item.credential_type_id = ct.id
@@ -278,7 +278,7 @@ async def create_credential_type(
         duplicate = await conn.fetchval(
             """
             SELECT EXISTS (
-                SELECT 1 FROM credential_types
+                SELECT 1 FROM scoped_credential_types
                 WHERE lower(btrim(label)) = lower($1)
                   AND (company_id IS NULL OR company_id = $2)
             )
@@ -294,22 +294,31 @@ async def create_credential_type(
 
         try:
             async with conn.transaction():
-                row = await conn.fetchrow(
+                base_row = await conn.fetchrow(
                     """
                     INSERT INTO credential_types
                         (key, label, category, description, has_expiration,
-                         has_number, has_state, is_system, company_id, created_by)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9)
-                    RETURNING *
+                         has_number, has_state, is_system)
+                    VALUES ($1, 'Tenant credential', 'custom', NULL, $2, $3, $4, false)
+                    RETURNING id
                     """,
                     f"custom_{uuid4().hex}",
-                    body.label,
-                    body.category,
-                    body.description,
                     body.has_expiration,
                     body.has_number,
                     body.has_state,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_types
+                        (credential_type_id, company_id, label, category,
+                         description, created_by)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    """,
+                    base_row["id"],
                     company_id,
+                    body.label,
+                    body.category,
+                    body.description,
                     user.id,
                 )
                 # A configured allowlist would otherwise hide the new row until
@@ -325,7 +334,13 @@ async def create_credential_type(
                     ON CONFLICT DO NOTHING
                     """,
                     company_id,
-                    row["id"],
+                    base_row["id"],
+                )
+                row = await conn.fetchrow(
+                    """SELECT * FROM scoped_credential_types
+                       WHERE id = $1 AND company_id = $2""",
+                    base_row["id"],
+                    company_id,
                 )
         except asyncpg.UniqueViolationError as exc:
             raise HTTPException(
@@ -353,7 +368,7 @@ async def update_credential_type_settings(
         )
     async with get_connection() as conn:
         existing_rows = await conn.fetch(
-            """SELECT id FROM credential_types
+            """SELECT id FROM scoped_credential_types
                WHERE id = ANY($1::uuid[])
                  AND (company_id IS NULL OR company_id = $2)""",
             selected_ids,
@@ -466,7 +481,7 @@ async def list_templates(
                 SELECT crt.*, ct.key AS ct_key, ct.label AS ct_label, ct.category AS ct_category,
                        rc.key AS role_key, rc.label AS role_label
                 FROM credential_requirement_templates crt
-                JOIN credential_types ct ON ct.id = crt.credential_type_id
+                JOIN scoped_credential_types ct ON ct.id = crt.credential_type_id
                 JOIN role_categories rc ON rc.id = crt.role_category_id
                 WHERE {where}
                 ORDER BY crt.state, rc.sort_order, ct.category, ct.label
@@ -721,7 +736,7 @@ async def trigger_research(
     user: CurrentUser = Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
-    """Trigger Gemini AI research for credential requirements."""
+    """Trigger OpenAI Luna research for credential requirements."""
     async with get_connection() as conn:
         results = await research_credential_requirements(
             conn,

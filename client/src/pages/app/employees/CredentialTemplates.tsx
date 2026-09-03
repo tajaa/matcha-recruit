@@ -184,6 +184,7 @@ export default function CredentialTemplates() {
   }, [credentialCategories, customCategory])
 
   const handleSaveTypeSettings = async () => {
+    if (savingTypes || creatingType) return
     setSavingTypes(true)
     try {
       await updateCredentialTypeSettings(selectedTypeIds)
@@ -198,6 +199,7 @@ export default function CredentialTemplates() {
   }
 
   const handleResetTypeSettings = async () => {
+    if (savingTypes || creatingType) return
     setSavingTypes(true)
     try {
       await resetCredentialTypeSettings()
@@ -216,6 +218,7 @@ export default function CredentialTemplates() {
   }
 
   const handleCreateCredentialType = async () => {
+    if (savingTypes || creatingType) return
     const label = customLabel.trim()
     const description = customDescription.trim()
     if (!label) {
@@ -246,16 +249,7 @@ export default function CredentialTemplates() {
         has_number: customHasNumber,
         has_state: customHasState,
       })
-      setTypeSettings(current => current ? {
-        ...current,
-        credential_types: [...current.credential_types, created].sort((a, b) =>
-          a.category.localeCompare(b.category) || a.label.localeCompare(b.label)
-        ),
-        selected_type_ids: current.is_configured
-          ? Array.from(new Set([...current.selected_type_ids, created.id]))
-          : current.selected_type_ids,
-      } : current)
-      setSelectedTypeIds(current => Array.from(new Set([...current, created.id])))
+      await loadTypeSettings()
       setCustomLabel('')
       setCustomDescription('')
       setCustomHasExpiration(true)
@@ -534,8 +528,8 @@ export default function CredentialTemplates() {
                 </p>
               </div>
               {typeSettings.manageable && <div className="flex gap-2">
-                {typeSettings.is_configured && <Button onClick={handleResetTypeSettings} disabled={savingTypes} variant="secondary">Use all types</Button>}
-                <Button onClick={handleSaveTypeSettings} disabled={savingTypes || selectedTypeIds.length === 0}>
+                {typeSettings.is_configured && <Button onClick={handleResetTypeSettings} disabled={savingTypes || creatingType} variant="secondary">Use all types</Button>}
+                <Button onClick={handleSaveTypeSettings} disabled={savingTypes || creatingType || selectedTypeIds.length === 0}>
                   {savingTypes ? 'Saving...' : 'Save options'}
                 </Button>
               </div>}
@@ -603,7 +597,7 @@ export default function CredentialTemplates() {
                 <label className="flex items-center gap-2"><input type="checkbox" checked={customHasState} onChange={event => setCustomHasState(event.target.checked)} className="accent-emerald-500" /> State-issued</label>
               </div>
               {customTypeError && <p role="alert" className="mt-3 text-xs text-red-400">{customTypeError}</p>}
-              <Button className="mt-4" onClick={handleCreateCredentialType} disabled={creatingType}>
+              <Button className="mt-4" onClick={handleCreateCredentialType} disabled={creatingType || savingTypes}>
                 {creatingType ? 'Adding option...' : 'Add credential option'}
               </Button>
             </div>
@@ -611,7 +605,7 @@ export default function CredentialTemplates() {
           <div className="grid gap-2 md:grid-cols-2">
             {typeSettings.credential_types.map(type => (
               <label key={type.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3 hover:border-zinc-700">
-                <input type="checkbox" checked={selectedTypeIds.includes(type.id)} onChange={() => toggleCredentialType(type.id)} disabled={!typeSettings.manageable} className="mt-0.5 accent-emerald-500 disabled:opacity-40" />
+                <input type="checkbox" checked={selectedTypeIds.includes(type.id)} onChange={() => toggleCredentialType(type.id)} disabled={!typeSettings.manageable || savingTypes || creatingType} className="mt-0.5 accent-emerald-500 disabled:opacity-40" />
                 <span className="min-w-0">
                   <span className="block text-sm text-zinc-200">{type.label}</span>
                   <span className="block text-[10px] uppercase tracking-wide text-zinc-600">{type.category}</span>

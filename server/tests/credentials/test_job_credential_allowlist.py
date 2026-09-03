@@ -16,7 +16,7 @@ class _Connection:
         self.executed = []
 
     async def fetch(self, query, *args):
-        if "SELECT id FROM credential_types" in query:
+        if "SELECT id FROM scoped_credential_types" in query:
             return [{"id": value} for value in args[0] if value not in self.inaccessible_ids]
         if "FROM schedule_job_credential_requirements" in query and "FOR UPDATE" in query:
             return [{"credential_type_id": value} for value in self.existing_ids]
