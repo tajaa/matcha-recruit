@@ -135,18 +135,46 @@ async def assert_location_in_company(
         raise HTTPException(status_code=404, detail="Location not found")
 
 
+# Sentinel for assert_job_in_company's location_id: distinguishes "this caller
+# has no location to check against" (omitted) from "the row being written has
+# no location" (passed as None). The second case still has to reject a
+# location-scoped job — otherwise a company-wide shift is a way to smuggle
+# another store's job in.
+UNSCOPED_LOCATION: Any = object()
+
+
 async def assert_job_in_company(
-    conn, company_id: UUID, job_id: Optional[UUID], *, location_id: Optional[UUID] = None,
+    conn, company_id: UUID, job_id: Optional[UUID], *,
+    location_id: Any = UNSCOPED_LOCATION, lock: bool = False,
 ):
+    """404 unless the job is this company's; 422 unless it is available at the
+    row's location. Returns the job row (name + location_id) so callers can
+    write the job's current name as the canonical role label.
+
+    A job with location_id NULL is company-wide and available everywhere. A
+    location-scoped job is available only at its own location — including
+    against a location-less shift, which is why `location_id=None` is a real
+    constraint and not the same as omitting the argument.
+
+    lock=True takes FOR SHARE, which is what actually closes the read/write
+    race: without it a concurrent rename can still commit between this SELECT
+    and the caller's INSERT, and the stale name gets persisted as the role.
+    Only meaningful inside the caller's write transaction.
+    """
     if job_id is None:
         return None
     row = await conn.fetchrow(
-        "SELECT name, location_id FROM schedule_jobs WHERE id = $1 AND company_id = $2",
+        "SELECT name, location_id FROM schedule_jobs WHERE id = $1 AND company_id = $2"
+        + (" FOR SHARE" if lock else ""),
         job_id, company_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
-    if location_id is not None and row["location_id"] not in (None, location_id):
+    if (
+        location_id is not UNSCOPED_LOCATION
+        and row["location_id"] is not None
+        and row["location_id"] != location_id
+    ):
         raise HTTPException(status_code=422, detail="Job is not available at this location")
     return row
 

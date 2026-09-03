@@ -47,7 +47,10 @@ Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
 class ShiftCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime
-    role: Optional[str] = Field(None, max_length=150)
+    # No `role`: it is derived from job_id, not sent. Declaring it would put a
+    # field in the OpenAPI schema that the route silently discards. Pydantic
+    # ignores it if an older client still sends one, and that client gets the
+    # job's name back — which is the label it should have had.
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
     break_minutes: int = Field(0, ge=0, le=1440)

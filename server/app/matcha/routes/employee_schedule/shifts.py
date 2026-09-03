@@ -452,10 +452,12 @@ async def create_shift(body: ShiftCreate,
                 force=force,
             )
         async with conn.transaction():
-            # Re-resolve under the write transaction so a concurrent job edit
-            # cannot persist a stale/cross-location role label.
+            # Re-resolve UNDER A ROW LOCK so a concurrent rename cannot commit
+            # between this read and the insert below and leave the shift
+            # labelled with the job's old name.
             job = await assert_job_in_company(
                 conn, company_id, body.job_id, location_id=body.location_id,
+                lock=True,
             )
             # Re-check conflicts under transaction-scoped employee locks in a
             # stable order.  The earlier pass provides detailed validation;
@@ -633,7 +635,12 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
         if "job_id" in patch:
-            await assert_job_in_company(conn, company_id, patch["job_id"])
+            # Same scope rule as create: a job from another store can't be
+            # attached by editing a shift into it.
+            await assert_job_in_company(
+                conn, company_id, patch["job_id"],
+                location_id=patch.get("location_id", existing["location_id"]),
+            )
 
         new_status = patch.get("status", existing["status"])
         publishing = new_status == "published" and existing["status"] != "published"
@@ -809,6 +816,16 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         "message": "The shift changed while you were editing it. Reload and try again.",
                     },
                 )
+            if "job_id" in patch:
+                # role is the job's canonical label, never a free-text string
+                # that can drift from it — including on the way to NULL, where
+                # a kept label would describe a job the shift no longer has.
+                locked_job = await assert_job_in_company(
+                    conn, company_id, patch["job_id"],
+                    location_id=patch.get("location_id", existing["location_id"]),
+                    lock=True,
+                )
+                patch["role"] = locked_job["name"] if locked_job else None
             if compliance_relevant and new_status != "cancelled":
                 locked_break = int(locked_shift["break_minutes"] or 0)
                 locked_assignees = await conn.fetch(
