@@ -287,6 +287,7 @@ def _run_compose(
     check: bool = True,
     capture: bool = False,
     test_services: bool = False,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         compose_command(record, *argv, test_services=test_services),
@@ -295,6 +296,7 @@ def _run_compose(
         text=True,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
+        timeout=timeout,
     )
     if check and result.returncode:
         message = (result.stderr or result.stdout or "docker compose failed").strip()
@@ -630,6 +632,7 @@ def exec_in_session(
     tty: bool,
     login_shell: bool = False,
     capture: bool = False,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = list(argv)
     if login_shell:
@@ -640,7 +643,7 @@ def exec_in_session(
     if not tty:
         compose_argv.append("--no-TTY")
     compose_argv.extend(["--user", f"{os.getuid()}:{os.getgid()}", "workspace", *command])
-    return _run_compose(record, *compose_argv, capture=capture, check=False)
+    return _run_compose(record, *compose_argv, capture=capture, check=False, timeout=timeout)
 
 
 def shutil_which(binary: str) -> str | None:

@@ -13,12 +13,19 @@ from pathlib import Path
 from typing import Callable, Sequence, TextIO, TypeVar
 
 from .agent_adapters import attach_agent
+from .capabilities import (
+    load_report,
+    planned_capabilities,
+    render_report_text,
+    report_is_stale,
+)
 from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session, session_home
 from .models import SessionRecord, SessionSpec
 from .session_auth import refresh_github_auth
 from .sessions import (
     create_session,
+    ensure_capability_report,
     reconcile_session,
     release_session,
     start_session,
@@ -328,8 +335,9 @@ def _new_session(
         f"{'browser' if playwright else 'development' if dev else 'agent only'} / "
         f"{'PR #' + str(pr_number) if pr_number else 'origin/main'}"
     )
+    planned = "\n".join(planned_capabilities(dev=dev, playwright=playwright))
     confirmed = choose(
-        f"Create {name}?\n  {summary}",
+        f"Create {name}?\n  {summary}\n\nPlanned capabilities\n{planned}",
         (("Create and open", True), ("Cancel", False)),
         reader=reader,
         output=output,
@@ -350,6 +358,12 @@ def _new_session(
     print(f"\nCreated {record.name}: {record.worktree_path}", file=output)
     if record.ports:
         print(f"Ports: {asdict(record.ports)}", file=output)
+    report = ensure_capability_report(record)
+    print("", file=output)
+    print(render_report_text(report, name=record.name), file=output)
+    # The agent takes over the terminal on attach. Let the operator read the
+    # measured report first rather than discovering it in scrollback.
+    _acknowledge(reader, output)
     if record.phase == "running":
         attach_agent(record)
 
@@ -386,6 +400,34 @@ def _run_validation(
     print(f"Report: {report.result_path}", file=output)
 
 
+def _session_menu_title(record: SessionRecord) -> str:
+    """Never open a session without showing what it can actually do.
+
+    Reading is cache-only. Measuring here would make every menu redraw launch
+    Chromium, authenticate to GitHub, and query production before it could
+    print a line; "Refresh capabilities" is the deliberate remeasure.
+    """
+    header = f"{record.name} — {record.agent} / {record.permission_mode} / {record.phase}"
+    try:
+        report = load_report(record)
+        if report is None:
+            return (
+                f"{header}\n\nCapabilities have not been measured yet — "
+                "choose Refresh capabilities."
+            )
+        body = render_report_text(report, name=record.name)
+    except (KeyError, RuntimeError, ValueError, OSError) as exc:
+        return f"{header}\n\nCapabilities are unavailable: {exc}"
+    notes = []
+    if report.container_available and record.phase != "running":
+        notes.append(
+            f"  measured while the container was running; this session is now {record.phase}"
+        )
+    if report_is_stale(report):
+        notes.append("  measured more than 15 minutes ago; Refresh capabilities to remeasure")
+    return "\n".join([f"{header}\n\n{body}", *notes])
+
+
 def _open_session(
     record: SessionRecord,
     *,
@@ -394,11 +436,12 @@ def _open_session(
 ) -> None:
     while record.phase != "released":
         action = choose(
-            f"{record.name} — {record.agent} / {record.permission_mode} / {record.phase}",
+            _session_menu_title(record),
             (
                 ("Open agent", "open"),
                 ("Open shell", "shell"),
                 ("Run validation", "validate"),
+                ("Refresh capabilities", "capabilities"),
                 ("Stop session", "stop"),
                 ("Submit draft pull request", "submit"),
                 ("Release published session", "release"),
@@ -410,6 +453,9 @@ def _open_session(
         if action == "back":
             return
         if action == "open":
+            # A running session's agent already read its context at startup;
+            # rewriting the report cannot reach that process, and remeasuring
+            # would block the attach behind the whole probe suite.
             if record.phase != "running":
                 start_session(record)
             attach_agent(record)
@@ -424,6 +470,11 @@ def _open_session(
             )
         elif action == "validate":
             _run_validation(record, reader=reader, output=output)
+        elif action == "capabilities":
+            print("\nMeasuring capabilities...", file=output)
+            report = ensure_capability_report(record, refresh=True)
+            print(render_report_text(report, name=record.name), file=output)
+            _acknowledge(reader, output)
         elif action == "stop":
             stop_session(record)
         elif action == "submit":

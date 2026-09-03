@@ -43,7 +43,7 @@ const nav: (NavItem | NavGroup)[] = [
       // has handbook_pilot to fall back to.
       { to: '/app/handbook-pilot', icon: Sparkles, label: 'Handbook Pilot', feature: 'handbook_pilot' },
       { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
-      { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
+      { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credential Templates', feature: 'credential_templates' },
       { to: '/app/workforce-compliance', icon: ShieldCheck, label: 'Workforce Compliance', feature: 'workforce_compliance' },
       { to: '/app/risk-profile', icon: Gauge, label: 'Risk Profile', feature: 'risk_profile' },
       { to: '/app/controls-evidence', icon: FileCheck, label: 'Proof of Controls', feature: 'controls_evidence' },

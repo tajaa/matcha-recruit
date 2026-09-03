@@ -333,7 +333,7 @@ async def _preflight_compliance_blocks(
                 violations = await check_shift_compliance(
                     conn, company_id,
                     location_id=location_id,
-                    job_id=job_id,
+                    job_id=UUID(shift["job_id"]) if shift.get("job_id") else None,
                     starts_at=datetime.fromisoformat(shift["starts_at"]),
                     ends_at=datetime.fromisoformat(shift["ends_at"]),
                     break_minutes=int(shift.get("break_minutes") or 0),
