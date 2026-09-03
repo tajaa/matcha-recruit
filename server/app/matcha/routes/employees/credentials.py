@@ -252,6 +252,7 @@ class CredentialDocumentResponse(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     expires_at: Optional[str] = None
+    is_current: bool = False
 
 
 def _cred_doc_from_row(row) -> dict:
@@ -275,7 +276,62 @@ def _cred_doc_from_row(row) -> dict:
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
         "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
+        "is_current": bool(row.get("is_current", False)),
     }
+
+
+# One pass over the employee's documents decides which row is the credential of
+# record for each type. The requirement pointer wins when it is set; otherwise
+# (HRIS-verified, waived, template-materialized-but-unlinked, or a legacy
+# document-only credential) the most recently approved document of that type is
+# current. `type_rank` partitions on approval so approved rows rank among
+# themselves; unapproved rows never reach that branch.
+_CREDENTIAL_DOCUMENTS_SQL = """
+WITH employee_documents AS (
+    SELECT cd.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY cd.document_type, (cd.review_status = 'approved')
+               ORDER BY cd.reviewed_at DESC NULLS LAST,
+                        cd.created_at DESC,
+                        cd.id DESC
+           ) AS type_rank
+      FROM credential_documents cd
+     WHERE cd.employee_id = $1 AND cd.company_id = $2
+),
+requirement_pointers AS (
+    SELECT DISTINCT ON (ct.key)
+           ct.key AS document_type,
+           ecr.credential_document_id AS current_document_id
+      FROM employee_credential_requirements ecr
+      JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
+     WHERE ecr.employee_id = $1
+       AND ecr.credential_document_id IS NOT NULL
+     ORDER BY ct.key,
+              ecr.verified_at DESC NULLS LAST,
+              ecr.updated_at DESC NULLS LAST
+)
+SELECT d.*,
+       CASE
+         WHEN d.review_status IS DISTINCT FROM 'approved' THEN false
+         WHEN rp.current_document_id IS NOT NULL THEN rp.current_document_id = d.id
+         ELSE d.type_rank = 1
+       END AS is_current
+  FROM employee_documents d
+  LEFT JOIN requirement_pointers rp ON rp.document_type = d.document_type
+ WHERE $3::uuid IS NULL OR d.id = $3::uuid
+ ORDER BY d.created_at DESC, d.id DESC
+"""
+
+
+async def _fetch_credential_documents(
+    conn, *, employee_id: UUID, company_id: UUID, document_id: Optional[UUID] = None,
+):
+    """Return credential documents with `is_current` resolved.
+
+    Every `CredentialDocumentResponse` is built from this projection so a
+    mutation response never disagrees with the list endpoint.
+    """
+    return await conn.fetch(_CREDENTIAL_DOCUMENTS_SQL, employee_id, company_id, document_id)
 
 
 async def _requirement_for_document_type(
@@ -413,6 +469,12 @@ async def upload_credential_document(
             company_id, employee_id, document_type, filename, file_path,
             file.content_type, len(file_bytes), current_user.id,
         )
+        # Re-read through the shared projection so `is_current` is real rather
+        # than the model default (a fresh upload is pending, so it is false).
+        projected = await _fetch_credential_documents(
+            conn, employee_id=employee_id, company_id=company_id, document_id=row["id"],
+        )
+        row = projected[0] if projected else row
 
     background_tasks.add_task(_run_credential_extraction, row["id"], file_bytes, file.content_type or "application/octet-stream", document_type)
 
@@ -435,11 +497,8 @@ async def list_credential_documents(
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-        rows = await conn.fetch(
-            """SELECT * FROM credential_documents
-               WHERE employee_id = $1 AND company_id = $2
-               ORDER BY created_at DESC""",
-            employee_id, company_id,
+        rows = await _fetch_credential_documents(
+            conn, employee_id=employee_id, company_id=company_id,
         )
 
     return [_cred_doc_from_row(r) for r in rows]
@@ -714,6 +773,13 @@ async def reclassify_credential_document(
                     body.expiration_date if requires_expiration else None,
                     new_requirement["id"],
                 )
+            # Reclassification re-points the requirement, so `is_current` has to
+            # be recomputed rather than defaulted off the RETURNING row.
+            projected = await _fetch_credential_documents(
+                conn, employee_id=employee_id, company_id=company_id, document_id=document_id,
+            )
+            if projected:
+                row = projected[0]
     return _cred_doc_from_row(row)
 
 

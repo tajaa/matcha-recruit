@@ -61,6 +61,7 @@ const document = {
   created_at: '2026-09-03T00:00:00Z',
   updated_at: '2026-09-03T00:00:00Z',
   expires_at: null,
+  is_current: true,
 }
 
 describe('CredentialManager reclassification', () => {
@@ -118,5 +119,88 @@ describe('CredentialManager reclassification', () => {
       'custom_forklift',
       '2027-06-30',
     )
+  })
+
+  it('allows a replacement upload and shows no history section when nothing is superseded', () => {
+    render(<CredentialManager employeeId="employee-1" />)
+
+    expect(screen.getByText('Current')).toBeInTheDocument()
+    expect(screen.getByText(/Add replacement credential/)).toBeInTheDocument()
+    expect(screen.queryByText('History')).toBeNull()
+  })
+
+  it('lists superseded approved documents under their own type, newest first', () => {
+    manager.useCredentialManager.mockReturnValue({
+      ...manager.useCredentialManager(),
+      docsByType: {
+        other: [
+          document,
+          {
+            ...document,
+            id: 'document-older',
+            filename: 'oldest-forklift.pdf',
+            reviewed_at: '2026-01-01T00:00:00Z',
+            is_current: false,
+          },
+          {
+            ...document,
+            id: 'document-newer',
+            filename: 'previous-forklift.pdf',
+            reviewed_at: '2026-06-01T00:00:00Z',
+            is_current: false,
+          },
+        ],
+      },
+    })
+
+    render(<CredentialManager employeeId="employee-1" />)
+
+    // Section heading plus one badge per superseded document.
+    expect(screen.getAllByText('History')).toHaveLength(3)
+    const historical = screen.getAllByText(/forklift\.pdf/).map((node) => node.textContent)
+    expect(historical).toEqual([
+      'forklift.pdf',
+      'previous-forklift.pdf',
+      'oldest-forklift.pdf',
+    ])
+  })
+
+  it('never offers approval on a historical document', () => {
+    const expiringDocument = { ...document, document_type: 'food_handler_card' }
+    manager.useCredentialManager.mockReturnValue({
+      ...manager.useCredentialManager(),
+      docsByType: {
+        food_handler_card: [
+          expiringDocument,
+          { ...expiringDocument, id: 'document-history', filename: 'old-card.pdf', is_current: false },
+        ],
+      },
+      allTypes: ['food_handler_card'],
+    })
+
+    render(<CredentialManager employeeId="employee-1" />)
+
+    // Both documents are approved without an expiry, but only the current one
+    // may be re-confirmed: approving history re-points the requirement.
+    expect(screen.getAllByRole('button', { name: 'Confirm expiry' })).toHaveLength(1)
+  })
+
+  it('hides the upload zone for a type the backend would reject', () => {
+    manager.useCredentialManager.mockReturnValue({
+      ...manager.useCredentialManager(),
+      // `other: []` keeps the generic "Other Document" upload block out of the
+      // way so the assertion below is about the legacy type's own section.
+      docsByType: {
+        legacy_removed_type: [{ ...document, document_type: 'legacy_removed_type' }],
+        other: [],
+      },
+      allTypes: ['legacy_removed_type'],
+      reqByType: {},
+      requirements: [],
+    })
+
+    render(<CredentialManager employeeId="employee-1" />)
+
+    expect(screen.queryByText(/drop file or/)).toBeNull()
   })
 })
