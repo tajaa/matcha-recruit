@@ -286,7 +286,11 @@ async def _requirement_for_document_type(
     Job rules are materialized lazily here too. This makes a just-assigned
     employee see the correct upload target without requiring a worker run.
     """
-    lock = " FOR UPDATE" if for_update else ""
+    # ``scoped_credential_types`` expands to a view with a LEFT JOIN.  A bare
+    # FOR UPDATE therefore asks PostgreSQL to lock its nullable join side and
+    # fails before approval can persist.  Only the requirement is mutated by
+    # approval/reclassification, so lock that row explicitly.
+    lock = " FOR UPDATE OF ecr" if for_update else ""
     requirement = await conn.fetchrow(
         f"""SELECT ecr.id, ct.has_expiration
               FROM employee_credential_requirements ecr
