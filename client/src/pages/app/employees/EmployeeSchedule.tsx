@@ -11,12 +11,12 @@ import {
   createShift, updateShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, replaceWeekTemplate, deleteWeekTemplate,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
-  fetchEligibilityCases, type ScheduleEligibilityCase,
+  fetchEligibilityCases, fetchJobs, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
-  Shift, RosterEmployee, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
+  Shift, RosterEmployee, ScheduleJob, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
@@ -60,6 +60,7 @@ export default function EmployeeSchedule() {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
   })
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
+  const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
@@ -106,6 +107,18 @@ export default function EmployeeSchedule() {
       })
     return () => { cancelled = true }
   }, [locationId, tab, weekStart])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!locationId) {
+      setJobs([])
+      return () => { cancelled = true }
+    }
+    void fetchJobs(locationId)
+      .then((response) => { if (!cancelled) setJobs(response.jobs) })
+      .catch(() => { if (!cancelled) setJobs([]) })
+    return () => { cancelled = true }
+  }, [locationId])
 
   function setTab(nextTab: EmployeeScheduleTab) {
     setScheduleTab(nextTab)
@@ -238,6 +251,7 @@ export default function EmployeeSchedule() {
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
                     locationId={locationId}
+                    jobs={jobs}
                   />
                 ))}
               </div>
@@ -279,9 +293,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, locationId }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, locationId, jobs }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; locationId: string
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; locationId: string; jobs: ScheduleJob[]
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -293,14 +307,14 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
       <div className="space-y-2">
         {adding && (
           <Card className="p-2.5">
-            <ShiftForm day={day} locationId={locationId} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            <ShiftForm day={day} locationId={locationId} jobs={jobs} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
           </Card>
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
         {shifts.map((s) => (
           <ShiftCard
             key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags}
-            onPatch={onPatch} onChanged={onChanged}
+            onPatch={onPatch} onChanged={onChanged} jobs={jobs}
             highlighted={s.id === highlightShiftId}
             weekDays={weekDays}
           />
@@ -310,9 +324,9 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
   )
 }
 
-function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays }: {
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays, jobs }: {
   shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]; jobs: ScheduleJob[]
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
@@ -411,6 +425,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         <ShiftForm
           day={shift.starts_at.slice(0, 10)}
           shift={shift}
+          jobs={jobs}
           onSaved={(s) => { onPatch(s); setEditing(false) }}
           onCancel={() => setEditing(false)}
         />
@@ -584,10 +599,11 @@ function spanHours(start: string, end: string): number | null {
  *  chosen time was invisible until the card re-rendered post-submit. The preview
  *  line below is the belt to that braces — the selection is legible even where
  *  the native control isn't. */
-function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
+function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: {
   day: string
   shift?: Shift
   locationId?: string
+  jobs: ScheduleJob[]
   onDone?: () => void
   onSaved?: (s: Shift) => void
   onCancel: () => void
@@ -598,12 +614,15 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const editing = !!shift
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
-  const [role, setRole] = useState(shift?.role ?? '')
+  const [jobId, setJobId] = useState(shift?.job_id ?? '')
   const [notes, setNotes] = useState(shift?.notes ?? '')
   const [breakMinutes, setBreakMinutes] = useState(shift ? String(shift.break_minutes) : '')
   const [breakDirty, setBreakDirty] = useState(false)
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
+  const [roleMissing, setRoleMissing] = useState(false)
+  const roleErrorId = `shift-role-error-${shift?.id ?? day}`
+  const selectedJobMissing = !!jobId && !jobs.some((job) => job.id === jobId)
 
   // Training-as-shift: kind is immutable after create (no field on
   // ShiftUpdate), so the toggle only renders for a brand-new shift.
@@ -624,7 +643,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
     const payload: ShiftPayload = {
       starts_at: `${startDay}T${start}:00Z`,
       ends_at: `${endDay}T${end}:00Z`,
-      role: role.trim() || null,
+      role: jobs.find((job) => job.id === jobId)?.name ?? shift?.role ?? null,
+      job_id: jobId || null,
       notes: notes.trim() || null,
       break_mode: plannedBreak === undefined ? 'auto' : 'manual',
       ...(plannedBreak === undefined ? {} : { break_minutes: plannedBreak }),
@@ -648,6 +668,11 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
     })
     if (!validation.valid) {
       toast(validation.error, 'error')
+      return
+    }
+    if (!editing && !jobId) {
+      setRoleMissing(true)
+      toast('Select a role for this shift', 'error')
       return
     }
     if (!editing && kind === 'training' && !requirementId) {
@@ -709,11 +734,21 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
         )}
       </div>
       <label className="block">
-        {/* Labelled rather than placeholder-only: "Role (optional)" clips to
-            "Role (option…" at day-column width, and a clipped placeholder
-            disappears entirely the moment you type. */}
-        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Role <span className="text-zinc-600 normal-case">(optional)</span></span>
-        <input value={role} onChange={(e) => setRole(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Role <span aria-hidden="true" className="text-red-400">*</span></span>
+        <select
+          required
+          aria-invalid={roleMissing}
+          aria-describedby={roleMissing ? roleErrorId : undefined}
+          value={jobId}
+          onChange={(e) => { setJobId(e.target.value); setRoleMissing(false) }}
+          className={`${inputCls} mt-0.5`}
+        >
+          <option value="">Select a role…</option>
+          {editing && selectedJobMissing && <option value={jobId}>{shift?.role ?? 'Previously assigned role'}</option>}
+          {jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}
+        </select>
+        {roleMissing && <span id={roleErrorId} role="alert" className="mt-1 block text-[10px] text-red-400">Select a role before adding this shift.</span>}
+        {!editing && jobs.length === 0 && <span className="mt-1 block text-[10px] text-amber-400">No roles are available for this location. Add one from the full shift editor.</span>}
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>

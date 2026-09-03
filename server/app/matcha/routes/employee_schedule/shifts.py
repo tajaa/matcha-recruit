@@ -348,7 +348,9 @@ async def create_shift(body: ShiftCreate,
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
-        await assert_job_in_company(conn, company_id, body.job_id)
+        await assert_job_in_company(
+            conn, company_id, body.job_id, location_id=body.location_id,
+        )
         plan_employee_ids = list(dict.fromkeys(body.employee_ids)) or [None]
         break_plans = await _resolve_break_plans_for_ids(
             conn, company_id, location_id=body.location_id,
@@ -450,6 +452,11 @@ async def create_shift(body: ShiftCreate,
                 force=force,
             )
         async with conn.transaction():
+            # Re-resolve under the write transaction so a concurrent job edit
+            # cannot persist a stale/cross-location role label.
+            job = await assert_job_in_company(
+                conn, company_id, body.job_id, location_id=body.location_id,
+            )
             # Re-check conflicts under transaction-scoped employee locks in a
             # stable order.  The earlier pass provides detailed validation;
             # this pass closes the gap between that snapshot and insertion.
@@ -463,7 +470,7 @@ async def create_shift(body: ShiftCreate,
                         raise_conflict(employee_id, conflicts)
             shift_id = await create_shift_core(
                 conn, company_id,
-                location_id=body.location_id, role=body.role, department=body.department,
+                location_id=body.location_id, role=job["name"], department=body.department,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=effective_break, required_staff=body.required_staff,
                 color=body.color, notes=body.notes, kind=body.kind, job_id=body.job_id,

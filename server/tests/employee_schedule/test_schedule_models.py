@@ -30,6 +30,7 @@ from app.matcha.models.scheduling.employee_schedule import (
 
 AWARE = datetime(2026, 7, 13, 9, tzinfo=timezone.utc)
 AWARE_END = datetime(2026, 7, 13, 17, tzinfo=timezone.utc)
+JOB_ID = "22222222-2222-2222-2222-222222222222"
 
 
 # -- assignment moves ---------------------------------------------------------
@@ -71,13 +72,13 @@ def test_naive_datetimes_are_read_as_utc():
     # A client that sends "2026-07-13T09:00:00" (no offset) used to produce a
     # naive datetime; comparing it with the aware value from the DB raised
     # TypeError → 500.
-    shift = ShiftCreate(starts_at="2026-07-13T09:00:00", ends_at="2026-07-13T17:00:00")
+    shift = ShiftCreate(starts_at="2026-07-13T09:00:00", ends_at="2026-07-13T17:00:00", job_id=JOB_ID)
     assert shift.starts_at == AWARE
     assert shift.starts_at.tzinfo is not None
 
 
 def test_offset_datetimes_are_converted_to_utc():
-    shift = ShiftCreate(starts_at="2026-07-13T05:00:00-04:00", ends_at="2026-07-13T17:00:00Z")
+    shift = ShiftCreate(starts_at="2026-07-13T05:00:00-04:00", ends_at="2026-07-13T17:00:00Z", job_id=JOB_ID)
     assert shift.starts_at == datetime(2026, 7, 13, 9, tzinfo=timezone.utc)
 
 
@@ -85,7 +86,7 @@ def test_mixed_naive_and_aware_still_validates_the_window():
     # Previously this comparison raised TypeError inside the validator (a 500);
     # now both sides are UTC, so an inverted window is a clean 422.
     with pytest.raises(ValidationError):
-        ShiftCreate(starts_at="2026-07-13T18:00:00Z", ends_at="2026-07-13T09:00:00")
+        ShiftCreate(starts_at="2026-07-13T18:00:00Z", ends_at="2026-07-13T09:00:00", job_id=JOB_ID)
 
 
 def test_publish_range_normalizes_too():
@@ -97,12 +98,12 @@ def test_publish_range_normalizes_too():
 
 def test_shift_create_rejects_inverted_window():
     with pytest.raises(ValidationError):
-        ShiftCreate(starts_at=AWARE_END, ends_at=AWARE)
+        ShiftCreate(starts_at=AWARE_END, ends_at=AWARE, job_id=JOB_ID)
 
 
 def test_shift_create_rejects_zero_length_window():
     with pytest.raises(ValidationError):
-        ShiftCreate(starts_at=AWARE, ends_at=AWARE)
+        ShiftCreate(starts_at=AWARE, ends_at=AWARE, job_id=JOB_ID)
 
 
 def test_shift_update_is_a_true_patch():
@@ -115,6 +116,11 @@ def test_shift_update_is_a_true_patch():
     assert cleared.model_dump(exclude_unset=True) == {"location_id": None}
 
     assert ShiftUpdate().model_dump(exclude_unset=True) == {}
+
+
+def test_shift_create_requires_a_job_role():
+    with pytest.raises(ValidationError, match="job_id"):
+        ShiftCreate(starts_at=AWARE, ends_at=AWARE_END)
 
 
 def test_shift_update_checks_window_only_when_both_sent():
@@ -281,28 +287,28 @@ REQ_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def test_default_kind_is_work_and_requirement_is_optional():
-    shift = ShiftCreate(starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z")
+    shift = ShiftCreate(starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z", job_id=JOB_ID)
     assert shift.kind == "work"
     assert shift.training_requirement_id is None
 
 
 def test_training_kind_without_requirement_id_is_rejected():
     with pytest.raises(ValidationError):
-        ShiftCreate(starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z", kind="training")
+        ShiftCreate(starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z", job_id=JOB_ID, kind="training")
 
 
 def test_work_kind_with_requirement_id_is_rejected():
     with pytest.raises(ValidationError):
         ShiftCreate(
             starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z",
-            kind="work", training_requirement_id=REQ_ID,
+            job_id=JOB_ID, kind="work", training_requirement_id=REQ_ID,
         )
 
 
 def test_valid_training_shift():
     shift = ShiftCreate(
         starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z",
-        kind="training", training_requirement_id=REQ_ID,
+        job_id=JOB_ID, kind="training", training_requirement_id=REQ_ID,
     )
     assert shift.kind == "training"
     assert str(shift.training_requirement_id) == REQ_ID

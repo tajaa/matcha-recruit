@@ -136,16 +136,19 @@ async def assert_location_in_company(
 
 
 async def assert_job_in_company(
-    conn, company_id: UUID, job_id: Optional[UUID]
-) -> None:
+    conn, company_id: UUID, job_id: Optional[UUID], *, location_id: Optional[UUID] = None,
+):
     if job_id is None:
-        return
+        return None
     row = await conn.fetchrow(
-        "SELECT 1 FROM schedule_jobs WHERE id = $1 AND company_id = $2",
+        "SELECT name, location_id FROM schedule_jobs WHERE id = $1 AND company_id = $2",
         job_id, company_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
+    if location_id is not None and row["location_id"] not in (None, location_id):
+        raise HTTPException(status_code=422, detail="Job is not available at this location")
+    return row
 
 
 async def fetch_shifts(

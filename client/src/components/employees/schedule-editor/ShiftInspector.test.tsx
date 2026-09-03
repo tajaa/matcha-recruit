@@ -2,6 +2,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import ShiftInspector from './ShiftInspector'
 
+const jobs = [{
+  id: 'job-1', name: 'Barista', location_id: 'loc-1', color: null, notes: null,
+  credential_grace_days: null, employee_ids: [], credential_requirements: [],
+}]
+
 function renderInspector() {
   const onCreate = vi.fn().mockResolvedValue(undefined)
   render(
@@ -11,7 +16,7 @@ function renderInspector() {
       locationId="loc-1"
       locationName="Downtown"
       roster={[]}
-      jobs={[]}
+      jobs={jobs}
       trainingEnabled={false}
       readOnly={false}
       saving={false}
@@ -54,15 +59,29 @@ function renderEditingInspector() {
 }
 
 describe('ShiftInspector validation', () => {
+  it('requires a company role before creating a shift', async () => {
+    const onCreate = renderInspector()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Select a role for this shift')
+    expect(screen.getByLabelText(/Role/)).toHaveAttribute('aria-invalid', 'true')
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
   it('leaves a new shift break blank so the server generates it', async () => {
     const onCreate = renderInspector()
 
+    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: 'job-1' } })
     expect(screen.getByLabelText('Planned break (minutes)')).toHaveValue(null)
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
 
     await waitFor(() => expect(onCreate).toHaveBeenCalled())
     expect(onCreate.mock.calls[0][0]).not.toHaveProperty('break_minutes')
     expect(onCreate.mock.calls[0][0]).toHaveProperty('break_mode', 'auto')
+    expect(onCreate.mock.calls[0][0]).toEqual(expect.objectContaining({
+      job_id: 'job-1', role: 'Barista',
+    }))
   })
 
   it('shows required-field errors without creating malformed shifts', async () => {
@@ -77,6 +96,7 @@ describe('ShiftInspector validation', () => {
 
   it('enforces the API count limits and submits their valid boundaries unchanged', async () => {
     const onCreate = renderInspector()
+    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: 'job-1' } })
     const staffInput = screen.getByLabelText('Staff needed')
     const breakInput = screen.getByLabelText('Planned break (minutes)')
 

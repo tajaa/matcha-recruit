@@ -58,10 +58,10 @@ class ShiftCreate(BaseModel):
     required_staff: int = Field(1, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
-    # Which job this shift is (Box Office, Concessions, ...) — None means
-    # ungated, anyone can be assigned. Enforced (forceable) at assignment
-    # time, not here.
-    job_id: Optional[UUID] = None
+    # Every manually created shift must identify the company job it represents
+    # (Box Office, Concessions, ...). The route verifies tenant/location scope
+    # and uses the job's current name as the persisted role label.
+    job_id: UUID
     # Employees to assign up front (optional).
     employee_ids: list[UUID] = Field(default_factory=list, max_length=99)
     # 'training' ties the shift to a training_requirement — assigning an

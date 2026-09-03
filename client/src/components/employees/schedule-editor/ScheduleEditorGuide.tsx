@@ -19,7 +19,7 @@ const STEPS: GuideStep[] = [
   {
     eyebrow: '01 / Define the work',
     title: 'Create jobs before you build shifts',
-    body: 'Open the Jobs tab and add the work areas your location schedules, such as Box Office, Concessions, or Ushers. Jobs are the labels that make qualification rules possible; role and department remain optional free-text context.',
+    body: 'Open the Jobs tab and add the work areas your location schedules, such as Box Office, Concessions, or Ushers. Every manually created shift requires one of these company roles; department remains optional free-text context.',
     icon: BriefcaseBusiness,
     detail: <span>Start with a separate job for each area where the qualified roster is different.</span>,
   },
@@ -33,9 +33,9 @@ const STEPS: GuideStep[] = [
   {
     eyebrow: '03 / Attach the work',
     title: 'Choose a job on the shift',
-    body: 'When you create or edit a shift, choose its Job. You can also choose a Job on a template block so every generated shift inherits the same qualification rule.',
+    body: 'When you create a shift, choose its Role from the jobs available at that location. You can also choose a Job on a template block so every generated shift inherits the same qualification rule.',
     icon: Tag,
-    detail: <span>Leaving Job empty keeps the shift ungated, so existing shifts and general-purpose work remain unchanged.</span>,
+    detail: <span>Existing legacy shifts can remain unassigned to a role, but every new manual shift must select one.</span>,
   },
   {
     eyebrow: '04 / Repeat the pattern',
