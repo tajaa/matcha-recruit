@@ -11,7 +11,7 @@ import {
   createShift, updateShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, replaceWeekTemplate, deleteWeekTemplate,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
-  fetchEligibilityCases, fetchJobs, type ScheduleEligibilityCase,
+  fetchEligibilityCases, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
@@ -37,6 +37,11 @@ import {
   MAX_REQUIRED_STAFF,
   validateShiftFields,
 } from '../../../components/employees/schedule-editor/shiftValidation'
+import {
+  NO_ROLES_MESSAGE, ROLE_PLACEHOLDER, ROLE_REQUIRED_MESSAGE,
+  isJobMissingFromList, roleLabelForJob,
+} from '../../../components/employees/schedule-editor/roleSelection'
+import { useScheduleJobs } from '../../../hooks/employees/useScheduleJobs'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../../api/employees/scheduleAssistant'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
@@ -60,7 +65,7 @@ export default function EmployeeSchedule() {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
   })
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
-  const [jobs, setJobs] = useState<ScheduleJob[]>([])
+  const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
@@ -107,18 +112,6 @@ export default function EmployeeSchedule() {
       })
     return () => { cancelled = true }
   }, [locationId, tab, weekStart])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!locationId) {
-      setJobs([])
-      return () => { cancelled = true }
-    }
-    void fetchJobs(locationId)
-      .then((response) => { if (!cancelled) setJobs(response.jobs) })
-      .catch(() => { if (!cancelled) setJobs([]) })
-    return () => { cancelled = true }
-  }, [locationId])
 
   function setTab(nextTab: EmployeeScheduleTab) {
     setScheduleTab(nextTab)
@@ -247,7 +240,7 @@ export default function EmployeeSchedule() {
                     roster={roster}
                     rosterFlags={rosterFlags}
                     onPatch={patchShift}
-                    onChanged={reload}
+                    onChanged={() => { void reloadJobs(); reload() }}
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
                     locationId={locationId}
@@ -622,7 +615,8 @@ function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: 
   const [busy, setBusy] = useState(false)
   const [roleMissing, setRoleMissing] = useState(false)
   const roleErrorId = `shift-role-error-${shift?.id ?? day}`
-  const selectedJobMissing = !!jobId && !jobs.some((job) => job.id === jobId)
+  const selectedJobMissing = isJobMissingFromList(jobId, jobs)
+  const noRolesAvailable = !editing && jobs.length === 0
 
   // Training-as-shift: kind is immutable after create (no field on
   // ShiftUpdate), so the toggle only renders for a brand-new shift.
@@ -643,7 +637,7 @@ function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: 
     const payload: ShiftPayload = {
       starts_at: `${startDay}T${start}:00Z`,
       ends_at: `${endDay}T${end}:00Z`,
-      role: jobs.find((job) => job.id === jobId)?.name ?? shift?.role ?? null,
+      role: roleLabelForJob(jobId, jobs, shift),
       job_id: jobId || null,
       notes: notes.trim() || null,
       break_mode: plannedBreak === undefined ? 'auto' : 'manual',
@@ -672,7 +666,7 @@ function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: 
     }
     if (!editing && !jobId) {
       setRoleMissing(true)
-      toast('Select a role for this shift', 'error')
+      toast(ROLE_REQUIRED_MESSAGE, 'error')
       return
     }
     if (!editing && kind === 'training' && !requirementId) {
@@ -743,12 +737,12 @@ function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: 
           onChange={(e) => { setJobId(e.target.value); setRoleMissing(false) }}
           className={`${inputCls} mt-0.5`}
         >
-          <option value="">Select a role…</option>
+          <option value="">{ROLE_PLACEHOLDER}</option>
           {editing && selectedJobMissing && <option value={jobId}>{shift?.role ?? 'Previously assigned role'}</option>}
           {jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}
         </select>
-        {roleMissing && <span id={roleErrorId} role="alert" className="mt-1 block text-[10px] text-red-400">Select a role before adding this shift.</span>}
-        {!editing && jobs.length === 0 && <span className="mt-1 block text-[10px] text-amber-400">No roles are available for this location. Add one from the full shift editor.</span>}
+        {roleMissing && <span id={roleErrorId} role="alert" className="mt-1 block text-[10px] text-red-400">{ROLE_REQUIRED_MESSAGE}</span>}
+        {noRolesAvailable && <span className="mt-1 block text-[10px] text-amber-400">{NO_ROLES_MESSAGE}</span>}
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
@@ -782,7 +776,7 @@ function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: 
         </label>
       )}
       <div className="flex items-center gap-1.5">
-        <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? 'Save' : 'Add'}</button>
+        <button onClick={save} disabled={busy || noRolesAvailable} title={noRolesAvailable ? NO_ROLES_MESSAGE : undefined} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? 'Save' : 'Add'}</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>

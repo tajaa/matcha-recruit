@@ -6,10 +6,10 @@ import { useMe } from '../../hooks/useMe'
 import { useLocationScope, locationLabel } from '../../hooks/useLocationScope'
 import { useScheduleEditor } from '../../hooks/employees/useScheduleEditor'
 import { useToast } from '../../components/ui'
-import { fetchJobs } from '../../api/employees/employeeSchedule'
+import { useScheduleJobs } from '../../hooks/employees/useScheduleJobs'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../api/employees/scheduleAssistant'
 import LocationPicker from '../../components/shared/LocationPicker'
-import { addDays, startOfWeekSunday, toISODate, type ScheduleJob, type Shift } from '../../types/employeeSchedule'
+import { addDays, startOfWeekSunday, toISODate, type Shift } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
 import RosterPanel from '../../components/employees/schedule-editor/RosterPanel'
 import ScheduleEditorToolbar from '../../components/employees/schedule-editor/ScheduleEditorToolbar'
@@ -62,7 +62,7 @@ export default function ScheduleEditor() {
   const [chatOpen, setChatOpen] = useState(false)
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
-  const [jobs, setJobs] = useState<ScheduleJob[]>([])
+  const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
     setNewDefaults(null)
     setInspectorShiftId(shift.id)
@@ -103,23 +103,6 @@ export default function ScheduleEditor() {
       })
     return () => { cancelled = true }
   }, [locationId, weekStart])
-
-  const reloadJobs = useCallback(async () => {
-    if (!locationId) {
-      setJobs([])
-      return
-    }
-    try {
-      const response = await fetchJobs(locationId)
-      setJobs(response.jobs)
-    } catch {
-      setJobs([])
-    }
-  }, [locationId])
-
-  useEffect(() => {
-    void reloadJobs()
-  }, [reloadJobs])
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {

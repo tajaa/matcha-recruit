@@ -6,6 +6,10 @@ import { Card } from '../../ui'
 import type { AssignmentNotePayload, ShiftAssignment, RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
 import { addDays, fmtTime } from '../../../types/employeeSchedule'
 import { MAX_BREAK_MINUTES, MAX_REQUIRED_STAFF, validateShiftFields } from './shiftValidation'
+import {
+  NO_ROLES_MESSAGE, NO_ROLE_OPTION, ROLE_PLACEHOLDER, ROLE_REQUIRED_MESSAGE,
+  isJobMissingFromList, roleLabelForJob,
+} from './roleSelection'
 
 export type NewShiftDefaults = {
   date: string
@@ -59,8 +63,10 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const [requirementId, setRequirementId] = useState(shift?.training_requirement_id ?? '')
   const [requirements, setRequirements] = useState<TrainingRequirement[]>([])
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [roleMissing, setRoleMissing] = useState(false)
   const persistedBreakMinutes = shift?.break_minutes
-  const selectedJobMissing = !!jobId && !jobs.some((job) => job.id === jobId)
+  const selectedJobMissing = isJobMissingFromList(jobId, jobs)
+  const noRolesAvailable = !editing && jobs.length === 0
 
   useEffect(() => {
     if (!breakDirty && persistedBreakMinutes !== undefined) {
@@ -83,7 +89,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
     return {
       starts_at: `${date}T${start}:00Z`,
       ends_at: `${endDate}T${end}:00Z`,
-      role: jobs.find((job) => job.id === jobId)?.name ?? shift?.role ?? null,
+      role: roleLabelForJob(jobId, jobs, shift),
       job_id: jobId || null,
       department: department.trim() || null,
       location_id: locationId || null,
@@ -106,7 +112,8 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       return
     }
     if (!editing && !jobId) {
-      setValidationError('Select a role for this shift')
+      setRoleMissing(true)
+      setValidationError(ROLE_REQUIRED_MESSAGE)
       return
     }
     if (!editing && kind === 'training' && !requirementId) {
@@ -114,6 +121,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       return
     }
     setValidationError(null)
+    setRoleMissing(false)
     const plannedBreak = editing && !breakDirty ? undefined : validation.breakMinutes
     const nextPayload = payload(validation.requiredStaff, plannedBreak)
     if (editing) await onUpdate(nextPayload)
@@ -131,7 +139,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       </div>
       <div className="grid grid-cols-2 gap-2">
         <label className="text-[10px] uppercase tracking-wide text-zinc-600">Date<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} disabled={readOnly} className={input} /></label>
-        <label className="text-[10px] uppercase tracking-wide text-zinc-600">Role <span aria-hidden="true" className="text-red-400">*</span><select required aria-invalid={validationError === 'Select a role for this shift'} aria-describedby={validationError === 'Select a role for this shift' ? 'shift-role-error' : undefined} value={jobId} onChange={(event) => { setJobId(event.target.value); setValidationError(null) }} disabled={readOnly} className={input}><option value="">{editing ? 'No assigned role (legacy)' : 'Select a role…'}</option>{editing && selectedJobMissing && <option value={jobId}>{shift?.role ?? 'Previously assigned role'}</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
+        <label className="text-[10px] uppercase tracking-wide text-zinc-600">Role <span aria-hidden="true" className="text-red-400">*</span><select required aria-invalid={roleMissing} aria-describedby={roleMissing ? 'shift-role-error' : undefined} value={jobId} onChange={(event) => { setJobId(event.target.value); setRoleMissing(false); setValidationError(null) }} disabled={readOnly} className={input}><option value="">{editing ? NO_ROLE_OPTION : ROLE_PLACEHOLDER}</option>{editing && selectedJobMissing && <option value={jobId}>{shift?.role ?? 'Previously assigned role'}</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select>{noRolesAvailable && <span className="mt-1 block normal-case tracking-normal text-[10px] text-amber-500">{NO_ROLES_MESSAGE}</span>}</label>
         <label className="text-[10px] uppercase tracking-wide text-zinc-600">Start<input type="time" required value={start} onChange={(event) => setStart(event.target.value)} disabled={readOnly} className={input} /></label>
         <label className="text-[10px] uppercase tracking-wide text-zinc-600">End<input type="time" required value={end} onChange={(event) => setEnd(event.target.value)} disabled={readOnly} className={input} /></label>
       </div>
@@ -146,10 +154,10 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         {!editing && trainingEnabled && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Kind<select value={kind} onChange={(event) => setKind(event.target.value as 'work' | 'training')} disabled={readOnly} className={input}><option value="work">Work</option><option value="training">Training</option></select></label>}
         {!editing && trainingEnabled && kind === 'training' && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Training requirement<select value={requirementId} onChange={(event) => setRequirementId(event.target.value)} disabled={readOnly} className={input}><option value="">Select requirement...</option>{requirements.map((requirement) => <option key={requirement.id} value={requirement.id}>{requirement.title}</option>)}</select></label>}
       </div>
-      {validationError && <p id={validationError === 'Select a role for this shift' ? 'shift-role-error' : undefined} role="alert" className="mt-3 text-xs text-red-400">{validationError}</p>}
+      {validationError && <p id={roleMissing ? 'shift-role-error' : undefined} role="alert" className="mt-3 text-xs text-red-400">{validationError}</p>}
       {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} onSaved={onAssignmentUpdated} />)}</span>}</div>}
       <div className="mt-4 flex items-center gap-2">
-        {!readOnly && <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}{editing ? 'Save changes' : 'Create draft'}</button>}
+        {!readOnly && <button onClick={save} disabled={saving || noRolesAvailable} title={noRolesAvailable ? NO_ROLES_MESSAGE : undefined} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}{editing ? 'Save changes' : 'Create draft'}</button>}
         {editing && !readOnly && <button onClick={onDelete} disabled={saving} className="ml-auto rounded-lg p-2 text-zinc-600 hover:bg-red-500/10 hover:text-red-400" aria-label="Delete shift"><Trash2 className="h-4 w-4" /></button>}
       </div>
       {readOnly && <p className="mt-3 text-[10px] text-amber-500">Published shifts are locked. Enable Edit published to change this shift.</p>}

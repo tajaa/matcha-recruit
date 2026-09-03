@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import EmployeeSchedule from './EmployeeSchedule'
+import {
+  NO_ROLES_MESSAGE, ROLE_REQUIRED_MESSAGE,
+} from '../../../components/employees/schedule-editor/roleSelection'
 
 const {
   createShiftMock,
@@ -195,7 +198,9 @@ describe('EmployeeSchedule break planning', () => {
     fireEvent.click(dayHeading.parentElement!.querySelector('button')!)
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Select a role before adding this shift.')
+    // One wording for one failure — the toast and the inline alert used to
+    // disagree, with a third variant in ShiftInspector.
+    expect(await screen.findByRole('alert')).toHaveTextContent(ROLE_REQUIRED_MESSAGE)
     expect(createShiftMock).not.toHaveBeenCalled()
 
     fireEvent.change(screen.getByLabelText(/Role/), { target: { value: 'job-1' } })
@@ -205,6 +210,20 @@ describe('EmployeeSchedule break planning', () => {
       job_id: 'job-1', role: 'Barista', location_id: 'loc-1',
     })))
     expect(await screen.findByText('Barista', { selector: 'div' })).toBeInTheDocument()
+  })
+
+  it('cannot submit a new shift at a location with no roles', async () => {
+    // The amber prompt was the only signal: Add stayed clickable and the click
+    // just toasted an error.
+    fetchJobsMock.mockResolvedValue({ jobs: [] })
+    renderSchedule()
+
+    const dayHeading = await screen.findByText('Sun 8/30')
+    fireEvent.click(dayHeading.parentElement!.querySelector('button')!)
+
+    expect(await screen.findByText(NO_ROLES_MESSAGE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled()
+    expect(createShiftMock).not.toHaveBeenCalled()
   })
 
   it('rejects shift counts above the API maximums', async () => {

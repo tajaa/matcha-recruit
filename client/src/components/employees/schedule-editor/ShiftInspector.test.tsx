@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import ShiftInspector from './ShiftInspector'
+import { NO_ROLES_MESSAGE, ROLE_REQUIRED_MESSAGE } from './roleSelection'
 
 const jobs = [{
   id: 'job-1', name: 'Barista', location_id: 'loc-1', color: null, notes: null,
@@ -64,7 +65,7 @@ describe('ShiftInspector validation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Select a role for this shift')
+    expect(await screen.findByRole('alert')).toHaveTextContent(ROLE_REQUIRED_MESSAGE)
     expect(screen.getByLabelText(/Role/)).toHaveAttribute('aria-invalid', 'true')
     expect(onCreate).not.toHaveBeenCalled()
   })
@@ -121,6 +122,71 @@ describe('ShiftInspector validation', () => {
       break_minutes: 1440,
       break_mode: 'manual',
     })))
+  })
+
+  it('clears the stale label when a job is cleared on an existing shift', async () => {
+    // Choosing "No assigned role (legacy)" used to keep the old role string,
+    // saving a shift labelled "Barista" that the UI just said has no role.
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ShiftInspector
+        shift={{
+          id: 'shift-1', starts_at: '2026-08-31T09:00:00Z', ends_at: '2026-08-31T17:00:00Z',
+          role: 'Barista', job_id: 'job-1', department: null, break_minutes: 0,
+          required_staff: 1, notes: null, kind: 'work', training_requirement_id: null,
+          assignments: [],
+        } as never}
+        defaults={null}
+        locationId="loc-1"
+        locationName="Downtown"
+        roster={[]}
+        jobs={jobs}
+        trainingEnabled={false}
+        readOnly={false}
+        saving={false}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+        onUpdate={onUpdate}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+        onAssignmentUpdated={vi.fn().mockResolvedValue(undefined)}
+        onClose={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled())
+    expect(onUpdate.mock.calls[0][0]).toEqual(expect.objectContaining({
+      job_id: null, role: null,
+    }))
+  })
+
+  it('cannot create a draft at a location with no roles', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ShiftInspector
+        shift={null}
+        defaults={{ date: '2026-08-31', minute: 540 }}
+        locationId="loc-1"
+        locationName="Downtown"
+        roster={[]}
+        jobs={[]}
+        trainingEnabled={false}
+        readOnly={false}
+        saving={false}
+        onCreate={onCreate}
+        onUpdate={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+        onAssignmentUpdated={vi.fn().mockResolvedValue(undefined)}
+        onClose={vi.fn()}
+      />,
+    )
+
+    // The empty dropdown said nothing at all here before — the only feedback
+    // was an error after the click.
+    expect(screen.getByText(NO_ROLES_MESSAGE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create draft' })).toBeDisabled()
+    expect(onCreate).not.toHaveBeenCalled()
   })
 
   it('uses Auto for an untouched edit and Manual after the manager changes the break', async () => {
