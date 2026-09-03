@@ -1400,6 +1400,19 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertIn("docker is not available", garbage.stdout)
         self.assertNotIn("legacy:", garbage.stdout)
 
+        # `capabilities` is a v2 verb as well. The missing-session error proves
+        # the installed launcher reached the Python controller instead of the
+        # legacy shell command table.
+        capabilities = subprocess.run(
+            [str(bin_dir / "msandbox"), "capabilities", "missing"],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(capabilities.returncode, 1)
+        self.assertIn("unknown msandbox session", capabilities.stderr)
+        self.assertNotIn("legacy:", capabilities.stdout)
+
     def test_install_retains_only_current_and_one_rollback_release(self) -> None:
         bin_dir = self.root / "bin"
         project_root = Path(__file__).resolve().parents[2]

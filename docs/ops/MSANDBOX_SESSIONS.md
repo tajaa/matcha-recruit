@@ -171,6 +171,15 @@ msandbox test payroll-fix --pr --browser --xcode affected
 msandbox test payroll-fix --all --xcode all
 ```
 
+For a one-command smoke test of the current PR against the real local Docker
+boundary, run `./scripts/msandbox-live-smoke.sh`. It installs the controller
+from the current checkout, creates a disposable no-agent session for the PR
+associated with the current branch, runs the focused unit/shell checks, doctor,
+capability persistence and isolation checks, and the session's `--pr`
+validation plan. A successful run releases its session. A failed run stops but
+retains the session for inspection; set `MSANDBOX_LIVE_KEEP_SESSION=1` to retain
+it even after success, or `MSANDBOX_LIVE_PR=<number>` to select a PR explicitly.
+
 Passing `--browser` automatically upgrades that session to a
 Playwright-capable content-addressed image and reuses it on later runs.
 

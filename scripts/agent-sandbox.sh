@@ -57,7 +57,7 @@ case "${1:-}" in
         esac
         run_v2_controller "$@"
         ;;
-    worktree|pr|test|install|host|gc)
+    worktree|pr|test|install|host|gc|capabilities)
         run_v2_controller "$@"
         ;;
     attach)
@@ -185,6 +185,8 @@ Commands:
   exec <cmd> [args...]         Run one non-interactive command with exact argv.
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
   doctor                       Check the isolation + capability checklist.
+  capabilities SESSION [--refresh]
+                               Show a session's measured capability report.
   audit [--draft]              Audit AutoPR; --draft dispatches its repair workflow when failures exist.
   attach <file...>             Import selected images/PDFs/files and print sandbox-readable paths.
   paste                        Import a copied Finder file or clipboard image (macOS).
