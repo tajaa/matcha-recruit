@@ -2,7 +2,40 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class CredentialTypeCreate(BaseModel):
+    """Create a tenant-owned option in credential-type dropdowns."""
+
+    label: str = Field(min_length=1, max_length=200)
+    category: str = Field(min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_]*$")
+    description: str | None = Field(default=None, max_length=2000)
+    has_expiration: bool = True
+    has_number: bool = False
+    has_state: bool = False
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label cannot be empty")
+        if any(character in value for character in "\r\n\t"):
+            raise ValueError("label must be a single line")
+        return value
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 class CredentialTypeVisibilityUpdate(BaseModel):

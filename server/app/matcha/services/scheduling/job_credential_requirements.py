@@ -81,7 +81,10 @@ async def replace_job_credential_requirements(
         normalized[requirement["credential_type_id"]] = requirement
     if normalized:
         valid = await conn.fetch(
-            "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])", list(normalized),
+            """SELECT id FROM credential_types
+               WHERE id = ANY($1::uuid[])
+                 AND (company_id IS NULL OR company_id = $2)""",
+            list(normalized), company_id,
         )
         if len(valid) != len(normalized):
             raise ValueError("One or more credential types do not exist")

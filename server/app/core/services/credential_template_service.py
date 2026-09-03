@@ -365,8 +365,12 @@ async def research_credential_requirements(
     )
 
     try:
-        # Load existing credential type keys for normalization
-        ct_rows = await conn.fetch("SELECT key FROM credential_types")
+        # Tenant research may reuse that tenant's custom options, but must not
+        # disclose or attach another company's catalog rows.
+        ct_rows = await conn.fetch(
+            "SELECT key FROM credential_types WHERE company_id IS NULL OR company_id = $1",
+            company_id,
+        )
         known_keys = {r["key"] for r in ct_rows}
 
         state_name = _STATE_NAMES.get(state, state)
@@ -433,7 +437,10 @@ Do NOT fabricate requirements — if unsure, omit."""
 
             # Ensure credential_type exists
             ct_id = await conn.fetchval(
-                "SELECT id FROM credential_types WHERE key = $1", ct_key
+                """SELECT id FROM credential_types
+                   WHERE key = $1 AND (company_id IS NULL OR company_id = $2)""",
+                ct_key,
+                company_id,
             )
             if not ct_id:
                 # Create new credential type from AI result
@@ -733,7 +740,7 @@ async def get_employee_credential_requirements(
 async def find_hidden_credential_types(
     conn, *, company_id: UUID, credential_type_ids: list[UUID]
 ) -> list[UUID]:
-    """Return which of these types the company has removed from its dropdowns.
+    """Return types unavailable because they are hidden or owned by another tenant.
 
     A company with no filter row has not configured one, so nothing is hidden.
     Callers pass only the ids they are *adding*: rules that predate the filter
@@ -747,12 +754,18 @@ async def find_hidden_credential_types(
         SELECT ct.id
         FROM credential_types ct
         WHERE ct.id = ANY($2::uuid[])
-          AND EXISTS (
-              SELECT 1 FROM company_credential_type_filters f WHERE f.company_id = $1
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM company_credential_type_filter_items item
-              WHERE item.company_id = $1 AND item.credential_type_id = ct.id
+          AND (
+              (ct.company_id IS NOT NULL AND ct.company_id <> $1)
+              OR (
+                  (ct.company_id IS NULL OR ct.company_id = $1)
+                  AND EXISTS (
+                      SELECT 1 FROM company_credential_type_filters f WHERE f.company_id = $1
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM company_credential_type_filter_items item
+                      WHERE item.company_id = $1 AND item.credential_type_id = ct.id
+                  )
+              )
           )
         """,
         company_id,
