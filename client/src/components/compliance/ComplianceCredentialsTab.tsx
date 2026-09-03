@@ -149,7 +149,8 @@ function EmployeeExpirySection({ employees }: { employees: EmployeeDocumentExpir
             <h3 className="text-sm font-medium text-zinc-200">Employee document expiries</h3>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Credentials warn 30 days before expiry; work permits warn 14 days before expiry.
+            Credentials warn on each credential type's configured lead time; work permits warn 14
+            days before expiry.
           </p>
         </div>
         <span className="shrink-0 text-[11px] text-zinc-500">

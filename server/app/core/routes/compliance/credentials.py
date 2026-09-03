@@ -11,7 +11,8 @@ from app.core.models.compliance import (
     EmployeeDocumentExpiryResponse,
 )
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client
+from app.matcha.dependencies import require_admin_or_client, require_feature
+from app.matcha.services.scheduling.schedule_eligibility import WARNING_DAYS_SQL
 
 from ._shared import _fetch_company_credentials, resolve_company_id, router, shared_router
 
@@ -23,14 +24,28 @@ _DOCUMENT_STATUS_PRIORITY = {
     "current": 3,
 }
 
+# Employee rollup ordering: most urgent first, so an expired credential is never
+# buried under alphabetically-earlier employees who need nothing.
+_EMPLOYEE_STATUS_PRIORITY = {
+    "expired": 0,
+    "expiring_soon": 1,
+    "unknown": 2,
+    "no_actionable_expiry": 3,
+}
 
-def _expiry_status(*, kind: str, expiry_date: date | None, stored_status: str, today: date) -> str:
+# Work permits carry no per-type window; 14 days matches the `validity` field
+# routes/employees/work_permits.py already returns for the same permit.
+_WORK_PERMIT_WARNING_DAYS = 14
+
+
+def _expiry_status(
+    *, expiry_date: date | None, stored_status: str, warning_days: int | None, today: date,
+) -> str:
     if stored_status == "expired" or (expiry_date is not None and expiry_date < today):
         return "expired"
     if expiry_date is None:
         return "unknown"
-    warning_days = 14 if kind == "work_permit" else 30
-    if expiry_date <= today + timedelta(days=warning_days):
+    if expiry_date <= today + timedelta(days=warning_days or _WORK_PERMIT_WARNING_DAYS):
         return "expiring_soon"
     return "current"
 
@@ -67,6 +82,10 @@ async def list_company_licenses(
 @shared_router.get(
     "/employee-document-expiries",
     response_model=List[EmployeeDocumentExpiryResponse],
+    # shared_router's mount only asks for compliance OR compliance_lite. Employee
+    # credential data belongs to the credentialing product, so gate it here rather
+    # than at the mount — the sibling compliance readers stay reachable without it.
+    dependencies=[Depends(require_feature("credential_templates"))],
 )
 async def list_employee_document_expiries(
     company_id: Optional[str] = Query(None),
@@ -79,7 +98,7 @@ async def list_employee_document_expiries(
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             WITH active_employees AS (
                 SELECT id, first_name, last_name
                 FROM employees
@@ -93,10 +112,12 @@ async def list_employee_document_expiries(
                        ct.label AS document_type,
                        ecr.expires_at AS expiry_date,
                        ecr.status AS stored_status,
-                       NULL::text AS location_name
+                       NULL::text AS location_name,
+                       ({WARNING_DAYS_SQL})::int AS warning_days
                 FROM employee_credential_requirements ecr
                 JOIN active_employees ae ON ae.id = ecr.employee_id
                 JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
+                LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
                 WHERE ecr.is_required = true
                   AND ct.has_expiration = true
                   AND ecr.status NOT IN ('waived', 'not_applicable')
@@ -122,7 +143,8 @@ async def list_employee_document_expiries(
                        'Work permit'::text AS document_type,
                        p.expires_at AS expiry_date,
                        p.status AS stored_status,
-                       bl.name AS location_name
+                       bl.name AS location_name,
+                       {_WORK_PERMIT_WARNING_DAYS}::int AS warning_days
                 FROM employee_work_permits p
                 JOIN active_employees ae ON ae.id = p.employee_id
                 LEFT JOIN business_locations bl
@@ -133,7 +155,7 @@ async def list_employee_document_expiries(
             )
             SELECT ae.id AS employee_id, ae.first_name, ae.last_name,
                    de.document_id, de.kind, de.document_type, de.expiry_date,
-                   de.stored_status, de.location_name
+                   de.stored_status, de.location_name, de.warning_days
             FROM active_employees ae
             LEFT JOIN document_expiries de ON de.employee_id = ae.id
             ORDER BY LOWER(ae.last_name), LOWER(ae.first_name), de.document_type
@@ -143,8 +165,15 @@ async def list_employee_document_expiries(
 
     today = date.today()
     employees: dict[str, dict] = {}
+    # Name keys kept beside the payload so the final ordering can break ties
+    # alphabetically without leaking sort-only fields into the response.
+    sort_names: dict[str, tuple[str, str]] = {}
     for row in rows:
         employee_id = str(row["employee_id"])
+        sort_names.setdefault(
+            employee_id,
+            ((row["last_name"] or "").lower(), (row["first_name"] or "").lower()),
+        )
         employee = employees.setdefault(
             employee_id,
             {
@@ -157,9 +186,9 @@ async def list_employee_document_expiries(
         if row["document_id"] is None:
             continue
         status = _expiry_status(
-            kind=row["kind"],
             expiry_date=row["expiry_date"],
             stored_status=row["stored_status"],
+            warning_days=row["warning_days"],
             today=today,
         )
         employee["documents"].append({
@@ -183,4 +212,10 @@ async def list_employee_document_expiries(
         if actionable:
             employee["status"] = min(actionable, key=_DOCUMENT_STATUS_PRIORITY.__getitem__)
 
-    return list(employees.values())
+    return sorted(
+        employees.values(),
+        key=lambda employee: (
+            _EMPLOYEE_STATUS_PRIORITY[employee["status"]],
+            sort_names[employee["employee_id"]],
+        ),
+    )
