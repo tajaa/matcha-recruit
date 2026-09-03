@@ -21,10 +21,32 @@ WORK_DIR="$(mktemp -d)"
 # model failure must fail loudly and stay selectable instead.
 INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
 [ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
+# checkpoint.sh refuses to harvest a sandbox clone older than this: on a rework
+# the leftover workspace still carries the same task id, so only its age
+# distinguishes the previous round's work from this run's. The workflow writes
+# the file before this script starts; local runs get their own.
+INVESTIGATION_STARTED_FILE="${AUTOPR_INVESTIGATION_STARTED_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-started-at}}"
+[ -n "$INVESTIGATION_STARTED_FILE" ] \
+    || INVESTIGATION_STARTED_FILE="$WORK_DIR/investigation-started-at"
+[ -s "$INVESTIGATION_STARTED_FILE" ] \
+    || date +%s > "$INVESTIGATION_STARTED_FILE" 2>/dev/null \
+    || true
+export AUTOPR_INVESTIGATION_STARTED_FILE="$INVESTIGATION_STARTED_FILE"
 SNAPSHOT_PID=""
+# Killing the timer only kills the sleeping subshell: a `checkpoint.sh snapshot`
+# it already forked keeps running and would re-point `active` after this run
+# consumed it. checkpoint.sh snapshot-halt waits that pass out.
+stop_inflight_snapshots() {
+    if [ -n "$SNAPSHOT_PID" ]; then
+        kill "$SNAPSHOT_PID" 2>/dev/null || true
+        SNAPSHOT_PID=""
+        "$SCRIPT_DIR/checkpoint.sh" snapshot-halt \
+            || printf 'kanban-autopr: could not halt in-flight snapshots\n' >&2
+    fi
+}
 _investigate_cleanup() {
     local status=$?
-    [ -z "$SNAPSHOT_PID" ] || kill "$SNAPSHOT_PID" 2>/dev/null || true
+    stop_inflight_snapshots
     [ -z "$INVESTIGATION_EXIT_FILE" ] \
         || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
         || true
@@ -60,7 +82,12 @@ if [ -n "$prior_checkpoint" ]; then
     if [ -s "$prior_checkpoint/metadata.json" ]; then
         cp "$prior_checkpoint/metadata.json" "$PRIOR_CHECKPOINT_FILE"
     fi
-    [ ! -s "$prior_checkpoint/model.patch" ] || RESUME_PATCH="$prior_checkpoint/model.patch"
+    # Trust the metadata over the file: a checkpoint that records no patch must
+    # never replay one left behind by an earlier pass of the same run.
+    if [ -s "$prior_checkpoint/model.patch" ] \
+        && [ "$(jq -r '.patch_saved // true' "$PRIOR_CHECKPOINT_FILE" 2>/dev/null)" != false ]; then
+        RESUME_PATCH="$prior_checkpoint/model.patch"
+    fi
     for checkpoint_input in report.md decision.json transcript.log; do
         [ ! -s "$prior_checkpoint/$checkpoint_input" ] \
             || ATTACH_ARGS+=(-f "$prior_checkpoint/$checkpoint_input")
@@ -360,6 +387,9 @@ SNAPSHOT_INTERVAL_SECONDS="${AUTOPR_SNAPSHOT_INTERVAL_SECONDS:-240}"
 SNAPSHOT_MAX_PASSES="${AUTOPR_SNAPSHOT_MAX_PASSES:-15}"
 start_inflight_snapshots() {
     [ "$SNAPSHOT_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null || return 0
+    # Clear any stop flag a previous run left in the shared runtime root.
+    "$SCRIPT_DIR/checkpoint.sh" snapshot-arm \
+        || printf 'kanban-autopr: could not arm in-flight snapshots\n' >&2
     local parent=$$
     (
         # Bounded, and self-terminating once this shell is gone: an orphaned
@@ -368,7 +398,10 @@ start_inflight_snapshots() {
         for _ in $(seq 1 "$SNAPSHOT_MAX_PASSES"); do
             sleep "$SNAPSHOT_INTERVAL_SECONDS"
             kill -0 "$parent" 2>/dev/null || exit 0
-            "$SCRIPT_DIR/checkpoint.sh" snapshot "$CARD_FILE" >/dev/null 2>&1 || true
+            # Never silence this: a snapshot that has been failing every pass
+            # looks exactly like one that is working until the run is lost.
+            "$SCRIPT_DIR/checkpoint.sh" snapshot "$CARD_FILE" >/dev/null \
+                || printf 'kanban-autopr: in-flight snapshot pass failed\n' >&2
         done
     ) &
     SNAPSHOT_PID=$!
@@ -403,6 +436,9 @@ if [ -s "$DIRECTIVE_FILE" ] \
     : > "$RAW_DECISION_FILE"
     codex_pass
 fi
+
+# Nothing below needs another snapshot, and `consume` must not race one.
+stop_inflight_snapshots
 
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
