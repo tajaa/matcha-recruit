@@ -734,3 +734,19 @@ class CompanyCertificationResponse(CompanyCredentialResponse):
 
 class CompanyLicenseResponse(CompanyCredentialResponse):
     """Per-company license (semantic alias of CompanyCredentialResponse)."""
+
+
+class EmployeeDocumentExpiryItem(BaseModel):
+    id: str
+    kind: Literal["credential", "work_permit"]
+    document_type: str
+    expiry_date: Optional[date] = None
+    expiry_status: Literal["expired", "expiring_soon", "unknown", "current"]
+    location_name: Optional[str] = None
+
+
+class EmployeeDocumentExpiryResponse(BaseModel):
+    employee_id: str
+    employee_name: str
+    status: Literal["expired", "expiring_soon", "unknown", "no_actionable_expiry"]
+    documents: List[EmployeeDocumentExpiryItem]

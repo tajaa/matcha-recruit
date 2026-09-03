@@ -63,7 +63,13 @@ _BLOCKING_AUTHORITY_SQL = f"AND {_BLOCKING_AUTHORITY_EXPR}"
 # type's real warning_days (e.g. 30) even when that template isn't the
 # active blocking authority. Pick the value from whichever side actually
 # governs the block, matching _BLOCKING_AUTHORITY_SQL's precedence.
-_WARNING_DAYS_SQL = """
+#
+# Public because the Compliance employee-expiry roster
+# (core/routes/compliance/credentials.py) resolves the same per-type window;
+# a second hand-rolled copy would re-introduce the shadowing bug above.
+# Requires `ecr` LEFT JOINed to `credential_requirement_templates crt` on
+# ecr.template_id, and `scoped_credential_types ct`.
+WARNING_DAYS_SQL = """
     CASE
         WHEN crt.schedule_blocking = true AND crt.review_status IN ('approved', 'auto_approved')
             THEN crt.warning_days
@@ -79,7 +85,7 @@ async def _schedule_blocking_requirements(conn, company_id: UUID, employee_ids: 
         f"""
         SELECT ecr.id, ecr.employee_id, ecr.status, ecr.expires_at,
                ct.label, ct.has_expiration,
-               {_WARNING_DAYS_SQL} AS warning_days,
+               {WARNING_DAYS_SQL} AS warning_days,
                crt.legal_basis
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id
@@ -320,7 +326,7 @@ async def open_expiring_eligibility_warnings(
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.expires_at, crt.legal_basis,
                COALESCE(future.location_id, e.work_location_id) AS location_id,
                scope_location.timezone,
-               {_WARNING_DAYS_SQL} AS warning_days
+               {WARNING_DAYS_SQL} AS warning_days
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
