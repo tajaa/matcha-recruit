@@ -39,6 +39,24 @@ export interface CompanyCredential {
   added_at: string | null
 }
 
+export type EmployeeDocumentExpiryStatus = 'expired' | 'expiring_soon' | 'unknown' | 'current'
+
+export type EmployeeDocumentExpiryItem = {
+  id: string
+  kind: 'credential' | 'work_permit'
+  document_type: string
+  expiry_date: string | null
+  expiry_status: EmployeeDocumentExpiryStatus
+  location_name: string | null
+}
+
+export type EmployeeDocumentExpiry = {
+  employee_id: string
+  employee_name: string
+  status: Exclude<EmployeeDocumentExpiryStatus, 'current'> | 'no_actionable_expiry'
+  documents: EmployeeDocumentExpiryItem[]
+}
+
 // ── Pending Research ──
 
 export type PendingResearch = {
