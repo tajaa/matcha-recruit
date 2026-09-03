@@ -115,6 +115,20 @@ class OrphanDocumentConn:
         return []
 
 
+def test_requirement_lock_targets_only_the_requirement_row():
+    conn = UploadedBlockingRequirementConn()
+
+    asyncio.run(employee_credentials._requirement_for_document_type(
+        conn,
+        company_id=uuid4(),
+        employee_id=uuid4(),
+        document_type="food_handler_card",
+        for_update=True,
+    ))
+
+    assert "FOR UPDATE OF ecr" in conn.query
+
+
 def test_orphan_food_handler_document_gets_a_scheduler_requirement():
     expected = {"id": uuid4(), "has_expiration": True}
     materialize = mock.AsyncMock(return_value=expected)
