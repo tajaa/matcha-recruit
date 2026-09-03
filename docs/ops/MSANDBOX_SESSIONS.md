@@ -81,27 +81,44 @@ all render the same measured report:
 
 ```text
 Capabilities for payroll-fix
-  ✅ Repository read/write     detached worktree at 4a91c02
-  ✅ Linux build tools         Python 3.12.7, Node v22.23.2, npm 10.9.2, …
-  ✅ GitHub CLI                octocat on tajaa/matcha; repository and Actions read
-  ❌ Production test database  no restricted production-test PostgreSQL service…
-  ❌ Non-test tenant mutation  denied by API and PostgreSQL
+  ✅ Repository read/write       detached worktree at 4a91c02
+  ✅ Linux build tools           Python 3.12.7, Node v22.23.2, npm 10.9.2, …
+  ✅ GitHub CLI                  octocat on tajaa/matcha; push; workflow dispatch and
+                                 merge are reachable — operator approval required
+  ❌ Production test database    no restricted production-test PostgreSQL service…
+  ⚠️ Host credentials in reach   /workspace/secrets/roonMT-arm.pem, host AWS profile(s)
+                                 default — powerful and operator-gated
+  ❌ Non-test tenant mutation    denied by API and PostgreSQL
 ```
 
 Rules that make the report worth trusting:
 
 - **Every `✅` was measured.** A probe exercises the real boundary — Chromium
   launches and closes, `gh` performs an authenticated repository and Actions
-  read, the restricted database role is asked what it can see. An executable
-  merely existing never renders a check.
+  read, the dev ports are bound inside the container and their host publication
+  read back from Docker, the builder-broker socket is connected to, the
+  restricted database role is asked what it can see. An executable merely
+  existing, a socket file merely present, or a session flag merely set never
+  renders a check.
 - **A `❌` names the reason and the fallback**, so an unavailable capability is
   actionable instead of mysterious.
-- **The last three rows are denied by design.** `Non-test tenant mutation`,
-  `Production admin/secrets`, and `Signing/deploy/merge` are asserted absent. A
-  probe that *finds* one of those identities renders `⚠️ … LEAK` and makes
-  `msandbox doctor` exit nonzero; it is never reported as a capability.
+- **Three rows are denied by design.** `Non-test tenant mutation`,
+  `Production admin/secrets`, and `Code signing / image push` are asserted
+  absent. A probe that *finds* one of those identities renders `⚠️ … LEAK` and
+  makes `msandbox doctor` exit nonzero; it is never reported as a capability.
+- **`Host credentials in reach` is the opposite of a leak.** The repo bind mount
+  and the read-only `~/.aws` mount are deliberate (`docs/ops/AGENT_SANDBOX.md`,
+  threat model). The report measures what they actually reach — an AWS profile
+  counts only when STS answers for it — and renders `⚠️` with an
+  operator-gated warning rather than failing a healthy session's own doctor.
+  The narrowed AutoPR lane reaches none of it and shows `❌`.
+- **Deploy and merge are a policy boundary, not a credential one.** A `gh` token
+  that can push can also dispatch `deploy.yml` and merge a pull request, so the
+  `GitHub CLI` row states that authority instead of another row claiming it is
+  denied. Ask the operator; do not dispatch or merge on your own.
 - **One registry.** `scripts/msandbox/capabilities.py` backs the picker, the
-  CLI, and the agent's own context. There is no second probe list.
+  CLI, the create screen's planned list, and the agent's own context. There is
+  no second probe list.
 
 The report is written as mode-600 JSON and Markdown to
 `/home/agent/.msandbox/capabilities.{json,md}` and injected into the agent
@@ -114,8 +131,13 @@ Reports contain no credential, token, connection string, PEM path, response
 body, or unredacted command output. Probe output is redacted and truncated
 before it reaches the model at all.
 
-Redrawing the picker never starts a container. A stopped session reports every
-container probe as `the session container is not running` rather than guessing.
+Redrawing the picker never starts a container, and never remeasures: the menu
+renders the last report from disk, notes when it is older than 15 minutes or was
+measured while the container was still running, and says so plainly when nothing
+has been measured yet. **Refresh capabilities** in the session menu is the
+deliberate remeasure. A stopped session reports every container probe as `the
+session container is not running` rather than guessing, and a cached report is
+discarded as soon as the container state it was measured under changes.
 
 ## Screenshots, PDFs, and dragged files
 
@@ -152,10 +174,12 @@ msandbox test payroll-fix --all --xcode all
 Passing `--browser` automatically upgrades that session to a
 Playwright-capable content-addressed image and reuses it on later runs.
 
-`msandbox doctor SESSION` remeasures the capability report above and exits
-nonzero when a required capability is unavailable or a denied identity leaked
-into the session. It shares one probe registry with the picker; it does not
-keep a second list of checks. The image readiness marker prevents commands from
+`msandbox doctor SESSION` repairs the session's GitHub credential and container
+first, then remeasures the capability report above and exits nonzero when a
+required capability is unavailable or a denied identity leaked into the session.
+Repairing first is what keeps a long-lived session's expired in-container token
+from being reported as a failed capability. It shares one probe registry with
+the picker; it does not keep a second list of checks. The image readiness marker prevents commands from
 racing first-use dependency initialization.
 
 `--changed` runs cheap targeted checks. `--pr` runs every relevant package's

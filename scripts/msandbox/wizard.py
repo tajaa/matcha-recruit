@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Callable, Sequence, TextIO, TypeVar
 
 from .agent_adapters import attach_agent
-from .capabilities import planned_capabilities, render_report_text
+from .capabilities import (
+    load_report,
+    planned_capabilities,
+    render_report_text,
+    report_is_stale,
+)
 from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session, session_home
 from .models import SessionRecord, SessionSpec
@@ -396,13 +401,31 @@ def _run_validation(
 
 
 def _session_menu_title(record: SessionRecord) -> str:
-    """Never open a session without showing what it can actually do."""
+    """Never open a session without showing what it can actually do.
+
+    Reading is cache-only. Measuring here would make every menu redraw launch
+    Chromium, authenticate to GitHub, and query production before it could
+    print a line; "Refresh capabilities" is the deliberate remeasure.
+    """
     header = f"{record.name} — {record.agent} / {record.permission_mode} / {record.phase}"
     try:
-        report = ensure_capability_report(record)
-    except (KeyError, RuntimeError, OSError) as exc:
+        report = load_report(record)
+        if report is None:
+            return (
+                f"{header}\n\nCapabilities have not been measured yet — "
+                "choose Refresh capabilities."
+            )
+        body = render_report_text(report, name=record.name)
+    except (KeyError, RuntimeError, ValueError, OSError) as exc:
         return f"{header}\n\nCapabilities are unavailable: {exc}"
-    return f"{header}\n\n{render_report_text(report, name=record.name)}"
+    notes = []
+    if report.container_available and record.phase != "running":
+        notes.append(
+            f"  measured while the container was running; this session is now {record.phase}"
+        )
+    if report_is_stale(report):
+        notes.append("  measured more than 15 minutes ago; Refresh capabilities to remeasure")
+    return "\n".join([f"{header}\n\n{body}", *notes])
 
 
 def _open_session(
@@ -418,6 +441,7 @@ def _open_session(
                 ("Open agent", "open"),
                 ("Open shell", "shell"),
                 ("Run validation", "validate"),
+                ("Refresh capabilities", "capabilities"),
                 ("Stop session", "stop"),
                 ("Submit draft pull request", "submit"),
                 ("Release published session", "release"),
@@ -429,10 +453,11 @@ def _open_session(
         if action == "back":
             return
         if action == "open":
+            # A running session's agent already read its context at startup;
+            # rewriting the report cannot reach that process, and remeasuring
+            # would block the attach behind the whole probe suite.
             if record.phase != "running":
                 start_session(record)
-            else:
-                ensure_capability_report(record, refresh=True)
             attach_agent(record)
         elif action == "shell":
             refresh_github_auth(record)
@@ -445,6 +470,11 @@ def _open_session(
             )
         elif action == "validate":
             _run_validation(record, reader=reader, output=output)
+        elif action == "capabilities":
+            print("\nMeasuring capabilities...", file=output)
+            report = ensure_capability_report(record, refresh=True)
+            print(render_report_text(report, name=record.name), file=output)
+            _acknowledge(reader, output)
         elif action == "stop":
             stop_session(record)
         elif action == "submit":

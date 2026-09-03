@@ -270,20 +270,29 @@ def ensure_capability_report(
     The picker, `msandbox capabilities`, and `msandbox doctor` all come through
     here so exactly one probe registry backs every rendering.
     """
-    if not refresh:
+    if refresh:
+        # doctor and `capabilities --refresh` repair the session before they
+        # measure it: an in-container gh token that expired during a long
+        # session is renewed, not reported as an authentication failure.
+        refresh_github_auth(record)
+        ensure_container(record)
+        report = refresh_capability_context(record)
+    else:
+        running = container_running(record)
         cached = load_report(record)
-        if cached is not None and not report_is_stale(cached):
+        # Age alone is not freshness. A report measured while the container was
+        # up describes nothing once it stops, so the state it was measured under
+        # has to match the state now.
+        if (
+            cached is not None
+            and not report_is_stale(cached)
+            and cached.container_available is not None
+            and cached.container_available == running
+        ):
             return cached
-    running = container_running(record)
-    if not refresh and not running:
         # Redrawing the picker must never start a container. Host probes still
         # run; every container probe reports the stopped session honestly.
-        report = refresh_capability_context(record, container_available=False)
-    else:
-        if not running:
-            refresh_github_auth(record)
-            ensure_container(record)
-        report = refresh_capability_context(record)
+        report = refresh_capability_context(record, container_available=running)
     if report is not None:
         save_session(record)
     return report

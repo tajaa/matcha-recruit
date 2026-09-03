@@ -44,22 +44,28 @@ class CapabilityReport:
     session_id: str
     results: tuple[CapabilityResult, ...]
     checked_at: str
+    # Whether the container was up for this measurement. None on reports written
+    # before the field existed.
+    container_available: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "session_id": self.session_id,
             "checked_at": self.checked_at,
+            "container_available": self.container_available,
             "results": [asdict(item) for item in self.results],
         }
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "CapabilityReport":
+        measured = raw.get("container_available")
         return cls(
             schema_version=int(raw["schema_version"]),
             session_id=str(raw["session_id"]),
             results=tuple(CapabilityResult(**item) for item in raw.get("results", ())),
             checked_at=str(raw["checked_at"]),
+            container_available=None if measured is None else bool(measured),
         )
 
     def by_id(self, capability_id: str) -> CapabilityResult | None:

@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Sequence
 
 from .capabilities import (
+    atomic_write,
     collect_report,
     container_report_paths,
     render_markdown,
+    report_paths,
     write_report,
 )
 from .docker_runtime import compose_command, compose_environment, exec_in_session, session_home
@@ -52,14 +54,17 @@ def agent_argv(
     raise AgentError(f"unsupported agent: {agent}")
 
 
-# Each agent's own documented context mechanism. Claude Code accepts a system
-# prompt file directly; Codex and OpenCode read a global instructions file from
-# the agent home, which is private to this session because the whole home is.
+# Each agent's own documented context mechanism, and exactly one per agent.
+# Codex and OpenCode read a global instructions file from the agent home, which
+# is private to this session because the whole home is. Claude Code takes the
+# report through --append-system-prompt-file instead, so it is deliberately
+# absent here: writing the file too would load the same report twice.
 CAPABILITY_CONTEXT_FILES: dict[str, tuple[str, ...]] = {
     "codex": (".codex/AGENTS.md",),
-    "claude": (".claude/CLAUDE.md",),
     "opencode": (".config/opencode/AGENTS.md",),
 }
+# Used only when an agent build rejects the flag above.
+CLAUDE_FALLBACK_CONTEXT = ".claude/CLAUDE.md"
 
 
 def capability_context_args(agent: str) -> list[str]:
@@ -77,14 +82,24 @@ def _install_capability_files(record: SessionRecord, markdown: str) -> tuple[Pat
     home = session_home(record)
     written: list[Path] = []
     for relative in CAPABILITY_CONTEXT_FILES.get(record.agent, ()):
+        # Same publish path as the report itself: randomized temp name, no
+        # symlink hop, no half-written instructions file left behind.
         destination = home / relative
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        temporary = destination.parent / f".{destination.name}.msandbox"
-        temporary.write_text(markdown, encoding="utf-8")
-        temporary.chmod(0o600)
-        os.replace(temporary, destination)
+        atomic_write(destination, markdown)
         written.append(destination)
     return tuple(written)
+
+
+def _install_claude_fallback_context(record: SessionRecord) -> None:
+    """Give Claude the report as a file only when it refused the flag."""
+    if record.agent != "claude":
+        return
+    _, markdown_path = report_paths(record)
+    try:
+        markdown = markdown_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    atomic_write(session_home(record) / CLAUDE_FALLBACK_CONTEXT, markdown)
 
 
 def refresh_capability_context(
@@ -163,6 +178,7 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
             f"{container_report_paths()[1]}.",
             file=sys.stderr,
         )
+        _install_claude_fallback_context(record)
         _start_agent_pane(record, extra)
 
 
