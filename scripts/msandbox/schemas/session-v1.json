@@ -18,10 +18,24 @@
     "base_sha"
   ],
   "properties": {
-    "schema_version": {"const": 1},
-    "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
-    "name": {"type": "string", "minLength": 1},
-    "agent": {"enum": ["codex", "opencode", "claude"]},
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent": {
+      "enum": [
+        "codex",
+        "opencode",
+        "claude"
+      ]
+    },
     "phase": {
       "enum": [
         "created",
@@ -33,14 +47,46 @@
         "orphaned"
       ]
     },
-    "repo_root": {"type": "string"},
-    "worktree_path": {"type": "string"},
-    "git_admin_name": {"type": "string"},
-    "compose_project": {"type": "string"},
-    "tmux_session": {"type": "string"},
-    "base_ref": {"type": "string"},
-    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "target_branch": {"type": ["string", "null"]}
+    "repo_root": {
+      "type": "string"
+    },
+    "worktree_path": {
+      "type": "string"
+    },
+    "git_admin_name": {
+      "type": "string"
+    },
+    "compose_project": {
+      "type": "string"
+    },
+    "tmux_session": {
+      "type": "string"
+    },
+    "base_ref": {
+      "type": "string"
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "target_branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_capability_check_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capability_report_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
   },
   "additionalProperties": true
 }

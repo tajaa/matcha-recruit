@@ -11,6 +11,7 @@ from pathlib import Path
 from . import __version__
 from .agent_adapters import attach_agent, deliver_attachments
 from .attachments import AttachmentError, import_clipboard, import_files
+from .capabilities import render_report_text, report_ok
 from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session
 from .git_worktrees import detach_branch_owner, prune_stale_worktree_metadata, resolve_worktree_owner
@@ -21,6 +22,7 @@ from .sessions import (
     SessionError,
     _github_repo,
     create_session,
+    ensure_capability_report,
     reconcile_session,
     release_session,
     resolve_pr,
@@ -132,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = commands.add_parser("doctor")
     doctor.add_argument("session", nargs="?")
+    capabilities = commands.add_parser(
+        "capabilities", help="show this session's measured capability report"
+    )
+    capabilities.add_argument("session")
+    capabilities.add_argument("--refresh", action="store_true")
     worktree = commands.add_parser("worktree")
     worktree_commands = worktree.add_subparsers(dest="worktree_command", required=True)
     worktree_commands.add_parser("doctor")
@@ -150,55 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _doctor(record) -> int:
-    refresh_github_auth(record)
-    ensure_container(record)
-    probes = [
-        ("node direct", ["node", "--version"], False, False),
-        ("node login shell", ["node", "--version"], True, False),
-        ("npm login shell", ["npm", "--version"], True, False),
-        ("npx login shell", ["npx", "--version"], True, False),
-        ("pytest", ["server/venv/bin/python", "-m", "pytest", "--version"], True, False),
-        ("vitest", ["client/node_modules/.bin/vitest", "--version"], True, False),
-        (
-            "OpenCode executable /tmp",
-            [
-                "bash",
-                "-lc",
-                "mount | awk '$3 == \"/tmp\" { found=1; if ($6 ~ /noexec/) bad=1 } "
-                "END { exit (!found || bad) }'",
-            ],
-            False,
-            False,
-        ),
-        ("git detached HEAD", ["git", "symbolic-ref", "-q", "HEAD"], False, True),
-        (
-            "GitHub CLI auth",
-            ["gh", "auth", "status", "--hostname", "github.com"],
-            False,
-            False,
-        ),
-        (
-            "GitHub Actions API",
-            [
-                "gh",
-                "workflow",
-                "list",
-                "--repo",
-                _github_repo(record.repo_path),
-                "--limit",
-                "1",
-            ],
-            False,
-            False,
-        ),
-    ]
-    failed = 0
-    for title, argv, login, invert in probes:
-        completed = exec_in_session(record, argv, tty=False, login_shell=login, capture=True)
-        ok = completed.returncode != 0 if invert else completed.returncode == 0
-        print(f"  [{'ok' if ok else 'FAIL':4}] {title}")
-        failed += not ok
-    return 1 if failed else 0
+    report = ensure_capability_report(record, refresh=True)
+    print(render_report_text(report, name=record.name))
+    return 0 if report is not None and report_ok(report) else 1
 
 
 def _checkout_pr(repo: Path, number: int) -> int:
@@ -350,6 +311,11 @@ def run(argv: list[str] | None = None) -> int:
             print(f"[{item.status.upper():11}] {item.title} ({item.duration_seconds:.1f}s)")
         print(f"Report: {report.result_path}")
         return 0 if report.status == "pass" else 1
+    if args.command == "capabilities":
+        record = load_session(args.session)
+        report = ensure_capability_report(record, refresh=args.refresh)
+        print(render_report_text(report, name=record.name))
+        return 0 if report is not None and report_ok(report) else 1
     if args.command == "doctor":
         if args.session:
             return _doctor(load_session(args.session))

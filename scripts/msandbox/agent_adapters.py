@@ -4,12 +4,21 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Sequence
 
-from .docker_runtime import compose_command, compose_environment, exec_in_session
-from .models import Attachment, SessionRecord
+from .capabilities import (
+    atomic_write,
+    collect_report,
+    container_report_paths,
+    render_markdown,
+    report_paths,
+    write_report,
+)
+from .docker_runtime import compose_command, compose_environment, exec_in_session, session_home
+from .models import Attachment, CapabilityReport, SessionRecord
 from .session_auth import refresh_github_auth
 
 
@@ -43,6 +52,75 @@ def agent_argv(
         autonomous = ["--auto"] if permission_mode == "autonomous" else []
         return ["opencode", *autonomous, *extra]
     raise AgentError(f"unsupported agent: {agent}")
+
+
+# Each agent's own documented context mechanism, and exactly one per agent.
+# Codex and OpenCode read a global instructions file from the agent home, which
+# is private to this session because the whole home is. Claude Code takes the
+# report through --append-system-prompt-file instead, so it is deliberately
+# absent here: writing the file too would load the same report twice.
+CAPABILITY_CONTEXT_FILES: dict[str, tuple[str, ...]] = {
+    "codex": (".codex/AGENTS.md",),
+    "opencode": (".config/opencode/AGENTS.md",),
+}
+# Used only when an agent build rejects the flag above.
+CLAUDE_FALLBACK_CONTEXT = ".claude/CLAUDE.md"
+
+
+def capability_context_args(agent: str) -> list[str]:
+    """CLI arguments that inject the measured report as developer context."""
+    _, markdown = container_report_paths()
+    if agent == "claude":
+        return ["--append-system-prompt-file", markdown]
+    if agent in ("codex", "opencode"):
+        # Both read their global instructions file; see CAPABILITY_CONTEXT_FILES.
+        return []
+    raise AgentError(f"unsupported agent: {agent}")
+
+
+def _install_capability_files(record: SessionRecord, markdown: str) -> tuple[Path, ...]:
+    home = session_home(record)
+    written: list[Path] = []
+    for relative in CAPABILITY_CONTEXT_FILES.get(record.agent, ()):
+        # Same publish path as the report itself: randomized temp name, no
+        # symlink hop, no half-written instructions file left behind.
+        destination = home / relative
+        atomic_write(destination, markdown)
+        written.append(destination)
+    return tuple(written)
+
+
+def _install_claude_fallback_context(record: SessionRecord) -> None:
+    """Give Claude the report as a file only when it refused the flag."""
+    if record.agent != "claude":
+        return
+    _, markdown_path = report_paths(record)
+    try:
+        markdown = markdown_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    atomic_write(session_home(record) / CLAUDE_FALLBACK_CONTEXT, markdown)
+
+
+def refresh_capability_context(
+    record: SessionRecord,
+    *,
+    container_available: bool = True,
+) -> CapabilityReport | None:
+    """Measure this session and publish the same report to disk and the agent.
+
+    A probe failure never blocks the session; the report itself records it.
+    """
+    try:
+        report = collect_report(record, container_available=container_available)
+        path = write_report(record, report)
+        _install_capability_files(record, render_markdown(report, name=record.name))
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Warning: capability report is unavailable ({exc}).", file=sys.stderr)
+        return None
+    record.last_capability_check_at = report.checked_at
+    record.capability_report_path = str(path)
+    return report
 
 
 def tmux_running(record: SessionRecord) -> bool:
@@ -84,6 +162,27 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         raise AgentError("tmux is required for durable msandbox sessions")
     if tmux_running(record):
         return
+    context_args = capability_context_args(record.agent)
+    if not context_args:
+        _start_agent_pane(record, extra)
+        return
+    try:
+        _start_agent_pane(record, [*context_args, *extra])
+    except AgentError:
+        # An older pinned agent build may not accept the context flag. The
+        # session is more valuable than the injection, and the same report is
+        # still on disk at the path the report itself names.
+        print(
+            "Warning: this agent build rejected the capability-context flag; "
+            "the report remains at "
+            f"{container_report_paths()[1]}.",
+            file=sys.stderr,
+        )
+        _install_claude_fallback_context(record)
+        _start_agent_pane(record, extra)
+
+
+def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
     subprocess.run(
         ["tmux", "kill-session", "-t", record.tmux_session],
         check=False,
