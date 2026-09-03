@@ -651,14 +651,263 @@ for prune_run in prune-1 prune-2 prune-3; do
         >/dev/null 2>&1
     sleep 1
 done
+# Two under the cap plus the one `active` names, which is exempt: pruning it
+# would delete the only resumable work while the pointer still names it.
 check "checkpoints are bounded instead of accumulating under .git forever" \
     $([ "$(find "$TMP_DIR/checkpoints/44445555-0000-4000-8000-000000000044" \
-        -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')" = 2 ] \
+        -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')" = 3 ] \
       && echo 0 || echo 1)
 
 check "the resumed transcript stays small enough to leave the model room to work" \
     $(grep -qF 'AUTOPR_CHECKPOINT_MAX_TRANSCRIPT_BYTES:-131072' "$AUTOPR_DIR/checkpoint.sh" \
       && [ "$(wc -c < "$checkpoint_path/transcript.log" | tr -d '[:space:]')" -le 131072 ] \
+      && echo 0 || echo 1)
+
+# checkpoint.sh save only runs as its own workflow step. A hard kill (machine
+# death, SIGKILL, Docker restart) skips it entirely and the next run wipes the
+# sandbox, so the investigation snapshots itself on a timer while the model
+# still holds the workspace.
+SNAPSHOT_RUNTIME="$TMP_DIR/snapshot-runtime"
+mkdir -p "$SNAPSHOT_RUNTIME"
+git clone --quiet "$SANDBOX_TEST_REPO" "$SNAPSHOT_RUNTIME/workspace"
+snapshot_base="$(git -C "$SNAPSHOT_RUNTIME/workspace" rev-parse HEAD)"
+mkdir -p "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/output"
+printf '%s\n' "$snapshot_base" \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/model-base-sha"
+printf '55556666-0000-4000-8000-000000000055\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/task-id"
+printf 'export const inflight = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts"
+printf '%s\n' '### Summary' 'still working' \
+    > "$SNAPSHOT_RUNTIME/workspace/.git/autopr-io/output/report.md"
+cat > "$TMP_DIR/snapshot-card.json" <<'EOF'
+{"task_id":"55556666-0000-4000-8000-000000000055","id8":"55556666","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+snapshot_index_before="$(shasum "$SNAPSHOT_RUNTIME/workspace/.git/index" | cut -d' ' -f1)"
+snapshot_dir="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+snapshot_latest="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/snapshot-card.json")"
+snapshot_index_after="$(shasum "$SNAPSHOT_RUNTIME/workspace/.git/index" | cut -d' ' -f1)"
+check "an in-flight snapshot captures live model work and becomes resumable" \
+    $([ -n "$snapshot_dir" ] && [ "$snapshot_dir" = "$snapshot_latest" ] \
+      && grep -q 'inflight.ts' "$snapshot_dir/model.patch" \
+      && git -C "$SANDBOX_TEST_REPO" apply --check --binary "$snapshot_dir/model.patch" \
+      && jq -e '.inflight == true and .patch_saved == true and .report_saved == true' \
+        "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+check "snapshots never fight the live container for its git index" \
+    $([ "$snapshot_index_before" = "$snapshot_index_after" ] \
+      && [ -f "$SNAPSHOT_RUNTIME/snapshot.index" ] \
+      && echo 0 || echo 1)
+
+# A file the model is still streaming into would be captured truncated, and
+# `git apply --check` on the resume would accept it.
+printf 'export const unsettled = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/unsettled.ts"
+unsettled_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=60 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "a snapshot skips a workspace the model is still writing" \
+    $([ -z "$unsettled_pass" ] \
+      && ! grep -q 'unsettled.ts' "$snapshot_dir/model.patch" \
+      && echo 0 || echo 1)
+
+# But never skips forever: a possibly-unsettled patch beats losing the run.
+forced_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=60 AUTOPR_SNAPSHOT_MAX_UNSETTLED_SKIPS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "an unsettled workspace is still checkpointed rather than skipped forever" \
+    $([ "$forced_pass" = "$snapshot_dir" ] \
+      && grep -q 'unsettled.ts' "$snapshot_dir/model.patch" \
+      && jq -e '.settled == false' "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+rm -f "$SNAPSHOT_RUNTIME/workspace/client/src/unsettled.ts"
+
+snapshot_foreign="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/foreign-card.json")"
+check "an in-flight snapshot refuses a sandbox belonging to another card" \
+    $([ -z "$snapshot_foreign" ] && echo 0 || echo 1)
+
+# The pointer is the whole value of a snapshot: an empty later save must not
+# take it away.
+empty_save_path="$(PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=empty-save-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/snapshot-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 2>/dev/null)"
+still_resumable="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/snapshot-card.json")"
+check "an empty save never steals the resume pointer from real saved work" \
+    $([ -n "$empty_save_path" ] && [ "$still_resumable" = "$snapshot_dir" ] \
+      && echo 0 || echo 1)
+
+# A pass that started a second before `consume` must not survive it: killing the
+# timer only kills the sleeping subshell, so the halt has to WAIT for the pass.
+mkdir -p "$SNAPSHOT_RUNTIME/snapshot.lock"
+halt_started="$(date +%s)"
+( sleep 2; rmdir "$SNAPSHOT_RUNTIME/snapshot.lock" ) &
+halt_waiter=$!
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_SNAPSHOT_HALT_WAIT_SECONDS=20 \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot-halt
+halt_elapsed=$(( $(date +%s) - halt_started ))
+wait "$halt_waiter" 2>/dev/null || true
+check "halting snapshots waits for a pass that is already running" \
+    $([ "$halt_elapsed" -ge 2 ] && [ ! -d "$SNAPSHOT_RUNTIME/snapshot.lock" ] \
+      && echo 0 || echo 1)
+
+# After the halt, a late pass must be a no-op rather than re-pointing `active`.
+printf 'export const late = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/late.ts"
+halted_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "a snapshot pass that lands after the halt writes nothing" \
+    $([ -z "$halted_pass" ] \
+      && ! grep -q 'late.ts' "$snapshot_dir/model.patch" \
+      && echo 0 || echo 1)
+
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot-arm
+rearmed_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "arming the next run re-enables snapshots" \
+    $([ "$rearmed_pass" = "$snapshot_dir" ] \
+      && grep -q 'late.ts' "$snapshot_dir/model.patch" \
+      && echo 0 || echo 1)
+
+# The tree goes clean (the directive-violation retry resets it). The previous
+# pass's patch must not stay on disk as this checkpoint's resume patch.
+rm -f "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts" \
+    "$SNAPSHOT_RUNTIME/workspace/client/src/late.ts"
+AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json" >/dev/null
+check "a pass with nothing to save drops the previous pass's stale patch" \
+    $([ ! -e "$snapshot_dir/model.patch" ] \
+      && jq -e '.patch_saved == false' "$snapshot_dir/metadata.json" >/dev/null \
+      && echo 0 || echo 1)
+
+# A rework of the SAME card finds the previous round's clone still stamped with
+# this task id. Only the clone's age tells the two rounds apart.
+printf 'export const inflight = true;\n' \
+    > "$SNAPSHOT_RUNTIME/workspace/client/src/inflight.ts"
+printf '%s\n' "$(( $(date +%s) + 120 ))" > "$TMP_DIR/started-in-the-future"
+stale_clone_pass="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_INVESTIGATION_STARTED_FILE="$TMP_DIR/started-in-the-future" \
+    AUTOPR_SNAPSHOT_SETTLE_SECONDS=0 \
+    GITHUB_RUN_ID=snapshot-test \
+    "$AUTOPR_DIR/checkpoint.sh" snapshot "$TMP_DIR/snapshot-card.json")"
+check "a snapshot refuses a sandbox clone left over from a previous round" \
+    $([ -z "$stale_clone_pass" ] \
+      && [ ! -e "$snapshot_dir/model.patch" ] \
+      && echo 0 || echo 1)
+
+# The timer itself: the real loop out of investigate.sh, orphaned by its parent.
+sed -n '/^start_inflight_snapshots() {/,/^}/p' "$AUTOPR_DIR/investigate.sh" \
+    > "$TMP_DIR/snapshot-timer.sh"
+cat > "$TMP_DIR/timer-parent.sh" <<EOF
+#!/usr/bin/env bash
+set -uo pipefail
+SCRIPT_DIR="$AUTOPR_DIR"
+CARD_FILE="$TMP_DIR/timer-card.json"
+SNAPSHOT_INTERVAL_SECONDS=1
+SNAPSHOT_MAX_PASSES=30
+SNAPSHOT_PID=""
+source "$TMP_DIR/snapshot-timer.sh"
+start_inflight_snapshots
+printf '%s\n' "\$SNAPSHOT_PID"
+EOF
+chmod +x "$TMP_DIR/timer-parent.sh"
+cat > "$TMP_DIR/timer-card.json" <<'EOF'
+{"task_id":"66667777-0000-4000-8000-000000000066","id8":"66667777","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+timer_root="$TMP_DIR/checkpoints/66667777-0000-4000-8000-000000000066"
+timer_pid="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$SNAPSHOT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$TMP_DIR/timer-parent.sh" 2>/dev/null)"
+sleep 3
+check "an orphaned snapshot timer stops instead of outliving its investigation" \
+    $(! kill -0 "$timer_pid" 2>/dev/null && [ ! -d "$timer_root" ] \
+      && echo 0 || echo 1)
+
+# Pruning must never evict the checkpoint `active` names, or the empty-save
+# guard protects a directory that pruning has already deleted.
+prune_active_root="$TMP_DIR/checkpoints/77778888-0000-4000-8000-000000000077"
+cat > "$TMP_DIR/prune-active-card.json" <<'EOF'
+{"task_id":"77778888-0000-4000-8000-000000000077","id8":"77778888","project_id":"dddddddd-0000-4000-8000-000000000004"}
+EOF
+mkdir -p "$prune_active_root/oldest-inflight"
+printf 'patch\n' > "$prune_active_root/oldest-inflight/model.patch"
+jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,created_at:$created,patch_saved:true}' \
+    > "$prune_active_root/oldest-inflight/metadata.json"
+printf 'oldest-inflight\n' > "$prune_active_root/active"
+for newer in newer-1 newer-2 newer-3; do
+    sleep 1
+    mkdir -p "$prune_active_root/$newer"
+done
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$CHECKPOINT_RUNTIME" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    AUTOPR_CHECKPOINT_MAX_PER_TASK=1 \
+    AUTOPR_LIVE_LOG="$TMP_DIR/checkpoint-live.log" \
+    AUTOPR_SANDBOX_TEST_DIRECT=1 GITHUB_RUN_ID=prune-active-test \
+    "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/prune-active-card.json" \
+    "$TMP_DIR/missing-report" "$TMP_DIR/missing-decision" "$(date +%s)" 20 \
+    >/dev/null 2>&1
+prune_active_latest="$(AUTOPR_WORKSPACE_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints" \
+    "$AUTOPR_DIR/checkpoint.sh" latest "$TMP_DIR/prune-active-card.json")"
+check "pruning never deletes the checkpoint the active pointer names" \
+    $([ -d "$prune_active_root/oldest-inflight" ] \
+      && [ "$prune_active_latest" = "$prune_active_root/oldest-inflight" ] \
       && echo 0 || echo 1)
 
 cat > "$TMP_DIR/bin/codex" <<'EOF'
