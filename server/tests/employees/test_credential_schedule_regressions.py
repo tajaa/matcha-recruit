@@ -87,6 +87,22 @@ class UploadedBlockingRequirementConn:
         return {"id": self.requirement_id, "has_expiration": True}
 
 
+def test_existing_requirement_lock_does_not_lock_scoped_catalog_view():
+    conn = UploadedBlockingRequirementConn()
+
+    requirement = asyncio.run(employee_credentials._requirement_for_document_type(
+        conn,
+        company_id=uuid4(),
+        employee_id=uuid4(),
+        document_type="food_handler_card",
+        for_update=True,
+    ))
+
+    assert requirement["id"] == conn.requirement_id
+    assert "JOIN scoped_credential_types" in conn.query
+    assert "FOR UPDATE OF ecr" in conn.query
+
+
 def test_food_handler_upload_materializes_company_wide_blocking_requirement():
     conn = UploadedBlockingRequirementConn()
     company_id, employee_id = uuid4(), uuid4()
