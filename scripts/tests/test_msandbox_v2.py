@@ -15,8 +15,25 @@ from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from scripts.msandbox.agent_adapters import agent_argv, launch_agent
+from scripts.msandbox.agent_adapters import (
+    agent_argv,
+    capability_context_args,
+    launch_agent,
+    refresh_capability_context,
+)
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
+from scripts.msandbox.capabilities import (
+    collect_report,
+    leaks,
+    load_report,
+    planned_capabilities,
+    probe_registry,
+    render_markdown,
+    render_report_text,
+    report_ok,
+    report_paths,
+    write_report,
+)
 from scripts.msandbox.cli import run as run_cli
 from scripts.msandbox.docker_gc import collect_garbage, reachable, runtime_roots
 from scripts.msandbox.docker_runtime import (
@@ -30,6 +47,7 @@ from scripts.msandbox.docker_runtime import (
     build_context_sources,
     build_identifier,
     compose_environment,
+    session_home,
 )
 from scripts.msandbox.git_worktrees import (
     GitError,
@@ -59,6 +77,7 @@ from scripts.msandbox.pty_proxy import (
 )
 from scripts.msandbox.sessions import (
     SessionError,
+    ensure_capability_report,
     _validation_current,
     create_session,
     release_session,
@@ -77,6 +96,7 @@ from scripts.msandbox.state import (
 from scripts.msandbox.validation import build_test_plan, changed_paths, run_test_plan
 from scripts.msandbox.wizard import (
     _choose_terminal,
+    _session_menu_title,
     _install_session_shell_handoff,
     _interpret_terminal_key,
     _new_session,
@@ -1057,10 +1077,12 @@ class HostAndInstallTests(MsandboxTestCase):
     def test_wizard_requires_an_explicit_autonomous_choice(self) -> None:
         record = self.record()
         record.phase = "running"
-        answers = iter(("", "2", "", "", "", ""))
+        answers = iter(("", "2", "", "", "", "", ""))
         with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]), mock.patch(
             "scripts.msandbox.wizard.create_session", return_value=record
-        ) as create, mock.patch("scripts.msandbox.wizard.attach_agent") as attach:
+        ) as create, mock.patch(
+            "scripts.msandbox.wizard.ensure_capability_report", return_value=None
+        ), mock.patch("scripts.msandbox.wizard.attach_agent") as attach:
             _new_session(
                 self.repo,
                 reader=lambda _prompt: next(answers),
@@ -1075,10 +1097,12 @@ class HostAndInstallTests(MsandboxTestCase):
     def test_wizard_defaults_to_standard_permissions(self) -> None:
         record = self.record()
         record.phase = "running"
-        answers = iter(("", "", "", "", "", ""))
+        answers = iter(("", "", "", "", "", "", ""))
         with mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[]), mock.patch(
             "scripts.msandbox.wizard.create_session", return_value=record
-        ) as create, mock.patch("scripts.msandbox.wizard.attach_agent"):
+        ) as create, mock.patch(
+            "scripts.msandbox.wizard.ensure_capability_report", return_value=None
+        ), mock.patch("scripts.msandbox.wizard.attach_agent"):
             _new_session(
                 self.repo,
                 reader=lambda _prompt: next(answers),
@@ -1886,6 +1910,423 @@ class DockerGcTests(MsandboxTestCase):
             ("session-home", "stale-orphan"),
             {(item.kind, item.name) for item in report.collected},
         )
+
+
+class FakeContainer:
+    """Answer container probes by matching a substring of the probe script."""
+
+    def __init__(self, responses, default=(1, "", "not configured")):
+        self.responses = list(responses)
+        self.default = default
+        self.scripts: list[str] = []
+
+    def __call__(self, record, argv, *, tty, capture=False, timeout=None, login_shell=False):
+        script = argv[-1]
+        self.scripts.append(script)
+        for needle, code, out, err in self.responses:
+            if callable(needle):
+                if needle(script):
+                    return subprocess.CompletedProcess(argv, code, out, err)
+                continue
+            if needle in script:
+                if isinstance(code, BaseException):
+                    raise code
+                return subprocess.CompletedProcess(argv, code, out, err)
+        return subprocess.CompletedProcess(argv, *self.default)
+
+
+def fake_host(argv, **kwargs):
+    if argv[:1] == ["xcodebuild"]:
+        return subprocess.CompletedProcess(argv, 0, "Xcode 26.1\nBuild version 17B55\n", "")
+    return subprocess.CompletedProcess(argv, 1, "", "unsupported host probe")
+
+
+HEALTHY_CONTAINER = (
+    ("git -C /workspace rev-parse", 0, "abc1234\n", ""),
+    ("python3 --version", 0, "Python 3.12.7\nv22.23.2\n10.9.2\npytest 8.3.2\n3.2.4\n", ""),
+    ("test -x scripts/dev-remote.sh", 0, "", ""),
+    ("sync_playwright", 0, "141.0.7390.37\n", ""),
+    ("/attachments/", 0, "", ""),
+    ("gh auth status", 0, "octocat\nexample/matcha\n", ""),
+    ("aws sts get-caller-identity", 0,
+     '{"Arn": "arn:aws:iam::123456789012:role/matcha-msandbox"}', ""),
+    ("service=matcha_prod_test", 0, "matcha_test_agent\n0\n", ""),
+    ("urllib.request", 0, "primary\nTrue\n", ""),
+    ("ssh -o BatchMode=yes", 0, "", ""),
+    ("aws configure list-profiles", 0, "matcha-msandbox\n", ""),
+    ("test -e", 0, "", ""),
+)
+
+
+class CapabilityTests(MsandboxTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        git(self.repo, "remote", "set-url", "origin", "https://github.com/example/matcha.git")
+
+    def session(self, *, dev: bool = True, playwright: bool = True, agent: str = "codex"):
+        record = self.record()
+        record.agent = agent
+        record.dev = dev
+        record.playwright = playwright
+        record.ports = PortSet(18001, 15174, 15191, 15201, 18080)
+        return record
+
+    def configure_production_credentials(self) -> None:
+        root = self.root / "config/production-test"
+        (root / "ssh").mkdir(parents=True, exist_ok=True)
+        (root / "accounts.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "base_url": "https://hey-matcha.com",
+                    "accounts": [
+                        {
+                            "label": "primary",
+                            "email": "builder@example.com",
+                            "password_file": "accounts/primary.password",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "pg_service.conf").write_text("[matcha_prod_test]\n", encoding="utf-8")
+        (root / "ssh/matcha-prod-test").write_text("restricted-key-placeholder\n", encoding="utf-8")
+
+    def collect(self, record, responses=HEALTHY_CONTAINER, **kwargs):
+        container = FakeContainer(responses)
+        report = collect_report(
+            record,
+            run_container=container,
+            run_host=fake_host,
+            **kwargs,
+        )
+        return report, container
+
+    # -- full and partial reports ------------------------------------------
+
+    def test_full_report_renders_checks_and_explicit_denials(self) -> None:
+        self.configure_production_credentials()
+        record = self.session()
+        report, _ = self.collect(record)
+        statuses = {item.id: item.status for item in report.results}
+        self.assertEqual(
+            statuses,
+            {
+                "repo_rw": "available",
+                "linux_build": "available",
+                "isolated_dev": "available",
+                "browser": "available",
+                "attachments": "available",
+                "github": "available",
+                "aws": "available",
+                "prod_test_api": "available",
+                "prod_test_db": "available",
+                "prod_diagnostics": "available",
+                # Xcode is measured on the host; no builder broker is installed
+                # in the test root, so it is honestly unavailable.
+                "xcode": "unavailable",
+                "non_test_mutation": "denied",
+                "prod_admin": "denied",
+                "signing_deploy": "denied",
+            },
+        )
+        self.assertTrue(report_ok(report))
+        rendered = render_report_text(report, name=record.name)
+        self.assertIn("✅ Repository read/write", rendered)
+        self.assertIn("❌ Non-test tenant mutation", rendered)
+        self.assertIn("is_test enforced", rendered)
+
+    def test_unconfigured_production_access_is_an_honest_cross(self) -> None:
+        record = self.session()
+        report, _ = self.collect(record)
+        for capability in ("prod_test_api", "prod_test_db", "prod_diagnostics"):
+            result = report.by_id(capability)
+            self.assertEqual(result.status, "unavailable")
+            self.assertIn("configured", result.detail)
+        # A denial without a production identity is still a denial, not a leak.
+        self.assertEqual(report.by_id("non_test_mutation").status, "denied")
+        self.assertTrue(report_ok(report))
+
+    def test_capability_choices_are_reported_rather_than_assumed(self) -> None:
+        record = self.session(dev=False, playwright=False)
+        report, container = self.collect(record)
+        self.assertEqual(report.by_id("browser").status, "unavailable")
+        self.assertEqual(report.by_id("isolated_dev").status, "unavailable")
+        # A capability the session never had must not cost a container probe.
+        self.assertFalse(any("sync_playwright" in script for script in container.scripts))
+
+    # -- probe failure modes ----------------------------------------------
+
+    def test_probe_failures_never_abort_the_report(self) -> None:
+        self.configure_production_credentials()
+        responses = (
+            ("git -C /workspace rev-parse", 0, "abc1234\n", ""),
+            ("python3 --version", subprocess.TimeoutExpired(["bash"], 90.0), "", ""),
+            ("test -x scripts/dev-remote.sh", 0, "", ""),
+            ("sync_playwright", 127, "", "bash: playwright: command not found"),
+            ("/attachments/", 0, "", ""),
+            ("gh auth status", 1, "", "gh: authentication failed"),
+            ("aws sts get-caller-identity", 0, "not json at all", ""),
+            ("service=matcha_prod_test", 1, "", "FATAL: password authentication failed"),
+            ("urllib.request", 1, "", "HTTP Error 401: Unauthorized"),
+            ("ssh -o BatchMode=yes", 255, "", "Permission denied (publickey)"),
+            ("aws configure list-profiles", 0, "matcha-msandbox\n", ""),
+            ("test -e", 0, "", ""),
+        )
+        report, _ = self.collect(self.session(), responses)
+        self.assertEqual(len(report.results), len(probe_registry()))
+        self.assertEqual(report.by_id("linux_build").detail, "the probe exceeded its timeout")
+        self.assertEqual(report.by_id("browser").status, "unavailable")
+        self.assertEqual(report.by_id("github").status, "unavailable")
+        self.assertEqual(report.by_id("aws").status, "unavailable")
+        self.assertEqual(report.by_id("prod_test_db").status, "unavailable")
+        self.assertEqual(report.by_id("prod_test_api").status, "unavailable")
+        # A failed production probe must never be read as production access.
+        self.assertEqual(report.by_id("non_test_mutation").status, "denied")
+        self.assertFalse(report_ok(report))
+
+    def test_a_stopped_container_reports_every_container_probe_honestly(self) -> None:
+        report, container = self.collect(self.session(), container_available=False)
+        self.assertEqual(container.scripts, [])
+        self.assertEqual(
+            report.by_id("repo_rw").detail, "the session container is not running"
+        )
+        self.assertEqual(report.by_id("prod_admin").status, "denied")
+        self.assertEqual(report.by_id("xcode").status, "unavailable")
+
+    def test_a_missing_host_executable_is_a_fallback_not_a_crash(self) -> None:
+        def missing_xcodebuild(argv, **kwargs):
+            raise FileNotFoundError(argv[0])
+
+        report = collect_report(
+            self.session(),
+            run_container=FakeContainer(HEALTHY_CONTAINER),
+            run_host=missing_xcodebuild,
+        )
+        result = report.by_id("xcode")
+        self.assertEqual(result.status, "unavailable")
+        self.assertIn("native-builds", result.detail)
+
+    # -- redaction ---------------------------------------------------------
+
+    def test_probe_output_is_redacted_before_it_enters_the_report(self) -> None:
+        secretive = (
+            "ghp_0123456789abcdefghijABCDEFGHIJ0123 "
+            "AKIAIOSFODNN7EXAMPLE "
+            "password=hunter2 "
+            "postgresql://matcha:matcha_dev@127.0.0.1:5432/matcha "
+            "Authorization: Bearer abcdef.ghijkl "
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----"
+        )
+        responses = (("gh auth status", 1, "", secretive),)
+        report, _ = self.collect(self.session(), responses)
+        detail = report.by_id("github").detail
+        for leaked in (
+            "ghp_0123456789abcdefghijABCDEFGHIJ0123",
+            "AKIAIOSFODNN7EXAMPLE",
+            "hunter2",
+            "matcha_dev",
+            "MIIEow",
+            "abcdef.ghijkl",
+        ):
+            self.assertNotIn(leaked, detail)
+        serialized = json.dumps(report.to_dict())
+        for leaked in ("ghp_0123", "AKIAIOSFODNN7EXAMPLE", "hunter2", "matcha_dev"):
+            self.assertNotIn(leaked, serialized)
+
+    def test_an_aws_account_number_never_reaches_the_report(self) -> None:
+        report, _ = self.collect(self.session())
+        self.assertNotIn("123456789012", report.by_id("aws").detail)
+        self.assertIn("matcha-msandbox", report.by_id("aws").detail)
+
+    # -- session record compatibility --------------------------------------
+
+    def test_records_written_before_capability_reporting_still_load(self) -> None:
+        raw = self.record().to_dict()
+        raw.pop("last_capability_check_at")
+        raw.pop("capability_report_path")
+        restored = SessionRecord.from_dict(raw)
+        self.assertIsNone(restored.last_capability_check_at)
+        self.assertIsNone(restored.capability_report_path)
+        save_session(restored)
+        self.assertIsNone(load_session(restored.id).capability_report_path)
+
+    # -- persistence and agent context -------------------------------------
+
+    def test_the_agent_receives_the_same_report_the_picker_shows(self) -> None:
+        for agent, relative in (
+            ("codex", ".codex/AGENTS.md"),
+            ("claude", ".claude/CLAUDE.md"),
+            ("opencode", ".config/opencode/AGENTS.md"),
+        ):
+            with self.subTest(agent=agent):
+                record = self.session(agent=agent)
+                expected = collect_report(
+                    record,
+                    run_container=FakeContainer(HEALTHY_CONTAINER),
+                    run_host=fake_host,
+                )
+                with mock.patch(
+                    "scripts.msandbox.agent_adapters.collect_report", return_value=expected
+                ):
+                    report = refresh_capability_context(record)
+                self.assertIsNotNone(report)
+                json_path, markdown_path = report_paths(record)
+                self.assertEqual(json_path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(markdown_path.stat().st_mode & 0o777, 0o600)
+                markdown = markdown_path.read_text(encoding="utf-8")
+                self.assertIn(
+                    "This capability report was measured for this session. Test the "
+                    "named invocation before claiming the capability is absent.",
+                    markdown,
+                )
+                self.assertIn("gh pr view", markdown)
+                self.assertIn("psql 'service=matcha_prod_test'", markdown)
+                delivered = session_home(record) / relative
+                self.assertEqual(delivered.read_text(encoding="utf-8"), markdown)
+                self.assertEqual(record.capability_report_path, str(json_path))
+                self.assertEqual(record.last_capability_check_at, report.checked_at)
+                round_tripped = load_report(record)
+                self.assertEqual(round_tripped, expected)
+
+    def test_claude_receives_the_report_through_its_system_prompt_flag(self) -> None:
+        self.assertEqual(
+            capability_context_args("claude"),
+            ["--append-system-prompt-file", "/home/agent/.msandbox/capabilities.md"],
+        )
+        self.assertEqual(capability_context_args("codex"), [])
+        self.assertEqual(capability_context_args("opencode"), [])
+
+    def test_no_credential_value_reaches_the_agent_context(self) -> None:
+        self.configure_production_credentials()
+        record = self.session()
+        expected = collect_report(
+            record,
+            run_container=FakeContainer(HEALTHY_CONTAINER),
+            run_host=fake_host,
+        )
+        markdown = render_markdown(expected, name=record.name)
+        for forbidden in ("password", "PRIVATE KEY", "ghp_", "AKIA", "123456789012"):
+            self.assertNotIn(forbidden, markdown)
+
+    # -- picker and doctor share one registry -------------------------------
+
+    def test_the_picker_shows_a_measured_report_before_the_agent_opens(self) -> None:
+        record = self.session()
+        report, _ = self.collect(record)
+        with mock.patch(
+            "scripts.msandbox.wizard.ensure_capability_report", return_value=report
+        ):
+            title = _session_menu_title(record)
+        self.assertIn("test — codex / standard / created", title)
+        self.assertIn("✅ GitHub CLI", title)
+        self.assertIn("❌ Production admin/secrets", title)
+
+    def test_the_new_session_screen_shows_what_it_plans_to_measure(self) -> None:
+        planned = "\n".join(planned_capabilities(dev=True, playwright=False))
+        self.assertIn("✅ Repository read/write", planned)
+        self.assertIn("❌ Headless browser", planned)
+        self.assertIn("❌ Production admin/secrets", planned)
+        self.assertIn(
+            "✅ Isolated development",
+            "\n".join(planned_capabilities(dev=True, playwright=True)),
+        )
+
+    def test_doctor_reuses_the_shared_registry_and_reports_its_result(self) -> None:
+        record = self.session()
+        save_session(record)
+        report, _ = self.collect(record)
+        output = io.StringIO()
+        with mock.patch(
+            "scripts.msandbox.cli.ensure_capability_report", return_value=report
+        ) as shared, redirect_stdout(output):
+            self.assertEqual(run_cli(["--repo", str(self.repo), "doctor", record.name]), 0)
+        shared.assert_called_once()
+        self.assertEqual(shared.call_args.kwargs, {"refresh": True})
+        self.assertIn("✅ Linux build tools", output.getvalue())
+
+    def test_capabilities_command_prefers_a_fresh_cached_report(self) -> None:
+        record = self.session()
+        save_session(record)
+        report, _ = self.collect(record)
+        write_report(record, report)
+        output = io.StringIO()
+        with mock.patch(
+            "scripts.msandbox.sessions.container_running", return_value=False
+        ) as running, mock.patch(
+            "scripts.msandbox.sessions.ensure_container"
+        ) as ensure, redirect_stdout(output):
+            self.assertEqual(
+                run_cli(["--repo", str(self.repo), "capabilities", record.name]), 0
+            )
+        ensure.assert_not_called()
+        running.assert_not_called()
+        self.assertIn("✅ Repository read/write", output.getvalue())
+
+    def test_redrawing_the_picker_never_starts_a_container(self) -> None:
+        record = self.session()
+        save_session(record)
+        with mock.patch(
+            "scripts.msandbox.sessions.container_running", return_value=False
+        ), mock.patch("scripts.msandbox.sessions.ensure_container") as ensure, mock.patch(
+            "scripts.msandbox.sessions.refresh_github_auth"
+        ) as auth, mock.patch(
+            "scripts.msandbox.agent_adapters.collect_report",
+            side_effect=lambda item, container_available=True: collect_report(
+                item,
+                run_container=FakeContainer(HEALTHY_CONTAINER),
+                run_host=fake_host,
+                container_available=container_available,
+            ),
+        ) as collected:
+            report = ensure_capability_report(record)
+        ensure.assert_not_called()
+        auth.assert_not_called()
+        self.assertEqual(collected.call_args.kwargs, {"container_available": False})
+        self.assertEqual(report.by_id("repo_rw").status, "unavailable")
+
+    # -- leaks --------------------------------------------------------------
+
+    def test_a_leaked_host_credential_turns_the_whole_result_red(self) -> None:
+        responses = tuple(
+            item for item in HEALTHY_CONTAINER if item[0] not in ("test -e", "aws configure list-profiles")
+        ) + (
+            ("aws configure list-profiles", 0, "default matcha-msandbox\n", ""),
+            (
+                "test -e",
+                0,
+                "LEAK /workspace/secrets/roonMT-arm.pem\nLEAK /var/run/docker.sock\n",
+                "",
+            ),
+        )
+        record = self.session()
+        save_session(record)
+        report, _ = self.collect(record, responses)
+        leaked = report.by_id("prod_admin")
+        self.assertEqual(leaked.status, "available")
+        self.assertIn("roonMT-arm.pem", leaked.detail)
+        self.assertIn("default", leaked.detail)
+        self.assertEqual({item.id for item in leaks(report)}, {"prod_admin", "signing_deploy"})
+        self.assertFalse(report_ok(report))
+        rendered = render_report_text(report, name=record.name)
+        self.assertIn("⚠️", rendered)
+        self.assertIn("LEAK: Production admin/secrets", rendered)
+        output = io.StringIO()
+        with mock.patch(
+            "scripts.msandbox.cli.ensure_capability_report", return_value=report
+        ), redirect_stdout(output):
+            self.assertEqual(run_cli(["--repo", str(self.repo), "doctor", record.name]), 1)
+
+    def test_a_visible_non_test_company_is_a_leak_not_a_capability(self) -> None:
+        self.configure_production_credentials()
+        responses = tuple(
+            item for item in HEALTHY_CONTAINER if item[0] != "service=matcha_prod_test"
+        ) + (("service=matcha_prod_test", 0, "matcha_test_agent\n41\n", ""),)
+        report, _ = self.collect(self.session(), responses)
+        self.assertEqual(report.by_id("prod_test_db").status, "unavailable")
+        self.assertEqual(report.by_id("non_test_mutation").status, "available")
+        self.assertFalse(report_ok(report))
 
 
 if __name__ == "__main__":

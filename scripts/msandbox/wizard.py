@@ -13,12 +13,14 @@ from pathlib import Path
 from typing import Callable, Sequence, TextIO, TypeVar
 
 from .agent_adapters import attach_agent
+from .capabilities import planned_capabilities, render_report_text
 from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session, session_home
 from .models import SessionRecord, SessionSpec
 from .session_auth import refresh_github_auth
 from .sessions import (
     create_session,
+    ensure_capability_report,
     reconcile_session,
     release_session,
     start_session,
@@ -328,8 +330,9 @@ def _new_session(
         f"{'browser' if playwright else 'development' if dev else 'agent only'} / "
         f"{'PR #' + str(pr_number) if pr_number else 'origin/main'}"
     )
+    planned = "\n".join(planned_capabilities(dev=dev, playwright=playwright))
     confirmed = choose(
-        f"Create {name}?\n  {summary}",
+        f"Create {name}?\n  {summary}\n\nPlanned capabilities\n{planned}",
         (("Create and open", True), ("Cancel", False)),
         reader=reader,
         output=output,
@@ -350,6 +353,12 @@ def _new_session(
     print(f"\nCreated {record.name}: {record.worktree_path}", file=output)
     if record.ports:
         print(f"Ports: {asdict(record.ports)}", file=output)
+    report = ensure_capability_report(record)
+    print("", file=output)
+    print(render_report_text(report, name=record.name), file=output)
+    # The agent takes over the terminal on attach. Let the operator read the
+    # measured report first rather than discovering it in scrollback.
+    _acknowledge(reader, output)
     if record.phase == "running":
         attach_agent(record)
 
@@ -386,6 +395,16 @@ def _run_validation(
     print(f"Report: {report.result_path}", file=output)
 
 
+def _session_menu_title(record: SessionRecord) -> str:
+    """Never open a session without showing what it can actually do."""
+    header = f"{record.name} — {record.agent} / {record.permission_mode} / {record.phase}"
+    try:
+        report = ensure_capability_report(record)
+    except (KeyError, RuntimeError, OSError) as exc:
+        return f"{header}\n\nCapabilities are unavailable: {exc}"
+    return f"{header}\n\n{render_report_text(report, name=record.name)}"
+
+
 def _open_session(
     record: SessionRecord,
     *,
@@ -394,7 +413,7 @@ def _open_session(
 ) -> None:
     while record.phase != "released":
         action = choose(
-            f"{record.name} — {record.agent} / {record.permission_mode} / {record.phase}",
+            _session_menu_title(record),
             (
                 ("Open agent", "open"),
                 ("Open shell", "shell"),
@@ -412,6 +431,8 @@ def _open_session(
         if action == "open":
             if record.phase != "running":
                 start_session(record)
+            else:
+                ensure_capability_report(record, refresh=True)
             attach_agent(record)
         elif action == "shell":
             refresh_github_auth(record)

@@ -69,6 +69,54 @@ Sessions without `--dev` publish no ports. `--dev` allocates a unique port set
 under a cross-process lock. Test runs add private PostgreSQL and Redis services;
 parallel sessions do not migrate or mutate the shared host development data.
 
+## Capabilities
+
+```bash
+msandbox capabilities payroll-fix
+msandbox capabilities payroll-fix --refresh
+```
+
+Selecting a session in the picker, confirming a new one, and `msandbox doctor`
+all render the same measured report:
+
+```text
+Capabilities for payroll-fix
+  ✅ Repository read/write     detached worktree at 4a91c02
+  ✅ Linux build tools         Python 3.12.7, Node v22.23.2, npm 10.9.2, …
+  ✅ GitHub CLI                octocat on tajaa/matcha; repository and Actions read
+  ❌ Production test database  no restricted production-test PostgreSQL service…
+  ❌ Non-test tenant mutation  denied by API and PostgreSQL
+```
+
+Rules that make the report worth trusting:
+
+- **Every `✅` was measured.** A probe exercises the real boundary — Chromium
+  launches and closes, `gh` performs an authenticated repository and Actions
+  read, the restricted database role is asked what it can see. An executable
+  merely existing never renders a check.
+- **A `❌` names the reason and the fallback**, so an unavailable capability is
+  actionable instead of mysterious.
+- **The last three rows are denied by design.** `Non-test tenant mutation`,
+  `Production admin/secrets`, and `Signing/deploy/merge` are asserted absent. A
+  probe that *finds* one of those identities renders `⚠️ … LEAK` and makes
+  `msandbox doctor` exit nonzero; it is never reported as a capability.
+- **One registry.** `scripts/msandbox/capabilities.py` backs the picker, the
+  CLI, and the agent's own context. There is no second probe list.
+
+The report is written as mode-600 JSON and Markdown to
+`/home/agent/.msandbox/capabilities.{json,md}` and injected into the agent
+before its first task — Claude Code through `--append-system-prompt-file`,
+Codex and OpenCode through their global instructions file in the session home.
+The agent is told to test the named invocation before claiming a capability is
+absent.
+
+Reports contain no credential, token, connection string, PEM path, response
+body, or unredacted command output. Probe output is redacted and truncated
+before it reaches the model at all.
+
+Redrawing the picker never starts a container. A stopped session reports every
+container probe as `the session container is not running` rather than guessing.
+
 ## Screenshots, PDFs, and dragged files
 
 ```bash
@@ -104,8 +152,10 @@ msandbox test payroll-fix --all --xcode all
 Passing `--browser` automatically upgrades that session to a
 Playwright-capable content-addressed image and reuses it on later runs.
 
-Doctor tests Node, npm, npx, pytest, and Vitest through the same login shell an
-agent subprocess uses. The image readiness marker prevents commands from
+`msandbox doctor SESSION` remeasures the capability report above and exits
+nonzero when a required capability is unavailable or a denied identity leaked
+into the session. It shares one probe registry with the picker; it does not
+keep a second list of checks. The image readiness marker prevents commands from
 racing first-use dependency initialization.
 
 `--changed` runs cheap targeted checks. `--pr` runs every relevant package's
