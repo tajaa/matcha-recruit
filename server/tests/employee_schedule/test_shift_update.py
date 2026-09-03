@@ -27,6 +27,7 @@ def test_break_mode_preserves_legacy_payloads_and_requires_manual_value():
     legacy = ShiftCreate(
         starts_at=starts_at,
         ends_at=datetime(2026, 8, 12, 16, 0, tzinfo=timezone.utc),
+        job_id=uuid4(),
         break_minutes=0,
     )
     assert legacy.break_mode is None

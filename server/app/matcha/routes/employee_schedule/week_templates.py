@@ -289,8 +289,10 @@ async def update_block(week_template_id: UUID, block_id: UUID, body: BlockUpdate
             return serialize_block(row)
         set_sql, params = build_patch(patch, first_param=3, casts={"days_of_week": "jsonb"})
         async with conn.transaction():
-            await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
-            await assert_job_in_company(conn, company_id, patch.get("job_id"))
+            tpl = await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
+            await assert_job_in_company(
+                conn, company_id, patch.get("job_id"), location_id=tpl["location_id"],
+            )
             row = await conn.fetchrow(
                 f"""
                 UPDATE schedule_shift_templates SET {set_sql}, updated_at = NOW()
@@ -389,7 +391,9 @@ async def _fetch_blocks(conn, week_template_id: UUID) -> list[dict]:
 
 
 async def _insert_block(conn, company_id: UUID, week_template_id: UUID, location_id, body: BlockCreate, actor_id):
-    await assert_job_in_company(conn, company_id, body.job_id)
+    # Scoped to the template's location: a block carrying another store's job
+    # would generate concrete shifts that create_shift itself would 422.
+    await assert_job_in_company(conn, company_id, body.job_id, location_id=location_id)
     row = await conn.fetchrow(
         f"""
         INSERT INTO schedule_shift_templates

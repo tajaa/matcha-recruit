@@ -17,7 +17,8 @@ from app.matcha.models.scheduling.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange, DuplicateShift,
 )
 from ...services.scheduling.schedule_rules import (
-    build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
+    build_patch, compliance_relevant_patch, job_changed,
+    summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
 from ...services.scheduling import schedule_compliance, schedule_eligibility, schedule_intelligence
 from ...services.scheduling.shift_writes import create_shift_core
@@ -348,7 +349,9 @@ async def create_shift(body: ShiftCreate,
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
-        await assert_job_in_company(conn, company_id, body.job_id)
+        await assert_job_in_company(
+            conn, company_id, body.job_id, location_id=body.location_id,
+        )
         plan_employee_ids = list(dict.fromkeys(body.employee_ids)) or [None]
         break_plans = await _resolve_break_plans_for_ids(
             conn, company_id, location_id=body.location_id,
@@ -450,6 +453,13 @@ async def create_shift(body: ShiftCreate,
                 force=force,
             )
         async with conn.transaction():
+            # Re-check the job's LOCATION under a row lock: create_shift_core
+            # derives the role label from the same locked row, but only this
+            # call knows which location the shift is being written to.
+            await assert_job_in_company(
+                conn, company_id, body.job_id, location_id=body.location_id,
+                lock=True,
+            )
             # Re-check conflicts under transaction-scoped employee locks in a
             # stable order.  The earlier pass provides detailed validation;
             # this pass closes the gap between that snapshot and insertion.
@@ -463,7 +473,7 @@ async def create_shift(body: ShiftCreate,
                         raise_conflict(employee_id, conflicts)
             shift_id = await create_shift_core(
                 conn, company_id,
-                location_id=body.location_id, role=body.role, department=body.department,
+                location_id=body.location_id, department=body.department,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=effective_break, required_staff=body.required_staff,
                 color=body.color, notes=body.notes, kind=body.kind, job_id=body.job_id,
@@ -625,8 +635,14 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             return await fetch_shift_by_id(conn, company_id, shift_id)
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
-        if "job_id" in patch:
-            await assert_job_in_company(conn, company_id, patch["job_id"])
+        shift_job_changed = job_changed(patch, existing)
+        if shift_job_changed:
+            # Same scope rule as create: a job from another store can't be
+            # attached by editing a shift into it.
+            await assert_job_in_company(
+                conn, company_id, patch["job_id"],
+                location_id=patch.get("location_id", existing["location_id"]),
+            )
 
         new_status = patch.get("status", existing["status"])
         publishing = new_status == "published" and existing["status"] != "published"
@@ -653,8 +669,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         # double-book everyone already on it, so it takes the same guard + force.
         # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
-        compliance_relevant = auto_break_requested or (
-            retimed or "break_minutes" in patch or "location_id" in patch or "job_id" in patch
+        compliance_relevant = compliance_relevant_patch(
+            patch, existing, retimed=retimed, auto_break_requested=auto_break_requested,
         )
         # Fair Workweek notice/clopening obligations attach to a POSTED shift's
         # timing changing, not to break/location edits alone — only pass the
@@ -802,6 +818,16 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         "message": "The shift changed while you were editing it. Reload and try again.",
                     },
                 )
+            if shift_job_changed:
+                # role is the job's canonical label, never a free-text string
+                # that can drift from it — including on the way to NULL, where
+                # a kept label would describe a job the shift no longer has.
+                locked_job = await assert_job_in_company(
+                    conn, company_id, patch["job_id"],
+                    location_id=patch.get("location_id", existing["location_id"]),
+                    lock=True,
+                )
+                patch["role"] = locked_job["name"] if locked_job else None
             if compliance_relevant and new_status != "cancelled":
                 locked_break = int(locked_shift["break_minutes"] or 0)
                 locked_assignees = await conn.fetch(

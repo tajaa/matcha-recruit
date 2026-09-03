@@ -180,13 +180,43 @@ async def fetch_availability(
     return out
 
 
+async def resolve_job_by_name(
+    conn, company_id: UUID, name: Optional[str], *, location_id: Optional[UUID] = None,
+):
+    """The job a free-text role label names, or None.
+
+    Chat and template-free generation let a manager type a label ("opener").
+    When that label IS one of the company's jobs, the shift should carry the
+    job — otherwise those paths keep minting the ungated, free-text-role rows
+    the REST route now refuses, and the two halves of the data model never
+    converge. A label that matches nothing stays free text: refusing it would
+    break "@huume add an opener Tuesday" for a company that never named one.
+
+    Location-scoped jobs win over company-wide ones, and a request with no
+    location matches only company-wide jobs — the same scope rule
+    assert_job_in_company enforces on the REST path.
+    """
+    if not name or not name.strip():
+        return None
+    return await conn.fetchrow(
+        """
+        SELECT id, name FROM schedule_jobs
+        WHERE company_id = $1 AND lower(name) = lower($2)
+          AND (location_id IS NULL OR location_id = $3)
+        ORDER BY location_id NULLS LAST
+        LIMIT 1
+        """,
+        company_id, name.strip(), location_id,
+    )
+
+
 async def create_shift_core(
     conn,
     company_id: UUID,
     *,
     location_id: Optional[UUID],
-    role: Optional[str],
-    department: Optional[str],
+    role: Optional[str] = None,
+    department: Optional[str] = None,
     starts_at: datetime,
     ends_at: datetime,
     break_minutes: int,
@@ -250,6 +280,21 @@ async def create_shift_core(
             "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
             location_id, company_id,
         ) or "UTC"
+
+    if job_id is not None:
+        # THE choke point for the role label: a shift that carries a job is
+        # labelled with that job's current name, whatever the caller passed.
+        # Route, chat and week generation all land here, so the invariant
+        # cannot be true on one path and false on another.
+        job_name = await conn.fetchval(
+            "SELECT name FROM schedule_jobs WHERE id = $1 AND company_id = $2 FOR SHARE",
+            job_id, company_id,
+        )
+        # A job that isn't this company's degrades to the caller's own label
+        # rather than raising, matching check_job_qualification's treatment of
+        # a stale job_id — the routes validate tenancy before they get here.
+        if job_name is not None:
+            role = job_name
 
     shift_id = await conn.fetchval(
         """

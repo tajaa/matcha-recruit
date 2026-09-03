@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import EmployeeSchedule from './EmployeeSchedule'
+import {
+  NO_ROLES_MESSAGE, ROLE_REQUIRED_MESSAGE,
+} from '../../../components/employees/schedule-editor/roleSelection'
 
 const {
   createShiftMock,
@@ -11,6 +14,7 @@ const {
   deleteWeekTemplateMock,
   fetchWeekMock,
   fetchWeekTemplatesMock,
+  fetchJobsMock,
   publishRangeMock,
   replaceWeekTemplateMock,
   updateShiftMock,
@@ -23,6 +27,7 @@ const {
   deleteWeekTemplateMock: vi.fn(),
   fetchWeekMock: vi.fn(),
   fetchWeekTemplatesMock: vi.fn(),
+  fetchJobsMock: vi.fn(),
   publishRangeMock: vi.fn(),
   replaceWeekTemplateMock: vi.fn(),
   updateShiftMock: vi.fn(),
@@ -55,6 +60,7 @@ vi.mock('../../../api/employees/employeeSchedule', () => ({
   fetchRequests: vi.fn().mockResolvedValue({ requests: [] }),
   fetchWeek: fetchWeekMock,
   fetchWeekTemplates: fetchWeekTemplatesMock,
+  fetchJobs: fetchJobsMock,
   generateFromWeekTemplate: vi.fn(),
   publishRange: publishRangeMock,
   replaceWeekTemplate: replaceWeekTemplateMock,
@@ -117,6 +123,10 @@ describe('EmployeeSchedule break planning', () => {
       summary: { total_shifts: 1, published: 0, draft: 1, open_shifts: 1, assigned: 0 },
     })
     fetchWeekTemplatesMock.mockResolvedValue({ week_templates: [] })
+    fetchJobsMock.mockResolvedValue({ jobs: [{
+      id: 'job-1', name: 'Barista', location_id: 'loc-1', color: null, notes: null,
+      credential_grace_days: null, employee_ids: [], credential_requirements: [],
+    }] })
     createShiftMock.mockReset()
     updateShiftMock.mockImplementation(async (_id: string, payload: { break_minutes?: number }) => ({
       ...shift,
@@ -167,6 +177,52 @@ describe('EmployeeSchedule break planning', () => {
     fireEvent.change(screen.getByLabelText('Staff needed'), { target: { value: '0' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(await screen.findByText('Staff needed must be a whole number from 1 to 99')).toBeInTheDocument()
+    expect(createShiftMock).not.toHaveBeenCalled()
+  })
+
+  it('requires and persists a role from the location job list', async () => {
+    createShiftMock.mockResolvedValue({ ...shift, role: 'Barista', job_id: 'job-1' })
+    fetchWeekMock
+      .mockResolvedValueOnce({
+        week_start: '2026-08-30', location_id: 'loc-1', shifts: [], roster: [], roster_flags: null,
+        summary: { total_shifts: 0, published: 0, draft: 0, open_shifts: 0, assigned: 0 },
+      })
+      .mockResolvedValue({
+        week_start: '2026-08-30', location_id: 'loc-1',
+        shifts: [{ ...shift, role: 'Barista', job_id: 'job-1' }], roster: [], roster_flags: null,
+        summary: { total_shifts: 1, published: 0, draft: 1, open_shifts: 1, assigned: 0 },
+      })
+    renderSchedule()
+
+    const dayHeading = await screen.findByText('Sun 8/30')
+    fireEvent.click(dayHeading.parentElement!.querySelector('button')!)
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    // One wording for one failure — the toast and the inline alert used to
+    // disagree, with a third variant in ShiftInspector.
+    expect(await screen.findByRole('alert')).toHaveTextContent(ROLE_REQUIRED_MESSAGE)
+    expect(createShiftMock).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: 'job-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    await waitFor(() => expect(createShiftMock).toHaveBeenCalledWith(expect.objectContaining({
+      job_id: 'job-1', role: 'Barista', location_id: 'loc-1',
+    })))
+    expect(await screen.findByText('Barista', { selector: 'div' })).toBeInTheDocument()
+  })
+
+  it('cannot submit a new shift at a location with no roles', async () => {
+    // The amber prompt was the only signal: Add stayed clickable and the click
+    // just toasted an error.
+    fetchJobsMock.mockResolvedValue({ jobs: [] })
+    renderSchedule()
+
+    const dayHeading = await screen.findByText('Sun 8/30')
+    fireEvent.click(dayHeading.parentElement!.querySelector('button')!)
+
+    expect(await screen.findByText(NO_ROLES_MESSAGE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled()
     expect(createShiftMock).not.toHaveBeenCalled()
   })
 

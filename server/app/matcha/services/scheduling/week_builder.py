@@ -27,6 +27,7 @@ from .shift_writes import (
     find_conflicts,
     lock_scheduling_employees,
     log_audit,
+    resolve_job_by_name,
 )
 
 
@@ -332,7 +333,7 @@ async def _preflight_compliance_blocks(
                 violations = await check_shift_compliance(
                     conn, company_id,
                     location_id=location_id,
-                    job_id=UUID(shift["job_id"]) if shift.get("job_id") else None,
+                    job_id=job_id,
                     starts_at=datetime.fromisoformat(shift["starts_at"]),
                     ends_at=datetime.fromisoformat(shift["ends_at"]),
                     break_minutes=int(shift.get("break_minutes") or 0),
@@ -1004,6 +1005,15 @@ async def apply_week_draft(
                     shift_id_by_key[shift["key"]] = live["id"]
                     touched_shift_ids.append(live["id"])
                     continue
+                job_id = UUID(shift["job_id"]) if shift.get("job_id") else None
+                if job_id is None:
+                    # A legacy block with a free-text role and no job still
+                    # names a real job often enough to be worth resolving —
+                    # generated shifts then match what the REST path writes.
+                    matched_job = await resolve_job_by_name(
+                        conn, company_id, shift.get("role"), location_id=location_id,
+                    )
+                    job_id = matched_job["id"] if matched_job else None
                 new_id = await create_shift_core(
                     conn, company_id, location_id=location_id, role=shift.get("role"),
                     department=shift.get("department"), starts_at=datetime.fromisoformat(shift["starts_at"]),
@@ -1013,7 +1023,7 @@ async def apply_week_draft(
                     notes=shift.get("notes"), kind=shift.get("kind") or "work",
                     template_id=UUID(shift["template_id"]) if shift.get("template_id") else None,
                     series_id=series_id,
-                    job_id=UUID(shift["job_id"]) if shift.get("job_id") else None,
+                    job_id=job_id,
                     training_requirement_id=(
                         UUID(shift["training_requirement_id"])
                         if shift.get("training_requirement_id") else None

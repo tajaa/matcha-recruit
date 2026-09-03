@@ -3,6 +3,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from app.matcha.services.scheduling.schedule_rules import (
+    compliance_relevant_patch, job_changed,
+)
 from app.matcha.services.scheduling.schedule_eligibility import (
     _schedule_blocking_requirements,
     local_date_at,
@@ -12,6 +15,9 @@ from app.matcha.services.scheduling.schedule_eligibility import (
     schedule_eligibility_roster_flags,
     schedule_eligibility_violations,
 )
+
+
+JOB = uuid4()
 
 
 def test_local_date_uses_location_timezone_and_falls_back_to_utc():
@@ -128,9 +134,45 @@ def test_shift_job_change_rechecks_existing_assignments():
     shifts = Path(__file__).parents[2] / "app/matcha/routes/employee_schedule/shifts.py"
     source = shifts.read_text()
     assert "kind, training_requirement_id, job_id" in source
-    assert 'or "job_id" in patch' in source
     assert "unqualified = await check_job_qualification(" in source
     assert "starts_at=new_start" in source
+    # The rule itself is asserted on behaviour below, not on this file's text:
+    # a job CHANGE re-runs the pass, a job merely resent does not.
+    assert compliance_relevant_patch(
+        {"job_id": JOB}, {"job_id": None}, retimed=False, auto_break_requested=False,
+    )
+
+
+def test_resending_an_unchanged_job_is_not_compliance_relevant():
+    # The editor sends job_id on every save. Reading "sent" as "changed" made a
+    # notes-only edit re-run break minimums, conflicts, availability and Fair
+    # Workweek — and 422/409 saves that used to go through.
+    existing = {"job_id": JOB}
+
+    assert not compliance_relevant_patch(
+        {"job_id": JOB, "notes": "restock the back bar"}, existing,
+        retimed=False, auto_break_requested=False,
+    )
+    assert not job_changed({"job_id": JOB}, existing)
+
+
+def test_clearing_a_job_is_a_change():
+    assert job_changed({"job_id": None}, {"job_id": JOB})
+
+
+def test_an_omitted_job_is_never_a_change():
+    assert not job_changed({"notes": "x"}, {"job_id": JOB})
+
+
+def test_retime_break_and_location_stay_compliance_relevant():
+    existing = {"job_id": JOB}
+    for patch, kwargs in (
+        ({}, {"retimed": True, "auto_break_requested": False}),
+        ({}, {"retimed": False, "auto_break_requested": True}),
+        ({"break_minutes": 30}, {"retimed": False, "auto_break_requested": False}),
+        ({"location_id": None}, {"retimed": False, "auto_break_requested": False}),
+    ):
+        assert compliance_relevant_patch(patch, existing, **kwargs)
 
 
 def test_schedule_feature_no_longer_requires_matcha_ops():

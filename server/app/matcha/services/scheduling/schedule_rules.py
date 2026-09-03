@@ -213,6 +213,38 @@ def job_qualification_detail(employee_id: UUID, job_id: UUID, job_name: str) -> 
     }
 
 
+def job_changed(patch: dict, existing) -> bool:
+    """True only when a PATCH actually moves the shift to a different job.
+
+    The schedule editor sends job_id on every save, so "the caller sent it" is
+    not "it changed" — reading the two as the same re-runs the entire
+    compliance pass (break minimum, conflicts, availability, Fair Workweek) on
+    an edit that only touched the notes, and can 422/409 a save that used to
+    go through silently.
+    """
+    return "job_id" in patch and patch["job_id"] != existing["job_id"]
+
+
+def compliance_relevant_patch(
+    patch: dict, existing, *, retimed: bool, auto_break_requested: bool,
+) -> bool:
+    """Whether a shift PATCH has to re-run the compliance pass.
+
+    Retiming a staffed shift can double-book everyone on it; a break, location
+    or job change moves the meal-break minimum, the jurisdiction, or who is
+    qualified. `location_id` and `break_minutes` are deliberately still tested
+    for PRESENCE, not for change — that is long-standing behaviour and the
+    clients that send them only send them on edit.
+    """
+    return bool(
+        auto_break_requested
+        or retimed
+        or "break_minutes" in patch
+        or "location_id" in patch
+        or job_changed(patch, existing)
+    )
+
+
 def shift_window_on_date(starts_at: datetime, ends_at: datetime, target: date) -> tuple[datetime, datetime]:
     """The same shift window re-anchored to `target`: preserves time-of-day
     and duration, so an overnight shift keeps its +1-day end. Pure day

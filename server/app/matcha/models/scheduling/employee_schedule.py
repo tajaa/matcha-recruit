@@ -47,7 +47,10 @@ Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
 class ShiftCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime
-    role: Optional[str] = Field(None, max_length=150)
+    # No `role`: it is derived from job_id, not sent. Declaring it would put a
+    # field in the OpenAPI schema that the route silently discards. Pydantic
+    # ignores it if an older client still sends one, and that client gets the
+    # job's name back — which is the label it should have had.
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
     break_minutes: int = Field(0, ge=0, le=1440)
@@ -58,10 +61,10 @@ class ShiftCreate(BaseModel):
     required_staff: int = Field(1, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
-    # Which job this shift is (Box Office, Concessions, ...) — None means
-    # ungated, anyone can be assigned. Enforced (forceable) at assignment
-    # time, not here.
-    job_id: Optional[UUID] = None
+    # Every manually created shift must identify the company job it represents
+    # (Box Office, Concessions, ...). The route verifies tenant/location scope
+    # and uses the job's current name as the persisted role label.
+    job_id: UUID
     # Employees to assign up front (optional).
     employee_ids: list[UUID] = Field(default_factory=list, max_length=99)
     # 'training' ties the shift to a training_requirement — assigning an

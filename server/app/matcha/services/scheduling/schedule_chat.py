@@ -69,8 +69,8 @@ from .shift_compliance import _approved_db_rules, _fair_workweek_advisories, _we
 from .shift_writes import (
     apply_assignment_core, cancel_shift_core, create_shift_core, fetch_availability,
     find_conflicts, generate_week_template_shifts, log_audit, remove_assignment_core,
-    lock_scheduling_employees, removal_audit_details, restore_assignment_raw,
-    retime_shift_core,
+    lock_scheduling_employees, removal_audit_details, resolve_job_by_name,
+    restore_assignment_raw, retime_shift_core,
 )
 
 logger = logging.getLogger(__name__)
@@ -773,7 +773,15 @@ async def build_proposal(
             # column, `find_shift_coverage`'s role filter).
             role = spec["role"] or req["label"]
             template_id = None
-            job_id = None
+            # When the manager's own label names a real job, carry the job —
+            # a conversational create should not keep producing the ungated,
+            # free-text rows the REST route refuses. No match stays free text.
+            matched_job = await resolve_job_by_name(
+                conn, company_id, role, location_id=location_id,
+            )
+            job_id = matched_job["id"] if matched_job else None
+            if matched_job:
+                role = matched_job["name"]
         else:
             return await _clarify(f"What hours should the {req['label']} run?")
 
