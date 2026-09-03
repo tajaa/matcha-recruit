@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import AppLayout from '../layouts/AppLayout'
 import TenantSidebar from '../components/sidebars/TenantSidebar'
 import { FeatureGate } from '../components/shared/FeatureGate'
@@ -61,6 +61,24 @@ import { LegacyOpsRedirect } from '../work/pages/LegacySurfaceRedirect'
 import SafetyMeetings from '../pages/app/safety-meetings/SafetyMeetings'
 import SafetyMeetingRecord from '../pages/app/safety-meetings/SafetyMeetingRecord'
 import SafetyMeetingDetail from '../pages/app/safety-meetings/SafetyMeetingDetail'
+import { useMe } from '../hooks/useMe'
+
+export function CredentialTemplatesRoute() {
+  const { me, loading } = useMe()
+
+  if (loading) {
+    return <div role="status" className="p-6 text-sm text-w-dim">Checking access…</div>
+  }
+  if (me?.profile?.signup_source === 'matcha_compliance') {
+    return <Navigate to="/app/compliance" replace />
+  }
+
+  return (
+    <FeatureGate feature="credential_templates" label="Credential Templates">
+      <CredentialTemplates />
+    </FeatureGate>
+  )
+}
 
 export default function AppRoutes() {
   return (
@@ -113,7 +131,7 @@ export default function AppRoutes() {
         <Route path="training/:requirementId" element={<FeatureGate feature="training" label="Training"><TrainingDetail /></FeatureGate>} />
         <Route path="ask-expert" element={<AskExpert />} />
         <Route path="risk-assessment" element={<FeatureGate feature="risk_assessment" label="Risk Assessment"><RiskAssessment /></FeatureGate>} />
-        <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
+        <Route path="credential-templates" element={<CredentialTemplatesRoute />} />
         <Route path="workforce-compliance" element={<FeatureGate feature="workforce_compliance" label="Workforce Compliance"><WorkforceCompliance /></FeatureGate>} />
         <Route path="risk-profile" element={<FeatureGate feature="risk_profile" label="Risk Profile"><RiskProfile /></FeatureGate>} />
         <Route path="resident-care" element={<FeatureGate feature="resident_care" label="Resident-Care Risk"><ResidentCare /></FeatureGate>} />
