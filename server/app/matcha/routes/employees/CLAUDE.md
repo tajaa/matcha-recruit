@@ -15,7 +15,7 @@ Backend routes for employee management. Package was split from a 5,425-line flat
 | `bulk_upload.py` | Bulk CSV upload (employees + credentials-only) + templates | 4 |
 | `leave.py` | Per-employee leave eligibility + place-on-leave | 2 |
 | `incidents.py` | Per-employee incidents endpoints | 2 |
-| `credentials.py` | Healthcare credentials + credential-document upload/review | 8 |
+| `credentials.py` | Healthcare credentials + credential-document upload/review (**ungated on purpose** — see below) | 8 |
 | `oig.py` | OIG LEIE exclusion screening | 4 |
 | `pto_admin.py` | **Sibling router `pto_admin_router`** — PTO admin endpoints | 3 |
 | `leave_admin.py` | **Sibling router `leave_admin_router`** — leave admin endpoints | 9 |
@@ -30,6 +30,20 @@ The package exposes **three** routers from `__init__.py`:
 3. `leave_admin_router` — sibling, NOT included into `router`. Mounted at `/employees/leave` in `routes/__init__.py`.
 
 The two sibling routers share the `require_feature("time_off")` mount-time gate. The leave admin's `/eligibility`, `/deadlines`, `/notices` sub-endpoints add a per-route `require_feature("compliance")` dependency on top.
+
+## Credentials are not gated on `credential_templates`
+
+`credentials.py` is included with no `require_feature` dependency, and that is
+deliberate. Two ungated surfaces call these endpoints for tenants that have
+`employees` but not `credential_templates` (default-off, Matcha-X/Pro only):
+
+- the employee **Onboarding** tab (`client/src/components/employees/OnboardingTaskList.tsx` → `useCredentialDocuments().upload`), and
+- the **employee portal** (`routes/employee_portal/credential_documents.py`, itself ungated) — gating only the admin side would let an employee upload a document no admin could list, approve or download.
+
+`credential_templates` gates the *template/requirement* surface, not credential
+documents themselves. Reverted 2026-09-03 after PR #420 added a subrouter-wide
+gate; the front-end `credentials` tab in `EmployeeDetail.tsx` stays unconditional
+for the same reason.
 
 ## Package router pattern
 
