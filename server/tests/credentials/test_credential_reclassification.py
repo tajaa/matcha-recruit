@@ -62,6 +62,13 @@ class _Connection:
         self.calls.append(("execute", query, args))
         return "OK"
 
+    async def fetch(self, query, *args):
+        # Reclassify re-reads through the shared is_current projection
+        # (server/app/matcha/routes/employees/credentials.py:_fetch_credential_documents)
+        # rather than trusting the RETURNING row's stale default.
+        self.calls.append(("fetch", query, args))
+        return [{**self.document, "is_current": self.document["review_status"] == "approved"}]
+
 
 def _connection_context(conn):
     @asynccontextmanager

@@ -22,6 +22,12 @@ type DocumentTypeOption = {
   hasExpiration: boolean
 }
 
+/** Newest first: approval time when the document has one, upload time otherwise. */
+function byRecencyDesc(a: CredentialDocument, b: CredentialDocument) {
+  return new Date(b.reviewed_at ?? b.created_at).getTime()
+    - new Date(a.reviewed_at ?? a.created_at).getTime()
+}
+
 function ExpirationBadge({ date }: { date: string | null }) {
   if (!date) return null
   const exp = new Date(date)
@@ -65,15 +71,19 @@ function DocumentCard({
   onDelete,
   documentTypeOptions,
   requiresExpiration = false,
+  contextLabel,
 }: {
   doc: CredentialDocument
-  onApprove: (expirationDate?: string) => void
+  /** Omitted for historical documents: approving one would re-point the
+      requirement at a superseded file and demote the current credential. */
+  onApprove?: (expirationDate?: string) => void
   onReject: () => void
   onReclassify: (documentType: string, expirationDate?: string) => void
   onDownload: () => void
   onDelete: () => void
   documentTypeOptions: DocumentTypeOption[]
   requiresExpiration?: boolean
+  contextLabel?: 'Current' | 'History'
 }) {
   const [confirming, setConfirming] = useState(false)
   const [approving, setApproving] = useState(false)
@@ -81,7 +91,7 @@ function DocumentCard({
   const [reclassifying, setReclassifying] = useState(false)
   const [documentType, setDocumentType] = useState(doc.document_type)
   const needsExpirationConfirmation = requiresExpiration && !doc.expires_at
-  const canApprove = doc.review_status === 'pending' || (doc.review_status === 'approved' && needsExpirationConfirmation)
+  const canApprove = !!onApprove && (doc.review_status === 'pending' || (doc.review_status === 'approved' && needsExpirationConfirmation))
   const selectedType = documentTypeOptions.find((option) => option.value === documentType)
   const reclassificationRequiresExpiration = selectedType?.hasExpiration ?? documentType === 'food_handler_card'
 
@@ -94,6 +104,7 @@ function DocumentCard({
             <Badge variant={REVIEW_VARIANT[doc.review_status] ?? 'neutral'}>
               {doc.review_status}
             </Badge>
+            {contextLabel && <Badge variant={contextLabel === 'Current' ? 'success' : 'neutral'}>{contextLabel}</Badge>}
             {doc.expires_at && <ExpirationBadge date={doc.expires_at} />}
           </div>
           <p className="text-[11px] text-zinc-500">
@@ -135,7 +146,7 @@ function DocumentCard({
             <Input label="Card expiration" type="date" value={expirationDate} onChange={(event) => setExpirationDate(event.target.value)} />
           )}
           <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => { onApprove(expirationDate || undefined); setApproving(false) }} disabled={requiresExpiration && !expirationDate}>
+            <Button size="sm" onClick={() => { onApprove?.(expirationDate || undefined); setApproving(false) }} disabled={requiresExpiration && !expirationDate}>
               Confirm approval
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setApproving(false)}>Cancel</Button>
@@ -170,18 +181,24 @@ function DocumentCard({
 function UploadZone({
   documentType,
   onUpload,
+  label = 'Upload credential',
 }: {
   documentType: string
   onUpload: (file: File, type: string) => Promise<void>
+  label?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [error, setError] = useState('')
 
   const handleFile = async (file: File) => {
     setUploading(true)
+    setError('')
     try {
       await onUpload(file, documentType)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setUploading(false)
     }
@@ -217,10 +234,11 @@ function UploadZone({
         <p className="text-xs text-zinc-400">Uploading...</p>
       ) : (
         <p className="text-xs text-zinc-500">
-          Drop file or <span className="text-emerald-400 underline">browse</span>
+          {label}: drop file or <span className="text-emerald-400 underline">browse</span>
           <span className="block text-[10px] text-zinc-600 mt-0.5">PDF, PNG, JPG up to 10MB</span>
         </p>
       )}
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </div>
   )
 }
@@ -459,7 +477,12 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
       {/* Document sections by type */}
       {allTypes.map((docType) => {
         const docs = docsByType[docType] ?? []
-        const hasApproved = docs.some((d) => d.review_status === 'approved')
+        const currentDocuments = docs.filter((d) => d.is_current)
+        const reviewDocuments = docs.filter((d) => d.review_status !== 'approved')
+        const historyDocuments = docs
+          .filter((d) => d.review_status === 'approved' && !d.is_current)
+          .sort(byRecencyDesc)
+        const hasCurrent = currentDocuments.length > 0
         const req = reqByType[docType]
         const requirementExpired = !!req?.expires_at && new Date(`${req.expires_at}T00:00:00`).getTime() < new Date().setHours(0, 0, 0, 0)
         const isVerifiedViaData = req?.status === 'verified' && !requirementExpired && docs.length === 0
@@ -470,10 +493,10 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
               <h4 className="text-xs font-medium text-zinc-300">
                 {req?.credential_type_label || (DOC_TYPE_LABELS[docType] ?? docType)}
               </h4>
-              {(hasApproved || isVerifiedViaData) && !requirementExpired && <Badge variant="success">Verified</Badge>}
+              {(hasCurrent || isVerifiedViaData) && !requirementExpired && <Badge variant="success">Verified</Badge>}
               {requirementExpired && <Badge variant="danger">Expired</Badge>}
-              {!hasApproved && !isVerifiedViaData && docs.length > 0 && <Badge variant="warning">Pending Review</Badge>}
-              {!hasApproved && !isVerifiedViaData && docs.length === 0 && <Badge variant="neutral">Not uploaded</Badge>}
+              {!hasCurrent && !isVerifiedViaData && reviewDocuments.length > 0 && <Badge variant="warning">Pending Review</Badge>}
+              {!hasCurrent && !isVerifiedViaData && reviewDocuments.length === 0 && <Badge variant="neutral">Not uploaded</Badge>}
               {req && !req.is_required && <span className="text-[10px] text-zinc-600">Optional</span>}
             </div>
 
@@ -482,9 +505,23 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
               <CredentialDataInline docType={docType} credentials={credentials} />
             )}
 
-            {docs.length > 0 && (
+            {(currentDocuments.length > 0 || reviewDocuments.length > 0) && (
               <div className="space-y-2 mb-2">
-                {docs.map((doc) => (
+                {currentDocuments.map((doc) => (
+                  <DocumentCard
+                    key={doc.id}
+                    doc={doc}
+                    onApprove={(expirationDate) => approve(doc.id, expirationDate)}
+                    onReject={() => reject(doc.id)}
+                    onReclassify={(documentType, expirationDate) => reclassify(doc.id, documentType, expirationDate)}
+                    onDownload={() => download(doc.id)}
+                    onDelete={() => remove(doc.id)}
+                    documentTypeOptions={documentTypeOptions}
+                    requiresExpiration={req?.has_expiration ?? doc.document_type === 'food_handler_card'}
+                    contextLabel="Current"
+                  />
+                ))}
+                {reviewDocuments.map((doc) => (
                   <DocumentCard
                     key={doc.id}
                     doc={doc}
@@ -500,8 +537,36 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
               </div>
             )}
 
-            {!hasApproved && !isVerifiedViaData && (
-              <UploadZone documentType={docType} onUpload={handleUpload} />
+            {historyDocuments.length > 0 && (
+              <div className="mb-2">
+                <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">History</p>
+                <div className="space-y-2">
+                  {historyDocuments.map((doc) => (
+                    <DocumentCard
+                      key={doc.id}
+                      doc={doc}
+                      onReject={() => reject(doc.id)}
+                      onReclassify={(documentType, expirationDate) => reclassify(doc.id, documentType, expirationDate)}
+                      onDownload={() => download(doc.id)}
+                      onDelete={() => remove(doc.id)}
+                      documentTypeOptions={documentTypeOptions}
+                      requiresExpiration={req?.has_expiration ?? doc.document_type === 'food_handler_card'}
+                      contextLabel="History"
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Upload only where the backend accepts one: a materialized
+                requirement, or a type in the server's VALID_DOCUMENT_TYPES set
+                (mirrored by DOC_TYPE_LABELS). Legacy/removed types 400. */}
+            {(!!req || DOC_TYPE_LABELS[docType] !== undefined) && (
+              <UploadZone
+                documentType={docType}
+                onUpload={handleUpload}
+                label={hasCurrent || isVerifiedViaData ? 'Add replacement credential' : 'Upload credential'}
+              />
             )}
           </div>
         )
