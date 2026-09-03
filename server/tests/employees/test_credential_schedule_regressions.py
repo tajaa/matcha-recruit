@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest import mock
 from uuid import uuid4
@@ -226,3 +226,70 @@ def test_document_removal_preserves_last_confirmed_expiry_for_worker_enforcement
     route_source = inspect.getsource(employee_credentials.delete_credential_document)
     requirement_update = route_source.split("UPDATE employee_credential_requirements", 1)[1]
     assert "expires_at = NULL" not in requirement_update
+
+
+class ListCredentialDocumentsConn:
+    def __init__(self, rows):
+        self.rows = rows
+        self.list_query = ""
+
+    async def fetchval(self, query, *_args):
+        assert "FROM employees" in query
+        return uuid4()
+
+    async def fetch(self, query, *_args):
+        self.list_query = query
+        return self.rows
+
+
+def _credential_document_row(*, current: bool, filename: str):
+    now = datetime(2026, 9, 3, 8, 0, 0)
+    return {
+        "id": uuid4(),
+        "company_id": uuid4(),
+        "employee_id": uuid4(),
+        "document_type": "medical_license",
+        "filename": filename,
+        "file_path": f"private/{filename}",
+        "mime_type": "application/pdf",
+        "file_size": 100,
+        "extracted_data": {"fields": {"license_number": {"value": "ABC123"}}},
+        "extraction_status": "extracted",
+        "review_status": "approved",
+        "reviewed_by": None,
+        "reviewed_at": now,
+        "review_notes": None,
+        "uploaded_by": None,
+        "uploaded_via": "admin",
+        "created_at": now,
+        "updated_at": now,
+        "expires_at": date(2027, 9, 3),
+        "is_current": current,
+    }
+
+
+def test_credential_document_list_distinguishes_current_from_history():
+    company_id, employee_id = uuid4(), uuid4()
+    conn = ListCredentialDocumentsConn([
+        _credential_document_row(current=True, filename="replacement.pdf"),
+        _credential_document_row(current=False, filename="original.pdf"),
+    ])
+
+    with (
+        mock.patch.object(
+            employee_credentials, "get_client_company_id",
+            mock.AsyncMock(return_value=company_id),
+        ),
+        mock.patch.object(
+            employee_credentials, "get_connection",
+            return_value=_ConnectionContext(conn),
+        ),
+    ):
+        documents = asyncio.run(employee_credentials.list_credential_documents(
+            employee_id=employee_id,
+            current_user=SimpleNamespace(id=uuid4()),
+        ))
+
+    assert [document["is_current"] for document in documents] == [True, False]
+    assert "employee_credential_requirements" in conn.list_query
+    assert "END AS is_current" in conn.list_query

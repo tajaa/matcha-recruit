@@ -11,6 +11,10 @@ included into the main router.
 
 External import path `app.matcha.routes.employees` stable.
 """
+from fastapi import Depends
+
+from app.matcha.dependencies import require_feature
+
 from .crud import router, EmployeeCreateRequest
 from ._shared import _refresh_risk_assessment
 from .pto_admin import router as pto_admin_router
@@ -26,7 +30,11 @@ from .invitations import router as _invitations_router; router.include_router(_i
 from .bulk_upload import router as _bulk_upload_router; router.include_router(_bulk_upload_router)
 from .leave import router as _leave_router; router.include_router(_leave_router)
 from .incidents import router as _incidents_router; router.include_router(_incidents_router)
-from .credentials import router as _credentials_router; router.include_router(_credentials_router)
+from .credentials import router as _credentials_router
+router.include_router(
+    _credentials_router,
+    dependencies=[Depends(require_feature("credential_templates"))],
+)
 from .oig import router as _oig_router; router.include_router(_oig_router)
 from .work_permits import router as _work_permits_router; router.include_router(_work_permits_router)
 from .demographics import router as _demographics_router; router.include_router(_demographics_router)

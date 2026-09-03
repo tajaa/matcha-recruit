@@ -252,6 +252,7 @@ class CredentialDocumentResponse(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     expires_at: Optional[str] = None
+    is_current: bool = False
 
 
 def _cred_doc_from_row(row) -> dict:
@@ -275,6 +276,7 @@ def _cred_doc_from_row(row) -> dict:
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
         "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
+        "is_current": bool(row.get("is_current", False)),
     }
 
 
@@ -432,9 +434,38 @@ async def list_credential_documents(
             raise HTTPException(status_code=404, detail="Employee not found")
 
         rows = await conn.fetch(
-            """SELECT * FROM credential_documents
-               WHERE employee_id = $1 AND company_id = $2
-               ORDER BY created_at DESC""",
+            """SELECT cd.*,
+                      CASE
+                        WHEN cd.review_status <> 'approved' THEN false
+                        WHEN EXISTS (
+                            SELECT 1
+                              FROM employee_credential_requirements ecr
+                             WHERE ecr.employee_id = cd.employee_id
+                               AND ecr.credential_document_id = cd.id
+                        ) THEN true
+                        WHEN EXISTS (
+                            SELECT 1
+                              FROM employee_credential_requirements ecr
+                              JOIN credential_types ct ON ct.id = ecr.credential_type_id
+                             WHERE ecr.employee_id = cd.employee_id
+                               AND ct.key = cd.document_type
+                        ) THEN false
+                        ELSE cd.id = (
+                            SELECT previous.id
+                              FROM credential_documents previous
+                             WHERE previous.employee_id = cd.employee_id
+                               AND previous.company_id = cd.company_id
+                               AND previous.document_type = cd.document_type
+                               AND previous.review_status = 'approved'
+                             ORDER BY previous.reviewed_at DESC NULLS LAST,
+                                      previous.created_at DESC,
+                                      previous.id DESC
+                             LIMIT 1
+                        )
+                      END AS is_current
+                 FROM credential_documents cd
+                WHERE cd.employee_id = $1 AND cd.company_id = $2
+                ORDER BY cd.created_at DESC, cd.id DESC""",
             employee_id, company_id,
         )
 

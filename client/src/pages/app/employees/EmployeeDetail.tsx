@@ -63,7 +63,9 @@ export default function EmployeeDetail() {
   // relevant tab (?tab=credentials) and pay editor (?edit=1).
   const [searchParams] = useSearchParams()
   const TABS_VALID: Tab[] = [
-    'profile', 'onboarding', 'credentials', 'leave',
+    'profile', 'onboarding',
+    ...(hasFeature('credential_templates') ? ['credentials' as const] : []),
+    'leave',
     ...(hasFeature('training') ? ['training' as const] : []),
     ...(hasFeature('employee_schedule') ? ['schedule' as const] : []),
   ]

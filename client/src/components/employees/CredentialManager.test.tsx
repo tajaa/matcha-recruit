@@ -61,6 +61,7 @@ const document = {
   created_at: '2026-09-03T00:00:00Z',
   updated_at: '2026-09-03T00:00:00Z',
   expires_at: null,
+  is_current: true,
 }
 
 describe('CredentialManager reclassification', () => {
@@ -118,5 +119,35 @@ describe('CredentialManager reclassification', () => {
       'custom_forklift',
       '2027-06-30',
     )
+  })
+
+  it('allows a replacement upload while showing current and empty history states', () => {
+    render(<CredentialManager employeeId="employee-1" />)
+
+    expect(screen.getByText('Current')).toBeInTheDocument()
+    expect(screen.getByText(/Add replacement credential/)).toBeInTheDocument()
+    expect(screen.getByText('No credential history yet.')).toBeInTheDocument()
+  })
+
+  it('moves superseded approved documents into credential history', () => {
+    manager.useCredentialManager.mockReturnValue({
+      ...manager.useCredentialManager(),
+      docsByType: {
+        other: [
+          document,
+          {
+            ...document,
+            id: 'document-history',
+            filename: 'old-forklift.pdf',
+            is_current: false,
+          },
+        ],
+      },
+    })
+
+    render(<CredentialManager employeeId="employee-1" />)
+
+    expect(screen.getByText('History')).toBeInTheDocument()
+    expect(screen.getByText('old-forklift.pdf')).toBeInTheDocument()
   })
 })
