@@ -103,4 +103,23 @@ describe('ScheduleJobsTab', () => {
       credential_type_id: 'advisory-type', is_required: false, schedule_blocking: false, notes: 'advisory only',
     }]))
   })
+
+  it('offers and deselects a custom credential returned by the tenant catalog', async () => {
+    fetchCredentialTypesMock.mockResolvedValue([{
+      id: 'custom-type', key: 'custom_123', label: 'Forklift Certification',
+      category: 'clearance', description: null, has_expiration: true,
+      has_number: false, has_state: false, is_system: false,
+    }])
+
+    render(<ScheduleJobsTab locationId="loc1" credentialTemplatesEnabled />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New job' }))
+    const picker = screen.getByLabelText('Add required credential')
+    expect(screen.getByRole('option', { name: 'Forklift Certification' })).toBeInTheDocument()
+    fireEvent.change(picker, { target: { value: 'custom-type' } })
+    const selected = screen.getByRole('button', { name: 'Forklift Certification ×' })
+    expect(selected).toBeInTheDocument()
+    fireEvent.click(selected)
+    expect(screen.queryByRole('button', { name: 'Forklift Certification ×' })).not.toBeInTheDocument()
+  })
 })

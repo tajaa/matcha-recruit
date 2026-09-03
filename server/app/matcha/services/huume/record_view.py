@@ -220,7 +220,7 @@ async def _model_credentials_batch(conn, company_id: UUID, rids: list[UUID]) -> 
                e.first_name, e.last_name, ct.label AS credential_label
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id AND e.org_id = $2
-        JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         WHERE ecr.id = ANY($1::uuid[])
         """,
         rids, company_id,
@@ -632,7 +632,7 @@ async def _build_credential_view(conn, company_id: UUID, rid: UUID) -> Optional[
                e.first_name, e.last_name
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id AND e.org_id = $2
-        JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         WHERE ecr.id = $1
         """,
         rid, company_id,

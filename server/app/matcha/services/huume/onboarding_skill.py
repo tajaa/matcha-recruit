@@ -307,7 +307,7 @@ async def lookup_context_impl(
                 SELECT ecr.id, e.first_name, e.last_name, ct.label AS credential_label, ecr.status, ecr.due_date
                 FROM employee_credential_requirements ecr
                 JOIN employees e ON e.id = ecr.employee_id
-                JOIN credential_types ct ON ct.id = ecr.credential_type_id
+                JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
                 WHERE e.org_id = $1 AND ecr.waived_at IS NULL
                   AND ecr.status != 'verified'
                   AND ecr.due_date IS NOT NULL AND ecr.due_date < CURRENT_DATE + INTERVAL '60 days'

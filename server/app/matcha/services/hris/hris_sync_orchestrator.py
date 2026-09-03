@@ -945,7 +945,7 @@ async def _reconcile_credential_requirements(
         """
         SELECT ecr.id, ct.key AS ct_key
         FROM employee_credential_requirements ecr
-        JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         WHERE ecr.employee_id = $1
           AND ecr.status = 'pending'
           AND ct.key = ANY($2)

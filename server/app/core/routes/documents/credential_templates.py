@@ -3,7 +3,7 @@
 import json
 import logging
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,7 +16,7 @@ from app.matcha.dependencies import (
     resolve_accessible_company_scope,
 )
 from app.core.models.auth import CurrentUser
-from app.core.models.credential_templates import CredentialTypeVisibilityUpdate
+from app.core.models.credential_templates import CredentialTypeCreate, CredentialTypeVisibilityUpdate
 from app.core.services.credential_template_service import (
     find_hidden_credential_types,
     get_templates_for_scope,
@@ -188,21 +188,22 @@ async def list_credential_types(
 ):
     """List credential types available for this company's dropdowns.
 
-    A NULL ``company_id`` matches no filter row, so an unscoped caller keeps the
-    legacy behavior of seeing the whole catalog.
+    A NULL ``company_id`` matches no tenant rows or filter row, so an unscoped
+    platform admin sees only the shared catalog.
     """
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT ct.*
-            FROM credential_types ct
-            WHERE NOT EXISTS (
+            FROM scoped_credential_types ct
+            WHERE (ct.company_id IS NULL OR ct.company_id = $1)
+              AND (NOT EXISTS (
                 SELECT 1 FROM company_credential_type_filters f
                 WHERE f.company_id = $1
             ) OR EXISTS (
                 SELECT 1 FROM company_credential_type_filter_items item
                 WHERE item.company_id = $1 AND item.credential_type_id = ct.id
-            )
+            ))
             ORDER BY ct.category, ct.label
             """,
             company_id,
@@ -217,7 +218,7 @@ async def get_credential_type_settings(
 ):
     """Return the full catalog and this company's current dropdown filter.
 
-    An unscoped caller (a platform admin who named no company) still gets the
+    An unscoped caller (a platform admin who named no company) gets the shared
     catalog, flagged ``manageable=False`` so the UI hides the save controls
     instead of writing to whichever tenant happens to be oldest.
     """
@@ -234,7 +235,8 @@ async def get_credential_type_settings(
             SELECT ct.*, filter_state.is_configured AS _is_configured,
                    item.credential_type_id IS NOT NULL AS _is_selected
             FROM filter_state
-            LEFT JOIN credential_types ct ON TRUE
+            LEFT JOIN scoped_credential_types ct
+              ON ct.company_id IS NULL OR ct.company_id = $1
             LEFT JOIN company_credential_type_filter_items item
               ON item.company_id = $1 AND item.credential_type_id = ct.id
             ORDER BY ct.category, ct.label
@@ -265,6 +267,89 @@ async def get_credential_type_settings(
     }
 
 
+@router.post("/types", status_code=201)
+async def create_credential_type(
+    body: CredentialTypeCreate,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(credential_settings_company_id),
+):
+    """Create a tenant-owned dropdown option and make it immediately available."""
+    async with get_connection() as conn:
+        duplicate = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM scoped_credential_types
+                WHERE lower(btrim(label)) = lower($1)
+                  AND (company_id IS NULL OR company_id = $2)
+            )
+            """,
+            body.label,
+            company_id,
+        )
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail="A credential option with this name already exists",
+            )
+
+        try:
+            async with conn.transaction():
+                base_row = await conn.fetchrow(
+                    """
+                    INSERT INTO credential_types
+                        (key, label, category, description, has_expiration,
+                         has_number, has_state, is_system)
+                    VALUES ($1, 'Tenant credential', 'custom', NULL, $2, $3, $4, false)
+                    RETURNING id
+                    """,
+                    f"custom_{uuid4().hex}",
+                    body.has_expiration,
+                    body.has_number,
+                    body.has_state,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_types
+                        (credential_type_id, company_id, label, category,
+                         description, created_by)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    """,
+                    base_row["id"],
+                    company_id,
+                    body.label,
+                    body.category,
+                    body.description,
+                    user.id,
+                )
+                # A configured allowlist would otherwise hide the new row until
+                # the user separately saved the settings form.
+                await conn.execute(
+                    """
+                    INSERT INTO company_credential_type_filter_items
+                        (company_id, credential_type_id)
+                    SELECT $1, $2
+                    WHERE EXISTS (
+                        SELECT 1 FROM company_credential_type_filters WHERE company_id = $1
+                    )
+                    ON CONFLICT DO NOTHING
+                    """,
+                    company_id,
+                    base_row["id"],
+                )
+                row = await conn.fetchrow(
+                    """SELECT * FROM scoped_credential_types
+                       WHERE id = $1 AND company_id = $2""",
+                    base_row["id"],
+                    company_id,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="A credential option with this name already exists",
+            ) from exc
+        return dict(row)
+
+
 @router.put("/type-settings")
 async def update_credential_type_settings(
     body: CredentialTypeVisibilityUpdate,
@@ -283,8 +368,11 @@ async def update_credential_type_settings(
         )
     async with get_connection() as conn:
         existing_rows = await conn.fetch(
-            "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])",
+            """SELECT id FROM scoped_credential_types
+               WHERE id = ANY($1::uuid[])
+                 AND (company_id IS NULL OR company_id = $2)""",
             selected_ids,
+            company_id,
         )
         existing_ids = {row["id"] for row in existing_rows}
         missing_ids = [
@@ -393,7 +481,7 @@ async def list_templates(
                 SELECT crt.*, ct.key AS ct_key, ct.label AS ct_label, ct.category AS ct_category,
                        rc.key AS role_key, rc.label AS role_label
                 FROM credential_requirement_templates crt
-                JOIN credential_types ct ON ct.id = crt.credential_type_id
+                JOIN scoped_credential_types ct ON ct.id = crt.credential_type_id
                 JOIN role_categories rc ON rc.id = crt.role_category_id
                 WHERE {where}
                 ORDER BY crt.state, rc.sort_order, ct.category, ct.label
@@ -648,7 +736,7 @@ async def trigger_research(
     user: CurrentUser = Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
-    """Trigger Gemini AI research for credential requirements."""
+    """Trigger OpenAI Luna research for credential requirements."""
     async with get_connection() as conn:
         results = await research_credential_requirements(
             conn,

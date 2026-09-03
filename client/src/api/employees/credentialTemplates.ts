@@ -1,6 +1,7 @@
 import { api } from '../client'
 import type {
   CredentialType,
+  CredentialTypeCreate,
   CredentialTypeSettings,
   RoleCategory,
   CredentialRequirementTemplate,
@@ -13,6 +14,10 @@ import type {
 
 export function fetchCredentialTypes() {
   return api.get<CredentialType[]>('/credential-templates/types')
+}
+
+export function createCredentialType(data: CredentialTypeCreate) {
+  return api.post<CredentialType>('/credential-templates/types', data)
 }
 
 export function fetchCredentialTypeSettings() {

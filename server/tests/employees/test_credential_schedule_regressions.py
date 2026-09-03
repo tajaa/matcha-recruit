@@ -51,19 +51,20 @@ def test_employee_portal_accepts_food_handler_documents():
     assert "food_handler_card" in _VALID_DOC_TYPES
 
 
-def test_empty_gemini_role_classification_degrades_without_error(monkeypatch, caplog):
-    response = SimpleNamespace(text=None)
-    client = SimpleNamespace(
-        models=SimpleNamespace(generate_content=mock.Mock(return_value=response))
-    )
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+def test_empty_luna_role_classification_degrades_without_error(monkeypatch, caplog):
     monkeypatch.setattr(
-        "app.core.services.genai_client.get_genai_client",
-        lambda **_kwargs: client,
+        credential_template_service,
+        "_luna_credentials",
+        lambda: ("test-key", "gpt-5.6-luna"),
+    )
+    monkeypatch.setattr(
+        credential_template_service,
+        "_generate_luna_text",
+        mock.AsyncMock(return_value=""),
     )
 
     with caplog.at_level("WARNING", logger=credential_template_service.__name__):
-        role = asyncio.run(credential_template_service._classify_role_via_gemini(
+        role = asyncio.run(credential_template_service._classify_role_via_luna(
             None,
             "Barista",
             [{"key": "non_clinical", "label": "Non-clinical"}],
