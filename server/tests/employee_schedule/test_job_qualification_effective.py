@@ -18,15 +18,20 @@ STARTS_AT = datetime(2026, 9, 15, 9, tzinfo=timezone.utc)
 
 
 class QualificationConn:
-    def __init__(self, *, qualified: bool = False):
+    def __init__(self, *, qualified: bool = False, has_roster: bool = True):
         self.qualified = qualified
+        self.has_roster = has_roster
         self.sql = ""
         self.args = ()
 
     async def fetchrow(self, sql, *args):
         self.sql = sql
         self.args = args
-        return {"name": "Barista", "qualified": self.qualified}
+        return {
+            "name": "Barista",
+            "qualified": self.qualified,
+            "has_roster": self.has_roster,
+        }
 
     async def fetch(self, sql, *args):
         self.sql = sql
@@ -45,6 +50,31 @@ async def test_route_gate_uses_status_and_shift_date():
     assert "qualified_from" in conn.sql
     assert "qualified_until" in conn.sql
     assert conn.args[-1] == date(2026, 9, 15)
+
+
+@pytest.mark.asyncio
+async def test_a_job_with_no_qualified_roster_stays_ungated():
+    # Picking a job is mandatory on the create form, so gating on the mere
+    # existence of a job would 409 every assignment for a company that has
+    # not filled in the per-job qualified lists yet.
+    conn = QualificationConn(qualified=False, has_roster=False)
+
+    detail = await check_job_qualification(
+        conn, COMPANY, EMPLOYEE, JOB, starts_at=STARTS_AT,
+    )
+
+    assert detail is None
+
+
+@pytest.mark.asyncio
+async def test_a_populated_roster_still_gates_someone_off_it():
+    conn = QualificationConn(qualified=False, has_roster=True)
+
+    detail = await check_job_qualification(
+        conn, COMPANY, EMPLOYEE, JOB, starts_at=STARTS_AT,
+    )
+
+    assert detail["code"] == "not_qualified_for_job"
 
 
 @pytest.mark.asyncio
