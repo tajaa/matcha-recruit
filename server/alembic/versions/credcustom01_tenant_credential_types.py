@@ -123,18 +123,22 @@ def upgrade() -> None:
         """
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_delete_company_credential_type_base "
+        "ON company_credential_types"
+    )
+    op.execute(
         """
-        DROP TRIGGER IF EXISTS trg_delete_company_credential_type_base
-            ON company_credential_types;
         CREATE TRIGGER trg_delete_company_credential_type_base
         AFTER DELETE ON company_credential_types
         FOR EACH ROW EXECUTE FUNCTION delete_company_credential_type_base()
         """
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_credential_template_type_scope "
+        "ON credential_requirement_templates"
+    )
+    op.execute(
         """
-        DROP TRIGGER IF EXISTS trg_credential_template_type_scope
-            ON credential_requirement_templates;
         CREATE TRIGGER trg_credential_template_type_scope
         BEFORE INSERT OR UPDATE OF company_id, credential_type_id
             ON credential_requirement_templates
@@ -142,9 +146,11 @@ def upgrade() -> None:
         """
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_employee_credential_type_scope "
+        "ON employee_credential_requirements"
+    )
+    op.execute(
         """
-        DROP TRIGGER IF EXISTS trg_employee_credential_type_scope
-            ON employee_credential_requirements;
         CREATE TRIGGER trg_employee_credential_type_scope
         BEFORE INSERT OR UPDATE OF employee_id, credential_type_id
             ON employee_credential_requirements
@@ -152,9 +158,11 @@ def upgrade() -> None:
         """
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_job_credential_type_scope "
+        "ON schedule_job_credential_requirements"
+    )
+    op.execute(
         """
-        DROP TRIGGER IF EXISTS trg_job_credential_type_scope
-            ON schedule_job_credential_requirements;
         CREATE TRIGGER trg_job_credential_type_scope
         BEFORE INSERT OR UPDATE OF company_id, credential_type_id
             ON schedule_job_credential_requirements
@@ -162,9 +170,11 @@ def upgrade() -> None:
         """
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_credential_filter_type_scope "
+        "ON company_credential_type_filter_items"
+    )
+    op.execute(
         """
-        DROP TRIGGER IF EXISTS trg_credential_filter_type_scope
-            ON company_credential_type_filter_items;
         CREATE TRIGGER trg_credential_filter_type_scope
         BEFORE INSERT OR UPDATE OF company_id, credential_type_id
             ON company_credential_type_filter_items
