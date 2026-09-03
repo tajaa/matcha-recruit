@@ -2690,5 +2690,11 @@ def edit_result_text(results: list[dict]) -> str:
         lines = [f"✅ Done — {n} change{'s' if n != 1 else ''} {verb} live ({'; '.join(parts)})."]
     for f in failed:
         who = f.get("to_employee_name") or f.get("from_employee_name") or (f.get("shift_role") or "that shift")
-        lines.append(f"Couldn't change {who}: {f['reason']}")
+        starts_at = datetime.fromisoformat(f["starts_at"])
+        label = (f.get("shift_role") or "shift").title()
+        shift_date = starts_at.date().isoformat()
+        lines.append(
+            f"Couldn't change {who} on **{label}** "
+            f"[[shift:{f['shift_id']}:{shift_date}]]: {f['reason']}"
+        )
     return "\n".join(lines)

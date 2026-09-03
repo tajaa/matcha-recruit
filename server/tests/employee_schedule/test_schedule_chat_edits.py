@@ -224,12 +224,26 @@ class TestEditResultText:
              "ok": False, "reason": "that shift was cancelled"},
         ])
         assert "1 change is live" in text
-        assert "Couldn't change Dana Kim: that shift was cancelled" in text
+        assert "Couldn't change Dana Kim on **Opener** [[shift:s1:2026-08-12]]: that shift was cancelled" in text
 
     def test_all_failed_says_so_plainly(self):
         text = edit_result_text([{**_op(), "ok": False, "reason": "they picked up a conflict"}])
         assert "Couldn't make any of those changes." in text
-        assert "[[shift:" not in text
+        assert "[[shift:s1:2026-08-12]]" in text
+
+    def test_bulk_failures_identify_each_shift_and_its_actual_reason(self):
+        text = edit_result_text([
+            {**_op(kind="assign", from_employee_name=None, to_employee_name="Ellie Marsh"),
+             "ok": False, "reason": "they picked up a conflicting shift in the meantime"},
+            {**_op(
+                kind="assign", shift_id="s2", shift_role="closer",
+                starts_at="2026-08-13T17:00:00+00:00",
+                from_employee_name=None, to_employee_name="Ellie Marsh",
+            ), "ok": False, "reason": "Food Handler Card requires an approved credential document before scheduling."},
+        ])
+
+        assert "[[shift:s1:2026-08-12]]: they picked up a conflicting shift" in text
+        assert "[[shift:s2:2026-08-13]]: Food Handler Card requires an approved" in text
 
     def test_plural_agreement(self):
         text = edit_result_text([{**_op(), "ok": True}, {**_op(shift_id="s2"), "ok": True}])

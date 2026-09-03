@@ -816,9 +816,9 @@ TOOLS: tuple[HuumeTool, ...] = (
     _tool(
         "list_schedule_eligibility_cases", "read",
         "List open credential/permit eligibility cases and recurring "
-        "escalations for this schedule location. Use it to explain why an "
-        "employee is blocked or why a previously acknowledged retention is "
-        "still being warned about.",
+        "escalations for this schedule location. The case expiration is "
+        "historical; use the returned canonical current credential status, "
+        "expiration, and block reason when explaining assignment eligibility.",
         properties={},
         discovery=True,
         intent_hints=("who is blocked", "expired permits", "expired credentials", "compliance issues"),

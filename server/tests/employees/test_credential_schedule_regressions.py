@@ -232,6 +232,10 @@ def test_food_handler_approval_persists_expiry_on_document_and_requirement():
             employee_credentials, "_requirement_for_document_type",
             mock.AsyncMock(return_value={"id": requirement_id, "has_expiration": True}),
         ),
+        mock.patch.object(
+            employee_credentials, "resolve_recovered_eligibility_cases",
+            mock.AsyncMock(return_value=1),
+        ) as resolve_cases,
     ):
         result = asyncio.run(employee_credentials.approve_credential_document(
             employee_id=employee_id,
@@ -246,6 +250,9 @@ def test_food_handler_approval_persists_expiry_on_document_and_requirement():
     assert document_update[1][2] == expiry
     assert requirement_update[1][2] == expiry
     assert result["expiration_date"] == "2025-01-10"
+    resolve_cases.assert_awaited_once_with(
+        conn, company_id, requirement_id=requirement_id,
+    )
 
 
 def test_document_removal_preserves_last_confirmed_expiry_for_worker_enforcement():

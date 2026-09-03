@@ -8,6 +8,8 @@ from uuid import UUID
 
 from app.database import get_connection
 
+from .schedule_eligibility import _credential_problem, local_date_at
+
 
 def _iso(value):
     return value.isoformat() if value is not None else None
@@ -128,10 +130,19 @@ async def list_schedule_eligibility_cases(*, company_id: UUID, location_id: UUID
         rows = await conn.fetch(
             """
             SELECT c.id, c.employee_id, c.requirement_type, c.status,
-                   c.expires_at, c.legal_basis, c.next_escalation_at,
-                   e.first_name, e.last_name
+                   c.expires_at AS case_expires_at, c.blocking_reason_code,
+                   c.legal_basis, c.next_escalation_at,
+                   e.first_name, e.last_name,
+                   ct.label AS credential_label, ct.has_expiration,
+                   ecr.status AS current_credential_status,
+                   ecr.expires_at AS current_credential_expires_at,
+                   location.timezone
             FROM schedule_eligibility_cases c
             JOIN employees e ON e.id=c.employee_id
+            LEFT JOIN employee_credential_requirements ecr
+              ON c.requirement_type='credential' AND ecr.id=c.requirement_id
+            LEFT JOIN scoped_credential_types ct ON ct.id=ecr.credential_type_id
+            LEFT JOIN business_locations location ON location.id=c.location_id
             WHERE c.company_id=$1 AND c.location_id=$2
               AND c.status IN ('warning_open','removal_requested','keep_acknowledged')
             ORDER BY c.next_escalation_at NULLS FIRST, c.expires_at
@@ -139,17 +150,48 @@ async def list_schedule_eligibility_cases(*, company_id: UUID, location_id: UUID
             """,
             company_id, location_id,
         )
+    cases = []
+    instant = datetime.now(timezone.utc)
+    for row in rows:
+        current_problem = None
+        if row["requirement_type"] == "credential" and row["current_credential_status"] is not None:
+            current_problem = _credential_problem(
+                {
+                    "label": row["credential_label"],
+                    "has_expiration": row["has_expiration"],
+                    "status": row["current_credential_status"],
+                    "expires_at": row["current_credential_expires_at"],
+                },
+                as_of=local_date_at(instant, row["timezone"]),
+            )
+        cases.append({
+            "id": str(row["id"]), "employee_id": str(row["employee_id"]),
+            "employee_name": " ".join(filter(None, [row["first_name"], row["last_name"]])),
+            "requirement_type": row["requirement_type"], "status": row["status"],
+            "blocking_reason_code": row["blocking_reason_code"],
+            # This is the historical date that opened the case, not a claim
+            # about the current credential. Give it an unambiguous name so a
+            # model cannot relabel it as the live expiration.
+            "case_expired_on": _iso(row["case_expires_at"]),
+            "credential_label": row["credential_label"],
+            "current_credential_status": row["current_credential_status"],
+            "current_credential_expires_at": _iso(row["current_credential_expires_at"]),
+            "currently_blocks_scheduling": (
+                current_problem is not None
+                if row["requirement_type"] == "credential"
+                else None
+            ),
+            "current_block_reason": current_problem[1] if current_problem else None,
+            "legal_basis": row["legal_basis"],
+            "next_escalation_at": _iso(row["next_escalation_at"]),
+        })
     return {
         "status": "ok",
-        "cases": [
-            {
-                "id": str(row["id"]), "employee_id": str(row["employee_id"]),
-                "employee_name": " ".join(filter(None, [row["first_name"], row["last_name"]])),
-                "requirement_type": row["requirement_type"], "status": row["status"],
-                "expires_at": _iso(row["expires_at"]),
-                "legal_basis": row["legal_basis"],
-                "next_escalation_at": _iso(row["next_escalation_at"]),
-            }
-            for row in rows
-        ],
+        "policy": (
+            "An eligibility case is a remediation record, not an independent assignment block. "
+            "For credentials, currently_blocks_scheduling and current_block_reason come from the "
+            "canonical requirement; case_expired_on is historical. Assignment confirmation still "
+            "rechecks the canonical requirement for each shift."
+        ),
+        "cases": cases,
     }
