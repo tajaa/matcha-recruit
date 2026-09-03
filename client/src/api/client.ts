@@ -4,11 +4,13 @@ import { noteRequestId, reportApiError } from './errorReporter'
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
-let _refreshing: Promise<boolean> | null = null
+type RefreshResult = 'refreshed' | 'rejected' | 'failed'
 
-async function _tryRefresh(): Promise<boolean> {
+let _refreshing: Promise<RefreshResult> | null = null
+
+async function _tryRefresh(): Promise<RefreshResult> {
   const refreshToken = getRefreshToken()
-  if (!refreshToken) return false
+  if (!refreshToken) return 'failed'
 
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
@@ -17,12 +19,23 @@ async function _tryRefresh(): Promise<boolean> {
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
 
-    if (!res.ok) return false
+    if (!res.ok) return res.status === 401 ? 'rejected' : 'failed'
 
     const data = await res.json()
     setAuthTokens(data.access_token, data.refresh_token, { recordActivity: false })
-    return true
+    return 'refreshed'
   } catch {
+    return 'failed'
+  }
+}
+
+function _accessTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp === 'number' && payload.exp <= Date.now() / 1000
+  } catch {
+    // Let the server decide whether a malformed token can authenticate rather
+    // than treating an undecodable token as safely expired.
     return false
   }
 }
@@ -82,20 +95,22 @@ function _logout() {
 /** Revoke the server session, then clear every local user-scoped surface.
  *
  * Resolves to whether the SERVER-side revocation landed. Local state is cleared
- * either way, so a false only matters for a token that already leaked — which
- * is precisely what revocation exists for, so it must not be swallowed. It is
- * reachable: on the idle-timeout path the refresh below is rejected by the
- * server's own 30-minute idle rule, leaving only an access token that
- * `access_token_stale` now refuses, so the POST 401s. */
+ * either way. A rejected refresh plus an expired access token needs no further
+ * revocation request: neither credential can authenticate, and sending the
+ * known-expired access token to /auth/logout only produces a spurious 401. */
 export async function logoutSession(): Promise<boolean> {
   let revoked = false
   try {
     // Refresh first when possible: with a 15-minute access token, a user may
     // click Sign out after it expired. A fresh access token lets the revocation
     // endpoint invalidate the still-live refresh session server-side.
-    if (getRefreshToken()) await _tryRefresh()
+    const hadRefreshToken = Boolean(getRefreshToken())
+    const refreshResult = hadRefreshToken ? await _tryRefresh() : null
     const token = getAccessToken()
     if (token) {
+      if (_accessTokenExpired(token) && (!hadRefreshToken || refreshResult === 'rejected')) {
+        return false
+      }
       const res = await fetch(`${API_BASE}/auth/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -140,8 +155,8 @@ export async function ensureFreshToken(): Promise<string | null> {
       if (!_refreshing) {
         _refreshing = _tryRefresh().finally(() => { _refreshing = null })
       }
-      const ok = await _refreshing
-      if (!ok) { _logout(); return null }
+      const result = await _refreshing
+      if (result !== 'refreshed') { _logout(); return null }
       return getAccessToken()
     }
   } catch { /* malformed token, proceed */ }
@@ -196,8 +211,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       _refreshing = _tryRefresh().finally(() => { _refreshing = null })
     }
 
-    const ok = await _refreshing
-    if (ok) {
+    const refreshResult = await _refreshing
+    if (refreshResult === 'refreshed') {
       // Retry with new token
       const newToken = getAccessToken()
       const retry = await fetch(`${API_BASE}${path}`, {
@@ -281,8 +296,8 @@ async function _fetchWithRefresh(url: string, init: RequestInit = {}): Promise<R
   if (!_refreshing) {
     _refreshing = _tryRefresh().finally(() => { _refreshing = null })
   }
-  const ok = await _refreshing
-  if (!ok) { _logout(); return res }
+  const refreshResult = await _refreshing
+  if (refreshResult !== 'refreshed') { _logout(); return res }
   const retry = await fetch(url, withAuth(getAccessToken()))
   noteRequestId(retry.headers.get('x-request-id'))
   return retry
