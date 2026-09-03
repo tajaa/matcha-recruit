@@ -17,7 +17,8 @@ from app.matcha.models.scheduling.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange, DuplicateShift,
 )
 from ...services.scheduling.schedule_rules import (
-    build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
+    build_patch, compliance_relevant_patch, job_changed,
+    summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
 from ...services.scheduling import schedule_compliance, schedule_eligibility, schedule_intelligence
 from ...services.scheduling.shift_writes import create_shift_core
@@ -634,7 +635,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             return await fetch_shift_by_id(conn, company_id, shift_id)
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
-        if "job_id" in patch:
+        shift_job_changed = job_changed(patch, existing)
+        if shift_job_changed:
             # Same scope rule as create: a job from another store can't be
             # attached by editing a shift into it.
             await assert_job_in_company(
@@ -667,8 +669,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         # double-book everyone already on it, so it takes the same guard + force.
         # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
-        compliance_relevant = auto_break_requested or (
-            retimed or "break_minutes" in patch or "location_id" in patch or "job_id" in patch
+        compliance_relevant = compliance_relevant_patch(
+            patch, existing, retimed=retimed, auto_break_requested=auto_break_requested,
         )
         # Fair Workweek notice/clopening obligations attach to a POSTED shift's
         # timing changing, not to break/location edits alone — only pass the
@@ -816,7 +818,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         "message": "The shift changed while you were editing it. Reload and try again.",
                     },
                 )
-            if "job_id" in patch:
+            if shift_job_changed:
                 # role is the job's canonical label, never a free-text string
                 # that can drift from it — including on the way to NULL, where
                 # a kept label would describe a job the shift no longer has.
