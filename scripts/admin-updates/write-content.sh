@@ -20,6 +20,15 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 RAW_DRAFT="$WORK_DIR/draft.json"
 RAW_REPORT="$WORK_DIR/report.md"
+
+# The prompt asks the model to "name the actual navigation" but never used to
+# hand it any, so it invented plausible paths. Regenerated from the working tree
+# on every run: the readable form grounds the prompt, the JSON form lets the
+# trusted validator drop any step that still names a surface we do not have.
+NAV_INVENTORY="$WORK_DIR/nav-inventory.txt"
+NAV_INVENTORY_JSON="$WORK_DIR/nav-inventory.json"
+python3 "$SCRIPT_DIR/nav_inventory.py" "$NAV_INVENTORY" --repo-root "$REPO_ROOT" --format text
+python3 "$SCRIPT_DIR/nav_inventory.py" "$NAV_INVENTORY_JSON" --repo-root "$REPO_ROOT"
 live_log_ready=false
 if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
     if (umask 077; {
@@ -36,7 +45,7 @@ run_model() {
         AUTOPR_CODEX_REASONING_EFFORT=high \
         AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1 \
         "$SANDBOX_RUNNER" "$SCRIPT_DIR/_prompt.txt" "$RAW_REPORT" "$RAW_DRAFT" \
-        -f "$PLAN" -f "$PRODUCTION_CONTEXT"
+        -f "$PLAN" -f "$PRODUCTION_CONTEXT" -f "$NAV_INVENTORY"
 }
 
 if [ "$live_log_ready" = true ]; then
@@ -54,7 +63,8 @@ fi
 [ "$live_log_ready" != true ] || printf '\n[COMPLETE] Luna finished at %s\n' \
     "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
 
-python3 "$SCRIPT_DIR/validate.py" "$PLAN" "$RAW_DRAFT" "$OUTPUT"
+python3 "$SCRIPT_DIR/validate.py" "$PLAN" "$RAW_DRAFT" "$OUTPUT" \
+    --nav-inventory "$NAV_INVENTORY_JSON"
 cp "$RAW_REPORT" "$REPORT"
 printf 'Validated Luna/high admin update draft: %s entries, %s skips\n' \
     "$(jq '.entries | length' "$OUTPUT")" "$(jq '.skipped | length' "$OUTPUT")"

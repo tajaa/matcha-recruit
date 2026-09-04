@@ -54,7 +54,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
       { to: '/app/training', icon: IconTraining, label: 'Training', feature: 'training' },
       { to: '/app/discipline', icon: IconSteps, label: 'Performance Action', feature: 'discipline' },
-      { to: '/app/credential-templates', icon: IconSeal, label: 'Credentialing', feature: 'credential_templates' },
+      { to: '/app/credential-templates', icon: IconSeal, label: 'Credential Templates', feature: 'credential_templates' },
       { to: '/app/workforce-compliance', icon: IconAudit, label: 'Workforce Compliance', feature: 'workforce_compliance' },
       { to: '/ops/schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
     ],

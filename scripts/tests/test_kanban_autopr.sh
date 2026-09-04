@@ -1580,6 +1580,91 @@ AUTOPR_SELECT_READ_ONLY=true PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/
 check "dashboard selection probe creates no cooldown state" \
     $([ ! -e "$readonly_cache" ] && echo 0 || echo 1)
 
+################################################################################
+# acceptance_criteria_met — the verdict a false-premise card needs.
+#
+# A reviewer send-back sets trust_still_broken + draft_pr, and both directive
+# clauses ban already_fixed. With the truth unrepresentable, the highest-scoring
+# legal outcome was "implementation", and the only implementable thing left on
+# an already-finished card was a cosmetic rename. That is PR #418. The escape
+# has to survive those directives while still refusing an unevidenced claim.
+################################################################################
+decision_dir="$TMP_DIR/decision-guards"
+mkdir -p "$decision_dir"
+head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+printf '{"directives":["draft_pr","trust_still_broken"],"test_route":null}\n' \
+    > "$decision_dir/policy.json"
+
+write_decision() {
+    local reason="$1" evidence="$2"
+    jq -n --arg reason "$reason" --argjson evidence "$evidence" '
+      {schema_version: 1,
+       outcome: "no_safe_action",
+       safe_changes_present: false,
+       questions: [],
+       criticality: {level: "yellow", reasons: ["already satisfied"]},
+       confidence: {
+         requirements_clarity: {score: 20, reason: "r"},
+         evidence_quality:     {score: 15, reason: "r"},
+         code_localization:    {score: 15, reason: "r"},
+         verification_strength:{score: 10, reason: "r"},
+         production_alignment: {score: 10, reason: "r"}},
+       no_safe_action_reason: $reason}
+      + (if $evidence == null then {} else {acceptance_evidence: $evidence} end)
+    ' > "$decision_dir/raw.json"
+}
+
+normalize_rc() {
+    ( cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize \
+        "$decision_dir/raw.json" "$decision_dir/out.json" "$decision_dir/policy.json" ) \
+        >/dev/null 2>&1
+    echo $?
+}
+
+good_evidence="$(jq -n --arg sha "$head_sha" \
+    '[{criterion:"route registered",path:"client/src/routes/AppRoutes.tsx",line:116,commit:$sha}]')"
+
+write_decision already_fixed null
+check "bare already_fixed is still refused under an owner directive" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met null
+check "acceptance_criteria_met without evidence is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met "$good_evidence"
+check "acceptance_criteria_met with verified evidence survives draft_pr" \
+    $([ "$(normalize_rc)" = "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met \
+    "$(jq -n --arg sha "$head_sha" '[{criterion:"c",path:"client/src/routes/AppRoutes.tsx",line:999999,commit:$sha}]')"
+check "acceptance evidence pointing past the end of a file is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+write_decision acceptance_criteria_met \
+    '[{"criterion":"c","path":"client/src/routes/AppRoutes.tsx","line":1,"commit":"deadbee"}]'
+check "acceptance evidence citing an unknown commit is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+################################################################################
+# Cosmetic-diff guard — the machine-detectable signature of the same failure.
+################################################################################
+cosmetic_rc=$(git -C "$REPO_ROOT" show 5c88c7e -m --first-parent \
+    -- client/src/components/sidebars/ClientSidebar.tsx \
+    | python3 "$AUTOPR_DIR/cosmetic_diff.py"; echo $?)
+check "PR #418's merged diff is detected as string-literal churn" \
+    $([ "$cosmetic_rc" = "0" ] && echo 0 || echo 1)
+
+substantive_rc=$(git -C "$REPO_ROOT" show e7d716f \
+    | python3 "$AUTOPR_DIR/cosmetic_diff.py"; echo $?)
+check "a real feature diff is not mistaken for string-literal churn" \
+    $([ "$substantive_rc" = "1" ] && echo 0 || echo 1)
+
+added_only_rc=$(printf '%s\n' '+  const answer = "42"' \
+    | python3 "$AUTOPR_DIR/cosmetic_diff.py"; echo $?)
+check "a pure addition is real work, not a reword" \
+    $([ "$added_only_rc" = "1" ] && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

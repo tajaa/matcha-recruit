@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Loader2, Award, BadgeCheck, FileWarning } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Loader2, Award, BadgeCheck, FileWarning, ArrowRight } from 'lucide-react'
+import { useMe } from '../../hooks/useMe'
 import {
   fetchCompanyCertifications,
   fetchCompanyLicenses,
@@ -37,6 +39,13 @@ export function ComplianceCredentialsTab({
   const [employees, setEmployees] = useState<EmployeeDocumentExpiry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { hasFeature } = useMe()
+  // This tab is a read-only expiry roster; the editable catalog (including the
+  // credential-type dropdown allowlist) is its own page. Without this pointer
+  // the tab dead-ends for anyone who came looking for it here — which is what
+  // the auto-published "Compliance -> Credential Templates" changelog step told
+  // people to do.
+  const canManageTemplates = hasFeature('credential_templates')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,6 +92,17 @@ export function ComplianceCredentialsTab({
 
   return (
     <div className="space-y-6">
+      {canManageTemplates && (
+        <div className="flex justify-end">
+          <Link
+            to="/app/credential-templates"
+            className="inline-flex items-center gap-1.5 text-xs text-emerald-400 transition-colors hover:text-emerald-300"
+          >
+            Manage credential templates
+            <ArrowRight className="w-3 h-3" />
+          </Link>
+        </div>
+      )}
       <EmployeeExpirySection employees={employees} />
       {!employeeOnly && (
         <>

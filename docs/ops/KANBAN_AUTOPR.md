@@ -296,7 +296,20 @@ second scheduler.
    without a magic prefix. `--draft-pr` remains the explicit form. Negated commands do
    not activate it. The policy mechanically rejects both `already_fixed` and
    `migration_required`: when needed, the draft may author only
-   `server/alembic/versions/*.py` for human review and must never apply it. That
+   `server/alembic/versions/*.py` for human review and must never apply it.
+   The single exception is `acceptance_criteria_met`, which survives both
+   `draft_pr` and `trust_still_broken` because it carries proof: an
+   `acceptance_evidence` array with one entry per acceptance criterion, each
+   naming the criterion and the `path`, `line`, and `commit` that already
+   satisfies it. `decision.sh` resolves every citation against the repository
+   and rejects the decision if any does not exist, so it cannot be reached by
+   assertion. It exists because a card can be written against a premise that
+   was already false — PR #418 asked for a route and a nav row that had both
+   shipped weeks earlier under a different label — and with no way to say so,
+   the only legal move left was a diff that changed nothing real. `publish.sh`
+   now also refuses an `implementation` whose staged diff is pure
+   string-literal churn when the card's own text asks for structure
+   (`cosmetic_diff.py`), so that move is no longer available either. That
    authorization is durable in three ways, because the operator saying "work on it"
    once must not have to be repeated after every cycle: the granted directives are
    published back onto the card as `[autopr:directives …]` and re-read on later cycles
@@ -354,7 +367,9 @@ second scheduler.
    in `changes_requested` until a new human comment or review arrives on that PR; the
    next local cycle then updates the same draft. Without a trusted draft directive,
    no-spec remains available for already-fixed work, migrations, policy boundaries,
-   and external dependencies.
+   and external dependencies. With one, `acceptance_criteria_met` remains available
+   for a card whose every stated criterion is already satisfied, provided it cites
+   verifiable evidence for each.
 7. **Cross-lane scope check** — for a fresh implementation patch, the shared
    `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
@@ -421,8 +436,11 @@ second scheduler.
    history event and a decision-bound bell/push notification to its author: PR
    drafted/updated, questions still needed, or the no-safe-action decision still
    applies. Notification delivery is required so consuming the event cannot be silent.
-   Awaiting-input and `already_fixed` outcomes also post one idempotent Espresso
-   message into the project's discussion channel. It starts with the existing
+   Awaiting-input, `already_fixed`, and `acceptance_criteria_met` outcomes also post
+   one idempotent Espresso message into the project's discussion channel; for
+   `acceptance_criteria_met` that message carries the per-criterion evidence, which
+   is the point of the verdict — the human needs to see where each thing the card
+   asked for already lives. It starts with the existing
    `⟦ticket:<id>|<title>|<column>⟧` token, so the ticket is clickable in Espresso.
    Replying directly to that message attaches the reply to the exact still-current
    AutoPR decision and acknowledges the escalation in chat; attached screenshots are

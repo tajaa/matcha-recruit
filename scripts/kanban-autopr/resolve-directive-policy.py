@@ -62,7 +62,8 @@ _TEST_ROUTE_RE = re.compile(
     re.IGNORECASE,
 )
 _RECOVERABLE_NOTE_RE = re.compile(
-    r"\[autopr:no-spec [^\]]+\]\s+(already_fixed|migration_required)(?:\s|$)",
+    r"\[autopr:no-spec [^\]]+\]\s+"
+    r"(already_fixed|acceptance_criteria_met|migration_required)(?:\s|$)",
     re.IGNORECASE,
 )
 _DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
