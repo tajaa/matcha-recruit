@@ -1,6 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
-import Home from "./pages/home";
+import ContactLanding from "./pages/home/ContactLanding";
 import Login from "./pages/Login";
 import RequireBusinessAccount from "./components/auth/RequireBusinessAccount";
 import RouteTracker from "./components/shared/RouteTracker";
@@ -135,7 +135,7 @@ export default function App() {
         {/* Exact "/" outranks the isCappeHost "/*" splat below, so the apex
             swap has to happen here: on the Cappe domain "/" renders the
             Gummfit landing (CappeRoutes index), everywhere else Matcha Home. */}
-        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
+        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <ContactLanding />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-ops" element={<MatchaOpsPage />} />
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
