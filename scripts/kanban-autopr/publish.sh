@@ -72,6 +72,7 @@ auto_setup_status() {
     if [ "$OUTCOME" = no_safe_action ]; then
         case "$NO_SAFE_ACTION_REASON" in
             already_fixed) printf 'NO PR: ALREADY FIXED' ;;
+            acceptance_criteria_met) printf 'NO PR: CARD ALREADY SATISFIED' ;;
             migration_required) printf 'NO PR: MIGRATION REQUIRED' ;;
             policy_blocked) printf 'NO PR: POLICY BLOCKED' ;;
             external_dependency) printf 'NO PR: EXTERNAL DEPENDENCY' ;;
@@ -122,14 +123,14 @@ progress_note_with_origin() {
         }
     ')"
     remainder="$(printf '%s' "$header" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
     # PAUSED belongs in this alternation: checkpoint.sh writes it, so without
     # it every recovery run would re-append its own stale pause header here.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$header" ] \
@@ -208,7 +209,10 @@ post_reconsideration_reply() {
 
 post_context_request() {
     local reason="$1" expected_note="$2"
-    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rsr '.[0:600]')"
+    # Newlines survive: the acceptance-evidence block is the payload here, and
+    # flattening it to one line at 600 characters cut the proof off after about
+    # four criteria. The server sanitizes and bounds it again.
+    reason="$(printf '%s' "$reason" | tr -d '\r' | jq -Rsr '.[0:4000]')"
     if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
         "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
             '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
@@ -220,6 +224,28 @@ post_context_request() {
 }
 
 BRANCH="bot/task-$ID8"
+
+# Dying here used to fail the workflow step with the diff discarded, no card
+# note, and nothing in chat: the next scheduled cycle re-selected the same card
+# and reproduced the same cosmetic diff forever, with no signal to a human. The
+# refusal stands, but it lands on the card and asks its owner for a decision.
+reject_cosmetic_diff() {
+    local reject_note origin_note
+    reject_note="[autopr:rejected $(date -u +%Y-%m-%dT%H:%M:%SZ)] cosmetic_only"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · BLOCKED: COSMETIC DIFF · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
+        "$EXISTING_PROGRESS_NOTE")"
+    if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null; then
+        post_context_request \
+            "AutoPR produced a diff that only rewrites string literals for a card asking for structure, so it was discarded. Either the criteria are already met — reply and it will return acceptance_criteria_met with per-criterion evidence — or the card needs the missing structural detail." \
+            "$origin_note"
+    else
+        printf 'kanban-autopr: warning: could not record the cosmetic-diff rejection on task %s\n' \
+            "$TASK_ID" >&2
+    fi
+    die "implementation diff only rewrites string literals for a card asking for structure; return acceptance_criteria_met with evidence, or questions_only"
+}
 
 existing_feedback_checkpoint() {
     local body="$1" kind="$2"
@@ -378,6 +404,17 @@ git diff --cached --quiet || has_diff=true
 case "$OUTCOME" in
     implementation|partial_implementation)
         [ "$has_diff" = true ] || die "decision says safe changes exist but the worktree is empty"
+        # A partial_implementation carries the same shape for the same reason,
+        # so the guard covers both outcomes rather than leaving the lower bar
+        # as a way around it.
+        STAGED_DIFF_FILE="$(mktemp)"
+        git diff --cached > "$STAGED_DIFF_FILE"
+        if autopr_cosmetic_only_diff "$STAGED_DIFF_FILE" "$TITLE" "$DESCRIPTION"; then
+            rm -f "$STAGED_DIFF_FILE"
+            git reset --hard >/dev/null 2>&1
+            reject_cosmetic_diff
+        fi
+        rm -f "$STAGED_DIFF_FILE"
         ;;
     questions_only|no_safe_action)
         if [ "$has_diff" = true ]; then
@@ -417,8 +454,16 @@ if [ "$OUTCOME" = no_safe_action ]; then
     # a refusal, and the human has no visible way to say "do it anyway".
     NEEDS_CONTEXT_REQUEST=false
     case "$NO_SAFE_ACTION_REASON" in
-        already_fixed|migration_required) NEEDS_CONTEXT_REQUEST=true ;;
+        already_fixed|migration_required|acceptance_criteria_met) NEEDS_CONTEXT_REQUEST=true ;;
     esac
+    # A card whose criteria are already met is the one refusal a human must see
+    # in full: the point is not "no PR", it is "here is where each thing you
+    # asked for already lives" -- so the proof rides along with the ask.
+    CONTEXT_REASON="$CARD_NOTE"
+    if [ "$NO_SAFE_ACTION_REASON" = acceptance_criteria_met ]; then
+        acceptance_evidence="$(autopr_render_acceptance_evidence "$DECISION_FILE")"
+        [ -z "$acceptance_evidence" ] || CONTEXT_REASON="$CARD_NOTE"$'\n'"$acceptance_evidence"
+    fi
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
     note_prefix="🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL"
     if [ "$MODE" = rework ]; then
@@ -435,7 +480,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
                 '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
         if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
-            post_context_request "$CARD_NOTE" "$origin_note"
+            post_context_request "$CONTEXT_REASON" "$origin_note"
         fi
         post_reconsideration_reply "$existing_open_pr" "$origin_note"
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
@@ -446,7 +491,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
         if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
-            post_context_request "$CARD_NOTE" "$origin_note"
+            post_context_request "$CONTEXT_REASON" "$origin_note"
         fi
         post_reconsideration_reply "" "$origin_note"
         echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"

@@ -39,16 +39,35 @@ boundaries.
 Apply `directive_policy` mechanically:
 - `draft_pr` means the authorized owner explicitly told AutoPR to work on this
   ticket. This cycle must produce an implementation/partial draft when the
-  requested change is repo-local. It may use `questions_only` only when a
-  specific missing product decision makes even a partial implementation
-  impossible. It may not return `already_fixed` or `migration_required`.
+  requested change is repo-local. It may not return `already_fixed` or
+  `migration_required`.
+  It may use `questions_only` when a specific missing product decision makes
+  even a partial implementation impossible, and also when the card or the
+  send-back cites a page, label, control, or behavior that does not exist
+  anywhere in the repository — say what you searched for and where. Never
+  invent a change whose only purpose is to make quoted text true.
+  It may use `no_safe_action` with `acceptance_criteria_met` when EVERY
+  acceptance criterion on the card is already satisfied on the current branch.
+  That verdict must carry `acceptance_evidence`: one entry per criterion, each
+  with the criterion text and the `path`, `line`, and `commit` that already
+  satisfy it. The harness verifies each citation and rejects the decision if
+  any does not resolve, so never guess a line number. The `commit` must be
+  HEAD or one of its ancestors on this branch, the `line` must not be blank at
+  that commit, and the `path` must still exist at HEAD — a real object from
+  some unrelated branch is not evidence. Renaming a string, or
+  any other change you would not make if the card did not exist, is not an
+  implementation — prefer this verdict over a cosmetic diff.
   When a schema change is needed, author the application change, tests, and a
   human-reviewable migration version file; never apply or deploy the migration.
   Policy and external-dependency safety boundaries still apply.
 - `trust_still_broken` accepts the authorized reporter's assertion that the
   described scenario still fails. Do not try to disprove the report from the
   existence of nearby code; localize the uncovered path and do not return
-  `already_fixed`.
+  `already_fixed`. The one exception is `acceptance_criteria_met` with per-
+  criterion evidence: a reporter can be right that something is wrong and still
+  be describing a card whose stated criteria are all met — most often because
+  the shipped label differs from the one the card names, or production is
+  behind the branch. Name that gap instead of coding around it.
 - `extend_runtime` changes only the trusted harness timeout. It grants no
   product, migration, path, or safety authority.
 
@@ -113,6 +132,20 @@ write the migration version as part of the draft for human review, but do not
 run it against any database. If the repository already contains the fix after
 the production SHA and `draft_pr` is absent, make no duplicate change and use
 `no_safe_action` with `already_fixed`.
+
+Before drafting anything, check each acceptance criterion on the card against
+the current branch and record in the report whether it is already satisfied,
+with a `path:line`. A card can be written against a premise that was already
+false — the route it asks you to register may exist, the nav entry it asks you
+to add may already be there under a different label. If every criterion is
+already met, return `acceptance_criteria_met` with its evidence rather than
+manufacturing a diff. If production is simply behind the branch, say so: the
+remaining action is a deploy, not a code change.
+
+The changelog copy at /admin/updates ("How to use it") is generated after merge
+by a separate system and lives in the production database, not this repository.
+You cannot change it. If feedback disputes only that wording, do not edit code
+to match it — return `questions_only` and say the copy is the thing to fix.
 
 Hard limits:
 - Do not access production, environment variables, credentials, network

@@ -19,7 +19,7 @@ Write a short Markdown receipt to REPORT_PATH with heading `### Admin updates dr
       "title": "Clear feature title",
       "summary": "Plain-language explanation of what shipped and why it matters.",
       "whatsNew": ["Specific capability now available."],
-      "howToUse": ["Open the relevant page and use the named control."],
+      "howToUse": ["Open Safety > Incidents and use the named control."],
       "setup": null,
       "notes": null,
       "tag": "new"
@@ -39,7 +39,9 @@ Rules:
 - A visible bug fix is an entry, not a skip. Prefix its `whatsNew` bullet with `Fixed:` and use `tag: null`.
 - Use `tag: "new"` only for a genuinely new usable capability; otherwise use null.
 - `setup` must always be null. Anything still requiring a migration, secret, environment change, or operator action is not confirmed usable and must be skipped.
-- `whatsNew` is 1-8 concrete plain-text bullets. `howToUse` is 0-6 practical plain-text steps and names the actual navigation or automatic behavior. Use an empty list for fixes with no new interaction.
+- `whatsNew` is 1-8 concrete plain-text bullets. `howToUse` is 0-6 practical plain-text steps. Use an empty list for fixes with no new interaction.
+- Every navigation step must name only rows that appear in the attached NAV INVENTORY, spelled exactly as listed. Never invent a page, tab, button, or menu name, and never guess a label from a route path or a PR title. If you cannot ground a step in that file, drop the step.
+- A sidebar group and the rows inside it are different things, and two rows in the same group are siblings. Do not write "A > B" unless B is genuinely reached from inside A. A page's in-page tabs are not sidebar rows: if you name a tab, first confirm it exists by reading that page's own source.
 - `notes` is null unless one to four short context bullets materially help the team understand limits or rollout scope.
 - Keep prose direct and non-technical. Do not mention commit hashes, PR mechanics, database internals, implementation files, model use, or this automation.
 - Return JSON only in DECISION_PATH. No markdown fences or commentary in that file.

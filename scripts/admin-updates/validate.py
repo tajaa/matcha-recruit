@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+from nav_inventory import unknown_nav_tokens
 
 
 MATCHA_CATEGORIES = {
@@ -51,7 +54,40 @@ def _string_list(value: Any, *, field: str, minimum: int, maximum: int) -> list[
     ]
 
 
-def validate(plan: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+def _ground_how_to_use(
+    steps: list[str],
+    inventory: dict[str, Any] | None,
+    *,
+    field: str,
+) -> list[str]:
+    """Drop navigation steps that name a surface the client tree does not have.
+
+    Deliberately lossy rather than fatal: the deploy dispatch is non-fatal by
+    design, so raising here would trade a wrong changelog for a missing one. A
+    dropped step is a warning on stderr and one fewer line for a reader to
+    follow into a dead end.
+    """
+    if not inventory:
+        return steps
+    kept: list[str] = []
+    for step in steps:
+        unknown = unknown_nav_tokens(step, inventory)
+        if unknown:
+            print(
+                f"admin-updates: dropped {field} step naming no real surface "
+                f"{unknown!r}: {step!r}",
+                file=sys.stderr,
+            )
+            continue
+        kept.append(step)
+    return kept
+
+
+def validate(
+    plan: dict[str, Any],
+    draft: dict[str, Any],
+    nav_inventory: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if set(draft) != {"schemaVersion", "processedThroughPr", "entries", "skipped"}:
         raise ValidationError("draft must contain only schemaVersion, processedThroughPr, entries, skipped")
     if draft.get("schemaVersion") != 1:
@@ -98,7 +134,11 @@ def validate(plan: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
             "title": _plain_text(entry["title"], field=f"entry {key!r}.title", minimum=4, maximum=140),
             "summary": _plain_text(entry["summary"], field=f"entry {key!r}.summary", minimum=20, maximum=900),
             "whatsNew": _string_list(entry["whatsNew"], field=f"entry {key!r}.whatsNew", minimum=1, maximum=8),
-            "howToUse": _string_list(entry["howToUse"], field=f"entry {key!r}.howToUse", minimum=0, maximum=6),
+            "howToUse": _ground_how_to_use(
+                _string_list(entry["howToUse"], field=f"entry {key!r}.howToUse", minimum=0, maximum=6),
+                nav_inventory,
+                field=f"entry {key!r}.howToUse",
+            ),
             "notes": notes,
         })
 
@@ -145,11 +185,23 @@ def main() -> int:
     parser.add_argument("plan", type=Path)
     parser.add_argument("draft", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument(
+        "--nav-inventory",
+        type=Path,
+        help="nav_inventory.py JSON; when given, howToUse steps naming a surface "
+             "the client tree does not have are dropped with a warning",
+    )
     args = parser.parse_args()
     try:
+        inventory = (
+            json.loads(args.nav_inventory.read_text(encoding="utf-8"))
+            if args.nav_inventory
+            else None
+        )
         normalized = validate(
             json.loads(args.plan.read_text(encoding="utf-8")),
             json.loads(args.draft.read_text(encoding="utf-8")),
+            inventory,
         )
     except (ValidationError, json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
         parser.error(str(exc))

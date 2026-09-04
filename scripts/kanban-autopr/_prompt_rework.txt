@@ -75,9 +75,29 @@ bounded and redacted. Use them to distinguish genuine PR feedback from a test
 against an older production build, and code defects from unapplied migrations.
 Recent errors may be unrelated to this card: only use one when its route,
 exception, or failure signature actually correlates with the ticket evidence.
-If the existing branch already contains the requested fix and production is
-simply behind it, do not manufacture another change; report deployment as the
-remaining action.
+If the existing branch or main already contains the requested fix and
+production is simply behind it, do not manufacture another change; report
+deployment as the remaining action.
+
+Check each acceptance criterion on the card against the current branch before
+drafting, and record in the report whether it is already satisfied, with a
+`path:line`. A send-back can be sincere and still describe a card whose stated
+criteria are all met — most often because the shipped label differs from the
+one the card or the changelog names, or because production is behind the
+branch. When every criterion is met, return `no_safe_action` with
+`acceptance_criteria_met` and an `acceptance_evidence` entry per criterion
+(criterion text plus `path`, `line`, `commit`); the harness verifies every
+citation, so never guess a line number. The `commit` must be HEAD or one of its
+ancestors on this branch, the `line` must not be blank at that commit, and the
+`path` must still exist at HEAD. When the send-back cites a page, label,
+control, or behavior that exists nowhere in the repository, return
+`questions_only` and say what you searched for. Renaming a string, or any other
+change you would not make if the card did not exist, is not an implementation.
+
+The changelog copy at /admin/updates ("How to use it") is generated after merge
+by a separate system and lives in the production database, not this repository.
+You cannot change it. If the feedback disputes only that wording, do not edit
+code to match it — return `questions_only` and say the copy is the thing to fix.
 
 Address the feedback on the EXISTING diff on this branch. Do not re-litigate
 or redo what the diff already does correctly — read it first, then make the

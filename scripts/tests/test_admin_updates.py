@@ -13,6 +13,7 @@ ADMIN_UPDATES_DIR = REPO_ROOT / "scripts" / "admin-updates"
 sys.path.insert(0, str(ADMIN_UPDATES_DIR))
 
 import collect as admin_collect  # noqa: E402
+import nav_inventory as admin_nav_inventory  # noqa: E402
 import validate as admin_validate  # noqa: E402
 
 
@@ -223,6 +224,174 @@ def _valid_draft() -> dict:
 def test_validator_accepts_complete_exact_output():
     normalized = admin_validate.validate(_plan_for_validation(), _valid_draft())
     assert normalized["entries"][0]["id"] == "pr-11-add-useful-feature"
+
+
+def _nav_inventory() -> dict:
+    return {
+        "routes": ["/app/credential-templates"],
+        "navItems": [
+            {
+                "sidebar": "ClientSidebar",
+                "group": "Compliance",
+                "label": "Credential Templates",
+                "to": "/app/credential-templates",
+            },
+        ],
+        "uiLabels": ["Dropdown options"],
+    }
+
+
+def _draft_with_steps(*steps: str) -> dict:
+    draft = _valid_draft()
+    draft["entries"][0]["howToUse"] = list(steps)
+    return draft
+
+
+def test_grounded_navigation_step_survives():
+    normalized = admin_validate.validate(
+        _plan_for_validation(),
+        _draft_with_steps("Open Compliance -> Credential Templates and select Dropdown options."),
+        _nav_inventory(),
+    )
+    assert len(normalized["entries"][0]["howToUse"]) == 1
+
+
+def test_invented_navigation_step_is_dropped():
+    """The PR #418 failure: a nav path that reads plausibly and does not exist."""
+    normalized = admin_validate.validate(
+        _plan_for_validation(),
+        _draft_with_steps("Open Compliance -> Widget Factory and select Blorp."),
+        _nav_inventory(),
+    )
+    assert normalized["entries"][0]["howToUse"] == []
+
+
+def test_prose_naming_no_surface_is_left_alone():
+    """Only navigation claims are checked -- English is not policed."""
+    step = "Recommendations refresh automatically each night."
+    normalized = admin_validate.validate(
+        _plan_for_validation(), _draft_with_steps(step), _nav_inventory()
+    )
+    assert normalized["entries"][0]["howToUse"] == [step]
+
+
+def test_empty_how_to_use_passes_through():
+    normalized = admin_validate.validate(
+        _plan_for_validation(), _draft_with_steps(), _nav_inventory()
+    )
+    assert normalized["entries"][0]["howToUse"] == []
+
+
+def test_missing_inventory_disables_grounding_rather_than_failing():
+    """No inventory must never mean "drop everything" -- the deploy dispatch is
+    non-fatal, so silently emptying the changelog would be the worse failure."""
+    step = "Open Compliance -> Widget Factory."
+    normalized = admin_validate.validate(_plan_for_validation(), _draft_with_steps(step))
+    assert normalized["entries"][0]["howToUse"] == [step]
+
+
+def test_prompt_separator_is_grounded():
+    """The prompt renders nav as `Group > Row` and writes its example steps that
+    way, so `>` has to be a separator the validator splits on -- it was not, and
+    every step written the way the prompt teaches skipped grounding entirely."""
+    normalized = admin_validate.validate(
+        _plan_for_validation(),
+        _draft_with_steps("Open Compliance > Widget Factory and select Blorp."),
+        _nav_inventory(),
+    )
+    assert normalized["entries"][0]["howToUse"] == []
+
+
+def test_prompt_example_separator_appears_in_nav_tokens():
+    for separator in ("->", ">", "→", "⇒", "»"):
+        assert admin_nav_inventory.nav_tokens(f"Open A {separator} B") == ["Open A", "B"]
+
+
+def test_invention_is_dropped_against_the_real_client_tree():
+    """The 3-entry fixture above overstates the check: the real tree carries
+    ~900 labels, and a substring test against that many anchors passed almost
+    anything."""
+    inventory = admin_nav_inventory.collect(REPO_ROOT)
+    assert admin_nav_inventory.unknown_nav_tokens(
+        "Open Compliance > Widget Factory and select Blorp.", inventory
+    ) == ["Widget Factory and select Blorp."]
+    assert admin_nav_inventory.unknown_nav_tokens(
+        "Open Safety > Incidents and use the named control.", inventory
+    ) == []
+
+
+def test_anchors_match_whole_words_only():
+    inventory = {"routes": [], "navItems": [], "uiLabels": ["Order"]}
+    assert admin_nav_inventory.unknown_nav_tokens("Open Order > Order", inventory) == []
+    assert admin_nav_inventory.unknown_nav_tokens(
+        "Open Reordering > Blorp", inventory
+    ) == ["Open Reordering", "Blorp"]
+
+
+def test_label_with_an_apostrophe_is_not_truncated():
+    """`label: "What's New"` used to capture `What`, because the regex accepted
+    either quote as the closer -- and a truncated label is the exact wrong-label
+    failure this module exists to prevent."""
+    items = admin_nav_inventory._collect_sidebar_file(
+        """const nav = [
+          { key: 'news', label: "What's New", items: [
+            { to: '/admin/updates', icon: Bell, label: 'Updates' },
+          ]},
+        ]""",
+        "TestSidebar",
+    )
+    assert items == [{
+        "sidebar": "TestSidebar",
+        "group": "What's New",
+        "label": "Updates",
+        "to": "/admin/updates",
+    }]
+
+
+def test_multi_line_nav_row_is_extracted():
+    """ClientSidebar's conditional Broker Chat row spells `to:` and `label:` on
+    separate lines; a line-at-a-time reader told the model it did not exist."""
+    items = admin_nav_inventory._collect_sidebar_file(
+        """const entry: NavItem = {
+          to: '/app/broker-chat',
+          icon: Handshake,
+          label: 'Broker Chat',
+        }""",
+        "ClientSidebar",
+    )
+    assert items == [{
+        "sidebar": "ClientSidebar",
+        "group": "",
+        "label": "Broker Chat",
+        "to": "/app/broker-chat",
+    }]
+
+
+def test_commented_out_nav_row_is_not_reported_as_shipped():
+    items = admin_nav_inventory._collect_sidebar_file(
+        """const nav = [
+          { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
+          // { to: '/app/locations', icon: MapPin, label: 'Locations' },
+        ]""",
+        "IrSidebar",
+    )
+    assert [item["label"] for item in items] == ["Incidents"]
+
+
+def test_real_client_tree_has_the_multi_line_broker_chat_row():
+    inventory = admin_nav_inventory.collect(REPO_ROOT)
+    assert any(item["to"] == "/app/broker-chat" for item in inventory["navItems"])
+
+
+def test_nav_inventory_extracts_real_sidebar_rows():
+    inventory = admin_nav_inventory.collect(REPO_ROOT)
+    credential_rows = [
+        item for item in inventory["navItems"]
+        if item["to"] == "/app/credential-templates"
+    ]
+    assert credential_rows, "credential-templates row missing from every sidebar"
+    # One label for one route -- the divergence that made the ticket unfindable.
+    assert {row["label"] for row in credential_rows} == {"Credential Templates"}
 
 
 def test_validator_accepts_and_strips_trusted_skip_echoes():

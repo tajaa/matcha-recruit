@@ -173,12 +173,20 @@ check "publisher sends a decision-bound result notification to the context autho
 check "awaiting-input publication asks in project chat against the exact decision" \
   $(jq -e '(.reason | contains("canonical term")) and (.expected_progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS"))' "$TMP_DIR/context-request.json" >/dev/null && echo 0 || echo 1)
 
-unicode_sample="$(jq -nr '"a" * 599 + "🙂tail"')"
-unicode_truncated="$(printf '%s' "$unicode_sample" | jq -Rrs '.[0:600]')"
+unicode_sample="$(jq -nr '"a" * 3999 + "🙂tail"')"
+unicode_truncated="$(printf '%s' "$unicode_sample" | jq -Rrs '.[0:4000]')"
 check "context-request truncation preserves UTF-8 at the boundary" \
-  $([ "$(printf '%s' "$unicode_truncated" | jq -Rrs 'length')" = 600 ] \
+  $([ "$(printf '%s' "$unicode_truncated" | jq -Rrs 'length')" = 4000 ] \
     && [[ "$unicode_truncated" == *🙂 ]] \
-    && grep -q "jq -Rsr '\.\[0:600\]'" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
+    && grep -q "jq -Rsr '\.\[0:4000\]'" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
+    && echo 0 || echo 1)
+
+# The acceptance-evidence block is the payload, so its line structure has to
+# reach the reader: flattening it cut the proof off after about four criteria.
+multiline_reason="$(printf 'card note\n   - criterion one\n     path/to/file.tsx:12 @ abc1234')"
+check "a multi-line context reason keeps its lines" \
+  $([ "$(printf '%s' "$multiline_reason" | tr -d '\r' | jq -Rsr '.[0:4000]' | wc -l | tr -d ' ')" = "3" ] \
+    && ! grep -q "tr '\\r\\n' '  '" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
     && echo 0 || echo 1)
 
 cat > "$TMP_DIR/already-fixed-card.json" <<'EOF'
@@ -333,6 +341,80 @@ set -e
 check "draft directive still rejects Alembic runner and configuration changes" \
   $([ "$alembic_runner_rc" != 0 ] && [ ! -e "$TEST_REPO/server/alembic/env.py" ] \
     && echo 0 || echo 1)
+
+################################################################################
+# Cosmetic-diff guard. PR #418's shape reached publication as an
+# `implementation`; a `partial_implementation` carrying the identical diff used
+# to walk straight past the guard, and the refusal itself left no trace on the
+# card for a human to see.
+################################################################################
+git -C "$TEST_REPO" reset --hard -q HEAD
+mkdir -p "$TEST_REPO/client/src/components/sidebars"
+cat > "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx" <<'EOF'
+const nav = [
+  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing' },
+]
+EOF
+git -C "$TEST_REPO" add -A
+git -C "$TEST_REPO" commit -qm "sidebar baseline"
+
+cat > "$TMP_DIR/structure-card.json" <<'EOF'
+{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Register the credential templates route in the sidebar","description":"The nav row should point at the credential templates page.","category":"fix","mode":"investigate","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
+EOF
+cat > "$TMP_DIR/raw-partial.json" <<'EOF'
+{"schema_version":1,"outcome":"partial_implementation","confidence":{"requirements_clarity":{"score":15,"reason":"mostly clear"},"evidence_quality":{"score":10,"reason":"nav is visible"},"code_localization":{"score":10,"reason":"one file"},"verification_strength":{"score":5,"reason":"rendered check"},"production_alignment":{"score":10,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["nav wording"]},"questions":[{"id":"q1","question":"Which label is canonical?","why_blocking":"two spellings exist","options":[{"key":"a","label":"Credentialing","impact":"keeps today's label"},{"key":"b","label":"Credential Templates","impact":"matches the page title"}],"default_assumption":"Credential Templates"}],"safe_changes_present":true,"no_safe_action_reason":null}
+EOF
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+  "$TMP_DIR/raw-partial.json" "$TMP_DIR/partial.json"
+
+# The only change: the label text. Route, row and gate are untouched.
+sed -i.bak "s/label: 'Credentialing'/label: 'Credential Templates'/" \
+  "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx"
+rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
+rm -f "$TMP_DIR/card-patch.json" "$TMP_DIR/context-request.json"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/structure-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>&1
+cosmetic_partial_rc=$?
+set -e
+check "a partial_implementation cannot smuggle a string-literal-only diff past the guard" \
+  $([ "$cosmetic_partial_rc" != 0 ] \
+    && git -C "$TEST_REPO" diff --quiet \
+    && echo 0 || echo 1)
+check "the cosmetic-diff refusal is recorded on the card" \
+  $(jq -e '.progress_note | contains("BLOCKED: COSMETIC DIFF") and contains("[autopr:rejected")' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+check "the cosmetic-diff refusal asks the card owner for a decision" \
+  $(jq -e '(.reason | contains("only rewrites string literals"))
+      and (.expected_progress_note | contains("BLOCKED: COSMETIC DIFF"))' \
+    "$TMP_DIR/context-request.json" >/dev/null && echo 0 || echo 1)
+
+# The same diff on a card that asks for a copy change is legitimate.
+cat > "$TMP_DIR/copy-card.json" <<'EOF'
+{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Rename Credentialing to Credential Templates","description":"Use one spelling for this feature.","category":"fix","mode":"investigate","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
+EOF
+sed -i.bak "s/label: 'Credentialing'/label: 'Credential Templates'/" \
+  "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx"
+rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>&1
+copy_card_rc=$?
+check "a card that genuinely asks for a copy change still publishes" \
+  $([ "$copy_card_rc" = 0 ] && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

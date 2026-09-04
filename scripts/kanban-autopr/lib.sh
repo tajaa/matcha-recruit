@@ -119,3 +119,22 @@ mw_move_card() {
     mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
         "$(jq -n --arg col "$column" '{board_column: $col}')" >/dev/null
 }
+
+# A card whose criteria are already met, on a run forbidden from saying so,
+# produces a diff that changes nothing real. PR #418 shipped exactly one such
+# line: a nav label reworded while the route, the row, and the feature gate it
+# asked for had all existed for weeks. Only meaningful when the card asked for
+# structure — a card that genuinely asks for a copy change has the same shape
+# and is legitimate.
+#
+# autopr_cosmetic_only_diff DIFF_COMMAND_OUTPUT_FILE TITLE DESCRIPTION
+# Returns 0 when the diff is a string-literal reword of a structure card.
+autopr_cosmetic_only_diff() {
+    local diff_file="$1" title="$2" description="$3" script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    [ -s "$diff_file" ] || return 1
+    printf '%s\n%s' "$title" "$description" \
+        | grep -Eqi '\b(route|router|sidebar|nav|navigation|menu|endpoint|expose|register|wire up)\b' \
+        || return 1
+    python3 "$script_dir/cosmetic_diff.py" < "$diff_file"
+}

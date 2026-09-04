@@ -372,8 +372,11 @@ async def post_autopr_context_request_endpoint(
         raise HTTPException(status_code=400, detail="reason and expected_progress_note must be strings")
     reason = raw_reason.strip()
     expected = raw_expected.strip()
-    if not reason or len(reason) > 600:
-        raise HTTPException(status_code=400, detail="reason must be 1-600 characters")
+    # Long enough to carry per-criterion acceptance evidence. A card can name up
+    # to 40 criteria of 500 characters each, and truncating that at 600 threw
+    # away the very thing the human is being asked to look at.
+    if not reason or len(reason) > 4000:
+        raise HTTPException(status_code=400, detail="reason must be 1-4000 characters")
     try:
         posted = await post_autopr_context_request(
             project_id=project_id,
