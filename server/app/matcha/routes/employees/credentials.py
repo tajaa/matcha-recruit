@@ -783,6 +783,13 @@ async def reclassify_credential_document(
                     body.expiration_date if requires_expiration else None,
                     new_requirement["id"],
                 )
+                # Verifying through reclassification is the same recovery
+                # boundary as verifying through approval: without this, the
+                # requirement reads verified through its new expiry while the
+                # open case still quotes the old one.
+                await resolve_recovered_eligibility_cases(
+                    conn, company_id, requirement_id=new_requirement["id"],
+                )
             # Reclassification re-points the requirement, so `is_current` has to
             # be recomputed rather than defaulted off the RETURNING row.
             projected = await _fetch_credential_documents(

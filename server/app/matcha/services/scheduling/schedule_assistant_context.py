@@ -149,10 +149,16 @@ async def list_schedule_eligibility_cases(*, company_id: UUID, location_id: UUID
                    CASE
                        WHEN c.requirement_type <> 'credential' THEN NULL
                        WHEN c.job_id IS NOT NULL THEN jr.id IS NOT NULL
-                       ELSE (
+                       -- _BLOCKING_AUTHORITY_EXPR is written for a WHERE clause,
+                       -- where SQL NULL excludes the row (= not blocking). It goes
+                       -- NULL routinely here (a requirement with no template makes
+                       -- the crt operand NULL), so a SELECT of it has to fold NULL
+                       -- down to false or this reads the opposite of the canonical
+                       -- checks in schedule_eligibility.
+                       ELSE COALESCE((
                            ecr.is_required = true AND ecr.applies_company_wide = true
                            AND {_BLOCKING_AUTHORITY_EXPR}
-                       )
+                       ), false)
                    END AS is_schedule_blocking
             FROM schedule_eligibility_cases c
             JOIN employees e ON e.id=c.employee_id
@@ -186,7 +192,7 @@ async def list_schedule_eligibility_cases(*, company_id: UUID, location_id: UUID
         if (
             row["requirement_type"] == "credential"
             and row["current_credential_status"] is not None
-            and row.get("is_schedule_blocking") is not False
+            and row["is_schedule_blocking"] is True
         ):
             evidence = {
                 "label": row["credential_label"],

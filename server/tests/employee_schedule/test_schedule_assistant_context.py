@@ -116,6 +116,7 @@ async def test_eligibility_cases_distinguish_historical_case_from_current_creden
         "current_credential_status": "verified",
         "current_credential_expires_at": date(2029, 9, 3),
         "timezone": "UTC",
+        "is_schedule_blocking": True,
     }])
     monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
 
@@ -149,6 +150,7 @@ async def test_unresolved_pending_credential_case_names_its_actual_block(monkeyp
         "current_credential_status": "pending",
         "current_credential_expires_at": date(2026, 9, 1),
         "timezone": "UTC",
+        "is_schedule_blocking": True,
     }])
     monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
 
@@ -187,6 +189,42 @@ async def test_a_requirement_that_no_longer_blocks_is_not_reported_as_blocking(m
         "current_credential_expires_at": date(2026, 9, 1),
         "timezone": "UTC",
         "is_schedule_blocking": False,
+    }])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    result = await context.list_schedule_eligibility_cases(
+        company_id=uuid4(), location_id=uuid4(),
+    )
+
+    case = result["cases"][0]
+    assert case["currently_blocks_scheduling"] is False
+    assert case["current_block_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_blocking_authority_is_not_reported_as_blocking(monkeypatch):
+    """`_BLOCKING_AUTHORITY_EXPR` is written for a WHERE clause, where SQL NULL
+    drops the row (= not blocking), and it goes NULL for the common case of a
+    requirement carrying no template. Reading NULL as "still blocking" here is
+    how this reader started claiming blocks that `resolve_recovered_eligibility_
+    cases` was concurrently resolving."""
+    conn = _Conn(None, [{
+        "id": uuid4(),
+        "employee_id": uuid4(),
+        "requirement_type": "credential",
+        "status": "warning_open",
+        "case_expires_at": date(2026, 9, 1),
+        "blocking_reason_code": "credential_expired",
+        "legal_basis": {},
+        "next_escalation_at": None,
+        "first_name": "Ellie",
+        "last_name": "Marsh",
+        "credential_label": "Food Handler Card",
+        "has_expiration": True,
+        "current_credential_status": "pending",
+        "current_credential_expires_at": date(2026, 9, 1),
+        "timezone": "UTC",
+        "is_schedule_blocking": None,
     }])
     monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
 
@@ -246,3 +284,6 @@ async def test_eligibility_case_query_resolves_the_canonical_blocking_authority(
     assert "is_schedule_blocking" in source
     assert "ecr.is_required = true AND ecr.applies_company_wide = true" in source
     assert "schedule_job_credential_requirements" in source
+    # The WHERE-clause expression is being SELECTed, so its NULLs have to be
+    # folded to false in SQL as well as read as false in Python.
+    assert "COALESCE((" in source

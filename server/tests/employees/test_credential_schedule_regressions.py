@@ -10,6 +10,7 @@ from app.core.services.credential_template_service import (
     ResolvedCredentialRequirement,
     assign_credential_requirements_to_employee,
 )
+from app.core.routes.documents import credential_templates
 from app.matcha.routes.employees import credentials as employee_credentials
 from app.matcha.routes.employee_portal.credential_documents import _VALID_DOC_TYPES
 
@@ -408,6 +409,10 @@ def test_reclassification_response_reports_current_from_the_projection():
             employee_credentials, "_fetch_credential_documents",
             mock.AsyncMock(return_value=[projected]),
         ),
+        mock.patch.object(
+            employee_credentials, "resolve_recovered_eligibility_cases",
+            mock.AsyncMock(return_value=1),
+        ) as resolve_cases,
     ):
         response = asyncio.run(employee_credentials.reclassify_credential_document(
             employee_id=employee_id,
@@ -419,3 +424,60 @@ def test_reclassification_response_reports_current_from_the_projection():
         ))
 
     assert response["is_current"] is True
+    # Reclassifying onto the right type verifies that requirement, so it is the
+    # same recovery boundary approval is: an open case left quoting the old
+    # expiry is exactly what the approve-path call was added to prevent.
+    resolve_cases.assert_awaited_once_with(
+        conn, company_id, requirement_id=requirement_id,
+    )
+
+
+class WaiveRequirementConn:
+    def __init__(self):
+        self.executed: list[str] = []
+
+    def transaction(self):
+        return _Transaction()
+
+    async def fetchrow(self, query, *_args):
+        assert "employee_credential_requirements" in query
+        return {"id": uuid4()}
+
+    async def execute(self, query, *_args):
+        self.executed.append(query)
+        return "UPDATE 1"
+
+
+def test_waiving_a_requirement_resolves_its_open_eligibility_case():
+    """`_credential_problem` reports nothing for a waived requirement.
+
+    So a case left open after a waiver never closes on its own, and the
+    schedule assistant keeps quoting an expiry the assignment path no longer
+    enforces — the same staleness the approval path already guards.
+    """
+    company_id, employee_id, requirement_id, user_id = (uuid4() for _ in range(4))
+    conn = WaiveRequirementConn()
+
+    with (
+        mock.patch.object(
+            credential_templates, "get_connection",
+            return_value=_ConnectionContext(conn),
+        ),
+        mock.patch.object(
+            credential_templates, "resolve_recovered_eligibility_cases",
+            mock.AsyncMock(return_value=1),
+        ) as resolve_cases,
+    ):
+        result = asyncio.run(credential_templates.waive_requirement(
+            employee_id=employee_id,
+            requirement_id=requirement_id,
+            body=credential_templates.WaiveRequest(reason="Manager waiver"),
+            user=SimpleNamespace(id=user_id),
+            company_id=company_id,
+        ))
+
+    assert result == {"ok": True}
+    assert any("status = 'waived'" in query for query in conn.executed)
+    resolve_cases.assert_awaited_once_with(
+        conn, company_id, requirement_id=requirement_id,
+    )
