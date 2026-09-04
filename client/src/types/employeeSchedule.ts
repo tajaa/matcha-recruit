@@ -39,7 +39,14 @@ export type PlannedBreak = {
   source: 'suggested' | 'manager'
 }
 
-export type BreakStaggerStatus = 'suggested' | 'unresolved' | 'insufficient_coverage'
+export type BreakStaggerStatus =
+  | 'suggested'
+  /** A time a manager already reviewed and saved — held fixed, not re-placed. */
+  | 'saved'
+  /** Placed, but the break cannot fit inside its legal window on this shift. */
+  | 'deadline_conflict'
+  | 'unresolved'
+  | 'insufficient_coverage'
 
 export type BreakStaggerResult = {
   employee_id: string

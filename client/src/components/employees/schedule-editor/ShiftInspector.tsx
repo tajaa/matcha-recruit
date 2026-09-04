@@ -2,9 +2,9 @@ import { Check, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchShiftBreakStagger, updateAssignmentBreakPlan, updateAssignmentNote } from '../../../api/employees/employeeSchedule'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
-import { Card } from '../../ui'
+import { Card, useToast } from '../../ui'
 import type { AssignmentNotePayload, BreakStaggerResult, PlannedBreak, ShiftAssignment, RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
-import { addDays, fmtTime } from '../../../types/employeeSchedule'
+import { addDays, errorMessage, fmtTime } from '../../../types/employeeSchedule'
 import { MAX_BREAK_MINUTES, MAX_REQUIRED_STAFF, validateShiftFields } from './shiftValidation'
 import {
   NO_ROLES_MESSAGE, NO_ROLE_OPTION, ROLE_PLACEHOLDER, ROLE_REQUIRED_MESSAGE,
@@ -69,7 +69,10 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const [breakRevision, setBreakRevision] = useState(0)
   const persistedBreakMinutes = shift?.break_minutes
   const shiftId = shift?.id ?? ''
-  const assignmentCount = shift?.assignments?.length ?? 0
+  // Keyed on WHO is assigned, not how many: a swap or reassign that keeps the
+  // headcount constant would otherwise leave the suggestions bound to the
+  // employee who just left, and the new assignee renders no break row at all.
+  const assignmentKey = (shift?.assignments ?? []).map((a) => a.employee_id).join(',')
   const selectedJobMissing = isJobMissingFromList(jobId, jobs)
   const noRolesAvailable = !editing && jobs.length === 0
 
@@ -88,7 +91,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   // rather than read off the shift payload. A failure leaves the legally
   // required guidance below untouched — it never blocks editing the shift.
   useEffect(() => {
-    if (!shiftId || assignmentCount === 0) {
+    if (!shiftId || assignmentKey === '') {
       setStagger([])
       setStaggerAdvisories([])
       return
@@ -106,7 +109,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         setStaggerAdvisories([])
       })
     return () => { cancelled = true }
-  }, [shiftId, assignmentCount, breakRevision])
+  }, [shiftId, assignmentKey, breakRevision])
 
   if (!shift && !defaults) return null
 
@@ -184,7 +187,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         {!editing && trainingEnabled && kind === 'training' && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Training requirement<select value={requirementId} onChange={(event) => setRequirementId(event.target.value)} disabled={readOnly} className={input}><option value="">Select requirement...</option>{requirements.map((requirement) => <option key={requirement.id} value={requirement.id}>{requirement.title}</option>)}</select></label>}
       </div>
       {validationError && <p id={roleMissing ? 'shift-role-error' : undefined} role="alert" className="mt-3 text-xs text-red-400">{validationError}</p>}
-      {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} shiftStartsAt={shift!.starts_at} stagger={stagger.filter((result) => result.employee_id === assignment.employee_id)} readOnly={readOnly} onSaved={async () => { setBreakRevision((value) => value + 1); await onAssignmentUpdated() }} />)}</span>}{staggerAdvisories.map((message) => <span key={message} className="mt-2 block text-amber-300">{message}</span>)}</div>}
+      {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} shiftStartsAt={shift!.starts_at} stagger={stagger.filter((result) => result.employee_id === assignment.employee_id)} readOnly={readOnly} onNoteSaved={onAssignmentUpdated} onBreaksSaved={async () => { setBreakRevision((value) => value + 1); await onAssignmentUpdated() }} />)}</span>}{staggerAdvisories.map((message) => <span key={message} className="mt-2 block text-amber-300">{message}</span>)}</div>}
       <div className="mt-4 flex items-center gap-2">
         {!readOnly && <button onClick={save} disabled={saving || noRolesAvailable} title={noRolesAvailable ? NO_ROLES_MESSAGE : undefined} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}{editing ? 'Save changes' : 'Create draft'}</button>}
         {editing && !readOnly && <button onClick={onDelete} disabled={saving} className="ml-auto rounded-lg p-2 text-zinc-600 hover:bg-red-500/10 hover:text-red-400" aria-label="Delete shift"><Trash2 className="h-4 w-4" /></button>}
@@ -206,12 +209,52 @@ function withClock(template: string, clock: string) {
   return `${template.slice(0, 11)}${clock}${template.slice(16)}`
 }
 
-function breakLabel(result: BreakStaggerResult) {
-  const kind = result.kind === 'meal' ? 'meal' : 'rest'
-  return `${result.duration_minutes}-min ${kind}`
+/** A break the manager can act on: a live suggestion, or a saved time the
+ *  current suggestions no longer cover ("orphaned" — the shift was retimed, a
+ *  waiver landed, or the fetch failed). An orphaned row still renders, because
+ *  the employee's portal is still showing it and this is the only place to
+ *  clear it. */
+type BreakRow = {
+  kind: 'meal' | 'rest'
+  ordinal: number
+  duration_minutes: number
+  status: BreakStaggerResult['status'] | 'orphaned'
+  suggested_start: string | null
+  reason: string | null
 }
 
-function AssignmentSummary({ shiftId, assignment, shiftStartsAt, stagger, readOnly, onSaved }: { shiftId: string; assignment: ShiftAssignment; shiftStartsAt: string; stagger: BreakStaggerResult[]; readOnly: boolean; onSaved: () => Promise<void> }) {
+function breakLabel(row: { duration_minutes: number; kind: string }) {
+  const kind = row.kind === 'meal' ? 'meal' : 'rest'
+  return `${row.duration_minutes}-min ${kind}`
+}
+
+const ORPHANED_REASON = 'This saved time is no longer a suggested break on this shift. Save to drop it, or clear the saved times.'
+
+function buildBreakRows(stagger: BreakStaggerResult[], saved: PlannedBreak[]): BreakRow[] {
+  const rows: BreakRow[] = stagger.map((result) => ({
+    kind: result.kind,
+    ordinal: result.ordinal,
+    duration_minutes: result.duration_minutes,
+    status: result.status,
+    suggested_start: result.suggested_start,
+    reason: result.reason,
+  }))
+  const covered = new Set(rows.map((row) => `${row.kind}:${row.ordinal}`))
+  for (const planned of saved) {
+    if (covered.has(`${planned.kind}:${planned.ordinal}`)) continue
+    rows.push({
+      kind: planned.kind,
+      ordinal: planned.ordinal,
+      duration_minutes: planned.duration_minutes,
+      status: 'orphaned',
+      suggested_start: null,
+      reason: ORPHANED_REASON,
+    })
+  }
+  return rows
+}
+
+function AssignmentSummary({ shiftId, assignment, shiftStartsAt, stagger, readOnly, onNoteSaved, onBreaksSaved }: { shiftId: string; assignment: ShiftAssignment; shiftStartsAt: string; stagger: BreakStaggerResult[]; readOnly: boolean; onNoteSaved: () => Promise<void>; onBreaksSaved: () => Promise<void> }) {
   const [note, setNote] = useState(assignment.manager_note ?? '')
   const [visible, setVisible] = useState(assignment.manager_note_visible_to_employee ?? true)
   const [includeDigest, setIncludeDigest] = useState(assignment.manager_note_include_in_location_digest ?? true)
@@ -219,41 +262,62 @@ function AssignmentSummary({ shiftId, assignment, shiftStartsAt, stagger, readOn
   const [saving, setSaving] = useState(false)
   const [savingBreaks, setSavingBreaks] = useState(false)
   const [breakEdits, setBreakEdits] = useState<Record<string, string>>({})
+  const { toast } = useToast()
   const guidance = assignment.compliance_guidance
   const savedBreaks = assignment.planned_breaks ?? []
+  const breakRows = buildBreakRows(stagger, savedBreaks)
   const breakKey = (kind: string, ordinal: number) => `${kind}:${ordinal}`
   const savedFor = (kind: string, ordinal: number) =>
     savedBreaks.find((planned) => planned.kind === kind && planned.ordinal === ordinal)
   // A saved time wins over a fresh suggestion: the manager already reviewed it.
-  const clockFor = (result: BreakStaggerResult) => {
-    const edited = breakEdits[breakKey(result.kind, result.ordinal)]
+  const clockFor = (row: BreakRow) => {
+    const edited = breakEdits[breakKey(row.kind, row.ordinal)]
     if (edited !== undefined) return edited
-    const saved = savedFor(result.kind, result.ordinal)
+    const saved = savedFor(row.kind, row.ordinal)
     if (saved) return clockOf(saved.start_local)
-    return result.suggested_start ? clockOf(result.suggested_start) : ''
+    return row.suggested_start ? clockOf(row.suggested_start) : ''
   }
 
   async function saveBreaks() {
     setSavingBreaks(true)
     try {
       const planned: PlannedBreak[] = []
-      for (const result of stagger) {
-        const clock = clockFor(result)
+      // Orphaned rows are deliberately excluded: this is a full replacement, so
+      // saving is also how a time the rules no longer support gets dropped.
+      for (const row of breakRows.filter((entry) => entry.status !== 'orphaned')) {
+        const clock = clockFor(row)
         if (!clock) continue
-        const saved = savedFor(result.kind, result.ordinal)
-        const template = saved?.start_local ?? result.suggested_start ?? shiftStartsAt
-        const edited = breakEdits[breakKey(result.kind, result.ordinal)] !== undefined
+        const saved = savedFor(row.kind, row.ordinal)
+        const template = saved?.start_local ?? row.suggested_start ?? shiftStartsAt
+        const edited = breakEdits[breakKey(row.kind, row.ordinal)] !== undefined
         planned.push({
-          kind: result.kind,
-          ordinal: result.ordinal,
+          kind: row.kind,
+          ordinal: row.ordinal,
           start_local: withClock(template, clock),
-          duration_minutes: result.duration_minutes,
+          duration_minutes: row.duration_minutes,
           source: edited || saved ? 'manager' : 'suggested',
         })
       }
       await updateAssignmentBreakPlan(shiftId, assignment.employee_id, planned.length ? planned : null)
       setBreakEdits({})
-      await onSaved()
+      await onBreaksSaved()
+    } catch (error) {
+      // Without this the button just re-enables with the edited value still in
+      // the input, which reads as a successful save of a compliance-relevant time.
+      toast(errorMessage(error), 'error')
+    } finally {
+      setSavingBreaks(false)
+    }
+  }
+
+  async function clearBreaks() {
+    setSavingBreaks(true)
+    try {
+      await updateAssignmentBreakPlan(shiftId, assignment.employee_id, null)
+      setBreakEdits({})
+      await onBreaksSaved()
+    } catch (error) {
+      toast(errorMessage(error), 'error')
     } finally {
       setSavingBreaks(false)
     }
@@ -269,7 +333,9 @@ function AssignmentSummary({ shiftId, assignment, shiftStartsAt, stagger, readOn
         send_employee_notice: sendNotice,
       }
       await updateAssignmentNote(shiftId, assignment.employee_id, payload)
-      await onSaved()
+      await onNoteSaved()
+    } catch (error) {
+      toast(errorMessage(error), 'error')
     } finally {
       setSaving(false)
     }
@@ -278,24 +344,27 @@ function AssignmentSummary({ shiftId, assignment, shiftStartsAt, stagger, readOn
   return <div className="rounded border border-zinc-800 p-2">
     <div className="flex items-center gap-1 text-zinc-200"><span>{assignment.name}</span>{assignment.availability_overridden && <span className="text-orange-400" title="Availability override">Availability override</span>}</div>
     {guidance?.summary && <p className={guidance.status === 'unmapped' || guidance.status === 'error' ? 'mt-1 text-amber-300' : 'mt-1 text-sky-300'}>{guidance.summary}</p>}
-    {stagger.length > 0 && <div className="mt-2 space-y-1.5 border-t border-zinc-800 pt-2">
+    {breakRows.length > 0 && <div className="mt-2 space-y-1.5 border-t border-zinc-800 pt-2">
       <p className="text-[10px] uppercase tracking-wide text-zinc-600">Suggested break times</p>
-      {stagger.map((result) => <div key={breakKey(result.kind, result.ordinal)} className="space-y-1">
+      {breakRows.map((row) => <div key={breakKey(row.kind, row.ordinal)} className="space-y-1">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-zinc-400">{breakLabel(result)}</span>
+          <span className="text-[10px] text-zinc-400">{breakLabel(row)}</span>
           <input
             type="time"
-            aria-label={`${breakLabel(result)} break start for ${assignment.name}`}
-            value={clockFor(result)}
-            disabled={readOnly}
-            onChange={(event) => setBreakEdits((edits) => ({ ...edits, [breakKey(result.kind, result.ordinal)]: event.target.value }))}
+            aria-label={`${breakLabel(row)} break start for ${assignment.name}`}
+            value={clockFor(row)}
+            disabled={readOnly || row.status === 'orphaned'}
+            onChange={(event) => setBreakEdits((edits) => ({ ...edits, [breakKey(row.kind, row.ordinal)]: event.target.value }))}
             className="rounded border border-zinc-800 bg-zinc-950 px-1.5 py-1 text-[11px] text-zinc-200 outline-none focus:border-zinc-600 disabled:opacity-50"
           />
-          {savedFor(result.kind, result.ordinal) && <span className="text-[9px] text-emerald-400">Saved</span>}
+          {savedFor(row.kind, row.ordinal) && <span className="text-[9px] text-emerald-400">Saved</span>}
         </div>
-        {result.status !== 'suggested' && result.reason && <p className="text-[10px] text-amber-300">{result.reason}</p>}
+        {row.reason && <p className="text-[10px] text-amber-300">{row.reason}</p>}
       </div>)}
-      {!readOnly && <button onClick={() => void saveBreaks()} disabled={savingBreaks} className="text-[10px] text-emerald-300 hover:text-emerald-200 disabled:opacity-50">{savingBreaks ? 'Saving…' : 'Save break times'}</button>}
+      {!readOnly && <div className="flex items-center gap-3">
+        <button onClick={() => void saveBreaks()} disabled={savingBreaks} className="text-[10px] text-emerald-300 hover:text-emerald-200 disabled:opacity-50">{savingBreaks ? 'Saving…' : 'Save break times'}</button>
+        {savedBreaks.length > 0 && <button onClick={() => void clearBreaks()} disabled={savingBreaks} className="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-50">Clear saved times</button>}
+      </div>}
     </div>}
     <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Shift note for this employee" className={`${input} mt-2`} />
     <div className="mt-1.5 grid gap-1 text-[10px] text-zinc-400">

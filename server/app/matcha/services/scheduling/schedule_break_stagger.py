@@ -36,7 +36,9 @@ from uuid import UUID
 from .schedule_breaks import BreakKind, BreakPlan, BreakRequirement
 
 
-StaggerStatus = Literal["suggested", "unresolved", "insufficient_coverage"]
+StaggerStatus = Literal[
+    "suggested", "saved", "deadline_conflict", "unresolved", "insufficient_coverage",
+]
 
 UNRESOLVED_REASONS: dict[str, str] = {
     "unmapped": "Break requirements could not be mapped for this location; verify manually.",
@@ -50,6 +52,24 @@ class StaggerAssignment:
 
     employee_id: UUID
     plan: BreakPlan
+
+
+@dataclass(frozen=True)
+class LockedBreak:
+    """A break time a manager already reviewed and saved.
+
+    Suggestions are re-derived every time a shift is opened, so without these
+    the placement would compute around a fiction: an accepted-then-edited time
+    is real state the floor will actually run on, and everything still
+    unreviewed has to be placed around it, not around what was suggested for
+    that person before the edit.
+    """
+
+    employee_id: UUID
+    kind: BreakKind
+    ordinal: int
+    start: datetime
+    duration_minutes: int
 
 
 @dataclass(frozen=True)
@@ -82,16 +102,28 @@ class _Slot:
     earliest: datetime
     latest_start: datetime
     preferred: datetime
+    deadline: datetime
     deadline_known: bool
+    window_too_short: bool
 
 
-def _window_bounds(
+@dataclass(frozen=True)
+class _Placed:
+    """An interval already committed to the floor, and whose it is."""
+
+    start: datetime
+    end: datetime
+    employee_id: UUID
+
+
+def _build_slot(
     requirement: BreakRequirement,
     *,
+    employee_id: UUID,
     shift_start_local: datetime,
     shift_end_local: datetime,
-) -> tuple[datetime, datetime, datetime, bool]:
-    """Resolve (earliest, latest_start, preferred, deadline_known) for a slot.
+) -> _Slot:
+    """Flatten one requirement into a placeable interval request.
 
     A rule set that carries no offsets still deserves a suggestion, so the
     shift's own window is the fallback envelope.
@@ -107,9 +139,13 @@ def _window_bounds(
         earliest = shift_start_local
     if latest_start > shift_end_local - duration:
         latest_start = shift_end_local - duration
-    if latest_start < earliest:
+    window_too_short = latest_start < earliest
+    if window_too_short:
         # A window too tight to hold the break at all: keep it anchored at the
-        # earliest legal moment rather than inverting the interval.
+        # earliest legal moment rather than inverting the interval.  The
+        # placement that comes out of this necessarily runs past the deadline,
+        # which is why the slot carries the flag rather than swallowing it —
+        # a break the law cannot fit is not a `suggested` one.
         latest_start = earliest
 
     preferred = requirement.recommended_local or earliest
@@ -117,7 +153,18 @@ def _window_bounds(
         preferred = earliest
     if preferred > latest_start:
         preferred = latest_start
-    return earliest, latest_start, preferred, deadline_known
+    return _Slot(
+        employee_id=employee_id,
+        kind=requirement.kind,
+        ordinal=requirement.ordinal,
+        duration_minutes=requirement.duration_minutes,
+        earliest=earliest,
+        latest_start=latest_start,
+        preferred=preferred,
+        deadline=deadline,
+        deadline_known=deadline_known,
+        window_too_short=window_too_short,
+    )
 
 
 def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
@@ -146,14 +193,25 @@ def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
                 seen.add(value)
                 candidates.append(value)
         offset += step
+    # The walk only ever lands on the grid, so a window whose own bounds are
+    # off-grid (a 12:00–12:12 window with a 6-minute break) would never try the
+    # one start that fits and would report insufficient_coverage for a slot
+    # that is schedulable.  Boundaries go last: they are the fallback after
+    # every preferred-adjacent option has been tried.
+    for boundary in (slot.latest_start, slot.earliest):
+        if boundary not in seen and slot.earliest <= boundary <= slot.latest_start:
+            seen.add(boundary)
+            candidates.append(boundary)
     return candidates
 
 
 def _fits(
     start: datetime,
     duration: timedelta,
-    placed: Sequence[tuple[datetime, datetime]],
+    placed: Sequence[_Placed],
     max_concurrent: int,
+    *,
+    employee_id: UUID,
 ) -> bool:
     """True when adding [start, start+duration) keeps concurrency in budget.
 
@@ -161,24 +219,29 @@ def _fits(
     most ``max_concurrent - 1`` of them at any instant.  Overlap counts are
     evaluated at each placed interval's start and at ``start`` itself, which is
     sufficient because concurrency only ever rises at an interval boundary.
+
+    One person is not two bodies, so the budget is not the only constraint: a
+    break can never overlap another break belonging to the same employee, no
+    matter how much spare headcount the shift carries.
     """
 
     end = start + duration
     overlapping = [
-        (other_start, other_end)
-        for other_start, other_end in placed
-        if other_start < end and start < other_end
+        entry for entry in placed
+        if entry.start < end and start < entry.end
     ]
     if not overlapping:
         return True
+    if any(entry.employee_id == employee_id for entry in overlapping):
+        return False
     if max_concurrent <= 1:
         return False
-    for boundary in [start, *(value[0] for value in overlapping)]:
+    for boundary in [start, *(entry.start for entry in overlapping)]:
         if boundary < start or boundary >= end:
             continue
         concurrent = 1 + sum(
-            1 for other_start, other_end in overlapping
-            if other_start <= boundary < other_end
+            1 for entry in overlapping
+            if entry.start <= boundary < entry.end
         )
         if concurrent > max_concurrent:
             return False
@@ -193,12 +256,24 @@ def _collision_reason(slot: _Slot) -> str:
     )
 
 
+def _deadline_reason(slot: _Slot, end: datetime) -> str:
+    overrun = int((end - slot.deadline).total_seconds() // 60)
+    window = "its legal deadline" if slot.deadline_known else "the end of the shift"
+    return (
+        f"A {slot.duration_minutes}-minute break does not fit before "
+        f"{window} ({slot.deadline.strftime('%H:%M')}); this time runs "
+        f"{overrun} minute(s) past it. Shorten the shift, move the break "
+        "window, or record why it could not be taken."
+    )
+
+
 def stagger_shift_breaks(
     *,
     shift_start_local: datetime,
     shift_end_local: datetime,
     required_staff: int,
     assignments: Sequence[StaggerAssignment],
+    locked: Sequence[LockedBreak] = (),
     step_minutes: int = 5,
 ) -> StaggerPlan:
     """Spread one shift's required breaks apart in time, deterministically.
@@ -207,6 +282,9 @@ def stagger_shift_breaks(
     plan never resolved produce ``unresolved`` results carrying the plan's own
     advisory wording — this module never guesses a time for a rule it could not
     evaluate.
+
+    ``locked`` holds times a manager already reviewed.  They are not re-placed;
+    they occupy the floor before anything else is placed around them.
     """
 
     assigned_count = len(assignments)
@@ -214,12 +292,37 @@ def stagger_shift_breaks(
     advisories: list[dict[str, Any]] = []
     results: list[StaggerResult] = []
     slots: list[_Slot] = []
+    locked_by_key = {
+        (entry.employee_id, entry.kind, entry.ordinal): entry for entry in locked
+    }
+    placed: list[_Placed] = [
+        _Placed(
+            start=entry.start,
+            end=entry.start + timedelta(minutes=entry.duration_minutes),
+            employee_id=entry.employee_id,
+        )
+        for entry in locked
+    ]
 
     for assignment in sorted(assignments, key=lambda value: str(value.employee_id)):
         plan = assignment.plan
         unresolved_reason = UNRESOLVED_REASONS.get(plan.status)
         for requirement in plan.requirements:
             if requirement.waived:
+                continue
+            saved = locked_by_key.get(
+                (assignment.employee_id, requirement.kind, requirement.ordinal)
+            )
+            if saved is not None:
+                results.append(StaggerResult(
+                    employee_id=assignment.employee_id,
+                    kind=requirement.kind,
+                    ordinal=requirement.ordinal,
+                    status="saved",
+                    suggested_start=saved.start,
+                    suggested_end=saved.start + timedelta(minutes=saved.duration_minutes),
+                    duration_minutes=saved.duration_minutes,
+                ))
                 continue
             if unresolved_reason is not None:
                 results.append(StaggerResult(
@@ -233,20 +336,11 @@ def stagger_shift_breaks(
                     reason=unresolved_reason,
                 ))
                 continue
-            earliest, latest_start, preferred, deadline_known = _window_bounds(
+            slots.append(_build_slot(
                 requirement,
+                employee_id=assignment.employee_id,
                 shift_start_local=shift_start_local,
                 shift_end_local=shift_end_local,
-            )
-            slots.append(_Slot(
-                employee_id=assignment.employee_id,
-                kind=requirement.kind,
-                ordinal=requirement.ordinal,
-                duration_minutes=requirement.duration_minutes,
-                earliest=earliest,
-                latest_start=latest_start,
-                preferred=preferred,
-                deadline_known=deadline_known,
             ))
 
     if assigned_count and slots and assigned_count <= max(0, required_staff):
@@ -271,12 +365,14 @@ def stagger_shift_breaks(
             slot.latest_start, slot.earliest, str(slot.employee_id), slot.kind, slot.ordinal,
         ),
     )
-    placed: list[tuple[datetime, datetime]] = []
     for slot in ordered:
         duration = timedelta(minutes=slot.duration_minutes)
         chosen: datetime | None = None
         for candidate in _candidate_starts(slot, step_minutes):
-            if _fits(candidate, duration, placed, max_concurrent):
+            if _fits(
+                candidate, duration, placed, max_concurrent,
+                employee_id=slot.employee_id,
+            ):
                 chosen = candidate
                 break
         if chosen is None:
@@ -291,15 +387,19 @@ def stagger_shift_breaks(
                 reason=_collision_reason(slot),
             ))
             continue
-        placed.append((chosen, chosen + duration))
+        placed.append(_Placed(
+            start=chosen, end=chosen + duration, employee_id=slot.employee_id,
+        ))
+        overruns_deadline = slot.window_too_short or chosen + duration > slot.deadline
         results.append(StaggerResult(
             employee_id=slot.employee_id,
             kind=slot.kind,
             ordinal=slot.ordinal,
-            status="suggested",
+            status="deadline_conflict" if overruns_deadline else "suggested",
             suggested_start=chosen,
             suggested_end=chosen + duration,
             duration_minutes=slot.duration_minutes,
+            reason=_deadline_reason(slot, chosen + duration) if overruns_deadline else None,
         ))
 
     if any(result.status == "insufficient_coverage" for result in results):
@@ -313,12 +413,163 @@ def stagger_shift_breaks(
             ),
         })
 
+    if any(result.status == "deadline_conflict" for result in results):
+        advisories.append({
+            "check": "break_stagger",
+            "code": "deadline_conflict",
+            "severity": "advisory",
+            "message": (
+                "One or more required breaks cannot be taken inside their legal "
+                "window on this shift. The suggested times run past the "
+                "deadline — review the flagged assignments."
+            ),
+        })
+
     results.sort(key=lambda result: (str(result.employee_id), result.kind, result.ordinal))
     return StaggerPlan(
         results=tuple(results),
         advisories=tuple(advisories),
         max_concurrent_breaks=max_concurrent,
     )
+
+
+def _clock(value: datetime) -> datetime:
+    """The wall-clock face of a schedule timestamp, zone stripped.
+
+    Saved break times carry the location offset while shift windows are
+    UTC-tagged wall clock; comparing them as instants would move an early
+    shift onto the previous day.  The characters are the local time on both
+    sides, so compare those.
+    """
+
+    return value.replace(tzinfo=None)
+
+
+def prune_planned_breaks(
+    planned: Sequence[dict[str, Any]] | None,
+    *,
+    requirements: Sequence[BreakRequirement],
+    shift_start_local: datetime,
+    shift_end_local: datetime,
+) -> list[dict[str, Any]]:
+    """Drop saved break times the current shift and rules no longer support.
+
+    A manager's reviewed time is kept across every write that does not
+    invalidate it.  It stops being an answer at all when the requirement it
+    satisfies is gone (retimed out, waived, rules changed) or when it no longer
+    lands inside the shift — a break at noon on a shift that now starts at 6 PM
+    is not stale advice, it is wrong advice, and the employee portal renders it
+    verbatim.
+    """
+
+    if not planned:
+        return []
+    live = {
+        (requirement.kind, requirement.ordinal)
+        for requirement in requirements
+        if not requirement.waived
+    }
+    window_start = _clock(shift_start_local)
+    window_end = _clock(shift_end_local)
+    survivors: list[dict[str, Any]] = []
+    for entry in planned:
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("kind"), entry.get("ordinal")) not in live:
+            continue
+        raw_start = entry.get("start_local")
+        duration = entry.get("duration_minutes")
+        if not isinstance(raw_start, str) or not isinstance(duration, int):
+            continue
+        try:
+            start = _clock(datetime.fromisoformat(raw_start))
+        except ValueError:
+            continue
+        if start < window_start or start + timedelta(minutes=duration) > window_end:
+            continue
+        survivors.append(entry)
+    return survivors
+
+
+def validate_planned_breaks(
+    planned: Sequence[Any],
+    *,
+    requirements: Sequence[BreakRequirement],
+    shift_start_local: datetime,
+    shift_end_local: datetime,
+) -> str | None:
+    """Return an error message when a submitted break plan is not saveable.
+
+    Pydantic only types the fields; it cannot know that ordinal 1 of a `meal`
+    is a real requirement on THIS shift, that the time lands inside the shift,
+    or that a second row for the same (kind, ordinal) makes one of the two
+    permanently unreachable through a keyed lookup.  Everything the employee
+    portal renders verbatim gets checked here.
+    """
+
+    live = {
+        (requirement.kind, requirement.ordinal): requirement
+        for requirement in requirements
+        if not requirement.waived
+    }
+    window_start = _clock(shift_start_local)
+    window_end = _clock(shift_end_local)
+    seen: set[tuple[str, int]] = set()
+    for entry in planned:
+        key = (entry.kind, entry.ordinal)
+        label = f"{entry.kind} break {entry.ordinal}"
+        if key in seen:
+            return f"Duplicate entry for {label}."
+        seen.add(key)
+        requirement = live.get(key)
+        if requirement is None:
+            return (
+                f"{label} is not a required, unwaived break on this shift."
+            ).capitalize()
+        if entry.duration_minutes < requirement.duration_minutes:
+            return (
+                f"{label} must be at least {requirement.duration_minutes} minutes."
+            ).capitalize()
+        start = _clock(entry.start_local)
+        if start < window_start:
+            return f"{label} starts before the shift.".capitalize()
+        if start + timedelta(minutes=entry.duration_minutes) > window_end:
+            return f"{label} runs past the end of the shift.".capitalize()
+    return None
+
+
+def locked_breaks_from_planned(
+    planned: Sequence[dict[str, Any]] | None,
+    *,
+    employee_id: UUID,
+    timezone: Any,
+) -> list[LockedBreak]:
+    """Read saved rows back as placement inputs, in the plan's own zone."""
+
+    locked: list[LockedBreak] = []
+    for entry in planned or ():
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        ordinal = entry.get("ordinal")
+        raw_start = entry.get("start_local")
+        duration = entry.get("duration_minutes")
+        if kind not in ("meal", "rest") or not isinstance(ordinal, int):
+            continue
+        if not isinstance(raw_start, str) or not isinstance(duration, int):
+            continue
+        try:
+            start = datetime.fromisoformat(raw_start)
+        except ValueError:
+            continue
+        locked.append(LockedBreak(
+            employee_id=employee_id,
+            kind=kind,
+            ordinal=ordinal,
+            start=start.replace(tzinfo=timezone),
+            duration_minutes=duration,
+        ))
+    return locked
 
 
 def stagger_payload(plan: StaggerPlan) -> dict[str, Any]:

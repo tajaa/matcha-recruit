@@ -80,6 +80,65 @@ state derives `always_available` for zero windows and `windows` otherwise.
 
 **Relative day-hint resolution + deterministic location-clarify resume + time-range narrowing** (2026-08-05, fixes from a live-prod battery on the edit machinery above): edit ops had no symbolic day field at all in the parse prompt (create has `weekdays[]`/`week_hint`; edits only had ISO-exact `target_date`/`second_date`/`new_date`), so "push **tomorrow's** shift back an hour" or "cancel **Friday's** shift" resolved zero date filter and fell straight to an ambiguous multi-day listing. `target_day_hint`/`second_day_hint`/`new_day_hint` (`"today"|"tomorrow"|weekday name`) now ride alongside each date field; `schedule_chat_rules.resolve_day_hint(hint, today)` resolves them deterministically (a named weekday's NEXT occurrence, `today` counting as a match for its own weekday) BEFORE `_resolve_shift_ref` runs, in `build_edit_proposal`'s per-op loop — a day-hint-only op (no exact date, no employee, no role) also had to be added to `coerce_edit_request`'s per-kind minimum-shape gate, or it was dropped before ever reaching resolution. `parse_time_hint` also gained a range split (`_TIME_RANGE_SPLIT_RE`, on `-`/`–`/`—`/"to"/"until") so "9am-5pm" narrows on its first endpoint the same way a bare "8am" always did — a bare-hour-before-"to" ("9 to 5pm") still returns `None` by the pre-existing bare-hour rule, unchanged on purpose (no am/pm to disambiguate). Separately, the **location-clarify round for a NEW shift** (create, not edit) is the channel's own multiple-choice offer (`build_proposal`'s options list, `LOCATION_CLARIFY_QUESTION` constant shared with `channels_ws.py`) — a reply to it used to always re-run the composed follow-up through a fresh `parse_schedule_request` Gemini call, and a real prod miss showed that call coming back non-actionable even when `resolve_clarify_answer` had already snapped the reply onto one of the offered options, cancelling the whole proposal with the generic `CLARIFY_BAIL_TEXT`. `_bg_schedule_reply` now also fetches the proposal's stored `parse` column; when the clarify question is the location question and the reply snapped onto a real option, it resumes straight from that ORIGINAL successfully-parsed request with `location_hint` overridden — no second Gemini call — and even for every other clarify question, a re-parse that comes back `None` now retries the builder from the stored parse instead of cancelling outright (bails only when both are unavailable).
 
+### Break staggering (migration `empsched21`)
+
+`schedule_breaks` answers what breaks an employee owes, per person, in
+isolation. `schedule_break_stagger.py` is the operational layer on top: given
+every assignee's evaluated `BreakPlan`, it spreads the periods apart so the
+floor keeps as many people on it as it can. Pure — no DB, no FastAPI.
+`schedule_guidance.resolve_shift_stagger_plan` is the read-time orchestration
+behind `GET /employee-schedule/shifts/{id}/break-stagger`; nothing on that path
+writes.
+
+**Two columns, two owners.** `compliance_guidance` is the legal record,
+recomputed by `refresh_assignment_break_guidance` on every write that touches a
+shift's window or roster. `planned_breaks` (JSONB, `empsched21`, nullable, no
+backfill) is the manager's reviewed answer to "when", saved through
+`PUT .../assignments/{employee_id}/break-plan`. Storing the second inside the
+first would put a human edit in a column the next retime silently overwrites.
+
+Invariants, each of which has a regression test in
+`tests/employee_schedule/test_break_stagger*.py`:
+
+- **The concurrency budget floors at 1.** `assigned_count` can never exceed
+  `required_staff` on a normal shift (assignment writes 409 `shift_full`), so a
+  spare-headcount-only model would suggest nothing on every real shift. The
+  floor is paired with a `coverage_shortfall` advisory — under-covering for 30
+  minutes is the manager's call; hiding it is not.
+- **A person is not two bodies.** `_fits` refuses any overlap with the same
+  employee's other break regardless of budget. With `max_concurrent >= 2` the
+  budget alone let one employee's meal and rest land at the same instant.
+- **A break that cannot fit its legal window is never `suggested`.** It is
+  placed (a manager still needs an actionable time) but emitted as
+  `deadline_conflict` with the overrun spelled out, plus a shift-level advisory.
+- **Candidate starts include the window boundaries**, not just the 5-minute
+  grid walked out from `preferred` — otherwise an off-grid window
+  (12:00–12:12 for a 6-minute break) reports `insufficient_coverage` for a slot
+  that is schedulable.
+- **Saved times are inputs, not outputs.** `locked_breaks_from_planned` reads
+  `planned_breaks` back and pre-places those intervals (`status="saved"`)
+  before anything else is placed, so the coverage guarantee survives a manager
+  editing an accepted time.
+- **Stale saved times are pruned, never rendered.** `prune_planned_breaks`
+  runs inside `refresh_assignment_break_guidance` — the one seam every
+  invalidating write reaches — and drops an entry whose `(kind, ordinal)` is no
+  longer a live non-waived requirement or that no longer lands inside the
+  shift. The employee portal renders these verbatim; a noon break on a shift
+  that now starts at 18:00 is wrong advice, not stale advice.
+- **The PUT is validated against the shift, not just typed.**
+  `validate_planned_breaks` rejects duplicate `(kind, ordinal)` pairs, entries
+  with no matching unwaived requirement, durations under the legal minimum, and
+  times outside the shift window.
+- **Times are wall clock on both sides.** Schedule timestamps are UTC-tagged
+  wall-clock values and `start_local` carries the location offset; compare and
+  render the clock fields, never convert.
+
+The location daily digest (`daily_digest.py`) selects `planned_breaks`
+alongside `compliance_guidance` and renders each person's own reviewed time —
+without that the whole crew reads the same generic legal line and walks off the
+floor together, which is what staggering exists to prevent. The redacted
+operational digest gets a count only, never times.
+
 ### Schedule Assistant voice turns
 
 The full schedule editor's Huume assistant supports push-to-talk turns as part
