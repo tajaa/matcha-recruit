@@ -1,7 +1,7 @@
 import {
   IconAudit, IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
   IconPeople, IconSeal, IconSetup, IconShield,
-  IconSteps, IconTraining, IconTrend,
+  IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
 import { CalendarClock, HeartPulse, Sparkles, LayoutDashboard, Radio } from 'lucide-react'
 import SidebarShell from '../sidebars/SidebarShell'
@@ -10,8 +10,8 @@ import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 
 // Matcha-X (mid tier) sidebar. Lite (IR + employees + handbook generation)
-// PLUS the mid-tier modules: handbook audit, training, progressive discipline,
-// credentialing. Each module nav item is feature-gated so it only renders when
+// PLUS the mid-tier modules: handbook audit, training, and credentialing.
+// Each module nav item is feature-gated so it only renders when
 // the tier overlay (TIER_REQUIRED_FEATURES["matcha_x"]) has it on.
 //
 // Grouped by the job being done rather than left as one flat list: at fifteen
@@ -53,7 +53,6 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/employees', icon: IconPeople, label: 'Employees', feature: 'employees' },
       { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
       { to: '/app/training', icon: IconTraining, label: 'Training', feature: 'training' },
-      { to: '/app/discipline', icon: IconSteps, label: 'Performance Action', feature: 'discipline' },
       { to: '/app/credential-templates', icon: IconSeal, label: 'Credentialing', feature: 'credential_templates' },
       { to: '/app/workforce-compliance', icon: IconAudit, label: 'Workforce Compliance', feature: 'workforce_compliance' },
       { to: '/ops/schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },

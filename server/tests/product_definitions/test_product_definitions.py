@@ -138,9 +138,9 @@ def test_materialize_stomps_every_default_off_then_grants():
     features = materialize_features(product)
     assert features["incidents"] is True
     assert features["handbooks"] is True
-    # A default-True flag the product doesn't sell must NOT hydrate back on.
-    assert DEFAULT_COMPANY_FEATURES["accommodations"] is True
-    assert features["accommodations"] is False
+    # Retired flags are not reintroduced into materialized product grants.
+    assert "accommodations" not in DEFAULT_COMPANY_FEATURES
+    assert "accommodations" not in features
 
 
 def test_pending_shape_grants_nothing():

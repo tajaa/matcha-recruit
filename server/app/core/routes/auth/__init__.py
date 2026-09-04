@@ -12,7 +12,6 @@ from app.core.routes.auth import broker  # noqa: F401,E402
 from app.core.routes.auth import test_accounts  # noqa: F401,E402
 from app.core.routes.auth import profile  # noqa: F401,E402
 from app.core.routes.auth import credentials  # noqa: F401,E402
-from app.core.routes.auth import admin_candidates  # noqa: F401,E402
 from app.core.routes.auth import beta  # noqa: F401,E402
 
 # Re-exported for tests that import these by module path (see

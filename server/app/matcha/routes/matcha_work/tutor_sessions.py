@@ -54,40 +54,17 @@ async def create_tutor_session(
     is_company_mode = request.mode in company_modes
 
     # Validate required mode-specific fields first
-    if request.mode == "interview_prep" and not request.interview_role:
-        raise HTTPException(status_code=400, detail="Interview role must be specified for interview prep mode")
-
     if request.mode == "language_test" and not request.language:
         raise HTTPException(status_code=400, detail="Language must be specified for language test mode")
 
     if is_company_mode and not request.company_id:
         raise HTTPException(status_code=400, detail="Company ID must be specified for company interview modes")
 
-    # For candidates: only allow interview_prep mode and require beta + tokens.
     if current_user.role == "candidate":
-        if request.mode != "interview_prep":
-            raise HTTPException(
-                status_code=403,
-                detail="This interview mode is not available for your account."
-            )
-        # Check beta access and tokens
-        has_beta = current_user.beta_features.get("interview_prep", False)
-        if not has_beta:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have access to Interview Prep. Contact support for beta access."
-            )
-        if current_user.interview_prep_tokens <= 0:
-            raise HTTPException(
-                status_code=403,
-                detail="You have no interview prep tokens remaining."
-            )
-        # Enforce role allowlist server-side (frontend checks are insufficient)
-        if request.interview_role not in current_user.allowed_interview_roles:
-            raise HTTPException(
-                status_code=403,
-                detail="This interview role is not available for your account."
-            )
+        raise HTTPException(
+            status_code=403,
+            detail="This interview mode is not available for your account."
+        )
 
     if is_company_mode and current_user.role not in ("admin", "client"):
         raise HTTPException(
@@ -97,11 +74,7 @@ async def create_tutor_session(
 
     # interviewer_name always stores user email for ownership checks.
     interviewer_name = current_user.email
-    if request.mode == "interview_prep":
-        interview_type = "tutor_interview"
-        interviewer_role = request.interview_role  # Store the role being practiced
-        company_id = None
-    elif request.mode == "language_test":
+    if request.mode == "language_test":
         interview_type = "tutor_language"
         interviewer_role = request.language  # Store the language for language mode
         company_id = None
@@ -149,24 +122,6 @@ async def create_tutor_session(
                     )
 
         async with conn.transaction():
-            # For candidates using interview prep, consume a token atomically.
-            # Skip token consumption for practice mode.
-            if current_user.role == "candidate" and request.mode == "interview_prep" and not request.is_practice:
-                token_row = await conn.fetchrow(
-                    """
-                    UPDATE users
-                    SET interview_prep_tokens = interview_prep_tokens - 1
-                    WHERE id = $1 AND interview_prep_tokens > 0
-                    RETURNING interview_prep_tokens
-                    """,
-                    current_user.id,
-                )
-                if not token_row:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="You have no interview prep tokens remaining."
-                    )
-
             # For tutor sessions, company_id is NULL. For company interview modes, company_id is required.
             row = await conn.fetchrow(
                 """
@@ -182,13 +137,11 @@ async def create_tutor_session(
             interview_id = row["id"]
 
         # Calculate duration in seconds
-        # Default: 5 min for interview prep, 2 min for language test, 8 min for company interview modes.
+        # Default: 2 min for language test, 8 min for company interview modes.
         if request.duration_minutes:
             duration_seconds = request.duration_minutes * 60
         elif request.mode == "language_test":
             duration_seconds = 2 * 60
-        elif request.mode == "interview_prep":
-            duration_seconds = 5 * 60
         else:
             duration_seconds = 8 * 60
 

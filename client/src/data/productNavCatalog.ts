@@ -1,7 +1,7 @@
 import {
   AlertTriangle, BadgeCheck, BarChart3, Boxes, Building2, CalendarClock, CalendarDays,
-  Car, ClipboardList, FileCheck2, FileSearch, FileSignature, FileText, GraduationCap,
-  Gavel, HeartPulse, MessageSquare, QrCode, Scale, Shield, ShieldCheck, Siren,
+  ClipboardList, FileCheck2, FileSearch, FileSignature, FileText, GraduationCap,
+  HeartPulse, MessageSquare, QrCode, Scale, Shield, ShieldCheck, Siren,
   Sparkles, TrendingUp, Users, Wallet,
 } from 'lucide-react'
 import type { NavIcon } from '../components/sidebars/SidebarShell'
@@ -38,18 +38,14 @@ export const PRODUCT_NAV_CATALOG: Record<string, ProductNavEntry> = {
   compliance: { to: '/app/compliance', icon: Shield, label: 'Compliance' },
   compliance_lite: { to: '/app/compliance', icon: Shield, label: 'Compliance' },
   training: { to: '/app/training', icon: GraduationCap, label: 'Training' },
-  discipline: { to: '/app/discipline', icon: Gavel, label: 'Performance Action' },
-  accommodations: { to: '/app/accommodations', icon: HeartPulse, label: 'Accommodations' },
   er_copilot: { to: '/app/er-copilot', icon: MessageSquare, label: 'ER Copilot' },
   credential_templates: { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing' },
   labor_relations: { to: '/app/labor', icon: Scale, label: 'Labor Relations' },
   risk_assessment: { to: '/app/risk-assessment', icon: TrendingUp, label: 'Risk Assessment' },
   risk_profile: { to: '/app/risk-profile', icon: TrendingUp, label: 'Risk Profile' },
   workforce_compliance: { to: '/app/workforce-compliance', icon: FileCheck2, label: 'Workforce Compliance' },
-  resident_care: { to: '/app/resident-care', icon: HeartPulse, label: 'Resident-Care Risk' },
   controls_evidence: { to: '/app/controls-evidence', icon: ShieldCheck, label: 'Proof of Controls' },
   limit_adequacy: { to: '/app/limit-adequacy', icon: Scale, label: 'Limit Adequacy' },
-  driver_risk: { to: '/app/driver-risk', icon: Car, label: 'Driver Risk' },
   tcor: { to: '/app/tcor', icon: Wallet, label: 'Total Cost of Risk' },
   coi_tracking: { to: '/app/coi', icon: FileSignature, label: 'Certificate Tracking' },
   do_readiness: { to: '/app/management-liability', icon: Shield, label: 'D&O Readiness' },
