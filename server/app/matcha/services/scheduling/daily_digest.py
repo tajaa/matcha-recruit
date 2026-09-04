@@ -29,6 +29,30 @@ def _guidance_text(value) -> str:
     return str(value)
 
 
+def _planned_text(value) -> str:
+    """Render the reviewed break times a manager staggered and saved.
+
+    Without this the digest sends every assignee the same legal requirement,
+    so the whole crew reads it as the same instruction and walks off the floor
+    together — which is the outcome staggering exists to prevent.  Schedule
+    times are wall clock: the characters ARE this location's time.
+    """
+    entries = _parse_guidance(value)
+    if not isinstance(entries, list):
+        return ""
+    parts = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        start = entry.get("start_local")
+        if not isinstance(start, str) or len(start) < 16:
+            continue
+        parts.append(
+            f"{start[11:16]} ({entry.get('duration_minutes')} min {entry.get('kind')})"
+        )
+    return " · ".join(parts)
+
+
 async def _claim(conn, *, company_id, location_id, digest_date, email, recipient_type) -> bool:
     # recipient_email has no case-insensitive constraint at the DB level —
     # normalize on write so Bob@x.com and bob@x.com converge on one claim
@@ -80,9 +104,11 @@ def _manager_html(location_name: str, rows: list[dict], digest_date: date) -> st
     lines = []
     for row in rows:
         requirements = _guidance_text(row.get("compliance_guidance")) if row.get("compliance_guidance") else "No break guidance recorded."
+        planned = _planned_text(row.get("planned_breaks"))
         note = row.get("manager_note") if row.get("manager_note_include_in_location_digest") else None
         lines.append(
             f"<li><b>{escape(row['name'] or 'Unnamed employee')}</b> — {escape(requirements)}"
+            f"{f' — Break times: {escape(planned)}' if planned else ''}"
             f"{f' — Note: {escape(note)}' if note else ''}</li>"
         )
     return (
@@ -99,12 +125,14 @@ def _operational_html(location_name: str, rows: list[dict], digest_date: date) -
     necessarily a person with a supervisory relationship to any named
     employee here). No employee names or note text; aggregate counts only."""
     with_guidance = sum(1 for row in rows if row.get("compliance_guidance"))
+    with_planned = sum(1 for row in rows if _planned_text(row.get("planned_breaks")))
     digest_notes = sum(1 for row in rows if row.get("manager_note") and row.get("manager_note_include_in_location_digest"))
     return (
         f"<p>Today's schedule summary for {escape(location_name)} ({digest_date.isoformat()}):</p>"
         f"<ul>"
         f"<li>{len(rows)} shift assignment(s) today.</li>"
         f"<li>{with_guidance} with break/compliance guidance on file.</li>"
+        f"<li>{with_planned} with reviewed break times scheduled.</li>"
         f"<li>{digest_notes} with a manager note visible in this digest.</li>"
         f"</ul>"
         "<p>Employee-level detail is available to that employee's manager or supervisor.</p>"
@@ -119,6 +147,9 @@ def _employee_html(rows: list[dict], digest_date: date) -> str:
     for row in rows:
         if row.get("compliance_guidance"):
             lines.append(escape(_guidance_text(row["compliance_guidance"])))
+        planned = _planned_text(row.get("planned_breaks"))
+        if planned:
+            lines.append(escape(f"Your break time(s) today: {planned}"))
         if row.get("manager_note") and row.get("manager_note_visible_to_employee"):
             lines.append(escape(row["manager_note"]))
     return f"<p>Your schedule notes for {digest_date.isoformat()}:</p><ul>{''.join(f'<li>{line}</li>' for line in lines)}</ul>"
@@ -135,6 +166,7 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
         """
         SELECT COALESCE(NULLIF(TRIM(e.first_name || ' ' || e.last_name), ''), e.email) AS name,
                COALESCE(u.email, e.email) AS email, a.compliance_guidance,
+               a.planned_breaks,
                a.manager_note, a.manager_note_visible_to_employee,
                a.manager_note_include_in_location_digest,
                a.manager_note_send_employee_notice

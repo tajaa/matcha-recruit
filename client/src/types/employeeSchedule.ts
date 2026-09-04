@@ -29,6 +29,43 @@ export type AssignmentComplianceGuidance = {
   jurisdiction?: string | null
 }
 
+/** One break period a manager reviewed and saved — the operational answer to
+ *  "when", distinct from the legal requirement in compliance_guidance. */
+export type PlannedBreak = {
+  kind: 'meal' | 'rest'
+  ordinal: number
+  start_local: string
+  duration_minutes: number
+  source: 'suggested' | 'manager'
+}
+
+export type BreakStaggerStatus =
+  | 'suggested'
+  /** A time a manager already reviewed and saved — held fixed, not re-placed. */
+  | 'saved'
+  /** Placed, but the break cannot fit inside its legal window on this shift. */
+  | 'deadline_conflict'
+  | 'unresolved'
+  | 'insufficient_coverage'
+
+export type BreakStaggerResult = {
+  employee_id: string
+  kind: 'meal' | 'rest'
+  ordinal: number
+  status: BreakStaggerStatus
+  duration_minutes: number
+  suggested_start: string | null
+  suggested_end: string | null
+  reason: string | null
+}
+
+export type ShiftBreakStagger = {
+  schema_version: number
+  max_concurrent_breaks: number
+  results: BreakStaggerResult[]
+  advisories: { check: string; code: string; severity: string; message: string }[]
+}
+
 export type MealBreakWaiverAttestation = {
   employee_id: string
   on_file: boolean
@@ -57,6 +94,7 @@ export interface ShiftAssignment {
   manager_note_include_in_location_digest?: boolean
   manager_note_send_employee_notice?: boolean
   compliance_guidance?: AssignmentComplianceGuidance | null
+  planned_breaks?: PlannedBreak[] | null
 }
 
 export interface Shift {

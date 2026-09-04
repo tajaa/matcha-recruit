@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.database import decode_jsonb
 from .schedule_break_rule_store import resolve_break_rules
 from .schedule_breaks import (
     BreakPlan,
@@ -17,6 +18,13 @@ from .schedule_breaks import (
     guidance_payload,
     minimum_meal_break_minutes,
     reinterpret_schedule_wall_time,
+)
+from .schedule_break_stagger import (
+    StaggerAssignment,
+    StaggerPlan,
+    locked_breaks_from_planned,
+    prune_planned_breaks,
+    stagger_shift_breaks,
 )
 from .shift_compliance import _age_on
 
@@ -121,13 +129,36 @@ async def resolve_shift_break_plans(
     employee_ids: Sequence[UUID],
 ) -> dict[UUID, BreakPlan]:
     """Resolve one shift window for many employees with batched DB reads."""
+    _, plans = await resolve_shift_break_plans_localized(
+        conn, company_id, location_id=location_id, starts_at=starts_at,
+        ends_at=ends_at, employee_ids=employee_ids,
+    )
+    return plans
+
+
+async def resolve_shift_break_plans_localized(
+    conn,
+    company_id: UUID,
+    *,
+    location_id: UUID | None,
+    starts_at: datetime,
+    ends_at: datetime,
+    employee_ids: Sequence[UUID],
+) -> tuple[ZoneInfo, dict[UUID, BreakPlan]]:
+    """``resolve_shift_break_plans`` plus the zone the plan times are in.
+
+    Break staggering has to compare requirement times against the shift's own
+    window, which means it needs the same effective zone the evaluator used —
+    returning it here avoids a second rules read just to re-derive it.
+    """
     unique_ids = list(dict.fromkeys(employee_ids))
+    utc = ZoneInfo("UTC")
     if not unique_ids:
-        return {}
+        return utc, {}
     if location_id is None:
-        return {
+        return utc, {
             employee_id: evaluate_break_plan(
-                starts_at=starts_at, ends_at=ends_at, timezone=ZoneInfo("UTC"), rules=(),
+                starts_at=starts_at, ends_at=ends_at, timezone=utc, rules=(),
             )
             for employee_id in unique_ids
         }
@@ -139,9 +170,9 @@ async def resolve_shift_break_plans(
     try:
         location_timezone = ZoneInfo(timezone_name or "UTC")
     except (ZoneInfoNotFoundError, ValueError):
-        return {
+        return utc, {
             employee_id: evaluate_break_plan(
-                starts_at=starts_at, ends_at=ends_at, timezone=ZoneInfo("UTC"), rules=(),
+                starts_at=starts_at, ends_at=ends_at, timezone=utc, rules=(),
             )
             for employee_id in unique_ids
         }
@@ -204,7 +235,7 @@ async def resolve_shift_break_plans(
             })
         status = "error" if resolved.source == "error" or age_unknown else plan.status
         plans[employee_id] = replace(plan, status=status, advisories=tuple(advisories))
-    return plans
+    return effective_timezone, plans
 
 
 async def resolve_open_shift_break_plans(
@@ -287,16 +318,43 @@ async def refresh_assignment_break_guidance(
     payload = guidance_payload(
         plan, timezone=timezone_name, evaluated_at=datetime.now(timezone.utc),
     )
-    await conn.execute(
+    # RETURNING hands back `planned_breaks` unchanged (this statement does not
+    # write it), so the common case — the column is NULL, which is every row
+    # nobody has reviewed — costs no extra round trip.
+    saved = decode_jsonb(await conn.fetchval(
         """
         UPDATE schedule_shift_assignments
         SET compliance_guidance = $1::jsonb,
             guidance_evaluated_at = NOW(),
             guidance_ruleset_hash = $2
         WHERE company_id = $3 AND shift_id = $4 AND employee_id = $5
+        RETURNING planned_breaks
         """,
         json.dumps(payload), plan.rule_set_hash, company_id, shift_id, employee_id,
+    ))
+    if not saved:
+        return plan
+    # `planned_breaks` is the manager's reviewed answer and is deliberately not
+    # recomputed here — but a saved time whose requirement is gone (retimed
+    # out, waived, rules changed), or that no longer lands inside the shift, is
+    # not stale advice, it is wrong advice, and the employee portal renders it
+    # verbatim.  This is the one write path every invalidating edit reaches.
+    survivors = prune_planned_breaks(
+        saved,
+        requirements=plan.requirements,
+        shift_start_local=starts_at,
+        shift_end_local=ends_at,
     )
+    if survivors != saved:
+        await conn.execute(
+            """
+            UPDATE schedule_shift_assignments
+            SET planned_breaks = $1::jsonb
+            WHERE company_id = $2 AND shift_id = $3 AND employee_id = $4
+            """,
+            json.dumps(survivors) if survivors else None,
+            company_id, shift_id, employee_id,
+        )
     return plan
 
 
@@ -353,3 +411,67 @@ async def refresh_assignment_break_guidance_and_minimum(
             },
         )
     return plan
+
+
+async def resolve_shift_stagger_plan(
+    conn,
+    company_id: UUID,
+    *,
+    shift_id: UUID,
+) -> StaggerPlan | None:
+    """Suggest staggered break times for every assignee on one shift.
+
+    Read-time only: nothing here writes.  The legal requirements still come
+    from the same evaluator the write path stores on each assignment, so a
+    suggestion can never disagree with the guidance already shown.
+
+    Times a manager already saved are read back as fixed inputs.  Re-deriving
+    the whole plan from rules alone would place everyone else around what was
+    suggested for that person before their edit — which is not where they will
+    actually be off the floor.
+    """
+    shift = await conn.fetchrow(
+        """
+        SELECT location_id, starts_at, ends_at, required_staff
+        FROM schedule_shifts
+        WHERE id = $1 AND company_id = $2
+        """,
+        shift_id, company_id,
+    )
+    if shift is None:
+        return None
+    assignment_rows = await conn.fetch(
+        """
+        SELECT employee_id, planned_breaks
+        FROM schedule_shift_assignments
+        WHERE shift_id = $1 AND company_id = $2 AND status <> 'declined'
+        ORDER BY employee_id
+        """,
+        shift_id, company_id,
+    )
+    employee_ids = [row["employee_id"] for row in assignment_rows]
+    effective_timezone, plans = await resolve_shift_break_plans_localized(
+        conn, company_id, location_id=shift["location_id"],
+        starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+        employee_ids=employee_ids,
+    )
+    locked = [
+        entry
+        for row in assignment_rows
+        for entry in locked_breaks_from_planned(
+            decode_jsonb(row["planned_breaks"]),
+            employee_id=row["employee_id"],
+            timezone=effective_timezone,
+        )
+    ]
+    return stagger_shift_breaks(
+        shift_start_local=reinterpret_schedule_wall_time(shift["starts_at"], effective_timezone),
+        shift_end_local=reinterpret_schedule_wall_time(shift["ends_at"], effective_timezone),
+        required_staff=int(shift["required_staff"] or 0),
+        assignments=[
+            StaggerAssignment(employee_id=employee_id, plan=plans[employee_id])
+            for employee_id in employee_ids
+            if employee_id in plans
+        ],
+        locked=locked,
+    )

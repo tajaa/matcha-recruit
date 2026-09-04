@@ -21,5 +21,6 @@ from app.database.pool import (  # noqa: F401
     connection_or_direct,
     get_connection,
 )
+from app.database._json import decode_jsonb  # noqa: F401
 from app.database.handbook import _ensure_handbook_tables  # noqa: F401
 from app.database.bootstrap import init_db  # noqa: F401

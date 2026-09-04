@@ -6,7 +6,7 @@ requests. Response shapes are assembled as plain dicts in the route layer
 """
 
 from datetime import date, datetime, time, timezone
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -139,6 +139,26 @@ class AssignmentNoteUpdate(BaseModel):
     visible_to_employee: bool = True
     include_in_location_digest: bool = True
     send_employee_notice: bool = True
+
+
+class PlannedBreak(BaseModel):
+    """One reviewed break period a manager accepted or edited.
+
+    Keyed by (kind, ordinal) so it lines up with the BreakRequirement it
+    satisfies; the legal requirement itself stays in compliance_guidance.
+    """
+
+    kind: Literal["meal", "rest"]
+    ordinal: int = Field(..., ge=1, le=20)
+    start_local: datetime
+    duration_minutes: int = Field(..., ge=1, le=480)
+    source: Literal["suggested", "manager"] = "manager"
+
+
+class AssignmentBreakPlanUpdate(BaseModel):
+    """Full replacement: null or [] clears the reviewed plan."""
+
+    planned_breaks: Optional[List[PlannedBreak]] = Field(None, max_length=20)
 
 
 class MealWaiverAttestationUpdate(BaseModel):

@@ -1,19 +1,21 @@
 """Assign / unassign employees to a shift (`/employee-schedule/shifts/{id}/assignments`)."""
 
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.database import get_connection
+from app.database import decode_jsonb, get_connection
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import (
-    AssignmentCreate, AssignmentMove, AssignmentNoteUpdate,
+    AssignmentBreakPlanUpdate, AssignmentCreate, AssignmentMove, AssignmentNoteUpdate,
 )
 from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import resolve_shift_break_plan
+from ...services.scheduling.schedule_break_stagger import validate_planned_breaks
 from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
     assert_employee_in_company, assert_employee_schedulable_at, assert_shift_open_for_assignment,
@@ -80,6 +82,75 @@ async def update_assignment_note(
                     "employee_id": str(employee_id),
                     "before": dict(existing),
                     "after": body.model_dump(),
+                },
+            )
+        return await fetch_shift_by_id(conn, company_id, shift_id)
+
+
+@router.put("/shifts/{shift_id}/assignments/{employee_id}/break-plan")
+async def update_assignment_break_plan(
+    shift_id: UUID,
+    employee_id: UUID,
+    body: AssignmentBreakPlanUpdate,
+    current_user=Depends(require_admin_or_client),
+):
+    """Save the break times a manager reviewed for one assignment.
+
+    Deliberately a different column from `compliance_guidance`: that one is the
+    legal requirement and is recomputed on every retime/reassign, so a human's
+    reviewed times would not survive there. Full replacement, and history stays
+    in schedule_audit_log rather than being overwritten unaccountably.
+    """
+    company_id = await require_company_id(current_user)
+    submitted = body.planned_breaks or []
+    planned = [item.model_dump(mode="json") for item in submitted] or None
+    async with get_connection() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchrow(
+                """
+                SELECT a.planned_breaks, s.location_id, s.starts_at, s.ends_at
+                FROM schedule_shift_assignments a
+                JOIN schedule_shifts s ON s.id = a.shift_id
+                WHERE a.shift_id = $1 AND a.employee_id = $2 AND s.company_id = $3
+                FOR UPDATE OF a
+                """,
+                shift_id, employee_id, company_id,
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="Assignment not found")
+            if submitted:
+                # The employee portal renders these times verbatim, so they are
+                # checked against the same evaluator that produced the legal
+                # requirement rather than trusted as typed.
+                plan = await resolve_shift_break_plan(
+                    conn, company_id, location_id=existing["location_id"],
+                    starts_at=existing["starts_at"], ends_at=existing["ends_at"],
+                    employee_id=employee_id,
+                )
+                problem = validate_planned_breaks(
+                    submitted,
+                    requirements=plan.requirements,
+                    shift_start_local=existing["starts_at"],
+                    shift_end_local=existing["ends_at"],
+                )
+                if problem:
+                    raise HTTPException(status_code=422, detail=problem)
+            await conn.execute(
+                """
+                UPDATE schedule_shift_assignments
+                SET planned_breaks = $1::jsonb
+                WHERE shift_id = $2 AND employee_id = $3
+                """,
+                json.dumps(planned) if planned else None, shift_id, employee_id,
+            )
+            before = decode_jsonb(existing["planned_breaks"])
+            await log_audit(
+                conn, company_id, "assignment", shift_id, current_user.id,
+                "assignment.break_plan.update",
+                {
+                    "employee_id": str(employee_id),
+                    "before": before,
+                    "after": planned,
                 },
             )
         return await fetch_shift_by_id(conn, company_id, shift_id)
