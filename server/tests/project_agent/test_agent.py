@@ -124,3 +124,89 @@ async def test_repo_question_refuses_ungrounded_direct_answer(monkeypatch):
         )
 
     agent.chat.post_as_espresso.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_repo_question_gives_up_after_repeated_finish_refusals(monkeypatch):
+    # Under tool_config=ANY the model can no longer end the run with prose, so a
+    # model that keeps failing the finish preconditions must be cut off well
+    # before _MAX_MODEL_CALLS rather than burning the whole wall-clock budget.
+    refusal = _response(types.Part.from_function_call(
+        name="answer_question",
+        args={"answer": "It probably works this way."},
+    ))
+    models = _FakeModels([refusal] * (agent._MAX_MODEL_CALLS + 1))
+    fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    monkeypatch.setattr(agent, "get_luna_client", lambda: fake_client)
+    monkeypatch.setattr(agent.store, "record_step", AsyncMock())
+    monkeypatch.setattr(agent.chat, "post_as_espresso", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="grounded answer"):
+        await agent.run_repo_question(
+            run_id=uuid4(),
+            company_id=uuid4(),
+            project_id=uuid4(),
+            channel_id=uuid4(),
+            question="How does it work?",
+            project_title="MATCHA",
+            repo="example/matcha",
+            base_branch="main",
+        )
+
+    assert len(models.calls) == agent._MAX_FINISH_REFUSALS
+    assert agent._MAX_FINISH_REFUSALS < agent._MAX_MODEL_CALLS
+    agent.chat.post_as_espresso.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_repo_question_refusal_streak_resets_after_a_successful_read(monkeypatch):
+    # A refused answer followed by new grounding is progress, not a loop: the
+    # streak restarts so the model still gets its full retry budget afterwards.
+    def refusal():
+        return _response(types.Part.from_function_call(
+            name="answer_question", args={"answer": "No citation here."},
+        ))
+
+    read = _response(types.Part.from_function_call(
+        name="read_file", args={"path": "client/src/App.tsx"},
+    ))
+    answer = "Registered here (`client/src/App.tsx:42`)."
+    models = _FakeModels([
+        refusal(),
+        refusal(),
+        read,
+        refusal(),
+        refusal(),
+        _response(types.Part.from_function_call(
+            name="answer_question", args={"answer": answer},
+        )),
+    ])
+    monkeypatch.setattr(
+        agent, "get_luna_client", lambda: SimpleNamespace(aio=SimpleNamespace(models=models)),
+    )
+    monkeypatch.setattr(agent.store, "read_repo_file", AsyncMock(return_value={
+        "path": "client/src/App.tsx",
+        "start_line": 1,
+        "end_line": 50,
+        "total_lines": 90,
+        "content": "42: registerProjectsRoute()",
+    }))
+    monkeypatch.setattr(agent.store, "record_step", AsyncMock())
+    monkeypatch.setattr(agent.store, "mark_run", AsyncMock())
+    post_answer = AsyncMock()
+    monkeypatch.setattr(agent.chat, "post_as_espresso", post_answer)
+
+    result = await agent.run_repo_question(
+        run_id=uuid4(),
+        company_id=uuid4(),
+        project_id=uuid4(),
+        channel_id=uuid4(),
+        question="How does it work?",
+        project_title="MATCHA",
+        repo="example/matcha",
+        base_branch="main",
+    )
+
+    assert result["answer"] == answer
+    assert len(models.calls) == 6
+    post_answer.assert_awaited_once()

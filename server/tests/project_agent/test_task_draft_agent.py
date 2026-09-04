@@ -107,6 +107,12 @@ async def test_task_draft_reads_architecture_guide_and_returns_resolved_review_d
     assert result["token_usage"]["model"] == "gpt-5.6-luna"
     assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
     assert all(call["feature"] == "matcha.espresso.task_draft" for call in models.calls)
+    # draft_ticket is the only exit; a prose turn would fail the whole run.
+    assert all(
+        call["config"].tool_config.function_calling_config.mode
+        == types.FunctionCallingConfigMode.ANY
+        for call in models.calls
+    )
     get_client.assert_called_once_with()
     read_repo_file.assert_awaited_once_with(
         "example/matcha", "main", "CLAUDE.md", start_line=1, end_line=400,
