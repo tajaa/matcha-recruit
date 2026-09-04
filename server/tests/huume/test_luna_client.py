@@ -193,6 +193,52 @@ async def test_generate_content_records_exact_response_and_requests_high_reasoni
 
 
 @pytest.mark.asyncio
+async def test_generate_content_maps_any_function_mode_to_required_tool_choice(monkeypatch):
+    sent = {}
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, _url, *, headers, json):
+            sent.update(headers=headers, json=json)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+                json={"id": "resp_required", "output": [], "usage": {}},
+            )
+
+    async def record(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        luna_client,
+        "get_settings",
+        lambda: SimpleNamespace(openai_api_key="test-key"),
+    )
+    monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(luna_client, "record_openai_response", record)
+
+    await _LunaModels().generate_content(
+        model="gpt-5.6-luna",
+        contents=[types.Content(role="user", parts=[types.Part(text="Help")])],
+        config=types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=[])],
+            tool_config=types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(
+                    mode=types.FunctionCallingConfigMode.ANY,
+                ),
+            ),
+        ),
+    )
+
+    assert sent["json"]["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
 async def test_generate_content_retries_transient_token_rate_limit(monkeypatch):
     responses = [
         httpx.Response(
