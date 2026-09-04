@@ -66,6 +66,9 @@ _TEST_ROUTE_RE = re.compile(
 # explicitly permitted under that directive, so a card resting on it is settled:
 # re-granting the directive there would re-run the model every cycle to reach
 # the same verdict forever.
+#
+# ``migration_required`` is retired -- no new decision can carry it -- but rows
+# written before that still sit on the board, so it stays recognized here.
 _RECOVERABLE_CURRENT_NOTE_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
     r"(already_fixed|migration_required)(?:\s|$)",

@@ -1123,6 +1123,10 @@ forced_already_fixed_rc=$?
 check "decision-bound force directives reject another already-fixed exit" \
     $([ "$forced_already_fixed_rc" != 0 ] && echo 0 || echo 1)
 
+# migration_required is retired outright, not merely forbidden under a
+# directive: the operator applies every migration by hand, so authoring the
+# version file is ordinary drafting work. It was the most common refusal and it
+# protected nothing.
 jq '.no_safe_action_reason = "migration_required"' \
     "$TMP_DIR/already-fixed-decision.json" > "$TMP_DIR/migration-required-decision.json"
 "$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
@@ -1130,6 +1134,12 @@ jq '.no_safe_action_reason = "migration_required"' \
 forced_migration_rc=$?
 check "decision-bound draft directive requires authoring a needed migration" \
     $([ "$forced_migration_rc" != 0 ] && echo 0 || echo 1)
+
+"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/bare-migration-decision.json" >/dev/null 2>&1
+bare_migration_rc=$?
+check "migration_required is refused even with no directive at all" \
+    $([ "$bare_migration_rc" != 0 ] && echo 0 || echo 1)
 
 cat > "$TMP_DIR/pending-directive-card.json" <<'EOF'
 {"autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"old-event"}
@@ -1476,7 +1486,7 @@ check "pending additional context reopens an unchanged no-spec decision" \
 cat > "$TMP_DIR/run-request-cards.json" <<'EOF'
 [
   {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Ordinary changes-requested work","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"},
-  {"task_id":"99999999-0000-4000-8000-000000000009","id8":"99999999","project_id":"p","title":"Run me now","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-01-02T00:00:00Z] migration_required","autopr_run_requested_at":"2026-01-03T00:00:00+00:00"}
+  {"task_id":"99999999-0000-4000-8000-000000000009","id8":"99999999","project_id":"p","title":"Run me now","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-01-02T00:00:00Z] already_fixed","autopr_run_requested_at":"2026-01-03T00:00:00+00:00"}
 ]
 EOF
 run_requested="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -1486,6 +1496,32 @@ check "an explicit run request outranks routine work and its own no-spec marker"
     $([ "$(printf '%s' "$run_requested" | jq -r '.id8')" = "99999999" ] \
       && [ "$(printf '%s' "$run_requested" | jq -r '.mode')" = "investigate" ] \
       && echo 0 || echo 1)
+
+# Every card stopped by the retired migration_required verdict is stale. The
+# operator should not have to hand-poke each one to undo a refusal the system
+# itself withdrew.
+cat > "$TMP_DIR/retired-nospec-cards.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Stopped by a retired verdict","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-04T06:11:02Z] migration_required · note: needs a migration"}
+]
+EOF
+retired_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/retired-nospec-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/retired-nospec-cards.json")"
+check "a retired migration_required marker no longer holds the no-spec ledger" \
+    $([ "$(printf '%s' "$retired_selected" | jq -r '.id8')" = "aaaaaaaa" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/live-nospec-cards.json" <<'EOF'
+[
+  {"task_id":"bbbbbbbb-0000-4000-8000-00000000000b","id8":"bbbbbbbb","project_id":"p","title":"Genuinely already fixed","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-04T06:11:02Z] already_fixed"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/live-nospec-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/live-nospec-cards.json" >/dev/null 2>&1
+live_nospec_rc=$?
+check "a live no-spec verdict still holds the ledger" \
+    $([ "$live_nospec_rc" = "3" ] && echo 0 || echo 1)
 
 # The same cache now holds a fresh attempt marker for that card: a request
 # newer than the attempt must still beat the cooldown, exactly like

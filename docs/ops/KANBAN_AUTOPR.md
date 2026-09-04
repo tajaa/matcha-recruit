@@ -294,9 +294,19 @@ second scheduler.
    decision-bound reply—such as `you can work on this`, `do it anyway`, `draft the
    migration`, or `you need to draft this PR`—becomes trusted `draft_pr` policy even
    without a magic prefix. `--draft-pr` remains the explicit form. Negated commands do
-   not activate it. The policy mechanically rejects both `already_fixed` and
-   `migration_required`: when needed, the draft may author only
-   `server/alembic/versions/*.py` for human review and must never apply it.
+   not activate it. The policy mechanically rejects `already_fixed`.
+   **A needed migration is never a refusal.** `migration_required` is not a
+   `no_safe_action_reason` the schema accepts, and authoring a
+   `server/alembic/versions/*.py` version file needs no directive — the operator
+   applies every migration by hand, and no part of this system runs one. What
+   stays permanently closed is the runner and its configuration (`env.py`,
+   templates, `alembic.ini`), which is the part that could touch a database.
+   Gating the version file behind a `draft_pr` directive made "this card needs a
+   column" the most common refusal on the board while protecting nothing;
+   `investigate.sh` now corrects a stray `migration_required` with one retry,
+   and `select.sh` ignores the marker on cards an older cycle already stopped,
+   so those do not need to be re-authorized by hand.
+
    The single exception is `acceptance_criteria_met`, which survives both
    `draft_pr` and `trust_still_broken` because it carries proof: an
    `acceptance_evidence` array with one entry per acceptance criterion, each
@@ -320,12 +330,10 @@ second scheduler.
    once must not have to be repeated after every cycle: the granted directives are
    published back onto the card as `[autopr:directives …]` and re-read on later cycles
    while it sits in `todo`/`changes_requested`; a run that consumes the event and then
-   repeats `already_fixed` or `migration_required` is recovered by `collect.sh`'s
+   repeats `already_fixed` is recovered by `collect.sh`'s
    bounded probe; and a decision contradicting the directive is retried once with the
    rejection stated back to the model (`decision.sh directive-ok`) instead of failing
-   the run silently. A `migration_required` stop now also posts the same Espresso
-   context request `already_fixed` did, so the override is visible where the refusal is.
-   `--trust-still-broken` (including the matching
+   the run silently. `--trust-still-broken` (including the matching
    natural-language form) accepts that the described scenario fails, while
    `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test
    tenant. The coding model never receives those credentials. It must inspect correlated

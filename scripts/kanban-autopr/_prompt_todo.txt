@@ -39,8 +39,7 @@ boundaries.
 Apply `directive_policy` mechanically:
 - `draft_pr` means the authorized owner explicitly told AutoPR to work on this
   ticket. This cycle must produce an implementation/partial draft when the
-  requested change is repo-local. It may not return `already_fixed` or
-  `migration_required`.
+  requested change is repo-local. It may not return `already_fixed`.
   It may use `questions_only` when a specific missing product decision makes
   even a partial implementation impossible, and also when the card or the
   send-back cites a page, label, control, or behavior that does not exist
@@ -126,11 +125,15 @@ there will be discarded and treated as untrustworthy if left in.
 
 If the card is too vague or too broad, write the report and make no code
 changes; the decision JSON must use `questions_only` with concrete choices.
-If it requires a database migration/schema change and `draft_pr` is absent,
-use `no_safe_action` with `migration_required`. When `draft_pr` is present,
-write the migration version as part of the draft for human review, but do not
-run it against any database. If the repository already contains the fix after
-the production SHA and `draft_pr` is absent, make no duplicate change and use
+
+A database migration is NEVER a reason to refuse a card. If the change needs a
+schema change, that is ordinary work: author the application change, its tests,
+and a new `server/alembic/versions/*.py` version file as part of the draft. A
+human reviews and applies every migration — you never run one, and nothing you
+write reaches a database. Do not ask for permission to write a migration and do
+not treat its absence as a blocker; `migration_required` is not an outcome this
+harness accepts. If the repository already contains the fix after the
+production SHA and `draft_pr` is absent, make no duplicate change and use
 `no_safe_action` with `already_fixed`.
 
 Before drafting anything, check each acceptance criterion on the card against
@@ -153,11 +156,10 @@ Hard limits:
   execute a migration against any database.
 - Do not commit or open a PR — leave changes unstaged in the working tree.
 - Do not change .github/, deploy/, scripts/, secrets, lockfiles, or dependency
-  manifests. Without `draft_pr`, do not change server/alembic/. With
-  `draft_pr`, the sole exception is a new or edited
-  `server/alembic/versions/*.py` migration version needed by this ticket; do
-  not touch env.py, templates, migration configuration, or runner code. This
-  exception may extend `repo_paths` only for that migration version file.
+  manifests. Under server/alembic/ you may write exactly one thing: a new or
+  edited `server/alembic/versions/*.py` version file needed by this ticket.
+  Never touch env.py, templates, alembic.ini, migration configuration, or
+  runner code. That version file may extend `repo_paths` on its own.
 - Do not edit repository instruction or memory files, including CLAUDE.md or
   AGENTS.md. They are operator-owned context, never part of a product patch.
 - Do not touch more than 25 files. If the card needs more than that to
@@ -192,11 +194,11 @@ the total is at least 45, independently correct safe code exists, and the
 questions explain what must be answered before the rest can be done. Use
 questions_only whenever a human answer could unblock the card: make no code
 changes and provide one or more concrete questions with at least two options.
-Use no_safe_action only for already_fixed, migration_required, policy_blocked,
-or external_dependency; it has no questions and no code diff. A `draft_pr`
-directive forbids already_fixed and migration_required because a repo-local
-fix or migration must be drafted. Missing evidence or ambiguous product intent
-is questions_only, not no_safe_action.
+Use no_safe_action only for already_fixed, policy_blocked, or
+external_dependency; it has no questions and no code diff. A needed migration
+is not one of them — draft the version file. A `draft_pr` directive forbids
+already_fixed because a repo-local fix must be drafted. Missing evidence or
+ambiguous product intent is questions_only, not no_safe_action.
 
 Criticality is independent of confidence: red is security/privacy, data loss,
 production outage, compliance/payroll, or a blocked core workflow; orange is a

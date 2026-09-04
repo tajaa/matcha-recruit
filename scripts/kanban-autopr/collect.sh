@@ -113,9 +113,9 @@ done
 
 # Repair one consumed-directive edge case without weakening ordinary decision
 # binding. The resolver accepts only an explicit directive whose old bound note
-# and current note are both a refusal draft_pr forbids (already_fixed or
-# migration_required). Once selected, draft_pr mechanically forbids repeating
-# either of those outcomes.
+# and current note are both a refusal draft_pr forbids. Once selected, draft_pr
+# mechanically forbids repeating that outcome. migration_required is retired and
+# appears here only to recover cards an older cycle already stopped.
 recovery_dir="$(mktemp -d)"
 trap 'rm -rf "$recovery_dir"' EXIT
 card_count="$(printf '%s' "$out" | jq 'length')"

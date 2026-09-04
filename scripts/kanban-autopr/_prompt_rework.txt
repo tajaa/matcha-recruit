@@ -41,7 +41,7 @@ Apply `directive_policy` mechanically:
   work. This cycle must produce an implementation/partial update when the
   requested change is repo-local. It may use `questions_only` only when a
   specific missing product decision makes even a partial implementation
-  impossible. It may not return `already_fixed` or `migration_required`.
+  impossible. It may not return `already_fixed`.
   When a schema change is needed, author the application change, tests, and a
   human-reviewable migration version file; never apply or deploy the migration.
   Policy and external-dependency safety boundaries still apply.
@@ -129,9 +129,14 @@ report — a separate process runs and reports tests.
 If the feedback cannot be safely addressed because product intent or evidence
 is missing, write the report and make no code changes; the decision JSON must
 use `questions_only` with concrete choices. Use `no_safe_action` only when the
-reason is already_fixed, migration_required, policy_blocked, or
-external_dependency. With `draft_pr`, already_fixed and migration_required are
-not available outcomes.
+reason is already_fixed, policy_blocked, or external_dependency. With
+`draft_pr`, already_fixed is not an available outcome.
+
+A database migration is NEVER a reason to refuse. If the feedback needs a schema
+change, author the application change, its tests, and a new
+`server/alembic/versions/*.py` version file as part of the draft. A human
+reviews and applies every migration — you never run one. `migration_required` is
+not an outcome this harness accepts.
 
 Hard limits:
 - Do not access production, environment variables, credentials, network
@@ -139,11 +144,10 @@ Hard limits:
   execute a migration against any database.
 - Do not commit or push — leave changes unstaged in the working tree.
 - Do not change .github/, deploy/, scripts/, secrets, lockfiles, or dependency
-  manifests. Without `draft_pr`, do not change server/alembic/. With
-  `draft_pr`, the sole exception is a new or edited
-  `server/alembic/versions/*.py` migration version needed by this ticket; do
-  not touch env.py, templates, migration configuration, or runner code. This
-  exception may extend `repo_paths` only for that migration version file.
+  manifests. Under server/alembic/ you may write exactly one thing: a new or
+  edited `server/alembic/versions/*.py` version file needed by this ticket.
+  Never touch env.py, templates, alembic.ini, migration configuration, or
+  runner code. That version file may extend `repo_paths` on its own.
 - Do not edit repository instruction or memory files, including CLAUDE.md or
   AGENTS.md. They are operator-owned context, never part of a product patch.
 - Do not touch more than 25 files total (including what the existing diff
@@ -178,11 +182,11 @@ the total is at least 45, independently correct safe code exists, and the
 questions explain what must be answered before the rest can be done. Use
 questions_only whenever a human answer could unblock the review: make no code
 changes and provide one or more concrete questions with at least two options.
-Use no_safe_action only for already_fixed, migration_required, policy_blocked,
-or external_dependency; it has no questions and no code diff. A `draft_pr`
-directive forbids already_fixed and migration_required because a repo-local
-fix or migration must be drafted. Missing evidence or ambiguous product intent
-is questions_only, not no_safe_action.
+Use no_safe_action only for already_fixed, policy_blocked, or
+external_dependency; it has no questions and no code diff. A needed migration
+is not one of them — draft the version file. A `draft_pr` directive forbids
+already_fixed because a repo-local fix must be drafted. Missing evidence or
+ambiguous product intent is questions_only, not no_safe_action.
 
 Criticality is independent of confidence: red is security/privacy, data loss,
 production outage, compliance/payroll, or a blocked core workflow; orange is a
