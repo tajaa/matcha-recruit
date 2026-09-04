@@ -221,10 +221,28 @@ class TestEditResultText:
         text = edit_result_text([
             {**_op(), "ok": True},
             {**_op(kind="unassign", from_employee_name="Dana Kim", to_employee_name=None),
-             "ok": False, "reason": "that shift was cancelled"},
+             "ok": False, "reason": "they weren't on that shift"},
         ])
         assert "1 change is live" in text
-        assert "Couldn't change Dana Kim on **Opener** [[shift:s1:2026-08-12]]: that shift was cancelled" in text
+        assert "Couldn't change Dana Kim on **Opener** [[shift:s1:2026-08-12]]: they weren't on that shift" in text
+
+    def test_a_gone_shift_is_not_deep_linked(self):
+        """`[[shift:…]]` renders as a real link into the scheduler, so the one
+        failure that says the shift is gone must not offer to open it."""
+        text = edit_result_text([
+            {**_op(kind="cancel", from_employee_name=None, to_employee_name=None),
+             "ok": False, "shift_gone": True, "reason": "that shift no longer exists"},
+        ])
+        assert "[[shift:" not in text
+        assert text == "Couldn't make any of those changes.\nCouldn't change **Opener**: that shift no longer exists"
+
+    def test_an_op_with_no_employee_names_the_shift_once(self):
+        text = edit_result_text([
+            {**_op(kind="retime", from_employee_name=None, to_employee_name=None),
+             "ok": False, "reason": "that retime is outside the selected schedule week"},
+        ])
+        assert "Couldn't change **Opener** [[shift:s1:2026-08-12]]: that retime is outside" in text
+        assert "Opener on **Opener**" not in text
 
     def test_all_failed_says_so_plainly(self):
         text = edit_result_text([{**_op(), "ok": False, "reason": "they picked up a conflict"}])
