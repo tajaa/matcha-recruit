@@ -2178,7 +2178,10 @@ async def execute_edit_proposal(
             )
             if shift_row is None:
                 await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "that shift no longer exists"})
+                results.append({
+                    **op, "ok": False, "shift_gone": True,
+                    "reason": "that shift no longer exists",
+                })
                 continue
             if not _in_editor_week(shift_row):
                 await _restore_if_removed(idx)
@@ -2187,7 +2190,9 @@ async def execute_edit_proposal(
 
             if op["kind"] == "cancel":
                 if shift_row["status"] == "cancelled":
-                    results.append({**op, "ok": False, "reason": "already cancelled"})
+                    results.append({
+                        **op, "ok": False, "shift_gone": True, "reason": "already cancelled",
+                    })
                     continue
                 await cancel_shift_core(
                     conn, company_id, shift_id=shift_id, existing_row=shift_row,
@@ -2200,7 +2205,10 @@ async def execute_edit_proposal(
             if op["kind"] == "unassign":
                 info = removed.get(idx)
                 if info is None:
-                    results.append({**op, "ok": False, "reason": "that shift was cancelled or no longer exists"})
+                    results.append({
+                        **op, "ok": False, "shift_gone": True,
+                        "reason": "that shift was cancelled or no longer exists",
+                    })
                     continue
                 if info["deleted"] == 0:
                     results.append({**op, "ok": False, "reason": "they weren't on that shift"})
@@ -2308,7 +2316,9 @@ async def execute_edit_proposal(
 
             if shift_row["status"] == "cancelled":
                 await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "that shift was cancelled"})
+                results.append({
+                    **op, "ok": False, "shift_gone": True, "reason": "that shift was cancelled",
+                })
                 continue
 
             if shift_row["status"] == "published" and not edit_published:
@@ -2689,6 +2699,16 @@ def edit_result_text(results: list[dict]) -> str:
         verb = "is" if n == 1 else "are"
         lines = [f"✅ Done — {n} change{'s' if n != 1 else ''} {verb} live ({'; '.join(parts)})."]
     for f in failed:
-        who = f.get("to_employee_name") or f.get("from_employee_name") or (f.get("shift_role") or "that shift")
-        lines.append(f"Couldn't change {who}: {f['reason']}")
+        who = f.get("to_employee_name") or f.get("from_employee_name")
+        label = (f.get("shift_role") or "shift").title()
+        # A deleted or cancelled shift has nothing to open — the token renders
+        # as a real link into the scheduler, so linking the very shift the
+        # reason says is gone hands the manager a dead deep link.
+        if f.get("shift_gone"):
+            where = f"**{label}**"
+        else:
+            shift_date = datetime.fromisoformat(f["starts_at"]).date().isoformat()
+            where = f"**{label}** [[shift:{f['shift_id']}:{shift_date}]]"
+        subject = f"{who} on {where}" if who else where
+        lines.append(f"Couldn't change {subject}: {f['reason']}")
     return "\n".join(lines)

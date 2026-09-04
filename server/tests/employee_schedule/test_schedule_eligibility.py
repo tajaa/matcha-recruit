@@ -12,6 +12,7 @@ from app.matcha.services.scheduling.schedule_eligibility import (
     open_expired_eligibility_cases,
     open_expired_job_credential_cases,
     open_expiring_eligibility_warnings,
+    resolve_recovered_eligibility_cases,
     schedule_eligibility_roster_flags,
     schedule_eligibility_violations,
 )
@@ -247,6 +248,45 @@ def test_credential_is_valid_through_its_expiration_date():
         ValidCredentialConn(), uuid4(), employee_id=uuid4(), shift_date=date(2026, 8, 21),
     ))
     assert violations == []
+
+
+class RecoveredCaseConn:
+    def __init__(self):
+        self.requirement_id = uuid4()
+        self.case_id = uuid4()
+        self.fetch_args = None
+        self.resolved = []
+
+    async def fetch(self, _query, *args):
+        self.fetch_args = args
+        return [{
+            "id": self.case_id,
+            "requirement_id": self.requirement_id,
+            "status": "verified",
+            "expires_at": date(2029, 9, 3),
+            "label": "Food Handler Card",
+            "has_expiration": True,
+            "timezone": "UTC",
+            "is_schedule_blocking": True,
+        }]
+
+    async def execute(self, _query, *args):
+        self.resolved.append(args)
+        return "UPDATE 1"
+
+
+def test_current_credential_resolves_only_its_stale_removal_case():
+    conn = RecoveredCaseConn()
+    company_id = uuid4()
+
+    count = asyncio.run(resolve_recovered_eligibility_cases(
+        conn, company_id, requirement_id=conn.requirement_id,
+        as_of=date(2026, 9, 3),
+    ))
+
+    assert count == 1
+    assert conn.fetch_args[2] == conn.requirement_id
+    assert conn.resolved[0][1] == "credential_renewed_or_cleared"
 
 
 class MinorPermitConn:

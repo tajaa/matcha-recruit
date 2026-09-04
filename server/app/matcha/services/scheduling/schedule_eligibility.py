@@ -368,7 +368,8 @@ async def open_expiring_eligibility_warnings(
 
 
 async def resolve_recovered_eligibility_cases(
-    conn, company_id: UUID, *, now: datetime | None = None, as_of: date | None = None,
+    conn, company_id: UUID, *, requirement_id: UUID | None = None,
+    now: datetime | None = None, as_of: date | None = None,
 ) -> int:
     """Close expired-credential cases once a replacement has been verified.
 
@@ -398,8 +399,10 @@ async def resolve_recovered_eligibility_cases(
           LEFT JOIN business_locations primary_location ON primary_location.id=e.work_location_id
          WHERE c.company_id=$1 AND c.requirement_type='credential'
            AND c.status = ANY($2::text[])
+           AND ($3::uuid IS NULL OR c.requirement_id=$3)
         """,
         company_id, ["warning_open", "removal_requested", "keep_acknowledged"],
+        requirement_id,
     )
     resolved = 0
     for row in rows:

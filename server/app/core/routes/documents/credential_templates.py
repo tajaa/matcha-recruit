@@ -26,6 +26,9 @@ from app.core.services.credential_template_service import (
     match_job_title_to_role_category,
     materialize_schedule_blocking_template,
 )
+from app.matcha.services.scheduling.schedule_eligibility import (
+    resolve_recovered_eligibility_cases,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -867,24 +870,33 @@ async def waive_requirement(
         if not row:
             raise HTTPException(404, "Requirement not found")
 
-        await conn.execute(
-            """
-            UPDATE employee_credential_requirements
-            SET status = 'waived', waived_by = $1, waived_at = NOW(),
-                waiver_reason = $2, updated_at = NOW()
-            WHERE id = $3
-            """,
-            user.id, body.reason, requirement_id,
-        )
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE employee_credential_requirements
+                SET status = 'waived', waived_by = $1, waived_at = NOW(),
+                    waiver_reason = $2, updated_at = NOW()
+                WHERE id = $3
+                """,
+                user.id, body.reason, requirement_id,
+            )
 
-        # Also complete the linked onboarding task
-        await conn.execute(
-            """
-            UPDATE employee_onboarding_tasks
-            SET status = 'completed'
-            WHERE credential_requirement_id = $1 AND status = 'pending'
-            """,
-            requirement_id,
-        )
+            # Also complete the linked onboarding task
+            await conn.execute(
+                """
+                UPDATE employee_onboarding_tasks
+                SET status = 'completed'
+                WHERE credential_requirement_id = $1 AND status = 'pending'
+                """,
+                requirement_id,
+            )
+
+            # A waiver is a recovery boundary too: `_credential_problem` reports
+            # no problem for a waived requirement, so leaving the case open
+            # makes the schedule assistant quote an expiry the assignment path
+            # no longer enforces.
+            await resolve_recovered_eligibility_cases(
+                conn, company_id, requirement_id=requirement_id,
+            )
 
         return {"ok": True}

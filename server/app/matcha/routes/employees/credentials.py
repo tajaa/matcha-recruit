@@ -39,6 +39,9 @@ from app.core.services.credential_template_service import (
     materialize_uploaded_schedule_blocking_requirement,
 )
 from app.matcha.services.scheduling.job_credential_requirements import materialize_job_requirements
+from app.matcha.services.scheduling.schedule_eligibility import (
+    resolve_recovered_eligibility_cases,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -611,6 +614,13 @@ async def approve_credential_document(
                     """,
                     document_id, current_user.id, body.expiration_date, requirement["id"],
                 )
+                # Approval is the canonical recovery boundary. Do not leave a
+                # historical removal-requested case visible until the optional
+                # eligibility worker happens to run: that stale case can make
+                # Huume describe the old expiry as the employee's current one.
+                await resolve_recovered_eligibility_cases(
+                    conn, company_id, requirement_id=requirement["id"],
+                )
 
             # Keep the task in the same transaction as requirement verification.
             await conn.execute(
@@ -772,6 +782,13 @@ async def reclassify_credential_document(
                     current_user.id,
                     body.expiration_date if requires_expiration else None,
                     new_requirement["id"],
+                )
+                # Verifying through reclassification is the same recovery
+                # boundary as verifying through approval: without this, the
+                # requirement reads verified through its new expiry while the
+                # open case still quotes the old one.
+                await resolve_recovered_eligibility_cases(
+                    conn, company_id, requirement_id=new_requirement["id"],
                 )
             # Reclassification re-points the requirement, so `is_current` has to
             # be recomputed rather than defaulted off the RETURNING row.
