@@ -209,7 +209,10 @@ post_reconsideration_reply() {
 
 post_context_request() {
     local reason="$1" expected_note="$2"
-    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rsr '.[0:600]')"
+    # Newlines survive: the acceptance-evidence block is the payload here, and
+    # flattening it to one line at 600 characters cut the proof off after about
+    # four criteria. The server sanitizes and bounds it again.
+    reason="$(printf '%s' "$reason" | tr -d '\r' | jq -Rsr '.[0:4000]')"
     if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
         "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
             '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
@@ -221,6 +224,28 @@ post_context_request() {
 }
 
 BRANCH="bot/task-$ID8"
+
+# Dying here used to fail the workflow step with the diff discarded, no card
+# note, and nothing in chat: the next scheduled cycle re-selected the same card
+# and reproduced the same cosmetic diff forever, with no signal to a human. The
+# refusal stands, but it lands on the card and asks its owner for a decision.
+reject_cosmetic_diff() {
+    local reject_note origin_note
+    reject_note="[autopr:rejected $(date -u +%Y-%m-%dT%H:%M:%SZ)] cosmetic_only"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · BLOCKED: COSMETIC DIFF · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
+        "$EXISTING_PROGRESS_NOTE")"
+    if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null; then
+        post_context_request \
+            "AutoPR produced a diff that only rewrites string literals for a card asking for structure, so it was discarded. Either the criteria are already met — reply and it will return acceptance_criteria_met with per-criterion evidence — or the card needs the missing structural detail." \
+            "$origin_note"
+    else
+        printf 'kanban-autopr: warning: could not record the cosmetic-diff rejection on task %s\n' \
+            "$TASK_ID" >&2
+    fi
+    die "implementation diff only rewrites string literals for a card asking for structure; return acceptance_criteria_met with evidence, or questions_only"
+}
 
 existing_feedback_checkpoint() {
     local body="$1" kind="$2"
@@ -379,19 +404,17 @@ git diff --cached --quiet || has_diff=true
 case "$OUTCOME" in
     implementation|partial_implementation)
         [ "$has_diff" = true ] || die "decision says safe changes exist but the worktree is empty"
-        # A card whose criteria are already met, on a run forbidden from saying
-        # so, produces a diff that changes nothing real. PR #418 shipped exactly
-        # one such line: a nav label reworded while the route, the row, and the
-        # feature gate it asked for had all existed for weeks. Refuse it only
-        # when the card asked for structure — a card that genuinely asks for a
-        # copy change has this same shape and is legitimate.
-        if [ "$OUTCOME" = implementation ] \
-            && printf '%s\n%s' "$TITLE" "$DESCRIPTION" \
-                | grep -Eqi '\b(route|router|sidebar|nav|navigation|menu|endpoint|expose|register|wire up)\b' \
-            && git diff --cached | python3 "$SCRIPT_DIR/cosmetic_diff.py"; then
+        # A partial_implementation carries the same shape for the same reason,
+        # so the guard covers both outcomes rather than leaving the lower bar
+        # as a way around it.
+        STAGED_DIFF_FILE="$(mktemp)"
+        git diff --cached > "$STAGED_DIFF_FILE"
+        if autopr_cosmetic_only_diff "$STAGED_DIFF_FILE" "$TITLE" "$DESCRIPTION"; then
+            rm -f "$STAGED_DIFF_FILE"
             git reset --hard >/dev/null 2>&1
-            die "implementation diff only rewrites string literals for a card asking for structure; return acceptance_criteria_met with evidence, or questions_only"
+            reject_cosmetic_diff
         fi
+        rm -f "$STAGED_DIFF_FILE"
         ;;
     questions_only|no_safe_action)
         if [ "$has_diff" = true ]; then

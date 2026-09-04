@@ -45,7 +45,12 @@ export function ComplianceCredentialsTab({
   // the tab dead-ends for anyone who came looking for it here — which is what
   // the auto-published "Compliance -> Credential Templates" changelog step told
   // people to do.
-  const canManageTemplates = hasFeature('credential_templates')
+  //
+  // Only when the tab is showing the viewer's own company. With `companyId` set
+  // (an admin or broker inspecting another tenant) both the feature check and
+  // /app/credential-templates resolve against the *viewer's* company, so the
+  // link would gate on the wrong flag and land on the wrong catalog.
+  const canManageTemplates = !companyId && hasFeature('credential_templates')
 
   const load = useCallback(async () => {
     setLoading(true)

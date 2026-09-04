@@ -51,7 +51,10 @@ Apply `directive_policy` mechanically:
   That verdict must carry `acceptance_evidence`: one entry per criterion, each
   with the criterion text and the `path`, `line`, and `commit` that already
   satisfy it. The harness verifies each citation and rejects the decision if
-  any does not resolve, so never guess a line number. Renaming a string, or
+  any does not resolve, so never guess a line number. The `commit` must be
+  HEAD or one of its ancestors on this branch, the `line` must not be blank at
+  that commit, and the `path` must still exist at HEAD — a real object from
+  some unrelated branch is not evidence. Renaming a string, or
   any other change you would not make if the card did not exist, is not an
   implementation — prefer this verdict over a cosmetic diff.
   When a schema change is needed, author the application change, tests, and a

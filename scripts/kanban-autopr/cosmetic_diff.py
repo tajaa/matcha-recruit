@@ -39,20 +39,60 @@ def skeleton(line: str) -> str:
     return " ".join(_QUOTED.sub('""', line).split())
 
 
+def _literals(line: str) -> list[str]:
+    """The quoted spans on one line, quotes stripped."""
+    return [match.group()[1:-1] for match in _QUOTED.finditer(line)]
+
+
+def _is_path_like(literal: str) -> bool:
+    """A quoted span that names a location rather than copy.
+
+    A route path or a nav destination is structure: rewriting `/app/old` to
+    `/app/new`, or moving a row that carries one, changes where the product
+    goes. Only prose rewrites are cosmetic.
+    """
+    text = literal.strip()
+    return text.startswith("/") or text.startswith("./") or text.startswith("../")
+
+
 def is_string_literal_only(diff: str) -> bool:
-    added: Counter[str] = Counter()
-    removed: Counter[str] = Counter()
+    added_raw: Counter[str] = Counter()
+    removed_raw: Counter[str] = Counter()
     for line in diff.splitlines():
         if line.startswith(("+++", "---", "diff ", "index ", "@@", "new file", "deleted file")):
             continue
         if line.startswith("+"):
-            added[skeleton(line[1:])] += 1
+            added_raw[line[1:]] += 1
         elif line.startswith("-"):
-            removed[skeleton(line[1:])] += 1
-    if not added or not removed:
+            removed_raw[line[1:]] += 1
+    if not added_raw or not removed_raw:
         # A pure addition or pure deletion is real work, not a reword.
         return False
-    return added == removed
+
+    # A line that appears verbatim on both sides was relocated, not reworded --
+    # a nav row moved into another group is exactly this shape, and it is real
+    # structural work. Set it aside before judging what actually changed.
+    relocated = added_raw & removed_raw
+    added_raw -= relocated
+    removed_raw -= relocated
+    if not added_raw or not removed_raw:
+        return False
+
+    added = Counter(skeleton(line) for line in added_raw.elements())
+    removed = Counter(skeleton(line) for line in removed_raw.elements())
+    if added != removed:
+        return False
+
+    # Same code, different strings -- but if one of those strings is a path,
+    # the diff repoints the product rather than rewording it.
+    added_literals: Counter[str] = Counter()
+    removed_literals: Counter[str] = Counter()
+    for line in added_raw.elements():
+        added_literals.update(_literals(line))
+    for line in removed_raw.elements():
+        removed_literals.update(_literals(line))
+    changed = (added_literals - removed_literals) + (removed_literals - added_literals)
+    return not any(_is_path_like(literal) for literal in changed)
 
 
 def main() -> int:

@@ -61,7 +61,20 @@ _TEST_ROUTE_RE = re.compile(
     r"(?:test[-_ ]route|reproduce(?:[-_ ]route)?)\s*(?:=|:)\s*(/\S+)",
     re.IGNORECASE,
 )
-_RECOVERABLE_NOTE_RE = re.compile(
+# Recovery only makes sense while the card is still stuck on a refusal a
+# ``draft_pr`` directive mechanically forbids. ``acceptance_criteria_met`` is
+# explicitly permitted under that directive, so a card resting on it is settled:
+# re-granting the directive there would re-run the model every cycle to reach
+# the same verdict forever.
+_RECOVERABLE_CURRENT_NOTE_RE = re.compile(
+    r"\[autopr:no-spec [^\]]+\]\s+"
+    r"(already_fixed|migration_required)(?:\s|$)",
+    re.IGNORECASE,
+)
+# The pass that consumed the directive may itself have ended on
+# ``acceptance_criteria_met``: the owner answered it, and the run after that
+# fell back to a forbidden refusal. That authorization is still owed.
+_RECOVERABLE_PRIOR_NOTE_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
     r"(already_fixed|acceptance_criteria_met|migration_required)(?:\s|$)",
     re.IGNORECASE,
@@ -178,17 +191,17 @@ def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dic
 
     A worker could accept decision-bound additional context, repeat the same
     kind of refusal, and thereby change the progress note so the event no
-    longer appeared pending. Recovery is deliberately narrow: both the old
-    bound decision and the current decision must be a refusal a ``draft_pr``
-    directive mechanically forbids (``already_fixed`` or
-    ``migration_required``), and the event itself must contain an explicit
-    work/still-broken directive.
+    longer appeared pending. Recovery is deliberately narrow: the current
+    decision must be a refusal a ``draft_pr`` directive mechanically forbids
+    (``already_fixed`` or ``migration_required``), the old bound decision must
+    be one of those or ``acceptance_criteria_met``, and the event itself must
+    contain an explicit work/still-broken directive.
     """
     current_note = str(card.get("progress_note") or "")
     if (
         card.get("autopr_reconsideration_pending", False)
         or card.get("board_column") not in {"todo", "changes_requested"}
-        or not _RECOVERABLE_NOTE_RE.search(current_note)
+        or not _RECOVERABLE_CURRENT_NOTE_RE.search(current_note)
     ):
         return {"directives": [], "test_route": None, "source_event_id": None}
 
@@ -199,7 +212,7 @@ def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dic
         if not isinstance(metadata, dict) or metadata.get("kind") != "autopr_additional_context":
             continue
         prior_note = str(metadata.get("autopr_reconsideration_of") or "")
-        if not _RECOVERABLE_NOTE_RE.search(prior_note):
+        if not _RECOVERABLE_PRIOR_NOTE_RE.search(prior_note):
             continue
         stored = str(metadata.get("autopr_directives") or "").split(",")
         # Only a standing directive may be recovered from an old event. A

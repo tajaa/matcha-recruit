@@ -1259,6 +1259,34 @@ check "a migration-required repeat cannot consume the owner's draft authorizatio
     $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
       "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
 
+# acceptance_criteria_met is permitted under draft_pr, so a card resting on it
+# is settled. Re-granting the directive there re-runs the model every cycle to
+# reach the same verdict forever.
+jq '.progress_note = "🤖 AUTO SETUP · NO PR: CARD ALREADY SATISFIED · [autopr:no-spec 2026-09-02T01:00:00Z] acceptance_criteria_met"' \
+    "$TMP_DIR/consumed-directive-card.json" > "$TMP_DIR/settled-acceptance-card.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/settled-acceptance-card.json" \
+    --history "$TMP_DIR/consumed-directive-history.json" \
+    --output "$TMP_DIR/settled-acceptance-directive.json"
+check "a card resting on acceptance_criteria_met stops re-recovering the directive" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
+      "$TMP_DIR/settled-acceptance-directive.json" >/dev/null && echo 0 || echo 1)
+
+# The prior bound decision may still have been acceptance_criteria_met: the
+# owner answered it and the next pass fell back to a forbidden refusal, so that
+# authorization is still owed.
+jq '.[0].metadata.autopr_reconsideration_of = "🤖 AUTO SETUP · NO PR: CARD ALREADY SATISFIED · [autopr:no-spec 2026-09-02T00:30:00Z] acceptance_criteria_met"' \
+    "$TMP_DIR/consumed-directive-history.json" > "$TMP_DIR/prior-acceptance-history.json"
+python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
+    --recover-consumed \
+    --card "$TMP_DIR/consumed-directive-card.json" \
+    --history "$TMP_DIR/prior-acceptance-history.json" \
+    --output "$TMP_DIR/prior-acceptance-directive.json"
+check "an authorization spent on an acceptance_criteria_met pass is still recoverable" \
+    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+      "$TMP_DIR/prior-acceptance-directive.json" >/dev/null && echo 0 || echo 1)
+
 # Recovery exists for standing product authority. A one-shot runtime approval
 # bound to a cycle that is already over must not ride along with it.
 jq '.[0].metadata.autopr_directives = "draft_pr,extend_runtime"
@@ -1646,24 +1674,81 @@ write_decision acceptance_criteria_met \
 check "acceptance evidence citing an unknown commit is refused" \
     $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
 
+# "Real object" is not "relevant object". A commit that exists in the runner's
+# store but is not on this branch's history bought the one verdict that
+# overrides an owner's draft_pr directive.
+sibling_sha="$(git -C "$REPO_ROOT" -c user.name=autopr-test -c user.email=autopr-test@example.com \
+    commit-tree "HEAD^{tree}" -p "HEAD~1" -m "autopr evidence-guard fixture" 2>/dev/null || true)"
+if [ -n "$sibling_sha" ]; then
+    write_decision acceptance_criteria_met \
+        "$(jq -n --arg sha "$sibling_sha" '[{criterion:"c",path:"client/src/routes/AppRoutes.tsx",line:116,commit:$sha}]')"
+    check "acceptance evidence citing a commit outside this branch's history is refused" \
+        $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+else
+    echo "skip: could not build a sibling commit for the ancestry guard" >&2
+fi
+
+blank_line="$(git -C "$REPO_ROOT" show "$head_sha:client/src/routes/AppRoutes.tsx" \
+    | grep -n '^[[:space:]]*$' | head -1 | cut -d: -f1)"
+if [ -n "$blank_line" ]; then
+    write_decision acceptance_criteria_met \
+        "$(jq -n --arg sha "$head_sha" --argjson line "$blank_line" \
+            '[{criterion:"c",path:"client/src/routes/AppRoutes.tsx",line:$line,commit:$sha}]')"
+    check "acceptance evidence citing a blank line is refused" \
+        $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+fi
+
+write_decision acceptance_criteria_met \
+    "$(jq -n --arg sha "$head_sha" '[{criterion:"c",path:"docs/does-not-exist-at-head.md",line:1,commit:$sha}]')"
+check "acceptance evidence citing a path absent at HEAD is refused" \
+    $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
 ################################################################################
 # Cosmetic-diff guard — the machine-detectable signature of the same failure.
+#
+# Fixtures, not commit SHAs: a shallow or filtered clone made `git show <sha>`
+# fail, cosmetic_diff.py read empty stdin, and the assertion failed for an
+# environmental reason rather than a regression.
 ################################################################################
-cosmetic_rc=$(git -C "$REPO_ROOT" show 5c88c7e -m --first-parent \
-    -- client/src/components/sidebars/ClientSidebar.tsx \
-    | python3 "$AUTOPR_DIR/cosmetic_diff.py"; echo $?)
+cosmetic_diff_rc() {
+    python3 "$AUTOPR_DIR/cosmetic_diff.py" <<< "$1"
+    echo $?
+}
+
+# PR #418's whole merged client change: the route, the row, and the gate the
+# card asked for all already existed; only the label text moved.
+pr418_diff="-  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
++  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credential Templates', feature: 'credential_templates' },"
 check "PR #418's merged diff is detected as string-literal churn" \
-    $([ "$cosmetic_rc" = "0" ] && echo 0 || echo 1)
+    $([ "$(cosmetic_diff_rc "$pr418_diff")" = "0" ] && echo 0 || echo 1)
 
-substantive_rc=$(git -C "$REPO_ROOT" show e7d716f \
-    | python3 "$AUTOPR_DIR/cosmetic_diff.py"; echo $?)
+feature_diff="-  const rows = useRows()
++  const rows = useRows()
++  const grouped = useMemo(() => groupRows(rows), [rows])"
 check "a real feature diff is not mistaken for string-literal churn" \
-    $([ "$substantive_rc" = "1" ] && echo 0 || echo 1)
+    $([ "$(cosmetic_diff_rc "$feature_diff")" = "1" ] && echo 0 || echo 1)
 
-added_only_rc=$(printf '%s\n' '+  const answer = "42"' \
-    | python3 "$AUTOPR_DIR/cosmetic_diff.py"; echo $?)
+# A row moved between sidebar groups: identical text on both sides, and real
+# structural work. The guard used to reject the card that asked for it.
+moved_row_diff="-      { to: '/app/foo', icon: Shield, label: 'Foo' },
++      { to: '/app/foo', icon: Shield, label: 'Foo' },"
+check "a relocated nav row is structure, not a reword" \
+    $([ "$(cosmetic_diff_rc "$moved_row_diff")" = "1" ] && echo 0 || echo 1)
+
+# Same skeleton, different string — but the string is a path, so the diff
+# repoints the product rather than rewording it.
+route_diff='-        <Route path="/app/old" element={<Old />} />
++        <Route path="/app/new" element={<Old />} />'
+check "a repointed route path is structure, not a reword" \
+    $([ "$(cosmetic_diff_rc "$route_diff")" = "1" ] && echo 0 || echo 1)
+
+nav_target_diff="-  { to: '/app/old', icon: Shield, label: 'Foo' },
++  { to: '/app/new', icon: Shield, label: 'Foo' },"
+check "a repointed nav destination is structure, not a reword" \
+    $([ "$(cosmetic_diff_rc "$nav_target_diff")" = "1" ] && echo 0 || echo 1)
+
 check "a pure addition is real work, not a reword" \
-    $([ "$added_only_rc" = "1" ] && echo 0 || echo 1)
+    $([ "$(cosmetic_diff_rc '+  const answer = "42"')" = "1" ] && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

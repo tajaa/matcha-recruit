@@ -410,26 +410,49 @@ start_inflight_snapshots() {
 start_inflight_snapshots
 codex_pass
 
-# One corrective retry when the returned outcome contradicts the card owner's
-# own directive. The owner already authorized this work, so a refusal the
-# directive forbids is a model error, not a safety stop — and dying here would
-# leave the card showing the stale refusal with no sign the authorization was
-# ever read. The retry re-states the directive as a rejection of the exact
-# decision just produced; the trusted validation below still has the last word.
+# One corrective retry when the pass just returned is one the trusted harness
+# will refuse anyway. Dying (or letting publish.sh die) would leave the card
+# showing a stale refusal, or nothing at all, with no sign the run happened.
+# The retry re-states the rejection of the exact decision just produced; the
+# trusted validation below still has the last word.
+CORRECTION_KIND=""
+CORRECTION_INSTRUCTION=""
 if [ -s "$DIRECTIVE_FILE" ] \
     && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
-    echo "kanban-autopr: decision violated the operator directive; retrying once" >&2
-    # The rejected pass concluded "no safe action", so it must not leave edits
-    # behind for the retry to inherit.
+    CORRECTION_KIND="directive_violation"
+    CORRECTION_INSTRUCTION="The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed or migration_required: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."
+else
+    # publish.sh refuses a string-literal-only diff on a card asking for
+    # structure and discards the run. Catching it here instead gives the model
+    # the one thing that failure never had: a correction path.
+    case "$(jq -r '.outcome // ""' "$RAW_DECISION_FILE" 2>/dev/null)" in
+        implementation|partial_implementation)
+            WORKTREE_DIFF="$WORK_DIR/worktree.diff"
+            git -C "$REPO_ROOT" diff HEAD > "$WORKTREE_DIFF" 2>/dev/null || : > "$WORKTREE_DIFF"
+            if autopr_cosmetic_only_diff "$WORKTREE_DIFF" \
+                "$(jq -r '.title // ""' "$CARD_FILE")" "$(jq -r '.description // ""' "$CARD_FILE")"; then
+                CORRECTION_KIND="cosmetic_only_diff"
+                CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: this card asks for structure — a route, a sidebar row, a menu entry, an endpoint — and your diff only rewrites string literals, which changes nothing a reader of the card asked for. Investigate again. If every acceptance criterion is already satisfied on this branch, return no_safe_action with acceptance_criteria_met and one acceptance_evidence entry per criterion (criterion text plus path, line, commit); the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. If a specific missing product decision blocks the structural change, return questions_only and say what is missing. Only return an implementation if you make the structural change the card actually asks for."
+            fi
+            ;;
+    esac
+fi
+
+if [ -n "$CORRECTION_KIND" ]; then
+    echo "kanban-autopr: decision rejected ($CORRECTION_KIND); retrying once" >&2
+    # The rejected pass must not leave edits behind for the retry to inherit.
     git -C "$REPO_ROOT" reset --hard HEAD >/dev/null 2>&1 || true
     git -C "$REPO_ROOT" clean -fd >/dev/null 2>&1 || true
     CORRECTION_FILE="$WORK_DIR/directive-correction.json"
+    # A cosmetic-diff rejection can happen with no directive at all.
+    [ -s "$DIRECTIVE_FILE" ] || printf 'null\n' > "$DIRECTIVE_FILE"
     jq -n --slurpfile policy "$DIRECTIVE_FILE" --slurpfile rejected "$RAW_DECISION_FILE" \
-        '{kind: "directive_violation",
-          directive_policy: $policy[0],
+        --arg kind "$CORRECTION_KIND" --arg instruction "$CORRECTION_INSTRUCTION" \
+        '{kind: $kind,
+          directive_policy: ($policy[0] // null),
           rejected_decision: {outcome: $rejected[0].outcome,
                               no_safe_action_reason: $rejected[0].no_safe_action_reason},
-          instruction: "The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed or migration_required: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."}' \
+          instruction: $instruction}' \
         > "$CORRECTION_FILE"
     ATTACH_ARGS+=(-f "$CORRECTION_FILE")
     : > "$REPORT_FILE"

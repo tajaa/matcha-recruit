@@ -34,6 +34,30 @@ _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 
+# The reason carries per-criterion acceptance evidence, which is a block with
+# line structure. Collapsing it to one line (the old behavior) destroyed that,
+# so newlines survive -- but nothing else does: control characters go, and the
+# ⟦…⟧ ticket-marker delimiters are stripped so a caller cannot forge a second
+# ticket header inside the message body.
+_CONTEXT_REASON_MAX_CHARS = 4000
+_CONTEXT_REASON_MAX_LINES = 60
+_CONTEXT_REASON_MAX_LINE_CHARS = 500
+
+
+def _sanitize_context_reason(reason: str) -> str:
+    lines: list[str] = []
+    for raw in (reason or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw.replace("\t", "  ")
+        line = "".join(char for char in line if ord(char) >= 32)
+        line = line.replace("⟦", "").replace("⟧", "").rstrip()
+        lines.append(line[:_CONTEXT_REASON_MAX_LINE_CHARS])
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines[:_CONTEXT_REASON_MAX_LINES])[:_CONTEXT_REASON_MAX_CHARS]
+
+
 async def post_autopr_context_request(
     *,
     project_id: UUID,
@@ -50,7 +74,7 @@ async def post_autopr_context_request(
     task+decision. Returns False when the task/decision/chat no longer exists.
     """
     expected = (expected_progress_note or "").strip()
-    why = " ".join((reason or "").split())[:600]
+    why = _sanitize_context_reason(reason)
     if not expected or not why:
         raise ValueError("AutoPR context requests require a decision and reason")
 
@@ -124,9 +148,16 @@ async def post_autopr_context_request(
             safe_title = " ".join((row["title"] or "ticket").split())
             safe_title = safe_title.replace("⟦", "").replace("⟧", "").replace("|", "/")[:200]
             column = (row["board_column"] or "todo").replace("_", " ").title()
+            # A multi-line reason is a rendered evidence block, not a clause:
+            # gluing the next sentence onto its last line made the proof the
+            # human is meant to read illegible.
+            if "\n" in why:
+                lead = f"This ticket needs additional context.\n{why}\n\n"
+            else:
+                lead = f"This ticket needs additional context because {why} "
             content = (
                 f"⟦ticket:{task_id}|{safe_title}|{column}⟧\n"
-                f"This ticket needs additional context because {why} "
+                f"{lead}"
                 "Reply to this Espresso message with the missing detail, or add it "
                 "from the ticket. You can attach screenshots. Start a line with "
                 "`--draft-pr`, or say `you can work on this`, to require a draft — "

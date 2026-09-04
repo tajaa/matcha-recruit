@@ -103,17 +103,31 @@ _autopr_directive_policy_ok() {
 # another string the model can write. Each cited path:line has to exist at the
 # commit it names -- otherwise a fabricated citation buys the same escape a
 # bare already_fixed was denied.
+#
+# "Exists" is not enough on its own. This is the one verdict that overrides an
+# owner's draft_pr directive, and every object the runner has ever fetched --
+# an unrelated remote branch, a dangling commit -- is a real object. So the
+# citation must be on this branch's own history, must point at a line that
+# actually says something, and must still be there now: the claim is "already
+# satisfied on main", not "was once written somewhere".
 _autopr_acceptance_evidence_ok() {
-    local decision_file="$1" commit path line lines
+    local decision_file="$1" commit path line lines content
     [ "$(jq -r '.no_safe_action_reason // ""' "$decision_file")" = acceptance_criteria_met ] || return 0
     while IFS=$'\t' read -r commit path line; do
         [ -n "$commit" ] || continue
         git cat-file -e "${commit}^{commit}" 2>/dev/null \
             || { echo "autopr: acceptance evidence cites unknown commit $commit" >&2; return 1; }
+        git merge-base --is-ancestor "$commit" HEAD 2>/dev/null \
+            || { echo "autopr: acceptance evidence cites $commit, which is not in this branch's history" >&2; return 1; }
         lines="$(git show "${commit}:${path}" 2>/dev/null | wc -l | tr -d ' ')" \
             || { echo "autopr: acceptance evidence cites unreadable $path at $commit" >&2; return 1; }
         [ -n "$lines" ] && [ "$lines" -ge "$line" ] 2>/dev/null \
             || { echo "autopr: acceptance evidence cites $path:$line beyond the file at $commit" >&2; return 1; }
+        content="$(git show "${commit}:${path}" 2>/dev/null | sed -n "${line}p" | tr -d '[:space:]')"
+        [ -n "$content" ] \
+            || { echo "autopr: acceptance evidence cites blank line $path:$line at $commit" >&2; return 1; }
+        git cat-file -e "HEAD:${path}" 2>/dev/null \
+            || { echo "autopr: acceptance evidence cites $path, which no longer exists at HEAD" >&2; return 1; }
     done < <(jq -r '.acceptance_evidence[] | [.commit, .path, (.line | tostring)] | @tsv' "$decision_file")
 }
 

@@ -87,7 +87,9 @@ one the card or the changelog names, or because production is behind the
 branch. When every criterion is met, return `no_safe_action` with
 `acceptance_criteria_met` and an `acceptance_evidence` entry per criterion
 (criterion text plus `path`, `line`, `commit`); the harness verifies every
-citation, so never guess a line number. When the send-back cites a page, label,
+citation, so never guess a line number. The `commit` must be HEAD or one of its
+ancestors on this branch, the `line` must not be blank at that commit, and the
+`path` must still exist at HEAD. When the send-back cites a page, label,
 control, or behavior that exists nowhere in the repository, return
 `questions_only` and say what you searched for. Renaming a string, or any other
 change you would not make if the card did not exist, is not an implementation.

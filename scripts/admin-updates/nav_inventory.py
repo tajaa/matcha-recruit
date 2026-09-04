@@ -25,16 +25,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# Sidebar nav entries are single-line object literals by convention across every
-# sidebar in the tree, e.g.
-#   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents', feature: 'incidents' },
-_TO_RE = re.compile(r"""\bto:\s*['"]([^'"]+)['"]""")
-_LABEL_RE = re.compile(r"""\blabel:\s*['"]([^'"]{1,80})['"]""")
-_ITEMS_RE = re.compile(r"\bitems:\s*\[")
-_ROUTE_RE = re.compile(r"""<Route\b[^>]*?\bpath=['"]([^'"]*)['"]""", re.DOTALL)
+# A quoted literal must close with the quote it opened with. Accepting either
+# closer let `label: "What's New"` capture `What`, and a truncated label is
+# exactly the wrong-label failure this module exists to prevent.
+_QUOTED = r"(?P<{name}q>['\"])(?P<{name}>(?:\\.|(?!(?P={name}q))[^\\\n]){{1,120}})(?P={name}q)"
+_TO_RE = re.compile(r"\bto:\s*" + _QUOTED.format(name="to"))
+_LABEL_RE = re.compile(r"\blabel:\s*" + _QUOTED.format(name="label"))
+_ROUTE_RE = re.compile(r"<Route\b[^>]*?\bpath=" + _QUOTED.format(name="path"), re.DOTALL)
 
 _SIDEBAR_DIRS = ("components/sidebars", "components/tier-sidebars")
 _ROUTE_DIR = "routes"
@@ -47,43 +48,123 @@ _TRAILING_NOUNS = {
     "link", "panel", "view", "sidebar", "nav", "navigation", "list", "form",
 }
 
+_MAX_LABEL_LEN = 80
+
+
+def _unescape(text: str) -> str:
+    """Undo the source-level escaping inside a captured literal."""
+    return re.sub(r"\\(.)", r"\1", text)
+
+
+def _literal(match: re.Match[str], name: str) -> str | None:
+    value = _unescape(match.group(name)).strip()
+    return value if 0 < len(value) <= _MAX_LABEL_LEN else None
+
 
 def _iter_tsx(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*.tsx") if "generated" not in p.parts)
 
 
-def _collect_sidebars(client_src: Path) -> list[dict[str, str]]:
+# Brace-aware lexer. Sidebar rows are single-line object literals *by
+# convention*, not by rule: ClientSidebar's conditional "Broker Chat" row spells
+# `to:` and `label:` on separate lines, and a line-at-a-time reader told the
+# model that a shipped nav row did not exist.
+_TOKEN_RE = re.compile(
+    r"(?P<skip>\s+|//[^\n]*|/\*.*?\*/)"
+    r"|(?P<string>'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`)"
+    r"|(?P<ident>[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"|(?P<punct>[{}:])"
+    r"|(?P<other>.)",
+    re.DOTALL,
+)
+
+
+def _lex(text: str) -> list[tuple[str, str]]:
+    tokens: list[tuple[str, str]] = []
+    for match in _TOKEN_RE.finditer(text):
+        kind = match.lastgroup
+        if kind in ("string", "ident", "punct"):
+            tokens.append((kind, match.group()))
+    return tokens
+
+
+def _string_value(token: str) -> str | None:
+    if token.startswith("`"):
+        return None  # an interpolated label is not a literal we can trust
+    value = _unescape(token[1:-1]).strip()
+    return value if 0 < len(value) <= _MAX_LABEL_LEN else None
+
+
+class _Frame:
+    __slots__ = ("to", "label", "items", "group")
+
+    def __init__(self, group: str) -> None:
+        self.to: str | None = None
+        self.label: str | None = None
+        self.items = False
+        self.group = group
+
+
+def _collect_sidebar_file(text: str, sidebar: str) -> list[dict[str, str]]:
     """Sidebar rows plus the group each one sits under.
 
-    A group header is a `label:` line carrying no `to:` and followed by `items:`
-    -- that is what distinguishes 'Compliance' the group from 'Compliance' the
-    row inside it, which is precisely the ambiguity that produced the bad copy.
+    A group header is an object carrying a `label:` and an `items:` array but no
+    `to:` -- that is what distinguishes 'Compliance' the group from 'Compliance'
+    the row inside it, which is precisely the ambiguity that produced the bad
+    copy.
     """
     items: list[dict[str, str]] = []
+    stack: list[_Frame] = []
+    tokens = _lex(text)
+    index = 0
+    while index < len(tokens):
+        kind, value = tokens[index]
+        if kind == "ident" and tokens[index + 1 : index + 2] == [("punct", ":")]:
+            following = tokens[index + 2] if index + 2 < len(tokens) else None
+            if stack:
+                frame = stack[-1]
+                if value in ("to", "label") and following and following[0] == "string":
+                    literal = _string_value(following[1])
+                    if literal is not None:
+                        setattr(frame, value, literal)
+                elif value == "items":
+                    frame.items = True
+            index += 2
+            continue
+        if kind == "punct" and value == "{":
+            group = ""
+            for frame in reversed(stack):
+                if frame.items and frame.label:
+                    group = frame.label
+                    break
+            stack.append(_Frame(group))
+        elif kind == "punct" and value == "}" and stack:
+            frame = stack.pop()
+            if frame.to and frame.label:
+                items.append({
+                    "sidebar": sidebar,
+                    "group": frame.group,
+                    "label": frame.label,
+                    "to": frame.to,
+                })
+        index += 1
+    return items
+
+
+def _collect_sidebars(client_src: Path) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
     for directory in _SIDEBAR_DIRS:
         base = client_src / directory
         if not base.is_dir():
             continue
         for path in sorted(base.glob("*.tsx")):
-            sidebar = path.stem
-            group = ""
-            pending_label = ""
-            for line in path.read_text(encoding="utf-8").splitlines():
-                to_match = _TO_RE.search(line)
-                label_match = _LABEL_RE.search(line)
-                if to_match and label_match:
-                    items.append({
-                        "sidebar": sidebar,
-                        "group": group,
-                        "label": label_match.group(1),
-                        "to": to_match.group(1),
-                    })
+            for item in _collect_sidebar_file(path.read_text(encoding="utf-8"), path.stem):
+                key = (item["sidebar"], item["group"], item["label"], item["to"])
+                if key in seen:
                     continue
-                if label_match and not to_match:
-                    pending_label = label_match.group(1)
-                elif _ITEMS_RE.search(line) and pending_label:
-                    group = pending_label
-                    pending_label = ""
+                seen.add(key)
+                items.append(item)
     return items
 
 
@@ -91,8 +172,11 @@ def _collect_routes(client_src: Path) -> list[str]:
     routes: set[str] = set()
     base = client_src / _ROUTE_DIR
     for path in _iter_tsx(base) if base.is_dir() else []:
-        routes.update(_ROUTE_RE.findall(path.read_text(encoding="utf-8")))
-    return sorted(r for r in routes if r)
+        for match in _ROUTE_RE.finditer(path.read_text(encoding="utf-8")):
+            value = _literal(match, "path")
+            if value:
+                routes.add(value)
+    return sorted(routes)
 
 
 def _collect_ui_labels(client_src: Path) -> list[str]:
@@ -103,7 +187,10 @@ def _collect_ui_labels(client_src: Path) -> list[str]:
     """
     labels: set[str] = set()
     for path in _iter_tsx(client_src):
-        labels.update(_LABEL_RE.findall(path.read_text(encoding="utf-8")))
+        for match in _LABEL_RE.finditer(path.read_text(encoding="utf-8")):
+            value = _literal(match, "label")
+            if value:
+                labels.add(value)
     return sorted(labels)
 
 
@@ -136,6 +223,13 @@ def _known(inventory: dict[str, Any]) -> set[str]:
     return known
 
 
+# The prompt renders the nav inventory as `Group > Row` and its own example
+# steps are written that way, so `>` has to be a separator here too. It was not,
+# which meant every step written in the form the prompt teaches skipped
+# grounding entirely.
+_SEPARATORS = ("->", "=>", "⇒", "›", "»", ">")
+
+
 def nav_tokens(text: str) -> list[str]:
     """Navigation claims inside one howToUse step.
 
@@ -143,7 +237,9 @@ def nav_tokens(text: str) -> list[str]:
     the UI's shape. Ordinary prose that names no surface is left alone, so this
     validates assertions rather than English.
     """
-    normalized = text.replace("->", "→").replace("⇒", "→")
+    normalized = text
+    for separator in _SEPARATORS:
+        normalized = normalized.replace(separator, "→")
     if "→" not in normalized:
         return []
     return [segment for segment in (s.strip() for s in normalized.split("→")) if segment]
@@ -152,6 +248,20 @@ def nav_tokens(text: str) -> list[str]:
 # Substring anchoring needs a floor: a two-letter label would match almost any
 # sentence. Short labels must still match a whole segment exactly.
 _ANCHOR_MIN_LEN = 5
+
+
+@lru_cache(maxsize=8)
+def _anchor_regex(anchors: frozenset[str]) -> re.Pattern[str] | None:
+    """One word-boundary alternation over every anchorable label.
+
+    Word-anchored, not raw substring: with ~900 labels in the tree a bare
+    substring test passed almost anything -- "order" inside "reorder point" is
+    not a claim that a control named Order exists.
+    """
+    if not anchors:
+        return None
+    ordered = sorted(anchors, key=len, reverse=True)
+    return re.compile(r"(?<!\w)(?:" + "|".join(re.escape(a) for a in ordered) + r")(?!\w)")
 
 
 def unknown_nav_tokens(text: str, inventory: dict[str, Any]) -> list[str]:
@@ -163,13 +273,13 @@ def unknown_nav_tokens(text: str, inventory: dict[str, Any]) -> list[str]:
     is the invention worth dropping.
     """
     known = _known(inventory)
-    anchors = [label for label in known if len(label) >= _ANCHOR_MIN_LEN]
+    anchors = _anchor_regex(frozenset(a for a in known if len(a) >= _ANCHOR_MIN_LEN))
     unknown: list[str] = []
     for token in nav_tokens(text):
         normalized = _normalize(token)
         if not normalized:
             continue
-        if normalized in known or any(anchor in normalized for anchor in anchors):
+        if normalized in known or (anchors is not None and anchors.search(normalized)):
             continue
         unknown.append(token)
     return unknown

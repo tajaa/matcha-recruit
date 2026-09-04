@@ -302,14 +302,20 @@ second scheduler.
    `acceptance_evidence` array with one entry per acceptance criterion, each
    naming the criterion and the `path`, `line`, and `commit` that already
    satisfies it. `decision.sh` resolves every citation against the repository
-   and rejects the decision if any does not exist, so it cannot be reached by
-   assertion. It exists because a card can be written against a premise that
+   and rejects the decision unless the commit is HEAD or one of its ancestors,
+   the cited line is non-blank there, and the path still exists at HEAD — a real
+   object from an unrelated branch is not evidence, so the verdict cannot be
+   reached by assertion. It exists because a card can be written against a premise that
    was already false — PR #418 asked for a route and a nav row that had both
    shipped weeks earlier under a different label — and with no way to say so,
-   the only legal move left was a diff that changed nothing real. `publish.sh`
-   now also refuses an `implementation` whose staged diff is pure
-   string-literal churn when the card's own text asks for structure
-   (`cosmetic_diff.py`), so that move is no longer available either. That
+   the only legal move left was a diff that changed nothing real. Both
+   `implementation` and `partial_implementation` are now refused when the staged
+   diff is pure string-literal churn and the card's own text asks for structure
+   (`cosmetic_diff.py`); a relocated row or a repointed path is structural work
+   and passes. `investigate.sh` catches it first and retries once with the
+   rejection stated back to the model, and `publish.sh` backstops it by writing
+   a `BLOCKED: COSMETIC DIFF` progress note and an Espresso context request
+   before failing, so the refusal is never a silent repeating loop. That
    authorization is durable in three ways, because the operator saying "work on it"
    once must not have to be repeated after every cycle: the granted directives are
    published back onto the card as `[autopr:directives …]` and re-read on later cycles
