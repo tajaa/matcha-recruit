@@ -29,8 +29,9 @@ from ...services.scheduling.schedule_location_readiness import (
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import (
-    resolve_shift_break_plan, resolve_shift_break_plans,
+    resolve_shift_break_plan, resolve_shift_break_plans, resolve_shift_stagger_plan,
 )
+from ...services.scheduling.schedule_break_stagger import stagger_payload
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
@@ -213,6 +214,24 @@ async def get_shift(shift_id: UUID, current_user=Depends(require_admin_or_client
     if shift is None:
         raise HTTPException(status_code=404, detail="Shift not found")
     return shift
+
+
+@router.get("/shifts/{shift_id}/break-stagger")
+async def get_shift_break_stagger(shift_id: UUID, current_user=Depends(require_admin_or_client)):
+    """Suggested break times for this shift's crew, spread to hold coverage.
+
+    Read-time and non-authoritative: the legal requirements the suggestions sit
+    on are the ones already stored on each assignment, and nothing here writes.
+    A manager keeps a time by PUTting it back to the assignment's break-plan
+    endpoint, so reopening an unreviewed shift always re-derives the same plan
+    from current rules rather than serving a stale one.
+    """
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        plan = await resolve_shift_stagger_plan(conn, company_id, shift_id=shift_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    return stagger_payload(plan)
 
 
 @router.get("/week")

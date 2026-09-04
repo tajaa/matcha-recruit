@@ -245,7 +245,7 @@ async def fetch_shifts(
                a.manager_note, a.manager_note_visible_to_employee,
                a.manager_note_include_in_location_digest,
                a.manager_note_send_employee_notice,
-               a.compliance_guidance,
+               a.compliance_guidance, a.planned_breaks,
                e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
         JOIN employees e ON e.id = a.employee_id
@@ -300,7 +300,8 @@ async def fetch_shifts(
             assignment["manager_note"] = (
                 r["manager_note"] if r["manager_note_visible_to_employee"] else None
             )
-            assignment["compliance_guidance"] = r["compliance_guidance"]
+            assignment["compliance_guidance"] = _json_or_none(r["compliance_guidance"])
+            assignment["planned_breaks"] = _json_or_none(r["planned_breaks"])
         if employee_id is None:
             assignment["manager_note_visible_to_employee"] = r["manager_note_visible_to_employee"]
             assignment["manager_note_include_in_location_digest"] = r["manager_note_include_in_location_digest"]
@@ -451,6 +452,7 @@ async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[
         """
         SELECT a.employee_id, a.status, a.manager_note,
                a.manager_note_visible_to_employee, a.compliance_guidance,
+               a.planned_breaks,
                e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
         JOIN employees e ON e.id = a.employee_id
@@ -467,11 +469,28 @@ async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[
             "status": r["status"],
             "manager_note": r["manager_note"],
             "manager_note_visible_to_employee": r["manager_note_visible_to_employee"],
-            "compliance_guidance": r["compliance_guidance"],
+            "compliance_guidance": _json_or_none(r["compliance_guidance"]),
+            "planned_breaks": _json_or_none(r["planned_breaks"]),
         }
         for r in assign_rows
     ]
     return shift
+
+
+def _json_or_none(value):
+    """Decode a JSONB column asyncpg hands back as text.
+
+    No `set_type_codec('jsonb', ...)` is registered app-wide, so a raw
+    passthrough reaches the client as a JSON *string* and every `guidance.summary`
+    read on it silently yields undefined.
+    """
+
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value
 
 
 def _shift_row_to_dict(r) -> dict:

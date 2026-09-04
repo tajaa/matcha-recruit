@@ -18,6 +18,11 @@ from .schedule_breaks import (
     minimum_meal_break_minutes,
     reinterpret_schedule_wall_time,
 )
+from .schedule_break_stagger import (
+    StaggerAssignment,
+    StaggerPlan,
+    stagger_shift_breaks,
+)
 from .shift_compliance import _age_on
 
 
@@ -121,13 +126,36 @@ async def resolve_shift_break_plans(
     employee_ids: Sequence[UUID],
 ) -> dict[UUID, BreakPlan]:
     """Resolve one shift window for many employees with batched DB reads."""
+    _, plans = await resolve_shift_break_plans_localized(
+        conn, company_id, location_id=location_id, starts_at=starts_at,
+        ends_at=ends_at, employee_ids=employee_ids,
+    )
+    return plans
+
+
+async def resolve_shift_break_plans_localized(
+    conn,
+    company_id: UUID,
+    *,
+    location_id: UUID | None,
+    starts_at: datetime,
+    ends_at: datetime,
+    employee_ids: Sequence[UUID],
+) -> tuple[ZoneInfo, dict[UUID, BreakPlan]]:
+    """``resolve_shift_break_plans`` plus the zone the plan times are in.
+
+    Break staggering has to compare requirement times against the shift's own
+    window, which means it needs the same effective zone the evaluator used —
+    returning it here avoids a second rules read just to re-derive it.
+    """
     unique_ids = list(dict.fromkeys(employee_ids))
+    utc = ZoneInfo("UTC")
     if not unique_ids:
-        return {}
+        return utc, {}
     if location_id is None:
-        return {
+        return utc, {
             employee_id: evaluate_break_plan(
-                starts_at=starts_at, ends_at=ends_at, timezone=ZoneInfo("UTC"), rules=(),
+                starts_at=starts_at, ends_at=ends_at, timezone=utc, rules=(),
             )
             for employee_id in unique_ids
         }
@@ -139,9 +167,9 @@ async def resolve_shift_break_plans(
     try:
         location_timezone = ZoneInfo(timezone_name or "UTC")
     except (ZoneInfoNotFoundError, ValueError):
-        return {
+        return utc, {
             employee_id: evaluate_break_plan(
-                starts_at=starts_at, ends_at=ends_at, timezone=ZoneInfo("UTC"), rules=(),
+                starts_at=starts_at, ends_at=ends_at, timezone=utc, rules=(),
             )
             for employee_id in unique_ids
         }
@@ -204,7 +232,7 @@ async def resolve_shift_break_plans(
             })
         status = "error" if resolved.source == "error" or age_unknown else plan.status
         plans[employee_id] = replace(plan, status=status, advisories=tuple(advisories))
-    return plans
+    return effective_timezone, plans
 
 
 async def resolve_open_shift_break_plans(
@@ -353,3 +381,54 @@ async def refresh_assignment_break_guidance_and_minimum(
             },
         )
     return plan
+
+
+async def resolve_shift_stagger_plan(
+    conn,
+    company_id: UUID,
+    *,
+    shift_id: UUID,
+) -> StaggerPlan | None:
+    """Suggest staggered break times for every assignee on one shift.
+
+    Read-time only: nothing here writes.  The legal requirements still come
+    from the same evaluator the write path stores on each assignment, so a
+    suggestion can never disagree with the guidance already shown.
+    """
+    shift = await conn.fetchrow(
+        """
+        SELECT location_id, starts_at, ends_at, required_staff
+        FROM schedule_shifts
+        WHERE id = $1 AND company_id = $2
+        """,
+        shift_id, company_id,
+    )
+    if shift is None:
+        return None
+    employee_ids = [
+        row["employee_id"]
+        for row in await conn.fetch(
+            """
+            SELECT employee_id
+            FROM schedule_shift_assignments
+            WHERE shift_id = $1 AND company_id = $2 AND status <> 'declined'
+            ORDER BY employee_id
+            """,
+            shift_id, company_id,
+        )
+    ]
+    effective_timezone, plans = await resolve_shift_break_plans_localized(
+        conn, company_id, location_id=shift["location_id"],
+        starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+        employee_ids=employee_ids,
+    )
+    return stagger_shift_breaks(
+        shift_start_local=reinterpret_schedule_wall_time(shift["starts_at"], effective_timezone),
+        shift_end_local=reinterpret_schedule_wall_time(shift["ends_at"], effective_timezone),
+        required_staff=int(shift["required_staff"] or 0),
+        assignments=[
+            StaggerAssignment(employee_id=employee_id, plan=plans[employee_id])
+            for employee_id in employee_ids
+            if employee_id in plans
+        ],
+    )
