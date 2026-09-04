@@ -191,6 +191,11 @@ async def run_repo_question(
     config = types.GenerateContentConfig(
         system_instruction=build_system_prompt(),
         tools=[types.Tool(function_declarations=declarations())],
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY,
+            ),
+        ),
     )
 
     while (

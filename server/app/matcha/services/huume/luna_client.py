@@ -267,6 +267,12 @@ class _LunaModels:
             # cannot silently drift to a differently priced service tier.
             "service_tier": "default",
         }
+        function_calling = getattr(
+            getattr(config, "tool_config", None), "function_calling_config", None,
+        )
+        mode = getattr(function_calling, "mode", None)
+        if getattr(mode, "value", mode) == "ANY":
+            payload["tool_choice"] = "required"
         if follow_up:
             payload["previous_response_id"] = self._previous_response_id
         # Structured-output switch for tool-less callers that parse the reply as

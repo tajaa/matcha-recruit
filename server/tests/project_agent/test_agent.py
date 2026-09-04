@@ -90,6 +90,11 @@ async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch
     assert result["token_usage"]["model"] == "gpt-5.6-luna"
     assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
     assert all(call["feature"] == "matcha.espresso.repo_question" for call in models.calls)
+    assert all(
+        call["config"].tool_config.function_calling_config.mode
+        == types.FunctionCallingConfigMode.ANY
+        for call in models.calls
+    )
     get_client.assert_called_once_with()
     post_answer.assert_awaited_once_with(company_id, channel_id, answer)
     assert record_step.await_count == 2
