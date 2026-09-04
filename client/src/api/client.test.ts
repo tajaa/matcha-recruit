@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest'
-import { API_BASE, ApiError, _shouldReportStatus } from './client'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { clearAuthTokens, setAuthTokens } from './authStorage'
+import { API_BASE, ApiError, logoutSession, _shouldReportStatus } from './client'
+
+function tokenWithExpiry(exp: number): string {
+  return `header.${btoa(JSON.stringify({ exp }))}.signature`
+}
+
+afterEach(() => {
+  clearAuthTokens()
+  vi.unstubAllGlobals()
+})
 
 describe('API_BASE', () => {
   it('never ends with a slash (a trailing-slash VITE_API_URL would otherwise double-slash every request)', () => {
@@ -29,5 +39,19 @@ describe('_shouldReportStatus', () => {
     expect(_shouldReportStatus(500)).toBe(true)
     expect(_shouldReportStatus(502)).toBe(true)
     expect(_shouldReportStatus(418)).toBe(true)
+  })
+})
+
+describe('logoutSession', () => {
+  it('does not send an expired access token to logout after refresh is rejected', async () => {
+    setAuthTokens(tokenWithExpiry(Date.now() / 1000 - 60), 'refresh-token')
+    window.history.replaceState({}, '', '/login')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(logoutSession()).resolves.toBe(false)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE}/auth/refresh`)
   })
 })
