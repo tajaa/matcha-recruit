@@ -318,6 +318,15 @@ async def run_task_draft(
     config = types.GenerateContentConfig(
         system_instruction=build_task_draft_system_prompt(),
         tools=[types.Tool(function_declarations=task_draft_declarations())],
+        # draft_ticket is the only tool and the only way to finish, and there is
+        # no prose fallback here: a turn that answers in text instead of calling
+        # it drops straight out of the loop into the "couldn't produce a draft"
+        # failure. Force a tool call on every turn.
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY,
+            ),
+        ),
     )
 
     while (

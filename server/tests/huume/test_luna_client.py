@@ -192,8 +192,19 @@ async def test_generate_content_records_exact_response_and_requests_high_reasoni
     assert result.usage_metadata.cache_write_token_count == 10
 
 
-@pytest.mark.asyncio
-async def test_generate_content_maps_any_function_mode_to_required_tool_choice(monkeypatch):
+def _declaration(name: str) -> types.FunctionDeclaration:
+    return types.FunctionDeclaration(
+        name=name,
+        description=f"{name} tool",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"path": types.Schema(type=types.Type.STRING)},
+        ),
+    )
+
+
+async def _capture_payload(monkeypatch, config) -> dict:
+    """Run one generate_content against a stub transport and return the body."""
     sent = {}
 
     class Client:
@@ -225,17 +236,91 @@ async def test_generate_content_maps_any_function_mode_to_required_tool_choice(m
     await _LunaModels().generate_content(
         model="gpt-5.6-luna",
         contents=[types.Content(role="user", parts=[types.Part(text="Help")])],
-        config=types.GenerateContentConfig(
+        config=config,
+    )
+    return sent["json"]
+
+
+def _tool_config(mode, allowed=None) -> types.ToolConfig:
+    return types.ToolConfig(
+        function_calling_config=types.FunctionCallingConfig(
+            mode=mode,
+            allowed_function_names=allowed,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_content_maps_any_function_mode_to_required_tool_choice(monkeypatch):
+    payload = await _capture_payload(
+        monkeypatch,
+        types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=[_declaration("read_file")])],
+            tool_config=_tool_config(types.FunctionCallingConfigMode.ANY),
+        ),
+    )
+
+    assert payload["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
+async def test_generate_content_omits_required_tool_choice_without_tools(monkeypatch):
+    # OpenAI rejects tool_choice="required" with an empty tools array (HTTP 400).
+    payload = await _capture_payload(
+        monkeypatch,
+        types.GenerateContentConfig(
             tools=[types.Tool(function_declarations=[])],
-            tool_config=types.ToolConfig(
-                function_calling_config=types.FunctionCallingConfig(
-                    mode=types.FunctionCallingConfigMode.ANY,
-                ),
+            tool_config=_tool_config(types.FunctionCallingConfigMode.ANY),
+        ),
+    )
+
+    assert payload["tools"] == []
+    assert "tool_choice" not in payload
+
+
+@pytest.mark.asyncio
+async def test_generate_content_narrows_tools_to_allowed_function_names(monkeypatch):
+    payload = await _capture_payload(
+        monkeypatch,
+        types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=[
+                _declaration("read_file"),
+                _declaration("answer_question"),
+            ])],
+            tool_config=_tool_config(
+                types.FunctionCallingConfigMode.ANY,
+                allowed=["answer_question"],
             ),
         ),
     )
 
-    assert sent["json"]["tool_choice"] == "required"
+    assert [tool["name"] for tool in payload["tools"]] == ["answer_question"]
+    assert payload["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
+async def test_generate_content_maps_none_function_mode_to_none_tool_choice(monkeypatch):
+    payload = await _capture_payload(
+        monkeypatch,
+        types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=[_declaration("read_file")])],
+            tool_config=_tool_config(types.FunctionCallingConfigMode.NONE),
+        ),
+    )
+
+    assert payload["tool_choice"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_generate_content_leaves_tool_choice_unset_without_tool_config(monkeypatch):
+    payload = await _capture_payload(
+        monkeypatch,
+        types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=[_declaration("read_file")])],
+        ),
+    )
+
+    assert "tool_choice" not in payload
 
 
 @pytest.mark.asyncio

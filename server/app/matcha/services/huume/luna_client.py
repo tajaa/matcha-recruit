@@ -267,12 +267,28 @@ class _LunaModels:
             # cannot silently drift to a differently priced service tier.
             "service_tier": "default",
         }
+        # google-genai tool_config -> Responses tool_choice. Responses has no
+        # allowed-function list for "must call a tool", so an ANY pin narrows
+        # the catalog itself instead of being silently dropped, and "required"
+        # is only sent with a non-empty tools array (empty is an HTTP 400).
         function_calling = getattr(
             getattr(config, "tool_config", None), "function_calling_config", None,
         )
         mode = getattr(function_calling, "mode", None)
-        if getattr(mode, "value", mode) == "ANY":
-            payload["tool_choice"] = "required"
+        mode = str(getattr(mode, "value", mode) or "")
+        if mode == "ANY":
+            allowed = {
+                str(name)
+                for name in (getattr(function_calling, "allowed_function_names", None) or [])
+            }
+            if allowed:
+                payload["tools"] = [
+                    tool for tool in payload["tools"] if tool["name"] in allowed
+                ]
+            if payload["tools"]:
+                payload["tool_choice"] = "required"
+        elif mode == "NONE":
+            payload["tool_choice"] = "none"
         if follow_up:
             payload["previous_response_id"] = self._previous_response_id
         # Structured-output switch for tool-less callers that parse the reply as
