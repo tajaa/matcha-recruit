@@ -330,17 +330,15 @@ cd "$REPO_ROOT"
 git add --all
 
 # Path guard: denylist is what stops the bot rewriting its own harness or CI.
-# The allowlist is strictly stronger. Authoring a migration *version* file is
-# ordinary drafting work and needs no directive — the operator applies every
-# migration by hand, and this script never runs one. What stays permanently
-# closed is the migration runner and configuration: env.py, templates,
-# alembic.ini. Gating the version file behind a directive did not make anything
-# safer; it just turned "this needs a column" into a refusal.
+# The allowlist is strictly stronger. Authoring a new migration version is
+# ordinary drafting work: publication always opens a GitHub draft PR and this
+# script never runs a migration. Existing mainline migrations and all migration
+# runner/configuration files remain closed.
 changed_paths="$(git diff --cached --no-renames --name-only)"
 unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
 unsafe_migrations="$(printf '%s\n' "$changed_paths" \
     | grep -E '^server/alembic/' \
-    | grep -vE '^server/alembic/versions/[^/]+\.py$' || true)"
+    | grep -vE '^server/alembic/versions/[A-Za-z0-9_]+\.py$' || true)"
 if [ -n "$unsafe_migrations" ]; then
     unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
 fi
@@ -351,13 +349,64 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[^/]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
+allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[A-Za-z0-9_]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
     echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
+fi
+
+migration_paths="$(printf '%s\n' "$changed_paths" \
+    | grep -E '^server/alembic/versions/[A-Za-z0-9_]+\.py$' || true)"
+if [ -n "$migration_paths" ]; then
+    migration_base_ref="${AUTOPR_MIGRATION_BASE_REF:-main}"
+    git rev-parse --verify "$migration_base_ref^{commit}" >/dev/null 2>&1 \
+        || die "migration safety base is unavailable: $migration_base_ref"
+
+    deleted_migrations="$(git diff --cached --diff-filter=D --no-renames --name-only -- \
+        server/alembic/versions || true)"
+    if [ -n "$deleted_migrations" ]; then
+        echo "Refusing deletion of migration version files:" >&2
+        printf '%s\n' "$deleted_migrations" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+
+    unsafe_migration_modes="$(git diff --cached --raw --no-renames -- \
+        server/alembic/versions \
+        | awk '$2 != "100644" {print $0}' || true)"
+    if [ -n "$unsafe_migration_modes" ]; then
+        echo "Refusing non-regular migration version files:" >&2
+        printf '%s\n' "$unsafe_migration_modes" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+
+    existing_migrations=""
+    while IFS= read -r migration_path; do
+        [ -n "$migration_path" ] || continue
+        migration_status="$(git diff --cached --no-renames --name-status \
+            "$migration_base_ref" -- "$migration_path" | awk 'NR == 1 {print $1}')"
+        if [ "$migration_status" != A ]; then
+            existing_migrations="${existing_migrations}${existing_migrations:+$'\n'}${migration_path}"
+        fi
+    done <<< "$migration_paths"
+    if [ -n "$existing_migrations" ]; then
+        echo "Refusing edits to migration files already present on $migration_base_ref:" >&2
+        printf '%s\n' "$existing_migrations" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+
+    if ! migration_graph_error="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+        "$REPO_ROOT/server/alembic/versions" 2>&1)"; then
+        echo "Refusing an invalid migration graph or migration file:" >&2
+        printf '%s\n' "$migration_graph_error" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
 fi
 
 # Same telemetry-suppression boundary error-autofix guards — kanban cards

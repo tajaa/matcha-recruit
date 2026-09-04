@@ -278,14 +278,13 @@ collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
 collect_rc=$?
 check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "5" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "4" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444", "55555555", "66666666", "77777777"]
-         and (.[4].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
+        'map(.id8) == ["11111111", "44444444", "55555555", "77777777"]
+         and (.[3].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
          and .[2].autopr_reconsideration_pending
          and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
-         and .[3].autopr_reconsideration_pending
-         and .[3].autopr_reconsideration_event_id == "consumed-collector-event"' >/dev/null \
+         and (.[3].autopr_reconsideration_pending | not)' >/dev/null \
       && echo 0 || echo 1)
 
 ################################################################################
@@ -1265,8 +1264,8 @@ python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
     --card "$TMP_DIR/consumed-migration-card.json" \
     --history "$TMP_DIR/consumed-migration-history.json" \
     --output "$TMP_DIR/recovered-migration-directive.json"
-check "a migration-required repeat cannot consume the owner's draft authorization" \
-    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+check "an old migration-required card is not revived by consumed authorization" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
       "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
 
 # acceptance_criteria_met is permitted under draft_pr, so a card resting on it
@@ -1497,19 +1496,31 @@ check "an explicit run request outranks routine work and its own no-spec marker"
       && [ "$(printf '%s' "$run_requested" | jq -r '.mode')" = "investigate" ] \
       && echo 0 || echo 1)
 
-# Every card stopped by the retired migration_required verdict is stale. The
-# operator should not have to hand-poke each one to undo a refusal the system
-# itself withdrew.
+# Old migration-required decisions stay settled. New runs draft migrations,
+# but abandoned cards must not be resurrected and spend another model run.
 cat > "$TMP_DIR/retired-nospec-cards.json" <<'EOF'
 [
   {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Stopped by a retired verdict","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-04T06:11:02Z] migration_required · note: needs a migration"}
 ]
 EOF
-retired_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
     AUTOPR_CACHE_DIR="$TMP_DIR/retired-nospec-cache" \
-    "$AUTOPR_DIR/select.sh" "$TMP_DIR/retired-nospec-cards.json")"
-check "a retired migration_required marker no longer holds the no-spec ledger" \
-    $([ "$(printf '%s' "$retired_selected" | jq -r '.id8')" = "aaaaaaaa" ] && echo 0 || echo 1)
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/retired-nospec-cards.json" >/dev/null 2>&1
+retired_nospec_rc=$?
+check "an old migration_required marker stays settled until fresh owner action" \
+    $([ "$retired_nospec_rc" = "3" ] && echo 0 || echo 1)
+
+cat > "$TMP_DIR/embedded-migration-text-cards.json" <<'EOF'
+[
+  {"task_id":"cccccccc-0000-4000-8000-00000000000c","id8":"cccccccc","project_id":"p","title":"Waiting on vendor","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY · [autopr:no-spec 2026-09-04T06:11:02Z] external_dependency · note: vendor mentioned ] migration_required in its response"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/embedded-migration-text-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/embedded-migration-text-cards.json" >/dev/null 2>&1
+embedded_migration_text_rc=$?
+check "migration_required text cannot reopen a card blocked for another exact reason" \
+    $([ "$embedded_migration_text_rc" = "3" ] && echo 0 || echo 1)
 
 cat > "$TMP_DIR/live-nospec-cards.json" <<'EOF'
 [

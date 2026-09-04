@@ -150,12 +150,11 @@ already_handled() {
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
     #
-    # A retired reason does not hold the ledger. `migration_required` is no
-    # longer a refusal this harness accepts, so every card stopped by one is
-    # stale: the operator should not have to hand-poke each of them to undo a
-    # verdict the system itself withdrew.
+    # Keep every prior no-spec decision settled until the owner supplies fresh
+    # context, requests a run, or moves/re-adds the card. In particular, do not
+    # resurrect old migration_required cards merely because new runs now draft
+    # migrations automatically; abandoned work must stay abandoned.
     if [[ "$progress_note" == *"[autopr:no-spec "* ]] \
-        && [[ "$progress_note" != *"] migration_required"* ]] \
         && [ "$reconsideration_pending" != true ] \
         && [ "$run_requested" != true ]; then
         # Full ISO timestamp, not just a date: BSD `date -j -f` fills any

@@ -9,8 +9,23 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 TEST_REPO="$TMP_DIR/repo"
 mkdir -p "$TEST_REPO/scripts"
 cp -R "$AUTOPR_SOURCE" "$TEST_REPO/scripts/kanban-autopr"
-mkdir -p "$TEST_REPO/server/app"
+cp "$REPO_ROOT/scripts/alembic_graph_snapshot.py" "$TEST_REPO/scripts/alembic_graph_snapshot.py"
+mkdir -p "$TEST_REPO/server/app" "$TEST_REPO/server/alembic/versions"
 printf 'pass\n' > "$TEST_REPO/server/app/example.py"
+cat > "$TEST_REPO/server/alembic/versions/base_test.py" <<'EOF'
+"""Test migration base."""
+
+revision = "base_test"
+down_revision = None
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
 git -C "$TEST_REPO" init -q
 git -C "$TEST_REPO" config user.name test
 git -C "$TEST_REPO" config user.email test@example.com
@@ -288,10 +303,23 @@ cat > "$TMP_DIR/raw-implementation.json" <<'EOF'
 EOF
 "$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
   "$TMP_DIR/raw-implementation.json" "$TMP_DIR/implementation.json"
-mkdir -p "$TEST_REPO/server/alembic/versions"
-printf '"""reviewed migration"""\n' > "$TEST_REPO/server/alembic/versions/task_test.py"
+cat > "$TEST_REPO/server/alembic/versions/task_test.py" <<'EOF'
+"""Reviewed migration."""
+
+revision = "task_test"
+down_revision = "base_test"
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
 # Authoring a migration version file is ordinary drafting work: the operator
 # applies every migration by hand, so no directive is involved.
+rm -f "$TMP_DIR/gh.log"
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -303,6 +331,45 @@ printf '"""reviewed migration"""\n' > "$TEST_REPO/server/alembic/versions/task_t
 check "a migration version may be drafted with no directive at all" \
   $(git -C "$TEST_REPO" show --name-only --format= HEAD \
     | grep -qx 'server/alembic/versions/task_test.py' && echo 0 || echo 1)
+check "migration work is published as a GitHub draft PR" \
+  $(grep -q -- '^pr create .*--draft' "$TMP_DIR/gh.log" && echo 0 || echo 1)
+
+printf '\n# forbidden rewrite\n' >> "$TEST_REPO/server/alembic/versions/base_test.py"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>"$TMP_DIR/existing-migration.stderr"
+existing_migration_rc=$?
+set -e
+check "publisher rejects edits to migrations already present on main" \
+  $([ "$existing_migration_rc" != 0 ] \
+    && grep -q 'already present on main' "$TMP_DIR/existing-migration.stderr" \
+    && ! grep -q 'forbidden rewrite' "$TEST_REPO/server/alembic/versions/base_test.py" \
+    && echo 0 || echo 1)
+
+printf '"""missing revision metadata and entrypoints"""\n' \
+  > "$TEST_REPO/server/alembic/versions/malformed_test.py"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>"$TMP_DIR/malformed-migration.stderr"
+malformed_migration_rc=$?
+set -e
+check "publisher rejects malformed migration drafts before opening a PR" \
+  $([ "$malformed_migration_rc" != 0 ] \
+    && grep -q 'invalid migration graph or migration file' "$TMP_DIR/malformed-migration.stderr" \
+    && [ ! -e "$TEST_REPO/server/alembic/versions/malformed_test.py" ] \
+    && echo 0 || echo 1)
 
 # The runner and its configuration stay permanently closed — that is the part
 # that could actually touch a database.

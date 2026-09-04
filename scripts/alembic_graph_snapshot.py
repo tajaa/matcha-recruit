@@ -40,6 +40,19 @@ def _assignment_values(tree: ast.Module) -> dict[str, object]:
     return values
 
 
+def _validate_entrypoints(tree: ast.Module, *, path: Path) -> None:
+    functions = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    missing = sorted({"upgrade", "downgrade"} - functions)
+    if missing:
+        raise ValueError(
+            f"{path}: missing migration entrypoint(s): {', '.join(missing)}"
+        )
+
+
 def _as_revisions(value: object, *, field: str, path: Path) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -62,6 +75,7 @@ def load_graph(versions_dir: Path) -> dict[str, Revision]:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        _validate_entrypoints(tree, path=path)
         values = _assignment_values(tree)
         revision = values.get("revision")
         if not isinstance(revision, str) or not revision:
