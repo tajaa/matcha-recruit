@@ -47,19 +47,6 @@ export default function ContactLanding() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: BG, colorScheme: 'light' }}>
-      <nav className="w-full px-6 md:px-12 py-6 flex items-center justify-between">
-        <span className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: INK }}>
-          Matcha
-        </span>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="text-[10px] font-mono uppercase tracking-[0.3em] font-bold"
-          style={{ color: MUTED }}
-        >
-          Contact
-        </button>
-      </nav>
-
       <main className="flex-1 flex items-center justify-center px-6 py-16">
         {!showForm ? (
           <div className="text-center">
