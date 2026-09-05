@@ -151,11 +151,15 @@ RUN --mount=type=cache,target=/root/.npm,id=npm-aux \
 # ---------------------------------------------------------------------------
 FROM system AS pydeps
 ARG INSTALL_PLAYWRIGHT_BROWSERS=false
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    UV_HTTP_TIMEOUT=120 \
+    UV_HTTP_RETRIES=10
 COPY server/requirements.txt /tmp/server-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
-    pip install --no-cache-dir uv \
+    pip install uv \
     && uv venv /opt/bootstrap/server-venv \
     && uv pip install --python /opt/bootstrap/server-venv/bin/python --upgrade pip \
     && uv pip install --python /opt/bootstrap/server-venv/bin/python -r /tmp/server-requirements.txt \
