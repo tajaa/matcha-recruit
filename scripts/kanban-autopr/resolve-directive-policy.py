@@ -67,8 +67,7 @@ _TEST_ROUTE_RE = re.compile(
 # re-granting the directive there would re-run the model every cycle to reach
 # the same verdict forever.
 _RECOVERABLE_CURRENT_NOTE_RE = re.compile(
-    r"\[autopr:no-spec [^\]]+\]\s+"
-    r"(already_fixed|migration_required)(?:\s|$)",
+    r"\[autopr:no-spec [^\]]+\]\s+already_fixed(?:\s|$)",
     re.IGNORECASE,
 )
 # The pass that consumed the directive may itself have ended on
@@ -76,7 +75,7 @@ _RECOVERABLE_CURRENT_NOTE_RE = re.compile(
 # fell back to a forbidden refusal. That authorization is still owed.
 _RECOVERABLE_PRIOR_NOTE_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
-    r"(already_fixed|acceptance_criteria_met|migration_required)(?:\s|$)",
+    r"(already_fixed|acceptance_criteria_met)(?:\s|$)",
     re.IGNORECASE,
 )
 _DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
@@ -192,10 +191,11 @@ def recover_consumed(card: dict[str, Any], history: list[dict[str, Any]]) -> dic
     A worker could accept decision-bound additional context, repeat the same
     kind of refusal, and thereby change the progress note so the event no
     longer appeared pending. Recovery is deliberately narrow: the current
-    decision must be a refusal a ``draft_pr`` directive mechanically forbids
-    (``already_fixed`` or ``migration_required``), the old bound decision must
-    be one of those or ``acceptance_criteria_met``, and the event itself must
-    contain an explicit work/still-broken directive.
+    decision must be the ``already_fixed`` refusal a ``draft_pr`` directive
+    mechanically forbids, the old bound decision must be that refusal or
+    ``acceptance_criteria_met``, and the event itself must contain an explicit
+    work/still-broken directive. Retired ``migration_required`` rows are not
+    recovered; the owner may re-add or explicitly rerun that work if desired.
     """
     current_note = str(card.get("progress_note") or "")
     if (

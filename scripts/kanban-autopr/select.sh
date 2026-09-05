@@ -149,6 +149,11 @@ already_handled() {
     # No-spec ledger lives on the card itself, not GitHub — this stops a
     # vague card being re-run every cron tick forever, and clears the moment
     # a human edits progress_note or moves the card (last_moved_at advances).
+    #
+    # Keep every prior no-spec decision settled until the owner supplies fresh
+    # context, requests a run, or moves/re-adds the card. In particular, do not
+    # resurrect old migration_required cards merely because new runs now draft
+    # migrations automatically; abandoned work must stay abandoned.
     if [[ "$progress_note" == *"[autopr:no-spec "* ]] \
         && [ "$reconsideration_pending" != true ] \
         && [ "$run_requested" != true ]; then

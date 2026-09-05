@@ -45,10 +45,6 @@ NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE
 DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | map(select(. == "draft_pr" or . == "trust_still_broken")) | join(",")' "$DECISION_FILE")"
 DIRECTIVE_MARKER=""
 [ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
-ALLOW_MIGRATION_VERSION=false
-case ",$DIRECTIVE_CSV," in
-    *,draft_pr,*) ALLOW_MIGRATION_VERSION=true ;;
-esac
 PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
 PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
 COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
@@ -73,7 +69,6 @@ auto_setup_status() {
         case "$NO_SAFE_ACTION_REASON" in
             already_fixed) printf 'NO PR: ALREADY FIXED' ;;
             acceptance_criteria_met) printf 'NO PR: CARD ALREADY SATISFIED' ;;
-            migration_required) printf 'NO PR: MIGRATION REQUIRED' ;;
             policy_blocked) printf 'NO PR: POLICY BLOCKED' ;;
             external_dependency) printf 'NO PR: EXTERNAL DEPENDENCY' ;;
             *) printf 'NO PR: HUMAN ACTION REQUIRED' ;;
@@ -335,18 +330,15 @@ cd "$REPO_ROOT"
 git add --all
 
 # Path guard: denylist is what stops the bot rewriting its own harness or CI.
-# The allowlist is strictly stronger. A decision-bound draft_pr directive may
-# additionally author a migration *version* for human review; it never permits
-# migration configuration/runner changes and this script never applies it.
+# The allowlist is strictly stronger. Authoring a new migration version is
+# ordinary drafting work: publication always opens a GitHub draft PR and this
+# script never runs a migration. Existing mainline migrations and all migration
+# runner/configuration files remain closed.
 changed_paths="$(git diff --cached --no-renames --name-only)"
 unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
-if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
-    unsafe_migrations="$(printf '%s\n' "$changed_paths" \
-        | grep -E '^server/alembic/' \
-        | grep -vE '^server/alembic/versions/[^/]+\.py$' || true)"
-else
-    unsafe_migrations="$(printf '%s\n' "$changed_paths" | grep -E '^server/alembic/' || true)"
-fi
+unsafe_migrations="$(printf '%s\n' "$changed_paths" \
+    | grep -E '^server/alembic/' \
+    | grep -vE '^server/alembic/versions/[A-Za-z0-9_]+\.py$' || true)"
 if [ -n "$unsafe_migrations" ]; then
     unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
 fi
@@ -357,16 +349,64 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-allowed_paths_re='^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
-if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
-    allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[^/]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
-fi
+allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[A-Za-z0-9_]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
     echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
+fi
+
+migration_paths="$(printf '%s\n' "$changed_paths" \
+    | grep -E '^server/alembic/versions/[A-Za-z0-9_]+\.py$' || true)"
+if [ -n "$migration_paths" ]; then
+    migration_base_ref="${AUTOPR_MIGRATION_BASE_REF:-main}"
+    git rev-parse --verify "$migration_base_ref^{commit}" >/dev/null 2>&1 \
+        || die "migration safety base is unavailable: $migration_base_ref"
+
+    deleted_migrations="$(git diff --cached --diff-filter=D --no-renames --name-only -- \
+        server/alembic/versions || true)"
+    if [ -n "$deleted_migrations" ]; then
+        echo "Refusing deletion of migration version files:" >&2
+        printf '%s\n' "$deleted_migrations" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+
+    unsafe_migration_modes="$(git diff --cached --raw --no-renames -- \
+        server/alembic/versions \
+        | awk '$2 != "100644" {print $0}' || true)"
+    if [ -n "$unsafe_migration_modes" ]; then
+        echo "Refusing non-regular migration version files:" >&2
+        printf '%s\n' "$unsafe_migration_modes" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+
+    existing_migrations=""
+    while IFS= read -r migration_path; do
+        [ -n "$migration_path" ] || continue
+        migration_status="$(git diff --cached --no-renames --name-status \
+            "$migration_base_ref" -- "$migration_path" | awk 'NR == 1 {print $1}')"
+        if [ "$migration_status" != A ]; then
+            existing_migrations="${existing_migrations}${existing_migrations:+$'\n'}${migration_path}"
+        fi
+    done <<< "$migration_paths"
+    if [ -n "$existing_migrations" ]; then
+        echo "Refusing edits to migration files already present on $migration_base_ref:" >&2
+        printf '%s\n' "$existing_migrations" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+
+    if ! migration_graph_error="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+        "$REPO_ROOT/server/alembic/versions" 2>&1)"; then
+        echo "Refusing an invalid migration graph or migration file:" >&2
+        printf '%s\n' "$migration_graph_error" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
 fi
 
 # Same telemetry-suppression boundary error-autofix guards — kanban cards
@@ -454,7 +494,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
     # a refusal, and the human has no visible way to say "do it anyway".
     NEEDS_CONTEXT_REQUEST=false
     case "$NO_SAFE_ACTION_REASON" in
-        already_fixed|migration_required|acceptance_criteria_met) NEEDS_CONTEXT_REQUEST=true ;;
+        already_fixed|acceptance_criteria_met) NEEDS_CONTEXT_REQUEST=true ;;
     esac
     # A card whose criteria are already met is the one refusal a human must see
     # in full: the point is not "no PR", it is "here is where each thing you

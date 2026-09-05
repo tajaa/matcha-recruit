@@ -207,9 +207,10 @@ second scheduler.
    backend/worker/nginx log signals. Codex receives those files and a commit list
    between each live image and the checked-out branch, but never SSH or database
    credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
-   fix or an unapplied migration. It may diagnose migration drift. The path guard allows
-   it to author a migration version only after a trusted `draft_pr` instruction and
-   always forbids applying a migration.
+   fix or an unapplied migration. It may diagnose migration drift. When work needs a
+   schema change, it may author a new migration version for the draft PR. The path guard
+   rejects edits to migrations already on `main`, malformed revision graphs, missing
+   `upgrade()`/`downgrade()` entrypoints, and every attempt to apply a migration.
 2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
@@ -294,9 +295,21 @@ second scheduler.
    decision-bound reply—such as `you can work on this`, `do it anyway`, `draft the
    migration`, or `you need to draft this PR`—becomes trusted `draft_pr` policy even
    without a magic prefix. `--draft-pr` remains the explicit form. Negated commands do
-   not activate it. The policy mechanically rejects both `already_fixed` and
-   `migration_required`: when needed, the draft may author only
-   `server/alembic/versions/*.py` for human review and must never apply it.
+   not activate it. The policy mechanically rejects `already_fixed`.
+   **A needed migration is never a refusal.** `migration_required` is not a
+   `no_safe_action_reason` the schema accepts. AutoPR authors the application
+   change, tests, and a new migration version, then the trusted publisher opens
+   the normal GitHub draft PR; the operator reviews and applies the migration by
+   hand, and no part of this system runs it. `investigate.sh` corrects an
+   out-of-date model that returns `migration_required` with one retry instead of
+   leaving the card blocked. The `draft_pr` directive is therefore not a
+   prerequisite for migration work; it remains an owner's explicit instruction
+   to draft work when AutoPR would otherwise conclude the request is already
+   covered. Old cards carrying a migration-required no-spec marker remain
+   settled until the owner supplies fresh context, requests a run, or re-adds
+   the work. What stays permanently closed is the migration runner and its
+   configuration (`env.py`, templates, `alembic.ini`).
+
    The single exception is `acceptance_criteria_met`, which survives both
    `draft_pr` and `trust_still_broken` because it carries proof: an
    `acceptance_evidence` array with one entry per acceptance criterion, each
@@ -320,12 +333,10 @@ second scheduler.
    once must not have to be repeated after every cycle: the granted directives are
    published back onto the card as `[autopr:directives …]` and re-read on later cycles
    while it sits in `todo`/`changes_requested`; a run that consumes the event and then
-   repeats `already_fixed` or `migration_required` is recovered by `collect.sh`'s
+   repeats `already_fixed` is recovered by `collect.sh`'s
    bounded probe; and a decision contradicting the directive is retried once with the
    rejection stated back to the model (`decision.sh directive-ok`) instead of failing
-   the run silently. A `migration_required` stop now also posts the same Espresso
-   context request `already_fixed` did, so the override is visible where the refusal is.
-   `--trust-still-broken` (including the matching
+   the run silently. `--trust-still-broken` (including the matching
    natural-language form) accepts that the described scenario fails, while
    `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test
    tenant. The coding model never receives those credentials. It must inspect correlated
@@ -371,11 +382,12 @@ second scheduler.
 
    The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
-   next local cycle then updates the same draft. Without a trusted draft directive,
-   no-spec remains available for already-fixed work, migrations, policy boundaries,
-   and external dependencies. With one, `acceptance_criteria_met` remains available
-   for a card whose every stated criterion is already satisfied, provided it cites
-   verifiable evidence for each.
+   next local cycle then updates the same draft. Every implementation or question PR
+   starts as a GitHub draft regardless of directives. Without a trusted `draft_pr`
+   directive, no-spec remains available for already-fixed work, policy boundaries,
+   and external dependencies; migration work is drafted automatically. With one,
+   `acceptance_criteria_met` remains available for a card whose every stated criterion
+   is already satisfied, provided it cites verifiable evidence for each.
 7. **Cross-lane scope check** — for a fresh implementation patch, the shared
    `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
@@ -400,10 +412,12 @@ second scheduler.
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
-   fix is. Trusted `draft_pr` policy adds one narrow allowlist entry for
-   `server/alembic/versions/*.py`; Alembic environment/configuration files remain denied,
-   and the workflow never applies migrations. Without that policy a migration still
-   takes the no-spec path and says why. PR titles begin
+   fix is. New `server/alembic/versions/*.py` files are the sole schema exception:
+   publisher compares them with `main`, rejects edits/deletions of existing revisions,
+   and validates static revision metadata, graph integrity, and both migration
+   entrypoints before publication. Alembic environment/configuration files remain
+   denied, the workflow never applies migrations, and the resulting PR is always a
+   GitHub draft. PR titles begin
    with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`
    is triaged visually. Question drafts also carry `autopr-awaiting-input`; those drafts
    do not consume the ten-PR implementation cap. PR body carries

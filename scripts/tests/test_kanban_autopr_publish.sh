@@ -9,8 +9,23 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 TEST_REPO="$TMP_DIR/repo"
 mkdir -p "$TEST_REPO/scripts"
 cp -R "$AUTOPR_SOURCE" "$TEST_REPO/scripts/kanban-autopr"
-mkdir -p "$TEST_REPO/server/app"
+cp "$REPO_ROOT/scripts/alembic_graph_snapshot.py" "$TEST_REPO/scripts/alembic_graph_snapshot.py"
+mkdir -p "$TEST_REPO/server/app" "$TEST_REPO/server/alembic/versions"
 printf 'pass\n' > "$TEST_REPO/server/app/example.py"
+cat > "$TEST_REPO/server/alembic/versions/base_test.py" <<'EOF'
+"""Test migration base."""
+
+revision = "base_test"
+down_revision = None
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
 git -C "$TEST_REPO" init -q
 git -C "$TEST_REPO" config user.name test
 git -C "$TEST_REPO" config user.email test@example.com
@@ -238,10 +253,10 @@ cat > "$TMP_DIR/rework-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"rework","progress_note":"from auto setup · build 849 · prod 1111111 · PR #501 · 🔴 C42 · awaiting answers · Human note","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 cat > "$TMP_DIR/raw-no-safe.json" <<'EOF'
-{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"clear boundary"},"evidence_quality":{"score":20,"reason":"review confirms it"},"code_localization":{"score":20,"reason":"migration identified"},"verification_strength":{"score":15,"reason":"no product diff allowed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"orange","reasons":["migration requires human review"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"migration_required"}
+{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"clear boundary"},"evidence_quality":{"score":20,"reason":"review confirms it"},"code_localization":{"score":20,"reason":"boundary identified"},"verification_strength":{"score":15,"reason":"no product diff allowed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"orange","reasons":["third-party API change required"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"external_dependency"}
 EOF
 cat > "$TMP_DIR/no-safe-publication-copy.json" <<'EOF'
-{"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Requires a human-reviewed migration, which AutoPR is not allowed to draft."}
+{"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Blocked on a third-party API change AutoPR cannot make."}
 EOF
 "$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-no-safe.json" "$TMP_DIR/no-safe.json"
 jq '. + {feedback_checkpoint:{comment_id:"answer-1",review_id:""}}' \
@@ -265,7 +280,7 @@ check "rework no-safe-action reconciles the existing PR title and labels" \
     && grep -q -- '--add-label criticality:orange' "$TMP_DIR/gh.log" \
     && echo 0 || echo 1)
 check "rework no-safe-action keeps accurate PR and triage card provenance" \
-  $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | startswith("🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED")) and (.progress_note | contains("PR #501 · 🟠 C100 · [autopr:no-spec")) and (.progress_note | contains("note: Requires a human-reviewed migration, which AutoPR is not allowed to draft.")) and (.progress_note | endswith("Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+  $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | startswith("🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY")) and (.progress_note | contains("PR #501 · 🟠 C100 · [autopr:no-spec")) and (.progress_note | contains("note: Blocked on a third-party API change AutoPR cannot make.")) and (.progress_note | endswith("Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/card-patch.json"
 set +e
@@ -286,13 +301,79 @@ check "required triage label failure stops before the card is suppressed" \
 cat > "$TMP_DIR/raw-implementation.json" <<'EOF'
 {"schema_version":1,"outcome":"implementation","confidence":{"requirements_clarity":{"score":30,"reason":"request is explicit"},"evidence_quality":{"score":20,"reason":"schema boundary is known"},"code_localization":{"score":20,"reason":"migration is localized"},"verification_strength":{"score":15,"reason":"migration can be reviewed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["scoped schema change"]},"questions":[],"safe_changes_present":true,"no_safe_action_reason":null}
 EOF
-cat > "$TMP_DIR/forced-policy.json" <<'EOF'
-{"directives":["draft_pr"],"test_route":null}
-EOF
 "$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
   "$TMP_DIR/raw-implementation.json" "$TMP_DIR/implementation.json"
-mkdir -p "$TEST_REPO/server/alembic/versions"
-printf '"""reviewed migration"""\n' > "$TEST_REPO/server/alembic/versions/task_test.py"
+cat > "$TEST_REPO/server/alembic/versions/task_test.py" <<'EOF'
+"""Reviewed migration."""
+
+revision = "task_test"
+down_revision = "base_test"
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
+# Authoring a migration version file is ordinary drafting work: the operator
+# applies every migration by hand, so no directive is involved.
+rm -f "$TMP_DIR/gh.log"
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+)
+check "a migration version may be drafted with no directive at all" \
+  $(git -C "$TEST_REPO" show --name-only --format= HEAD \
+    | grep -qx 'server/alembic/versions/task_test.py' && echo 0 || echo 1)
+check "migration work is published as a GitHub draft PR" \
+  $(grep -q -- '^pr create .*--draft' "$TMP_DIR/gh.log" && echo 0 || echo 1)
+
+printf '\n# forbidden rewrite\n' >> "$TEST_REPO/server/alembic/versions/base_test.py"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>"$TMP_DIR/existing-migration.stderr"
+existing_migration_rc=$?
+set -e
+check "publisher rejects edits to migrations already present on main" \
+  $([ "$existing_migration_rc" != 0 ] \
+    && grep -q 'already present on main' "$TMP_DIR/existing-migration.stderr" \
+    && ! grep -q 'forbidden rewrite' "$TEST_REPO/server/alembic/versions/base_test.py" \
+    && echo 0 || echo 1)
+
+printf '"""missing revision metadata and entrypoints"""\n' \
+  > "$TEST_REPO/server/alembic/versions/malformed_test.py"
+set +e
+(
+  cd "$TEST_REPO"
+  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+) >/dev/null 2>"$TMP_DIR/malformed-migration.stderr"
+malformed_migration_rc=$?
+set -e
+check "publisher rejects malformed migration drafts before opening a PR" \
+  $([ "$malformed_migration_rc" != 0 ] \
+    && grep -q 'invalid migration graph or migration file' "$TMP_DIR/malformed-migration.stderr" \
+    && [ ! -e "$TEST_REPO/server/alembic/versions/malformed_test.py" ] \
+    && echo 0 || echo 1)
+
+# The runner and its configuration stay permanently closed — that is the part
+# that could actually touch a database.
+printf 'unsafe = True\n' > "$TEST_REPO/server/alembic/env.py"
 set +e
 (
   cd "$TEST_REPO"
@@ -302,45 +383,22 @@ set +e
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
     ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
-migration_without_directive_rc=$?
-set -e
-check "migration versions remain blocked without a trusted draft directive" \
-  $([ "$migration_without_directive_rc" != 0 ] \
-    && [ ! -e "$TEST_REPO/server/alembic/versions/task_test.py" ] \
-    && echo 0 || echo 1)
-
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
-  "$TMP_DIR/raw-implementation.json" "$TMP_DIR/forced-implementation.json" \
-  "$TMP_DIR/forced-policy.json"
-mkdir -p "$TEST_REPO/server/alembic/versions"
-printf '"""reviewed migration"""\n' > "$TEST_REPO/server/alembic/versions/task_test.py"
-(
-  cd "$TEST_REPO"
-  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
-    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
-    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
-    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/forced-implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
-)
-check "trusted draft directive may publish a migration version for review" \
-  $(git -C "$TEST_REPO" show --name-only --format= HEAD \
-    | grep -qx 'server/alembic/versions/task_test.py' && echo 0 || echo 1)
-
-printf 'unsafe = True\n' > "$TEST_REPO/server/alembic/env.py"
-set +e
-(
-  cd "$TEST_REPO"
-  PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
-    AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
-    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
-    AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    ./scripts/kanban-autopr/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/forced-implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
-) >/dev/null 2>&1
 alembic_runner_rc=$?
 set -e
-check "draft directive still rejects Alembic runner and configuration changes" \
+check "Alembic runner and configuration changes are always rejected" \
   $([ "$alembic_runner_rc" != 0 ] && [ ! -e "$TEST_REPO/server/alembic/env.py" ] \
     && echo 0 || echo 1)
+
+# migration_required cannot even be expressed any more.
+jq '.no_safe_action_reason = "migration_required"' "$TMP_DIR/raw-no-safe.json" \
+  > "$TMP_DIR/raw-migration-required.json"
+set +e
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+  "$TMP_DIR/raw-migration-required.json" "$TMP_DIR/migration-required.json" >/dev/null 2>&1
+migration_reason_rc=$?
+set -e
+check "migration_required is no longer a decision the harness accepts" \
+  $([ "$migration_reason_rc" != 0 ] && echo 0 || echo 1)
 
 ################################################################################
 # Cosmetic-diff guard. PR #418's shape reached publication as an

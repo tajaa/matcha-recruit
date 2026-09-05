@@ -66,7 +66,7 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 # below.
                 (.board_column == "todo" or .board_column == "changes_requested")
                 and ((.progress_note // "")
-                     | test("\\[autopr:no-spec [^]]+\\] (already_fixed|migration_required)(?: |$)"; "i"))
+                     | test("\\[autopr:no-spec [^]]+\\] already_fixed(?: |$)"; "i"))
               )
             )
             and .status != "cancelled"
@@ -113,9 +113,8 @@ done
 
 # Repair one consumed-directive edge case without weakening ordinary decision
 # binding. The resolver accepts only an explicit directive whose old bound note
-# and current note are both a refusal draft_pr forbids (already_fixed or
-# migration_required). Once selected, draft_pr mechanically forbids repeating
-# either of those outcomes.
+# and current note are both the already_fixed refusal draft_pr forbids. Old
+# migration_required rows deliberately stay settled until fresh owner action.
 recovery_dir="$(mktemp -d)"
 trap 'rm -rf "$recovery_dir"' EXIT
 card_count="$(printf '%s' "$out" | jq 'length')"
@@ -125,7 +124,7 @@ for ((i = 0; i < card_count; i++)); do
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
     [ "$pending" != true ] || continue
     case "$progress_note" in
-        *"[autopr:no-spec "*" already_fixed"*|*"[autopr:no-spec "*" migration_required"*) ;;
+        *"[autopr:no-spec "*" already_fixed"*) ;;
         *) continue ;;
     esac
     project_id="$(printf '%s' "$card" | jq -r '.project_id')"
