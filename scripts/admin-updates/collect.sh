@@ -68,3 +68,29 @@ if [ -n "$SINCE_PR" ]; then
     args+=(--since-pr "$SINCE_PR")
 fi
 python3 "$SCRIPT_DIR/collect.py" "${args[@]}"
+
+# Only the handful of PRs that survived the production boundary are worth a
+# detail round trip. Their commit messages and review discussion are what the
+# writer should read instead of reconstructing a whole merge diff.
+DETAIL_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/admin-updates-detail.XXXXXX")"
+trap 'rm -f "$MERGED_PRS" "${FULL_FILES:-}" "${NEXT_PRS:-}"; rm -rf "$DETAIL_DIR"' EXIT
+# bash 3.2 ships on the macOS runner: an empty array is unset under `set -u`,
+# so track membership explicitly instead of expanding ${#array[@]}.
+detail_files=()
+detail_count=0
+while IFS= read -r pr_number; do
+    [ -n "$pr_number" ] || continue
+    detail_path="$DETAIL_DIR/pr-$pr_number.json"
+    if gh pr view "$pr_number" \
+        --json number,commits,comments,reviews,files,additions,deletions,changedFiles \
+        > "$detail_path" 2>/dev/null; then
+        detail_files+=("$detail_path")
+        detail_count=$((detail_count + 1))
+    else
+        echo "admin-updates: warning: could not read PR #$pr_number detail; the writer falls back to its title and body" >&2
+    fi
+done < <(jq -r '(.candidates // [])[].sourcePr' "$OUTPUT")
+
+if [ "$detail_count" -gt 0 ]; then
+    python3 "$SCRIPT_DIR/enrich.py" "$OUTPUT" "${detail_files[@]}"
+fi

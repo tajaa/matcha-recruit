@@ -31,8 +31,18 @@ that boundary, the trusted collector replaces it with the complete paginated RES
 list before product classification; at the REST endpoint's 3,000-file ceiling it fails
 closed rather than risking an incomplete product update.
 
-The publication date is the deployment date, not the merge date. Existing ids are
-never overwritten, so a hand-edited entry remains authoritative on retries.
+The publication date is the day the change actually went live, not the merge date and
+not the dispatching deploy's timestamp. The collector takes the running blue/green
+containers' `started_at` (read fresh in the same run) for exactly the components a PR
+needed, floors it at the PR's merge time, and renders it in `America/Los_Angeles`
+(override with `ADMIN_UPDATES_TIMEZONE`). Both halves matter: this workflow shares one
+self-hosted runner, so a dispatch can sit queued for a day and describe a deploy that
+predates the one that carried the PR live, and a UTC calendar day turns every deploy
+after 17:00 Pacific into tomorrow's entry. When a container start time is unreadable the
+collector falls back to whichever is later of the dispatch and this run's production
+check. The model never computes a date; the validator rejects any entry that changes the
+one it was given. Existing ids are never overwritten, so a hand-edited entry remains
+authoritative on retries.
 
 ## Trust boundary
 
@@ -48,8 +58,12 @@ Drafting reuses `scripts/kanban-autopr/run-codex-sandboxed.sh`:
 - empty AWS mount and no GitHub, Matcha, SSH, or production credentials; and
 - `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, so the writing pass cannot change code.
 
-The model receives a bounded plan and production context, inspects the local PR diffs,
-and must emit one entry-or-skip decision for every requested `(PR, product)` pair. The
+The model receives a bounded plan and production context, and must emit one
+entry-or-skip decision for every requested `(PR, product)` pair. It does not read merge
+diffs: the trusted collector calls `gh pr view` for the few candidate PRs only and
+attaches truncated commit messages, review discussion, and per-file stats to each
+candidate (`scripts/admin-updates/enrich.py`), so the writer works from what a human
+wrote about the change and opens current files only to confirm a real control label. The
 validator rejects extra keys, missing decisions, changed ids/dates, unknown categories,
 control characters, oversized prose, setup prerequisites, and `action-needed` tags.
 

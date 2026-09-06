@@ -13,18 +13,28 @@ ADMIN_UPDATES_DIR = REPO_ROOT / "scripts" / "admin-updates"
 sys.path.insert(0, str(ADMIN_UPDATES_DIR))
 
 import collect as admin_collect  # noqa: E402
+import enrich as admin_enrich  # noqa: E402
 import nav_inventory as admin_nav_inventory  # noqa: E402
 import validate as admin_validate  # noqa: E402
 
 
-def _context(*, pending: list[str] | None = None) -> dict:
+def _context(
+    *,
+    pending: list[str] | None = None,
+    checked_at: str = "2026-08-31T12:00:00Z",
+    backend_started_at: str | None = None,
+    frontend_started_at: str | None = None,
+) -> dict:
+    backend: dict = {"git_sha": "backend-live"}
+    frontend: dict = {"git_sha": "frontend-live"}
+    if backend_started_at is not None:
+        backend["started_at"] = backend_started_at
+    if frontend_started_at is not None:
+        frontend["started_at"] = frontend_started_at
     return {
-        "checked_at": "2026-08-31T12:00:00Z",
+        "checked_at": checked_at,
         "build_number": "701",
-        "containers": {
-            "backend": {"git_sha": "backend-live"},
-            "frontend": {"git_sha": "frontend-live"},
-        },
+        "containers": {"backend": backend, "frontend": frontend},
         "database": {"status": "current", "pending_migrations": pending or []},
     }
 
@@ -472,3 +482,164 @@ def test_dev_changelog_sync_cannot_overwrite_production_entries():
         if "--table admin_updates --table tellus_admin_updates" in line
     )
     assert "--mode update" not in admin_export
+
+
+def test_entry_date_follows_the_deploy_that_actually_carried_the_pr(monkeypatch, tmp_path):
+    """A dispatch queued behind an offline runner must not date the entry.
+
+    Regression: a 2026-09-04 dispatch waited 27 hours for the self-hosted
+    runner, ran after the 2026-09-05 evening deploy that first carried the PR
+    live, and published it as SEP 4.
+    """
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:39:00Z",
+            backend_started_at="2026-09-06T02:17:44.123456789Z",
+            frontend_started_at="2026-09-06T02:18:02.987654321Z",
+        ),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py", "client/src/pages/X.tsx"])],
+        deployment={
+            "deploy_id": "deploy-stale",
+            "deployed_at": "2026-09-04T23:46:29Z",
+            "target": "matcha",
+            "sha": "abc123",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    assert plan["displayTimezone"] == "America/Los_Angeles"
+    assert plan["deploymentDate"] == "2026-09-04"
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+    assert plan["units"][0]["date"] == "2026-09-05"
+
+
+def test_entry_date_uses_only_the_components_a_pr_needs(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["client/src/pages/X.tsx"])
+    pr["mergedAt"] = "2026-09-01T10:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:39:00Z",
+            backend_started_at="2026-09-06T02:17:44Z",
+            frontend_started_at="2026-09-02T18:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-02"
+
+
+def test_entry_date_never_precedes_the_merge(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["server/app/core/x.py"])
+    pr["mergedAt"] = "2026-09-04T20:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-05T01:00:00Z",
+            backend_started_at="2026-09-01T12:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-04"
+
+
+def test_entry_date_falls_back_to_this_run_when_container_start_is_unknown(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(checked_at="2026-09-06T02:39:00Z"),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment={
+            "deploy_id": "deploy-stale",
+            "deployed_at": "2026-09-04T23:46:29Z",
+            "target": "matcha",
+            "sha": "abc123",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    # Local Pacific date of the run that verified production, not the stale
+    # dispatch and not the UTC calendar day.
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+
+
+def test_entry_date_uses_pacific_not_utc_for_an_evening_deploy(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:20:00Z",
+            backend_started_at="2026-09-06T02:19:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+
+
+def test_writer_reads_authored_evidence_instead_of_merge_diffs(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    plan = admin_collect.build_plan(
+        production_context=_context(),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    enriched = admin_enrich.enrich(plan, {
+        11: {
+            "number": 11,
+            "commits": [
+                {"messageHeadline": "Add the thing", "messageBody": "b" * 5000},
+                {"messageHeadline": "", "messageBody": "dropped"},
+            ],
+            "comments": [{"author": {"login": "tajaa"}, "body": "c" * 9000}],
+            "reviews": [{"author": {"login": "bot"}, "body": ""}],
+            "files": [{"path": "server/app/core/x.py", "additions": 12, "deletions": 3}],
+            "additions": 12,
+            "deletions": 3,
+            "changedFiles": 1,
+        },
+    })
+    candidate = enriched["candidates"][0]
+
+    assert [commit["subject"] for commit in candidate["commits"]] == ["Add the thing"]
+    assert len(candidate["commits"][0]["body"]) <= admin_enrich.MAX_COMMIT_BODY + 16
+    assert len(candidate["discussion"]) == 1
+    assert candidate["discussion"][0]["author"] == "tajaa"
+    assert len(candidate["discussion"][0]["body"]) <= admin_enrich.MAX_DISCUSSION_BODY + 16
+    assert candidate["fileStats"] == [
+        {"path": "server/app/core/x.py", "additions": 12, "deletions": 3}
+    ]
+    assert candidate["changeSize"] == {"additions": 12, "deletions": 3, "changedFiles": 1}
+
+
+def test_prompt_forbids_diff_reconstruction_and_model_authored_dates():
+    prompt = (ADMIN_UPDATES_DIR / "_prompt.txt").read_text()
+    collector = (ADMIN_UPDATES_DIR / "collect.sh").read_text()
+
+    assert "`git show`, `git diff`, and `git log -p`" in prompt
+    assert "git show <mergeOid>" not in prompt
+    assert "Never compute a date" in prompt
+    assert "gh pr view" in collector and "enrich.py" in collector

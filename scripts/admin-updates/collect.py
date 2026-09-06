@@ -6,15 +6,18 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _PR_ID_RE = re.compile(r"^pr-(\d+)-")
+_NANOSECOND_RE = re.compile(r"\.\d{7,}")
 _IGNORED_PREFIXES = (
     ".github/",
     "docs/",
@@ -27,10 +30,21 @@ _IGNORED_PREFIXES = (
 )
 _IGNORED_EXACT = {"CLAUDE.md", "AGENTS.md", "README.md"}
 _MERGE_CURSOR_OVERLAP = timedelta(hours=24)
+# Readers of /admin/updates are in one office. A UTC date turns every
+# late-afternoon Pacific deploy into tomorrow's changelog entry.
+_DEFAULT_DISPLAY_TIMEZONE = "America/Los_Angeles"
 
 
 class CollectionError(RuntimeError):
     """The deployed boundary could not be established safely."""
+
+
+def display_timezone() -> ZoneInfo | timezone:
+    name = os.environ.get("ADMIN_UPDATES_TIMEZONE") or _DEFAULT_DISPLAY_TIMEZONE
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
 
 
 def slugify(title: str, max_len: int = 40) -> str:
@@ -145,13 +159,59 @@ def _file_paths(pr: dict[str, Any]) -> list[str]:
 
 
 def _timestamp(value: Any, *, field: str) -> datetime:
+    # Docker reports container start times with nanosecond precision, which
+    # fromisoformat rejects; keep at most microseconds.
+    text = _NANOSECOND_RE.sub(lambda match: match.group(0)[:7], str(value).strip())
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise CollectionError(f"invalid {field} timestamp: {value!r}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _optional_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return _timestamp(value, field="optional")
+    except CollectionError:
+        return None
+
+
+def _component_started_at(production_context: dict[str, Any]) -> dict[str, datetime | None]:
+    """When each live blue/green container actually began serving its image."""
+    containers = production_context.get("containers") or {}
+    return {
+        component: _optional_timestamp((containers.get(component) or {}).get("started_at"))
+        for component in ("backend", "frontend")
+    }
+
+
+def _live_at(
+    *,
+    required_components: list[str],
+    started_at: dict[str, datetime | None],
+    merged_at: datetime | None,
+    fallback: datetime,
+) -> datetime:
+    """Best evidence for when a PR became reachable in production.
+
+    The dispatching deploy's own timestamp is unreliable: this workflow runs on
+    one self-hosted runner and a dispatch can sit queued for a day, by which
+    point a *later* deploy is what actually carried the PR live. The running
+    containers' start times are read fresh in the same run, so prefer them and
+    never date an entry before its PR merged.
+    """
+    starts = [started_at.get(component) for component in required_components]
+    known = [start for start in starts if start is not None]
+    if not known or len(known) != len(starts):
+        return fallback
+    live = max(known)
+    if merged_at is not None and merged_at > live:
+        return merged_at
+    return live
 
 
 def build_plan(
@@ -181,8 +241,19 @@ def build_plan(
     if not all(live_shas.values()):
         raise CollectionError("production context is missing active backend/frontend SHAs")
 
+    tz = display_timezone()
     deployed_at = str(deployment.get("deployed_at") or production_context.get("checked_at") or "")
-    deployment_date = _timestamp(deployed_at, field="deployment").date().isoformat()
+    deployed_at_ts = _timestamp(deployed_at, field="deployment")
+    checked_at_ts = _optional_timestamp(production_context.get("checked_at"))
+    # A dispatch that waited in the runner queue describes an older deploy than
+    # the one now live; fall back to when this run observed production instead.
+    fallback_live_at = (
+        checked_at_ts
+        if checked_at_ts is not None and checked_at_ts > deployed_at_ts
+        else deployed_at_ts
+    )
+    deployment_date = deployed_at_ts.astimezone(tz).date().isoformat()
+    started_at = _component_started_at(production_context)
 
     state_updated_at_raw = production_state.get("updated_at")
     state_updated_at = (
@@ -264,10 +335,17 @@ def build_plan(
             if number not in existing_by_product[product]
         ]
         if missing_products:
+            live_at = _live_at(
+                required_components=sorted(components),
+                started_at=started_at,
+                merged_at=_optional_timestamp(pr.get("mergedAt")),
+                fallback=fallback_live_at,
+            )
             candidates.append({
                 "sourcePr": number,
                 "id": entry_id(number, title),
-                "date": deployment_date,
+                "date": live_at.astimezone(tz).date().isoformat(),
+                "liveAt": live_at.isoformat().replace("+00:00", "Z"),
                 "title": title,
                 "body": str(pr.get("body") or "")[:6000],
                 "url": str(pr.get("url") or ""),
@@ -301,6 +379,8 @@ def build_plan(
     return {
         "schemaVersion": 1,
         "sourceWatermark": since_pr,
+        "displayTimezone": str(tz),
+        "deploymentDate": deployment_date,
         "sourceStateUpdatedAt": state_updated_at_raw,
         "mergeCursorOverlapHours": int(_MERGE_CURSOR_OVERLAP.total_seconds() / 3600),
         "targetWatermark": target_watermark,

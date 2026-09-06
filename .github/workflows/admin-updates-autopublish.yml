@@ -112,7 +112,7 @@ jobs:
 
           echo "has_work=$(jq -r '.hasWork' "$RUNNER_TEMP/admin-updates-plan.json")" >> "$GITHUB_OUTPUT"
           echo "needs_draft=$(jq -r '.needsDraft' "$RUNNER_TEMP/admin-updates-plan.json")" >> "$GITHUB_OUTPUT"
-          jq '{sourceWatermark,sourceStateUpdatedAt,mergeCursorOverlapHours,targetWatermark,candidates:(.candidates|length),units:(.units|length),automaticSkips:(.automaticSkips|length),deferred}' \
+          jq '{sourceWatermark,sourceStateUpdatedAt,mergeCursorOverlapHours,targetWatermark,displayTimezone,dispatchedFor:.deploymentDate,entryDates:([.candidates[].date]|unique),candidates:(.candidates|length),units:(.units|length),automaticSkips:(.automaticSkips|length),deferred}' \
             "$RUNNER_TEMP/admin-updates-plan.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Draft update content with Luna high
