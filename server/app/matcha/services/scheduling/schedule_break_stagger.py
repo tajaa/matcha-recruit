@@ -24,6 +24,17 @@ Times in and out are location-local wall-clock datetimes, matching
 ``BreakRequirement.earliest_local`` / ``recommended_local`` / ``deadline_local``
 as produced by ``evaluate_break_plan``.  This module has no database or FastAPI
 dependency.
+
+Placement policy vs. law: some jurisdictions fix only a deadline and say
+nothing about how early a break may start — California is the case in point
+(Cal. Lab. Code § 512(a) and *Brinker Restaurant Corp. v. Superior Court*
+(2012) 53 Cal.4th 1004 make a first-hour meal lawful).  Suggesting the shift's
+own start time is legal there and useless everywhere: nobody has worked yet.
+``DEFAULT_PLACEMENT_FLOOR_MINUTES`` is this module's operational answer, and it
+is policy, not law — it is never written into a ``BreakRequirement``, it only
+ever applies where the rule set states no earliest of its own, it yields both
+to the legal deadline and to coverage rather than manufacturing a conflict of
+either kind, and a time a manager saved is never re-judged against it.
 """
 
 from __future__ import annotations
@@ -39,6 +50,8 @@ from .schedule_breaks import BreakKind, BreakPlan, BreakRequirement
 StaggerStatus = Literal[
     "suggested", "saved", "deadline_conflict", "unresolved", "insufficient_coverage",
 ]
+
+DEFAULT_PLACEMENT_FLOOR_MINUTES = 120
 
 UNRESOLVED_REASONS: dict[str, str] = {
     "unmapped": "Break requirements could not be mapped for this location; verify manually.",
@@ -100,6 +113,7 @@ class _Slot:
     ordinal: int
     duration_minutes: int
     earliest: datetime
+    policy_earliest: datetime
     latest_start: datetime
     preferred: datetime
     deadline: datetime
@@ -122,14 +136,31 @@ def _build_slot(
     employee_id: UUID,
     shift_start_local: datetime,
     shift_end_local: datetime,
+    step_minutes: int,
+    placement_floor_minutes: int,
 ) -> _Slot:
     """Flatten one requirement into a placeable interval request.
 
     A rule set that carries no offsets still deserves a suggestion, so the
-    shift's own window is the fallback envelope.
+    shift's own window is the fallback envelope.  That envelope opens at the
+    shift's first instant, which is a legal time and a worthless suggestion, so
+    two placement rules narrow it — both subordinate to the rule's own window,
+    and neither able to create a conflict the law does not have:
+
+    * a statute-silent requirement does not start before the policy floor, and
+    * nothing starts at the shift's first instant, even where a rule set
+      encodes an earliest offset of zero.
+
+    The result is ``policy_earliest``, kept SEPARATE from the legal ``earliest``
+    because policy is a preference and law is a bound.  Narrowing the legal
+    window itself would be wrong twice over: it applies only while the break
+    still fits before its deadline (checked here), and it must not cost the
+    shift a placement (checked at placement time, since only there is it known
+    how many breaks are competing for the same window).
     """
 
     duration = timedelta(minutes=requirement.duration_minutes)
+    step = timedelta(minutes=max(1, step_minutes))
     earliest = requirement.earliest_local or shift_start_local
     deadline_known = requirement.deadline_local is not None
     deadline = requirement.deadline_local or shift_end_local
@@ -139,6 +170,15 @@ def _build_slot(
         earliest = shift_start_local
     if latest_start > shift_end_local - duration:
         latest_start = shift_end_local - duration
+    policy_earliest = earliest
+    if requirement.earliest_local is None:
+        floor = shift_start_local + timedelta(minutes=max(0, placement_floor_minutes))
+        if policy_earliest < floor <= latest_start:
+            policy_earliest = floor
+    if policy_earliest <= shift_start_local and shift_start_local + step <= latest_start:
+        # A break at the moment the shift opens is never the answer, even where
+        # a rule set encodes an earliest offset of zero.
+        policy_earliest = shift_start_local + step
     window_too_short = latest_start < earliest
     if window_too_short:
         # A window too tight to hold the break at all: keep it anchored at the
@@ -147,10 +187,12 @@ def _build_slot(
         # which is why the slot carries the flag rather than swallowing it —
         # a break the law cannot fit is not a `suggested` one.
         latest_start = earliest
+    if policy_earliest > latest_start:
+        policy_earliest = latest_start
 
-    preferred = requirement.recommended_local or earliest
-    if preferred < earliest:
-        preferred = earliest
+    preferred = requirement.recommended_local or policy_earliest
+    if preferred < policy_earliest:
+        preferred = policy_earliest
     if preferred > latest_start:
         preferred = latest_start
     return _Slot(
@@ -159,6 +201,7 @@ def _build_slot(
         ordinal=requirement.ordinal,
         duration_minutes=requirement.duration_minutes,
         earliest=earliest,
+        policy_earliest=policy_earliest,
         latest_start=latest_start,
         preferred=preferred,
         deadline=deadline,
@@ -173,6 +216,15 @@ def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
     Preferring the recommended time and only then drifting keeps the first
     employee placed where the rule actually wants the break, and pushes later
     employees off it only as far as coverage forces.
+
+    The walk covers the whole LEGAL window and the placement policy only
+    reorders it: every time policy allows comes first, then the times it merely
+    discourages, closest to the floor first.  Dropping the latter instead would
+    make the policy cost placements — breaks serialize when a shift carries no
+    spare headcount, so a window shortened by two hours holds four fewer of
+    them, and the crew who no longer fit would be reported as
+    `insufficient_coverage` rather than given the lawful early time they had
+    before.
     """
 
     step = timedelta(minutes=max(1, step_minutes))
@@ -198,11 +250,15 @@ def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
     # one start that fits and would report insufficient_coverage for a slot
     # that is schedulable.  Boundaries go last: they are the fallback after
     # every preferred-adjacent option has been tried.
-    for boundary in (slot.latest_start, slot.earliest):
+    for boundary in (slot.latest_start, slot.policy_earliest, slot.earliest):
         if boundary not in seen and slot.earliest <= boundary <= slot.latest_start:
             seen.add(boundary)
             candidates.append(boundary)
-    return candidates
+    allowed = [value for value in candidates if value >= slot.policy_earliest]
+    discouraged = sorted(
+        (value for value in candidates if value < slot.policy_earliest), reverse=True,
+    )
+    return allowed + discouraged
 
 
 def _fits(
@@ -275,6 +331,7 @@ def stagger_shift_breaks(
     assignments: Sequence[StaggerAssignment],
     locked: Sequence[LockedBreak] = (),
     step_minutes: int = 5,
+    placement_floor_minutes: int = DEFAULT_PLACEMENT_FLOOR_MINUTES,
 ) -> StaggerPlan:
     """Spread one shift's required breaks apart in time, deterministically.
 
@@ -284,7 +341,8 @@ def stagger_shift_breaks(
     evaluate.
 
     ``locked`` holds times a manager already reviewed.  They are not re-placed;
-    they occupy the floor before anything else is placed around them.
+    they occupy the floor before anything else is placed around them, and the
+    placement policy above does not judge them.
     """
 
     assigned_count = len(assignments)
@@ -341,6 +399,8 @@ def stagger_shift_breaks(
                 employee_id=assignment.employee_id,
                 shift_start_local=shift_start_local,
                 shift_end_local=shift_end_local,
+                step_minutes=step_minutes,
+                placement_floor_minutes=placement_floor_minutes,
             ))
 
     if assigned_count and slots and assigned_count <= max(0, required_staff):

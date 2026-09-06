@@ -74,6 +74,13 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "meal_break_after_hours": 5,           # Cal. Lab. Code § 512
         "meal_break_minutes": 30,
         "second_meal_after_hours": 10,
+        # CA fixes only the deadline: the meal must begin before the end of the
+        # 5th hour, and a meal taken in the first hour is lawful (§ 512(a),
+        # Brinker (2012) 53 Cal.4th 1004). `None` is the table's "explicitly no
+        # such rule here" — the scheduler still declines to SUGGEST the shift's
+        # own start time, but that floor is placement policy in
+        # schedule_break_stagger, not a threshold this table enforces.
+        "meal_break_earliest_after_hours": None,
         # First meal is waivable by mutual consent when the workday is <=6h
         # (Cal. Lab. Code § 512(a)); the second-meal waiver has extra
         # conditions this module doesn't model, so it's left un-suppressed.
@@ -86,6 +93,10 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "minor_16_17_day_hours": 8,            # Cal. Lab. Code § 1391 (school in session)
         "citations": {
             "meal_break": "Cal. Lab. Code § 512",
+            "meal_break_timing": (
+                "Cal. Lab. Code § 512(a); Brinker Restaurant Corp. v. Superior "
+                "Court (2012) 53 Cal.4th 1004"
+            ),
             "daily_overtime": "Cal. Lab. Code § 510",
             "weekly_overtime": "Cal. Lab. Code § 510",
             "minor_hours": "Cal. Lab. Code § 1391",

@@ -59,3 +59,12 @@ Rules (the runner enforces 1–2, you enforce the rest):
   history, and order lifecycle examples). Undo:
   `sunset_dental_inventory.undo.sql`. Linted by
   `server/tests/seed_packs/test_sunset_dental_inventory_pack.py`.
+- `meal_break_timing.sql` — compliance-catalog rows for meal-period TIMING
+  (how early a meal break may start) in CA / WA / OR, including California as
+  an explicit "no statutory earliest". Reference data, not tenant data: the
+  law panel and the pilots cite these rows directly, and they are the eventual
+  source for `meal_break_earliest_after_hours` extraction — but that extraction
+  reads CODIFIED rows only, which these are not yet (see the pack's own header
+  for what codification needs and why the pack cannot do it). Undo:
+  `meal_break_timing.undo.sql`. Linted by
+  `server/tests/seed_packs/test_meal_break_timing_pack.py`.

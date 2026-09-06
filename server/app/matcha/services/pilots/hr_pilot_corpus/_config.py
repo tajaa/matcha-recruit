@@ -50,10 +50,13 @@ _MAX_SCHEDLAW_RECORDS = 30
 
 # rule_key -> (label, unit) — mirrors client/src/components/employees/ScheduleLawPanel.tsx's
 # RULE_LABELS so the HR Pilot answer and the admin-facing law panel describe
-# the same eleven fields the same way.
+# the same twelve fields the same way. `_schedlaw_records` iterates THIS map,
+# so a key added to `_SCHEDLAW_RULE_KEY_TO_CHECK` alone is only half-wired: it
+# resolves a citation for a record the corpus will never emit.
 _SCHEDLAW_RULE_LABELS: dict[str, tuple[str, str]] = {
     "meal_break_after_hours": ("meal break required after", "h shift"),
     "meal_break_minutes": ("meal break duration", "min"),
+    "meal_break_earliest_after_hours": ("earliest meal break start", "h into shift"),
     "second_meal_after_hours": ("second meal break after", "h shift"),
     "daily_ot_hours": ("daily overtime after", "h"),
     "daily_doubletime_hours": ("daily double-time after", "h"),
@@ -66,6 +69,16 @@ _SCHEDLAW_RULE_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
+# rule_key -> how `no_cap` reads for THAT field. Every other key here is a
+# ceiling, so the default ("no limit under law") is right for them. The
+# earliest meal start is a floor: "no limit" would describe the wrong end of
+# it, and this text is quoted to a supervisor as law.
+_SCHEDLAW_NO_RULE_DISPLAY: dict[str, str] = {
+    "meal_break_earliest_after_hours": "no earliest set by law (any start time is lawful)",
+}
+_SCHEDLAW_NO_RULE_DEFAULT = "no limit under law"
+
+
 # rule_key -> the citation-lookup name `schedule_compliance._cite` reads
 # (`rules["citations"][name]`) — duplicated from
 # `routes/employee_schedule/_compliance.py:_RULE_KEY_TO_CHECK` rather than
@@ -74,6 +87,7 @@ _SCHEDLAW_RULE_LABELS: dict[str, tuple[str, str]] = {
 _SCHEDLAW_RULE_KEY_TO_CHECK = {
     "meal_break_after_hours": "meal_break",
     "meal_break_minutes": "meal_break",
+    "meal_break_earliest_after_hours": "meal_break_timing",
     "second_meal_after_hours": "meal_break",
     "daily_ot_hours": "daily_overtime",
     "daily_doubletime_hours": "daily_overtime",

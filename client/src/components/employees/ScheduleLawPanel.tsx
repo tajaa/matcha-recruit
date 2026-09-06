@@ -8,6 +8,7 @@ import { fetchLocationCompliance } from '../../api/employees/employeeSchedule'
 const RULE_LABELS: Record<string, { label: string; unit: string }> = {
   meal_break_after_hours: { label: 'Meal break required after', unit: 'h shift' },
   meal_break_minutes: { label: 'Meal break duration', unit: 'min' },
+  meal_break_earliest_after_hours: { label: 'Earliest meal break start', unit: 'h into shift' },
   second_meal_after_hours: { label: 'Second meal break after', unit: 'h shift' },
   daily_ot_hours: { label: 'Daily overtime after', unit: 'h' },
   daily_doubletime_hours: { label: 'Daily double-time after', unit: 'h' },
@@ -25,10 +26,23 @@ const SOURCE_LABEL: Record<string, string> = {
   unmapped: 'Not yet researched',
 }
 
+// How `no_cap` reads per field. Every other rule here is a ceiling, so the
+// default is right for them; the earliest meal start is a floor, and "no limit"
+// would describe the wrong end of it.
+const NO_RULE_LABELS: Record<string, string> = {
+  meal_break_earliest_after_hours: 'no earliest under law',
+}
+
 function RuleRow({ ruleKey, value }: { ruleKey: string; value: unknown }) {
   const meta = RULE_LABELS[ruleKey]
   if (!meta) return null
-  const display = value === 'no_cap' ? 'no limit under law' : `${value}${meta.unit}`
+  // null is the threshold table's "explicitly no such rule in this state" —
+  // distinct from an absent key (not researched, filtered out above) and from
+  // no_cap (the law affirmatively imposes no limit).
+  const display =
+    value === 'no_cap' ? (NO_RULE_LABELS[ruleKey] ?? 'no limit under law')
+    : value === null ? 'none under state law'
+    : `${value}${meta.unit}`
   return (
     <div className="flex items-center justify-between text-sm py-1 border-b border-zinc-900 last:border-0">
       <span className="text-zinc-400">{meta.label}</span>

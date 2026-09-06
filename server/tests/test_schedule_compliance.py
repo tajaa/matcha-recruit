@@ -17,6 +17,16 @@ def test_rules_for_state_merges_federal_and_state():
     assert "meal_break_after_hours" not in sc.rules_for_state("TX")
 
 
+def test_california_states_no_earliest_meal_time():
+    """Recorded as an explicit None, not an absent key: § 512(a)/Brinker fix
+    only the deadline, so nothing downstream may infer an earliest for CA."""
+    r = sc.rules_for_state("CA")
+    assert "meal_break_earliest_after_hours" in r
+    assert r["meal_break_earliest_after_hours"] is None
+    assert "Brinker" in r["citations"]["meal_break_timing"]
+    assert sc.rules_summary("CA")["meal_break_earliest_after_hours"] is None
+
+
 def test_meal_break_boundary():
     r = sc.rules_for_state("CA")
     assert sc.check_meal_break(5.0, 0, r, "CA") == []          # exactly 5h → clear

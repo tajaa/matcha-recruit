@@ -106,6 +106,45 @@ def test_multiple_rows_mixed_validity():
     assert len(rejected) == 1
 
 
+# ── cross-row: the meal window has to be a window ─────────────────────────
+
+def _earliest(value):
+    return _row(rule_key="meal_break_earliest_after_hours", rule_value=value)
+
+
+def test_earliest_at_or_past_the_deadline_is_rejected():
+    """Each bound is in range on its own; together they hold no break."""
+    for earliest in (5.0, 6.0):
+        payload = {"rules": [_row(rule_value=5.0), _earliest(earliest)]}
+        valid, rejected = sre.validate_extraction(payload, _ALLOWED)
+        assert [row["rule_key"] for row in valid] == ["meal_break_after_hours"]
+        assert [row["reason"] for row in rejected] == ["earliest_not_before_deadline"]
+
+
+def test_earliest_before_the_deadline_is_kept():
+    payload = {"rules": [_row(rule_value=5.0), _earliest(2.0)]}
+    valid, rejected = sre.validate_extraction(payload, _ALLOWED)
+    assert len(valid) == 2 and not rejected
+
+
+def test_earliest_is_kept_when_the_run_carries_no_deadline():
+    # The pair can be approved out of separate runs; the adaptation layer in
+    # schedule_break_rule_store is the backstop for that, not this check.
+    valid, rejected = sre.validate_extraction({"rules": [_earliest(6.0)]}, _ALLOWED)
+    assert len(valid) == 1 and not rejected
+
+
+def test_a_state_with_no_meal_rule_at_all_keeps_its_no_rule_rows():
+    payload = {
+        "rules": [
+            _row(rule_value=None, no_rule=True),
+            _earliest(None) | {"no_rule": True},
+        ],
+    }
+    valid, rejected = sre.validate_extraction(payload, _ALLOWED)
+    assert len(valid) == 2 and not rejected
+
+
 # ── decide_upsert ─────────────────────────────────────────────────────────
 
 def test_decide_upsert_no_existing_row_inserts():
@@ -136,6 +175,18 @@ def test_decide_upsert_approved_drift_sets_proposed():
 
 def test_every_range_key_has_a_rule_key():
     assert set(sre._RANGES) == set(sre.RULE_KEYS)
+
+
+def test_every_rule_key_is_explained_to_the_model():
+    # A key the glossary never describes gets extracted by guesswork.
+    for key in sre.RULE_KEYS:
+        assert key in sre._FIELD_GLOSSARY, key
+
+
+def test_meal_break_earliest_is_extractable():
+    """WA/OR legislate how EARLY a meal may start; break suggestions read it."""
+    assert "meal_break_earliest_after_hours" in sre.RULE_KEYS
+    assert sre._RANGES["meal_break_earliest_after_hours"] == (0.5, 6)
 
 
 def test_sick_leave_not_in_extraction_categories():
