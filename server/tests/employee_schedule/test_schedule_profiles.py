@@ -1,4 +1,5 @@
 """Shared writer and route contracts for employee scheduling profiles."""
+from datetime import date
 from pathlib import Path
 from uuid import UUID
 
@@ -190,3 +191,62 @@ def test_combined_details_route_uses_one_caller_owned_transaction():
     assert 'replace_employee_jobs_core(' in body
     assert 'replace_availability_core(' in body
     assert 'upsert_schedule_profile(' in body
+
+
+# ── Job qualification: an empty roster means ungated ────────────────────────
+
+class _QualificationConn:
+    """Answers the EXISTS roster probe and the qualified-rows query."""
+
+    def __init__(self, *, has_roster: bool, qualified_ids=()):
+        self.has_roster = has_roster
+        self.qualified_ids = list(qualified_ids)
+        self.fetch_calls = []
+
+    async def fetchval(self, sql, *args):
+        assert "EXISTS" in sql
+        return self.has_roster
+
+    async def fetch(self, sql, *args):
+        self.fetch_calls.append((sql, args))
+        return [{"employee_id": employee_id} for employee_id in self.qualified_ids]
+
+
+EMPLOYEE_2 = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2")
+
+
+@pytest.mark.asyncio
+async def test_effective_ids_treats_a_job_with_no_roster_as_ungated():
+    """Gating is opted into by naming who is qualified, matching
+    routes/employee_schedule/_shared.check_job_qualification. Without this the
+    chat/coverage/week-builder paths refuse everyone for a job whose qualified
+    list has not been filled in, while the REST grid assigns them freely."""
+    conn = _QualificationConn(has_roster=False)
+    result = await schedule_profiles.fetch_effective_job_employee_ids(
+        conn, company_id=COMPANY, job_id=JOB,
+        employee_ids=[EMPLOYEE, EMPLOYEE_2], as_of=date(2026, 9, 14),
+    )
+    assert result == {EMPLOYEE, EMPLOYEE_2}
+    # No point querying qualified rows for a roster we already know is empty.
+    assert conn.fetch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_effective_ids_filters_once_a_roster_exists():
+    conn = _QualificationConn(has_roster=True, qualified_ids=[EMPLOYEE])
+    result = await schedule_profiles.fetch_effective_job_employee_ids(
+        conn, company_id=COMPANY, job_id=JOB,
+        employee_ids=[EMPLOYEE, EMPLOYEE_2], as_of=date(2026, 9, 14),
+    )
+    assert result == {EMPLOYEE}
+
+
+@pytest.mark.asyncio
+async def test_effective_ids_leaves_a_jobless_shift_ungated():
+    conn = _QualificationConn(has_roster=True)
+    result = await schedule_profiles.fetch_effective_job_employee_ids(
+        conn, company_id=COMPANY, job_id=None,
+        employee_ids=[EMPLOYEE], as_of=date(2026, 9, 14),
+    )
+    assert result == {EMPLOYEE}
+    assert conn.fetch_calls == []

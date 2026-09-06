@@ -81,7 +81,17 @@ def _shift(key: str, day: int, *, job_id=None, fixed=None, required=1):
     }
 
 
-def _plan(*, demand, employees, availability, existing=None, unavailable=None, caps=None):
+def _plan(*, demand, employees, availability, existing=None, unavailable=None, caps=None,
+          gated_job_ids=None):
+    # Stand-in for the production company-wide "which jobs have any roster row"
+    # query: default to every job somebody here is named on, so a fixture that
+    # qualifies people is gated and one that names nobody is not.
+    if gated_job_ids is None:
+        gated_job_ids = {
+            job["job_id"]
+            for employee in employees
+            for job in employee.get("jobs") or []
+        }
     return build_plan(
         demand=demand,
         employees=employees,
@@ -90,6 +100,7 @@ def _plan(*, demand, employees, availability, existing=None, unavailable=None, c
         unavailable_ranges=unavailable or {},
         exclude_employee_ids=set(),
         employee_hour_caps=caps or {},
+        gated_job_ids=gated_job_ids,
     )
 
 
@@ -117,6 +128,68 @@ def test_scarcity_first_preserves_only_qualified_employee_for_later_shift():
         for shift in plan["shifts"]
     }
     assert assignments == {"flex": ["ben"], "licensed": ["amy"]}
+    assert plan["metrics"]["open_positions"] == 0
+
+
+def test_a_job_nobody_is_named_on_is_ungated():
+    """An empty qualified roster means UNGATED, matching the REST assignment
+    gate. The first whole-week build on a tenant that defined jobs but never
+    filled in the per-job lists otherwise reports every position open."""
+    employees = [_employee("amy", "Amy")]
+    plan = _plan(
+        demand=[_shift("licensed", 24, job_id="job-1")],
+        employees=employees,
+        availability={"amy": {1: [(time(8), time(18))]}},
+        gated_job_ids=set(),
+    )
+
+    assert [item["employee_id"] for item in plan["shifts"][0]["proposed_assignments"]] == ["amy"]
+    assert plan["metrics"]["open_positions"] == 0
+
+
+def test_a_job_with_a_roster_still_gates_someone_not_on_it():
+    """Gating is opted into by naming who is qualified — once anyone is named,
+    everyone else is refused."""
+    employees = [_employee("amy", "Amy")]
+    plan = _plan(
+        demand=[_shift("licensed", 24, job_id="job-1")],
+        employees=employees,
+        availability={"amy": {1: [(time(8), time(18))]}},
+        gated_job_ids={"job-1"},
+    )
+
+    assert plan["shifts"][0]["proposed_assignments"] == []
+    assert plan["metrics"]["open_positions"] == 1
+    assert plan["unfilled"][0]["reason"] == "not qualified for the shift job"
+
+
+def test_gating_is_per_job_not_global():
+    """A roster on one job must not gate a different, roster-less job."""
+    qualified_job = {
+        "job_id": "job-1", "qualification_status": "active",
+        "qualified_from": None, "qualified_until": None,
+    }
+    employees = [
+        _employee("amy", "Amy", jobs=[qualified_job]),
+        _employee("ben", "Ben"),
+    ]
+    availability = {
+        "amy": {1: [(time(8), time(18))], 2: [(time(8), time(18))]},
+        "ben": {1: [(time(8), time(18))], 2: [(time(8), time(18))]},
+    }
+    plan = _plan(
+        demand=[_shift("licensed", 25, job_id="job-1"), _shift("open-job", 25, job_id="job-2")],
+        employees=employees,
+        availability=availability,
+        gated_job_ids={"job-1"},
+    )
+
+    assignments = {
+        shift["key"]: [item["employee_id"] for item in shift["proposed_assignments"]]
+        for shift in plan["shifts"]
+    }
+    assert assignments["licensed"] == ["amy"]      # gated, only Amy is named
+    assert assignments["open-job"] == ["ben"]      # ungated, anyone may work it
     assert plan["metrics"]["open_positions"] == 0
 
 

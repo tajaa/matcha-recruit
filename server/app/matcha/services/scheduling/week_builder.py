@@ -122,8 +122,21 @@ def _is_unavailable(employee_id: str, shift_date: date, ranges: dict[str, list[t
     return any(start <= shift_date <= end for start, end in ranges.get(employee_id, []))
 
 
-def _job_qualified(employee: dict[str, Any], job_id: str | None, shift_date: date) -> bool:
-    if not job_id:
+def _job_qualified(
+    employee: dict[str, Any], job_id: str | None, shift_date: date,
+    gated_job_ids: set[str],
+) -> bool:
+    """Whether this employee may work a shift carrying ``job_id``.
+
+    An EMPTY roster means ungated, matching
+    ``routes/employee_schedule/_shared.check_job_qualification`` and
+    ``schedule_profiles.fetch_effective_job_employee_ids``. Without it, the
+    first whole-week build on a tenant that defined jobs but has not filled in
+    the qualified lists (a separate tab, and the common state) reports every
+    position open — and `apply_week_draft`'s recheck, which uses the shared
+    helper, would then disagree with the plan it is confirming.
+    """
+    if not job_id or job_id not in gated_job_ids:
         return True
     for job in employee.get("jobs") or []:
         if job["job_id"] != job_id or job["qualification_status"] != "active":
@@ -152,6 +165,7 @@ def build_plan(
     existing_assignments: list[dict[str, Any]],
     unavailable_ranges: dict[str, list[tuple[date, date]]],
     exclude_employee_ids: set[str], employee_hour_caps: dict[str, int],
+    gated_job_ids: set[str],
     blocked_pairs: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic scarcity-first assignment planner.
@@ -160,6 +174,11 @@ def build_plan(
     size of their feasible candidate pool, then by time/id; this prevents a
     flexible opener from consuming the only person who can cover a later
     licensed role.
+
+    ``gated_job_ids`` is required rather than defaulted: an omitted set would
+    silently mean "gate nothing", which is the opposite failure from the one
+    this argument exists to fix and would be invisible until a real roster
+    stopped being enforced.
     """
     blocked_pairs = blocked_pairs or set()
     by_id = {employee["id"]: employee for employee in employees}
@@ -182,7 +201,7 @@ def build_plan(
             return "compliance or eligibility block"
         if employee.get("availability_state") == "unconfirmed":
             return "availability unconfirmed"
-        if not _job_qualified(employee, shift.get("job_id"), shift_date):
+        if not _job_qualified(employee, shift.get("job_id"), shift_date, gated_job_ids):
             return "not qualified for the shift job"
         if _is_unavailable(employee_id, shift_date, unavailable_ranges):
             return "approved time away"
@@ -464,11 +483,20 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         unavailable[str(row["employee_id"])].append((row["start_date"], row["end_date"]))
     for ranges in unavailable.values():
         ranges.sort()
+    # Jobs somebody has been named qualified for, company-wide — the same
+    # EXISTS check `_shared.check_job_qualification` does, and deliberately not
+    # filtered to this location: a job whose roster lives at another store is
+    # still opted into gating.
+    gated_rows = await conn.fetch(
+        "SELECT DISTINCT job_id FROM schedule_job_employees WHERE company_id=$1",
+        company_id,
+    )
     return {
         "employees": employees,
         "availability": availability,
         "existing_assignments": existing_assignments,
         "unavailable_ranges": dict(unavailable),
+        "gated_job_ids": {str(row["job_id"]) for row in gated_rows},
     }
 
 
@@ -924,6 +952,7 @@ async def propose_week_draft(
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],
+                gated_job_ids=snapshot["gated_job_ids"],
                 blocked_pairs=blocked_pairs,
             )
             newly_blocked = await _preflight_compliance_blocks(
@@ -941,6 +970,7 @@ async def propose_week_draft(
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],
+                gated_job_ids=snapshot["gated_job_ids"],
                 blocked_pairs=blocked_pairs,
             )
         review = _review_payload(
