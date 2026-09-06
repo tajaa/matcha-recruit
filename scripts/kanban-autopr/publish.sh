@@ -41,13 +41,10 @@ CRITICALITY="$(jq -r '.criticality.level' "$DECISION_FILE")"
 CRITICALITY_EMOJI="$(autopr_criticality_emoji "$CRITICALITY")"
 AWAITING_HUMAN="$(jq -r '.awaiting_human' "$DECISION_FILE")"
 NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE")"
-DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | join(",")' "$DECISION_FILE")"
+# A runtime extension is not standing product authority.
+DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | map(select(. == "draft_pr" or . == "trust_still_broken")) | join(",")' "$DECISION_FILE")"
 DIRECTIVE_MARKER=""
 [ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
-ALLOW_MIGRATION_VERSION=false
-case ",$DIRECTIVE_CSV," in
-    *,draft_pr,*) ALLOW_MIGRATION_VERSION=true ;;
-esac
 PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
 PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
 COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
@@ -71,7 +68,7 @@ auto_setup_status() {
     if [ "$OUTCOME" = no_safe_action ]; then
         case "$NO_SAFE_ACTION_REASON" in
             already_fixed) printf 'NO PR: ALREADY FIXED' ;;
-            migration_required) printf 'NO PR: MIGRATION REQUIRED' ;;
+            acceptance_criteria_met) printf 'NO PR: CARD ALREADY SATISFIED' ;;
             policy_blocked) printf 'NO PR: POLICY BLOCKED' ;;
             external_dependency) printf 'NO PR: EXTERNAL DEPENDENCY' ;;
             *) printf 'NO PR: HUMAN ACTION REQUIRED' ;;
@@ -93,25 +90,52 @@ else
 fi
 
 progress_note_with_origin() {
-    local marker="$1" existing="$2" remainder
+    local marker="$1" existing="$2" header body preserved remainder
     # Replace this system's prior structured prefix on rework instead of
     # nesting it every round. Preserve any human-authored text after it.
-    remainder="$(printf '%s' "$existing" | sed -E \
-        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+    header="${existing%%$'\n'*}"
+    if [ "$header" = "$existing" ]; then
+        body=""
+    else
+        body="${existing#*$'\n'}"
+    fi
+    if [[ "$header" != "from auto setup"* ]] && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        # Entirely human-authored: nothing of it is this system's to rewrite.
+        header="$existing"
+        body=""
+    fi
+    # Drop only the machine-written blocks below the header: the pause report
+    # and the question form (always written last). Everything else on those
+    # lines is the operator's and survives the next cycle.
+    preserved="$(printf '%s\n' "$body" | awk '
+        /^Answers needed — reply below with the numbered choices:/ { exit }
+        /^(Why more time|Done so far|Latest progress|Next step):/ { next }
+        NF { seen = 1 }
+        seen { lines[n++] = $0 }
+        END {
+            while (n > 0 && lines[n-1] ~ /^[[:space:]]*$/) n--
+            for (i = 0; i < n; i++) print lines[i]
+        }
+    ')"
+    remainder="$(printf '%s' "$header" | sed -E \
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
+    # PAUSED belongs in this alternation: checkpoint.sh writes it, so without
+    # it every recovery run would re-append its own stale pause header here.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|NO PR: [A-Z_ -]+)( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
-    if [ -n "$remainder" ] && [ "$remainder" != "$existing" ]; then
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?( · note: [^·]+)?( · )?//')"
+    if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
         printf '%s · %s' "$marker" "$remainder"
-    elif [ -n "$existing" ] \
-        && [[ "$existing" != "from auto setup"* ]] \
-        && [[ "$existing" != "🤖 AUTO SETUP"* ]]; then
-        printf '%s · %s' "$marker" "$existing"
+    elif [ -n "$header" ] \
+        && [[ "$header" != "from auto setup"* ]] \
+        && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        printf '%s · %s' "$marker" "$header"
     else
         printf '%s' "$marker"
     fi
+    [ -z "$preserved" ] || printf '\n%s' "$preserved"
 }
 
 report_summary() {
@@ -124,7 +148,7 @@ report_summary() {
 }
 
 post_reconsideration_reply() {
-    local pr_number="${1:-}" expected_note="${2:-}" summary message fixed_pr
+    local pr_number="${1:-}" expected_note="${2:-}" summary message fixed_pr notification_error
     [ -n "$RECONSIDERATION_EVENT_ID" ] || return 0
     [ -n "$expected_note" ] || die "reconsideration result is missing its decision note"
     summary="$(report_summary)"
@@ -158,18 +182,32 @@ post_reconsideration_reply() {
     # The activity thread is durable history, but the AutoPR account can be
     # the same identity as the reporter and ordinary comment notifications
     # deliberately suppress self-notification. This decision-bound endpoint
-    # targets the original context author and is required: a run must not
-    # silently consume their instruction.
-    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/result-notification" \
+    # targets the original context author. During a rolling deployment the
+    # workflow can reach production before the endpoint does; do not turn an
+    # already-published PR/card update into a false failure for that one known
+    # compatibility case. Authentication and all other API errors remain fatal.
+    if ! notification_error="$(mw_api POST \
+        "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/result-notification" \
         "$(jq -n --arg event "$RECONSIDERATION_EVENT_ID" --arg note "$expected_note" \
             --arg message "$message" \
             '{reconsideration_event_id:$event,expected_progress_note:$note,message:$message}')" \
-        >/dev/null
+        2>&1 >/dev/null)"; then
+        if [[ "$notification_error" == *"HTTP 404:"* ]]; then
+            printf 'kanban-autopr: warning: result notification endpoint is not deployed; PR/card publication for task %s remains complete\n' \
+                "$TASK_ID" >&2
+        else
+            printf '%s\n' "$notification_error" >&2
+            return 1
+        fi
+    fi
 }
 
 post_context_request() {
     local reason="$1" expected_note="$2"
-    reason="$(printf '%s' "$reason" | tr '\r\n' '  ' | jq -Rsr '.[0:600]')"
+    # Newlines survive: the acceptance-evidence block is the payload here, and
+    # flattening it to one line at 600 characters cut the proof off after about
+    # four criteria. The server sanitizes and bounds it again.
+    reason="$(printf '%s' "$reason" | tr -d '\r' | jq -Rsr '.[0:4000]')"
     if ! (mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/context-request" \
         "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
             '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
@@ -181,6 +219,28 @@ post_context_request() {
 }
 
 BRANCH="bot/task-$ID8"
+
+# Dying here used to fail the workflow step with the diff discarded, no card
+# note, and nothing in chat: the next scheduled cycle re-selected the same card
+# and reproduced the same cosmetic diff forever, with no signal to a human. The
+# refusal stands, but it lands on the card and asks its owner for a decision.
+reject_cosmetic_diff() {
+    local reject_note origin_note
+    reject_note="[autopr:rejected $(date -u +%Y-%m-%dT%H:%M:%SZ)] cosmetic_only"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · BLOCKED: COSMETIC DIFF · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
+        "$EXISTING_PROGRESS_NOTE")"
+    if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null; then
+        post_context_request \
+            "AutoPR produced a diff that only rewrites string literals for a card asking for structure, so it was discarded. Either the criteria are already met — reply and it will return acceptance_criteria_met with per-criterion evidence — or the card needs the missing structural detail." \
+            "$origin_note"
+    else
+        printf 'kanban-autopr: warning: could not record the cosmetic-diff rejection on task %s\n' \
+            "$TASK_ID" >&2
+    fi
+    die "implementation diff only rewrites string literals for a card asking for structure; return acceptance_criteria_met with evidence, or questions_only"
+}
 
 existing_feedback_checkpoint() {
     local body="$1" kind="$2"
@@ -270,18 +330,15 @@ cd "$REPO_ROOT"
 git add --all
 
 # Path guard: denylist is what stops the bot rewriting its own harness or CI.
-# The allowlist is strictly stronger. A decision-bound draft_pr directive may
-# additionally author a migration *version* for human review; it never permits
-# migration configuration/runner changes and this script never applies it.
+# The allowlist is strictly stronger. Authoring a new migration version is
+# ordinary drafting work: publication always opens a GitHub draft PR and this
+# script never runs a migration. Existing mainline migrations and all migration
+# runner/configuration files remain closed.
 changed_paths="$(git diff --cached --no-renames --name-only)"
 unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
-if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
-    unsafe_migrations="$(printf '%s\n' "$changed_paths" \
-        | grep -E '^server/alembic/' \
-        | grep -vE '^server/alembic/versions/[^/]+\.py$' || true)"
-else
-    unsafe_migrations="$(printf '%s\n' "$changed_paths" | grep -E '^server/alembic/' || true)"
-fi
+unsafe_migrations="$(printf '%s\n' "$changed_paths" \
+    | grep -E '^server/alembic/' \
+    | grep -vE "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
 if [ -n "$unsafe_migrations" ]; then
     unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
 fi
@@ -292,14 +349,40 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-allowed_paths_re='^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
-if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
-    allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[^/]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
-fi
+migration_draft_alternative="${AUTOPR_MIGRATION_DRAFT_RE#^}"
+allowed_paths_re="^(server/(app|tests)/.*\.py|${migration_draft_alternative%$}|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$"
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
     echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
+    git reset --hard >/dev/null 2>&1
+    exit 1
+fi
+
+migration_paths="$(printf '%s\n' "$changed_paths" | grep -E "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
+if [ -n "$migration_paths" ]; then
+    # A version file must be a regular file: a symlink or a mode change is
+    # never how a migration is authored, and the graph parser would follow it.
+    # Destination mode 000000 is a deletion, not an irregular file — the
+    # migration guard below reports that with the reason it actually has.
+    unsafe_migration_modes="$(git diff --cached --raw --no-renames -- \
+        server/alembic/versions \
+        | awk '$2 != "100644" && $2 != "000000" {print $0}' || true)"
+    if [ -n "$unsafe_migration_modes" ]; then
+        echo "Refusing non-regular migration version files:" >&2
+        printf '%s\n' "$unsafe_migration_modes" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+fi
+
+# Same check investigate.sh already gave the model a retry on. Reaching it here
+# means the retry did not fix it, so the run ends — but every rejection resets
+# the tree first, including an unusable base ref.
+if ! migration_errors="$(autopr_migration_draft_errors "$REPO_ROOT" \
+    "${AUTOPR_MIGRATION_BASE_REF:-main}")"; then
+    echo "Refusing migration draft:" >&2
+    printf '%s\n' "$migration_errors" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
 fi
@@ -339,6 +422,17 @@ git diff --cached --quiet || has_diff=true
 case "$OUTCOME" in
     implementation|partial_implementation)
         [ "$has_diff" = true ] || die "decision says safe changes exist but the worktree is empty"
+        # A partial_implementation carries the same shape for the same reason,
+        # so the guard covers both outcomes rather than leaving the lower bar
+        # as a way around it.
+        STAGED_DIFF_FILE="$(mktemp)"
+        git diff --cached > "$STAGED_DIFF_FILE"
+        if autopr_cosmetic_only_diff "$STAGED_DIFF_FILE" "$TITLE" "$DESCRIPTION"; then
+            rm -f "$STAGED_DIFF_FILE"
+            git reset --hard >/dev/null 2>&1
+            reject_cosmetic_diff
+        fi
+        rm -f "$STAGED_DIFF_FILE"
         ;;
     questions_only|no_safe_action)
         if [ "$has_diff" = true ]; then
@@ -373,6 +467,21 @@ TITLE_LINE="$(autopr_title_marker "$DECISION_FILE") $PREFIX: $TITLE"
 # ---- unautomatable: mark the card and reconcile an existing rework PR ----
 if [ "$OUTCOME" = no_safe_action ]; then
     git reset --hard >/dev/null 2>&1
+    # Both refusals a draft_pr directive can overturn must actively ask the
+    # owner for that authorization. Without the prompt the card just reads as
+    # a refusal, and the human has no visible way to say "do it anyway".
+    NEEDS_CONTEXT_REQUEST=false
+    case "$NO_SAFE_ACTION_REASON" in
+        already_fixed|acceptance_criteria_met) NEEDS_CONTEXT_REQUEST=true ;;
+    esac
+    # A card whose criteria are already met is the one refusal a human must see
+    # in full: the point is not "no PR", it is "here is where each thing you
+    # asked for already lives" -- so the proof rides along with the ask.
+    CONTEXT_REASON="$CARD_NOTE"
+    if [ "$NO_SAFE_ACTION_REASON" = acceptance_criteria_met ]; then
+        acceptance_evidence="$(autopr_render_acceptance_evidence "$DECISION_FILE")"
+        [ -z "$acceptance_evidence" ] || CONTEXT_REASON="$CARD_NOTE"$'\n'"$acceptance_evidence"
+    fi
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] $NO_SAFE_ACTION_REASON"
     note_prefix="🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL"
     if [ "$MODE" = rework ]; then
@@ -388,8 +497,8 @@ if [ "$OUTCOME" = no_safe_action ]; then
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg url "$pr_url" --argjson num "$existing_open_pr" --arg note "$origin_note" \
                 '{pr_url: $url, pr_number: $num, board_column: "changes_requested", progress_note: $note}')" >/dev/null
-        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
-            post_context_request "$CARD_NOTE" "$origin_note"
+        if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
+            post_context_request "$CONTEXT_REASON" "$origin_note"
         fi
         post_reconsideration_reply "$existing_open_pr" "$origin_note"
         echo "Updated PR #$existing_open_pr and marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
@@ -399,8 +508,8 @@ if [ "$OUTCOME" = no_safe_action ]; then
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
             "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
-        if [ "$NO_SAFE_ACTION_REASON" = already_fixed ]; then
-            post_context_request "$CARD_NOTE" "$origin_note"
+        if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
+            post_context_request "$CONTEXT_REASON" "$origin_note"
         fi
         post_reconsideration_reply "" "$origin_note"
         echo "No diff produced; marked card $TASK_ID no-spec: $NO_SAFE_ACTION_REASON"
@@ -450,6 +559,12 @@ card_column=in_progress
 origin_note="$(progress_note_with_origin \
     "🤖 AUTO SETUP · $AUTO_SETUP_STATUS · build $PROD_BUILD_NUMBER · $PROD_LABEL · PR #$published_pr · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
+if [ "$AWAITING_HUMAN" = true ]; then
+    card_questions="$(autopr_render_card_questions "$DECISION_FILE")"
+    [ -z "$card_questions" ] || origin_note="$origin_note
+
+$card_questions"
+fi
 replace_triage_labels "$published_pr"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg url "$pr_url" --argjson num "${published_pr:-null}" --arg col "$card_column" \

@@ -9,18 +9,18 @@ import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, replaceWeekTemplate, deleteWeekTemplate,
+  assignEmployee, unassignEmployee, fetchWeekTemplates, deleteWeekTemplate,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
   fetchEligibilityCases, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
-  Shift, RosterEmployee, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
+  Shift, RosterEmployee, ScheduleJob, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
-  fmtTime, fmtDayLabel, toISODate, addDays, startOfWeekSunday,
+  fmtTime, fmtDayLabel, toISODate, addDays, startOfWeek,
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
 import type { EmployeeScheduleTab } from './useEmployeeSchedule'
@@ -37,6 +37,12 @@ import {
   MAX_REQUIRED_STAFF,
   validateShiftFields,
 } from '../../../components/employees/schedule-editor/shiftValidation'
+import {
+  NO_ROLES_MESSAGE, ROLE_PLACEHOLDER, ROLE_REQUIRED_MESSAGE,
+  isJobMissingFromList, roleLabelForJob,
+} from '../../../components/employees/schedule-editor/roleSelection'
+import { TemplateForm } from '../../../components/employees/schedule-editor/TemplateForm'
+import { useScheduleJobs } from '../../../hooks/employees/useScheduleJobs'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../../api/employees/scheduleAssistant'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
@@ -56,10 +62,12 @@ export default function EmployeeSchedule() {
   const { me, hasFeature, loading: meLoading } = useMe()
   const { toast } = useToast()
   const { locationId, setLocationId, locations, loading: locationsLoading } = useLocationScope()
+  const weekStartWeekday = locations.find((l) => l.id === locationId)?.week_start_weekday ?? 0
   const [guideOpen, setGuideOpen] = useState(() => {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
   })
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
+  const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
@@ -78,7 +86,7 @@ export default function EmployeeSchedule() {
     patchShift,
     publishWeek,
     days,
-  } = useEmployeeSchedule(linkedDate, initialTab, locationId)
+  } = useEmployeeSchedule(linkedDate, initialTab, locationId, weekStartWeekday)
 
   useEffect(() => {
     const blockedIntelligence = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
@@ -187,7 +195,7 @@ export default function EmployeeSchedule() {
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
               <button onClick={() => setWeekStart((w) => addDays(w, -7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-white/[0.08]"><ChevronLeft className="h-4 w-4" /></button>
-              <button onClick={() => setWeekStart(toISODate(startOfWeekSunday(new Date())))} className="text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-white/[0.08]">This week</button>
+              <button onClick={() => setWeekStart(toISODate(startOfWeek(new Date(), weekStartWeekday)))} className="text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-white/[0.08]">This week</button>
               <button onClick={() => setWeekStart((w) => addDays(w, 7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-white/[0.08]"><ChevronRight className="h-4 w-4" /></button>
               <span className="text-sm text-zinc-500 ml-1">Week of {fmtDayLabel(weekStart)}</span>
             </div>
@@ -234,10 +242,11 @@ export default function EmployeeSchedule() {
                     roster={roster}
                     rosterFlags={rosterFlags}
                     onPatch={patchShift}
-                    onChanged={reload}
+                    onChanged={() => { void reloadJobs(); reload() }}
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
                     locationId={locationId}
+                    jobs={jobs}
                   />
                 ))}
               </div>
@@ -247,7 +256,7 @@ export default function EmployeeSchedule() {
       )}
 
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
-      {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} />}
+      {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} weekStartWeekday={weekStartWeekday} />}
       {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
       {tab === 'audit' && <ScheduleAuditLog />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
@@ -279,9 +288,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, locationId }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, locationId, jobs }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; locationId: string
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; locationId: string; jobs: ScheduleJob[]
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -293,14 +302,14 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
       <div className="space-y-2">
         {adding && (
           <Card className="p-2.5">
-            <ShiftForm day={day} locationId={locationId} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            <ShiftForm day={day} locationId={locationId} jobs={jobs} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
           </Card>
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
         {shifts.map((s) => (
           <ShiftCard
             key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags}
-            onPatch={onPatch} onChanged={onChanged}
+            onPatch={onPatch} onChanged={onChanged} jobs={jobs}
             highlighted={s.id === highlightShiftId}
             weekDays={weekDays}
           />
@@ -310,9 +319,9 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
   )
 }
 
-function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays }: {
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays, jobs }: {
   shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]; jobs: ScheduleJob[]
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
@@ -411,6 +420,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         <ShiftForm
           day={shift.starts_at.slice(0, 10)}
           shift={shift}
+          jobs={jobs}
           onSaved={(s) => { onPatch(s); setEditing(false) }}
           onCancel={() => setEditing(false)}
         />
@@ -584,10 +594,11 @@ function spanHours(start: string, end: string): number | null {
  *  chosen time was invisible until the card re-rendered post-submit. The preview
  *  line below is the belt to that braces — the selection is legible even where
  *  the native control isn't. */
-function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
+function ShiftForm({ day, shift, locationId, jobs, onDone, onSaved, onCancel }: {
   day: string
   shift?: Shift
   locationId?: string
+  jobs: ScheduleJob[]
   onDone?: () => void
   onSaved?: (s: Shift) => void
   onCancel: () => void
@@ -598,11 +609,16 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const editing = !!shift
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
-  const [role, setRole] = useState(shift?.role ?? '')
+  const [jobId, setJobId] = useState(shift?.job_id ?? '')
   const [notes, setNotes] = useState(shift?.notes ?? '')
-  const [breakMinutes, setBreakMinutes] = useState(String(shift?.break_minutes ?? 0))
+  const [breakMinutes, setBreakMinutes] = useState(shift ? String(shift.break_minutes) : '')
+  const [breakDirty, setBreakDirty] = useState(false)
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
+  const [roleMissing, setRoleMissing] = useState(false)
+  const roleErrorId = `shift-role-error-${shift?.id ?? day}`
+  const selectedJobMissing = isJobMissingFromList(jobId, jobs)
+  const noRolesAvailable = !editing && jobs.length === 0
 
   // Training-as-shift: kind is immutable after create (no field on
   // ShiftUpdate), so the toggle only renders for a brand-new shift.
@@ -617,15 +633,17 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   const overnight = end <= start
   const durationHours = spanHours(start, end)
 
-  function buildPayload(requiredStaff: number, plannedBreak: number): ShiftPayload {
+  function buildPayload(requiredStaff: number, plannedBreak: number | undefined): ShiftPayload {
     const startDay = editing ? shift!.starts_at.slice(0, 10) : day
     const endDay = overnight ? addDays(startDay, 1) : startDay
     const payload: ShiftPayload = {
       starts_at: `${startDay}T${start}:00Z`,
       ends_at: `${endDay}T${end}:00Z`,
-      role: role.trim() || null,
+      role: roleLabelForJob(jobId, jobs, shift),
+      job_id: jobId || null,
       notes: notes.trim() || null,
-      break_minutes: plannedBreak,
+      break_mode: plannedBreak === undefined ? 'auto' : 'manual',
+      ...(plannedBreak === undefined ? {} : { break_minutes: plannedBreak }),
       required_staff: requiredStaff,
     }
     if (!editing && kind === 'training' && requirementId) {
@@ -648,13 +666,19 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       toast(validation.error, 'error')
       return
     }
+    if (!editing && !jobId) {
+      setRoleMissing(true)
+      toast(ROLE_REQUIRED_MESSAGE, 'error')
+      return
+    }
     if (!editing && kind === 'training' && !requirementId) {
       toast('Select a training requirement for this session', 'error')
       return
     }
     setBusy(true)
     try {
-      const payload = buildPayload(validation.requiredStaff, validation.breakMinutes)
+      const plannedBreak = editing && !breakDirty ? undefined : validation.breakMinutes
+      const payload = buildPayload(validation.requiredStaff, plannedBreak)
       if (editing) {
         // PUT is a true PATCH, but every field here is one the form owns, so
         // sending the lot is the same write. `status` is deliberately NOT sent —
@@ -706,11 +730,21 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
         )}
       </div>
       <label className="block">
-        {/* Labelled rather than placeholder-only: "Role (optional)" clips to
-            "Role (option…" at day-column width, and a clipped placeholder
-            disappears entirely the moment you type. */}
-        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Role <span className="text-zinc-600 normal-case">(optional)</span></span>
-        <input value={role} onChange={(e) => setRole(e.target.value)} className={`${inputCls} mt-0.5`} />
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Role <span aria-hidden="true" className="text-red-400">*</span></span>
+        <select
+          required
+          aria-invalid={roleMissing}
+          aria-describedby={roleMissing ? roleErrorId : undefined}
+          value={jobId}
+          onChange={(e) => { setJobId(e.target.value); setRoleMissing(false) }}
+          className={`${inputCls} mt-0.5`}
+        >
+          <option value="">{ROLE_PLACEHOLDER}</option>
+          {editing && selectedJobMissing && <option value={jobId}>{shift?.role ?? 'Previously assigned role'}</option>}
+          {jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}
+        </select>
+        {roleMissing && <span id={roleErrorId} role="alert" className="mt-1 block text-[10px] text-red-400">{ROLE_REQUIRED_MESSAGE}</span>}
+        {noRolesAvailable && <span className="mt-1 block text-[10px] text-amber-400">{NO_ROLES_MESSAGE}</span>}
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
@@ -718,8 +752,8 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Planned break (minutes)</span>
-        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} className={`${inputCls} mt-0.5`} />
-        <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Used by scheduling-law checks when employees are assigned.</span>
+        <input type="number" min="0" max={MAX_BREAK_MINUTES} step="5" value={breakMinutes} onChange={(e) => { setBreakMinutes(e.target.value); setBreakDirty(true) }} placeholder="Auto" className={`${inputCls} mt-0.5`} />
+        <span className="mt-1 block text-[10px] leading-4 text-zinc-600">Leave blank to generate the approved legal minimum. You can add time later, but cannot save below that minimum.</span>
       </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Notes <span className="text-zinc-600 normal-case">(optional)</span></span>
@@ -744,7 +778,7 @@ function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
         </label>
       )}
       <div className="flex items-center gap-1.5">
-        <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? 'Save' : 'Add'}</button>
+        <button onClick={save} disabled={busy || noRolesAvailable} title={noRolesAvailable ? NO_ROLES_MESSAGE : undefined} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? 'Save' : 'Add'}</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>
@@ -873,140 +907,6 @@ function TemplateRow({ tpl, onDeleted, onGenerated, onEdit }: { tpl: WeekTemplat
         </div>
       )}
     </Card>
-  )
-}
-
-type TemplateBlockDraft = {
-  id: number | string
-  name: string
-  role: string
-  start: string
-  end: string
-  breakMinutes: string
-  required: string
-  days: number[]
-}
-
-const MAX_TEMPLATE_BLOCKS = 40
-
-function newTemplateBlock(id: number): TemplateBlockDraft {
-  return {
-    id,
-    name: '',
-    role: '',
-    start: '09:00',
-    end: '17:00',
-    breakMinutes: '0',
-    required: '1',
-    days: [1, 2, 3, 4, 5],
-  }
-}
-
-function TemplateForm({ locationId, template, onDone, onCancel }: { locationId: string; template?: WeekTemplate; onDone: () => void; onCancel: () => void }) {
-  const [name, setName] = useState(() => template?.name ?? '')
-  const [blocks, setBlocks] = useState<TemplateBlockDraft[]>(() => template
-    ? template.blocks.map((block) => ({
-      id: block.id,
-      name: block.name,
-      role: block.role ?? '',
-      start: block.start_time.slice(0, 5),
-      end: block.end_time.slice(0, 5),
-      breakMinutes: String(block.break_minutes),
-      required: String(block.required_staff),
-      days: block.days_of_week,
-    }))
-    : [newTemplateBlock(1)])
-  const [busy, setBusy] = useState(false)
-  const blocksValid = blocks.every((block) => block.days.length > 0)
-
-  function updateBlock(id: number | string, patch: Partial<TemplateBlockDraft>) {
-    setBlocks((current) => current.map((block) => block.id === id ? { ...block, ...patch } : block))
-  }
-
-  function toggleDay(id: number | string, day: number) {
-    const block = blocks.find((item) => item.id === id)
-    if (!block) return
-    updateBlock(id, {
-      days: block.days.includes(day)
-        ? block.days.filter((item) => item !== day)
-        : [...block.days, day].sort((a, b) => a - b),
-    })
-  }
-
-  function addBlock() {
-    setBlocks((current) => {
-      if (current.length >= MAX_TEMPLATE_BLOCKS) return current
-      const nextId = Math.max(0, ...current.map((block) => typeof block.id === 'number' ? block.id : 0)) + 1
-      return [...current, newTemplateBlock(nextId)]
-    })
-  }
-
-  async function save() {
-    if (!name.trim() || blocks.length === 0 || !blocksValid) return
-    setBusy(true)
-    try {
-      const blockPayload = (block: TemplateBlockDraft, index: number) => ({
-        id: typeof block.id === 'string' ? block.id : undefined,
-        name: block.name.trim() || block.role.trim() || `Shift ${index + 1}`,
-        role: block.role.trim() || null,
-        start_time: `${block.start}:00`, end_time: `${block.end}:00`,
-        break_minutes: Math.max(0, Math.round(Number(block.breakMinutes) || 0)),
-        required_staff: Math.max(1, Math.round(Number(block.required) || 1)),
-        days_of_week: block.days,
-      })
-      if (!template) {
-        await createWeekTemplate({
-          name: name.trim(), location_id: locationId,
-          blocks: blocks.map((block, index) => {
-            const { id: _id, ...payload } = blockPayload(block, index)
-            return payload
-          }),
-        })
-      } else {
-        await replaceWeekTemplate(template.id, { name: name.trim(), blocks: blocks.map(blockPayload) })
-      }
-      onDone()
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="space-y-4">
-      <label className="block max-w-md"><span className="text-[10px] text-zinc-500 uppercase">Template name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Standard operating week" className={`${inputCls} mt-1`} /></label>
-      <div className="space-y-3">
-        {blocks.map((block, index) => (
-          <div key={block.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-zinc-300">Shift {index + 1}</span>
-              {blocks.length > 1 && <button type="button" onClick={() => setBlocks((current) => current.filter((item) => item.id !== block.id))} className="text-xs text-zinc-500 hover:text-red-400">Remove shift</button>}
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Role</span><input value={block.role} onChange={(e) => updateBlock(block.id, { role: e.target.value })} className={`${inputCls} mt-1`} /></label>
-              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Start</span><input type="time" value={block.start} onChange={(e) => updateBlock(block.id, { start: e.target.value })} className={`${inputCls} mt-1`} /></label>
-              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={block.end} onChange={(e) => updateBlock(block.id, { end: e.target.value })} className={`${inputCls} mt-1`} /></label>
-              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={block.required} onChange={(e) => updateBlock(block.id, { required: e.target.value })} className={`${inputCls} mt-1`} /></label>
-            </div>
-            <div className="grid max-w-sm grid-cols-2 gap-2">
-              <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Planned break (minutes)</span><input type="number" min="0" step="5" value={block.breakMinutes} onChange={(e) => updateBlock(block.id, { breakMinutes: e.target.value })} className={`${inputCls} mt-1`} /></label>
-            </div>
-            <div>
-              <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
-              <div className="flex gap-1 mt-1">
-                {WEEKDAY_LABELS.map((lbl, day) => (
-                  <button type="button" key={day} aria-label={`${lbl} for shift ${index + 1}`} aria-pressed={block.days.includes(day)} onClick={() => toggleDay(block.id, day)} className={`w-9 py-1 rounded-md text-xs border ${block.days.includes(day) ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>{lbl[0]}</button>
-                ))}
-              </div>
-              {block.days.length === 0 && <div className="mt-1 text-xs text-red-400">Select at least one day for this shift.</div>}
-            </div>
-          </div>
-        ))}
-        <button type="button" onClick={addBlock} disabled={blocks.length >= MAX_TEMPLATE_BLOCKS} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 disabled:cursor-not-allowed disabled:text-zinc-600"><Plus className="h-3.5 w-3.5" /> Add shift</button>
-        {blocks.length >= MAX_TEMPLATE_BLOCKS && <div className="text-xs text-zinc-500">Maximum 40 shifts per template.</div>}
-      </div>
-      <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim() || blocks.length === 0 || !blocksValid} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {template ? 'Save changes' : 'Save template'}</button>
-        <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
-      </div>
-    </div>
   )
 }
 

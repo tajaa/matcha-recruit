@@ -12,7 +12,7 @@ from .schedule_eligibility_authorization import (
     eligibility_case_decision_error,
     require_eligibility_case_access,
 )
-from .schedule_guidance import refresh_assignment_break_guidance
+from app.workers.tasks.schedule_break_refresh import enqueue_employee_schedule_break_refresh
 from .shift_writes import log_audit
 
 
@@ -119,26 +119,6 @@ async def record_meal_break_waiver_core(
                 company_id, employee_id, on_file, effective_from, actor_user_id,
                 note.strip() if note else None,
             )
-            # Company-wide by design — a waiver is an employee-level fact,
-            # not a location-scoped one — but bounded so a single confirm
-            # can't hold row locks open across an unbounded future roster.
-            assignments = await conn.fetch(
-                """
-                SELECT s.id AS shift_id, s.location_id, s.starts_at, s.ends_at
-                FROM schedule_shift_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-                WHERE a.company_id=$1 AND a.employee_id=$2 AND s.status <> 'cancelled'
-                  AND s.starts_at::date >= $3
-                ORDER BY s.starts_at
-                LIMIT 500
-                """,
-                company_id, employee_id, effective_from,
-            )
-            for assignment in assignments:
-                await refresh_assignment_break_guidance(
-                    conn, company_id, shift_id=assignment["shift_id"], employee_id=employee_id,
-                    location_id=assignment["location_id"], starts_at=assignment["starts_at"],
-                    ends_at=assignment["ends_at"],
-                )
             await log_audit(
                 conn, company_id, "employee", employee_id, actor_user_id,
                 "employee.meal_break_waiver.update",
@@ -150,6 +130,14 @@ async def record_meal_break_waiver_core(
                     "attestation_id": str(row["id"]),
                 },
             )
+        # Company-wide by design — a waiver is an employee-level fact.  The
+        # paged worker keeps the fact write transaction bounded regardless of
+        # how many future shifts exist.
+        enqueue_employee_schedule_break_refresh(
+            company_id=company_id, employee_id=employee_id,
+            actor_user_id=actor_user_id, source="meal_break_waiver_update",
+            effective_from=effective_from,
+        )
     return {
         "status": "created", "record_id": str(row["id"]),
         "message": f"Meal-break waiver marked {'on file' if on_file else 'not on file'} effective {row['effective_from'].isoformat()}.",

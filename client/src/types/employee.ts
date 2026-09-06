@@ -99,6 +99,7 @@ export type CredentialDocument = {
   created_at: string
   updated_at: string
   expires_at: string | null
+  is_current: boolean
 }
 
 export type EmployeeCredentials = {

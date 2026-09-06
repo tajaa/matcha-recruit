@@ -16,7 +16,7 @@ from difflib import SequenceMatcher
 from typing import Literal, Optional, Union
 from uuid import UUID
 
-from .schedule_rules import sunday_indexed_weekday
+from .schedule_rules import align_week_start, sunday_indexed_weekday, week_day_offset
 
 # ── Authorization envelope ──────────────────────────────────────────────
 
@@ -78,19 +78,21 @@ class NeedsClarify:
 
 def resolve_week(
     week_hint: Optional[str], today: date, week_start: Optional[date] = None,
+    week_start_weekday: int = 0,
 ) -> date:
-    """The SUNDAY that starts the target week — matches
+    """The day that starts the target week — matches
     `shift_compliance._week_window` + the schedule grid's own week-start
     convention, so a proposed shift lands in the same week an admin looking
-    at the grid would expect. `'next_week'` is the Sunday strictly after
-    today's own week (never today, even when today IS a Sunday);
-    `'this_week'`/None is today's own week's Sunday."""
-    this_sunday = week_start or (
-        today - timedelta(days=sunday_indexed_weekday(today))
-    )
+    at the grid would expect. `'next_week'` is the week strictly after
+    today's own (never today, even when today IS the start day);
+    `'this_week'`/None is today's own week.
+
+    `week_start_weekday` comes from the location's scheduling profile and
+    defaults to Sunday, the convention every caller assumed before."""
+    this_week = week_start or align_week_start(today, week_start_weekday)
     if week_hint == "next_week":
-        return this_sunday + timedelta(days=7)
-    return this_sunday
+        return this_week + timedelta(days=7)
+    return this_week
 
 
 _WEEKDAY_NAMES = {
@@ -104,11 +106,25 @@ _WEEKDAY_NAMES = {
 }
 
 
+def _dates_for_weekdays(week_start: date, weekdays: set[int], week_start_weekday: int) -> list[date]:
+    """Calendar dates in [week_start, +7d) for a set of Sunday-indexed weekdays.
+
+    The weekday index is NOT a day offset from the week start unless the week
+    starts on Sunday, which is why this goes through `week_day_offset` rather
+    than adding the index directly.
+    """
+    return sorted(
+        week_start + timedelta(days=week_day_offset(weekday, week_start_weekday))
+        for weekday in weekdays
+    )
+
+
 def resolve_dates(
     spec: dict,
     week_start: date,
     today: date,
     template_days: Optional[list[int]] = None,
+    week_start_weekday: int = 0,
 ) -> Union[list[date], NeedsClarify]:
     """Precedence: an explicit ISO date > named weekdays (within the resolved
     week) > the matched template's own `days_of_week` mask ∩ the week >
@@ -143,15 +159,15 @@ def resolve_dates(
         if isinstance(w, str) and w.strip().lower() in _WEEKDAY_NAMES
     }
     if wanted:
-        dates = [week_start + timedelta(days=i) for i in range(7) if i in wanted]
+        dates = _dates_for_weekdays(week_start, wanted, week_start_weekday)
         future = [d for d in dates if d >= today]
         if not future:
             rolled_start = week_start + timedelta(days=7)
-            future = [rolled_start + timedelta(days=i) for i in range(7) if i in wanted]
+            future = _dates_for_weekdays(rolled_start, wanted, week_start_weekday)
         return future
 
     if template_days:
-        dates = [week_start + timedelta(days=i) for i in range(7) if i in set(template_days)]
+        dates = _dates_for_weekdays(week_start, set(template_days), week_start_weekday)
         dates = [d for d in dates if d >= today]
         if not dates:
             return NeedsClarify(

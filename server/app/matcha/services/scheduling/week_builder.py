@@ -17,15 +17,18 @@ from uuid import UUID, uuid4
 
 from app.database import connection_or_direct
 
+from .location_profile import WEEKDAY_NAMES, resolve_week_start_weekday
 from .schedule_profiles import fetch_effective_job_employee_ids
-from .schedule_rules import availability_violations, template_windows
+from .schedule_rules import align_week_start, availability_violations, template_windows
 from .shift_compliance import check_shift_compliance
 from .shift_writes import (
     apply_assignment_core,
     create_shift_core,
     fetch_availability,
     find_conflicts,
+    lock_scheduling_employees,
     log_audit,
+    resolve_job_by_name,
 )
 
 
@@ -119,8 +122,21 @@ def _is_unavailable(employee_id: str, shift_date: date, ranges: dict[str, list[t
     return any(start <= shift_date <= end for start, end in ranges.get(employee_id, []))
 
 
-def _job_qualified(employee: dict[str, Any], job_id: str | None, shift_date: date) -> bool:
-    if not job_id:
+def _job_qualified(
+    employee: dict[str, Any], job_id: str | None, shift_date: date,
+    gated_job_ids: set[str],
+) -> bool:
+    """Whether this employee may work a shift carrying ``job_id``.
+
+    An EMPTY roster means ungated, matching
+    ``routes/employee_schedule/_shared.check_job_qualification`` and
+    ``schedule_profiles.fetch_effective_job_employee_ids``. Without it, the
+    first whole-week build on a tenant that defined jobs but has not filled in
+    the qualified lists (a separate tab, and the common state) reports every
+    position open — and `apply_week_draft`'s recheck, which uses the shared
+    helper, would then disagree with the plan it is confirming.
+    """
+    if not job_id or job_id not in gated_job_ids:
         return True
     for job in employee.get("jobs") or []:
         if job["job_id"] != job_id or job["qualification_status"] != "active":
@@ -149,6 +165,7 @@ def build_plan(
     existing_assignments: list[dict[str, Any]],
     unavailable_ranges: dict[str, list[tuple[date, date]]],
     exclude_employee_ids: set[str], employee_hour_caps: dict[str, int],
+    gated_job_ids: set[str],
     blocked_pairs: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic scarcity-first assignment planner.
@@ -157,6 +174,11 @@ def build_plan(
     size of their feasible candidate pool, then by time/id; this prevents a
     flexible opener from consuming the only person who can cover a later
     licensed role.
+
+    ``gated_job_ids`` is required rather than defaulted: an omitted set would
+    silently mean "gate nothing", which is the opposite failure from the one
+    this argument exists to fix and would be invisible until a real roster
+    stopped being enforced.
     """
     blocked_pairs = blocked_pairs or set()
     by_id = {employee["id"]: employee for employee in employees}
@@ -179,7 +201,7 @@ def build_plan(
             return "compliance or eligibility block"
         if employee.get("availability_state") == "unconfirmed":
             return "availability unconfirmed"
-        if not _job_qualified(employee, shift.get("job_id"), shift_date):
+        if not _job_qualified(employee, shift.get("job_id"), shift_date, gated_job_ids):
             return "not qualified for the shift job"
         if _is_unavailable(employee_id, shift_date, unavailable_ranges):
             return "approved time away"
@@ -461,11 +483,20 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         unavailable[str(row["employee_id"])].append((row["start_date"], row["end_date"]))
     for ranges in unavailable.values():
         ranges.sort()
+    # Jobs somebody has been named qualified for, company-wide — the same
+    # EXISTS check `_shared.check_job_qualification` does, and deliberately not
+    # filtered to this location: a job whose roster lives at another store is
+    # still opted into gating.
+    gated_rows = await conn.fetch(
+        "SELECT DISTINCT job_id FROM schedule_job_employees WHERE company_id=$1",
+        company_id,
+    )
     return {
         "employees": employees,
         "availability": availability,
         "existing_assignments": existing_assignments,
         "unavailable_ranges": dict(unavailable),
+        "gated_job_ids": {str(row["job_id"]) for row in gated_rows},
     }
 
 
@@ -578,6 +609,41 @@ async def _list_templates(conn, *, company_id: UUID, location_id: UUID) -> list[
             for row in rows]
 
 
+async def _misaligned_week(conn, *, company_id: UUID, location_id: UUID,
+                           week_start: date) -> dict[str, Any] | None:
+    """Refusal when the requested week does not start on the location's own
+    start day.
+
+    Everything downstream (`template_windows`, the seven-day demand load, the
+    editor grid) assumes `week_start` IS the first day of the week, so a
+    Sunday date for a Monday-start store silently plans a window that matches
+    no grid the manager can see. The assistant session gates its own week the
+    same way; this covers every other caller.
+    """
+    weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id, location_id=location_id,
+    )
+    aligned = align_week_start(week_start, weekday)
+    if aligned == week_start:
+        return None
+    return {
+        "status": "refused",
+        "message": (
+            f"This location's weeks start on {WEEKDAY_NAMES[weekday]}. "
+            f"Use {aligned.isoformat()} as the week start."
+        ),
+    }
+
+
+async def _default_template_id(conn, *, company_id: UUID, location_id: UUID) -> UUID | None:
+    """The week template this location's scheduling profile points at."""
+    return await conn.fetchval(
+        "SELECT default_week_template_id FROM schedule_location_profiles "
+        "WHERE company_id=$1 AND location_id=$2",
+        company_id, location_id,
+    )
+
+
 async def _load_template_demand(conn, *, company_id: UUID, location_id: UUID,
                                 week_start: date, template_id: UUID) -> tuple[str, list[dict[str, Any]]]:
     template = await conn.fetchrow(
@@ -667,6 +733,11 @@ async def get_week_build_readiness(
         )
         if not location:
             return {"status": "refused", "message": "That schedule location is not available."}
+        misaligned = await _misaligned_week(
+            conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        )
+        if misaligned:
+            return misaligned
         roster = await _load_roster_context(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
@@ -677,6 +748,13 @@ async def get_week_build_readiness(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
         templates = await _list_templates(conn, company_id=company_id, location_id=location_id)
+        default_id = await _default_template_id(
+            conn, company_id=company_id, location_id=location_id,
+        )
+    default_template = next(
+        (template for template in templates
+         if str(template["id"]) == str(default_id) and template["block_count"]), None,
+    ) if default_id else None
     confirmed = [employee for employee in roster["employees"] if employee["availability_state"] != "unconfirmed"]
     unconfirmed = [employee for employee in roster["employees"] if employee["availability_state"] == "unconfirmed"]
     existing_positions = sum(int(shift["required_staff"]) for shift in demand)
@@ -684,6 +762,8 @@ async def get_week_build_readiness(
         recommendation = "existing"
     elif shift_counts["published"]:
         recommendation = None
+    elif default_template is not None:
+        recommendation = "template"
     elif len(templates) == 1 and templates[0]["block_count"]:
         recommendation = "template"
     else:
@@ -705,10 +785,14 @@ async def get_week_build_readiness(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
     usable_templates = [template for template in templates if template["block_count"]]
-    if not demand and not week_template_id and len(usable_templates) > 1:
+    if (
+        not demand and not week_template_id
+        and default_template is None and len(usable_templates) > 1
+    ):
         blockers.append("Choose which saved week template Huume should use as staffing demand.")
     return {
         "status": "ok", "ready": not blockers, "location_name": location["name"],
+        "default_week_template_id": str(default_template["id"]) if default_template else None,
         "week_start": week_start.isoformat(), "week_end": (week_start + timedelta(days=6)).isoformat(),
         "roster_count": len(roster["employees"]), "confirmed_availability_count": len(confirmed),
         "unconfirmed_availability": [
@@ -765,6 +849,11 @@ async def propose_week_draft(
     except ValueError as exc:
         return {"status": "clarify", "message": str(exc)}
     async with connection_or_direct() as conn:
+        misaligned = await _misaligned_week(
+            conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        )
+        if misaligned:
+            return misaligned
         existing = await _load_existing_demand(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
@@ -789,15 +878,28 @@ async def propose_week_draft(
                 selected_source = "template"
             else:
                 usable = [template for template in templates if template["block_count"]]
-                if len(usable) != 1:
+                # The location's own default is an explicit answer to "which
+                # template?" — asking again when the manager already set one is
+                # the loop this feature exists to end.
+                default_id = await _default_template_id(
+                    conn, company_id=company_id, location_id=location_id,
+                )
+                default_usable = next(
+                    (t for t in usable if str(t["id"]) == str(default_id)), None,
+                ) if default_id else None
+                if default_usable is not None:
+                    selected_source = "template"
+                    week_template_id = default_usable["id"]
+                elif len(usable) != 1:
                     return {
                         "status": "clarify",
                         "message": "Choose which week template to use." if usable else
                                    "Add draft shifts or a week template before I build the week.",
                         "week_templates": usable,
                     }
-                selected_source = "template"
-                week_template_id = usable[0]["id"]
+                else:
+                    selected_source = "template"
+                    week_template_id = usable[0]["id"]
         if selected_source not in {"existing", "template"}:
             return {"status": "clarify", "message": "Use source_mode existing, template, or auto."}
         if selected_source == "template":
@@ -850,6 +952,7 @@ async def propose_week_draft(
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],
+                gated_job_ids=snapshot["gated_job_ids"],
                 blocked_pairs=blocked_pairs,
             )
             newly_blocked = await _preflight_compliance_blocks(
@@ -867,6 +970,7 @@ async def propose_week_draft(
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],
+                gated_job_ids=snapshot["gated_job_ids"],
                 blocked_pairs=blocked_pairs,
             )
         review = _review_payload(
@@ -1003,6 +1107,15 @@ async def apply_week_draft(
                     shift_id_by_key[shift["key"]] = live["id"]
                     touched_shift_ids.append(live["id"])
                     continue
+                job_id = UUID(shift["job_id"]) if shift.get("job_id") else None
+                if job_id is None:
+                    # A legacy block with a free-text role and no job still
+                    # names a real job often enough to be worth resolving —
+                    # generated shifts then match what the REST path writes.
+                    matched_job = await resolve_job_by_name(
+                        conn, company_id, shift.get("role"), location_id=location_id,
+                    )
+                    job_id = matched_job["id"] if matched_job else None
                 new_id = await create_shift_core(
                     conn, company_id, location_id=location_id, role=shift.get("role"),
                     department=shift.get("department"), starts_at=datetime.fromisoformat(shift["starts_at"]),
@@ -1012,7 +1125,7 @@ async def apply_week_draft(
                     notes=shift.get("notes"), kind=shift.get("kind") or "work",
                     template_id=UUID(shift["template_id"]) if shift.get("template_id") else None,
                     series_id=series_id,
-                    job_id=UUID(shift["job_id"]) if shift.get("job_id") else None,
+                    job_id=job_id,
                     training_requirement_id=(
                         UUID(shift["training_requirement_id"])
                         if shift.get("training_requirement_id") else None
@@ -1029,6 +1142,10 @@ async def apply_week_draft(
                 for shift in proposal.get("shifts") or []
                 for assignment in shift.get("proposed_assignments") or []
             })
+            # find_conflicts retains transaction advisory locks.  Acquire the
+            # whole set in one stable order before the proposal-order loop so
+            # concurrent week applies cannot deadlock on inverse rosters.
+            await lock_scheduling_employees(conn, company_id, employee_ids)
             availability = await fetch_availability(conn, company_id, employee_ids)
             for shift in proposal.get("shifts") or []:
                 shift_id = shift_id_by_key[shift["key"]]

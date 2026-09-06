@@ -80,7 +80,7 @@ async def reconcile_schedule_eligibility_events(conn, company_id: UUID) -> dict[
           FROM schedule_eligibility_cases c
           JOIN employees e ON e.id = c.employee_id
           LEFT JOIN employee_credential_requirements ecr ON ecr.id = c.requirement_id
-          LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+          LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
           LEFT JOIN schedule_eligibility_case_assignments a ON a.case_id = c.id
          WHERE c.company_id = $1 AND c.status = ANY($2::text[])
          GROUP BY c.id, e.first_name, e.last_name, ct.label

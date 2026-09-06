@@ -233,9 +233,15 @@ def loss_run_series(snapshots: list[dict]) -> dict:
 
 
 def _week_start(d: date) -> date:
-    """Sunday-anchored week start — same convention as `schedule_rules.py` /
-    `_compliance.py`'s weekly-overtime window, so this series buckets the same
-    weeks the scheduling UI and compliance advisories do."""
+    """Sunday-anchored week start for the company-wide trend series.
+
+    Deliberately ONE axis, not per-location: this is a 26-week rollup across
+    every location, and a tenant whose stores start their weeks on different
+    days has no single correct anchor. It therefore matches the scheduling grid
+    exactly only for Sunday-start locations — fine for a trend line, and the
+    reason nothing that adjudicates anything (compliance windows, the week
+    builder, Fair Workweek pricing) buckets through here.
+    """
     return d - timedelta(days=(d.weekday() + 1) % 7)
 
 

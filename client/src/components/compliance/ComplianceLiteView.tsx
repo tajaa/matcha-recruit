@@ -7,14 +7,15 @@ import { ComplianceLocationList } from './ComplianceLocationList'
 import { ComplianceRequirementsTab } from './ComplianceRequirementsTab'
 import PendingResearchPanel from './PendingResearchPanel'
 import { ComplianceUpcomingTab } from './ComplianceUpcomingTab'
+import { ComplianceCredentialsTab } from './ComplianceCredentialsTab'
 import { UpgradeUpsellCard } from '../shared/UpgradeUpsellCard'
 
 /**
  * Matcha-X read-only "taste" of Compliance (`compliance_lite`).
  *
  * Mirrors the Pro tabbed page so it reads as the full product, but only the
- * read-only tabs (Overview / Requirements / Upcoming) are live — they show the
- * REAL baseline the onboarding build wrote. Every Pro tab is visible but locked
+ * read-only tabs (Requirements / Certifications & Licenses / Upcoming) are live —
+ * they show the REAL baseline and employee expiry data. Every Pro tab is visible but locked
  * and renders a blurred upgrade teaser. The Pro data endpoints are 403 for this
  * tier, so the blurred rows are an honest feature preview; the sharp content is
  * the user's real data. Dispatched from Compliance.tsx; the Pro page is
@@ -39,7 +40,7 @@ const TABS: { value: LiteTab; label: string }[] = [
 ]
 
 // Tabs that are live (read-only) on the lite taste. Everything else is locked.
-const LIVE_TABS = new Set<LiteTab>(['requirements', 'upcoming'])
+const LIVE_TABS = new Set<LiteTab>(['requirements', 'credentials', 'upcoming'])
 const LOCATION_TABS = new Set<LiteTab>(['requirements', 'upcoming'])
 
 const noop = () => {}
@@ -168,6 +169,8 @@ export function ComplianceLiteView() {
         </div>
       )}
 
+      {tab === 'credentials' && <ComplianceCredentialsTab employeeOnly />}
+
       {/* Locked Pro tabs — blurred teaser */}
       {!LIVE_TABS.has(tab) && <UnlockTeaser tab={tab} upcoming={upcoming} />}
     </div>
@@ -177,7 +180,6 @@ export function ComplianceLiteView() {
 type UpcomingItem = { title: string; effective_date: string; days_until: number; location: string; category: string | null }
 
 const TAB_PITCH: Partial<Record<LiteTab, string>> = {
-  credentials: 'Track company certifications and license renewals with automatic expiry alerts.',
   alerts: 'Get monitored compliance alerts with assignable action plans as the law changes.',
   history: 'See the full audit trail of every compliance re-check for each location.',
   posters: 'Auto-generate and track the labor-law posters each location must display.',

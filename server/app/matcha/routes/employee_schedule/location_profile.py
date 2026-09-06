@@ -1,0 +1,115 @@
+"""Per-location scheduling setup (`/employee-schedule/locations/{id}/profile`).
+
+The hand-editable twin of what Huume interviews for on the schedule-assistant
+surface — same table, same service, so a manager can correct in the editor
+whatever the chat saved (and vice versa).
+
+Authorization is `assert_manager_location`, the same location check the
+schedule assistant session uses: role alone is not enough, because a
+location-scoped manager must not read or rewrite another store's setup.
+"""
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.database import get_connection
+from ...dependencies import require_admin_or_client
+from ...models.scheduling.employee_schedule import LocationScheduleProfileUpdate
+from ...services.scheduling.location_profile import (
+    UNSET, load_profile_bundle, upsert_location_profile,
+)
+from ...services.scheduling.schedule_assistant_session import assert_manager_location
+from ...services.scheduling.week_template_writes import JobUnavailable, assert_job_available
+from ._shared import require_company_id
+
+router = APIRouter()
+
+
+def _serialize(bundle: dict, *, location_id: UUID) -> dict:
+    profile = bundle.get("profile") or {}
+    template = bundle.get("template")
+    return {
+        "location_id": str(location_id),
+        "operating_hours": profile.get("operating_hours") or {},
+        "default_week_template_id": (
+            str(profile["default_week_template_id"]) if profile.get("default_week_template_id") else None
+        ),
+        "leader_job_id": str(profile["leader_job_id"]) if profile.get("leader_job_id") else None,
+        "leader_job_name": bundle.get("leader_job_name"),
+        "notes": profile.get("notes"),
+        # Sunday unless this location says otherwise — the default every
+        # week-start computation in the codebase already assumes.
+        "week_start_weekday": int(profile.get("week_start_weekday") or 0),
+        "template": template,
+    }
+
+
+@router.get("/locations/{location_id}/profile")
+async def get_location_schedule_profile(
+    location_id: UUID, current_user=Depends(require_admin_or_client),
+):
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_manager_location(
+            conn, company_id=company_id, user_id=current_user.id,
+            actor_role=current_user.role, location_id=location_id,
+        )
+        bundle = await load_profile_bundle(conn, company_id=company_id, location_id=location_id)
+    return _serialize(bundle, location_id=location_id)
+
+
+@router.put("/locations/{location_id}/profile")
+async def update_location_schedule_profile(
+    location_id: UUID, body: LocationScheduleProfileUpdate,
+    current_user=Depends(require_admin_or_client),
+):
+    company_id = await require_company_id(current_user)
+    patch = body.model_dump(exclude_unset=True)
+    async with get_connection() as conn:
+        await assert_manager_location(
+            conn, company_id=company_id, user_id=current_user.id,
+            actor_role=current_user.role, location_id=location_id,
+        )
+        if patch.get("leader_job_id") is not None:
+            try:
+                await assert_job_available(
+                    conn, company_id, patch["leader_job_id"], location_id=location_id,
+                )
+            except JobUnavailable as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if patch.get("default_week_template_id") is not None:
+            # Must be this location's own template. A company-wide one
+            # (location_id IS NULL) shows in every store's picker and would
+            # make one store's default silently follow another's edits.
+            owned = await conn.fetchval(
+                "SELECT 1 FROM schedule_week_templates "
+                "WHERE id = $1 AND company_id = $2 AND location_id = $3",
+                patch["default_week_template_id"], company_id, location_id,
+            )
+            if not owned:
+                raise HTTPException(
+                    status_code=422,
+                    detail="That week template does not belong to this location",
+                )
+        async with conn.transaction():
+            try:
+                await upsert_location_profile(
+                    conn, company_id=company_id, location_id=location_id,
+                    actor_user_id=current_user.id,
+                    operating_hours=(
+                        {
+                            day: ({"open": window["open"], "close": window["close"]} if window else None)
+                            for day, window in (patch["operating_hours"] or {}).items()
+                        }
+                        if "operating_hours" in patch else UNSET
+                    ),
+                    default_week_template_id=patch.get("default_week_template_id", UNSET),
+                    leader_job_id=patch.get("leader_job_id", UNSET),
+                    notes=patch.get("notes", UNSET),
+                    week_start_weekday=patch.get("week_start_weekday", UNSET),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        bundle = await load_profile_bundle(conn, company_id=company_id, location_id=location_id)
+    return _serialize(bundle, location_id=location_id)

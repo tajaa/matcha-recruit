@@ -3,15 +3,22 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from app.matcha.services.scheduling.schedule_rules import (
+    compliance_relevant_patch, job_changed,
+)
 from app.matcha.services.scheduling.schedule_eligibility import (
     _schedule_blocking_requirements,
     local_date_at,
     open_expired_eligibility_cases,
     open_expired_job_credential_cases,
     open_expiring_eligibility_warnings,
+    resolve_recovered_eligibility_cases,
     schedule_eligibility_roster_flags,
     schedule_eligibility_violations,
 )
+
+
+JOB = uuid4()
 
 
 def test_local_date_uses_location_timezone_and_falls_back_to_utc():
@@ -128,9 +135,45 @@ def test_shift_job_change_rechecks_existing_assignments():
     shifts = Path(__file__).parents[2] / "app/matcha/routes/employee_schedule/shifts.py"
     source = shifts.read_text()
     assert "kind, training_requirement_id, job_id" in source
-    assert 'or "job_id" in patch' in source
     assert "unqualified = await check_job_qualification(" in source
     assert "starts_at=new_start" in source
+    # The rule itself is asserted on behaviour below, not on this file's text:
+    # a job CHANGE re-runs the pass, a job merely resent does not.
+    assert compliance_relevant_patch(
+        {"job_id": JOB}, {"job_id": None}, retimed=False, auto_break_requested=False,
+    )
+
+
+def test_resending_an_unchanged_job_is_not_compliance_relevant():
+    # The editor sends job_id on every save. Reading "sent" as "changed" made a
+    # notes-only edit re-run break minimums, conflicts, availability and Fair
+    # Workweek — and 422/409 saves that used to go through.
+    existing = {"job_id": JOB}
+
+    assert not compliance_relevant_patch(
+        {"job_id": JOB, "notes": "restock the back bar"}, existing,
+        retimed=False, auto_break_requested=False,
+    )
+    assert not job_changed({"job_id": JOB}, existing)
+
+
+def test_clearing_a_job_is_a_change():
+    assert job_changed({"job_id": None}, {"job_id": JOB})
+
+
+def test_an_omitted_job_is_never_a_change():
+    assert not job_changed({"notes": "x"}, {"job_id": JOB})
+
+
+def test_retime_break_and_location_stay_compliance_relevant():
+    existing = {"job_id": JOB}
+    for patch, kwargs in (
+        ({}, {"retimed": True, "auto_break_requested": False}),
+        ({}, {"retimed": False, "auto_break_requested": True}),
+        ({"break_minutes": 30}, {"retimed": False, "auto_break_requested": False}),
+        ({"location_id": None}, {"retimed": False, "auto_break_requested": False}),
+    ):
+        assert compliance_relevant_patch(patch, existing, **kwargs)
 
 
 def test_schedule_feature_no_longer_requires_matcha_ops():
@@ -205,6 +248,45 @@ def test_credential_is_valid_through_its_expiration_date():
         ValidCredentialConn(), uuid4(), employee_id=uuid4(), shift_date=date(2026, 8, 21),
     ))
     assert violations == []
+
+
+class RecoveredCaseConn:
+    def __init__(self):
+        self.requirement_id = uuid4()
+        self.case_id = uuid4()
+        self.fetch_args = None
+        self.resolved = []
+
+    async def fetch(self, _query, *args):
+        self.fetch_args = args
+        return [{
+            "id": self.case_id,
+            "requirement_id": self.requirement_id,
+            "status": "verified",
+            "expires_at": date(2029, 9, 3),
+            "label": "Food Handler Card",
+            "has_expiration": True,
+            "timezone": "UTC",
+            "is_schedule_blocking": True,
+        }]
+
+    async def execute(self, _query, *args):
+        self.resolved.append(args)
+        return "UPDATE 1"
+
+
+def test_current_credential_resolves_only_its_stale_removal_case():
+    conn = RecoveredCaseConn()
+    company_id = uuid4()
+
+    count = asyncio.run(resolve_recovered_eligibility_cases(
+        conn, company_id, requirement_id=conn.requirement_id,
+        as_of=date(2026, 9, 3),
+    ))
+
+    assert count == 1
+    assert conn.fetch_args[2] == conn.requirement_id
+    assert conn.resolved[0][1] == "credential_renewed_or_cleared"
 
 
 class MinorPermitConn:

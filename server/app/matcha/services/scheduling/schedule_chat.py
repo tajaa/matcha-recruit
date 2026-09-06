@@ -61,6 +61,7 @@ from .schedule_chat_rules import (
 )
 from .schedule_intelligence import fetch_lapse_items
 from .schedule_profiles import fetch_effective_job_employee_ids
+from .location_profile import resolve_week_start_weekday
 from .schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES, availability_violations, sunday_indexed_weekday,
     template_windows,
@@ -69,7 +70,8 @@ from .shift_compliance import _approved_db_rules, _fair_workweek_advisories, _we
 from .shift_writes import (
     apply_assignment_core, cancel_shift_core, create_shift_core, fetch_availability,
     find_conflicts, generate_week_template_shifts, log_audit, remove_assignment_core,
-    removal_audit_details, restore_assignment_raw, retime_shift_core,
+    lock_scheduling_employees, removal_audit_details, resolve_job_by_name,
+    restore_assignment_raw, retime_shift_core,
 )
 
 logger = logging.getLogger(__name__)
@@ -722,8 +724,15 @@ async def build_proposal(
         if r["location_id"] is None or str(r["location_id"]) == str(location_id)
     ]
 
-    # 3. Per-request time/date resolution
-    resolved_week_start = resolve_week(parsed.get("week_hint"), today, week_start)
+    # 3. Per-request time/date resolution. The week starts on whatever day
+    # this store says it does — resolved AFTER the location, which is why the
+    # lookup lives here rather than at the top of the function.
+    location_week_start_weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id, location_id=location_id,
+    )
+    resolved_week_start = resolve_week(
+        parsed.get("week_hint"), today, week_start, location_week_start_weekday,
+    )
     resolved_shifts: list[dict] = []
 
     for req in parsed["shift_requests"]:
@@ -772,11 +781,22 @@ async def build_proposal(
             # column, `find_shift_coverage`'s role filter).
             role = spec["role"] or req["label"]
             template_id = None
-            job_id = None
+            # When the manager's own label names a real job, carry the job —
+            # a conversational create should not keep producing the ungated,
+            # free-text rows the REST route refuses. No match stays free text.
+            matched_job = await resolve_job_by_name(
+                conn, company_id, role, location_id=location_id,
+            )
+            job_id = matched_job["id"] if matched_job else None
+            if matched_job:
+                role = matched_job["name"]
         else:
             return await _clarify(f"What hours should the {req['label']} run?")
 
-        dates_or_clarify = resolve_dates(req, resolved_week_start, today, template_days=template_days)
+        dates_or_clarify = resolve_dates(
+            req, resolved_week_start, today, template_days=template_days,
+            week_start_weekday=location_week_start_weekday,
+        )
         if isinstance(dates_or_clarify, NeedsClarify):
             return await _clarify(dates_or_clarify.question, dates_or_clarify.options)
 
@@ -901,7 +921,9 @@ async def build_proposal(
         # internally for its own violation checks.
         hours_by_id: dict[str, float] = {}
         for r in free:
-            hours_by_id[str(r["id"])] = await _week_hours(conn, company_id, r["id"], starts_at, 0.0, None)
+            hours_by_id[str(r["id"])] = await _week_hours(
+                conn, company_id, r["id"], starts_at, 0.0, None, location_id,
+            )
 
         pinned_rows = [r for r in free if str(r["id"]) in pinned]
         other_rows = sorted(
@@ -1951,6 +1973,7 @@ async def execute_proposal(
 
     async with conn.transaction():
         await _claim_proposal_execution(conn, proposal_row["id"])
+        await lock_scheduling_employees(conn, company_id, all_employee_ids)
         for shift in proposal["shifts"]:
             starts_at = datetime.fromisoformat(shift["starts_at"])
             ends_at = datetime.fromisoformat(shift["ends_at"])
@@ -2091,6 +2114,42 @@ async def execute_edit_proposal(
 
     async with conn.transaction():
         await _claim_proposal_execution(conn, proposal_row["id"])
+        # Every edit proposal locks its complete shift set in one stable order
+        # before reading any roster or applying either half of a swap.  This
+        # prevents two overlapping proposals from deadlocking or validating a
+        # secondary shift against state that changes before the write.
+        shift_ids_to_lock = sorted({
+            UUID(raw_id)
+            for op in ops
+            for raw_id in (op.get("shift_id"), op.get("second_shift_id"))
+            if raw_id
+        })
+        if shift_ids_to_lock:
+            await conn.fetch(
+                """
+                SELECT id
+                FROM schedule_shifts
+                WHERE company_id = $1 AND id = ANY($2::uuid[])
+                ORDER BY id
+                FOR UPDATE
+                """,
+                company_id, shift_ids_to_lock,
+            )
+        explicit_employee_ids = {
+            UUID(raw_id)
+            for op in ops
+            for raw_id in (op.get("from_employee_id"), op.get("to_employee_id"))
+            if raw_id
+        }
+        roster_rows = await conn.fetch(
+            "SELECT employee_id FROM schedule_shift_assignments "
+            "WHERE shift_id = ANY($1::uuid[])",
+            shift_ids_to_lock,
+        ) if shift_ids_to_lock else []
+        await lock_scheduling_employees(
+            conn, company_id,
+            [*explicit_employee_ids, *(row["employee_id"] for row in roster_rows)],
+        )
         removed: dict[int, dict] = {}
         for idx, op in enumerate(ops):
             if op["kind"] in ("reassign", "unassign") and op.get("from_employee_id"):
@@ -2126,12 +2185,16 @@ async def execute_edit_proposal(
                 SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
                        kind, training_requirement_id, published_at, required_staff
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
+                FOR UPDATE
                 """,
                 shift_id, company_id,
             )
             if shift_row is None:
                 await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "that shift no longer exists"})
+                results.append({
+                    **op, "ok": False, "shift_gone": True,
+                    "reason": "that shift no longer exists",
+                })
                 continue
             if not _in_editor_week(shift_row):
                 await _restore_if_removed(idx)
@@ -2140,7 +2203,9 @@ async def execute_edit_proposal(
 
             if op["kind"] == "cancel":
                 if shift_row["status"] == "cancelled":
-                    results.append({**op, "ok": False, "reason": "already cancelled"})
+                    results.append({
+                        **op, "ok": False, "shift_gone": True, "reason": "already cancelled",
+                    })
                     continue
                 await cancel_shift_core(
                     conn, company_id, shift_id=shift_id, existing_row=shift_row,
@@ -2153,7 +2218,10 @@ async def execute_edit_proposal(
             if op["kind"] == "unassign":
                 info = removed.get(idx)
                 if info is None:
-                    results.append({**op, "ok": False, "reason": "that shift was cancelled or no longer exists"})
+                    results.append({
+                        **op, "ok": False, "shift_gone": True,
+                        "reason": "that shift was cancelled or no longer exists",
+                    })
                     continue
                 if info["deleted"] == 0:
                     results.append({**op, "ok": False, "reason": "they weren't on that shift"})
@@ -2261,7 +2329,9 @@ async def execute_edit_proposal(
 
             if shift_row["status"] == "cancelled":
                 await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "that shift was cancelled"})
+                results.append({
+                    **op, "ok": False, "shift_gone": True, "reason": "that shift was cancelled",
+                })
                 continue
 
             if shift_row["status"] == "published" and not edit_published:
@@ -2642,6 +2712,16 @@ def edit_result_text(results: list[dict]) -> str:
         verb = "is" if n == 1 else "are"
         lines = [f"✅ Done — {n} change{'s' if n != 1 else ''} {verb} live ({'; '.join(parts)})."]
     for f in failed:
-        who = f.get("to_employee_name") or f.get("from_employee_name") or (f.get("shift_role") or "that shift")
-        lines.append(f"Couldn't change {who}: {f['reason']}")
+        who = f.get("to_employee_name") or f.get("from_employee_name")
+        label = (f.get("shift_role") or "shift").title()
+        # A deleted or cancelled shift has nothing to open — the token renders
+        # as a real link into the scheduler, so linking the very shift the
+        # reason says is gone hands the manager a dead deep link.
+        if f.get("shift_gone"):
+            where = f"**{label}**"
+        else:
+            shift_date = datetime.fromisoformat(f["starts_at"]).date().isoformat()
+            where = f"**{label}** [[shift:{f['shift_id']}:{shift_date}]]"
+        subject = f"{who} on {where}" if who else where
+        lines.append(f"Couldn't change {subject}: {f['reason']}")
     return "\n".join(lines)

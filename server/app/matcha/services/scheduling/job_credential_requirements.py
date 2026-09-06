@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from uuid import UUID
 
+from app.core.services.credential_template_service import find_hidden_credential_types
+
 
 async def materialize_job_requirements(
     conn,
@@ -79,7 +81,10 @@ async def replace_job_credential_requirements(
         normalized[requirement["credential_type_id"]] = requirement
     if normalized:
         valid = await conn.fetch(
-            "SELECT id FROM credential_types WHERE id = ANY($1::uuid[])", list(normalized),
+            """SELECT id FROM scoped_credential_types
+               WHERE id = ANY($1::uuid[])
+                 AND (company_id IS NULL OR company_id = $2)""",
+            list(normalized), company_id,
         )
         if len(valid) != len(normalized):
             raise ValueError("One or more credential types do not exist")
@@ -88,6 +93,14 @@ async def replace_job_credential_requirements(
         company_id, job_id,
     )
     existing_ids = {row["credential_type_id"] for row in existing}
+    # Types the company removed from its dropdowns cannot be attached to a job
+    # by a stale tab or a direct API call.  Retained rules are exempt so an
+    # already-configured requirement stays editable and removable.
+    hidden = await find_hidden_credential_types(
+        conn, company_id=company_id, credential_type_ids=list(set(normalized) - existing_ids),
+    )
+    if hidden:
+        raise ValueError("One or more credential types are not available to this company")
     remove_ids = list(existing_ids - set(normalized))
     if remove_ids:
         await conn.execute(
@@ -119,7 +132,7 @@ async def fetch_job_credential_requirements(conn, *, company_id: UUID, job_ids: 
                   jr.effective_from, jr.notes, ct.key AS credential_type_key,
                   ct.label AS credential_type_label, ct.has_expiration
              FROM schedule_job_credential_requirements jr
-             JOIN credential_types ct ON ct.id=jr.credential_type_id
+             JOIN scoped_credential_types ct ON ct.id=jr.credential_type_id
             WHERE jr.company_id=$1 AND jr.job_id = ANY($2::uuid[])
             ORDER BY ct.category, ct.label""",
         company_id, list(job_ids),

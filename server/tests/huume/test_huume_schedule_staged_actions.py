@@ -20,7 +20,7 @@ from uuid import uuid4
 import pytest
 from google.genai import types
 
-from app.matcha.services.huume import agent, schedule_skill
+from app.matcha.services.huume import agent, schedule_profile_skill, schedule_skill
 from app.matcha.services.scheduling import week_builder
 from app.matcha.services.huume.scope import (
     HuumeSurfaceContext,
@@ -77,18 +77,26 @@ def _connection_context(monkeypatch, *, fetchval=None, fetchrow=None):
     return connection
 
 
-async def _run_turn(monkeypatch, responses, *, fetchval=None, fetchrow=None):
+async def _run_turn(
+    monkeypatch, responses, *, fetchval=None, fetchrow=None,
+    current_state=None, user_text="stage something",
+):
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=responses)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
     _connection_context(monkeypatch, fetchval=fetchval, fetchrow=fetchrow)
+    # The schedule prompt now embeds the location's saved profile; every test
+    # here drives the tool loop, not that read.
+    monkeypatch.setattr(
+        schedule_profile_skill, "context_block", AsyncMock(return_value=""),
+    )
 
     frames = [
         frame async for frame in agent.run_huume_turn(
             thread_id=uuid4(), company_id=uuid4(), user_id=uuid4(), user_role="client",
-            history=[{"role": "user", "content": "stage something"}],
-            company_name="Acme", current_state={}, features={
+            history=[{"role": "user", "content": user_text}],
+            company_name="Acme", current_state=current_state or {}, features={
                 "huume": True, "matcha_work": True, "employee_schedule": True,
             }, integrations={}, surface_context=_schedule_surface_context(),
         )
@@ -230,3 +238,251 @@ async def test_build_week_schedule_stages_scoped_preview(monkeypatch):
     assert action["week_start"] == "2026-08-23"
     assert action["schedule_preview"][0]["assignment_names"] == ["Amy", "Ben"]
     assert ("build_week_schedule", "ok") in _step_statuses(result)
+
+
+@pytest.mark.asyncio
+async def test_save_location_profile_stages_resolved_setup(monkeypatch):
+    """The staged dict carries what the SERVER resolved (job ids, materialized
+    leader blocks), not the model's raw args — the confirm turn writes exactly
+    what the manager was shown."""
+    monkeypatch.setattr(schedule_profile_skill, "resolve_profile_args", AsyncMock(return_value={
+        "status": "ok",
+        "operating_hours": {"1": {"open": "08:00", "close": "17:00"}},
+        "blocks": [{
+            "name": "Opener", "role": "Barista", "job_id": str(uuid4()), "job_name": "Barista",
+            "days_of_week": [1, 2, 3], "start_time": "08:00", "end_time": "16:00",
+            "required_staff": 2, "break_minutes": 30,
+        }],
+        "leader_job_id": None, "leader_job_name": None, "notes": None, "template_name": None,
+        "summary": "hours on 1 day, 1 shift block (2 positions/day-slot)",
+    }))
+    call = _fake_call("save_location_schedule_profile", {
+        "operating_hours": {"1": {"open": "08:00", "close": "17:00"}},
+        "blocks": [{
+            "name": "Opener", "job_name": "Barista", "days_of_week": [1, 2, 3],
+            "start_time": "08:00", "end_time": "16:00", "required_staff": 2,
+        }],
+    })
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="Staged the setup for your approval.")],
+    )
+    result = _result(frames)
+    action = result["state_updates"]["huume_action"]
+
+    assert action["type"] == "schedule_location_profile"
+    assert action["status"] == "proposed"
+    assert action["location_id"]
+    assert len(action["confirm_id"]) == 8
+    assert action["blocks"][0]["job_id"]
+    assert ("save_location_schedule_profile", "ok") in _step_statuses(result)
+
+
+@pytest.mark.asyncio
+async def test_save_location_profile_clarify_offers_job_chips(monkeypatch):
+    """An unresolvable job name becomes a tappable question, not a dead end."""
+    monkeypatch.setattr(schedule_profile_skill, "resolve_profile_args", AsyncMock(return_value={
+        "status": "clarify",
+        "message": "There's no job named 'Barrista' at this location. Jobs here: Barista, Shift Lead.",
+        "job_options": ["Barista", "Shift Lead"],
+    }))
+    call = _fake_call("save_location_schedule_profile", {
+        "blocks": [{
+            "name": "Opener", "job_name": "Barrista", "days_of_week": [1],
+            "start_time": "08:00", "end_time": "16:00", "required_staff": 1,
+        }],
+    })
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="Which job did you mean?")],
+    )
+    result = _result(frames)
+
+    assert "huume_action" not in result["state_updates"]
+    choice = result["state_updates"]["huume_choice"]
+    assert [option["label"] for option in choice["options"]] == ["Barista", "Shift Lead"]
+    assert ("save_location_schedule_profile", "rejected") in _step_statuses(result)
+
+
+@pytest.mark.asyncio
+async def test_save_location_profile_confirm_requires_explicit_user_confirm(monkeypatch):
+    """Echoing the confirm_id is not consent — the id is printed in the state
+    block, so without this gate the model can approve its own proposal. A chip
+    click sends an option label, never the word "confirm", so chips can't
+    satisfy it either."""
+    execute = AsyncMock(return_value={"status": "created", "record_id": str(uuid4())})
+    monkeypatch.setattr(schedule_profile_skill, "execute", execute)
+    staged = {
+        "type": "schedule_location_profile", "status": "proposed", "confirm_id": "ab12cd34",
+        "location_id": str(uuid4()), "operating_hours": {"1": {"open": "08:00", "close": "17:00"}},
+        "blocks": [], "summary": "hours on 1 day",
+    }
+    call = _fake_call("save_location_schedule_profile", {"confirm_id": "ab12cd34"})
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="Still waiting on you.")],
+        current_state={"huume_action": staged},
+        user_text="also add a note about parking",
+    )
+    result = _result(frames)
+
+    execute.assert_not_awaited()
+    assert ("save_location_schedule_profile", "rejected") in _step_statuses(result)
+
+
+@pytest.mark.asyncio
+async def test_save_location_profile_executes_on_explicit_confirm(monkeypatch):
+    execute = AsyncMock(return_value={"status": "created", "record_id": str(uuid4())})
+    monkeypatch.setattr(schedule_profile_skill, "execute", execute)
+    staged = {
+        "type": "schedule_location_profile", "status": "proposed", "confirm_id": "ab12cd34",
+        "location_id": str(uuid4()), "operating_hours": {"1": {"open": "08:00", "close": "17:00"}},
+        "blocks": [], "summary": "hours on 1 day",
+    }
+    call = _fake_call("save_location_schedule_profile", {"confirm_id": "ab12cd34"})
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="Saved.")],
+        current_state={"huume_action": staged},
+        user_text="confirm",
+    )
+    result = _result(frames)
+
+    execute.assert_awaited_once()
+    assert result["state_updates"]["huume_action"]["status"] == "saved"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_profile_confirm_blocked_within_one_turn(monkeypatch):
+    """Parallel function calls can emit the same confirming call twice, and
+    pre_turn_action is frozen for the whole turn — one confirm_id must execute
+    at most once."""
+    execute = AsyncMock(return_value={"status": "created", "record_id": str(uuid4())})
+    monkeypatch.setattr(schedule_profile_skill, "execute", execute)
+    staged = {
+        "type": "schedule_location_profile", "status": "proposed", "confirm_id": "ab12cd34",
+        "location_id": str(uuid4()), "operating_hours": {"1": {"open": "08:00", "close": "17:00"}},
+        "blocks": [], "summary": "hours on 1 day",
+    }
+    calls = [
+        _fake_call("save_location_schedule_profile", {"confirm_id": "ab12cd34"}),
+        _fake_call("save_location_schedule_profile", {"confirm_id": "ab12cd34"}),
+    ]
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=calls), _fake_response(text="Saved once.")],
+        current_state={"huume_action": staged},
+        user_text="confirm",
+    )
+    result = _result(frames)
+
+    assert execute.await_count == 1
+    assert ("save_location_schedule_profile", "rejected") in _step_statuses(result)
+
+
+@pytest.mark.asyncio
+async def test_finish_can_offer_tappable_options(monkeypatch):
+    call = _fake_call("finish", {
+        "message": "Which store are we scheduling?",
+        "question": "Which store are we scheduling?",
+        "options": ["Downtown", "Wilshire", "Downtown"],
+    })
+    frames = await _run_turn(monkeypatch, [_fake_response(calls=[call])])
+    result = _result(frames)
+
+    choice = result["state_updates"]["huume_choice"]
+    # Deduped, and rendered as a single-select question.
+    assert [option["label"] for option in choice["options"]] == ["Downtown", "Wilshire"]
+    assert choice["kind"] == "single"
+
+
+@pytest.mark.asyncio
+async def test_stale_choice_is_cleared_when_the_turn_does_not_reissue_it(monkeypatch):
+    """Chips answer one question. Left in place they invite the manager to tap
+    an answer to something asked two turns ago."""
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[_fake_call("finish", {"message": "Got it."})])],
+        current_state={"huume_choice": {
+            "question": "Which store?", "options": [{"label": "Downtown"}], "kind": "single",
+        }},
+    )
+    result = _result(frames)
+    assert result["state_updates"]["huume_choice"] is None
+
+
+@pytest.mark.asyncio
+async def test_no_choice_key_emitted_when_none_was_ever_set(monkeypatch):
+    """An empty state_updates skips apply_update entirely; an unconditional
+    clear would force a document version bump on every idle turn."""
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[_fake_call("finish", {"message": "Got it."})])],
+    )
+    result = _result(frames)
+    assert "huume_choice" not in result["state_updates"]
+
+
+@pytest.mark.asyncio
+async def test_profile_clarify_ends_the_turn_without_another_model_call(monkeypatch):
+    """The clarify already names the location's real jobs, so a second model
+    call can only re-ask what the manager can already read — the retry loop the
+    August cost audit found. The deterministic message becomes the reply."""
+    monkeypatch.setattr(schedule_profile_skill, "resolve_profile_args", AsyncMock(return_value={
+        "status": "clarify",
+        "message": "There's no job named 'Barrista' at this location. Jobs here: Barista, Shift Lead.",
+        "job_options": ["Barista", "Shift Lead"],
+    }))
+    call = _fake_call("save_location_schedule_profile", {
+        "blocks": [{
+            "name": "Opener", "job_name": "Barrista", "days_of_week": [1],
+            "start_time": "08:00", "end_time": "16:00", "required_staff": 1,
+        }],
+    })
+
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[call]),
+        AssertionError("the turn made a second model call after a schedule clarification"),
+    ])
+    result = _result(frames)
+
+    assert result["message"] == (
+        "There's no job named 'Barrista' at this location. Jobs here: Barista, Shift Lead."
+    )
+    assert result["token_usage"]["stop_reason"] == "schedule_clarification"
+    assert result["model_calls"] == 1
+    # The chips still ride along, so the manager can tap the answer.
+    assert [option["label"] for option in result["state_updates"]["huume_choice"]["options"]] == [
+        "Barista", "Shift Lead",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_week_template_clarify_ends_the_turn_too(monkeypatch):
+    """Same rule for the builder's "which template?" — it lists the real saved
+    templates, and re-asking costs a full model call per round."""
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "clarify",
+        "message": "Choose which week template to use.",
+        "week_templates": [
+            {"id": str(uuid4()), "name": "Downtown default week", "block_count": 4},
+            {"id": str(uuid4()), "name": "Holiday week", "block_count": 3},
+        ],
+    }))
+
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[_fake_call("build_week_schedule", {"source_mode": "auto"})]),
+        AssertionError("the turn made a second model call after a schedule clarification"),
+    ])
+    result = _result(frames)
+
+    assert result["message"] == "Choose which week template to use."
+    assert result["token_usage"]["stop_reason"] == "schedule_clarification"
+    assert [option["label"] for option in result["state_updates"]["huume_choice"]["options"]] == [
+        "Downtown default week", "Holiday week",
+    ]

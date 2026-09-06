@@ -50,6 +50,12 @@ struct TaskViewerSheet: View {
     @State var isAddingAutoPRContext = false
     @State var didSubmitAutoPRContext = false
     @State var autoPRContextError: String?
+    /// "Run AutoPR now": optimistic local state so the control flips the
+    /// instant the request lands, before the next task-list refresh carries
+    /// the server's `autopr_run_requested_at` back.
+    @State var didRequestAutoPRRun = false
+    @State var requestingAutoPRRun = false
+    @State var autoPRRunError: String?
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -284,6 +290,11 @@ struct TaskViewerSheet: View {
             // is opened so a person can distinguish automated work from their
             // own and see exactly why the automation acted or stopped.
             autoSetupBanner
+
+            // Independent of the banner: a ticket AutoPR has never touched has
+            // no note to hang this off, and queueing an untouched card is the
+            // common case.
+            autoPRRunNowControl
 
             if PacificDateFormatter.absolute(task.createdAt) != nil
                 || PacificDateFormatter.absolute(task.lastMovedAt) != nil {

@@ -11,15 +11,23 @@ WORKFLOW="${AUTOPR_WORKFLOW:-kanban-autopr.yml}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 GIT_BIN="${AUTOPR_GIT_BIN:-/usr/bin/git}"
 RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-actions-runner/_work/matcha-recruit/matcha-recruit}"
-REFRESH_SECONDS="${AUTOPR_PR_REFRESH_SECONDS:-10}"
+# PR/check metadata is observer-only and shares the dispatcher's API token.
+REFRESH_SECONDS="${AUTOPR_PR_REFRESH_SECONDS:-60}"
 PACIFIC_TZ="${AUTOPR_DASHBOARD_TZ:-America/Los_Angeles}"
 MAX_DIFF_LINES="${AUTOPR_PR_DIFF_LINES:-80}"
 MAX_FILE_LINES="${AUTOPR_PR_FILE_LINES:-3}"
 CARD_SNAPSHOT="${AUTOPR_CARD_SNAPSHOT:-$USER_HOME/Library/Caches/matcha-kanban-autopr/cards.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
+# This pane is an observer. Its PR metadata may be a couple of minutes old;
+# what it must not do is spend a GitHub request per redraw per pane.
+GH_CACHED="${AUTOPR_GH_CACHED:-$SCRIPT_DIR/gh-cached.sh}"
+PR_LIST_TTL_SECONDS="${AUTOPR_PR_LIST_TTL_SECONDS:-300}"
+PR_VIEW_TTL_SECONDS="${AUTOPR_PR_VIEW_TTL_SECONDS:-120}"
 
 workflow_is_active() {
-    "$GH_BIN" run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 --json status 2>/dev/null \
-        | jq -e 'any(.[]; .status | IN("queued", "in_progress", "requested", "waiting", "pending"))' >/dev/null 2>&1
+    AUTOPR_REPO="$REPO" AUTOPR_GH_BIN="$GH_BIN" "$RUN_SNAPSHOT" 2>/dev/null \
+        | jq -e 'any(.[]; .lane == "kanban" and (.status | IN("queued", "in_progress", "requested", "waiting", "pending")))' >/dev/null 2>&1
 }
 
 runner_task_branch() {
@@ -45,7 +53,8 @@ current_task_branch() {
     # When the runner is between jobs, fall back to the most recently updated
     # open Kanban PR. Restrict both the label and branch prefix so a bot/err-*
     # production-error PR can never appear in this pane.
-    latest_open="$($GH_BIN pr list --repo "$REPO" --state open --label autopr --limit 20 \
+    latest_open="$("$GH_CACHED" "$PR_LIST_TTL_SECONDS" pr-open-autopr \
+        "$GH_BIN" pr list --repo "$REPO" --state open --label autopr --limit 20 \
         --json headRefName,updatedAt 2>/dev/null \
         | jq -r '[.[] | select(.headRefName | startswith("bot/task-"))] | sort_by(.updatedAt) | reverse | .[0].headRefName // empty' 2>/dev/null)"
     if [ -n "$latest_open" ]; then
@@ -59,10 +68,12 @@ current_task_branch() {
 
 pr_for_branch() {
     local branch="$1" number
-    number="$($GH_BIN pr list --repo "$REPO" --head "$branch" --state all --limit 1 \
+    number="$("$GH_CACHED" "$PR_VIEW_TTL_SECONDS" "pr-number-$branch" \
+        "$GH_BIN" pr list --repo "$REPO" --head "$branch" --state all --limit 1 \
         --json number --jq '.[0].number // empty' 2>/dev/null || true)"
     [ -n "$number" ] || return 1
-    "$GH_BIN" pr view "$number" --repo "$REPO" \
+    "$GH_CACHED" "$PR_VIEW_TTL_SECONDS" "pr-view-$number" \
+        "$GH_BIN" pr view "$number" --repo "$REPO" \
         --json number,title,isDraft,state,url,labels,headRefName,updatedAt,reviewDecision,statusCheckRollup,files,additions,deletions \
         2>/dev/null
 }

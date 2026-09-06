@@ -47,6 +47,27 @@ def sunday_indexed_weekday(d: date) -> int:
     return (d.weekday() + 1) % 7
 
 
+def align_week_start(d: date, week_start_weekday: int = 0) -> date:
+    """Start of the seven-day week containing `d`.
+
+    `week_start_weekday` is Sunday-indexed like every other weekday integer in
+    this module (0=Sunday … 6=Saturday) and comes from the location's
+    scheduling profile. It defaults to 0, so every caller that has not been
+    given a location keeps the Sunday weeks the whole codebase assumed before.
+    """
+    return d - timedelta(days=(sunday_indexed_weekday(d) - int(week_start_weekday)) % 7)
+
+
+def week_day_offset(weekday: int, week_start_weekday: int = 0) -> int:
+    """Days from the week's start to a Sunday-indexed weekday.
+
+    Distinct from the weekday index itself: only for a Sunday-starting week are
+    the two the same number. Anywhere a weekday is added to a week_start as a
+    day offset, this is the conversion that has to happen first.
+    """
+    return (int(weekday) - int(week_start_weekday)) % 7
+
+
 def template_windows(
     start_date: date,
     end_date: date,
@@ -211,6 +232,38 @@ def job_qualification_detail(employee_id: UUID, job_id: UUID, job_name: str) -> 
         "job_id": str(job_id),
         "job_name": job_name,
     }
+
+
+def job_changed(patch: dict, existing) -> bool:
+    """True only when a PATCH actually moves the shift to a different job.
+
+    The schedule editor sends job_id on every save, so "the caller sent it" is
+    not "it changed" — reading the two as the same re-runs the entire
+    compliance pass (break minimum, conflicts, availability, Fair Workweek) on
+    an edit that only touched the notes, and can 422/409 a save that used to
+    go through silently.
+    """
+    return "job_id" in patch and patch["job_id"] != existing["job_id"]
+
+
+def compliance_relevant_patch(
+    patch: dict, existing, *, retimed: bool, auto_break_requested: bool,
+) -> bool:
+    """Whether a shift PATCH has to re-run the compliance pass.
+
+    Retiming a staffed shift can double-book everyone on it; a break, location
+    or job change moves the meal-break minimum, the jurisdiction, or who is
+    qualified. `location_id` and `break_minutes` are deliberately still tested
+    for PRESENCE, not for change — that is long-standing behaviour and the
+    clients that send them only send them on edit.
+    """
+    return bool(
+        auto_break_requested
+        or retimed
+        or "break_minutes" in patch
+        or "location_id" in patch
+        or job_changed(patch, existing)
+    )
 
 
 def shift_window_on_date(starts_at: datetime, ends_at: datetime, target: date) -> tuple[datetime, datetime]:

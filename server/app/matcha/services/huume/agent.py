@@ -65,6 +65,17 @@ _MAX_MODEL_CALLS = 8
 _MAX_SCHEDULE_PROPOSALS_PER_TURN = 1
 _MAX_TURN_PROMPT_TOKENS = 100_000
 
+# Staged schedule tools whose clarification/refusal ENDS the turn: their
+# messages are deterministic and complete (the candidate list, the real job
+# names, the saved templates), so another model call can only re-ask what the
+# manager already has in front of them — the retry loop that cost $3.44 in a
+# single August day. The relayed message becomes the assistant's reply.
+_TERMINAL_SCHEDULE_TOOLS = frozenset({
+    "propose_schedule_change",
+    "save_location_schedule_profile",
+    "build_week_schedule",
+})
+
 
 def _turn_bound_reason(
     *,
@@ -528,6 +539,20 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "failed_label": "Generated week not applied",
         "done_status": "applied",
     },
+    "save_location_schedule_profile": {
+        "action_type": "schedule_location_profile",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        # Like propose_schedule_change, the real staged state is what
+        # schedule_profile_skill.resolve_profile_args merged in (resolved job
+        # ids, materialized leader blocks) — not the model's raw args.
+        "fields": ("operating_hours", "blocks", "leader_job_name", "notes", "template_name"),
+        "staged_label": "Staged: location schedule profile",
+        "refused_label": "Location profile refused",
+        "done_label": "Saved location schedule profile",
+        "failed_label": "Location profile not saved",
+        "done_status": "saved",
+    },
 }
 
 
@@ -555,6 +580,49 @@ def _send_offer_confirming(
     if not target_matches:
         return False
     return recipient_override is None or recipient_override == existing.get("recipient_email")
+
+
+_MAX_CHOICE_OPTIONS = 6
+_MAX_CHOICE_LABEL = 40
+
+
+def _build_choice(
+    question: Any, options: Any, *, sends: Optional[dict[str, str]] = None,
+) -> Optional[dict[str, Any]]:
+    """Pure. A tappable multiple-choice question for the client, or None.
+
+    Threads have no reply-to, so a question whose answer is one of a short list
+    used to cost the manager a round of typing (and a re-parse that could miss).
+    Rendering it as buttons removes both. Anything that isn't a genuine short
+    finite choice degrades to plain prose — hence the None returns.
+    """
+    text = str(question or "").strip()
+    if not text:
+        return None
+    picked: list[tuple[str, Optional[str]]] = []
+    seen: set[str] = set()
+    for raw in options or []:
+        original = str(raw or "").strip()
+        # The send text is keyed on the FULL option, not the trimmed label: a
+        # long template name would otherwise lose its "Use the week template
+        # named ..." phrasing and send back a chopped name nothing resolves.
+        label = original[:_MAX_CHOICE_LABEL]
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        picked.append((label, (sends or {}).get(original)))
+        if len(picked) >= _MAX_CHOICE_OPTIONS:
+            break
+    if len(picked) < 2:
+        return None
+    return {
+        "question": text,
+        "options": [
+            {"label": label, **({"send": send} if send else {})}
+            for label, send in picked
+        ],
+        "kind": "single",
+    }
 
 
 def _build_hr_ops_staged(spec: dict[str, Any], args: dict[str, Any], existing: Any) -> tuple[dict[str, Any], bool]:
@@ -704,6 +772,7 @@ async def run_huume_turn(
             "discipline_draft": "discipline write-up",
             "schedule_change": "schedule change",
             "schedule_week_draft": "generated weekly schedule",
+            "schedule_location_profile": "location schedule profile",
             "schedule_note": "assignment note",
             "meal_break_waiver": "meal-break waiver",
             "work_permit": "work permit",
@@ -736,7 +805,11 @@ async def run_huume_turn(
         if deferred is not None:
             return deferred
         staged_action_this_turn = staged
-        state_updates["huume_action"] = staged
+        # Sanitized on the way into thread state: this dict is persisted as
+        # JSONB, and one UUID/date left in it fails json.dumps for the WHOLE
+        # state update — the staged card, and any other slot this turn set,
+        # vanish with only a swallowed log line to show for it.
+        state_updates["huume_action"] = _json_safe(staged)
         return None
 
     # Pilot-skill turn state: handbook drafts proposed THIS turn (the two-turn
@@ -811,6 +884,24 @@ async def run_huume_turn(
                     status="ok" if ok else "rejected", detail=result.get("message"),
                 )
                 return _json_safe(result), step
+
+            if name == "get_location_schedule_profile":
+                from app.matcha.services.huume import schedule_profile_skill
+                if not surface_context.is_schedule or not surface_context.location_id:
+                    step = recorder.record(
+                        tool=name, kind="read", label="Schedule context unavailable", status="rejected",
+                    )
+                    return {"status": "refused", "message": "This tool requires a scoped schedule workspace."}, step
+                from app.matcha.services.scheduling import location_profile as _location_profile
+                bundle = await schedule_profile_skill.load_bundle(
+                    company_id=company_id, location_id=surface_context.location_id,
+                )
+                missing = _location_profile.missing_fields(bundle)
+                step = recorder.record(
+                    tool=name, kind="read", label="Read location scheduling profile",
+                    status="ok", detail=f"missing: {', '.join(missing)}" if missing else "complete",
+                )
+                return _json_safe({"status": "ok", **bundle, "missing": missing}), step
 
             if name == "get_week_build_readiness":
                 from app.matcha.services.scheduling.week_builder import get_week_build_readiness
@@ -1440,7 +1531,10 @@ async def run_huume_turn(
                 spec = _HR_OPS_TOOL_SPECS[name]
                 staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
                 if (
-                    name in {"propose_schedule_change", "build_week_schedule"}
+                    name in {
+                        "propose_schedule_change", "build_week_schedule",
+                        "save_location_schedule_profile",
+                    }
                     and confirming
                     and not _has_explicit_schedule_confirmation(history)
                 ):
@@ -1498,6 +1592,36 @@ async def run_huume_turn(
                             "message": message,
                         }, step
                     staged.update({k: v for k, v in proposed.items() if k != "status"})
+                if name == "save_location_schedule_profile" and not confirming:
+                    # Same shape as the two special cases above: job names are
+                    # resolved to real ids and the leader rule is materialized
+                    # into blocks NOW, so the confirm turn writes exactly what
+                    # the manager was shown.
+                    from app.matcha.services.huume import schedule_profile_skill
+                    if not surface_context.is_schedule or not surface_context.location_id:
+                        message = "Saving a location's scheduling setup requires a scoped schedule workspace."
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Location profile not staged",
+                            status="rejected", detail=message,
+                        )
+                        return {"status": "refused", "message": message}, step
+                    resolved = await schedule_profile_skill.resolve_profile_args(
+                        company_id=company_id, location_id=surface_context.location_id, args=args,
+                    )
+                    if resolved.get("status") != "ok":
+                        message = str(resolved.get("message") or "That scheduling profile could not be staged.")
+                        options = resolved.get("job_options") or []
+                        if len(options) >= 2:
+                            state_updates["huume_choice"] = _build_choice(
+                                "Which job did you mean?", options,
+                            )
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Location profile not staged",
+                            status="rejected", detail=message,
+                        )
+                        return {"status": resolved.get("status") or "refused", "message": message}, step
+                    staged.update({k: v for k, v in resolved.items() if k not in {"status", "job_options"}})
+                    staged["location_id"] = str(surface_context.location_id)
                 if name == "build_week_schedule" and not confirming:
                     from app.matcha.services.scheduling.week_builder import propose_week_draft
                     if not surface_context.is_schedule or not surface_context.location_id or not surface_context.week_start:
@@ -1528,6 +1652,13 @@ async def run_huume_turn(
                         response = {"status": proposal_status or "refused", "message": message}
                         if proposed.get("week_templates") is not None:
                             response["week_templates"] = proposed["week_templates"]
+                            names = [str(t.get("name") or "") for t in proposed["week_templates"]]
+                            choice = _build_choice(
+                                "Which week template should I use?", names,
+                                sends={n: f"Use the week template named {n}" for n in names},
+                            )
+                            if choice:
+                                state_updates["huume_choice"] = choice
                         return _json_safe(response), step
                     if (
                         isinstance(pre_turn_action, dict)
@@ -1572,10 +1703,27 @@ async def run_huume_turn(
                         response["unfilled"] = staged.get("unfilled")
                         response["schedule_preview"] = staged.get("schedule_preview")
                         response["preview_truncated"] = staged.get("preview_truncated")
+                    if name == "save_location_schedule_profile":
+                        response["summary"] = staged.get("summary")
+                        response["blocks"] = staged.get("blocks")
                     return _json_safe(response), step
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label=spec["refused_label"], status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
+                # Same parallel-function-call hazard the bespoke propose_*
+                # arm guards: pre_turn_action is frozen for the turn, so two
+                # confirming calls in one batch would both execute.
+                if spec["mints_confirm_id"] and staged.get("confirm_id"):
+                    if staged["confirm_id"] in executed_schedule_action_confirm_ids:
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Duplicate confirmation blocked",
+                            status="rejected", detail="This action was already executed this turn.",
+                        )
+                        return {
+                            "status": "refused",
+                            "message": "That was already confirmed and executed this turn.",
+                        }, step
+                    executed_schedule_action_confirm_ids.add(staged["confirm_id"])
                 result = await actions.execute_huume_action(
                     company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
                     week_start=surface_context.week_start, week_end=surface_context.week_end,
@@ -1954,10 +2102,21 @@ async def run_huume_turn(
     tier = routing.TIERS[tier_name]
 
     client = get_luna_client()
+    # The schedule surface has no per-turn context builder (Huume's dispatch
+    # replaces _inject_mode_contexts wholesale), so the location's saved setup
+    # is rendered into the system prompt itself — without it the model has to
+    # spend a tool call rediscovering it before every single intake question.
+    _location_profile_block = ""
+    if surface_context.is_schedule and surface_context.location_id:
+        from app.matcha.services.huume import schedule_profile_skill
+        _location_profile_block = await schedule_profile_skill.context_block(
+            company_id=company_id, location_id=surface_context.location_id,
+        )
     _system_instruction = build_system_prompt(
         company_name=company_name or "your company", today=date.today().isoformat(),
         state_block=build_state_block(current_state, schedule_surface=surface_context.is_schedule),
         surface_context=surface_context,
+        location_profile_block=_location_profile_block,
     )
     _tools_arg = [types.Tool(function_declarations=tool_declarations(allowed_names=allowed_tool_names))]
     # Two configs retain the planner/executor call boundary. Luna is pinned
@@ -1995,20 +2154,23 @@ async def run_huume_turn(
                     )
                 break
 
-            await rate_limiter.check_limit("huume", "agent")
             is_first_call = model_calls == 0
             model_calls += 1
             call_model = tier.planner_model if is_first_call else tier.executor_model
             call_config = planner_config if is_first_call else executor_config
             call_timeout = min(_CALL_TIMEOUT, max(1.0, _WALL_CLOCK_SECONDS - elapsed()))
-            try:
-                with feature_scope("matcha.huume.loop"):
-                    response = await asyncio.wait_for(
-                        client.aio.models.generate_content(model=call_model, contents=contents, config=call_config),
-                        timeout=call_timeout,
-                    )
-            finally:
-                await rate_limiter.record_call("huume", "agent")
+            with feature_scope("matcha.huume.loop"):
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=call_model,
+                        contents=contents,
+                        config=call_config,
+                        timeout_seconds=call_timeout,
+                        before_request=lambda: rate_limiter.check_limit("huume", "agent"),
+                        after_request=lambda: rate_limiter.record_call("huume", "agent"),
+                    ),
+                    timeout=call_timeout,
+                )
 
             usage = getattr(response, "usage_metadata", None)
             if usage:
@@ -2079,6 +2241,9 @@ async def run_huume_turn(
                         continue
                     finish_message = str(args.get("message") or "").strip() or None
                     finished = True
+                    choice = _build_choice(args.get("question"), args.get("options"))
+                    if choice:
+                        state_updates["huume_choice"] = choice
                     recorder.record(tool="finish", kind="finish", label="Done", status="ok", args=args)
                     continue
 
@@ -2172,9 +2337,9 @@ async def run_huume_turn(
                     yield {"type": "step", "data": step}
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
 
-                if name == "propose_schedule_change" and payload.get("status") in {"clarify", "refused"}:
+                if name in _TERMINAL_SCHEDULE_TOOLS and payload.get("status") in {"clarify", "refused"}:
                     tool_rejections += 1
-                    terminal_message = str(payload.get("message") or "The schedule change could not be completed.")
+                    terminal_message = str(payload.get("message") or "That schedule request could not be completed.")
                     stop_reason = (
                         "schedule_clarification"
                         if payload.get("status") == "clarify"
@@ -2241,6 +2406,13 @@ async def run_huume_turn(
     total_usage["duplicate_tool_calls_blocked"] = duplicate_tool_calls_blocked
     total_usage["tool_retry_limit_blocks"] = tool_retry_limit_blocks
     total_usage["tool_rejections"] = tool_rejections
+
+    # Chips are per-question, not sticky: a turn that didn't reissue one must
+    # clear it, or the manager is left tapping an answer to a question that is
+    # two turns stale. apply_update drops keys set to None. Guarded rather than
+    # unconditional so an idle turn doesn't force a document version bump.
+    if "huume_choice" not in state_updates and current_state.get("huume_choice"):
+        state_updates["huume_choice"] = None
 
     result_data: dict[str, Any] = {
         "message": final_message,

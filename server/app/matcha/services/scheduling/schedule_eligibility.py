@@ -63,7 +63,13 @@ _BLOCKING_AUTHORITY_SQL = f"AND {_BLOCKING_AUTHORITY_EXPR}"
 # type's real warning_days (e.g. 30) even when that template isn't the
 # active blocking authority. Pick the value from whichever side actually
 # governs the block, matching _BLOCKING_AUTHORITY_SQL's precedence.
-_WARNING_DAYS_SQL = """
+#
+# Public because the Compliance employee-expiry roster
+# (core/routes/compliance/credentials.py) resolves the same per-type window;
+# a second hand-rolled copy would re-introduce the shadowing bug above.
+# Requires `ecr` LEFT JOINed to `credential_requirement_templates crt` on
+# ecr.template_id, and `scoped_credential_types ct`.
+WARNING_DAYS_SQL = """
     CASE
         WHEN crt.schedule_blocking = true AND crt.review_status IN ('approved', 'auto_approved')
             THEN crt.warning_days
@@ -79,12 +85,12 @@ async def _schedule_blocking_requirements(conn, company_id: UUID, employee_ids: 
         f"""
         SELECT ecr.id, ecr.employee_id, ecr.status, ecr.expires_at,
                ct.label, ct.has_expiration,
-               {_WARNING_DAYS_SQL} AS warning_days,
+               {WARNING_DAYS_SQL} AS warning_days,
                crt.legal_basis
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
-        LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
           AND ecr.is_required = true AND ecr.applies_company_wide = true
           {_BLOCKING_AUTHORITY_SQL}
@@ -135,7 +141,7 @@ async def _job_credential_rows(
              JOIN schedule_jobs j ON j.id=jr.job_id AND j.company_id=jr.company_id
              JOIN companies c ON c.id=jr.company_id
              JOIN employees e ON e.id=$2 AND e.org_id=jr.company_id
-             JOIN credential_types ct ON ct.id=jr.credential_type_id
+             JOIN scoped_credential_types ct ON ct.id=jr.credential_type_id
              LEFT JOIN employee_credential_requirements ecr
                ON ecr.employee_id=e.id AND ecr.credential_type_id=jr.credential_type_id
             WHERE jr.company_id=$1 AND jr.job_id=$3 AND jr.is_required AND jr.schedule_blocking""",
@@ -218,7 +224,7 @@ async def schedule_eligibility_violations(
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
-        LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.employee_id = $2
           AND ecr.is_required = true AND ecr.applies_company_wide = true
           {_BLOCKING_AUTHORITY_SQL}
@@ -320,10 +326,10 @@ async def open_expiring_eligibility_warnings(
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.expires_at, crt.legal_basis,
                COALESCE(future.location_id, e.work_location_id) AS location_id,
                scope_location.timezone,
-               {_WARNING_DAYS_SQL} AS warning_days
+               {WARNING_DAYS_SQL} AS warning_days
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
-        LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         LEFT JOIN LATERAL (
             SELECT DISTINCT s.location_id
               FROM schedule_shift_assignments a
@@ -362,7 +368,8 @@ async def open_expiring_eligibility_warnings(
 
 
 async def resolve_recovered_eligibility_cases(
-    conn, company_id: UUID, *, now: datetime | None = None, as_of: date | None = None,
+    conn, company_id: UUID, *, requirement_id: UUID | None = None,
+    now: datetime | None = None, as_of: date | None = None,
 ) -> int:
     """Close expired-credential cases once a replacement has been verified.
 
@@ -386,14 +393,16 @@ async def resolve_recovered_eligibility_cases(
           FROM schedule_eligibility_cases c
           LEFT JOIN employees e ON e.id=c.employee_id AND e.org_id=c.company_id
           LEFT JOIN employee_credential_requirements ecr ON ecr.id = c.requirement_id
-          LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+          LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
           LEFT JOIN credential_requirement_templates crt ON crt.id=ecr.template_id
           LEFT JOIN business_locations case_location ON case_location.id=c.location_id
           LEFT JOIN business_locations primary_location ON primary_location.id=e.work_location_id
          WHERE c.company_id=$1 AND c.requirement_type='credential'
            AND c.status = ANY($2::text[])
+           AND ($3::uuid IS NULL OR c.requirement_id=$3)
         """,
         company_id, ["warning_open", "removal_requested", "keep_acknowledged"],
+        requirement_id,
     )
     resolved = 0
     for row in rows:
@@ -433,7 +442,7 @@ async def open_expired_eligibility_cases(
                COALESCE(ct.auto_unassign_on_expiry, false) AS auto_unassign_on_expiry
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
-        LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
         LEFT JOIN business_locations primary_location ON primary_location.id=e.work_location_id
         WHERE e.org_id = $1 AND ecr.is_required = true AND ecr.applies_company_wide = true
           {_BLOCKING_AUTHORITY_SQL}
@@ -562,7 +571,7 @@ async def open_expired_job_credential_cases(
                   ct.label, ct.has_expiration, COALESCE(ct.auto_unassign_on_expiry,false) AS auto_unassign_on_expiry
              FROM schedule_job_credential_requirements jr
              JOIN employee_credential_requirements ecr ON ecr.credential_type_id=jr.credential_type_id
-             JOIN credential_types ct ON ct.id=jr.credential_type_id
+             JOIN scoped_credential_types ct ON ct.id=jr.credential_type_id
              JOIN employees e ON e.id=ecr.employee_id AND e.org_id=jr.company_id
              JOIN schedule_job_employees sje
                ON sje.job_id=jr.job_id AND sje.employee_id=ecr.employee_id AND sje.company_id=jr.company_id

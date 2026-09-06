@@ -282,6 +282,14 @@ extension ProjectDetailViewModel {
             if merged.autoprReconsiderationPending == nil {
                 merged.autoprReconsiderationPending = false
             }
+            // A published decision means the harness ran, so it also claimed
+            // any queued "run now" request — but only drop the CACHED value.
+            // A payload that carries its own timestamp is reporting live server
+            // state (a note edited moments after the card was queued), and
+            // overwriting that with nil hides a request the server still holds.
+            if updated.autoprRunRequestedAt == nil {
+                merged.autoprRunRequestedAt = nil
+            }
         } else {
             if merged.autoprReconsiderationPending == nil {
                 merged.autoprReconsiderationPending = previous.autoprReconsiderationPending
@@ -291,6 +299,9 @@ extension ProjectDetailViewModel {
             }
             if merged.autoprReconsiderationAt == nil {
                 merged.autoprReconsiderationAt = previous.autoprReconsiderationAt
+            }
+            if merged.autoprRunRequestedAt == nil {
+                merged.autoprRunRequestedAt = previous.autoprRunRequestedAt
             }
         }
         if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = previous.assignedAvatarUrl }

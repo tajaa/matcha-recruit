@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Select } from '../../../components/ui'
+import { Button, Select, useToast } from '../../../components/ui'
 import {
-  fetchCredentialTypes,
   fetchRoleCategories,
   fetchTemplates,
   approveTemplate,
@@ -10,12 +9,16 @@ import {
   triggerResearch,
   deleteTemplate,
   previewRequirements,
+  fetchCredentialTypeSettings,
+  updateCredentialTypeSettings,
+  resetCredentialTypeSettings,
+  createCredentialType,
 } from '../../../api/employees/credentialTemplates'
 import type {
-  CredentialType,
   RoleCategory,
   CredentialRequirementTemplate,
   PreviewResult,
+  CredentialTypeSettings,
 } from '../../../types/credentialTemplates'
 import { STATUS_COLORS, PRIORITY_COLORS } from '../../../types/credentialTemplates'
 
@@ -40,14 +43,27 @@ const US_STATES = [
 ]
 
 export default function CredentialTemplates() {
-  const [credTypes, setCredTypes] = useState<CredentialType[]>([])
+  const { toast } = useToast()
   const [roles, setRoles] = useState<RoleCategory[]>([])
   const [templates, setTemplates] = useState<CredentialRequirementTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [filterState, setFilterState] = useState('')
   const [filterRole, setFilterRole] = useState('')
   const [researching, setResearching] = useState(false)
-  const [tab, setTab] = useState<'templates' | 'preview'>('templates')
+  const [tab, setTab] = useState<'templates' | 'preview' | 'dropdown'>('templates')
+  const [typeSettings, setTypeSettings] = useState<CredentialTypeSettings | null>(null)
+  const [selectedTypeIds, setSelectedTypeIds] = useState<string[]>([])
+  const [savingTypes, setSavingTypes] = useState(false)
+  const [typeSettingsLoading, setTypeSettingsLoading] = useState(true)
+  const [typeSettingsError, setTypeSettingsError] = useState('')
+  const [creatingType, setCreatingType] = useState(false)
+  const [customLabel, setCustomLabel] = useState('')
+  const [customCategory, setCustomCategory] = useState('')
+  const [customDescription, setCustomDescription] = useState('')
+  const [customHasExpiration, setCustomHasExpiration] = useState(true)
+  const [customHasNumber, setCustomHasNumber] = useState(false)
+  const [customHasState, setCustomHasState] = useState(false)
+  const [customTypeError, setCustomTypeError] = useState('')
 
   // Preview state
   const [previewState, setPreviewState] = useState('')
@@ -58,12 +74,10 @@ export default function CredentialTemplates() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [ct, rc, tmpl] = await Promise.all([
-        fetchCredentialTypes(),
+      const [rc, tmpl] = await Promise.all([
         fetchRoleCategories(),
         fetchTemplates({ state: filterState || undefined, role_category_id: filterRole || undefined }),
       ])
-      setCredTypes(ct)
       setRoles(rc)
       setTemplates(tmpl)
     } catch (e) {
@@ -73,7 +87,26 @@ export default function CredentialTemplates() {
     }
   }, [filterState, filterRole])
 
+  // Kept out of loadData on purpose: that reloads on every filter change and
+  // after every approve/reject/delete, and re-seeding the checkboxes there
+  // would silently throw away an in-progress edit on the Dropdown options tab.
+  const loadTypeSettings = useCallback(async () => {
+    setTypeSettingsLoading(true)
+    setTypeSettingsError('')
+    try {
+      const settings = await fetchCredentialTypeSettings()
+      setTypeSettings(settings)
+      setSelectedTypeIds(settings.is_configured ? settings.selected_type_ids : settings.credential_types.map(type => type.id))
+    } catch (e) {
+      console.error('Failed to load credential dropdown options', e)
+      setTypeSettingsError(e instanceof Error && e.message ? e.message : 'Credential dropdown options could not be loaded')
+    } finally {
+      setTypeSettingsLoading(false)
+    }
+  }, [])
+
   useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { loadTypeSettings() }, [loadTypeSettings])
 
   const grouped = useMemo(() => {
     const map = new Map<string, CredentialRequirementTemplate[]>()
@@ -140,6 +173,96 @@ export default function CredentialTemplates() {
   }
 
   const clinicalRoles = useMemo(() => roles.filter(r => r.is_clinical), [roles])
+  const credentialCategories = useMemo(() => Array.from(new Set(
+    (typeSettings?.credential_types ?? []).map(type => type.category)
+  )).sort(), [typeSettings])
+
+  useEffect(() => {
+    if (!customCategory && credentialCategories.length > 0) {
+      setCustomCategory(credentialCategories[0])
+    }
+  }, [credentialCategories, customCategory])
+
+  const handleSaveTypeSettings = async () => {
+    if (savingTypes || creatingType) return
+    setSavingTypes(true)
+    try {
+      await updateCredentialTypeSettings(selectedTypeIds)
+      await loadTypeSettings()
+      toast('Credential dropdown options saved', 'success')
+    } catch (error) {
+      console.error('Failed to save credential dropdown options', error)
+      toast(error instanceof Error && error.message ? error.message : 'Credential dropdown options could not be saved', 'error')
+    } finally {
+      setSavingTypes(false)
+    }
+  }
+
+  const handleResetTypeSettings = async () => {
+    if (savingTypes || creatingType) return
+    setSavingTypes(true)
+    try {
+      await resetCredentialTypeSettings()
+      await loadTypeSettings()
+      toast('All credential types are available again', 'success')
+    } catch (error) {
+      console.error('Failed to reset credential dropdown options', error)
+      toast(error instanceof Error && error.message ? error.message : 'Credential dropdown options could not be reset', 'error')
+    } finally {
+      setSavingTypes(false)
+    }
+  }
+
+  const toggleCredentialType = (id: string) => {
+    setSelectedTypeIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
+  }
+
+  const handleCreateCredentialType = async () => {
+    if (savingTypes || creatingType) return
+    const label = customLabel.trim()
+    const description = customDescription.trim()
+    if (!label) {
+      setCustomTypeError('Enter a name for the credential option.')
+      return
+    }
+    if (!customCategory) {
+      setCustomTypeError('Choose a category for the credential option.')
+      return
+    }
+    if (!/^[a-z][a-z0-9_]*$/.test(customCategory)) {
+      setCustomTypeError('Use letters, numbers, and underscores for the category, starting with a letter.')
+      return
+    }
+    if (typeSettings?.credential_types.some(type => type.label.trim().toLocaleLowerCase() === label.toLocaleLowerCase())) {
+      setCustomTypeError('A credential option with this name already exists.')
+      return
+    }
+
+    setCreatingType(true)
+    setCustomTypeError('')
+    try {
+      const created = await createCredentialType({
+        label,
+        category: customCategory,
+        description: description || undefined,
+        has_expiration: customHasExpiration,
+        has_number: customHasNumber,
+        has_state: customHasState,
+      })
+      await loadTypeSettings()
+      setCustomLabel('')
+      setCustomDescription('')
+      setCustomHasExpiration(true)
+      setCustomHasNumber(false)
+      setCustomHasState(false)
+      toast(`${created.label} added to credential dropdowns`, 'success')
+    } catch (error) {
+      console.error('Failed to create credential option', error)
+      setCustomTypeError(error instanceof Error && error.message ? error.message : 'Credential option could not be saved. Try again.')
+    } finally {
+      setCreatingType(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -171,6 +294,12 @@ export default function CredentialTemplates() {
             className={`px-3 py-1.5 text-xs rounded-md transition-colors ${tab === 'preview' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
             Preview
+          </button>
+          <button
+            onClick={() => setTab('dropdown')}
+            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${tab === 'dropdown' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            Dropdown options
           </button>
         </div>
       </div>
@@ -209,7 +338,7 @@ export default function CredentialTemplates() {
             <span>{templates.length} templates</span>
             <span>{templates.filter(t => t.review_status === 'pending').length} pending review</span>
             <span>{new Set(templates.map(t => t.state)).size} states</span>
-            <span>{credTypes.length} credential types</span>
+            <span>{typeSettings?.credential_types.length ?? 0} credential types</span>
           </div>
 
           {/* Template groups */}
@@ -372,6 +501,119 @@ export default function CredentialTemplates() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'dropdown' && typeSettingsLoading && (
+        <div className="flex items-center justify-center py-12 text-xs uppercase tracking-wider text-zinc-500 animate-pulse">
+          Loading dropdown options...
+        </div>
+      )}
+
+      {tab === 'dropdown' && !typeSettingsLoading && typeSettingsError && (
+        <div className="rounded-lg border border-red-900/60 bg-red-950/20 p-4 text-sm text-red-300">
+          <p>{typeSettingsError}</p>
+          <Button className="mt-3" variant="secondary" onClick={() => void loadTypeSettings()}>Try again</Button>
+        </div>
+      )}
+
+      {tab === 'dropdown' && !typeSettingsLoading && !typeSettingsError && typeSettings && (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-sm font-medium text-zinc-200">Required credential dropdown</h2>
+                <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">
+                  Choose the credential types your company can add to jobs. Existing requirements stay visible and can still be removed after a type is hidden.
+                </p>
+              </div>
+              {typeSettings.manageable && <div className="flex gap-2">
+                {typeSettings.is_configured && <Button onClick={handleResetTypeSettings} disabled={savingTypes || creatingType} variant="secondary">Use all types</Button>}
+                <Button onClick={handleSaveTypeSettings} disabled={savingTypes || creatingType || selectedTypeIds.length === 0}>
+                  {savingTypes ? 'Saving...' : 'Save options'}
+                </Button>
+              </div>}
+            </div>
+            <div className="mt-3 text-xs text-zinc-500">
+              {typeSettings.is_configured ? `${selectedTypeIds.length} of ${typeSettings.credential_types.length} types shown` : 'All credential types are currently shown'}
+            </div>
+            {!typeSettings.manageable && (
+              <div className="mt-2 text-xs text-amber-400/80">
+                This is the shared credential catalog. Sign in as the company to change which types it offers.
+              </div>
+            )}
+            {typeSettings.manageable && selectedTypeIds.length === 0 && (
+              <div className="mt-2 text-xs text-amber-400/80">
+                Select at least one type. To offer every type again, use "Use all types".
+              </div>
+            )}
+          </div>
+          {typeSettings.manageable && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+              <h2 className="text-sm font-medium text-zinc-200">Add custom credential option</h2>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                Add a company-specific option for job credential requirements. It will be selected in your dropdown settings automatically.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="text-xs text-zinc-400">
+                  Name
+                  <input
+                    value={customLabel}
+                    maxLength={200}
+                    onChange={event => { setCustomLabel(event.target.value); setCustomTypeError('') }}
+                    placeholder="e.g. Forklift Operator Certification"
+                    className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+                  />
+                </label>
+                <label className="text-xs text-zinc-400">
+                  Category
+                  <input
+                    value={customCategory}
+                    maxLength={40}
+                    list="credential-type-categories"
+                    onChange={event => { setCustomCategory(event.target.value.toLowerCase().replace(/\s+/g, '_')); setCustomTypeError('') }}
+                    placeholder="e.g. clearance"
+                    className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+                  />
+                  <datalist id="credential-type-categories">
+                    {credentialCategories.map(category => <option key={category} value={category} />)}
+                  </datalist>
+                </label>
+                <label className="text-xs text-zinc-400 md:col-span-2">
+                  Description <span className="text-zinc-600">(optional)</span>
+                  <textarea
+                    value={customDescription}
+                    maxLength={2000}
+                    onChange={event => setCustomDescription(event.target.value)}
+                    rows={2}
+                    placeholder="When this credential is used"
+                    className="mt-1 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-zinc-400">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={customHasExpiration} onChange={event => setCustomHasExpiration(event.target.checked)} className="accent-emerald-500" /> Tracks expiration</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={customHasNumber} onChange={event => setCustomHasNumber(event.target.checked)} className="accent-emerald-500" /> Has credential number</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={customHasState} onChange={event => setCustomHasState(event.target.checked)} className="accent-emerald-500" /> State-issued</label>
+              </div>
+              {customTypeError && <p role="alert" className="mt-3 text-xs text-red-400">{customTypeError}</p>}
+              <Button className="mt-4" onClick={handleCreateCredentialType} disabled={creatingType || savingTypes}>
+                {creatingType ? 'Adding option...' : 'Add credential option'}
+              </Button>
+            </div>
+          )}
+          <div className="grid gap-2 md:grid-cols-2">
+            {typeSettings.credential_types.map(type => (
+              <label key={type.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3 hover:border-zinc-700">
+                <input type="checkbox" checked={selectedTypeIds.includes(type.id)} onChange={() => toggleCredentialType(type.id)} disabled={!typeSettings.manageable || savingTypes || creatingType} className="mt-0.5 accent-emerald-500 disabled:opacity-40" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-zinc-200">{type.label}</span>
+                  <span className="block text-[10px] uppercase tracking-wide text-zinc-600">{type.category}</span>
+                  {type.description && <span className="mt-1 block text-xs text-zinc-500">{type.description}</span>}
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -62,6 +62,10 @@ export default function EmployeeDetail() {
   // Deep-link support: the compliance risk cockpit links straight to the
   // relevant tab (?tab=credentials) and pay editor (?edit=1).
   const [searchParams] = useSearchParams()
+  // `credentials` stays unconditional: the endpoints behind it are ungated and
+  // are used by tenants that have `employees` without `credential_templates`.
+  // Gating it here would also drop the ?tab=credentials deep link, since this
+  // list is read once by a useState initializer while useMe is still loading.
   const TABS_VALID: Tab[] = [
     'profile', 'onboarding', 'credentials', 'leave',
     ...(hasFeature('training') ? ['training' as const] : []),

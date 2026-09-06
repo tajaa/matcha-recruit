@@ -18,10 +18,58 @@ SessionPhase = Literal[
     "orphaned",
 ]
 ValidationStatus = Literal["pass", "fail", "unavailable", "skip"]
+CapabilityStatus = Literal["available", "unavailable", "denied"]
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+@dataclass(frozen=True)
+class CapabilityResult:
+    """One measured capability. Never holds a credential, token, connection
+    string, PEM path, response body, or unredacted command output."""
+
+    id: str
+    title: str
+    status: CapabilityStatus
+    detail: str
+    invocation: str | None = None
+    checked_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class CapabilityReport:
+    schema_version: int
+    session_id: str
+    results: tuple[CapabilityResult, ...]
+    checked_at: str
+    # Whether the container was up for this measurement. None on reports written
+    # before the field existed.
+    container_available: bool | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "session_id": self.session_id,
+            "checked_at": self.checked_at,
+            "container_available": self.container_available,
+            "results": [asdict(item) for item in self.results],
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "CapabilityReport":
+        measured = raw.get("container_available")
+        return cls(
+            schema_version=int(raw["schema_version"]),
+            session_id=str(raw["session_id"]),
+            results=tuple(CapabilityResult(**item) for item in raw.get("results", ())),
+            checked_at=str(raw["checked_at"]),
+            container_available=None if measured is None else bool(measured),
+        )
+
+    def by_id(self, capability_id: str) -> CapabilityResult | None:
+        return next((item for item in self.results if item.id == capability_id), None)
 
 
 @dataclass(frozen=True)
@@ -85,6 +133,8 @@ class SessionRecord:
     updated_at: str = field(default_factory=utc_now)
     submitted_at: str | None = None
     last_validation: ValidationReference | None = None
+    last_capability_check_at: str | None = None
+    capability_report_path: str | None = None
 
     @property
     def repo_path(self) -> Path:

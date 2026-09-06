@@ -8,7 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
-from .agent_adapters import launch_agent, stop_agent, tmux_running
+from .agent_adapters import launch_agent, refresh_capability_context, stop_agent, tmux_running
+from .capabilities import load_report, report_is_stale
 from .docker_runtime import (
     allocate_port_block,
     compose_project,
@@ -37,7 +38,14 @@ from .git_worktrees import (
     sync_host_to_session_git,
     sync_session_git_to_host,
 )
-from .models import PullRequest, ReleaseResult, SessionRecord, SessionSpec, utc_now
+from .models import (
+    CapabilityReport,
+    PullRequest,
+    ReleaseResult,
+    SessionRecord,
+    SessionSpec,
+    utc_now,
+)
 from .session_auth import provision_session_auth, refresh_github_auth
 from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
@@ -252,6 +260,44 @@ def _reconcile_isolated_git(record: SessionRecord) -> str:
     return synchronized
 
 
+def ensure_capability_report(
+    record: SessionRecord,
+    *,
+    refresh: bool = False,
+) -> CapabilityReport | None:
+    """Return this session's measured report, remeasuring when it is stale.
+
+    The picker, `msandbox capabilities`, and `msandbox doctor` all come through
+    here so exactly one probe registry backs every rendering.
+    """
+    if refresh:
+        # doctor and `capabilities --refresh` repair the session before they
+        # measure it: an in-container gh token that expired during a long
+        # session is renewed, not reported as an authentication failure.
+        refresh_github_auth(record)
+        ensure_container(record)
+        report = refresh_capability_context(record)
+    else:
+        running = container_running(record)
+        cached = load_report(record)
+        # Age alone is not freshness. A report measured while the container was
+        # up describes nothing once it stops, so the state it was measured under
+        # has to match the state now.
+        if (
+            cached is not None
+            and not report_is_stale(cached)
+            and cached.container_available is not None
+            and cached.container_available == running
+        ):
+            return cached
+        # Redrawing the picker must never start a container. Host probes still
+        # run; every container probe reports the stopped session honestly.
+        report = refresh_capability_context(record, container_available=running)
+    if report is not None:
+        save_session(record)
+    return report
+
+
 def start_session(
     record: SessionRecord,
     extra_agent_args: Sequence[str] = (),
@@ -264,6 +310,9 @@ def start_session(
     _reconcile_isolated_git(record)
     refresh_github_auth(record)
     ensure_container(record)
+    # Measure before launching so the agent's first turn already carries the
+    # same report the picker shows, including anything that changed on resume.
+    refresh_capability_context(record)
     launch_agent(record, extra_agent_args)
     record.phase = "running"
     save_session(record)

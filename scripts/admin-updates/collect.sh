@@ -68,3 +68,36 @@ if [ -n "$SINCE_PR" ]; then
     args+=(--since-pr "$SINCE_PR")
 fi
 python3 "$SCRIPT_DIR/collect.py" "${args[@]}"
+
+# Only the handful of PRs that survived the production boundary are worth a
+# detail round trip. Their commit messages and review discussion are what the
+# writer should read instead of reconstructing a whole merge diff.
+DETAIL_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/admin-updates-detail.XXXXXX")"
+trap 'rm -f "$MERGED_PRS" "${FULL_FILES:-}" "${NEXT_PRS:-}"; rm -rf "$DETAIL_DIR"' EXIT
+# bash 3.2 ships on the macOS runner: an empty array is unset under `set -u`,
+# so track membership explicitly instead of expanding ${#array[@]}.
+detail_files=()
+detail_count=0
+while IFS= read -r pr_number; do
+    [ -n "$pr_number" ] || continue
+    detail_path="$DETAIL_DIR/pr-$pr_number.json"
+    # `--repo` pins the same repository the REST calls above use instead of
+    # whatever remote this checkout happens to have; `</dev/null` keeps gh from
+    # consuming the loop's stdin and swallowing the remaining PR numbers.
+    if gh pr view "$pr_number" --repo "$REPO" \
+        --json number,commits,comments,reviews,files,additions,deletions,changedFiles \
+        > "$detail_path" 2>/dev/null </dev/null; then
+        detail_files+=("$detail_path")
+        detail_count=$((detail_count + 1))
+    else
+        echo "admin-updates: warning: could not read PR #$pr_number detail; the writer falls back to its title and body" >&2
+    fi
+done < <(jq -r '(.candidates // [])[].sourcePr' "$OUTPUT")
+
+# Enrichment is optional evidence, never a gate. Failing the step here would
+# skip publication entirely and open an ops-health issue over a malformed
+# comment body -- the same reason nav grounding is non-fatal in write-content.sh.
+if [ "$detail_count" -gt 0 ]; then
+    python3 "$SCRIPT_DIR/enrich.py" "$OUTPUT" "${detail_files[@]}" \
+        || echo "admin-updates: warning: could not attach PR evidence; the writer falls back to titles and bodies" >&2
+fi

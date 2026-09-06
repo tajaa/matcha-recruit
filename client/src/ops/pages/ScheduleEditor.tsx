@@ -6,18 +6,19 @@ import { useMe } from '../../hooks/useMe'
 import { useLocationScope, locationLabel } from '../../hooks/useLocationScope'
 import { useScheduleEditor } from '../../hooks/employees/useScheduleEditor'
 import { useToast } from '../../components/ui'
-import { fetchJobs } from '../../api/employees/employeeSchedule'
+import { useScheduleJobs } from '../../hooks/employees/useScheduleJobs'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../api/employees/scheduleAssistant'
 import LocationPicker from '../../components/shared/LocationPicker'
-import { addDays, startOfWeekSunday, toISODate, type ScheduleJob, type Shift } from '../../types/employeeSchedule'
+import { addDays, startOfWeek, toISODate, type Shift } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
 import RosterPanel from '../../components/employees/schedule-editor/RosterPanel'
-import ScheduleEditorToolbar from '../../components/employees/schedule-editor/ScheduleEditorToolbar'
+import ScheduleEditorToolbar, { type ScheduleBodyMode } from '../../components/employees/schedule-editor/ScheduleEditorToolbar'
 import ShiftInspector, { type NewShiftDefaults } from '../../components/employees/schedule-editor/ShiftInspector'
 import WeekTimeGrid from '../../components/employees/schedule-editor/WeekTimeGrid'
 import ScheduleEditorGuide from '../../components/employees/schedule-editor/ScheduleEditorGuide'
 import ScheduleHuumePanel from '../../components/employees/schedule-editor/ScheduleHuumePanel'
 import ScheduleJobsTab from '../../components/employees/schedule-editor/ScheduleJobsTab'
+import WeekStartPane from '../../components/employees/schedule-editor/WeekStartPane'
 
 // Bump when guide content materially changes so existing managers see new
 // scheduling safeguards instead of staying pinned to an obsolete walkthrough.
@@ -31,22 +32,29 @@ function hasSeenGuide(): boolean {
   }
 }
 
-function parseWeek(value: string | null): string {
-  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())) return value
-  return toISODate(startOfWeekSunday(new Date()))
+/** Snaps to the location's own week start: a `?week=` carried over from
+ * another store (or from before the manager changed the start day) would
+ * otherwise scope the grid to a week the server now refuses. */
+function parseWeek(value: string | null, weekStartWeekday: number): string {
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())) {
+    return toISODate(startOfWeek(new Date(`${value}T00:00:00Z`), weekStartWeekday))
+  }
+  return toISODate(startOfWeek(new Date(), weekStartWeekday))
 }
 
 export default function ScheduleEditor() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const weekStart = parseWeek(searchParams.get('week'))
   const {
     locationId: requestedLocationId,
     setLocationId,
     locations,
     loading: locationsLoading,
+    reloadLocations,
   } = useLocationScope()
   const locationId = locations.some((location) => location.id === requestedLocationId) ? requestedLocationId : ''
+  const weekStartWeekday = locations.find((l) => l.id === locationId)?.week_start_weekday ?? 0
+  const weekStart = parseWeek(searchParams.get('week'), weekStartWeekday)
   const { me, hasFeature } = useMe()
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
@@ -58,11 +66,11 @@ export default function ScheduleEditor() {
   const [activeDrag, setActiveDrag] = useState<ScheduleDragData | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
-  const [jobsOpen, setJobsOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
+  // One mode rather than a boolean per pane — see ScheduleBodyMode.
+  const [bodyMode, setBodyMode] = useState<ScheduleBodyMode>('grid')
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
-  const [jobs, setJobs] = useState<ScheduleJob[]>([])
+  const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
     setNewDefaults(null)
     setInspectorShiftId(shift.id)
@@ -103,23 +111,6 @@ export default function ScheduleEditor() {
       })
     return () => { cancelled = true }
   }, [locationId, weekStart])
-
-  const reloadJobs = useCallback(async () => {
-    if (!locationId) {
-      setJobs([])
-      return
-    }
-    try {
-      const response = await fetchJobs(locationId)
-      setJobs(response.jobs)
-    } catch {
-      setJobs([])
-    }
-  }, [locationId])
-
-  useEffect(() => {
-    void reloadJobs()
-  }, [reloadJobs])
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {
@@ -209,20 +200,18 @@ export default function ScheduleEditor() {
           onChangeLocation={setLocationId}
           onPreviousWeek={() => setWeek(addDays(weekStart, -7))}
           onNextWeek={() => setWeek(addDays(weekStart, 7))}
-          onThisWeek={() => setWeek(toISODate(startOfWeekSunday(new Date())))}
+          onThisWeek={() => setWeek(toISODate(startOfWeek(new Date(), weekStartWeekday)))}
           onTogglePublishedEditing={setEditPublished}
           onPublish={handlePublish}
           onExit={() => navigate(`/ops/schedule?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`)}
           onHelp={() => setGuideOpen(true)}
-          jobsOpen={jobsOpen}
-          jobsDisabled={!locationId}
+          bodyMode={bodyMode}
+          locationMissing={!locationId}
           credentialsEnabled={credentialTemplatesEnabled}
-          onToggleJobs={() => { setJobsOpen((value) => !value); setChatOpen(false) }}
-          chatOpen={chatOpen}
           huumeSelectionCount={huumeSelectedShifts.length}
-          onToggleChat={() => { setChatOpen((value) => !value); setJobsOpen(false) }}
+          onSetBodyMode={setBodyMode}
         />
-        {automaticSuggestion && !chatOpen && locationId && (
+        {automaticSuggestion && bodyMode !== 'chat' && locationId && (
           <div className="flex items-center gap-3 border-b border-emerald-500/20 bg-emerald-500/[0.07] px-4 py-2 text-xs text-emerald-100 md:px-6">
             <Sparkles className="h-4 w-4 shrink-0 text-emerald-300" />
             <span>Huume prepared a suggested schedule for the week of {automaticSuggestion.week_start}.</span>
@@ -232,8 +221,7 @@ export default function ScheduleEditor() {
                 if (automaticSuggestion.week_start && automaticSuggestion.week_start !== weekStart) {
                   setWeek(automaticSuggestion.week_start)
                 }
-                setChatOpen(true)
-                setJobsOpen(false)
+                setBodyMode('chat')
               }}
               className="ml-auto rounded-lg border border-emerald-400/40 px-2.5 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-400/10"
             >
@@ -250,9 +238,13 @@ export default function ScheduleEditor() {
               <p className="text-xs text-zinc-600">No locations set up yet — add one under Company.</p>
             )}
           </div>
-        ) : jobsOpen ? (
+        ) : bodyMode === 'jobs' ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
             <ScheduleJobsTab key={locationId} locationId={locationId} credentialTemplatesEnabled={credentialTemplatesEnabled} onJobsChanged={reloadJobs} />
+          </div>
+        ) : bodyMode === 'weekStart' ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+            <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} onSaved={() => { void reloadLocations() }} />
           </div>
         ) : editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
@@ -279,7 +271,7 @@ export default function ScheduleEditor() {
                 onClose={() => { setInspectorShiftId(null); setNewDefaults(null) }}
               />
             )}
-            {chatOpen && (
+            {bodyMode === 'chat' && (
               <ScheduleHuumePanel
                 key={`${weekStart}:${locationId}`}
                 firstName={firstName}
@@ -290,7 +282,7 @@ export default function ScheduleEditor() {
                 onClearSelectedShifts={() => setHuumeSelectedShiftIds(new Set())}
                 onApplied={() => { setAutomaticSuggestion(null); void editor.reload() }}
                 onAutomaticActionSettled={() => setAutomaticSuggestion(null)}
-                onClose={() => setChatOpen(false)}
+                onClose={() => setBodyMode('grid')}
               />
             )}
           </div>

@@ -1,8 +1,14 @@
-import { BriefcaseBusiness, CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, Loader2, Save, Send, Sparkles, X } from 'lucide-react'
+import { BriefcaseBusiness, CalendarCog, CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, Loader2, Save, Send, Sparkles, X } from 'lucide-react'
 import type { ScheduleSaveState, } from '../../../hooks/employees/useScheduleEditor'
 import type { CompanyLocation } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../shared/LocationPicker'
 import type { ScheduleSummary } from '../../../types/employeeSchedule'
+
+/** What the editor body is showing. The panes are mutually exclusive, so this
+ *  is one value rather than a boolean per pane — the pairwise "open me, close
+ *  you" wiring this replaced could not be extended to a third pane without
+ *  every call site remembering to clear every other flag. */
+export type ScheduleBodyMode = 'grid' | 'jobs' | 'chat' | 'weekStart'
 
 interface ScheduleEditorToolbarProps {
   weekStart: string
@@ -21,13 +27,12 @@ interface ScheduleEditorToolbarProps {
   onPublish(): void
   onExit(): void
   onHelp(): void
-  jobsOpen: boolean
-  jobsDisabled: boolean
+  bodyMode: ScheduleBodyMode
+  /** No location picked yet — the location-scoped panes have nothing to show. */
+  locationMissing: boolean
   credentialsEnabled: boolean
-  onToggleJobs(): void
-  chatOpen: boolean
   huumeSelectionCount: number
-  onToggleChat(): void
+  onSetBodyMode(mode: ScheduleBodyMode): void
 }
 
 function saveLabel(state: ScheduleSaveState, lastSavedAt: Date | null): string {
@@ -41,9 +46,10 @@ export default function ScheduleEditorToolbar({
   weekStart, summary, saveState, lastSavedAt, editPublished, publishing,
   locations, locationId, onChangeLocation,
   onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
-  jobsOpen, jobsDisabled, credentialsEnabled, onToggleJobs,
-  chatOpen, huumeSelectionCount, onToggleChat,
+  bodyMode, locationMissing, credentialsEnabled, huumeSelectionCount, onSetBodyMode,
 }: ScheduleEditorToolbarProps) {
+  // Picking the pane you are already in takes you back to the grid.
+  const toggle = (mode: ScheduleBodyMode) => () => onSetBodyMode(bodyMode === mode ? 'grid' : mode)
   return (
     <div className="border-b border-white/[0.06] bg-zinc-950/90 px-3 py-3 backdrop-blur md:px-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -51,8 +57,9 @@ export default function ScheduleEditorToolbar({
           <X className="h-3.5 w-3.5" /> Exit editor
         </button>
         <button onClick={onHelp} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-100" title="How to use the schedule editor"><HelpCircle className="h-3.5 w-3.5" /> How to use</button>
-        <button onClick={onToggleJobs} disabled={jobsDisabled} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${jobsOpen ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title={credentialsEnabled ? 'Configure location jobs and their required credentials' : 'Configure location jobs'}><BriefcaseBusiness className="h-3.5 w-3.5" /> {credentialsEnabled ? 'Jobs & credentials' : 'Jobs'}</button>
-        <button onClick={onToggleChat} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${chatOpen ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title="Ask Huume about this schedule"><Sparkles className="h-3.5 w-3.5" /> Ask Huume</button>
+        <button onClick={toggle('jobs')} disabled={locationMissing} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${bodyMode === 'jobs' ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title={credentialsEnabled ? 'Configure location jobs and their required credentials' : 'Configure location jobs'}><BriefcaseBusiness className="h-3.5 w-3.5" /> {credentialsEnabled ? 'Jobs & credentials' : 'Jobs'}</button>
+        <button onClick={toggle('weekStart')} disabled={locationMissing} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${bodyMode === 'weekStart' ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title="Operating hours, week start, and this location's staffing pattern"><CalendarCog className="h-3.5 w-3.5" /> Week setup</button>
+        <button onClick={toggle('chat')} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${bodyMode === 'chat' ? 'border-emerald-500/50 text-emerald-300' : 'border-zinc-800 text-zinc-400 hover:text-zinc-100'}`} title="Ask Huume about this schedule"><Sparkles className="h-3.5 w-3.5" /> Ask Huume</button>
         <div className="h-5 w-px bg-zinc-800" />
         <button onClick={onPreviousWeek} className="rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100" aria-label="Previous week"><ChevronLeft className="h-4 w-4" /></button>
         <button onClick={onThisWeek} className="rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-300 hover:text-zinc-100">This week</button>

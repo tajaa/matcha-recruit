@@ -25,6 +25,10 @@ _MAX_MODEL_CALLS = 18
 _WALL_SECONDS = 240.0
 _STEP_AUDIT_CAP = 4_000
 _MAX_ANSWER_CHARS = 3_500
+# Under tool_config=ANY the model can no longer end the run by answering in
+# prose, so a model that keeps failing the finish preconditions would otherwise
+# grind through every one of _MAX_MODEL_CALLS before raising. Give up sooner.
+_MAX_FINISH_REFUSALS = 3
 _AI_USAGE_FEATURE = "matcha.espresso.repo_question"
 
 
@@ -86,6 +90,7 @@ async def run_repo_question(
     tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
+    finish_refusals = 0
     seq = 0
     answer: str | None = None
     usage: dict[str, Any] = {"model": LUNA}
@@ -191,6 +196,11 @@ async def run_repo_question(
     config = types.GenerateContentConfig(
         system_instruction=build_system_prompt(),
         tools=[types.Tool(function_declarations=declarations())],
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY,
+            ),
+        ),
     )
 
     while (
@@ -199,14 +209,16 @@ async def run_repo_question(
         and time.monotonic() - started < _WALL_SECONDS
     ):
         model_calls += 1
+        call_timeout = max(1, _WALL_SECONDS - (time.monotonic() - started))
         with feature_scope(_AI_USAGE_FEATURE):
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(
                     model=LUNA,
                     contents=contents,
                     config=config,
+                    timeout_seconds=call_timeout,
                 ),
-                timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)),
+                timeout=call_timeout,
             )
 
         _fold_usage(usage, response)
@@ -240,8 +252,16 @@ async def run_repo_question(
         contents.append(types.Content(role="model", parts=parts))
         tool_responses: list[types.Part] = []
         for call in calls:
-            result, _status = await call_tool(call.name, dict(call.args or {}))
+            result, status = await call_tool(call.name, dict(call.args or {}))
+            if call.name == "answer_question":
+                finish_refusals = finish_refusals + 1 if status == "error" else 0
+            elif status == "ok":
+                # A successful read is new grounding, so the next finish attempt
+                # starts from a clean slate.
+                finish_refusals = 0
             tool_responses.append(types.Part.from_function_response(name=call.name, response=result))
+        if finish_refusals >= _MAX_FINISH_REFUSALS:
+            break
         contents.append(types.Content(role="user", parts=tool_responses))
 
     if answer is None:

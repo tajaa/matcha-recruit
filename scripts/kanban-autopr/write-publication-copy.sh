@@ -43,8 +43,6 @@ fallback_card_note() {
             printf 'AutoPR reviewed this request and still needs human answers before it can continue safely.' ;;
         no_safe_action:already_fixed)
             printf 'After reviewing the additional context, AutoPR still found this request already fixed.' ;;
-        no_safe_action:migration_required)
-            printf 'After reviewing the additional context, AutoPR still requires a human-reviewed migration.' ;;
         no_safe_action:policy_blocked)
             printf 'After reviewing the additional context, AutoPR still found this request blocked by policy.' ;;
         no_safe_action:external_dependency)

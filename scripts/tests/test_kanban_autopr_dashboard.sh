@@ -105,6 +105,7 @@ VIEW_DIR="$TMP_DIR/view"
 mkdir "$VIEW_DIR"
 cp "$AUTOPR_DIR/dashboard.sh" "$VIEW_DIR/dashboard.sh"
 cp "$AUTOPR_DIR/plan.py" "$VIEW_DIR/plan.py"
+cp "$AUTOPR_DIR/run-snapshot.sh" "$VIEW_DIR/run-snapshot.sh"
 cat > "$VIEW_DIR/collect.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' '[{"task_id":"a","id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","last_moved_at":"2026-08-27T00:00:00Z","created_at":"2026-08-27T00:00:00Z","progress_note":""},{"task_id":"b","id8":"bbbb0000","project_title":"MATCHA","title":"Polish reports","board_column":"todo","last_moved_at":"2026-08-27T01:00:00Z","created_at":"2026-08-27T01:00:00Z","progress_note":""}]'
@@ -124,7 +125,7 @@ chmod +x "$VIEW_DIR"/*.sh
 cat > "$TMP_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
-  printf '%s\n' '[{"databaseId":900,"status":"in_progress","conclusion":null,"event":"workflow_dispatch","createdAt":"2099-08-27T01:00:00Z","updatedAt":"2099-08-27T01:01:00Z","url":"x","displayTitle":"Kanban autopr"}]'
+  printf '%s\n' '[{"databaseId":900,"status":"in_progress","conclusion":null,"event":"workflow_dispatch","createdAt":"2099-08-27T01:00:00Z","updatedAt":"2099-08-27T01:01:00Z","url":"x","displayTitle":"Kanban autopr","workflowName":"Kanban autopr"}]'
 elif [ "$1 $2" = "run view" ]; then
   printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
 elif [ "$1 $2" = "pr list" ] && [[ "$*" == *"--state open"* ]]; then
@@ -169,6 +170,63 @@ check "PR-context failure cannot produce a live release plan" \
   $(grep -q 'PLAN · unavailable · NOT-READY PRS ONLY' "$TMP_DIR/dashboard-no-pr-context.out" \
     && grep -q 'unavailable · existing queue remains visible below' "$TMP_DIR/dashboard-no-pr-context.out" \
     && ! grep -q '  RELEASE gh workflow run' "$TMP_DIR/dashboard-no-pr-context.out" \
+    && echo 0 || echo 1)
+
+# The selector is the most expensive probe on the board, so its answer is
+# cached for five minutes. A warm hit must render exactly what the cold call
+# rendered — including the selector's exit status, which the NEXT section
+# branches on. Run with a real clock so the cache is actually inside its TTL
+# (the rest of this file uses a year-2099 stamp, which always reads as
+# expired and so never exercised this path).
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'call\n' >> "$AUTOPR_TEST_SELECT_CALLS"
+printf '%s\n' '{"id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","mode":"rework"}'
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+warm_now="$(date +%s)"
+for _ in 1 2; do
+  AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+    AUTOPR_TEST_SELECT_CALLS="$TMP_DIR/select-calls" \
+    AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/warm-cache" \
+    AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+    "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-warm.out"
+done
+check "a cached selection still renders as an exact selector result" \
+  $(grep -q 'NEXT · EXACT SELECTOR RESULT' "$TMP_DIR/dashboard-warm.out" \
+    && grep -q 'Fix intake' "$TMP_DIR/dashboard-warm.out" \
+    && ! grep -q 'Selector failed' "$TMP_DIR/dashboard-warm.out" \
+    && [ "$(wc -l < "$TMP_DIR/select-calls" | tr -d ' ')" = 1 ] && echo 0 || echo 1)
+
+# "Nothing eligible" is a verdict worth caching; a selector CRASH is not.
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 3
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/empty-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > /dev/null
+cat > "$VIEW_DIR/select.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$VIEW_DIR/select.sh"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/empty-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-warm-empty.out"
+check "a cached empty queue survives, and a later crash is not cached as empty" \
+  $(grep -q 'NEXT · NONE ELIGIBLE AFTER CURRENT WORK' "$TMP_DIR/dashboard-warm-empty.out" \
+    && AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+       AUTOPR_DASHBOARD_NOW_EPOCH="$warm_now" \
+       AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/crash-cache" \
+       AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" \
+       AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+       "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-crash.out" \
+    && [ ! -e "$TMP_DIR/crash-cache/next-selection.json" ] \
+    && grep -q 'Selector failed (exit 1)' "$TMP_DIR/dashboard-crash.out" \
     && echo 0 || echo 1)
 
 cat > "$VIEW_DIR/select.sh" <<'EOF'
@@ -222,6 +280,7 @@ EOF
 chmod +x "$TMP_DIR/git-pr" "$TMP_DIR/gh-pr"
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-pr" AUTOPR_GIT_BIN="$TMP_DIR/git-pr" \
+  AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache" \
   AUTOPR_RUNNER_WORKTREE="$TMP_DIR/runner-worktree" "$AUTOPR_DIR/watch-pr.sh" > "$TMP_DIR/pr-pane.out"
 check "PR pane shows real metadata, labels, worktree files, and live diff" \
   $(grep -q 'PR #310  DRAFT' "$TMP_DIR/pr-pane.out" \
@@ -230,10 +289,29 @@ check "PR pane shows real metadata, labels, worktree files, and live diff" \
     && grep -q 'CHANGED FILES · LIVE RUNNER WORKTREE' "$TMP_DIR/pr-pane.out" \
     && grep -q 'ComplianceLocationModal' "$TMP_DIR/pr-pane.out" && echo 0 || echo 1)
 
+# A second redraw of the same pane must not spend a second GitHub request:
+# the observer panes were re-listing PRs every cycle, every pane.
+cat > "$TMP_DIR/gh-pr-counting" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$1 $2" >> "$AUTOPR_TEST_GH_CALLS"
+exec "$AUTOPR_TEST_REAL_GH" "$@"
+EOF
+chmod +x "$TMP_DIR/gh-pr-counting"
+: > "$TMP_DIR/pr-gh-calls.log"
+for _ in 1 2 3; do
+  AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-pr-counting" AUTOPR_GIT_BIN="$TMP_DIR/git-pr" \
+    AUTOPR_TEST_REAL_GH="$TMP_DIR/gh-pr" AUTOPR_TEST_GH_CALLS="$TMP_DIR/pr-gh-calls.log" \
+    AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache-ttl" \
+    AUTOPR_RUNNER_WORKTREE="$TMP_DIR/runner-worktree" "$AUTOPR_DIR/watch-pr.sh" >/dev/null
+done
+check "repeat observer redraws reuse cached PR metadata instead of re-asking GitHub" \
+  $([ "$(grep -c 'pr view' "$TMP_DIR/pr-gh-calls.log")" = 1 ] \
+    && [ "$(grep -c 'pr list' "$TMP_DIR/pr-gh-calls.log")" -le 2 ] && echo 0 || echo 1)
+
 cat > "$TMP_DIR/gh-work" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1 $2" = "run list" ]; then
-  printf '%s\n' '[{"databaseId":900,"status":"in_progress","createdAt":"2099-08-27T01:00:00Z"}]'
+  printf '%s\n' '[{"databaseId":900,"status":"in_progress","createdAt":"2099-08-27T01:00:00Z","workflowName":"Kanban autopr"}]'
 elif [ "$1 $2" = "run view" ]; then
   printf '%s\n' '{"jobs":[{"name":"build","steps":[{"name":"Investigate","status":"in_progress"}]}]}'
 fi
@@ -252,6 +330,8 @@ Codex: running focused tests
 EOF
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/work-github-cache" \
+  AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-pane.out"
 check "live-work pane shows model activity and redacts common credentials" \
   $(grep -q 'LIVE CODEX WORK' "$TMP_DIR/work-pane.out" \
@@ -264,6 +344,8 @@ check "live-work pane shows model activity and redacts common credentials" \
     && echo 0 || echo 1)
 
 AUTOPR_DASHBOARD_MAX_ITERATIONS=1 AUTOPR_GH_BIN="$TMP_DIR/gh-work" \
+  AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/work-github-cache" \
+  AUTOPR_GH_CACHE_DIR="$TMP_DIR/gh-cache-work" \
   AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" "$AUTOPR_DIR/watch-work.sh" > "$TMP_DIR/work-history.out"
 check "interactive live-work pane appends sanitized output without clearing history" \
   $(grep -q 'append-only history' "$TMP_DIR/work-history.out" \

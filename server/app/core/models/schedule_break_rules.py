@@ -39,6 +39,13 @@ class BreakRuleSetImport(BaseModel):
                 raise ValueError(f"{key} must be a list")
         if "meal_periods" not in value and "rest_periods" not in value:
             raise ValueError("rules must contain meal_periods or rest_periods")
+        # Import and runtime resolution must accept exactly the same shape.
+        # Import lazily to avoid coupling model module initialization to the
+        # scheduling service graph.
+        from app.matcha.services.scheduling.schedule_break_rule_store import (
+            validate_break_rule_payload,
+        )
+        validate_break_rule_payload(value)
         return value
 
     @model_validator(mode="after")

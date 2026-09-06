@@ -16,7 +16,43 @@ RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.j
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
+# checkpoint.sh reads this to tell a genuine step timeout from a crash: only a
+# run that was killed may pause the card behind a human approval. A harness or
+# model failure must fail loudly and stay selectable instead.
+INVESTIGATION_EXIT_FILE="${AUTOPR_INVESTIGATION_EXIT_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-exit-code}}"
+[ -z "$INVESTIGATION_EXIT_FILE" ] || rm -f "$INVESTIGATION_EXIT_FILE"
+# checkpoint.sh refuses to harvest a sandbox clone older than this: on a rework
+# the leftover workspace still carries the same task id, so only its age
+# distinguishes the previous round's work from this run's. The workflow writes
+# the file before this script starts; local runs get their own.
+INVESTIGATION_STARTED_FILE="${AUTOPR_INVESTIGATION_STARTED_FILE:-${RUNNER_TEMP:+$RUNNER_TEMP/investigation-started-at}}"
+[ -n "$INVESTIGATION_STARTED_FILE" ] \
+    || INVESTIGATION_STARTED_FILE="$WORK_DIR/investigation-started-at"
+[ -s "$INVESTIGATION_STARTED_FILE" ] \
+    || date +%s > "$INVESTIGATION_STARTED_FILE" 2>/dev/null \
+    || true
+export AUTOPR_INVESTIGATION_STARTED_FILE="$INVESTIGATION_STARTED_FILE"
+SNAPSHOT_PID=""
+# Killing the timer only kills the sleeping subshell: a `checkpoint.sh snapshot`
+# it already forked keeps running and would re-point `active` after this run
+# consumed it. checkpoint.sh snapshot-halt waits that pass out.
+stop_inflight_snapshots() {
+    if [ -n "$SNAPSHOT_PID" ]; then
+        kill "$SNAPSHOT_PID" 2>/dev/null || true
+        SNAPSHOT_PID=""
+        "$SCRIPT_DIR/checkpoint.sh" snapshot-halt \
+            || printf 'kanban-autopr: could not halt in-flight snapshots\n' >&2
+    fi
+}
+_investigate_cleanup() {
+    local status=$?
+    stop_inflight_snapshots
+    [ -z "$INVESTIGATION_EXIT_FILE" ] \
+        || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
+        || true
+    rm -rf "$WORK_DIR"
+}
+trap _investigate_cleanup EXIT
 
 # The report must live outside the git workspace: `git add --all` in
 # publish.sh would otherwise stage a file the model wrote under its own
@@ -36,6 +72,38 @@ ID8="$(jq -r '.id8' "$CARD_FILE")"
 
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
+RESUME_PATCH=""
+PRIOR_CHECKPOINT_FILE="$WORK_DIR/prior-checkpoint.json"
+printf 'null\n' > "$PRIOR_CHECKPOINT_FILE"
+
+# Resume a prior checkpoint only inside the disposable sandbox.
+prior_checkpoint="$($SCRIPT_DIR/checkpoint.sh latest "$CARD_FILE")"
+if [ -n "$prior_checkpoint" ]; then
+    if [ -s "$prior_checkpoint/metadata.json" ]; then
+        cp "$prior_checkpoint/metadata.json" "$PRIOR_CHECKPOINT_FILE"
+    fi
+    # Trust the metadata over the file: a checkpoint that records no patch must
+    # never replay one left behind by an earlier pass of the same run.
+    if [ -s "$prior_checkpoint/model.patch" ] \
+        && [ "$(jq -r '.patch_saved // true' "$PRIOR_CHECKPOINT_FILE" 2>/dev/null)" != false ]; then
+        RESUME_PATCH="$prior_checkpoint/model.patch"
+    fi
+    for checkpoint_input in report.md decision.json transcript.log; do
+        [ ! -s "$prior_checkpoint/$checkpoint_input" ] \
+            || ATTACH_ARGS+=(-f "$prior_checkpoint/$checkpoint_input")
+    done
+fi
+
+# Consume any "run now" request as soon as this card is actually picked up.
+# The claim is what stops the one-minute watcher re-dispatching for a card
+# whose run then crashes, is capped, or produces no PR. Non-fatal: losing the
+# claim must never abandon an investigation that is otherwise ready to go.
+if [ "$(jq -r '.autopr_run_requested_at // empty' "$CARD_FILE")" != "" ]; then
+    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/run-claim" '{}' \
+        >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not claim the run request for %s\n' \
+            "$TASK_ID" >&2
+fi
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist
@@ -53,10 +121,21 @@ printf '%s' "$files" > "$WORK_DIR/files.json"
 # directives. Card prose, comments, PR bodies, and unrelated history remain
 # untrusted evidence. Resolve structured metadata plus the same event's body
 # so context submitted before a parser upgrade remains actionable.
+# Reuse the policy the runtime step already resolved when it hands one over.
+# Resolving twice against two different reads of the board history lets the
+# budgeted runtime and the authority stated in the model's prompt disagree
+# about the same run.
 DIRECTIVE_FILE="$WORK_DIR/directive-policy.json"
-python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
-    --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
-    --output "$DIRECTIVE_FILE"
+if [ -n "${AUTOPR_DIRECTIVE_POLICY_FILE:-}" ] && [ -s "${AUTOPR_DIRECTIVE_POLICY_FILE}" ]; then
+    jq '{directives:(.directives // []),
+         test_route:(.test_route // null),
+         source_event_id:(.source_event_id // null)}' \
+        "$AUTOPR_DIRECTIVE_POLICY_FILE" > "$DIRECTIVE_FILE"
+else
+    python3 "$SCRIPT_DIR/resolve-directive-policy.py" \
+        --card "$CARD_FILE" --history "$WORK_DIR/history.json" \
+        --output "$DIRECTIVE_FILE"
+fi
 
 # An approved test tenant may be exercised by the trusted browser harness.
 # Credentials never enter context.json or msandbox; only a screenshot and
@@ -190,9 +269,10 @@ jq -n \
     --slurpfile test_tenant_evidence "$TEST_TENANT_EVIDENCE_FILE" \
     --slurpfile production_errors "$WORK_DIR/production-errors.json" \
     --slurpfile changes_since_production "$WORK_DIR/changes-since-production.json" \
+    --slurpfile prior_checkpoint "$PRIOR_CHECKPOINT_FILE" \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], directive_policy: $directive_policy[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
     > "$CONTEXT_FILE"
 
 if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
@@ -259,38 +339,150 @@ fi
 
 run_codex() {
     [ -x "$SANDBOX_RUNNER" ] || die "sandbox runner is not executable: $SANDBOX_RUNNER"
-    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
-        AUTOPR_CODEX_MODEL=gpt-5.6-sol \
-        AUTOPR_CODEX_REASONING_EFFORT=medium \
-        "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
+    runner_env=(
+        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY
+        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD
+        AUTOPR_CODEX_MODEL=gpt-5.6-sol
+        AUTOPR_CODEX_REASONING_EFFORT=medium
+        AUTOPR_TASK_ID="$TASK_ID"
+    )
+    [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
+    "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
         "${ATTACH_ARGS[@]}"
 }
 
-if [ "$live_log_ready" = true ]; then
-    run_codex 2>&1 | tee -a "$LIVE_LOG"
-    codex_rc="${PIPESTATUS[0]}"
-else
-    run_codex
-    codex_rc=$?
-fi
-if [ "$codex_rc" -ne 0 ]; then
-    [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
-        "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
-    die "Codex investigation exited $codex_rc"
-fi
-[ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \
-    "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
-
-if [ ! -s "$REPORT_FILE" ]; then
-    die "investigation produced no report at $REPORT_FILE"
-fi
-
-for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; do
-    if ! grep -qF "$heading" "$REPORT_FILE"; then
-        die "report is missing required heading: $heading"
+codex_pass() {
+    if [ "$live_log_ready" = true ]; then
+        run_codex 2>&1 | tee -a "$LIVE_LOG"
+        codex_rc="${PIPESTATUS[0]}"
+    else
+        run_codex
+        codex_rc=$?
     fi
-done
+    if [ "$codex_rc" -ne 0 ]; then
+        [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
+            "$codex_rc" "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+        die "Codex investigation exited $codex_rc"
+    fi
+    [ "$live_log_ready" != true ] || printf '\n[COMPLETE] Codex finished at %s\n' \
+        "$(date '+%H:%M:%S %Z')" >> "$LIVE_LOG"
+
+    if [ ! -s "$REPORT_FILE" ]; then
+        die "investigation produced no report at $REPORT_FILE"
+    fi
+
+    for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; do
+        if ! grep -qF "$heading" "$REPORT_FILE"; then
+            die "report is missing required heading: $heading"
+        fi
+    done
+}
+
+# Snapshot the live sandbox on a timer. checkpoint.sh save runs as a separate
+# workflow step, so it never runs at all if this process is killed outright
+# (machine death, SIGKILL, a Docker restart) — and the next run wipes the
+# sandbox clone. Without this, that class of failure loses the whole
+# investigation rather than the last few minutes of it.
+SNAPSHOT_INTERVAL_SECONDS="${AUTOPR_SNAPSHOT_INTERVAL_SECONDS:-240}"
+SNAPSHOT_MAX_PASSES="${AUTOPR_SNAPSHOT_MAX_PASSES:-15}"
+start_inflight_snapshots() {
+    [ "$SNAPSHOT_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null || return 0
+    # Clear any stop flag a previous run left in the shared runtime root.
+    "$SCRIPT_DIR/checkpoint.sh" snapshot-arm \
+        || printf 'kanban-autopr: could not arm in-flight snapshots\n' >&2
+    local parent=$$
+    (
+        # Bounded, and self-terminating once this shell is gone: an orphaned
+        # loop must never outlive the investigation and repoint a checkpoint
+        # the next run is already reading.
+        for _ in $(seq 1 "$SNAPSHOT_MAX_PASSES"); do
+            sleep "$SNAPSHOT_INTERVAL_SECONDS"
+            kill -0 "$parent" 2>/dev/null || exit 0
+            # Never silence this: a snapshot that has been failing every pass
+            # looks exactly like one that is working until the run is lost.
+            "$SCRIPT_DIR/checkpoint.sh" snapshot "$CARD_FILE" >/dev/null \
+                || printf 'kanban-autopr: in-flight snapshot pass failed\n' >&2
+        done
+    ) &
+    SNAPSHOT_PID=$!
+}
+
+start_inflight_snapshots
+codex_pass
+
+# One corrective retry when the pass just returned is one the trusted harness
+# will refuse anyway. Dying (or letting publish.sh die) would leave the card
+# showing a stale refusal, or nothing at all, with no sign the run happened.
+# The retry re-states the rejection of the exact decision just produced; the
+# trusted validation below still has the last word.
+CORRECTION_KIND=""
+CORRECTION_INSTRUCTION=""
+if [ -s "$DIRECTIVE_FILE" ] \
+    && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
+    CORRECTION_KIND="directive_violation"
+    CORRECTION_INSTRUCTION="The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. A needed migration is never a reason to refuse. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."
+elif [ "$(jq -r '.no_safe_action_reason // ""' "$RAW_DECISION_FILE" 2>/dev/null)" = migration_required ]; then
+    # The single most common refusal, and it never protected anything: the
+    # operator applies every migration by hand, so authoring the version file
+    # is ordinary drafting work. decision.sh no longer accepts the reason at
+    # all; correct it here so an out-of-date model costs one retry instead of
+    # a dead run.
+    CORRECTION_KIND="migration_is_not_a_blocker"
+    CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: migration_required is not an outcome this harness accepts. Needing a database migration is ordinary drafting work, not a blocker. Investigate again and implement the change: author the application code, its tests, and a new server/alembic/versions/<revision>.py version file for human review — its name must use only letters, digits and underscores without a leading underscore, it must assign a string literal `revision`, its `down_revision` must be one of the current repository heads, and it must define both `upgrade()` and `downgrade()`. You must never run a migration against any database and you must not touch env.py, templates, alembic.ini, or any migration runner code — a human reviews and applies every migration. If something OTHER than the schema change genuinely blocks you, use questions_only with concrete options, or no_safe_action with already_fixed, acceptance_criteria_met, policy_blocked, or external_dependency."
+else
+    # publish.sh refuses a string-literal-only diff on a card asking for
+    # structure and discards the run. Catching it here instead gives the model
+    # the one thing that failure never had: a correction path.
+    case "$(jq -r '.outcome // ""' "$RAW_DECISION_FILE" 2>/dev/null)" in
+        implementation|partial_implementation)
+            WORKTREE_DIFF="$WORK_DIR/worktree.diff"
+            git -C "$REPO_ROOT" diff HEAD > "$WORKTREE_DIFF" 2>/dev/null || : > "$WORKTREE_DIFF"
+            if autopr_cosmetic_only_diff "$WORKTREE_DIFF" \
+                "$(jq -r '.title // ""' "$CARD_FILE")" "$(jq -r '.description // ""' "$CARD_FILE")"; then
+                CORRECTION_KIND="cosmetic_only_diff"
+                CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: this card asks for structure — a route, a sidebar row, a menu entry, an endpoint — and your diff only rewrites string literals, which changes nothing a reader of the card asked for. Investigate again. If every acceptance criterion is already satisfied on this branch, return no_safe_action with acceptance_criteria_met and one acceptance_evidence entry per criterion (criterion text plus path, line, commit); the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. If a specific missing product decision blocks the structural change, return questions_only and say what is missing. Only return an implementation if you make the structural change the card actually asks for."
+            fi
+            # The publisher's migration gate, run here instead of there. A
+            # mistyped down_revision used to cost the whole investigation:
+            # publish.sh's only answer is `git reset --hard` and exit. Now that
+            # drafting a migration is the routine path rather than a rare
+            # exception, that failure needed a correction path like every other.
+            if [ -z "$CORRECTION_KIND" ] \
+                && ! MIGRATION_DRAFT_ERRORS="$(autopr_migration_draft_errors "$REPO_ROOT" \
+                    "${AUTOPR_MIGRATION_BASE_REF:-main}")"; then
+                CORRECTION_KIND="migration_draft_invalid"
+                CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: the migration you drafted cannot be published.
+$MIGRATION_DRAFT_ERRORS
+Investigate again and re-author the change. A drafted migration must be a NEW file server/alembic/versions/<revision>.py whose name uses only letters, digits and underscores and does not start with an underscore; it must assign a string literal \`revision\`; its \`down_revision\` must be one of the current repository heads (listed as repository_heads in the production context) or another migration you are adding in this same change, never None and never a mid-chain revision; and it must define both \`upgrade()\` and \`downgrade()\`. Never edit or delete a migration already on main, never touch env.py, templates, alembic.ini, or any migration runner code, and never run a migration against any database."
+            fi
+            ;;
+    esac
+fi
+
+if [ -n "$CORRECTION_KIND" ]; then
+    echo "kanban-autopr: decision rejected ($CORRECTION_KIND); retrying once" >&2
+    # The rejected pass must not leave edits behind for the retry to inherit.
+    git -C "$REPO_ROOT" reset --hard HEAD >/dev/null 2>&1 || true
+    git -C "$REPO_ROOT" clean -fd >/dev/null 2>&1 || true
+    CORRECTION_FILE="$WORK_DIR/directive-correction.json"
+    # A cosmetic-diff rejection can happen with no directive at all.
+    [ -s "$DIRECTIVE_FILE" ] || printf 'null\n' > "$DIRECTIVE_FILE"
+    jq -n --slurpfile policy "$DIRECTIVE_FILE" --slurpfile rejected "$RAW_DECISION_FILE" \
+        --arg kind "$CORRECTION_KIND" --arg instruction "$CORRECTION_INSTRUCTION" \
+        '{kind: $kind,
+          directive_policy: ($policy[0] // null),
+          rejected_decision: {outcome: $rejected[0].outcome,
+                              no_safe_action_reason: $rejected[0].no_safe_action_reason},
+          instruction: $instruction}' \
+        > "$CORRECTION_FILE"
+    ATTACH_ARGS+=(-f "$CORRECTION_FILE")
+    : > "$REPORT_FILE"
+    : > "$RAW_DECISION_FILE"
+    codex_pass
+fi
+
+# Nothing below needs another snapshot, and `consume` must not race one.
+stop_inflight_snapshots
 
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
@@ -301,3 +493,4 @@ jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
 mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
 mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+"$SCRIPT_DIR/checkpoint.sh" consume "$CARD_FILE"

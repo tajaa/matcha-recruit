@@ -65,6 +65,43 @@ class TestResolveWeek:
         assert resolve_week("this_week", wed) == resolve_week(None, wed)
 
 
+class TestLocationWeekStart:
+    """A store whose week starts on Monday. `days_of_week` stays Sunday-indexed
+    everywhere — only which day the week BEGINS on changes, which is why the
+    weekday index cannot be added to a week start as a raw offset."""
+
+    MONDAY = 1
+    WEEK_START = date(2026, 8, 3)   # the Monday of the same calendar week
+    TODAY = date(2026, 8, 1)
+
+    def test_resolve_week_anchors_on_the_locations_own_day(self):
+        wed = date(2026, 8, 5)
+        assert resolve_week(None, wed, None, self.MONDAY) == self.WEEK_START
+        assert resolve_week("next_week", wed, None, self.MONDAY) == date(2026, 8, 10)
+
+    def test_resolve_dates_maps_weekdays_onto_the_shifted_week(self):
+        # Sunday (index 0) is the LAST day of a Monday-start week, six days
+        # after the start — not the start itself.
+        out = resolve_dates(
+            {"weekdays": ["sunday", "monday"]}, self.WEEK_START, self.TODAY,
+            week_start_weekday=self.MONDAY,
+        )
+        assert out == [date(2026, 8, 3), date(2026, 8, 9)]
+
+    def test_template_mask_also_goes_through_the_offset(self):
+        out = resolve_dates(
+            {}, self.WEEK_START, self.TODAY, template_days=[0, 6],
+            week_start_weekday=self.MONDAY,
+        )
+        assert out == [date(2026, 8, 8), date(2026, 8, 9)]   # Sat, then Sun
+
+    def test_sunday_start_is_unchanged(self):
+        """The default has to stay exactly what every caller assumed before."""
+        assert resolve_dates(
+            {"weekdays": ["monday"]}, date(2026, 8, 2), self.TODAY, week_start_weekday=0,
+        ) == resolve_dates({"weekdays": ["monday"]}, date(2026, 8, 2), self.TODAY)
+
+
 class TestResolveDates:
     WEEK_START = date(2026, 8, 2)  # a Sunday
     TODAY = date(2026, 8, 1)

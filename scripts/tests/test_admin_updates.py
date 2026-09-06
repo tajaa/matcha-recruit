@@ -13,17 +13,28 @@ ADMIN_UPDATES_DIR = REPO_ROOT / "scripts" / "admin-updates"
 sys.path.insert(0, str(ADMIN_UPDATES_DIR))
 
 import collect as admin_collect  # noqa: E402
+import enrich as admin_enrich  # noqa: E402
+import nav_inventory as admin_nav_inventory  # noqa: E402
 import validate as admin_validate  # noqa: E402
 
 
-def _context(*, pending: list[str] | None = None) -> dict:
+def _context(
+    *,
+    pending: list[str] | None = None,
+    checked_at: str = "2026-08-31T12:00:00Z",
+    backend_started_at: str | None = None,
+    frontend_started_at: str | None = None,
+) -> dict:
+    backend: dict = {"git_sha": "backend-live"}
+    frontend: dict = {"git_sha": "frontend-live"}
+    if backend_started_at is not None:
+        backend["started_at"] = backend_started_at
+    if frontend_started_at is not None:
+        frontend["started_at"] = frontend_started_at
     return {
-        "checked_at": "2026-08-31T12:00:00Z",
+        "checked_at": checked_at,
         "build_number": "701",
-        "containers": {
-            "backend": {"git_sha": "backend-live"},
-            "frontend": {"git_sha": "frontend-live"},
-        },
+        "containers": {"backend": backend, "frontend": frontend},
         "database": {"status": "current", "pending_migrations": pending or []},
     }
 
@@ -62,6 +73,22 @@ def _deployment() -> dict:
         "sha": "abc123",
         "source": "github",
     }
+
+
+def _stale_deployment() -> dict:
+    """A dispatch whose own deploy predates the merge it is now reporting on."""
+    return {
+        "deploy_id": "deploy-stale",
+        "deployed_at": "2026-09-04T23:46:29Z",
+        "target": "matcha",
+        "sha": "stale-sha",
+        "source": "github",
+    }
+
+
+def _live_only_ancestry(_root, _merge_oid, descendant) -> bool:
+    """The PR is in both live images but not in the dispatching deploy's SHA."""
+    return descendant in ("backend-live", "frontend-live")
 
 
 def test_plan_requires_every_changed_component_to_be_live(monkeypatch, tmp_path):
@@ -225,6 +252,174 @@ def test_validator_accepts_complete_exact_output():
     assert normalized["entries"][0]["id"] == "pr-11-add-useful-feature"
 
 
+def _nav_inventory() -> dict:
+    return {
+        "routes": ["/app/credential-templates"],
+        "navItems": [
+            {
+                "sidebar": "ClientSidebar",
+                "group": "Compliance",
+                "label": "Credential Templates",
+                "to": "/app/credential-templates",
+            },
+        ],
+        "uiLabels": ["Dropdown options"],
+    }
+
+
+def _draft_with_steps(*steps: str) -> dict:
+    draft = _valid_draft()
+    draft["entries"][0]["howToUse"] = list(steps)
+    return draft
+
+
+def test_grounded_navigation_step_survives():
+    normalized = admin_validate.validate(
+        _plan_for_validation(),
+        _draft_with_steps("Open Compliance -> Credential Templates and select Dropdown options."),
+        _nav_inventory(),
+    )
+    assert len(normalized["entries"][0]["howToUse"]) == 1
+
+
+def test_invented_navigation_step_is_dropped():
+    """The PR #418 failure: a nav path that reads plausibly and does not exist."""
+    normalized = admin_validate.validate(
+        _plan_for_validation(),
+        _draft_with_steps("Open Compliance -> Widget Factory and select Blorp."),
+        _nav_inventory(),
+    )
+    assert normalized["entries"][0]["howToUse"] == []
+
+
+def test_prose_naming_no_surface_is_left_alone():
+    """Only navigation claims are checked -- English is not policed."""
+    step = "Recommendations refresh automatically each night."
+    normalized = admin_validate.validate(
+        _plan_for_validation(), _draft_with_steps(step), _nav_inventory()
+    )
+    assert normalized["entries"][0]["howToUse"] == [step]
+
+
+def test_empty_how_to_use_passes_through():
+    normalized = admin_validate.validate(
+        _plan_for_validation(), _draft_with_steps(), _nav_inventory()
+    )
+    assert normalized["entries"][0]["howToUse"] == []
+
+
+def test_missing_inventory_disables_grounding_rather_than_failing():
+    """No inventory must never mean "drop everything" -- the deploy dispatch is
+    non-fatal, so silently emptying the changelog would be the worse failure."""
+    step = "Open Compliance -> Widget Factory."
+    normalized = admin_validate.validate(_plan_for_validation(), _draft_with_steps(step))
+    assert normalized["entries"][0]["howToUse"] == [step]
+
+
+def test_prompt_separator_is_grounded():
+    """The prompt renders nav as `Group > Row` and writes its example steps that
+    way, so `>` has to be a separator the validator splits on -- it was not, and
+    every step written the way the prompt teaches skipped grounding entirely."""
+    normalized = admin_validate.validate(
+        _plan_for_validation(),
+        _draft_with_steps("Open Compliance > Widget Factory and select Blorp."),
+        _nav_inventory(),
+    )
+    assert normalized["entries"][0]["howToUse"] == []
+
+
+def test_prompt_example_separator_appears_in_nav_tokens():
+    for separator in ("->", ">", "→", "⇒", "»"):
+        assert admin_nav_inventory.nav_tokens(f"Open A {separator} B") == ["Open A", "B"]
+
+
+def test_invention_is_dropped_against_the_real_client_tree():
+    """The 3-entry fixture above overstates the check: the real tree carries
+    ~900 labels, and a substring test against that many anchors passed almost
+    anything."""
+    inventory = admin_nav_inventory.collect(REPO_ROOT)
+    assert admin_nav_inventory.unknown_nav_tokens(
+        "Open Compliance > Widget Factory and select Blorp.", inventory
+    ) == ["Widget Factory and select Blorp."]
+    assert admin_nav_inventory.unknown_nav_tokens(
+        "Open Safety > Incidents and use the named control.", inventory
+    ) == []
+
+
+def test_anchors_match_whole_words_only():
+    inventory = {"routes": [], "navItems": [], "uiLabels": ["Order"]}
+    assert admin_nav_inventory.unknown_nav_tokens("Open Order > Order", inventory) == []
+    assert admin_nav_inventory.unknown_nav_tokens(
+        "Open Reordering > Blorp", inventory
+    ) == ["Open Reordering", "Blorp"]
+
+
+def test_label_with_an_apostrophe_is_not_truncated():
+    """`label: "What's New"` used to capture `What`, because the regex accepted
+    either quote as the closer -- and a truncated label is the exact wrong-label
+    failure this module exists to prevent."""
+    items = admin_nav_inventory._collect_sidebar_file(
+        """const nav = [
+          { key: 'news', label: "What's New", items: [
+            { to: '/admin/updates', icon: Bell, label: 'Updates' },
+          ]},
+        ]""",
+        "TestSidebar",
+    )
+    assert items == [{
+        "sidebar": "TestSidebar",
+        "group": "What's New",
+        "label": "Updates",
+        "to": "/admin/updates",
+    }]
+
+
+def test_multi_line_nav_row_is_extracted():
+    """ClientSidebar's conditional Broker Chat row spells `to:` and `label:` on
+    separate lines; a line-at-a-time reader told the model it did not exist."""
+    items = admin_nav_inventory._collect_sidebar_file(
+        """const entry: NavItem = {
+          to: '/app/broker-chat',
+          icon: Handshake,
+          label: 'Broker Chat',
+        }""",
+        "ClientSidebar",
+    )
+    assert items == [{
+        "sidebar": "ClientSidebar",
+        "group": "",
+        "label": "Broker Chat",
+        "to": "/app/broker-chat",
+    }]
+
+
+def test_commented_out_nav_row_is_not_reported_as_shipped():
+    items = admin_nav_inventory._collect_sidebar_file(
+        """const nav = [
+          { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
+          // { to: '/app/locations', icon: MapPin, label: 'Locations' },
+        ]""",
+        "IrSidebar",
+    )
+    assert [item["label"] for item in items] == ["Incidents"]
+
+
+def test_real_client_tree_has_the_multi_line_broker_chat_row():
+    inventory = admin_nav_inventory.collect(REPO_ROOT)
+    assert any(item["to"] == "/app/broker-chat" for item in inventory["navItems"])
+
+
+def test_nav_inventory_extracts_real_sidebar_rows():
+    inventory = admin_nav_inventory.collect(REPO_ROOT)
+    credential_rows = [
+        item for item in inventory["navItems"]
+        if item["to"] == "/app/credential-templates"
+    ]
+    assert credential_rows, "credential-templates row missing from every sidebar"
+    # One label for one route -- the divergence that made the ticket unfindable.
+    assert {row["label"] for row in credential_rows} == {"Credential Templates"}
+
+
 def test_validator_accepts_and_strips_trusted_skip_echoes():
     draft = _valid_draft()
     draft["entries"] = []
@@ -303,3 +498,334 @@ def test_dev_changelog_sync_cannot_overwrite_production_entries():
         if "--table admin_updates --table tellus_admin_updates" in line
     )
     assert "--mode update" not in admin_export
+
+
+def test_entry_date_follows_the_deploy_that_actually_carried_the_pr(monkeypatch, tmp_path):
+    """A dispatch queued behind an offline runner must not date the entry.
+
+    Regression: a 2026-09-04 dispatch waited 27 hours for the self-hosted
+    runner, ran after the 2026-09-05 evening deploy that first carried the PR
+    live, and published it as SEP 4.
+    """
+    monkeypatch.setattr(admin_collect, "_is_ancestor", _live_only_ancestry)
+    pr = _pr(11, ["server/app/core/x.py", "client/src/pages/X.tsx"])
+    pr["mergedAt"] = "2026-09-05T01:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:39:00Z",
+            backend_started_at="2026-09-06T02:17:44.123456789Z",
+            frontend_started_at="2026-09-06T02:18:02.987654321Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment=_stale_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["displayTimezone"] == "America/Los_Angeles"
+    assert plan["deploymentDate"] == "2026-09-04"
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+    assert plan["units"][0]["date"] == "2026-09-05"
+
+
+def test_entry_date_uses_only_the_components_a_pr_needs(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["client/src/pages/X.tsx"])
+    pr["mergedAt"] = "2026-09-01T10:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:39:00Z",
+            backend_started_at="2026-09-06T02:17:44Z",
+            frontend_started_at="2026-09-02T18:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-02"
+
+
+def test_entry_date_never_precedes_the_merge(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["server/app/core/x.py"])
+    pr["mergedAt"] = "2026-09-04T20:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-05T01:00:00Z",
+            backend_started_at="2026-09-01T12:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-04"
+
+
+def test_entry_date_falls_back_to_this_run_when_container_start_is_unknown(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(checked_at="2026-09-06T02:39:00Z"),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment={
+            "deploy_id": "deploy-stale",
+            "deployed_at": "2026-09-04T23:46:29Z",
+            "target": "matcha",
+            "sha": "abc123",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    # Local Pacific date of the run that verified production, not the stale
+    # dispatch and not the UTC calendar day.
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+
+
+def test_entry_date_uses_pacific_not_utc_for_an_evening_deploy(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:20:00Z",
+            backend_started_at="2026-09-06T02:19:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment={
+            "deploy_id": "deploy-evening",
+            "deployed_at": "2026-09-06T02:20:00Z",
+            "target": "matcha",
+            "sha": "abc123",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+
+
+def test_entry_date_uses_the_carrying_deploy_not_a_later_restart(monkeypatch, tmp_path):
+    """A container's start time is the *latest* deploy of that component.
+
+    Any run that is not the first successful dispatch after the carrying
+    deploy -- a retry, a batch released by `deferred`, a `since_pr` backfill --
+    sees a later restart and would date the entry after the change went live.
+    """
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["server/app/core/x.py"])
+    pr["mergedAt"] = "2026-09-01T10:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-04T03:00:00Z",
+            # A deploy three days after the one that carried this PR.
+            backend_started_at="2026-09-04T02:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment={
+            "deploy_id": "deploy-carrying",
+            "deployed_at": "2026-09-01T20:00:00Z",
+            "target": "backend",
+            "sha": "carrying-sha",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-01"
+
+
+def test_deploy_bound_is_ignored_for_a_component_it_did_not_replace(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["server/app/core/x.py"])
+    pr["mergedAt"] = "2026-09-01T10:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-04T03:00:00Z",
+            backend_started_at="2026-09-04T02:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment={
+            "deploy_id": "deploy-frontend-only",
+            "deployed_at": "2026-09-01T20:00:00Z",
+            "target": "frontend",
+            "sha": "carrying-sha",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    # A frontend-only deploy says nothing about when the backend went live.
+    assert plan["candidates"][0]["date"] == "2026-09-03"
+
+
+def test_zero_value_container_start_is_treated_as_unknown(monkeypatch, tmp_path):
+    """Docker reports `0001-01-01T00:00:00Z` for a container that never ran.
+
+    It parses cleanly, so treating it as a real time made `_live_at` skip the
+    fallback and the merge floor date the entry at the merge date.
+    """
+    monkeypatch.setattr(admin_collect, "_is_ancestor", _live_only_ancestry)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:39:00Z",
+            backend_started_at="0001-01-01T00:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment=_stale_deployment(),
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+
+
+def test_writer_reads_authored_evidence_instead_of_merge_diffs(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    plan = admin_collect.build_plan(
+        production_context=_context(),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment=_deployment(),
+        repo_root=tmp_path,
+    )
+
+    enriched = admin_enrich.enrich(plan, {
+        11: {
+            "number": 11,
+            "commits": [
+                {"messageHeadline": "Add the thing", "messageBody": "b" * 5000},
+                {"messageHeadline": "", "messageBody": "dropped"},
+            ],
+            "comments": [{"author": {"login": "tajaa"}, "body": "c" * 9000}],
+            "reviews": [{"author": {"login": "bot"}, "body": ""}],
+            "files": [{"path": "server/app/core/x.py", "additions": 12, "deletions": 3}],
+            "additions": 12,
+            "deletions": 3,
+            "changedFiles": 1,
+        },
+    })
+    candidate = enriched["candidates"][0]
+
+    assert [commit["subject"] for commit in candidate["commits"]] == ["Add the thing"]
+    assert len(candidate["commits"][0]["body"]) <= admin_enrich.MAX_COMMIT_BODY + 16
+    assert len(candidate["discussion"]) == 1
+    assert candidate["discussion"][0]["author"] == "tajaa"
+    assert len(candidate["discussion"][0]["body"]) <= admin_enrich.MAX_DISCUSSION_BODY + 16
+    assert candidate["fileStats"] == [
+        {"path": "server/app/core/x.py", "additions": 12, "deletions": 3}
+    ]
+    assert candidate["changeSize"] == {"additions": 12, "deletions": 3, "changedFiles": 1}
+
+
+def _bot_comment(day: int) -> dict:
+    return {
+        "author": {"login": "review-bot"},
+        "createdAt": f"2026-09-{day:02d}T10:00:00Z",
+        "body": "c" * 2500,
+    }
+
+
+def test_review_rationale_survives_a_flood_of_bot_comments():
+    """Reviews used to be appended after every comment and truncated away."""
+    enriched = admin_enrich.enrich({"candidates": [{"sourcePr": 11}]}, {
+        11: {
+            "number": 11,
+            "comments": [_bot_comment(day) for day in range(1, 9)],
+            "reviews": [{
+                "author": {"login": "tajaa"},
+                "submittedAt": "2026-09-09T10:00:00Z",
+                "state": "APPROVED",
+                "body": "Staggering the breaks is the whole point of the change.",
+            }],
+        },
+    })
+    discussion = enriched["candidates"][0]["discussion"]
+
+    assert [item["kind"] for item in discussion].count("review") == 1
+    assert discussion[-1]["state"] == "APPROVED"
+    assert discussion == sorted(discussion, key=lambda item: item["at"])
+    assert sum(len(item["body"]) for item in discussion) <= admin_enrich.MAX_DISCUSSION_TOTAL
+
+
+def test_plan_evidence_shares_one_global_budget():
+    """Per-candidate caps alone let a backlog run grow the plan without bound."""
+    candidates = [{"sourcePr": number} for number in range(1, 21)]
+    details = {
+        number: {
+            "number": number,
+            "commits": [
+                {"messageHeadline": f"Commit {index}", "messageBody": "b" * 1200}
+                for index in range(20)
+            ],
+            "comments": [_bot_comment(day) for day in range(1, 13)],
+            "files": [
+                {"path": f"server/app/matcha/services/area/module_{index}.py"}
+                for index in range(60)
+            ],
+        }
+        for number in range(1, 21)
+    }
+
+    enriched = admin_enrich.enrich({"candidates": candidates}, details)
+    total = sum(
+        len(commit["subject"]) + len(commit["body"])
+        for candidate in enriched["candidates"]
+        for commit in candidate["commits"]
+    ) + sum(
+        len(item["body"])
+        for candidate in enriched["candidates"]
+        for item in candidate["discussion"]
+    ) + sum(
+        len(entry["path"])
+        for candidate in enriched["candidates"]
+        for entry in candidate["fileStats"]
+    )
+
+    assert total <= admin_enrich.MAX_PLAN_EVIDENCE_TOTAL
+    # An even share per remaining candidate: the last one is never starved.
+    assert enriched["candidates"][-1]["commits"]
+    assert enriched["candidates"][-1]["discussion"]
+    assert enriched["candidates"][-1]["fileStats"]
+
+
+def test_enrichment_failure_never_blocks_publication():
+    collector = (ADMIN_UPDATES_DIR / "collect.sh").read_text()
+    enrich_line = next(
+        line for line in collector.splitlines() if "enrich.py" in line and "python3" in line
+    )
+    assert enrich_line.rstrip().endswith("\\")
+    assert "|| echo" in collector.split("enrich.py")[1]
+
+
+def test_pr_detail_lookup_pins_the_repository_and_releases_stdin():
+    collector = (ADMIN_UPDATES_DIR / "collect.sh").read_text()
+    view_line = next(line for line in collector.splitlines() if "gh pr view" in line)
+
+    assert '--repo "$REPO"' in view_line
+    assert "</dev/null" in collector.split("gh pr view")[1].split("then")[0]
+
+
+def test_prompt_forbids_diff_reconstruction_and_model_authored_dates():
+    prompt = (ADMIN_UPDATES_DIR / "_prompt.txt").read_text()
+    collector = (ADMIN_UPDATES_DIR / "collect.sh").read_text()
+
+    assert "`git show`, `git diff`, and `git log -p`" in prompt
+    assert "git show <mergeOid>" not in prompt
+    assert "Never compute a date" in prompt
+    assert "gh pr view" in collector and "enrich.py" in collector

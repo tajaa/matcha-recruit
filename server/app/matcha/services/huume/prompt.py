@@ -221,6 +221,14 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"EXACTLY this confirm_id after the admin explicitly confirms applies it to the "
                 f"editor as drafts; omitting confirm_id (or using a different one) builds a NEW proposal."
             )
+        elif action.get("type") == "schedule_location_profile":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: location schedule profile "
+                f"({action.get('summary') or 'setup details'}), confirm_id={action.get('confirm_id')}. "
+                f"Calling save_location_schedule_profile again with EXACTLY this confirm_id after "
+                f"the admin explicitly confirms saves it (hours + the location's default week "
+                f"template); omitting confirm_id (or using a different one) stages a NEW profile."
+            )
         elif action.get("type") == "schedule_note":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: assignment note "
@@ -333,7 +341,7 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
 
     if not lines:
         if schedule_surface:
-            return "Nothing is currently staged. Any build_week_schedule, propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, or propose_eligibility_case_decision call today starts fresh."
+            return "Nothing is currently staged. Any build_week_schedule, save_location_schedule_profile, propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, or propose_eligibility_case_decision call today starts fresh."
         return "Nothing is currently staged. Any send_offer, build_onboarding_plan, or execute_approved_steps call today starts fresh."
     return "\n".join(lines)
 
@@ -341,6 +349,7 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
 def build_system_prompt(
     *, company_name: str, today: str, state_block: str = "",
     surface_context: HuumeSurfaceContext | None = None,
+    location_profile_block: str = "",
 ) -> str:
     if surface_context and surface_context.is_schedule:
         location = str(surface_context.location_id) if surface_context.location_id else "the selected location"
@@ -360,7 +369,15 @@ You have a real multi-turn conversation. Use prior answers and the schedule tool
 
 Use deterministic schedule data for staffing, breaks, notes, eligibility, permits, credentials, and waiver status. Never invent availability, legal requirements, employee facts, or a successful write. Reuse employee and shift ids already returned by get_schedule_overview; do not spend extra calls looking up the same people again.
 
-For a request to make the whole week's schedule, call get_week_build_readiness and then build_week_schedule when the demand source is unambiguous. Availability tells you who can work; existing draft shifts or a saved week template define how many people the store needs and when. The deterministic builder preserves existing assignments, excludes unconfirmed availability, respects qualifications/time away/hour caps, and explains any open positions. A generated week always lands as editable drafts after confirmation; only the manager publishes it.
+## This location's scheduling profile
+
+{location_profile_block or "No scheduling profile saved yet for this location."}
+
+For a request to make the whole week's schedule, call get_week_build_readiness and then build_week_schedule when the demand source is unambiguous. Availability tells you who can work; existing draft shifts, this location's saved staffing pattern, or another saved week template define how many people the store needs and when. The deterministic builder preserves existing assignments, excludes unconfirmed availability, respects qualifications/time away/hour caps, and explains any open positions. A generated week always lands as editable drafts after confirmation; only the manager publishes it.
+
+When the week has no staffing demand yet, do NOT tell the manager to go add draft shifts or build a template by hand — interview them instead. Read get_location_schedule_profile first (much of it may already be saved), then ask for what is still missing, ONE question per turn: the store's opening hours, the shift blocks a normal week needs (name, job, days, times, how many people), and whether a shift lead or manager has to be on every shift. When the answer is one of a short list — a job name, a saved template, yes/no — pass `question` plus `options` to finish so the manager can tap the answer instead of typing it. Use real job names from the location; never invent one. Once you have hours and at least one shift block, stage save_location_schedule_profile — never in the same turn you build a week. After the manager confirms it, call get_week_build_readiness and then build_week_schedule; the saved pattern is picked up automatically, so you will not have to ask which template to use again.
+
+Sales projections, break rules and legal compliance are handled deterministically downstream — do not ask the manager about them, and do not promise a forecast you were not given data for.
 
 Every schedule mutation is staged first and requires explicit confirmation in a later user message. A staged operation is not applied. Keep the real confirmation id from the staged state; never guess one. Complete requested read-only checks before staging. Only one staged action can occupy the pending slot: after any tool returns `status=staged`, do not call another staged tool in that turn. If the request contains several action types, stage the first fully grounded one and clearly list the others as deferred until the pending action is confirmed or cancelled. Related shift edits are the exception only in shape, not confirmation: batch up to four of them in one propose_schedule_change `changes` call, which still creates one staged action. If the manager explicitly asks to assign one employee to every vacant shift in this editor week, do not enumerate or chunk the shifts: call propose_schedule_change once with all_vacant_shifts=true and to_employee_name, producing one proposal and one confirmation for the full server-resolved batch. Assignment notes, waivers, permits, eligibility decisions, and whole-week generation remain separate staged actions. If a tool returns clarification, refusal, or deferral, relay its actual options/reason.
 

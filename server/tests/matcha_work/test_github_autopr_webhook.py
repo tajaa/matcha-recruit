@@ -9,7 +9,7 @@ from app.matcha.services.matcha_work import project_task_service
 @pytest.mark.asyncio
 async def test_resolve_all_cross_lane_tasks_by_exact_persisted_number(monkeypatch):
     task_id, second_task_id = uuid4(), uuid4()
-    project_id = next(iter(github._KANBAN_AUTOPR_PROJECT_IDS))
+    project_id = next(iter(github._kanban_autopr_project_ids()))
     calls = []
     task = {
         "id": task_id,
@@ -55,7 +55,7 @@ async def test_resolve_all_cross_lane_tasks_by_exact_persisted_number(monkeypatc
 @pytest.mark.asyncio
 async def test_resolver_unions_primary_trailer_task_with_secondary_links(monkeypatch):
     primary_id, secondary_id = uuid4(), uuid4()
-    project_id = next(iter(github._KANBAN_AUTOPR_PROJECT_IDS))
+    project_id = next(iter(github._kanban_autopr_project_ids()))
     base = {
         "project_id": project_id,
         "board_column": "in_progress",

@@ -262,11 +262,15 @@ function AssignmentGuidance({ assignment }: { assignment: ShiftAssignment | unde
   const requirements = guidance?.requirements ?? []
   const active = requirements.filter((requirement) => !requirement.waived)
   const waived = requirements.some((requirement) => requirement.waived && requirement.kind === 'meal')
+  // Break times a manager staggered and saved. Schedule times are wall-clock,
+  // so the characters are already this location's clock — never convert.
+  const planned = assignment.planned_breaks ?? []
   return (
     <div className="mt-1.5 space-y-1 text-[11px]">
       {summary && <p className={guidance?.status === 'unmapped' || guidance?.status === 'error' ? 'text-amber-300' : 'text-sky-300'}>{summary}</p>}
       {!summary && active.length > 0 && <p className="text-sky-300">{active.map((requirement) => `${requirement.duration_minutes}-minute ${requirement.paid ? 'paid' : 'unpaid'} ${requirement.kind} break`).join(' · ')}</p>}
       {waived && <p className="text-emerald-300">Meal-break waiver applies to this shift.</p>}
+      {planned.length > 0 && <p className="text-sky-300">Scheduled break{planned.length > 1 ? 's' : ''}: {planned.map((entry) => `${entry.start_local.slice(11, 16)} (${entry.duration_minutes} min ${entry.kind})`).join(' · ')}</p>}
       {assignment.manager_note && <p className="text-zinc-400">Manager note: {assignment.manager_note}</p>}
     </div>
   )
@@ -403,6 +407,11 @@ function UnavailableForm({ teamShifts, onDone }: { teamShifts: Shift[]; onDone: 
   const [to, setTo] = useState(todayISO())
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  // Advisory only — it warns before submitting. The authoritative check is
+  // the server's time_off_guard, which anchors each shift on ITS OWN
+  // location's week start; the portal has no location profile in hand, so
+  // this pre-warning stays Sunday-anchored and can differ by a day for a
+  // store that starts its week elsewhere.
   const selectedWeekHasPublishedShifts = teamShifts.some((shift) => {
     const shiftDate = shift.starts_at.slice(0, 10)
     const shiftStart = new Date(`${shiftDate}T00:00:00Z`)

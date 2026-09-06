@@ -270,6 +270,8 @@ async def _bg_apply_autopr_context_reply(
             directive_note += " The draft-PR requirement is active."
         if "trust_still_broken" in directives:
             directive_note += " The still-broken assertion is active."
+        if "extend_runtime" in directives:
+            directive_note += " The 10-minute continuation is approved."
         await post_as_espresso(
             project["company_id"], channel_id,
             "Thanks — I attached your reply and any screenshots as escalated AutoPR context."

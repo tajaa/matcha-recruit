@@ -95,6 +95,7 @@ struct KanbanBoardView: View {
     /// Skippable how-to for the review/complete workflow — auto-shown once, and
     /// re-openable from the board's "?" button.
     @State private var showReviewGuide = false
+    @State var approvingAutoPRRuntimeTaskIds: Set<String> = []
 
     var isPipeline: Bool { viewMode == .pipeline }
     var pipelineSummary: PipelineSummary { PipelineSummary(tasks: viewModel.tasks) }

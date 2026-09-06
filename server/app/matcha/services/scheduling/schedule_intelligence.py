@@ -28,6 +28,8 @@ from uuid import UUID
 
 from . import fair_workweek
 from . import schedule_intelligence_stats as stats
+from .location_profile import resolve_week_start_weekday
+from .schedule_rules import align_week_start
 from ..discipline.discipline_compliance import ATTENDANCE_INFRACTION_TYPES
 
 INCIDENT_CORRELATION_DISCLAIMER = (
@@ -298,12 +300,21 @@ async def build_fair_workweek_exposure(conn, company_id: UUID, *, days: int = 90
 
 # ── Module 3: pretext shield ──────────────────────────────────────────────
 
-def _week_start_sunday(d: date) -> date:
-    return d - timedelta(days=(d.weekday() + 1) % 7)
-
-
 async def _employee_weekly_hours(conn, company_id: UUID, employee_id: UUID,
                                   start: datetime, end: datetime) -> list[float]:
+    """Hours per week for the volatility metric.
+
+    Buckets on the employee's OWN store's week start: bucketing a
+    Monday-start store on Sundays splits every real week across two buckets
+    and manufactures the volatility this metric exists to detect.
+    """
+    week_start_weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id,
+        location_id=await conn.fetchval(
+            "SELECT work_location_id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        ),
+    )
     rows = await conn.fetch(
         """
         SELECT s.starts_at, s.ends_at, s.break_minutes
@@ -317,7 +328,10 @@ async def _employee_weekly_hours(conn, company_id: UUID, employee_id: UUID,
     by_week: dict[date, float] = defaultdict(float)
     for r in rows:
         hours = max(0.0, (r["ends_at"] - r["starts_at"]).total_seconds() / 3600.0 - (r["break_minutes"] or 0) / 60.0)
-        by_week[_week_start_sunday(r["starts_at"].astimezone(timezone.utc).date())] += hours
+        bucket = align_week_start(
+            r["starts_at"].astimezone(timezone.utc).date(), week_start_weekday,
+        )
+        by_week[bucket] += hours
     return list(by_week.values())
 
 
@@ -438,7 +452,7 @@ async def fetch_lapse_items(
             SELECT ecr.employee_id, ct.label AS credential_name, ecr.due_date
             FROM employee_credential_requirements ecr
             JOIN employees e ON e.id = ecr.employee_id
-            LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+            LEFT JOIN scoped_credential_types ct ON ct.id = ecr.credential_type_id
             WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
               AND ecr.status NOT IN ('verified', 'waived') AND ecr.due_date IS NOT NULL
             """,

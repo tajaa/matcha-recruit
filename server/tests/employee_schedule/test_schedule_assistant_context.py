@@ -95,3 +95,195 @@ async def test_overview_location_query_uses_real_business_locations_columns():
     source = inspect.getsource(context.get_schedule_overview)
     assert "zipcode" in source
     assert "postal_code" not in source
+
+
+@pytest.mark.asyncio
+async def test_eligibility_cases_distinguish_historical_case_from_current_credential(monkeypatch):
+    case_id, employee_id, company_id, location_id = (uuid4() for _ in range(4))
+    conn = _Conn(None, [{
+        "id": case_id,
+        "employee_id": employee_id,
+        "requirement_type": "credential",
+        "status": "removal_requested",
+        "case_expires_at": date(2026, 9, 1),
+        "blocking_reason_code": "credential_expired_auto_unassigned",
+        "legal_basis": {},
+        "next_escalation_at": None,
+        "first_name": "Ellie",
+        "last_name": "Marsh",
+        "credential_label": "Food Handler Card",
+        "has_expiration": True,
+        "current_credential_status": "verified",
+        "current_credential_expires_at": date(2029, 9, 3),
+        "timezone": "UTC",
+        "is_schedule_blocking": True,
+    }])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    result = await context.list_schedule_eligibility_cases(
+        company_id=company_id, location_id=location_id,
+    )
+
+    case = result["cases"][0]
+    assert case["case_expired_on"] == "2026-09-01"
+    assert case["current_credential_expires_at"] == "2029-09-03"
+    assert case["currently_blocks_scheduling"] is False
+    assert case["current_block_reason"] is None
+    assert "not an independent assignment block" in result["policy"]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_pending_credential_case_names_its_actual_block(monkeypatch):
+    conn = _Conn(None, [{
+        "id": uuid4(),
+        "employee_id": uuid4(),
+        "requirement_type": "credential",
+        "status": "removal_requested",
+        "case_expires_at": date(2026, 9, 1),
+        "blocking_reason_code": "credential_missing",
+        "legal_basis": {},
+        "next_escalation_at": None,
+        "first_name": "Ellie",
+        "last_name": "Marsh",
+        "credential_label": "Food Handler Card",
+        "has_expiration": True,
+        "current_credential_status": "pending",
+        "current_credential_expires_at": date(2026, 9, 1),
+        "timezone": "UTC",
+        "is_schedule_blocking": True,
+    }])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    result = await context.list_schedule_eligibility_cases(
+        company_id=uuid4(), location_id=uuid4(),
+    )
+
+    case = result["cases"][0]
+    assert case["currently_blocks_scheduling"] is True
+    assert case["current_block_reason"] == (
+        "Food Handler Card requires an approved credential document before scheduling."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_requirement_that_no_longer_blocks_is_not_reported_as_blocking(monkeypatch):
+    """The SQL resolves the same blocking authority `schedule_eligibility_
+    violations` does (tenant opt-out template, is_required/applies_company_wide,
+    live job rule). An open case whose rule stopped blocking must not tell the
+    model the employee is unschedulable — assignment confirmation would allow
+    the shift."""
+    conn = _Conn(None, [{
+        "id": uuid4(),
+        "employee_id": uuid4(),
+        "requirement_type": "credential",
+        "status": "warning_open",
+        "case_expires_at": date(2026, 9, 1),
+        "blocking_reason_code": "credential_expired",
+        "legal_basis": {},
+        "next_escalation_at": None,
+        "first_name": "Ellie",
+        "last_name": "Marsh",
+        "credential_label": "Food Handler Card",
+        "has_expiration": True,
+        "current_credential_status": "pending",
+        "current_credential_expires_at": date(2026, 9, 1),
+        "timezone": "UTC",
+        "is_schedule_blocking": False,
+    }])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    result = await context.list_schedule_eligibility_cases(
+        company_id=uuid4(), location_id=uuid4(),
+    )
+
+    case = result["cases"][0]
+    assert case["currently_blocks_scheduling"] is False
+    assert case["current_block_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_blocking_authority_is_not_reported_as_blocking(monkeypatch):
+    """`_BLOCKING_AUTHORITY_EXPR` is written for a WHERE clause, where SQL NULL
+    drops the row (= not blocking), and it goes NULL for the common case of a
+    requirement carrying no template. Reading NULL as "still blocking" here is
+    how this reader started claiming blocks that `resolve_recovered_eligibility_
+    cases` was concurrently resolving."""
+    conn = _Conn(None, [{
+        "id": uuid4(),
+        "employee_id": uuid4(),
+        "requirement_type": "credential",
+        "status": "warning_open",
+        "case_expires_at": date(2026, 9, 1),
+        "blocking_reason_code": "credential_expired",
+        "legal_basis": {},
+        "next_escalation_at": None,
+        "first_name": "Ellie",
+        "last_name": "Marsh",
+        "credential_label": "Food Handler Card",
+        "has_expiration": True,
+        "current_credential_status": "pending",
+        "current_credential_expires_at": date(2026, 9, 1),
+        "timezone": "UTC",
+        "is_schedule_blocking": None,
+    }])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    result = await context.list_schedule_eligibility_cases(
+        company_id=uuid4(), location_id=uuid4(),
+    )
+
+    case = result["cases"][0]
+    assert case["currently_blocks_scheduling"] is False
+    assert case["current_block_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_job_case_inside_the_new_hire_grace_window_does_not_block(monkeypatch):
+    """Job-scoped cases go through `_job_credential_problem`, so the grace
+    window the assignment path honors is honored here too."""
+    conn = _Conn(None, [{
+        "id": uuid4(),
+        "employee_id": uuid4(),
+        "requirement_type": "credential",
+        "status": "warning_open",
+        "case_expires_at": None,
+        "blocking_reason_code": "credential_missing",
+        "legal_basis": {},
+        "next_escalation_at": None,
+        "first_name": "Ellie",
+        "last_name": "Marsh",
+        "credential_label": "Food Handler Card",
+        "has_expiration": True,
+        "current_credential_status": "pending",
+        "current_credential_expires_at": None,
+        "timezone": "UTC",
+        "is_schedule_blocking": True,
+        "job_id": uuid4(),
+        "effective_from": date(2020, 1, 1),
+        "grace_days": 3650,
+        "employee_start_date": date.today(),
+        "employee_created_on": date.today(),
+    }])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    result = await context.list_schedule_eligibility_cases(
+        company_id=uuid4(), location_id=uuid4(),
+    )
+
+    assert result["cases"][0]["currently_blocks_scheduling"] is False
+
+
+@pytest.mark.asyncio
+async def test_eligibility_case_query_resolves_the_canonical_blocking_authority():
+    """The fake connection returns canned rows regardless of query text, so pin
+    the SQL itself: dropping these filters is exactly how this reader would
+    start disagreeing with `schedule_eligibility_violations`."""
+    import inspect
+
+    source = inspect.getsource(context.list_schedule_eligibility_cases)
+    assert "is_schedule_blocking" in source
+    assert "ecr.is_required = true AND ecr.applies_company_wide = true" in source
+    assert "schedule_job_credential_requirements" in source
+    # The WHERE-clause expression is being SELECTed, so its NULLs have to be
+    # folded to false in SQL as well as read as false in Python.
+    assert "COALESCE((" in source

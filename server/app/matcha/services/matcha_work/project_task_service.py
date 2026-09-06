@@ -118,30 +118,48 @@ _AUTOPR_TEST_ROUTE_RE = re.compile(
     re.IGNORECASE,
 )
 _AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
+# Operator directive grammar. Deliberately generous: this parser only ever
+# sees text an authorized owner bound to one exact AutoPR decision, so a plain
+# affirmative ("you can work on this", "do it anyway", "draft the migration")
+# is authority. Keep in lock-step with the harness-side copy in
+# scripts/kanban-autopr/resolve-directive-policy.py.
+_AUTOPR_LEAD_IN = (
+    r"^(?:(?:please|pls|hey|ok|okay|yes|yep|yeah|sure|thanks)\b[\s,]*)*"
+    r"(?:(?:anyway|anyways|either\s+way|regardless|still|nonetheless)\b[\s,]*)*"
+    r"(?:i\s+(?:need|want|expect)\s+(?:you\s+)?to\s+)?"
+    r"(?:(?:you|u|it|autopr|the\s+bot|the\s+agent)\s+)?"
+    r"(?:(?:can|may|must|should|could|shall|will|need\s+to|have\s+to|ought\s+to"
+    r"|are\s+(?:ok|okay|clear|free|allowed)\s+to)\s+)?"
+    r"(?:go\s+ahead\s+(?:and\s+)?)?"
+    r"(?:(?:just|still|absolutely|definitely|certainly|totally|really|simply"
+    r"|please|now|then|instead|anyway|anyways)\s+)*"
+)
 _AUTOPR_DRAFT_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:(?:you\s+)?"
-    r"(?:can|may|must|should|need\s+to)\s+)?)?"
-    r"(?:draft|create|open)\s+(?:(?:this|a|the)\s+)?"
-    r"(?:pr|pull\s+request)\b"
+    _AUTOPR_LEAD_IN
+    + r"(?:draft|create|open|make|write|author|submit|raise|put\s+up)\s+"
+    r"(?:(?:this|that|a|an|the)\s+)?(?:draft\s+)?"
+    r"(?:pr|pull\s+request|migration(?:\s+(?:script|file|version))?s?)\b"
 )
 _AUTOPR_WORK_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:go\s+ahead(?:\s+and)?\s+)?)?"
-    r"(?:(?:you\s+)?(?:can|may|must|should|need\s+to)\s+)?"
-    r"(?:work\s+on|implement|start\s+work\s+on)\s+"
-    r"(?:this|it|the\s+(?:ticket|card|pr|pull\s+request))\b"
+    _AUTOPR_LEAD_IN
+    + r"(?:work\s+on|start\s+(?:work\s+)?on|implement|build|do|handle|fix"
+    r"|finish|complete|tackle|take\s+on|pick\s+up|proceed\s+with)\s+"
+    r"(?:this|that|it|the\s+(?:ticket|card|pr|pull\s+request|work|change|migration))\b"
 )
 _AUTOPR_GO_AHEAD_COMMAND_RE = re.compile(
-    r"^(?:(?:please\s+)?(?:just\s+)?)?go\s+ahead"
-    r"(?:\s+and\s+(?:do|fix|handle|implement)\s+(?:it|this))?"
-    r"(?:\s+(?:with\s+)?(?:it|this))?"
-    r"(?:\s+anyways?)?[.!]*$"
+    _AUTOPR_LEAD_IN + r"(?:go\s+ahead|proceed|carry\s+on|keep\s+going)\b"
 )
 _AUTOPR_FORCE_NEGATION_RE = re.compile(
     r"(?:\b(?:do\s+not|don't|dont|never|not|no)\b.{0,40}"
-    r"\b(?:work|implement|draft|create|open)\b)"
-    r"|(?:\b(?:work|implement|draft|create|open)\b.{0,20}"
-    r"\b(?:not|never)\b)"
+    r"\b(?:work|implement|draft|create|open|build|handle|fix|finish|proceed"
+    r"|go\s+ahead)\b)"
+    r"|(?:\b(?:work|implement|draft|create|open|build|handle|fix|finish|proceed)\b"
+    r".{0,20}\b(?:not|never)\b)"
 )
+_AUTOPR_EXPLICIT_DRAFT_COMMANDS = {
+    "draft-pr", "draft pr", "force-pr", "force pr", "force", "override",
+    "draft it", "do it", "work on it", "ship it",
+}
 
 
 def _is_autopr_waiting_for_answers_note(note: str) -> bool:
@@ -149,6 +167,14 @@ def _is_autopr_waiting_for_answers_note(note: str) -> bool:
     lowered = normalized.lower()
     return normalized.startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS") or (
         lowered.startswith("from auto setup") and "answers needed" in lowered
+    )
+
+
+def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
+    normalized = (note or "").strip()
+    return (
+        normalized.startswith("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+        or normalized.startswith("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
     )
 
 
@@ -169,7 +195,7 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
         instruction = " ".join(
             directive_text.strip().lower().replace("’", "'").split()
         )
-        explicit_draft = instruction in {"draft-pr", "draft pr", "force-pr", "force pr"}
+        explicit_draft = instruction in _AUTOPR_EXPLICIT_DRAFT_COMMANDS
         natural_draft = bool(_AUTOPR_DRAFT_COMMAND_RE.search(instruction))
         natural_work = bool(_AUTOPR_WORK_COMMAND_RE.search(instruction))
         natural_go_ahead = bool(_AUTOPR_GO_AHEAD_COMMAND_RE.search(instruction))
@@ -188,6 +214,13 @@ def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:
             ))
         ) and "trust_still_broken" not in directives:
             directives.append("trust_still_broken")
+        if marked and instruction in {
+            "extend-runtime",
+            "extend runtime",
+            "allow-more-time",
+            "allow more time",
+        } and "extend_runtime" not in directives:
+            directives.append("extend_runtime")
         route_match = _AUTOPR_TEST_ROUTE_RE.search(directive_text) if marked else None
         if route_match:
             candidate = route_match.group(1).rstrip(".,;)")
@@ -241,7 +274,7 @@ def _row_to_task(row: dict) -> dict:
         d["due_date"] = d["due_date"].isoformat()
     for key in (
         "completed_at", "created_at", "updated_at", "last_moved_at",
-        "autopr_reconsideration_at",
+        "autopr_reconsideration_at", "autopr_run_requested_at",
     ):
         if d.get(key) is not None:
             d[key] = d[key].isoformat()
@@ -316,7 +349,14 @@ async def request_autopr_reconsideration(
                     "The AutoPR decision changed; refresh the ticket and try again"
                 )
             waiting_for_answers = _is_autopr_waiting_for_answers_note(current_note)
-            if not _AUTOPR_NO_SPEC_RE.search(current_note) and not waiting_for_answers:
+            waiting_for_runtime_approval = _is_autopr_waiting_for_runtime_approval_note(
+                current_note
+            )
+            if (
+                not _AUTOPR_NO_SPEC_RE.search(current_note)
+                and not waiting_for_answers
+                and not waiting_for_runtime_approval
+            ):
                 raise AutoPRReconsiderationConflict(
                     "This ticket no longer has an AutoPR decision awaiting context"
                 )
@@ -365,6 +405,198 @@ async def request_autopr_reconsideration(
         "autopr_directives": directives,
         "autopr_test_route": test_route,
     }
+
+
+# The four Espresso boards the kanban-autopr harness actually watches (kept in
+# sync with scripts/seed/autopr_bot.py's PROJECTS list and scripts/kanban-autopr
+# /lib.sh's KANBAN_AUTOPR_PROJECT_IDS). Anything outside this set has no
+# harness polling it, so a run request there could never be claimed — reject it
+# at the door instead of queueing work nothing will pick up.
+KANBAN_AUTOPR_PROJECT_IDS = {
+    "7f728636-3219-4d83-9df3-a4682e3242de",  # WerkWerk
+    "fade10b4-36ff-4c60-af59-5cc6058285ab",  # Beetlejuse
+    "84823d21-c752-4abd-9696-4c93c8b3c21e",  # Gummfit
+    "8b924347-d6e4-4000-8e7d-ca8f46f76fba",  # MATCHA
+}
+
+_AUTOPR_RUN_LANES = ("todo", "changes_requested")
+
+# How long a "run now" request can still be waiting for the harness. The local
+# watcher dispatches within a minute and the selector consumes the request in
+# the pass that dispatch triggers, so anything older than this was dropped on
+# the floor — a run killed before select.sh ran, or a board the AutoPR bot does
+# not watch. Bounding it is what stops a stranded request from forcing a Kanban
+# dispatch every five minutes forever, keeps the once-a-minute poll off a
+# full-history scan, and lets the card's "Queued for AutoPR" chip clear itself.
+# A code constant interpolated into SQL below; never user input.
+_AUTOPR_RUN_REQUEST_TTL = "30 minutes"
+
+# The bookkeeping rows this feature writes carry no body and render nothing, so
+# they must not reach the unviewed-updates badge or the ticket activity graph.
+# They share event_type='activity' with real discussion notes and are told
+# apart by metadata kind.
+_AUTOPR_BOOKKEEPING_KINDS = ("autopr_run_request", "autopr_run_claim")
+
+
+async def request_autopr_run(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: UUID,
+) -> Optional[dict]:
+    """Queue one immediate AutoPR pass for this card.
+
+    The scheduled lane is deliberately slow. This is the human's way past it:
+    a request sits pending until the harness posts a matching claim, and the
+    local watcher dispatches a run as soon as it sees one. Repeating the
+    request while one is already pending is idempotent — it returns the
+    existing timestamp rather than stacking events.
+    """
+    if str(project_id) not in KANBAN_AUTOPR_PROJECT_IDS:
+        raise AutoPRReconsiderationConflict(
+            "AutoPR does not watch this board, so it cannot pick up this ticket"
+        )
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                """
+                SELECT id, board_column, status
+                FROM mw_tasks
+                WHERE id = $1 AND project_id = $2
+                FOR UPDATE
+                """,
+                task_id, project_id,
+            )
+            if not task:
+                return None
+            if task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
+                raise AutoPRReconsiderationConflict(
+                    "AutoPR only picks up tickets in Todo or Changes Requested"
+                )
+            pending_at = await conn.fetchval(
+                f"""
+                SELECT MAX(h.created_at) FROM mw_task_history h
+                WHERE h.task_id = $1
+                  AND h.event_type = 'activity'
+                  AND h.metadata->>'kind' = 'autopr_run_request'
+                  AND h.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
+                  AND h.created_at > COALESCE((
+                        SELECT MAX(c.created_at) FROM mw_task_history c
+                        WHERE c.task_id = $1
+                          AND c.event_type = 'activity'
+                          AND c.metadata->>'kind' = 'autopr_run_claim'
+                      ), '-infinity'::timestamptz)
+                """,
+                task_id,
+            )
+            if pending_at is not None:
+                return {
+                    "ok": True,
+                    "already_pending": True,
+                    "autopr_run_requested_at": pending_at.isoformat(),
+                }
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                RETURNING id, created_at
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                # No body: the discussion feed renders bodyless notes as
+                # nothing, so a queue request stays out of the conversation.
+                json.dumps({"kind": "autopr_run_request"}),
+            )
+    return {
+        "ok": True,
+        "already_pending": False,
+        "activity_id": str(row["id"]),
+        "autopr_run_requested_at": row["created_at"].isoformat(),
+    }
+
+
+async def claim_autopr_run(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: Optional[UUID] = None,
+) -> Optional[dict]:
+    """Consume any pending run request for this card.
+
+    Called by the trusted harness when it actually starts investigating, so a
+    crashed or unselectable card cannot make the watcher dispatch forever.
+    """
+    async with get_connection() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+        if not exists:
+            return None
+        row = await conn.fetchrow(
+            """
+            INSERT INTO mw_task_history
+                (task_id, task_id_text, project_id, actor_user_id,
+                 event_type, metadata)
+            VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+            RETURNING id, created_at
+            """,
+            task_id, str(task_id), project_id, actor_user_id,
+            json.dumps({"kind": "autopr_run_claim"}),
+        )
+    return {"ok": True, "claimed_at": row["created_at"].isoformat()}
+
+
+async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
+    """Pending run requests across the caller's projects.
+
+    Deliberately tiny: the local watcher polls this once a minute and must not
+    pay for a whole board bundle to learn that nothing is queued.
+    """
+    if not project_ids:
+        return []
+    async with get_connection() as conn:
+        # The TTL predicate is what keeps this a bounded query: it rides
+        # idx_mw_task_history_project_created (project_id, created_at) instead
+        # of walking every history row on four boards, 1440 times a day, to
+        # answer "is anything queued?". The claim lookup is bounded by the same
+        # window — a claim older than the oldest live request cannot matter.
+        # LIMIT is a backstop only; the watcher acts on the queue's existence.
+        rows = await conn.fetch(
+            f"""
+            SELECT t.id AS task_id, t.project_id, t.board_column,
+                   MAX(h.created_at) AS requested_at
+            FROM mw_task_history h
+            JOIN mw_tasks t ON t.id = h.task_id
+            WHERE h.project_id = ANY($1::uuid[])
+              AND h.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
+              AND h.event_type = 'activity'
+              AND h.metadata->>'kind' = 'autopr_run_request'
+              AND t.status != 'cancelled'
+              AND t.board_column = ANY($2::text[])
+              AND h.created_at > COALESCE((
+                    SELECT MAX(c.created_at) FROM mw_task_history c
+                    WHERE c.task_id = h.task_id
+                      AND c.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
+                      AND c.event_type = 'activity'
+                      AND c.metadata->>'kind' = 'autopr_run_claim'
+                  ), '-infinity'::timestamptz)
+            GROUP BY t.id, t.project_id, t.board_column
+            ORDER BY MAX(h.created_at)
+            LIMIT 200
+            """,
+            project_ids, list(_AUTOPR_RUN_LANES),
+        )
+    return [
+        {
+            "task_id": str(r["task_id"]),
+            "project_id": str(r["project_id"]),
+            "board_column": r["board_column"],
+            "requested_at": r["requested_at"].isoformat(),
+        }
+        for r in rows
+    ]
 
 
 async def log_task_activity(
@@ -512,6 +744,16 @@ async def list_project_tasks(
     # Inline the counted-event literals (code constants, not user input) so the
     # badge subqueries stay in lock-step with COUNTED_UPDATE_EVENTS.
     _counted = ", ".join(f"'{e}'" for e in COUNTED_UPDATE_EVENTS)
+    # AutoPR's run-request / run-claim rows ride event_type='activity' but have
+    # no body, so NoteRow renders nothing for them. Counting them would put an
+    # unviewed-updates chip on the card that opening the ticket cannot clear.
+    _bookkeeping = ", ".join(f"'{k}'" for k in _AUTOPR_BOOKKEEPING_KINDS)
+    _skip_bookkeeping3 = (
+        f"AND COALESCE(h3.metadata->>'kind', '') NOT IN ({_bookkeeping})"
+    )
+    _skip_bookkeeping4 = (
+        f"AND COALESCE(h4.metadata->>'kind', '') NOT IN ({_bookkeeping})"
+    )
     # Exclude the viewer's OWN history events from the unviewed-updates badge +
     # count: your own move/comment isn't "an update you haven't seen", so a
     # reviewer who drags a ticket to Done shouldn't then see it ringed yellow.
@@ -546,6 +788,10 @@ async def list_project_tasks(
                    (autopr_ctx.id IS NOT NULL) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
+                   -- "Run AutoPR now" on the card. Pending until the harness
+                   -- claims the card for a run, so the scheduled lane can stay
+                   -- slow without a human having to wait for its next tick.
+                   autopr_run.created_at AS autopr_run_requested_at,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first move. Counts a
                    -- review_rejected as a move too (review → changes_requested)
@@ -580,10 +826,12 @@ async def list_project_tasks(
                    (SELECT COUNT(*) FROM mw_task_history h3
                       WHERE h3.task_id = t.id
                         AND h3.event_type IN ({_counted})
+                        {_skip_bookkeeping3}
                         {_self3}) AS update_count,
                    ARRAY(SELECT h4.id::text FROM mw_task_history h4
                       WHERE h4.task_id = t.id
                         AND h4.event_type IN ({_counted})
+                        {_skip_bookkeeping4}
                         {_self4}
                       ORDER BY h4.created_at DESC
                       LIMIT 100) AS recent_event_ids,
@@ -621,6 +869,28 @@ async def list_project_tasks(
                 ORDER BY h5.created_at DESC
                 LIMIT 1
             ) autopr_ctx ON TRUE
+            LEFT JOIN LATERAL (
+                -- A run request outlives nothing but its own claim: the
+                -- harness posts autopr_run_claim when it actually picks the
+                -- card up, which is what stops the request re-firing every
+                -- tick. No column, same shape as the reconsideration join.
+                SELECT h6.created_at
+                FROM mw_task_history h6
+                WHERE h6.task_id = t.id
+                  AND h6.event_type = 'activity'
+                  AND h6.metadata->>'kind' = 'autopr_run_request'
+                  -- Same shelf life the dispatcher honours, so the card's
+                  -- "Queued for AutoPR" chip can never outlive the request.
+                  AND h6.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
+                  AND h6.created_at > COALESCE((
+                        SELECT MAX(h7.created_at) FROM mw_task_history h7
+                        WHERE h7.task_id = t.id
+                          AND h7.event_type = 'activity'
+                          AND h7.metadata->>'kind' = 'autopr_run_claim'
+                      ), '-infinity'::timestamptz)
+                ORDER BY h6.created_at DESC
+                LIMIT 1
+            ) autopr_run ON TRUE
             WHERE t.project_id = $1 AND t.status != 'cancelled'
               {_done_clause}
             ORDER BY

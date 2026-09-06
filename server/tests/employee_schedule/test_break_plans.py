@@ -9,6 +9,7 @@ from app.matcha.services.scheduling.schedule_breaks import (
     MealWaiverAttestation,
     evaluate_break_plan,
     guidance_payload,
+    minimum_meal_break_minutes,
     reinterpret_schedule_wall_time,
     render_break_plan,
 )
@@ -121,6 +122,24 @@ def test_permitted_waiver_marks_meal_as_waived():
     assert plan.requirements[0].waived is True
     assert plan.requirements[0].waiver_attestation_id == waiver.id
     assert render_break_plan(plan) == "Meal break waiver on file; no mandatory meal break applies to this shift."
+    assert minimum_meal_break_minutes(plan) == 0
+
+
+def test_age_scoped_rule_changes_only_the_minor_plan():
+    starts_at, ends_at = _window()
+    minor_rule = _rule(trigger_after_minutes=240, maximum_age=17)
+
+    minor_plan = evaluate_break_plan(
+        starts_at=starts_at, ends_at=ends_at, timezone=LA,
+        rules=[minor_rule], employee_age=16,
+    )
+    adult_plan = evaluate_break_plan(
+        starts_at=starts_at, ends_at=ends_at, timezone=LA,
+        rules=[minor_rule], employee_age=18,
+    )
+
+    assert minimum_meal_break_minutes(minor_plan) == 30
+    assert minimum_meal_break_minutes(adult_plan) == 0
 
 
 def test_waiver_that_exceeds_rule_limit_does_not_suppress_meal():
@@ -193,6 +212,17 @@ def test_empty_rules_are_unmapped_and_never_clear():
     )
     assert plan.status == "unmapped"
     assert render_break_plan(plan) == "Break requirements could not be mapped for this location; verify manually."
+
+
+def test_error_plan_has_explicit_manual_review_summary():
+    starts_at, ends_at = _window()
+    plan = evaluate_break_plan(
+        starts_at=starts_at, ends_at=ends_at, timezone=LA, rules=[],
+    )
+    from dataclasses import replace
+    assert render_break_plan(replace(plan, status="error")) == (
+        "Break requirements could not be fully evaluated; verify manually."
+    )
 
 
 def test_guidance_payload_is_json_safe_and_versioned():

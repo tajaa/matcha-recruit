@@ -8,6 +8,25 @@ export type CredentialType = {
   has_number: boolean
   has_state: boolean
   is_system: boolean
+  company_id?: string | null
+  created_by?: string | null
+}
+
+export type CredentialTypeCreate = {
+  label: string
+  category: string
+  description?: string
+  has_expiration: boolean
+  has_number: boolean
+  has_state: boolean
+}
+
+export type CredentialTypeSettings = {
+  is_configured: boolean
+  /** False for a platform admin who has not named a company — read-only view. */
+  manageable: boolean
+  selected_type_ids: string[]
+  credential_types: CredentialType[]
 }
 
 export type RoleCategory = {

@@ -1,15 +1,9 @@
-"""Shared JSONB decode helper — asyncpg returns JSONB as str (no
-set_type_codec('jsonb', …) registered app-wide), so any jsonb_agg(...)
-column must be decoded before use."""
+"""Back-compat re-export — the shared decode now lives in `app.database`.
 
-import json
-from typing import Any, Optional
+Four inventory modules import `decode_jsonb` from here; the helper itself moved
+next to the pool that causes the problem it works around.
+"""
 
+from app.database import decode_jsonb  # noqa: F401
 
-def decode_jsonb(value: Any, default: Optional[Any] = None) -> Any:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except ValueError:
-            return default
-    return value if value is not None else default
+__all__ = ["decode_jsonb"]

@@ -74,8 +74,8 @@ class Settings:
     # Gemini API
     gemini_api_key: Optional[str]
 
-    # OpenAI Luna is used only by narrowly scoped, grounded narrators.  Keep
-    # the configured model explicit because account availability can differ.
+    # OpenAI Luna is used only by narrowly scoped AI workloads.  Keep the
+    # configured model explicit because account availability can differ.
     openai_api_key: Optional[str]
     openai_luna_model: Optional[str]
 

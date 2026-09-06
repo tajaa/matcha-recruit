@@ -53,24 +53,49 @@ async def review_break_rule_set(
 ) -> dict:
     if decision not in {"approved", "rejected"}:
         raise ValueError("decision must be approved or rejected")
-    row = await conn.fetchrow(
-        """
-        UPDATE schedule_break_rule_sets
-        SET review_status = $2,
-            reviewed_by = $3,
-            reviewed_at = NOW(),
-            updated_at = NOW()
-        WHERE id = $1
-          AND is_active = true
-          AND ($2 <> 'approved' OR jurisdiction_id IS NOT NULL)
-        RETURNING id, review_status, reviewed_by, reviewed_at
-        """,
-        rule_set_id,
-        decision,
-        actor_user_id,
+    from app.matcha.services.scheduling.schedule_break_rule_store import (
+        lock_schedule_break_rule_guidance,
+        validate_break_rule_payload,
     )
-    if not row:
-        raise LookupError("Rule set not found or cannot be approved without a jurisdiction")
+    async with conn.transaction():
+        await lock_schedule_break_rule_guidance(conn, exclusive=True)
+        existing = await conn.fetchrow(
+            """
+            SELECT id, jurisdiction_id, rules, citation
+            FROM schedule_break_rule_sets
+            WHERE id = $1 AND is_active = true
+            FOR UPDATE
+            """,
+            rule_set_id,
+        )
+        if not existing:
+            raise LookupError("Rule set not found")
+        if decision == "approved":
+            if existing["jurisdiction_id"] is None:
+                raise LookupError("Rule set cannot be approved without a jurisdiction")
+            # Revalidate the locked database value.  A pending row could have
+            # been inserted before strict validation existed or altered by an
+            # operational repair after import.
+            validate_break_rule_payload(existing["rules"], existing["citation"])
+        row = await conn.fetchrow(
+            """
+            UPDATE schedule_break_rule_sets
+            SET review_status = $2,
+                reviewed_by = $3,
+                reviewed_at = NOW(),
+                updated_at = clock_timestamp()
+            WHERE id = $1
+            RETURNING id, review_status, reviewed_by, reviewed_at
+            """,
+            rule_set_id,
+            decision,
+            actor_user_id,
+        )
+    # Existing assignment guidance is a materialized view of rule status.
+    # Dispatch is best-effort because the committed rule row itself is the
+    # recovery record scanned whenever a worker starts.
+    from app.workers.tasks.schedule_break_refresh import enqueue_schedule_break_recovery
+    enqueue_schedule_break_recovery()
     return {
         "id": row["id"],
         "review_status": row["review_status"],

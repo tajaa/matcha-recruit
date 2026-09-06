@@ -26,6 +26,10 @@ from .invitations import router as _invitations_router; router.include_router(_i
 from .bulk_upload import router as _bulk_upload_router; router.include_router(_bulk_upload_router)
 from .leave import router as _leave_router; router.include_router(_leave_router)
 from .incidents import router as _incidents_router; router.include_router(_incidents_router)
+# Deliberately ungated: the onboarding tab and the employee portal
+# (routes/employee_portal/credential_documents.py) upload credential documents
+# for any tenant with `employees`. Gating this on `credential_templates` would
+# 403 those surfaces and orphan portal-uploaded documents no admin could review.
 from .credentials import router as _credentials_router; router.include_router(_credentials_router)
 from .oig import router as _oig_router; router.include_router(_oig_router)
 from .work_permits import router as _work_permits_router; router.include_router(_work_permits_router)

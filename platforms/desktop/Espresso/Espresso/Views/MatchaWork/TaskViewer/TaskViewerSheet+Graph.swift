@@ -26,6 +26,7 @@ extension TaskViewerSheet {
     var graphModel: (nodes: [GraphNode], lanes: [GraphLane]) {
         let sorted = history
             .filter { GraphGeom.nodeEvents.contains($0.eventType) }
+            .filter { !GraphGeom.isBookkeeping($0) }
             .sorted { $0.createdAt < $1.createdAt }
         // Coalesce: a run of back-to-back moves by the SAME actor collapses to
         // its last move, so "Todo → In Progress → Review" by one person is one

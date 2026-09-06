@@ -15,6 +15,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
+from app.database import decode_jsonb
 from ...dependencies import get_client_company_id
 from ...services.scheduling.schedule_rules import (  # re-exported for the route modules
     INACTIVE_EMPLOYMENT_STATUSES, availability_detail, availability_violations,
@@ -22,7 +23,8 @@ from ...services.scheduling.schedule_rules import (  # re-exported for the route
     shift_full_detail, shift_window_on_date, unlocated_employee_detail,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
-    _iso, fetch_availability, find_conflicts, log_audit, log_availability_override, shift_snapshot,
+    _iso, fetch_availability, find_conflicts, lock_scheduling_employees,
+    log_audit, log_availability_override, shift_snapshot,
 )
 from ...services.scheduling.schedule_warning_events import reconcile_schedule_warning_events
 
@@ -134,17 +136,48 @@ async def assert_location_in_company(
         raise HTTPException(status_code=404, detail="Location not found")
 
 
+# Sentinel for assert_job_in_company's location_id: distinguishes "this caller
+# has no location to check against" (omitted) from "the row being written has
+# no location" (passed as None). The second case still has to reject a
+# location-scoped job — otherwise a company-wide shift is a way to smuggle
+# another store's job in.
+UNSCOPED_LOCATION: Any = object()
+
+
 async def assert_job_in_company(
-    conn, company_id: UUID, job_id: Optional[UUID]
-) -> None:
+    conn, company_id: UUID, job_id: Optional[UUID], *,
+    location_id: Any = UNSCOPED_LOCATION, lock: bool = False,
+):
+    """404 unless the job is this company's; 422 unless it is available at the
+    row's location. Returns the job row (name + location_id) so callers can
+    write the job's current name as the canonical role label.
+
+    A job with location_id NULL is company-wide and available everywhere. A
+    location-scoped job is available only at its own location — including
+    against a location-less shift, which is why `location_id=None` is a real
+    constraint and not the same as omitting the argument.
+
+    lock=True takes FOR SHARE, which is what actually closes the read/write
+    race: without it a concurrent rename can still commit between this SELECT
+    and the caller's INSERT, and the stale name gets persisted as the role.
+    Only meaningful inside the caller's write transaction.
+    """
     if job_id is None:
-        return
+        return None
     row = await conn.fetchrow(
-        "SELECT 1 FROM schedule_jobs WHERE id = $1 AND company_id = $2",
+        "SELECT name, location_id FROM schedule_jobs WHERE id = $1 AND company_id = $2"
+        + (" FOR SHARE" if lock else ""),
         job_id, company_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
+    if (
+        location_id is not UNSCOPED_LOCATION
+        and row["location_id"] is not None
+        and row["location_id"] != location_id
+    ):
+        raise HTTPException(status_code=422, detail="Job is not available at this location")
+    return row
 
 
 async def fetch_shifts(
@@ -213,7 +246,7 @@ async def fetch_shifts(
                a.manager_note, a.manager_note_visible_to_employee,
                a.manager_note_include_in_location_digest,
                a.manager_note_send_employee_notice,
-               a.compliance_guidance,
+               a.compliance_guidance, a.planned_breaks,
                e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
         JOIN employees e ON e.id = a.employee_id
@@ -268,7 +301,8 @@ async def fetch_shifts(
             assignment["manager_note"] = (
                 r["manager_note"] if r["manager_note_visible_to_employee"] else None
             )
-            assignment["compliance_guidance"] = r["compliance_guidance"]
+            assignment["compliance_guidance"] = decode_jsonb(r["compliance_guidance"])
+            assignment["planned_breaks"] = decode_jsonb(r["planned_breaks"])
         if employee_id is None:
             assignment["manager_note_visible_to_employee"] = r["manager_note_visible_to_employee"]
             assignment["manager_note_include_in_location_digest"] = r["manager_note_include_in_location_digest"]
@@ -301,10 +335,17 @@ async def check_job_qualification(
     *, starts_at: datetime,
 ) -> Optional[dict]:
     """None when the shift carries no job (ungated — every pre-empsched04
-    shift, or any shift with no job picked) or the employee is on that job's
-    qualified list. Otherwise the 409 detail dict, for the caller to raise
+    shift), when the job has no qualified roster at all, or when the employee
+    is on that roster. Otherwise the 409 detail dict, for the caller to raise
     (unforced) or force past + audit (same pattern as availability_violations
     below — compute once, decide what to do with it at the call site).
+
+    An EMPTY roster means ungated, and that is load-bearing. Picking a job is
+    now mandatory on the manual create form, so without this rule every
+    company that defines jobs but has not filled in the per-job qualified
+    lists (a separate tab, and a common state) would get a forceable 409 on
+    literally every assignment. Gating is opted into by naming who is
+    qualified, not by the mere existence of a job.
 
     A dangling job_id (the job itself was deleted between read and write, or
     never existed) degrades to ungated rather than a hard error — deleting a
@@ -322,12 +363,16 @@ async def check_job_qualification(
                      AND je.qualification_status = 'active'
                      AND (je.qualified_from IS NULL OR je.qualified_from <= $4)
                      AND (je.qualified_until IS NULL OR je.qualified_until >= $4)
-               ) AS qualified
+               ) AS qualified,
+               EXISTS (
+                   SELECT 1 FROM schedule_job_employees any_je
+                   WHERE any_je.job_id = j.id AND any_je.company_id = $2
+               ) AS has_roster
         FROM schedule_jobs j WHERE j.id = $1 AND j.company_id = $2
         """,
         job_id, company_id, employee_id, starts_at.date(),
     )
-    if row is None or row["qualified"]:
+    if row is None or row["qualified"] or not row["has_roster"]:
         return None
     return job_qualification_detail(employee_id, job_id, row["name"])
 
@@ -348,13 +393,14 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     """
     row = await conn.fetchrow(
         """
-        SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
+        SELECT s.id, s.starts_at, s.ends_at, s.status, s.required_staff,
                s.location_id, s.break_minutes, s.role, s.kind,
                s.training_requirement_id, s.job_id,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
                 WHERE a.shift_id = s.id) AS assigned_count
         FROM schedule_shifts s
         WHERE s.id = $1 AND s.company_id = $2
+        FOR UPDATE
         """,
         shift_id, company_id,
     )
@@ -407,6 +453,7 @@ async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[
         """
         SELECT a.employee_id, a.status, a.manager_note,
                a.manager_note_visible_to_employee, a.compliance_guidance,
+               a.planned_breaks,
                e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
         JOIN employees e ON e.id = a.employee_id
@@ -423,7 +470,8 @@ async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[
             "status": r["status"],
             "manager_note": r["manager_note"],
             "manager_note_visible_to_employee": r["manager_note_visible_to_employee"],
-            "compliance_guidance": r["compliance_guidance"],
+            "compliance_guidance": decode_jsonb(r["compliance_guidance"]),
+            "planned_breaks": decode_jsonb(r["planned_breaks"]),
         }
         for r in assign_rows
     ]

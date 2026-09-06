@@ -38,11 +38,11 @@ struct AIComposeBar: View {
                     .foregroundColor(appState.themeText)
                     .frame(maxWidth: .infinity)
                     .onSubmit { submit() }
-                    .help("Espresso reads the connected repo and drafts a reviewable ticket. e.g. \"add saved project filters\"")
+                    .help("Espresso reads the repo's CLAUDE.md or AGENTS.md guide and drafts a reviewable ticket. e.g. \"add saved project filters\"")
                 if isDrafting {
                     HStack(spacing: 5) {
                         ProgressView().controlSize(.small)
-                        Text("Reading repo…")
+                        Text("Reading repo guide…")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                         Button(action: onCancel) {

@@ -2,11 +2,25 @@
 
 `.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
 `silent-error-autofix.yml` and `autopr-self-audit.yml`. `msandbox` is the authoritative
-master switch. While it is ON, a local macOS LaunchAgent is the sole automatic
-five-minute clock and dispatches only when no AutoPR lane is queued or active. A
-production-error pass gets the next slot when its last completion is at least ten
-minutes old; then a self-audit gets one when its last completion is at least six hours
-old; otherwise Kanban advances.
+master switch. While it is ON, two local macOS LaunchAgents are the sole automatic
+clock, and both dispatch only when no AutoPR lane is queued or active. The scheduler
+ticks every five minutes: a production-error pass gets the next slot when its last
+completion is at least ten minutes old; then a self-audit gets one when its last
+completion is at least six hours old; then Kanban advances **only if its own last pass
+is at least twenty minutes old**, otherwise the tick is a logged `kanban-not-due` skip.
+The second agent (`com.matcha.kanban-autopr-request-watch`, one minute, the same
+`dispatch-if-idle.sh --if-requested`) exists so a human never waits on that twenty
+minutes: pressing **Run AutoPR now** on a card queues a request, the watcher sees it via
+one bounded query against our own API (`GET /matcha-work/autopr/run-requests`), and
+dispatches Kanban immediately. An idle watch tick makes no GitHub API call at all,
+starts no observer panes, takes no dispatch lock, and writes no line to the shared
+dispatch log — it costs one bounded, timeout-capped board query and a heartbeat file.
+A probe failure never forces a run, and a five-minute floor between forced dispatches
+(burned only once a dispatch actually lands) keeps a card that cannot be selected from
+spinning the runner. Three bounds make "cannot be selected" terminal rather than
+permanent: `select.sh` consumes the request of any run-requested card the pass declines
+or defers, the server refuses a request for a board outside the four the harness polls,
+and a request that nothing claims within 30 minutes expires on its own.
 GitHub's manual workflow dispatch remains the recovery path but also fails closed when
 `msandbox` is OFF. There is deliberately no second GitHub cron:
 a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
@@ -109,13 +123,27 @@ changes.
 ## Local tmux dashboard
 
 While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
-`matcha-autopr` session on its next five-minute tick if the session is missing. Detaching
+`matcha-autopr` session on its next tick if the session is missing. Detaching
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
 considered healthy: if any of the four panes is dead or missing, the helper replaces the
 whole observer session. Autonomous model startup fails closed until all four panes are
 live. The overview owns the full-height left side; the right side stacks live agent work,
 active PR detail, and automation health. This keeps the operational answer readable from
 across a room while retaining drill-down detail in the same tmux window.
+
+The panes are observers and are budgeted like observers. Every GitHub read they make
+goes through `gh-cached.sh TTL KEY <command>`: open/merged PR lists and the selector
+probe hold for five minutes, the board bundle for three, and the in-flight run's step
+detail for 45 seconds. Before that, four panes each re-listed PRs on their own timer and
+the overview additionally re-ran `select.sh` — which asks GitHub about every candidate
+card — on every redraw, which is what pushed the hourly REST budget. The dispatcher
+deliberately does **not** use this cache: it reads `run-snapshot.sh` with a short TTL and
+`ALLOW_STALE=false`, because acting on stale run state can double-dispatch. Empty command
+output is a cacheable answer, not a miss — "this branch has no PR yet" is the normal
+state during an investigation, and treating it as a failure re-asked GitHub every minute.
+A selector **crash** is never cached, though: only an actual pick or an actual
+"nothing eligible" is stored, alongside the exit status the NEXT pane branches on, so a
+rate-limited selector reads as failed rather than as an empty queue.
 
 The LaunchAgent does not execute the repo-backed `msandbox` symlink directly:
 macOS can deny background agents access to `~/Documents` even when Terminal has
@@ -153,13 +181,18 @@ Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
   A container stuck in `created`, `exited`, or another non-running state is shown as
   blocked rather than healthy.
 
-The overview refreshes every 30 seconds, the PR pane every 10 seconds, the local model
-stream appends new output every 2 seconds (with status appended only when it changes and
-GitHub refreshed every 10), and health refreshes every 15 seconds. Override those intervals with
+The overview and PR metadata refresh every 60 seconds. The local model stream still
+appends new output every 2 seconds, but its remote workflow status refreshes every 60;
+health refreshes from local state every 15 seconds. The overview, PR pane, live-work pane,
+and dispatcher share one mode-600 GitHub run snapshot with a 60-second TTL. Its refresh is
+one unfiltered run-list request that is classified locally, rather than each pane resolving
+and polling four workflow names independently. A dispatch uses one direct workflow API
+POST. Override those intervals with
 `AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,
 `AUTOPR_WORK_REFRESH_SECONDS`, `AUTOPR_WORK_STATUS_REFRESH_SECONDS`, and
-`AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. Override
-`AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
+`AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. The shared GitHub
+TTL is `AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS`; do not lower it without accounting for every
+observer pane. Override `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
 
 The self-audit implementation and its sealed model allowlist are documented in
 `docs/ops/AGENT_SANDBOX.md`. Manual recovery commands are `msandbox audit` and
@@ -174,9 +207,13 @@ second scheduler.
    backend/worker/nginx log signals. Codex receives those files and a commit list
    between each live image and the checked-out branch, but never SSH or database
    credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
-   fix or an unapplied migration. It may diagnose migration drift. The path guard allows
-   it to author a migration version only after a trusted `draft_pr` instruction and
-   always forbids applying a migration.
+   fix or an unapplied migration. It may diagnose migration drift. When work needs a
+   schema change, it may author a new migration version for the draft PR. The path guard
+   rejects edits or deletions of migrations already on `main`, drafts that add a base or
+   a new head instead of extending exactly one current head, missing
+   `upgrade()`/`downgrade()` entrypoints, and any path under `server/alembic/` that is
+   not a new `versions/<revision>.py`. Nothing in the pipeline can apply a migration: the
+   msandbox holds no database credentials and the workflow never invokes `alembic`.
 2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
@@ -199,8 +236,9 @@ second scheduler.
    not receive a merge position. PR comments are untrusted planning evidence, never
    executable instructions.
 5. **`select.sh`** — picks one planned card GitHub hasn't already handled. Branch key is
-   `bot/task-<id8>` (first 8 hex of the task UUID). A pending decision-bound additional
-   context event is highest priority, followed by related rework and planned Todo work;
+   `bot/task-<id8>` (first 8 hex of the task UUID). An explicit **Run AutoPR now** request
+   ranks first, then a pending decision-bound additional
+   context event, followed by related rework and planned Todo work;
    the plan keeps each related cluster together. Without a plan it safely falls back to
    reconsideration, Changes Requested, then Todo. Rework is better-specified —
    it has a written `review_note` — and unblocks a PR already in flight. For `todo`, any PR at all on
@@ -217,8 +255,25 @@ second scheduler.
    current no-spec/awaiting-answers note. That event makes the card eligible once without deleting audit
    history or pretending the card moved; a later AutoPR outcome replaces the note and
    therefore consumes the signal. New context submitted after an earlier failed-attempt
-   marker can bypass that old cooldown once. A failed attempt otherwise cools down
-   for 15 minutes, so five-minute ticks can work other cards instead of repeatedly
+   marker can bypass that old cooldown once. **Run AutoPR now** is the same class of
+   authorization and behaves the same way: it queues an `autopr_run_request` history
+   event (no schema change, same shape as the reconsideration event), which makes the
+   card eligible regardless of assignment, outranks the no-spec ledger and the Todo
+   "any PR means skip" rule, and beats a cooldown older than the request.
+   `investigate.sh` posts the matching `autopr_run_claim` the moment it actually picks
+   the card up — that claim, not the run's outcome, is what stops the one-minute watcher
+   re-dispatching for a card whose run then crashes. `select.sh` posts the same claim for
+   any run-requested card it passes over (an ALREADY-SCOPED card whose linked PR is open,
+   a card blocked by the open-PR cap, a card GitHub could not be read for), so the
+   invariant is **one button press costs at most one forced run**: the card's "Queued for
+   AutoPR" chip clears and the human can press again once the blocker is gone. The
+   read-only dashboard probe (`AUTOPR_SELECT_READ_ONLY=true`) never claims anything.
+   Requests are only accepted for the four boards in `KANBAN_AUTOPR_PROJECT_IDS`
+   (defined once in `project_task_service.py`, shared with the PR webhook's board check),
+   and any request older than 30 minutes stops counting as pending everywhere — the
+   watcher's poll, the card chip, and the idempotency check all read the same window.
+   A failed attempt otherwise cools down
+   for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
    `autopr` PRs (question-only drafts use their separate cap).
 6. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
@@ -240,22 +295,103 @@ second scheduler.
    Additional-context events are untrusted but escalated evidence: the agent must trace
    the newly described uncovered scenario and cannot repeat `already_fixed` merely
    because a generic patch exists. A clear affirmative work command in that exact
-   decision-bound reply—such as `you can work on this` or `you need to draft this PR`—
-   becomes trusted `draft_pr` policy even without a magic prefix. `--draft-pr` remains
-   the explicit form. Negated commands do not activate it. The policy mechanically
-   rejects both `already_fixed` and `migration_required`: when needed, the draft may
-   author only `server/alembic/versions/*.py` for human review and must never apply it.
-   `--trust-still-broken` (including the matching
+   decision-bound reply—such as `you can work on this`, `do it anyway`, `draft the
+   migration`, or `you need to draft this PR`—becomes trusted `draft_pr` policy even
+   without a magic prefix. `--draft-pr` remains the explicit form. Negated commands do
+   not activate it. The policy mechanically rejects `already_fixed`.
+   **A needed migration is never a refusal.** `migration_required` is not a
+   `no_safe_action_reason` the schema accepts. AutoPR authors the application
+   change, tests, and a new migration version, then the trusted publisher opens
+   the normal GitHub draft PR; the operator reviews and applies the migration by
+   hand, and no part of this system runs it. `investigate.sh` corrects an
+   out-of-date model that returns `migration_required` with one retry instead of
+   leaving the card blocked, and corrects an unpublishable migration draft
+   (`migration_draft_invalid`) the same way. The `draft_pr` directive is therefore not a
+   prerequisite for migration work; it remains an owner's explicit instruction
+   to draft work when AutoPR would otherwise conclude the request is already
+   covered. Old cards carrying a migration-required no-spec marker remain
+   settled until the owner supplies fresh context, requests a run, or re-adds
+   the work. What stays permanently closed is the migration runner and its
+   configuration (`env.py`, templates, `alembic.ini`).
+
+   The single exception is `acceptance_criteria_met`, which survives both
+   `draft_pr` and `trust_still_broken` because it carries proof: an
+   `acceptance_evidence` array with one entry per acceptance criterion, each
+   naming the criterion and the `path`, `line`, and `commit` that already
+   satisfies it. `decision.sh` resolves every citation against the repository
+   and rejects the decision unless the commit is HEAD or one of its ancestors,
+   the cited line is non-blank there, and the path still exists at HEAD — a real
+   object from an unrelated branch is not evidence, so the verdict cannot be
+   reached by assertion. It exists because a card can be written against a premise that
+   was already false — PR #418 asked for a route and a nav row that had both
+   shipped weeks earlier under a different label — and with no way to say so,
+   the only legal move left was a diff that changed nothing real. Both
+   `implementation` and `partial_implementation` are now refused when the staged
+   diff is pure string-literal churn and the card's own text asks for structure
+   (`cosmetic_diff.py`); a relocated row or a repointed path is structural work
+   and passes. `investigate.sh` catches it first and retries once with the
+   rejection stated back to the model, and `publish.sh` backstops it by writing
+   a `BLOCKED: COSMETIC DIFF` progress note and an Espresso context request
+   before failing, so the refusal is never a silent repeating loop. That
+   authorization is durable in three ways, because the operator saying "work on it"
+   once must not have to be repeated after every cycle: the granted directives are
+   published back onto the card as `[autopr:directives …]` and re-read on later cycles
+   while it sits in `todo`/`changes_requested`; a run that consumes the event and then
+   repeats `already_fixed` is recovered by `collect.sh`'s
+   bounded probe; and a decision contradicting the directive is retried once with the
+   rejection stated back to the model (`decision.sh directive-ok`) instead of failing
+   the run silently. `--trust-still-broken` (including the matching
    natural-language form) accepts that the described scenario fails, while
    `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test
    tenant. The coding model never receives those credentials. It must inspect correlated
    production errors/log signals and any test replay before asking for an exact route,
    role, reproduction steps, and screenshot. Missing product intent
-   or evidence produces a question-only draft PR, not a no-spec marker. The card remains
+   or evidence produces a question-only draft PR, not a no-spec marker. The normal
+   investigation ceiling is 20 minutes. A run that reaches it is stopped, its bounded
+   patch/report/decision fragments and final 128 KB of escape-stripped terminal output
+   are stored mode-600 under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`. The
+   sandbox clone is stamped with the card it was created for and with its own creation
+   time, and a checkpoint harvests it only when both match this run, so neither another
+   card's work nor a previous round's clone can be saved under this one. That end-of-run
+   save is a separate workflow step, so it does not run at all if the machine or the
+   runner process dies outright; the investigation therefore also snapshots itself every
+   4 minutes while the model is working (`checkpoint.sh snapshot`, bounded and
+   self-terminating), writing through a private git index so it never contends with the
+   live container for `.git/index`. A hard kill costs the last few minutes, not the whole
+   run. Snapshots hold a lock that `save` and `consume` take first (`snapshot-halt`), so
+   a pass in progress can never re-point a run whose PR is already published. A save that
+   harvested nothing never takes the resume pointer away from that snapshot. Checkpoints
+   are pruned to the newest three per card on both paths — `save` on the interrupted one,
+   `consume` on the successful one — never evicting the active checkpoint, with a 14-day
+   floor across all cards, and stop being resumable after 24 hours. Only a
+   run that was actually killed pauses the card: investigate.sh records its own exit
+   status, so a crash or a rejected decision late in the window fails the run loudly and
+   leaves the card selectable instead of parking it behind an approval button.
+   The card moves to
+   `changes_requested` and shows why the run stopped, which files and outputs were saved,
+   and the latest partial-report summary. The pause note carries forward the standing
+   `[autopr:directives …]` grant, the `[autopr:no-spec …]` ledger, and any pending
+   question form, so nothing durable is lost to the pause. It does not spin on every
+   scheduler tick. The
+   card's **Approve 10 more minutes** button submits the explicit `--extend-runtime`
+   directive for one 10-minute continuation. Approval is never inferred from ordinary
+   prose and is not carried into later cycles, and it only applies when a resumable
+   checkpoint exists — a from-scratch investigation always keeps its full 20 minutes.
+   The continuation restores
+   the partial patch only inside the disposable msandbox and attaches the saved textual
+   output as untrusted context. If the patch no longer applies to current code, the text
+   remains available and the retry starts from a clean tree. Successful recovery
+   deactivates but does not delete the checkpoint. A paused card also reopens on new
+   feedback on the draft PR it already has, not only from the ticket side.
+
+   The card remains
    in `changes_requested` until a new human comment or review arrives on that PR; the
-   next local cycle then updates the same draft. Without a trusted draft directive,
-   no-spec remains available for already-fixed work, migrations, policy boundaries,
-   and external dependencies.
+   next local cycle then updates the same draft. Every implementation or question PR
+   starts as a GitHub draft regardless of directives. Without a trusted `draft_pr`
+   directive, no-spec remains available for already-fixed work, policy boundaries,
+   and external dependencies; migration work is drafted automatically. With one,
+   `acceptance_criteria_met` remains available for a card whose every stated criterion
+   is already satisfied, provided it cites verifiable evidence for each.
 7. **Cross-lane scope check** — for a fresh implementation patch, the shared
    `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
@@ -280,10 +416,17 @@ second scheduler.
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
-   fix is. Trusted `draft_pr` policy adds one narrow allowlist entry for
-   `server/alembic/versions/*.py`; Alembic environment/configuration files remain denied,
-   and the workflow never applies migrations. Without that policy a migration still
-   takes the no-spec path and says why. PR titles begin
+   fix is. New `server/alembic/versions/<revision>.py` files are the sole schema
+   exception, and `__init__.py` is not one of them: the shared
+   `autopr_migration_draft_errors` helper in `lib.sh` compares each one with `main`,
+   rejects edits/deletions of existing revisions, and validates static revision metadata,
+   both migration entrypoints, and that each draft extends exactly one current head
+   rather than adding a second base or a new head. `investigate.sh` runs that same helper
+   right after the model pass, so a mistyped `down_revision` costs one corrective retry
+   (`migration_draft_invalid`) instead of the whole investigation; reaching the publisher
+   with it still unfixed ends the run. Alembic environment/configuration files remain
+   denied, the workflow never applies migrations, and the resulting PR is always a
+   GitHub draft. PR titles begin
    with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`
    is triaged visually. Question drafts also carry `autopr-awaiting-input`; those drafts
    do not consume the ten-PR implementation cap. PR body carries
@@ -305,7 +448,11 @@ second scheduler.
    `autopr-awaiting-input`, and leaves the card in `changes_requested` with a visible
    note such as `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod
    c5d3a49 · PR #295 · 🟡 C42 · note: Needs the canonical term before labels can be
-   updated safely.`. `rework` updates the existing branch and PR;
+   updated safely.` followed by the numbered questions, choices, and suggested defaults.
+   Espresso shows those questions on the card and in the opened ticket. **Answer AutoPR
+   questions** submits numbered choices through the existing decision-bound additional-
+   context endpoint; a PR comment/review remains an alternate answer path. `rework`
+   updates the existing branch and PR;
    once there are no remaining blocking questions it returns the card to `in_progress`
    (this is the one transition `project_task_service` deliberately
    suppresses the notification email for — it already knows this is a rework resume, not
@@ -318,8 +465,11 @@ second scheduler.
    history event and a decision-bound bell/push notification to its author: PR
    drafted/updated, questions still needed, or the no-safe-action decision still
    applies. Notification delivery is required so consuming the event cannot be silent.
-   Awaiting-input and `already_fixed` outcomes also post one idempotent Espresso
-   message into the project's discussion channel. It starts with the existing
+   Awaiting-input, `already_fixed`, and `acceptance_criteria_met` outcomes also post
+   one idempotent Espresso message into the project's discussion channel; for
+   `acceptance_criteria_met` that message carries the per-criterion evidence, which
+   is the point of the verdict — the human needs to see where each thing the card
+   asked for already lives. It starts with the existing
    `⟦ticket:<id>|<title>|<column>⟧` token, so the ticket is clickable in Espresso.
    Replying directly to that message attaches the reply to the exact still-current
    AutoPR decision and acknowledges the escalation in chat; attached screenshots are

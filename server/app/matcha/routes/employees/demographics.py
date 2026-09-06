@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.workers.tasks.schedule_break_refresh import enqueue_employee_schedule_break_refresh
 
 router = APIRouter()
 
@@ -56,5 +57,11 @@ async def update_date_of_birth(
                 company_id,
                 body.date_of_birth,
             )
+
+        enqueue_employee_schedule_break_refresh(
+            company_id=company_id, employee_id=employee_id,
+            actor_user_id=current_user.id,
+            source="employee_date_of_birth_update",
+        )
 
     return {"minor_status": _minor_status(body.date_of_birth), "updated": True}

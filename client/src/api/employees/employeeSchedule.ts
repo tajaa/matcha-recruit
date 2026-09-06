@@ -9,6 +9,7 @@ import type {
   EmployeeScheduleProfile, EmployeeScheduleProfilePayload,
   ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
   ScheduleAuditFilters, ScheduleAuditResponse,
+  ShiftBreakStagger, PlannedBreak,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -119,6 +120,21 @@ export function exportScheduleAuditLogs(filters: Omit<ScheduleAuditFilters, 'lim
 
 export function updateAssignmentNote(shiftId: string, employeeId: string, payload: AssignmentNotePayload) {
   return api.put<Shift>(`/employee-schedule/shifts/${shiftId}/assignments/${employeeId}/note`, payload)
+}
+
+/** Suggested staggered break times for one shift's crew — read-time, never stored
+ *  until a manager saves it back through updateAssignmentBreakPlan. */
+export function fetchShiftBreakStagger(shiftId: string) {
+  return api.get<ShiftBreakStagger>(`/employee-schedule/shifts/${shiftId}/break-stagger`)
+}
+
+export function updateAssignmentBreakPlan(
+  shiftId: string, employeeId: string, plannedBreaks: PlannedBreak[] | null,
+) {
+  return api.put<Shift>(
+    `/employee-schedule/shifts/${shiftId}/assignments/${employeeId}/break-plan`,
+    { planned_breaks: plannedBreaks },
+  )
 }
 
 export function fetchMealBreakWaiver(employeeId: string) {

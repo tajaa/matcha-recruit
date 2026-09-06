@@ -136,7 +136,7 @@ def _write_launcher(destination: Path, repo_root: Path, bin_dir: Path) -> None:
                 "    case \"$dispatch_subcommand\" in create|start|attach|shell) ensure_system || exit $? ;; esac\n"
                 "    run_v2 \"$@\"\n"
                 "    ;;\n"
-                "  --version|worktree|pr|test|install|gc) run_v2 \"$@\" ;;\n"
+                "  --version|worktree|pr|test|install|gc|capabilities) run_v2 \"$@\" ;;\n"
                 "  attach) if [ \"$#\" -gt 1 ] && [ ! -e \"${2:-}\" ]; then run_v2 \"$@\"; fi ;;\n"
                 "  paste|doctor) if [ \"$#\" -gt 1 ]; then run_v2 \"$@\"; fi ;;\n"
                 "esac\n"

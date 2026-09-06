@@ -13,7 +13,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/compliance', icon: Shield, label: 'Compliance' },
   { to: '/app/compliance-calendar', icon: CalendarClock, label: 'Compliance Calendar' },
   { to: '/app/policies', icon: FileText, label: 'Policy Management', feature: 'policies' },
-  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
+  { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credential Templates', feature: 'credential_templates' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
   { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/compliance/onboarding', icon: Zap, label: 'Compliance Setup' },

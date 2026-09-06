@@ -140,6 +140,8 @@ async def review_schedule_break_rule(
             )
         except LookupError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid schedule break rules: {exc}")
     return {
         "id": str(result["id"]),
         "review_status": result["review_status"],

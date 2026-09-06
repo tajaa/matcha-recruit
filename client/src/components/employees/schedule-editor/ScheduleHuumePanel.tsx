@@ -8,6 +8,7 @@ import type { HuumeStep, MWMessage, MWSendResponse, MWStreamEvent } from '../../
 import { getHuumeState } from '../../../work/utils/huumeState'
 import MessageBubble from '../../../work/components/panels/MessageBubble'
 import HuumeActionCard from '../../../work/components/panels/HuumeActionCard'
+import HuumeChoiceChips from '../../../work/components/panels/HuumeChoiceChips'
 import ActionDocViewer from '../../../work/components/panels/HuumePanel/ActionDocViewer'
 import HuumeStepTimeline from '../../../work/components/panels/HuumeStepTimeline'
 import { useVoiceDictation } from '../../../hooks/useVoiceDictation'
@@ -245,7 +246,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
     }
   }
 
-  const action = getHuumeState(currentState).action
+  const { action, choice } = getHuumeState(currentState)
   const composerDisabled = !threadId || !!sessionError || busy || startingVoice || transcribing || dictation.status === 'recording'
 
   return (
@@ -301,7 +302,8 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
         )}
         {messages.map((message) => <MessageBubble key={message.id} message={message} lightMode={false} />)}
         {action && <HuumeActionCard action={action} streaming={busy} onSendChat={(text) => { void send(text) }} />}
-        {action?.type === 'schedule_week_draft' && (
+        {choice && !busy && <HuumeChoiceChips choice={choice} disabled={composerDisabled} onPick={(text) => { void send(text) }} />}
+        {(action?.type === 'schedule_week_draft' || action?.type === 'schedule_location_profile') && (
           <div className="max-h-80 overflow-y-auto rounded-lg border border-white/[0.08] bg-white/[0.02]">
             <ActionDocViewer action={action} lightMode={false} />
           </div>

@@ -18,15 +18,26 @@ STARTS_AT = datetime(2026, 9, 15, 9, tzinfo=timezone.utc)
 
 
 class QualificationConn:
-    def __init__(self, *, qualified: bool = False):
+    def __init__(self, *, qualified: bool = False, has_roster: bool = True):
         self.qualified = qualified
+        self.has_roster = has_roster
         self.sql = ""
         self.args = ()
 
     async def fetchrow(self, sql, *args):
         self.sql = sql
         self.args = args
-        return {"name": "Barista", "qualified": self.qualified}
+        return {
+            "name": "Barista",
+            "qualified": self.qualified,
+            "has_roster": self.has_roster,
+        }
+
+    async def fetchval(self, sql, *args):
+        # The batch gate's roster-existence probe.
+        self.sql = sql
+        self.args = args
+        return self.has_roster
 
     async def fetch(self, sql, *args):
         self.sql = sql
@@ -48,6 +59,31 @@ async def test_route_gate_uses_status_and_shift_date():
 
 
 @pytest.mark.asyncio
+async def test_a_job_with_no_qualified_roster_stays_ungated():
+    # Picking a job is mandatory on the create form, so gating on the mere
+    # existence of a job would 409 every assignment for a company that has
+    # not filled in the per-job qualified lists yet.
+    conn = QualificationConn(qualified=False, has_roster=False)
+
+    detail = await check_job_qualification(
+        conn, COMPANY, EMPLOYEE, JOB, starts_at=STARTS_AT,
+    )
+
+    assert detail is None
+
+
+@pytest.mark.asyncio
+async def test_a_populated_roster_still_gates_someone_off_it():
+    conn = QualificationConn(qualified=False, has_roster=True)
+
+    detail = await check_job_qualification(
+        conn, COMPANY, EMPLOYEE, JOB, starts_at=STARTS_AT,
+    )
+
+    assert detail["code"] == "not_qualified_for_job"
+
+
+@pytest.mark.asyncio
 async def test_batch_gate_returns_only_effective_members():
     conn = QualificationConn(qualified=True)
     result = await fetch_effective_job_employee_ids(
@@ -57,6 +93,25 @@ async def test_batch_gate_returns_only_effective_members():
     assert result == {EMPLOYEE}
     assert "qualification_status='active'" in conn.sql
     assert conn.args[-1] == date(2026, 9, 15)
+
+
+@pytest.mark.asyncio
+async def test_batch_gate_matches_the_route_gate_on_an_empty_roster():
+    """The two gates must agree. They did not for a while, and the split was
+    visible: the grid assigned someone the chat/coverage/week-builder paths
+    refused for the same job."""
+    conn = QualificationConn(qualified=False, has_roster=False)
+    result = await fetch_effective_job_employee_ids(
+        conn, company_id=COMPANY, job_id=JOB,
+        employee_ids=[EMPLOYEE], as_of=date(2026, 9, 15),
+    )
+    assert result == {EMPLOYEE}
+
+    route_detail = await check_job_qualification(
+        QualificationConn(qualified=False, has_roster=False),
+        COMPANY, EMPLOYEE, JOB, starts_at=STARTS_AT,
+    )
+    assert route_detail is None
 
 
 @pytest.mark.asyncio

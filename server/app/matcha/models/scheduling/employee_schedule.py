@@ -6,7 +6,7 @@ requests. Response shapes are assembled as plain dicts in the route layer
 """
 
 from datetime import date, datetime, time, timezone
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -47,19 +47,26 @@ Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
 class ShiftCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime
-    role: Optional[str] = Field(None, max_length=150)
+    # No `role`: it is derived from job_id, not sent. Declaring it would put a
+    # field in the OpenAPI schema that the route silently discards. Pydantic
+    # ignores it if an older client still sends one, and that client gets the
+    # job's name back — which is the label it should have had.
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
     break_minutes: int = Field(0, ge=0, le=1440)
+    # Distinguish an intentional manager value from the legacy clients that
+    # always serialized their zero default.  Missing mode remains compatible
+    # with those clients and is treated as automatic by the route.
+    break_mode: Optional[Literal["auto", "manual"]] = None
     required_staff: int = Field(1, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
-    # Which job this shift is (Box Office, Concessions, ...) — None means
-    # ungated, anyone can be assigned. Enforced (forceable) at assignment
-    # time, not here.
-    job_id: Optional[UUID] = None
+    # Every manually created shift must identify the company job it represents
+    # (Box Office, Concessions, ...). The route verifies tenant/location scope
+    # and uses the job's current name as the persisted role label.
+    job_id: UUID
     # Employees to assign up front (optional).
-    employee_ids: list[UUID] = Field(default_factory=list)
+    employee_ids: list[UUID] = Field(default_factory=list, max_length=99)
     # 'training' ties the shift to a training_requirement — assigning an
     # employee creates/accelerates their training record instead of (not in
     # addition to) matching scheduled_role rules. Immutable after create
@@ -91,7 +98,11 @@ class ShiftUpdate(BaseModel):
     role: Optional[str] = Field(None, max_length=150)
     department: Optional[str] = Field(None, max_length=100)
     location_id: Optional[UUID] = None
-    break_minutes: Optional[int] = Field(None, ge=0, le=1440)
+    # Omission means "leave unchanged"; explicit null is not a valid stored
+    # value.  Keeping the annotation non-null also makes OpenAPI tell clients
+    # the truth while exclude_unset still distinguishes an omitted field.
+    break_minutes: int = Field(default=None, ge=0, le=1440)  # type: ignore[assignment]
+    break_mode: Optional[Literal["auto", "manual"]] = None
     required_staff: Optional[int] = Field(None, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
@@ -100,6 +111,13 @@ class ShiftUpdate(BaseModel):
 
     _utc = field_validator("starts_at", "ends_at")(_as_utc)
 
+    @field_validator("break_minutes", mode="before")
+    @classmethod
+    def _reject_null_break_minutes(cls, value):
+        if value is None:
+            raise ValueError("break_minutes cannot be null")
+        return value
+
     @model_validator(mode="after")
     def _check_window(self) -> "ShiftUpdate":
         # Only when the caller sent both — a one-sided retime is checked against
@@ -107,6 +125,8 @@ class ShiftUpdate(BaseModel):
         if self.starts_at is not None and self.ends_at is not None:
             if self.ends_at <= self.starts_at:
                 raise ValueError("ends_at must be after starts_at")
+        if self.break_mode == "manual" and self.break_minutes is None:
+            raise ValueError("manual break_mode requires break_minutes")
         return self
 
 
@@ -119,6 +139,26 @@ class AssignmentNoteUpdate(BaseModel):
     visible_to_employee: bool = True
     include_in_location_digest: bool = True
     send_employee_notice: bool = True
+
+
+class PlannedBreak(BaseModel):
+    """One reviewed break period a manager accepted or edited.
+
+    Keyed by (kind, ordinal) so it lines up with the BreakRequirement it
+    satisfies; the legal requirement itself stays in compliance_guidance.
+    """
+
+    kind: Literal["meal", "rest"]
+    ordinal: int = Field(..., ge=1, le=20)
+    start_local: datetime
+    duration_minutes: int = Field(..., ge=1, le=480)
+    source: Literal["suggested", "manager"] = "manager"
+
+
+class AssignmentBreakPlanUpdate(BaseModel):
+    """Full replacement: null or [] clears the reviewed plan."""
+
+    planned_breaks: Optional[List[PlannedBreak]] = Field(None, max_length=20)
 
 
 class MealWaiverAttestationUpdate(BaseModel):
@@ -306,6 +346,38 @@ class EmployeeScheduleProfileUpdate(BaseModel):
 JobCreate.model_rebuild()
 
 
+class OperatingWindow(BaseModel):
+    """One day's open/close. An overnight window (close <= open) is allowed —
+    bars and 24h stores are real."""
+
+    open: time
+    close: time
+
+
+class LocationScheduleProfileUpdate(BaseModel):
+    """True PATCH on a location's scheduling setup — only supplied fields are
+    written, so the Week Start pane can save one section at a time.
+
+    `operating_hours` is keyed by weekday index as a STRING, "0".."6" with
+    0=Sunday (the same index `days_of_week` masks use). A null value means
+    closed that day; an absent key means nobody has answered for that day yet,
+    which is deliberately not the same thing.
+    """
+
+    operating_hours: Optional[dict[str, Optional[OperatingWindow]]] = None
+    default_week_template_id: Optional[UUID] = None
+    leader_job_id: Optional[UUID] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+    week_start_weekday: Optional[Weekday] = None
+
+    @model_validator(mode="after")
+    def _check_weekday_keys(self) -> "LocationScheduleProfileUpdate":
+        for key in (self.operating_hours or {}):
+            if key not in {"0", "1", "2", "3", "4", "5", "6"}:
+                raise ValueError('operating_hours keys must be "0"-"6" (0=Sunday)')
+        return self
+
+
 class WeekTemplateCreate(BaseModel):
     """A named, reusable week of shift blocks. Location is set once here and
     inherited by every block (block-level location_id is a DB implementation
@@ -345,6 +417,9 @@ class WeekTemplateBlockReplace(BaseModel):
     break_minutes: int = Field(0, ge=0, le=1440)
     required_staff: int = Field(1, ge=1, le=99)
     days_of_week: list[Weekday] = Field(default_factory=list)
+    # Editable here because an agent-authored block carries a job link; leaving
+    # it out of this shape made the editor's own save strip it back to NULL.
+    job_id: Optional[UUID] = None
 
 
 class WeekTemplateReplace(BaseModel):
@@ -547,6 +622,7 @@ class ScheduleAutomationRuleUpsert(BaseModel):
                 raise ValueError("one-time schedules require run_date and target_week_start")
             if self.run_weekday is not None or self.target_weeks_ahead is not None:
                 raise ValueError("one-time schedules cannot include weekly fields")
-            if self.target_week_start.weekday() != 6:
-                raise ValueError("target_week_start must be a Sunday")
+            # Which weekday is valid depends on the LOCATION's own week start
+            # day, which this payload does not carry — the route re-checks
+            # alignment against the location's scheduling profile.
         return self

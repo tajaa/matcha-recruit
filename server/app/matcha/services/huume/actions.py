@@ -133,6 +133,7 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "waste_recipe_correction": "inventory_waste",
     "schedule_change": "employee_schedule",
     "schedule_week_draft": "employee_schedule",
+    "schedule_location_profile": "employee_schedule",
     "schedule_note": "employee_schedule",
     "meal_break_waiver": "employee_schedule",
     "work_permit": "employee_schedule",
@@ -391,6 +392,25 @@ def evaluate_huume_action(
         except (TypeError, ValueError):
             return HuumeVerdict(
                 kind="refuse", message="The generated weekly schedule has invalid scope details."
+            )
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+    if action_type == "schedule_location_profile":
+        if not staged_action.get("confirm_id"):
+            return HuumeVerdict(kind="refuse", message="There's no scheduling profile to save.")
+        try:
+            UUID(str(staged_action.get("location_id")))
+        except (TypeError, ValueError):
+            return HuumeVerdict(kind="refuse", message="That scheduling profile has no valid location.")
+        blocks = staged_action.get("blocks") or []
+        if not any([staged_action.get("operating_hours"), blocks,
+                    staged_action.get("leader_job_id"), staged_action.get("notes")]):
+            return HuumeVerdict(kind="refuse", message="Nothing to save in the location profile.")
+        # Every block must already carry a resolved job: a free-text block
+        # would generate ungated shifts whose role nothing can match back.
+        if any(not block.get("job_id") for block in blocks):
+            return HuumeVerdict(
+                kind="refuse", message="Every shift block needs a job before I can save the pattern."
             )
         return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
 
@@ -1276,6 +1296,11 @@ async def execute_huume_action(
             generation_run_id=UUID(str(action["generation_run_id"])),
             location_id=UUID(str(action["location_id"])),
             week_start=date.fromisoformat(str(action["week_start"])),
+        )
+    elif action.get("type") == "schedule_location_profile":
+        from app.matcha.services.huume import schedule_profile_skill
+        result = await schedule_profile_skill.execute(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
     elif action.get("type") in {"schedule_note", "meal_break_waiver", "work_permit"}:
         from app.matcha.services.scheduling import schedule_assistant_actions

@@ -128,6 +128,49 @@ for target in (
 PY
 echo "PASS: sessions use private Git metadata with host objects as a read-only alternate"
 
+# The capability report claims exactly what a session can reach. Pin the full
+# mount surface so a new mount is a deliberate, reviewed capability change
+# rather than an unnoticed widening of the sandbox boundary.
+python3 - "$TMP_DIR/session.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    workspace = json.load(handle)["services"]["workspace"]
+
+targets = {volume["target"] for volume in workspace["volumes"]}
+git_objects = {target for target in targets if target.endswith("/git/objects")}
+assert len(git_objects) == 1, targets
+expected = {
+    "/workspace",
+    "/home/agent",
+    "/home/agent/.npm",
+    # Replaced by the dedicated matcha-msandbox profile directory in PR F.
+    "/home/agent/.aws",
+    "/workspace/server/venv",
+    "/workspace/client/node_modules",
+    "/workspace/client/tellus/node_modules",
+    "/workspace/client/oceanlab/node_modules",
+    "/workspace/client/node_modules/.vite",
+    "/workspace/client/tellus/node_modules/.vite",
+    "/workspace/client/oceanlab/node_modules/.vite",
+    "/msandbox-git",
+    "/workspace/.git",
+    "/attachments",
+} | git_objects
+assert targets == expected, sorted(targets.symmetric_difference(expected))
+
+forbidden = (
+    "/var/run/docker.sock",
+    "/home/agent/.ssh",
+    "/workspace/secrets",
+    "/workspace/server/.env",
+)
+for target in forbidden:
+    assert target not in targets, target
+PY
+echo "PASS: interactive sessions mount only the reviewed capability surface"
+
 if grep -qF '/home/agent/.config/opencode/opencode.json' \
     "$REPO_ROOT/docker/agent-sandbox/Dockerfile"; then
     echo "FAIL: Dockerfile must not bake autonomous OpenCode permissions" >&2

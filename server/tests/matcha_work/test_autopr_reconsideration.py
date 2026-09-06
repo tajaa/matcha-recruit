@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -85,6 +85,38 @@ def test_operator_directives_accept_clear_work_commands_in_bound_context():
     )
     assert svc._parse_autopr_directives("--no draft PR yet") == ([], None)
     assert svc._parse_autopr_directives("--draft prevention notes") == ([], None)
+    assert svc._parse_autopr_directives("--extend-runtime") == (["extend_runtime"], None)
+    assert svc._parse_autopr_directives("please extend the runtime") == ([], None)
+
+
+def test_operator_directives_accept_ordinary_override_phrasing():
+    """A refusal is overridden the way an owner actually types it.
+
+    Every phrasing here was rejected by the first-generation parser, so a
+    ticket the owner had explicitly unblocked kept publishing the same
+    "no safe action" note.
+    """
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    for phrasing in (
+        "do it anyway",
+        "work on it either way",
+        "you can absolutely draft a PR with migration scripts",
+        "draft the migration",
+        "write the migration file",
+        "i need you to implement this",
+        "handle the migration",
+        "proceed",
+    ):
+        assert svc._parse_autopr_directives(phrasing) == (["draft_pr"], None), phrasing
+
+    # Prose that merely mentions the same verbs stays untrusted.
+    assert svc._parse_autopr_directives("the dropdown should fix hospitality accounts") == (
+        [],
+        None,
+    )
+    assert svc._parse_autopr_directives("no need to draft a PR for this") == ([], None)
+    assert svc._parse_autopr_directives("do not draft the migration") == ([], None)
 
 
 @pytest.mark.asyncio
@@ -184,6 +216,32 @@ async def test_awaiting_answers_accepts_chat_or_ticket_context(monkeypatch):
 
     assert result["autopr_reconsideration_pending"] is True
     assert json.loads(conn.insert_args[4])["kind"] == "autopr_additional_context"
+
+
+@pytest.mark.asyncio
+async def test_runtime_pause_accepts_ten_minute_continuation(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    current = (
+        "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 123\n"
+        "Why more time: The first 20-minute investigation ended before AutoPR produced a publishable result.\n"
+        "Done so far: Saved a partial report and run transcript."
+    )
+    conn = _ReconsiderationConn(current, board_column="changes_requested")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    monkeypatch.setattr(svc, "_notify_task_comment", AsyncMock())
+
+    result = await svc.request_autopr_reconsideration(
+        project_id=uuid4(),
+        task_id=uuid4(),
+        actor_user_id=uuid4(),
+        expected_progress_note=current,
+        body="--extend-runtime",
+    )
+
+    metadata = json.loads(conn.insert_args[4])
+    assert metadata["autopr_directives"] == "extend_runtime"
+    assert result["autopr_directives"] == ["extend_runtime"]
 
 
 @pytest.mark.asyncio
@@ -323,3 +381,128 @@ def test_task_shape_serializes_reconsideration_fields():
     )
     assert shaped["autopr_reconsideration_event_id"] == str(event_id)
     assert shaped["autopr_reconsideration_at"] == now.isoformat()
+
+
+class _RunRequestConn:
+    """Stub for the run-now queue: one task row, one pending-request lookup."""
+
+    def __init__(self, *, board_column="todo", status="pending", pending_at=None, exists=True):
+        self.board_column = board_column
+        self.status = status
+        self.pending_at = pending_at
+        self.exists = exists
+        self.insert_args = None
+        self.activity_id = uuid4()
+        self.created_at = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+
+    def transaction(self):
+        return _AsyncContext()
+
+    async def fetchrow(self, query, *args):
+        if "SELECT id, board_column" in query:
+            if not self.exists:
+                return None
+            return {"id": args[0], "board_column": self.board_column, "status": self.status}
+        if "INSERT INTO mw_task_history" in query:
+            self.insert_args = args
+            return {"id": self.activity_id, "created_at": self.created_at}
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetchval(self, query, *args):
+        if "autopr_run_request" in query:
+            return self.pending_at
+        if "SELECT 1 FROM mw_tasks" in query:
+            return 1 if self.exists else None
+        raise AssertionError(f"Unexpected query: {query}")
+
+
+def _watched_project_id():
+    """A board the kanban-autopr harness actually polls.
+
+    "Run AutoPR now" is rejected anywhere else: nothing would ever claim the
+    request, so the card would sit queued with no run coming.
+    """
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    return UUID(next(iter(svc.KANBAN_AUTOPR_PROJECT_IDS)))
+
+
+@pytest.mark.asyncio
+async def test_run_now_queues_one_pending_request(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.request_autopr_run(
+        project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
+    )
+
+    assert result["already_pending"] is False
+    assert result["autopr_run_requested_at"] == conn.created_at.isoformat()
+    metadata = json.loads(conn.insert_args[4])
+    assert metadata == {"kind": "autopr_run_request"}
+
+
+@pytest.mark.asyncio
+async def test_run_now_is_idempotent_while_a_request_is_unclaimed(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    pending_at = datetime(2026, 9, 2, 2, 55, tzinfo=timezone.utc)
+    conn = _RunRequestConn(pending_at=pending_at)
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.request_autopr_run(
+        project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
+    )
+
+    assert result["already_pending"] is True
+    assert result["autopr_run_requested_at"] == pending_at.isoformat()
+    # Pressing the button twice must not stack a second history event.
+    assert conn.insert_args is None
+
+
+@pytest.mark.asyncio
+async def test_run_now_rejects_lanes_autopr_never_picks_from(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn(board_column="review")
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    with pytest.raises(svc.AutoPRReconsiderationConflict):
+        await svc.request_autopr_run(
+            project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
+        )
+    assert conn.insert_args is None
+
+
+@pytest.mark.asyncio
+async def test_run_claim_consumes_the_request(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+
+    assert result["claimed_at"] == conn.created_at.isoformat()
+    assert json.loads(conn.insert_args[4]) == {"kind": "autopr_run_claim"}
+
+
+@pytest.mark.asyncio
+async def test_run_now_rejects_a_board_autopr_does_not_watch(monkeypatch):
+    """The harness polls four fixed Espresso projects. A request anywhere else
+    could never be claimed, so it would pin the card at "Queued for AutoPR"
+    while the local watcher forced a dispatch that ignored it."""
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    unwatched = uuid4()
+    assert str(unwatched) not in svc.KANBAN_AUTOPR_PROJECT_IDS
+    with pytest.raises(svc.AutoPRReconsiderationConflict):
+        await svc.request_autopr_run(
+            project_id=unwatched, task_id=uuid4(), actor_user_id=uuid4()
+        )
+    assert conn.insert_args is None

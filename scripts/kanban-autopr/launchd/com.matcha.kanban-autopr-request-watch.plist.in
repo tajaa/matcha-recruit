@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.matcha.kanban-autopr-request-watch</string>
+  <!-- The card's "Run AutoPR now" button. This lane exists so the scheduled
+       Kanban pass can stay slow (twenty minutes) without a human having to
+       wait for the clock. It asks our own API whether any card is queued and
+       exits before touching GitHub when nothing is: an idle minute costs one
+       bounded board query, no Actions API budget, and no model work. The same
+       msandbox master switch and dispatch lock govern it. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__DISPATCHER_PATH__</string>
+    <string>--if-requested</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__USER_HOME__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__USER_HOME__</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__USER_HOME__/Library/Logs/matcha-kanban-autopr-dispatch.log</string>
+  <key>StandardErrorPath</key>
+  <string>__USER_HOME__/Library/Logs/matcha-kanban-autopr-dispatch-error.log</string>
+</dict>
+</plist>

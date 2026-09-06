@@ -86,11 +86,11 @@ works; it completes a background, source-grounded read and posts the answer
 back into the project chat without changing code or opening a pull request.
 
 On a repo-connected project board, **Describe a task to draft** uses that same
-read-only agent lifecycle. Espresso inspects the live implementation and tests,
-then opens an editable ticket review with a scoped description, checklist, and
-the source evidence it used. Nothing is added to the board until the user
-reviews the fields and clicks Create. Projects without a repo keep the simpler
-one-shot draft fallback.
+read-only run lifecycle, but deliberately keeps repository context small:
+Espresso reads the root `CLAUDE.md` or `AGENTS.md` architecture guide and then
+opens an editable ticket review with a scoped description, checklist, and cited
+guidance. Nothing is added to the board until the user reviews the fields and
+clicks Create. Projects without a repo keep the simpler one-shot draft fallback.
 
 ---
 
