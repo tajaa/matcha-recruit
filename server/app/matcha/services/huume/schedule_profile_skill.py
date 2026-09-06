@@ -57,6 +57,37 @@ def _summarize(
     return ", ".join(parts) or "no changes"
 
 
+def _leader_coverage_name(leader_job_name: str) -> str:
+    """The name `_leader_blocks` gives generated coverage.
+
+    Also the signature `_strip_leader_coverage` matches on, so the two stay in
+    step: a rule that materialized demand has to be able to take it back.
+    """
+    return f"{leader_job_name} coverage"
+
+
+def _strip_leader_coverage(
+    blocks: list[dict[str, Any]], leader_job_id: Any, leader_job_name: Optional[str],
+) -> list[dict[str, Any]]:
+    """`blocks` minus the coverage `_leader_blocks` generated for that job.
+
+    Matched on the generated name AND the job, never the job alone: a real
+    block the manager wrote that happens to use the lead job is theirs, and
+    survives a retracted leader rule.
+    """
+    if not leader_job_name:
+        return blocks
+    generated = _leader_coverage_name(leader_job_name).lower()
+    leader_id = str(leader_job_id)
+    return [
+        block for block in blocks
+        if not (
+            str(block.get("job_id")) == leader_id
+            and (block.get("name") or "").strip().lower() == generated
+        )
+    ]
+
+
 def _leader_blocks(operating_hours: dict, leader_job: dict, blocks: list[dict]) -> list[dict]:
     """One leader block per distinct open-hours window not already covered.
 
@@ -75,7 +106,7 @@ def _leader_blocks(operating_hours: dict, leader_job: dict, blocks: list[dict]) 
         windows.setdefault((window["open"], window["close"]), []).append(day)
     return [
         {
-            "name": f"{leader_job['name']} coverage",
+            "name": _leader_coverage_name(leader_job["name"]),
             "role": leader_job["name"],
             # str, not UUID: this dict is persisted into the thread's JSONB
             # state, and json.dumps has no UUID branch — a raw UUID here means
@@ -272,6 +303,19 @@ async def resolve_profile_args(
         leader_coverage = _leader_blocks(operating_hours, leader_job, pattern) if pattern else []
         if leader_coverage:
             blocks = [*pattern, *leader_coverage]
+    elif leader_required is False and saved_leader_job:
+        # Retracting the rule has to retract the demand it created. An earlier
+        # "yes" materialized `<Job> coverage` into the default week template,
+        # and leaving it there staffs a lead every day at a store that just
+        # said it needs none — the template contradicting the answer the
+        # confirm card showed. `_leader_blocks` only ever adds coverage on top
+        # of an existing pattern, so stripping can never empty one it wrote.
+        pattern = blocks or _saved_pattern_blocks(saved)
+        stripped = _strip_leader_coverage(
+            pattern, saved_leader_job, saved.get("leader_job_name"),
+        )
+        if stripped and len(stripped) != len(pattern):
+            blocks = stripped
 
     # Blank notes are "this turn had nothing to say", not "erase the note the
     # manager wrote" — the model fills the field with "" whether or not it was
@@ -326,6 +370,12 @@ async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, An
         fields["operating_hours"] = action["operating_hours"]
     if leader_job_id:
         fields["leader_job_id"] = UUID(str(leader_job_id))
+    elif action.get("leader_required") is False:
+        # "No lead required" has to clear the named job as well. Leaving it
+        # set keeps `_coverage_profile` emitting leader gaps on every built
+        # week and keeps `profile_context_lines` telling the manager a lead is
+        # required on every shift — re-arguing an answer they already gave.
+        fields["leader_job_id"] = None
     # `is not None`, not truthiness: False is "no lead needed", the answer that
     # finishes the setup, and dropping it would leave the question unanswered
     # forever while the confirm card said otherwise.

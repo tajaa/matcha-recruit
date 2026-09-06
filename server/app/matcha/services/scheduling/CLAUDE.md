@@ -65,6 +65,24 @@ Invariants:
   could never finish setup, so the gate would block it forever. Both surfaces
   can answer it: the interview passes `leader_required`, the Week setup pane
   has a "No leader required" option distinct from an unpicked select.
+- **A retracted leader rule has to give back both halves.** `true` names a job
+  AND materializes `<Job> coverage` demand into the default template
+  (`schedule_profile_skill._leader_blocks`). A later `false` therefore clears
+  `leader_job_id` too — otherwise `_coverage_profile` keeps emitting leader
+  gaps and `profile_context_lines` keeps saying a lead is required — and strips
+  the generated coverage back out (`_strip_leader_coverage`, matched on the
+  generated name AND the job, so a manager-written block on the lead job
+  survives). `upsert_location_profile` is symmetric for the same reason:
+  naming the job answers the question, clearing it un-answers it rather than
+  leaving `leader_required=true` with nothing named — the one state the CHECK
+  refuses.
+- **`hours_answered` wants all seven weekdays, so existing rows need the
+  backfill.** Both the old pane and the old interview wrote only the days
+  somebody mentioned, which is every already-configured location. `schedloc03`
+  fills the absent days in as closed for any row that already opens at least
+  once; a row with no open day is genuinely unanswered and left for the
+  interview. Skipping it does not fail loudly — it refuses every week build and
+  flips `schedule_automation.generate_review_suggestion` to `not_ready`.
 - **The default template is always location-scoped.** `_list_templates` also
   returns company-wide rows (`location_id IS NULL`); one of those as a store's
   default would let another store's edits rewrite this store's week. Both the

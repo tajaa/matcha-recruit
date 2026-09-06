@@ -20,7 +20,16 @@ vi.mock('../../../api/employees/employeeSchedule', () => ({
   fetchWeekTemplates: mocks.fetchTemplates,
 }))
 
-vi.mock('./TemplateForm', () => ({ TemplateForm: () => null }))
+// Stands in for the real form so a save can be driven from a test: it hands
+// back a template id the way TemplateForm does after a successful write.
+vi.mock('./TemplateForm', () => ({
+  TemplateForm: ({ submitLabel, onDone }: {
+    submitLabel: string
+    onDone: (saved: { id: string }) => void | Promise<void>
+  }) => (
+    <button type="button" onClick={() => { void onDone({ id: 'tpl-1' }) }}>{submitLabel}</button>
+  ),
+}))
 
 const profile = {
   location_id: 'loc-1',
@@ -156,5 +165,52 @@ describe('WeekStartPane — the leader answer', () => {
 
     expect(await screen.findByText(/Still missing: hours, a staffing pattern, the leader rule/))
       .toBeInTheDocument()
+  })
+})
+
+
+describe('WeekStartPane — saving the staffing pattern', () => {
+  const onSaved = vi.fn()
+
+  beforeEach(() => {
+    onSaved.mockClear()
+    mocks.fetchTemplates.mockResolvedValue({ week_templates: [] })
+  })
+
+  function renderWithOnSaved() {
+    return render(
+      <ToastProvider>
+        <WeekStartPane locationId="loc-1" jobs={[]} onSaved={onSaved} />
+      </ToastProvider>,
+    )
+  }
+
+  it('re-reads the setup when the pattern is already this location’s default', async () => {
+    // Nothing is written to the profile row on this path, but the pattern's
+    // first block is what clears `staffing_pattern` from week_rules.missing —
+    // this pane's banner and the editor's both kept claiming it was missing
+    // until something else reloaded.
+    const alreadyDefault = { ...profile, default_week_template_id: 'tpl-1' }
+    mocks.fetchProfile.mockResolvedValue(alreadyDefault)
+    mocks.saveProfile.mockResolvedValue(alreadyDefault)
+
+    renderWithOnSaved()
+    fireEvent.click(await screen.findByText('Save staffing pattern'))
+
+    await waitFor(() => expect(mocks.fetchProfile).toHaveBeenCalledTimes(2))
+    expect(mocks.saveProfile).not.toHaveBeenCalled()
+    expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('points the profile at a brand-new pattern', async () => {
+    mocks.fetchProfile.mockResolvedValue(profile)
+    mocks.saveProfile.mockResolvedValue({ ...profile, default_week_template_id: 'tpl-1' })
+
+    renderWithOnSaved()
+    fireEvent.click(await screen.findByText('Save staffing pattern'))
+
+    await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
+    expect(mocks.saveProfile.mock.calls[0][1]).toEqual({ default_week_template_id: 'tpl-1' })
+    expect(onSaved).toHaveBeenCalled()
   })
 })

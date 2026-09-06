@@ -41,7 +41,14 @@ the only gap is the leader question. `leader_required` is a real tool field —
 `false` is the answer "no lead needed", so it must stay in
 `_HR_OPS_TOOL_SPECS[...]["fields"]` (a field missing there is dropped from the
 staged dict) and reach `execute` on an `is not None` test, exactly like the
-buffers. Full gate spec: `services/scheduling/CLAUDE.md`.
+buffers. An explicit `false` also clears `leader_job_id` and strips the
+`<Job> coverage` blocks an earlier `true` wrote into the default template —
+half a retraction leaves the profile arguing with the manager on every turn.
+The `operating_hours` tool description tells the model to send `null` for a
+closed day precisely because the gate wants all seven: omitting the days
+nobody mentioned saves cleanly and then refuses to build, which the model
+cannot diagnose and re-asks forever. Full gate spec:
+`services/scheduling/CLAUDE.md`.
 
 The profile is rendered into the schedule system prompt every turn
 (`prompt.build_system_prompt(location_profile_block=...)`, loaded just before

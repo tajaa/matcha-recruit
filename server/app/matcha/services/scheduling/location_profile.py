@@ -380,11 +380,14 @@ async def upsert_location_profile(
         supplied["leader_job_id"] = leader_job_id
     if leader_required is not UNSET:
         supplied["leader_required"] = None if leader_required is None else bool(leader_required)
-    elif leader_job_id is not UNSET and leader_job_id is not None:
+    elif leader_job_id is not UNSET:
         # Naming the job IS the answer to "does a lead have to be on?" — a
         # caller that only sets leader_job_id would otherwise leave the
-        # question reading as unasked forever.
-        supplied["leader_required"] = True
+        # question reading as unasked forever. Symmetric on the way out:
+        # clearing the job un-answers the question rather than leaving
+        # leader_required=true with nothing named, which is exactly the state
+        # the CHECK refuses — a 422 on a PUT that looked reasonable.
+        supplied["leader_required"] = True if leader_job_id is not None else None
     if notes is not UNSET:
         supplied["notes"] = notes
     if week_start_weekday is not UNSET:

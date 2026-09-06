@@ -881,8 +881,11 @@ TOOLS: tuple[HuumeTool, ...] = (
                 type=types.Type.OBJECT,
                 description=(
                     "Open/close per weekday keyed '0'..'6' (0=Sunday), e.g. "
-                    "{\"1\": {\"open\": \"08:00\", \"close\": \"17:00\"}}. Use null for a "
-                    "closed day; omit a day nobody has told you about."
+                    "{\"1\": {\"open\": \"08:00\", \"close\": \"17:00\"}}. Send null for a "
+                    "day the store is closed. All seven days need an answer before a "
+                    "week can be built, so ask about the ones the manager did not "
+                    "mention instead of leaving them out — omit a day only while it "
+                    "is still unasked."
                 ),
             ),
             "blocks": types.Schema(

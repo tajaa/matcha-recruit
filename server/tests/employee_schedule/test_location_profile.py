@@ -730,3 +730,176 @@ async def test_execute_leaves_the_leader_answer_alone_when_a_turn_omits_it(monke
     )
 
     assert "leader_required" not in upsert.await_args.kwargs
+
+
+# --- retracting the leader rule ----------------------------------------------
+#
+# "Yes, a lead is always on" materializes real demand: `_leader_blocks` writes a
+# `<Job> coverage` block into the location's default week template. A later "no"
+# has to take BOTH halves back — the named job on the profile row and the demand
+# it created — or the coverage evaluator, the prompt and the template keep
+# arguing with the answer the manager just gave.
+
+_LEAD_ID = UUID("99999999-9999-9999-9999-999999999999")
+
+
+def _bundle_with_saved_lead(*extra_blocks):
+    bundle = _bundle(
+        hours=FULL_WEEK_HOURS, leader="Shift Lead",
+        blocks=[
+            {"name": "Opener", "role": "Barista", "job_id": str(JOB_ID), "job_name": "Barista",
+             "days_of_week": [1], "start_time": "08:00", "end_time": "16:00",
+             "required_staff": 2, "break_minutes": 30},
+            *extra_blocks,
+        ],
+    )
+    bundle["profile"]["leader_job_id"] = _LEAD_ID
+    return bundle
+
+
+@pytest.mark.asyncio
+async def test_a_leader_no_strips_the_coverage_a_yes_materialized(monkeypatch):
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle_with_saved_lead(
+        {"name": "Shift Lead coverage", "role": "Shift Lead", "job_id": str(_LEAD_ID),
+         "job_name": "Shift Lead", "days_of_week": [1, 2, 3, 4, 5],
+         "start_time": "08:00", "end_time": "17:00", "required_staff": 1,
+         "break_minutes": 0},
+    ))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={"leader_required": False},
+    )
+
+    assert result["status"] == "ok"
+    assert result["leader_required"] is False
+    assert [block["name"] for block in result["blocks"]] == ["Opener"]
+
+
+@pytest.mark.asyncio
+async def test_a_leader_no_keeps_a_manager_written_block_on_the_lead_job(monkeypatch):
+    """Only the generated `<Job> coverage` block goes. A real shift the manager
+    wrote that happens to use the lead job is theirs, not ours to delete."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle_with_saved_lead(
+        {"name": "Friday close", "role": "Shift Lead", "job_id": str(_LEAD_ID),
+         "job_name": "Shift Lead", "days_of_week": [5], "start_time": "14:00",
+         "end_time": "22:00", "required_staff": 1, "break_minutes": 0},
+    ))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={"leader_required": False},
+    )
+
+    assert result["status"] == "ok"
+    # Nothing generated to strip, so the pattern is left entirely alone rather
+    # than re-staged.
+    assert result["blocks"] == []
+
+
+@pytest.mark.asyncio
+async def test_execute_clears_the_named_job_when_the_answer_is_no(monkeypatch):
+    """Without this the profile still names a lead: `_coverage_profile` keeps
+    emitting leader gaps and `profile_context_lines` keeps telling the manager
+    a lead is required, both contradicting the confirm card they just OK'd."""
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=_null_context())
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=_null_context(conn)))
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(location_profile, "upsert_location_profile", upsert)
+    monkeypatch.setattr(schedule_profile_skill, "log_audit", AsyncMock())
+
+    await schedule_profile_skill.execute(
+        company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        action={"type": "schedule_location_profile", "confirm_id": "ab12cd34",
+                "location_id": str(LOCATION_ID), "operating_hours": {}, "blocks": [],
+                "leader_required": False, "leader_job_id": None},
+    )
+
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["leader_required"] is False
+    assert kwargs["leader_job_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_execute_leaves_the_named_job_alone_when_the_turn_omits_the_answer(monkeypatch):
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=_null_context())
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=_null_context(conn)))
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(location_profile, "upsert_location_profile", upsert)
+    monkeypatch.setattr(schedule_profile_skill, "log_audit", AsyncMock())
+
+    await schedule_profile_skill.execute(
+        company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        action={"type": "schedule_location_profile", "confirm_id": "ab12cd34",
+                "location_id": str(LOCATION_ID), "operating_hours": {}, "blocks": [],
+                "notes": "Busy on match days"},
+    )
+
+    assert "leader_job_id" not in upsert.await_args.kwargs
+
+
+# --- upsert_location_profile: the leader auto-answer is symmetric -------------
+
+class _CapturingConn:
+    """Enough of an asyncpg connection for `upsert_location_profile`: the
+    ownership check passes and the INSERT is captured instead of run."""
+
+    def __init__(self):
+        self.sql = ""
+        self.values: tuple = ()
+
+    async def fetchval(self, *args, **kwargs):
+        return 1
+
+    async def fetchrow(self, sql, *values):
+        self.sql = sql
+        self.values = values
+        return {"id": TEMPLATE_ID, "operating_hours": "{}"}
+
+
+def _written(conn: _CapturingConn) -> dict:
+    header = conn.sql.split("INSERT INTO schedule_location_profiles (", 1)[1].split(")", 1)[0]
+    return dict(zip([column.strip() for column in header.split(",")], conn.values))
+
+
+@pytest.mark.asyncio
+async def test_naming_the_job_alone_answers_the_leader_question():
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_id=JOB_ID,
+    )
+    written = _written(conn)
+    assert written["leader_job_id"] == JOB_ID
+    assert written["leader_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_job_alone_un_answers_it_rather_than_violating_the_check():
+    """`leader_required=true` with no job named is the one state the DB CHECK
+    refuses. A caller that clears only the job would otherwise get a 422 on a
+    PUT that looked perfectly reasonable."""
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_id=None,
+    )
+    written = _written(conn)
+    assert written["leader_job_id"] is None
+    assert written["leader_required"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_leader_required_still_wins_over_the_auto_answer():
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_id=None, leader_required=False,
+    )
+    written = _written(conn)
+    assert written["leader_job_id"] is None
+    assert written["leader_required"] is False

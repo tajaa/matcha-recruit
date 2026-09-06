@@ -97,6 +97,18 @@ export default function WeekStartPane(
 
   useEffect(() => { void load() }, [load])
 
+  /** Re-read `week_rules` without `load()`'s full-pane spinner and WITHOUT
+   *  `applyProfile` — the fields above may hold edits the manager has not
+   *  saved yet, and re-seeding them from the server would silently discard
+   *  those. Only the server-owned half of `profile` is replaced. */
+  const refreshWeekRules = useCallback(async () => {
+    try {
+      setProfile(await fetchLocationScheduleProfile(locationId))
+    } catch {
+      // Leave the banner as it was — the server-side gate is what holds.
+    }
+  }, [locationId])
+
   async function persist(payload: LocationScheduleProfileUpdate, message: string) {
     setSaving(true)
     try {
@@ -253,6 +265,12 @@ export default function WeekStartPane(
             if (profile && profile.default_week_template_id !== saved.id) {
               await persist({ default_week_template_id: saved.id }, 'Staffing pattern saved as this location’s default')
             } else {
+              // Already the default, so nothing is written to the profile row —
+              // but the pattern's first block is what clears `staffing_pattern`
+              // from `week_rules.missing`, and both this banner and the
+              // editor's would keep claiming it is missing until a reload.
+              await refreshWeekRules()
+              onSaved?.()
               toast('Staffing pattern saved', 'success')
             }
           }}
