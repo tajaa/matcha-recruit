@@ -428,7 +428,7 @@ elif [ "$(jq -r '.no_safe_action_reason // ""' "$RAW_DECISION_FILE" 2>/dev/null)
     # all; correct it here so an out-of-date model costs one retry instead of
     # a dead run.
     CORRECTION_KIND="migration_is_not_a_blocker"
-    CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: migration_required is not an outcome this harness accepts. Needing a database migration is ordinary drafting work, not a blocker. Investigate again and implement the change: author the application code, its tests, and a new server/alembic/versions/*.py version file for human review. You must never run a migration against any database and you must not touch env.py, templates, alembic.ini, or any migration runner code — a human reviews and applies every migration. If something OTHER than the schema change genuinely blocks you, use questions_only with concrete options, or no_safe_action with already_fixed, acceptance_criteria_met, policy_blocked, or external_dependency."
+    CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: migration_required is not an outcome this harness accepts. Needing a database migration is ordinary drafting work, not a blocker. Investigate again and implement the change: author the application code, its tests, and a new server/alembic/versions/<revision>.py version file for human review — its name must use only letters, digits and underscores without a leading underscore, it must assign a string literal `revision`, its `down_revision` must be one of the current repository heads, and it must define both `upgrade()` and `downgrade()`. You must never run a migration against any database and you must not touch env.py, templates, alembic.ini, or any migration runner code — a human reviews and applies every migration. If something OTHER than the schema change genuinely blocks you, use questions_only with concrete options, or no_safe_action with already_fixed, acceptance_criteria_met, policy_blocked, or external_dependency."
 else
     # publish.sh refuses a string-literal-only diff on a card asking for
     # structure and discards the run. Catching it here instead gives the model
@@ -441,6 +441,19 @@ else
                 "$(jq -r '.title // ""' "$CARD_FILE")" "$(jq -r '.description // ""' "$CARD_FILE")"; then
                 CORRECTION_KIND="cosmetic_only_diff"
                 CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: this card asks for structure — a route, a sidebar row, a menu entry, an endpoint — and your diff only rewrites string literals, which changes nothing a reader of the card asked for. Investigate again. If every acceptance criterion is already satisfied on this branch, return no_safe_action with acceptance_criteria_met and one acceptance_evidence entry per criterion (criterion text plus path, line, commit); the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. If a specific missing product decision blocks the structural change, return questions_only and say what is missing. Only return an implementation if you make the structural change the card actually asks for."
+            fi
+            # The publisher's migration gate, run here instead of there. A
+            # mistyped down_revision used to cost the whole investigation:
+            # publish.sh's only answer is `git reset --hard` and exit. Now that
+            # drafting a migration is the routine path rather than a rare
+            # exception, that failure needed a correction path like every other.
+            if [ -z "$CORRECTION_KIND" ] \
+                && ! MIGRATION_DRAFT_ERRORS="$(autopr_migration_draft_errors "$REPO_ROOT" \
+                    "${AUTOPR_MIGRATION_BASE_REF:-main}")"; then
+                CORRECTION_KIND="migration_draft_invalid"
+                CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: the migration you drafted cannot be published.
+$MIGRATION_DRAFT_ERRORS
+Investigate again and re-author the change. A drafted migration must be a NEW file server/alembic/versions/<revision>.py whose name uses only letters, digits and underscores and does not start with an underscore; it must assign a string literal \`revision\`; its \`down_revision\` must be one of the current repository heads (listed as repository_heads in the production context) or another migration you are adding in this same change, never None and never a mid-chain revision; and it must define both \`upgrade()\` and \`downgrade()\`. Never edit or delete a migration already on main, never touch env.py, templates, alembic.ini, or any migration runner code, and never run a migration against any database."
             fi
             ;;
     esac

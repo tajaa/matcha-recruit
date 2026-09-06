@@ -338,7 +338,7 @@ changed_paths="$(git diff --cached --no-renames --name-only)"
 unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
 unsafe_migrations="$(printf '%s\n' "$changed_paths" \
     | grep -E '^server/alembic/' \
-    | grep -vE '^server/alembic/versions/[A-Za-z0-9_]+\.py$' || true)"
+    | grep -vE "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
 if [ -n "$unsafe_migrations" ]; then
     unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
 fi
@@ -349,7 +349,8 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[A-Za-z0-9_]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
+migration_draft_alternative="${AUTOPR_MIGRATION_DRAFT_RE#^}"
+allowed_paths_re="^(server/(app|tests)/.*\.py|${migration_draft_alternative%$}|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$"
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
     echo "Refusing change outside approved product source paths:" >&2
@@ -358,55 +359,32 @@ if [ -n "$disallowed_paths" ]; then
     exit 1
 fi
 
-migration_paths="$(printf '%s\n' "$changed_paths" \
-    | grep -E '^server/alembic/versions/[A-Za-z0-9_]+\.py$' || true)"
+migration_paths="$(printf '%s\n' "$changed_paths" | grep -E "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
 if [ -n "$migration_paths" ]; then
-    migration_base_ref="${AUTOPR_MIGRATION_BASE_REF:-main}"
-    git rev-parse --verify "$migration_base_ref^{commit}" >/dev/null 2>&1 \
-        || die "migration safety base is unavailable: $migration_base_ref"
-
-    deleted_migrations="$(git diff --cached --diff-filter=D --no-renames --name-only -- \
-        server/alembic/versions || true)"
-    if [ -n "$deleted_migrations" ]; then
-        echo "Refusing deletion of migration version files:" >&2
-        printf '%s\n' "$deleted_migrations" >&2
-        git reset --hard >/dev/null 2>&1
-        exit 1
-    fi
-
+    # A version file must be a regular file: a symlink or a mode change is
+    # never how a migration is authored, and the graph parser would follow it.
+    # Destination mode 000000 is a deletion, not an irregular file — the
+    # migration guard below reports that with the reason it actually has.
     unsafe_migration_modes="$(git diff --cached --raw --no-renames -- \
         server/alembic/versions \
-        | awk '$2 != "100644" {print $0}' || true)"
+        | awk '$2 != "100644" && $2 != "000000" {print $0}' || true)"
     if [ -n "$unsafe_migration_modes" ]; then
         echo "Refusing non-regular migration version files:" >&2
         printf '%s\n' "$unsafe_migration_modes" >&2
         git reset --hard >/dev/null 2>&1
         exit 1
     fi
+fi
 
-    existing_migrations=""
-    while IFS= read -r migration_path; do
-        [ -n "$migration_path" ] || continue
-        migration_status="$(git diff --cached --no-renames --name-status \
-            "$migration_base_ref" -- "$migration_path" | awk 'NR == 1 {print $1}')"
-        if [ "$migration_status" != A ]; then
-            existing_migrations="${existing_migrations}${existing_migrations:+$'\n'}${migration_path}"
-        fi
-    done <<< "$migration_paths"
-    if [ -n "$existing_migrations" ]; then
-        echo "Refusing edits to migration files already present on $migration_base_ref:" >&2
-        printf '%s\n' "$existing_migrations" >&2
-        git reset --hard >/dev/null 2>&1
-        exit 1
-    fi
-
-    if ! migration_graph_error="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
-        "$REPO_ROOT/server/alembic/versions" 2>&1)"; then
-        echo "Refusing an invalid migration graph or migration file:" >&2
-        printf '%s\n' "$migration_graph_error" >&2
-        git reset --hard >/dev/null 2>&1
-        exit 1
-    fi
+# Same check investigate.sh already gave the model a retry on. Reaching it here
+# means the retry did not fix it, so the run ends — but every rejection resets
+# the tree first, including an unusable base ref.
+if ! migration_errors="$(autopr_migration_draft_errors "$REPO_ROOT" \
+    "${AUTOPR_MIGRATION_BASE_REF:-main}")"; then
+    echo "Refusing migration draft:" >&2
+    printf '%s\n' "$migration_errors" >&2
+    git reset --hard >/dev/null 2>&1
+    exit 1
 fi
 
 # Same telemetry-suppression boundary error-autofix guards — kanban cards

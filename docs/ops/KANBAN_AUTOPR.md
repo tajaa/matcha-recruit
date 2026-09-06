@@ -209,8 +209,11 @@ second scheduler.
    credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
    fix or an unapplied migration. It may diagnose migration drift. When work needs a
    schema change, it may author a new migration version for the draft PR. The path guard
-   rejects edits to migrations already on `main`, malformed revision graphs, missing
-   `upgrade()`/`downgrade()` entrypoints, and every attempt to apply a migration.
+   rejects edits or deletions of migrations already on `main`, drafts that add a base or
+   a new head instead of extending exactly one current head, missing
+   `upgrade()`/`downgrade()` entrypoints, and any path under `server/alembic/` that is
+   not a new `versions/<revision>.py`. Nothing in the pipeline can apply a migration: the
+   msandbox holds no database credentials and the workflow never invokes `alembic`.
 2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
    (there is no company-wide list endpoint the bot can use — its access is per-project
    collaborator rows, not one company scope). Filters to cards assigned to
@@ -302,7 +305,8 @@ second scheduler.
    the normal GitHub draft PR; the operator reviews and applies the migration by
    hand, and no part of this system runs it. `investigate.sh` corrects an
    out-of-date model that returns `migration_required` with one retry instead of
-   leaving the card blocked. The `draft_pr` directive is therefore not a
+   leaving the card blocked, and corrects an unpublishable migration draft
+   (`migration_draft_invalid`) the same way. The `draft_pr` directive is therefore not a
    prerequisite for migration work; it remains an owner's explicit instruction
    to draft work when AutoPR would otherwise conclude the request is already
    covered. Old cards carrying a migration-required no-spec marker remain
@@ -412,10 +416,15 @@ second scheduler.
    `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
    `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
    explicitly since a kanban card is far more likely to touch client code than an error
-   fix is. New `server/alembic/versions/*.py` files are the sole schema exception:
-   publisher compares them with `main`, rejects edits/deletions of existing revisions,
-   and validates static revision metadata, graph integrity, and both migration
-   entrypoints before publication. Alembic environment/configuration files remain
+   fix is. New `server/alembic/versions/<revision>.py` files are the sole schema
+   exception, and `__init__.py` is not one of them: the shared
+   `autopr_migration_draft_errors` helper in `lib.sh` compares each one with `main`,
+   rejects edits/deletions of existing revisions, and validates static revision metadata,
+   both migration entrypoints, and that each draft extends exactly one current head
+   rather than adding a second base or a new head. `investigate.sh` runs that same helper
+   right after the model pass, so a mistyped `down_revision` costs one corrective retry
+   (`migration_draft_invalid`) instead of the whole investigation; reaching the publisher
+   with it still unfixed ends the run. Alembic environment/configuration files remain
    denied, the workflow never applies migrations, and the resulting PR is always a
    GitHub draft. PR titles begin
    with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`

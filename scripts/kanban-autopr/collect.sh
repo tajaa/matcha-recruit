@@ -123,10 +123,15 @@ for ((i = 0; i < card_count; i++)); do
     pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
     [ "$pending" != true ] || continue
-    case "$progress_note" in
-        *"[autopr:no-spec "*" already_fixed"*) ;;
-        *) continue ;;
-    esac
+    # Same anchored shape the jq admission filter above uses. A loose
+    # substring match would spend an API call and a policy run on any note that
+    # merely contains the words, then reject it downstream anyway.
+    shopt -s nocasematch
+    if [[ ! "$progress_note" =~ \[autopr:no-spec[^]]+\]\ already_fixed([[:space:]]|$) ]]; then
+        shopt -u nocasematch
+        continue
+    fi
+    shopt -u nocasematch
     project_id="$(printf '%s' "$card" | jq -r '.project_id')"
     task_id="$(printf '%s' "$card" | jq -r '.task_id')"
     history="$(mw_api GET "/matcha-work/projects/$project_id/tasks/$task_id/history" 2>/dev/null || printf '[]')"

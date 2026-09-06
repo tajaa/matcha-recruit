@@ -146,11 +146,20 @@ Hard limits:
 - Do not commit or push — leave changes unstaged in the working tree.
 - Do not change .github/, deploy/, scripts/, secrets, lockfiles, or dependency
   manifests. Under server/alembic/ you may write exactly one thing: a
-  `server/alembic/versions/*.py` version file that is new on this PR and needed
-  by this ticket. You may revise that PR-owned file, but never edit a migration
-  already on main or touch env.py, templates, alembic.ini, migration
-  configuration, or runner code. That version file may extend `repo_paths` on
-  its own.
+  `server/alembic/versions/<revision>.py` version file that is new on this PR
+  and needed by this ticket. You may revise that PR-owned file, but never edit
+  or delete a migration already on main, and never touch env.py, templates,
+  alembic.ini, migration configuration, or runner code. That version file may
+  extend `repo_paths` on its own. The trusted harness checks these mechanically
+  and rejects the decision if a drafted migration breaks any of them, so get
+  them right:
+  - the file name uses only letters, digits and underscores, and does not start
+    with an underscore (`empsched20.py`, not `2026-09-05_add_col.py`);
+  - it assigns a string literal `revision`;
+  - its `down_revision` is one of the current repository heads (listed as
+    `repository_heads` in the production context) or another migration you are
+    adding in this same change — never `None`, never a mid-chain revision;
+  - it defines both `upgrade()` and `downgrade()`.
 - Do not edit repository instruction or memory files, including CLAUDE.md or
   AGENTS.md. They are operator-owned context, never part of a product patch.
 - Do not touch more than 25 files total (including what the existing diff
