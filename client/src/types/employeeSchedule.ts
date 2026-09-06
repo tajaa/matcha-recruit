@@ -366,6 +366,62 @@ export interface WeekTemplateBlockReplacePayload {
   break_minutes: number
   required_staff: number
   days_of_week: number[]
+  /** Omitting this on a replace strips the job link off blocks that had one
+   *  (the ones Huume creates always do), so every editor must send it back. */
+  job_id?: string | null
+}
+
+// ---- Location scheduling profile ----
+
+/** One day's opening window, 24h "HH:MM". */
+export interface OperatingWindow {
+  open: string
+  close: string
+}
+
+/** `operating_hours` keys are the weekday as a string, "0".."6", 0 = Sunday.
+ *  A `null` value means closed that day; a missing key means nobody has
+ *  answered for that day yet — the two are deliberately different. */
+export type OperatingHours = Record<string, OperatingWindow | null>
+
+export interface LocationScheduleProfileBlock {
+  id: string
+  name: string
+  role: string | null
+  job_id: string | null
+  job_name: string | null
+  days_of_week: number[]
+  start_time: string
+  end_time: string
+  required_staff: number
+  break_minutes: number
+}
+
+export interface LocationScheduleProfileTemplate {
+  id: string
+  name: string
+  blocks: LocationScheduleProfileBlock[]
+}
+
+export interface LocationScheduleProfile {
+  location_id: string
+  operating_hours: OperatingHours
+  default_week_template_id: string | null
+  leader_job_id: string | null
+  leader_job_name: string | null
+  notes: string | null
+  week_start_weekday: number
+  template: LocationScheduleProfileTemplate | null
+}
+
+/** Only the supplied fields are written, so an untouched section must be
+ *  left off entirely rather than sent as an empty value. */
+export interface LocationScheduleProfileUpdate {
+  operating_hours?: OperatingHours
+  leader_job_id?: string | null
+  notes?: string | null
+  week_start_weekday?: number
+  default_week_template_id?: string | null
 }
 
 export interface ScheduleAutomationRule {
@@ -473,10 +529,23 @@ export function addDays(iso: string, n: number): string {
   return toISODate(d)
 }
 
-export function startOfWeekSunday(d: Date): Date {
+/** Start of the seven-day week containing `d`, for a week beginning on
+ * `weekStartWeekday` (0=Sunday .. 6=Saturday, the same index as
+ * `WEEKDAY_LABELS` and the backend's `days_of_week` mask).
+ *
+ * The day comes from the location's scheduling profile (`week_start_weekday`).
+ * It defaults to Sunday, which is what every caller assumed before stores
+ * could pick their own. */
+export function startOfWeek(d: Date, weekStartWeekday = 0): Date {
   const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
-  c.setUTCDate(c.getUTCDate() - c.getUTCDay())
+  c.setUTCDate(c.getUTCDate() - ((c.getUTCDay() - weekStartWeekday + 7) % 7))
   return c
+}
+
+/** @deprecated Pass the location's `week_start_weekday` to `startOfWeek`
+ * instead — this is only correct for Sunday-start locations. */
+export function startOfWeekSunday(d: Date): Date {
+  return startOfWeek(d, 0)
 }
 
 /** "Mon 7/13" — takes a YYYY-MM-DD day key or a full ISO timestamp. */

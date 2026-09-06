@@ -580,6 +580,15 @@ async def _list_templates(conn, *, company_id: UUID, location_id: UUID) -> list[
             for row in rows]
 
 
+async def _default_template_id(conn, *, company_id: UUID, location_id: UUID) -> UUID | None:
+    """The week template this location's scheduling profile points at."""
+    return await conn.fetchval(
+        "SELECT default_week_template_id FROM schedule_location_profiles "
+        "WHERE company_id=$1 AND location_id=$2",
+        company_id, location_id,
+    )
+
+
 async def _load_template_demand(conn, *, company_id: UUID, location_id: UUID,
                                 week_start: date, template_id: UUID) -> tuple[str, list[dict[str, Any]]]:
     template = await conn.fetchrow(
@@ -679,6 +688,13 @@ async def get_week_build_readiness(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
         templates = await _list_templates(conn, company_id=company_id, location_id=location_id)
+        default_id = await _default_template_id(
+            conn, company_id=company_id, location_id=location_id,
+        )
+    default_template = next(
+        (template for template in templates
+         if str(template["id"]) == str(default_id) and template["block_count"]), None,
+    ) if default_id else None
     confirmed = [employee for employee in roster["employees"] if employee["availability_state"] != "unconfirmed"]
     unconfirmed = [employee for employee in roster["employees"] if employee["availability_state"] == "unconfirmed"]
     existing_positions = sum(int(shift["required_staff"]) for shift in demand)
@@ -686,6 +702,8 @@ async def get_week_build_readiness(
         recommendation = "existing"
     elif shift_counts["published"]:
         recommendation = None
+    elif default_template is not None:
+        recommendation = "template"
     elif len(templates) == 1 and templates[0]["block_count"]:
         recommendation = "template"
     else:
@@ -707,10 +725,14 @@ async def get_week_build_readiness(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
     usable_templates = [template for template in templates if template["block_count"]]
-    if not demand and not week_template_id and len(usable_templates) > 1:
+    if (
+        not demand and not week_template_id
+        and default_template is None and len(usable_templates) > 1
+    ):
         blockers.append("Choose which saved week template Huume should use as staffing demand.")
     return {
         "status": "ok", "ready": not blockers, "location_name": location["name"],
+        "default_week_template_id": str(default_template["id"]) if default_template else None,
         "week_start": week_start.isoformat(), "week_end": (week_start + timedelta(days=6)).isoformat(),
         "roster_count": len(roster["employees"]), "confirmed_availability_count": len(confirmed),
         "unconfirmed_availability": [
@@ -791,15 +813,28 @@ async def propose_week_draft(
                 selected_source = "template"
             else:
                 usable = [template for template in templates if template["block_count"]]
-                if len(usable) != 1:
+                # The location's own default is an explicit answer to "which
+                # template?" — asking again when the manager already set one is
+                # the loop this feature exists to end.
+                default_id = await _default_template_id(
+                    conn, company_id=company_id, location_id=location_id,
+                )
+                default_usable = next(
+                    (t for t in usable if str(t["id"]) == str(default_id)), None,
+                ) if default_id else None
+                if default_usable is not None:
+                    selected_source = "template"
+                    week_template_id = default_usable["id"]
+                elif len(usable) != 1:
                     return {
                         "status": "clarify",
                         "message": "Choose which week template to use." if usable else
                                    "Add draft shifts or a week template before I build the week.",
                         "week_templates": usable,
                     }
-                selected_source = "template"
-                week_template_id = usable[0]["id"]
+                else:
+                    selected_source = "template"
+                    week_template_id = usable[0]["id"]
         if selected_source not in {"existing", "template"}:
             return {"status": "clarify", "message": "Use source_mode existing, template, or auto."}
         if selected_source == "template":

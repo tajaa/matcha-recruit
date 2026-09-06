@@ -24,6 +24,8 @@ SCHEDULE_TOOLS = frozenset({
     "get_schedule_overview",
     "get_week_build_readiness",
     "build_week_schedule",
+    "get_location_schedule_profile",
+    "save_location_schedule_profile",
     "list_schedule_eligibility_cases",
     "find_shift_coverage",
     "propose_schedule_change",

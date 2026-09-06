@@ -8,7 +8,7 @@ import {
 import type {
   ScheduleAutomationCadence, ScheduleAutomationRule, WeekTemplate,
 } from '../../types/employeeSchedule'
-import { addDays, errorMessage, startOfWeekSunday, toISODate, WEEKDAY_LABELS } from '../../types/employeeSchedule'
+import { addDays, errorMessage, startOfWeek, toISODate, WEEKDAY_LABELS } from '../../types/employeeSchedule'
 import { useToast } from '../ui'
 
 
@@ -25,9 +25,11 @@ type FormState = {
   targetWeekStart: string
 }
 
-function defaults(): FormState {
+function defaults(weekStartWeekday = 0): FormState {
   const tomorrow = addDays(toISODate(new Date()), 1)
-  const nextSunday = addDays(toISODate(startOfWeekSunday(new Date())), 7)
+  // The server rejects a target week that is not aligned to this location's
+  // own start day, so the default has to be aligned too.
+  const nextWeek = addDays(toISODate(startOfWeek(new Date(), weekStartWeekday)), 7)
   return {
     enabled: true,
     cadence: 'weekly',
@@ -36,12 +38,12 @@ function defaults(): FormState {
     runDate: tomorrow,
     runTime: '09:00',
     targetWeeksAhead: 1,
-    targetWeekStart: nextSunday,
+    targetWeekStart: nextWeek,
   }
 }
 
-function fromRule(rule: ScheduleAutomationRule): FormState {
-  const fallback = defaults()
+function fromRule(rule: ScheduleAutomationRule, weekStartWeekday = 0): FormState {
+  const fallback = defaults(weekStartWeekday)
   return {
     enabled: rule.enabled,
     cadence: rule.cadence,
@@ -62,7 +64,7 @@ function formatTimestamp(value: string, timezoneName: string): string {
   }).format(new Date(value))
 }
 
-export default function AutoSchedulesTab({ locationId }: { locationId: string }) {
+export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: { locationId: string; weekStartWeekday?: number }) {
   const { toast } = useToast()
   const locationIdRef = useRef(locationId)
   locationIdRef.current = locationId
@@ -76,7 +78,7 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
 
   useEffect(() => {
     setRule(null)
-    setForm(defaults())
+    setForm(defaults(weekStartWeekday))
     setTemplates([])
     setGeneratedWeekStart(null)
     setRunning(false)
@@ -86,7 +88,7 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
       .then(([automation, templateResponse]) => {
         setRule(automation.rule)
         setTemplates(templateResponse.week_templates)
-        if (automation.rule) setForm(fromRule(automation.rule))
+        if (automation.rule) setForm(fromRule(automation.rule, weekStartWeekday))
       })
       .catch((err) => toast(errorMessage(err), 'error'))
       .finally(() => setLoading(false))
@@ -110,7 +112,7 @@ export default function AutoSchedulesTab({ locationId }: { locationId: string })
         target_week_start: form.cadence === 'once' ? form.targetWeekStart : null,
       })
       setRule(saved)
-      setForm(fromRule(saved))
+      setForm(fromRule(saved, weekStartWeekday))
       toast(saved.enabled ? 'Auto schedule saved and queued.' : 'Auto schedule saved but paused.', 'success')
     } catch (err) {
       toast(errorMessage(err), 'error')

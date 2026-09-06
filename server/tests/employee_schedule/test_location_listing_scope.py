@@ -28,10 +28,12 @@ class _Conn:
         return self.rows
 
 
-def _row(location_id):
+def _row(location_id, *, week_start_weekday=0):
     return {
         "id": location_id, "name": "Wilshire", "address": "3435 Wilshire Blvd",
         "city": "Los Angeles", "state": "CA", "zipcode": "90010", "is_active": True,
+        # Every location-scoped page derives its own week boundaries from this.
+        "week_start_weekday": week_start_weekday,
     }
 
 
@@ -76,3 +78,37 @@ def test_company_operator_keeps_full_location_list(monkeypatch):
 def test_manager_queue_marks_two_party_confirmation_explicitly():
     source = (Path(__file__).parents[3] / "client/src/pages/app/employees/EmployeeSchedule.tsx").read_text()
     assert "Both employees confirmed." in source
+
+
+def test_listing_carries_each_locations_week_start_day(monkeypatch):
+    """Without it every location-scoped page renders Sunday weeks for a
+    Monday-start store."""
+    company_id, user_id, location_id = uuid4(), uuid4(), uuid4()
+    conn = _Conn([_row(location_id, week_start_weekday=1)])
+    async def company_for_user(_user):
+        return company_id
+
+    monkeypatch.setattr(locations, "get_client_company_id", company_for_user)
+    monkeypatch.setattr(locations, "get_connection", lambda: _ConnectionContext(conn))
+    result = asyncio.run(locations.list_company_locations(
+        current_user=SimpleNamespace(id=user_id, role="client"),
+    ))
+
+    assert result["locations"][0]["week_start_weekday"] == 1
+
+
+def test_listing_defaults_a_location_with_no_profile_to_sunday(monkeypatch):
+    company_id, user_id, location_id = uuid4(), uuid4(), uuid4()
+    row = _row(location_id)
+    row["week_start_weekday"] = None
+    conn = _Conn([row])
+    async def company_for_user(_user):
+        return company_id
+
+    monkeypatch.setattr(locations, "get_client_company_id", company_for_user)
+    monkeypatch.setattr(locations, "get_connection", lambda: _ConnectionContext(conn))
+    result = asyncio.run(locations.list_company_locations(
+        current_user=SimpleNamespace(id=user_id, role="client"),
+    ))
+
+    assert result["locations"][0]["week_start_weekday"] == 0

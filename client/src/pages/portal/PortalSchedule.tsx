@@ -407,6 +407,11 @@ function UnavailableForm({ teamShifts, onDone }: { teamShifts: Shift[]; onDone: 
   const [to, setTo] = useState(todayISO())
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  // Advisory only — it warns before submitting. The authoritative check is
+  // the server's time_off_guard, which anchors each shift on ITS OWN
+  // location's week start; the portal has no location profile in hand, so
+  // this pre-warning stays Sunday-anchored and can differ by a day for a
+  // store that starts its week elsewhere.
   const selectedWeekHasPublishedShifts = teamShifts.some((shift) => {
     const shiftDate = shift.starts_at.slice(0, 10)
     const shiftStart = new Date(`${shiftDate}T00:00:00Z`)

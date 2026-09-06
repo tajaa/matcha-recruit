@@ -215,6 +215,9 @@ async def test_session_refreshes_proposal_applied_by_another_manager(monkeypatch
         return "applied"
 
     conn.fetchval = fetchval
+    # This conn answers every fetchval with "applied"; the week-alignment gate
+    # has its own lookup and is not what this test is about.
+    monkeypatch.setattr(session, "resolve_week_start_weekday", _sunday_weeks)
     monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
     monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *args, **kwargs: _allow_scope())
     monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
@@ -226,6 +229,10 @@ async def test_session_refreshes_proposal_applied_by_another_manager(monkeypatch
 
     assert result["current_state"]["huume_action"]["status"] == "applied"
     assert result["version"] == 4
+
+
+async def _sunday_weeks(*_args, **_kwargs) -> int:
+    return 0
 
 
 async def _allow_scope():

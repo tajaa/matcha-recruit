@@ -26,8 +26,9 @@ class _AsyncContext:
 
 
 class _FakeConn:
-    def __init__(self, row):
+    def __init__(self, row, *, scalar=None):
         self.row = row
+        self.scalar = scalar
         self.executed = []
 
     def transaction(self):
@@ -35,6 +36,9 @@ class _FakeConn:
 
     async def fetchrow(self, *_args):
         return self.row
+
+    async def fetchval(self, *_args):
+        return self.scalar
 
     async def execute(self, *args):
         self.executed.append(args)
@@ -230,6 +234,109 @@ async def test_readiness_loads_week_shift_counts(monkeypatch):
     assert result["recommended_source"] is None
     assert any("published shifts" in blocker for blocker in result["blockers"])
     counts.assert_awaited_once()
+
+
+COMPANY_ID = UUID("3f6b1c22-2000-4000-8000-000000000001")
+LOCATION_ID = UUID("3f6b1c22-2000-4000-8000-000000000002")
+DEFAULT_TEMPLATE_ID = UUID("3f6b1c22-2000-4000-8000-000000000009")
+OTHER_TEMPLATE_ID = UUID("3f6b1c22-2000-4000-8000-00000000000a")
+
+
+def _empty_week(monkeypatch, conn, templates):
+    monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        week_builder, "_week_shift_counts", AsyncMock(return_value={"draft": 0, "published": 0}),
+    )
+    monkeypatch.setattr(week_builder, "_list_templates", AsyncMock(return_value=templates))
+
+
+@pytest.mark.asyncio
+async def test_auto_prefers_the_locations_default_template_over_asking(monkeypatch):
+    """Two usable templates used to force a "choose one" clarify every single
+    week. The location's saved default IS that answer."""
+    conn = _FakeConn(None, scalar=DEFAULT_TEMPLATE_ID)
+    _empty_week(monkeypatch, conn, [
+        {"id": str(OTHER_TEMPLATE_ID), "name": "Holiday week", "block_count": 3},
+        {"id": str(DEFAULT_TEMPLATE_ID), "name": "Downtown default week", "block_count": 4},
+    ])
+    snapshot = AsyncMock(side_effect=ValueError("stop after source selection"))
+    monkeypatch.setattr(week_builder, "_planning_snapshot", snapshot)
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=date(2026, 8, 23),
+    )
+
+    # Reached the planner (not the clarify) with the default selected.
+    assert result["status"] == "clarify"
+    assert snapshot.await_args.kwargs["source_mode"] == "template"
+    assert snapshot.await_args.kwargs["week_template_id"] == DEFAULT_TEMPLATE_ID
+
+
+@pytest.mark.asyncio
+async def test_auto_still_asks_when_the_default_template_has_no_blocks(monkeypatch):
+    """An empty default is not an answer — it would build nothing."""
+    conn = _FakeConn(None, scalar=DEFAULT_TEMPLATE_ID)
+    _empty_week(monkeypatch, conn, [
+        {"id": str(OTHER_TEMPLATE_ID), "name": "Holiday week", "block_count": 3},
+        {"id": str(DEFAULT_TEMPLATE_ID), "name": "Downtown default week", "block_count": 0},
+        {"id": "3f6b1c22-2000-4000-8000-00000000000b", "name": "Summer", "block_count": 2},
+    ])
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=date(2026, 8, 23),
+    )
+
+    assert result["status"] == "clarify"
+    assert "Choose which week template" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_readiness_recommends_the_default_and_drops_the_choose_blocker(monkeypatch):
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown"}, scalar=DEFAULT_TEMPLATE_ID)
+    _empty_week(monkeypatch, conn, [
+        {"id": str(OTHER_TEMPLATE_ID), "name": "Holiday week", "block_count": 3},
+        {"id": str(DEFAULT_TEMPLATE_ID), "name": "Downtown default week", "block_count": 4},
+    ])
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [{
+            "id": "employee-1", "name": "Amy", "availability_state": "windows",
+            "target_weekly_minutes": 1200, "max_weekly_minutes": 2400,
+        }],
+    }))
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=date(2026, 8, 23),
+    )
+
+    assert result["recommended_source"] == "template"
+    assert result["default_week_template_id"] == str(DEFAULT_TEMPLATE_ID)
+    assert result["ready"] is True
+    assert not any("Choose which saved week template" in b for b in result["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_readiness_keeps_the_choose_blocker_without_a_default(monkeypatch):
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown"}, scalar=None)
+    _empty_week(monkeypatch, conn, [
+        {"id": str(OTHER_TEMPLATE_ID), "name": "Holiday week", "block_count": 3},
+        {"id": str(DEFAULT_TEMPLATE_ID), "name": "Downtown default week", "block_count": 4},
+    ])
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [{
+            "id": "employee-1", "name": "Amy", "availability_state": "windows",
+            "target_weekly_minutes": 1200, "max_weekly_minutes": 2400,
+        }],
+    }))
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=date(2026, 8, 23),
+    )
+
+    assert result["default_week_template_id"] is None
+    assert any("Choose which saved week template" in b for b in result["blockers"])
 
 
 @pytest.mark.asyncio

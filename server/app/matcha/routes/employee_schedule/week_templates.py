@@ -28,18 +28,17 @@ from app.matcha.models.scheduling.employee_schedule import (
 )
 from ...services.scheduling.schedule_rules import build_patch
 from ...services.scheduling.shift_writes import generate_week_template_shifts
+from ...services.scheduling.week_template_writes import (
+    BLOCK_COLS as _BLOCK_COLS, WEEK_COLS as _WEEK_COLS,
+    JobUnavailable, WeekTemplateNotFound,
+    create_week_template_core, insert_block_core, replace_week_template_contents_core,
+)
 from ._shared import (
     require_company_id, log_audit, serialize_week_template, serialize_block,
     fetch_shifts, assert_location_in_company, assert_job_in_company, reconcile_warning_events,
 )
 
 router = APIRouter()
-
-_WEEK_COLS = "id, name, location_id, color, notes"
-_BLOCK_COLS = (
-    "id, week_template_id, name, role, department, location_id, start_time, "
-    "end_time, break_minutes, required_staff, days_of_week, color, notes, job_id"
-)
 
 
 @router.get("/week-templates")
@@ -83,19 +82,13 @@ async def create_week_template(body: WeekTemplateCreate, current_user=Depends(re
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         async with conn.transaction():
-            tpl = await conn.fetchrow(
-                f"""
-                INSERT INTO schedule_week_templates (company_id, name, location_id, color, notes, created_by)
-                VALUES ($1,$2,$3,$4,$5,$6)
-                RETURNING {_WEEK_COLS}
-                """,
-                company_id, body.name.strip(), body.location_id, body.color, body.notes,
-                current_user.id,
-            )
-            blocks = [
-                await _insert_block(conn, company_id, tpl["id"], body.location_id, b, current_user.id)
-                for b in body.blocks
-            ]
+            try:
+                tpl, block_rows = await create_week_template_core(
+                    conn, company_id=company_id, actor_user_id=current_user.id, body=body,
+                )
+            except JobUnavailable as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            blocks = [serialize_block(r) for r in block_rows]
             await log_audit(conn, company_id, "week_template", tpl["id"], current_user.id,
                             "week_template.create", {"name": body.name, "blocks": len(blocks)})
     return serialize_week_template(tpl, blocks)
@@ -194,66 +187,20 @@ async def replace_week_template_contents(
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
-            tpl = await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
-            existing_rows = await conn.fetch(
-                f"SELECT {_BLOCK_COLS} FROM schedule_shift_templates "
-                "WHERE week_template_id = $1 FOR UPDATE",
-                week_template_id,
-            )
-            existing_ids = {row["id"] for row in existing_rows}
-            supplied_ids = {block.id for block in body.blocks if block.id is not None}
-            unknown_ids = supplied_ids - existing_ids
-            if unknown_ids:
-                raise HTTPException(status_code=404, detail="Template block not found")
-
-            tpl = await conn.fetchrow(
-                f"""
-                UPDATE schedule_week_templates SET name = $3, updated_at = NOW()
-                WHERE id = $1 AND company_id = $2
-                RETURNING {_WEEK_COLS}
-                """,
-                week_template_id, company_id, body.name.strip(),
-            )
-            if not tpl:
-                raise HTTPException(status_code=404, detail="Week template not found")
-
-            added = 0
-            updated = 0
-            for block in body.blocks:
-                if block.id is None:
-                    new_block = BlockCreate(**block.model_dump(exclude={"id"}))
-                    await _insert_block(
-                        conn, company_id, week_template_id, tpl["location_id"], new_block, current_user.id,
-                    )
-                    added += 1
-                    continue
-                await conn.execute(
-                    """
-                    UPDATE schedule_shift_templates
-                    SET name = $3, role = $4, start_time = $5,
-                        end_time = $6, break_minutes = $7, required_staff = $8,
-                        days_of_week = $9::jsonb, updated_at = NOW()
-                    WHERE id = $1 AND week_template_id = $2
-                    """,
-                    block.id, week_template_id, block.name.strip(), block.role,
-                    block.start_time, block.end_time,
-                    block.break_minutes, block.required_staff,
-                    json.dumps(sorted(set(block.days_of_week))),
+            try:
+                tpl, block_rows, counts = await replace_week_template_contents_core(
+                    conn, company_id=company_id, week_template_id=week_template_id,
+                    name=body.name, blocks=body.blocks, actor_user_id=current_user.id,
                 )
-                updated += 1
-
-            removed_ids = list(existing_ids - supplied_ids)
-            if removed_ids:
-                await conn.execute(
-                    "DELETE FROM schedule_shift_templates WHERE id = ANY($1::uuid[])",
-                    removed_ids,
-                )
+            except WeekTemplateNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except JobUnavailable as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             await log_audit(
                 conn, company_id, "week_template", week_template_id, current_user.id,
-                "week_template.reconcile_blocks",
-                {"added": added, "updated": updated, "removed": len(removed_ids)},
+                "week_template.reconcile_blocks", counts,
             )
-            blocks = await _fetch_blocks(conn, week_template_id)
+            blocks = [serialize_block(r) for r in block_rows]
     return serialize_week_template(tpl, blocks)
 
 
@@ -263,7 +210,14 @@ async def add_block(week_template_id: UUID, body: BlockCreate, current_user=Depe
     async with get_connection() as conn:
         async with conn.transaction():
             tpl = await _fetch_week_template_for_update_or_404(conn, company_id, week_template_id)
-            block = await _insert_block(conn, company_id, week_template_id, tpl["location_id"], body, current_user.id)
+            try:
+                row = await insert_block_core(
+                    conn, company_id=company_id, week_template_id=week_template_id,
+                    location_id=tpl["location_id"], block=body, actor_user_id=current_user.id,
+                )
+            except JobUnavailable as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            block = serialize_block(row)
             await log_audit(conn, company_id, "week_template_block", block["id"], current_user.id,
                             "week_template.block.add", {"name": body.name, "week_template_id": str(week_template_id)})
     return block
@@ -390,21 +344,3 @@ async def _fetch_blocks(conn, week_template_id: UUID) -> list[dict]:
     return [serialize_block(r) for r in rows]
 
 
-async def _insert_block(conn, company_id: UUID, week_template_id: UUID, location_id, body: BlockCreate, actor_id):
-    # Scoped to the template's location: a block carrying another store's job
-    # would generate concrete shifts that create_shift itself would 422.
-    await assert_job_in_company(conn, company_id, body.job_id, location_id=location_id)
-    row = await conn.fetchrow(
-        f"""
-        INSERT INTO schedule_shift_templates
-            (company_id, week_template_id, name, role, department, location_id,
-             start_time, end_time, break_minutes, required_staff, days_of_week,
-             color, notes, created_by, job_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15)
-        RETURNING {_BLOCK_COLS}
-        """,
-        company_id, week_template_id, body.name.strip(), body.role, body.department, location_id,
-        body.start_time, body.end_time, body.break_minutes, body.required_staff,
-        json.dumps(sorted(set(body.days_of_week))), body.color, body.notes, actor_id, body.job_id,
-    )
-    return serialize_block(row)

@@ -27,6 +27,7 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   meal_break_waiver: { created: 'Meal-break waiver recorded' },
   work_permit: { created: 'Work permit recorded' },
   eligibility_case_decision: { created: 'Eligibility decision applied' },
+  schedule_location_profile: { saved: 'Location profile saved' },
 }
 
 /** One-line summary for the chat banner strip / the panel's passive status line. */
@@ -83,6 +84,8 @@ export function bannerLabel(action: HuumeAction): string {
       return 'Record this work permit?'
     case 'eligibility_case_decision':
       return action.decision === 'remove' ? 'Remove this employee assignment?' : 'Keep this employee assignment?'
+    case 'schedule_location_profile':
+      return 'Save this scheduling profile?'
     default:
       return 'Action staged — confirm or cancel?'
   }
@@ -103,6 +106,6 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'inventory_order_decision') return <Truck size={size} />
   if (type === 'inventory_item_archive') return <Archive size={size} />
   if (type === 'inventory_receipt') return <Receipt size={size} />
-  if (type === 'schedule_change' || type === 'schedule_week_draft' || type === 'schedule_note' || type === 'meal_break_waiver' || type === 'work_permit' || type === 'eligibility_case_decision') return <CalendarClock size={size} />
+  if (type === 'schedule_change' || type === 'schedule_week_draft' || type === 'schedule_note' || type === 'meal_break_waiver' || type === 'work_permit' || type === 'eligibility_case_decision' || type === 'schedule_location_profile') return <CalendarClock size={size} />
   return <ShieldAlert size={size} />
 }

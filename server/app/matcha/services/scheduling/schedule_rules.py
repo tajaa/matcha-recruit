@@ -47,6 +47,27 @@ def sunday_indexed_weekday(d: date) -> int:
     return (d.weekday() + 1) % 7
 
 
+def align_week_start(d: date, week_start_weekday: int = 0) -> date:
+    """Start of the seven-day week containing `d`.
+
+    `week_start_weekday` is Sunday-indexed like every other weekday integer in
+    this module (0=Sunday … 6=Saturday) and comes from the location's
+    scheduling profile. It defaults to 0, so every caller that has not been
+    given a location keeps the Sunday weeks the whole codebase assumed before.
+    """
+    return d - timedelta(days=(sunday_indexed_weekday(d) - int(week_start_weekday)) % 7)
+
+
+def week_day_offset(weekday: int, week_start_weekday: int = 0) -> int:
+    """Days from the week's start to a Sunday-indexed weekday.
+
+    Distinct from the weekday index itself: only for a Sunday-starting week are
+    the two the same number. Anywhere a weekday is added to a week_start as a
+    day offset, this is the conversion that has to happen first.
+    """
+    return (int(weekday) - int(week_start_weekday)) % 7
+
+
 def template_windows(
     start_date: date,
     end_date: date,

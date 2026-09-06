@@ -343,7 +343,9 @@ describe('EmployeeSchedule break planning', () => {
     expect(submittedBlock).not.toHaveProperty('department')
     expect(submittedBlock).not.toHaveProperty('color')
     expect(submittedBlock).not.toHaveProperty('notes')
-    expect(submittedBlock).not.toHaveProperty('job_id')
+    // job_id IS carried, even from the surface with no job picker: a replace
+    // that omits it unlinks the job off every block Huume created.
+    expect(submittedBlock.job_id).toBeNull()
   })
 
   it('requires confirmation before deleting a template', async () => {

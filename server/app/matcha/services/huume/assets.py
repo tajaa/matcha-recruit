@@ -128,8 +128,11 @@ ASSET_SPECS: dict[str, AssetSpec] = {
 # amend_handbook: its executor (handbook_skill.promote) returns status="ok",
 # never "created", and no record_id (different shape entirely: session_id/
 # promoted/handbook/...) — record_asset's status guard already no-ops it.
+# schedule_location_profile: writes the location's own setup row. There is no
+# artifact to hand back — the thing it produces is configuration the whole
+# editor reads, not a document this thread owns.
 # Listed here so the drift-guard test has a documented reason, not a gap.
-_NO_ASSET_TYPES: frozenset[str] = frozenset({"amend_handbook"})
+_NO_ASSET_TYPES: frozenset[str] = frozenset({"amend_handbook", "schedule_location_profile"})
 
 
 async def record_asset(

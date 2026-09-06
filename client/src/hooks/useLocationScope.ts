@@ -10,6 +10,10 @@ export type CompanyLocation = {
   state: string
   zipcode?: string | null
   is_active: boolean
+  /** 0=Sunday .. 6=Saturday, from this location's scheduling profile. Every
+   * location-scoped page computes its own week boundaries, so it has to come
+   * along with the location rather than being fetched per page. */
+  week_start_weekday?: number
 }
 
 export function locationLabel(l: CompanyLocation): string {
