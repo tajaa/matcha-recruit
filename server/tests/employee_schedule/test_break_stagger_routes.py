@@ -242,6 +242,75 @@ def test_separate_same_floor_shifts_do_not_get_the_same_break(monkeypatch):
     assert payload["results"][0]["suggested_start"].startswith("2026-08-21T09:00:00")
 
 
+def test_the_openers_and_the_mid_morning_arrival_all_break_apart(monkeypatch):
+    """The send-back, row for row: two openers on separate 06:30–14:30 rows
+    and a third person on an 08:30–16:30 row.  Whichever row the manager
+    opens, the three suggestions never overlap and follow the day's order."""
+    location_id = uuid4()
+    opener_a = UUID("00000000-0000-0000-0000-00000000000a")
+    opener_b = UUID("00000000-0000-0000-0000-00000000000b")
+    arrival = UUID("00000000-0000-0000-0000-00000000000c")
+    employees = {opener_a: uuid4(), opener_b: uuid4(), arrival: uuid4()}
+    opener = {
+        "starts_at": datetime(2026, 8, 21, 6, 30, tzinfo=timezone.utc),
+        "ends_at": datetime(2026, 8, 21, 14, 30, tzinfo=timezone.utc),
+    }
+    shifts = [
+        {"id": opener_a, "location_id": location_id, "required_staff": 1, **opener},
+        {"id": opener_b, "location_id": location_id, "required_staff": 1, **opener},
+        {
+            "id": arrival, "location_id": location_id, "required_staff": 1,
+            "starts_at": datetime(2026, 8, 21, 8, 30, tzinfo=timezone.utc),
+            "ends_at": datetime(2026, 8, 21, 16, 30, tzinfo=timezone.utc),
+        },
+    ]
+
+    class DailyConnection:
+        async def fetchrow(self, _query, shift_id, _company_id):
+            return next(row for row in shifts if row["id"] == shift_id)
+
+        async def fetch(self, query, *_args):
+            if "FROM schedule_shifts" in query:
+                return shifts
+            assert "schedule_shift_assignments" in query
+            return [
+                {"shift_id": shift_id, "employee_id": employee_id, "planned_breaks": None}
+                for shift_id, employee_id in employees.items()
+            ]
+
+    async def fake_require_company_id(_user):
+        return uuid4()
+
+    async def fake_plans(*_args, **kwargs):
+        from zoneinfo import ZoneInfo
+        plan = BreakPlan(
+            status="complete", requirements=(_requirement(),), advisories=(),
+            rule_set_ids=(uuid4(),), rule_set_hash="hash",
+        )
+        return ZoneInfo("UTC"), {
+            key: {employee_id: plan for employee_id in employee_ids}
+            for key, _starts_at, _ends_at, employee_ids in kwargs["shifts"]
+        }, set()
+
+    monkeypatch.setattr(shifts_route, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(
+        shifts_route, "get_connection", lambda: _ConnectionContext(DailyConnection()),
+    )
+    monkeypatch.setattr(schedule_guidance, "resolve_week_break_plans", fake_plans)
+
+    suggested = {}
+    for shift_id in (arrival, opener_b, opener_a):  # open them in the "wrong" order
+        payload = _run(shifts_route.get_shift_break_stagger(shift_id, current_user=_user()))
+        assert [result["employee_id"] for result in payload["results"]] == [str(employees[shift_id])]
+        assert payload["results"][0]["status"] == "suggested"
+        suggested[shift_id] = payload["results"][0]["suggested_start"]
+
+    assert suggested[opener_a].startswith("2026-08-21T08:30:00")
+    assert suggested[opener_b].startswith("2026-08-21T09:00:00")
+    # Two hours in for the 08:30 arrival, and clear of both openers' breaks.
+    assert suggested[arrival].startswith("2026-08-21T10:30:00")
+
+
 # ── PUT /shifts/{id}/assignments/{employee_id}/break-plan ─────────────────────
 
 

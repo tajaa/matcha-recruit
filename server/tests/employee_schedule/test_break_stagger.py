@@ -124,13 +124,52 @@ def test_shortfall_is_not_reported_when_nothing_needs_a_break():
     assert plan.advisories == ()
 
 
-def test_spare_headcount_allows_concurrent_breaks():
+def test_spare_headcount_is_a_ceiling_not_a_target():
+    """The budget allows two concurrent breaks; the window can hold four serial
+    ones, so nobody is doubled up."""
     plan = _run(_crew(4), required_staff=2)
 
     assert plan.max_concurrent_breaks == 2
     assert len(_intervals(plan)) == 4
-    assert _overlaps(_intervals(plan)) == 2
+    assert _overlaps(_intervals(plan)) == 1
     assert plan.advisories == ()
+
+
+def test_spare_headcount_is_spent_only_when_the_window_is_too_tight():
+    """Four 30-minute meals inside 12:00–13:00: two fit serially, the other two
+    must share — and the budget of two lets them, instead of `insufficient_coverage`."""
+    crowded = lambda: _requirement(  # noqa: E731 - table-style fixture
+        earliest_local=_local(12), recommended_local=_local(12), deadline_local=_local(13),
+    )
+    plan = _run(_crew(4, crowded), required_staff=2)
+
+    assert [result.status for result in plan.results] == ["suggested"] * 4
+    assert sorted(_intervals(plan)) == [
+        (_local(12), _local(12, 30)), (_local(12), _local(12, 30)),
+        (_local(12, 30), _local(13)), (_local(12, 30), _local(13)),
+    ]
+    assert _overlaps(_intervals(plan)) == 2
+
+
+def test_a_shared_allowed_time_beats_a_clear_discouraged_one():
+    """Stagger-first never reaches below the policy floor while an allowed time
+    can still be shared: a doubled-up break after two hours of work beats a
+    lone one after thirty minutes.
+
+    Budget 2, window 08:30–09:00 above the floor on a 06:30 shift (deadline
+    09:30): the first break takes 08:30 clear; the second could be clear at
+    07:00 but shares 08:30 instead.
+    """
+    tight = lambda: _ca_meal(deadline_local=_local(9, 30))  # noqa: E731
+    plan = _opener(tight, required_staff=0, crew=2)
+
+    assert sorted(result.suggested_start for result in plan.results) == [
+        _local(8, 30), _local(9),
+    ]
+    plan = _opener(tight, required_staff=0, crew=3)
+    assert sorted(result.suggested_start for result in plan.results) == [
+        _local(8, 30), _local(8, 30), _local(9),
+    ]
 
 
 def test_waived_requirement_takes_no_slot():
@@ -278,6 +317,18 @@ def test_early_shift_regression_never_suggests_the_shift_start():
     assert result.status == "suggested"
     assert result.suggested_start == _local(8, 30)
     assert result.suggested_start != _local(6, 30)
+
+
+def test_two_openers_are_staggered_even_when_the_floor_allows_both_at_once():
+    """The send-back: two 06:30–14:30 openers both told 08:30 because a third
+    person clocks in then.  Inside the budget and still the wrong answer —
+    breaks stagger whenever the legal window has room."""
+    plan = _opener(required_staff=0, crew=2)
+
+    assert plan.max_concurrent_breaks == 2
+    assert sorted(result.suggested_start for result in plan.results) == [
+        _local(8, 30), _local(9),
+    ]
 
 
 def test_the_whole_crew_stays_above_the_placement_floor():

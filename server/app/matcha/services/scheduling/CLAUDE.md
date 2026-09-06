@@ -399,7 +399,22 @@ Invariants, each of which has a regression test in
   spare-headcount-only model would suggest nothing on every real shift. The
   floor is paired with a `coverage_shortfall` advisory — under-covering for 30
   minutes is the manager's call; hiding it is not.
-- **A person is not two bodies.** `_fits` refuses any overlap with the same
+- **The budget is a ceiling, not a target — stagger first, share last.**
+  `_choose_start` takes the first candidate nobody else is on break for
+  (`_fit == "clear"`), anywhere in the legal window, before it will double up
+  inside the budget (`"shared"`), and exhausts both outcomes for every
+  policy-allowed time before it offers a discouraged one. Two openers on a
+  06:30 shift were both told 08:30 because a third person clocks in then —
+  lawful, in budget, and the wrong suggestion (the 2026-09-06 send-back).
+- **Coverage is the location's day, not one shift row.**
+  `resolve_shift_stagger_plan` plans every non-cancelled shift overlapping the
+  target's local day at the same location in `(starts_at, ends_at, id)` order,
+  feeding each earlier row's suggestions and every other row's saved times to
+  the next as `occupied` — a separate input from `locked` so a peer's break is
+  never mistaken for this row's saved answer (one employee on two rows has the
+  same `(kind, ordinal)` twice in a day). Only the opened row's results are
+  returned; opening rows in any order yields the same times.
+- **A person is not two bodies.** `_fit` refuses any overlap with the same
   employee's other break regardless of budget. With `max_concurrent >= 2` the
   budget alone let one employee's meal and rest land at the same instant.
 - **A break that cannot fit its legal window is never `suggested`.** It is

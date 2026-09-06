@@ -20,6 +20,13 @@ budget floors at one concurrent break — breaks are serialized — and a
 taken.  Under-covering for 30 minutes is the manager's call to make; hiding it
 is not.
 
+The budget is a ceiling, not a target.  Two openers sent off the floor at the
+same minute "technically work" whenever a third person has just clocked in,
+and it is still the wrong suggestion: the floor runs with the fewest bodies it
+lawfully can, at the same instant, for no reason.  Placement therefore prefers
+a time nobody else is on break — anywhere in the legal window — and spends the
+concurrency budget only when the window cannot hold another serialized break.
+
 Times in and out are location-local wall-clock datetimes, matching
 ``BreakRequirement.earliest_local`` / ``recommended_local`` / ``deadline_local``
 as produced by ``evaluate_break_plan``.  This module has no database or FastAPI
@@ -210,21 +217,23 @@ def _build_slot(
     )
 
 
-def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
-    """Candidate starts, walking outward from the preferred time.
+def _candidate_tiers(slot: _Slot, step_minutes: int) -> tuple[list[datetime], list[datetime]]:
+    """Candidate starts, walking outward from the preferred time, in two tiers.
 
     Preferring the recommended time and only then drifting keeps the first
     employee placed where the rule actually wants the break, and pushes later
     employees off it only as far as coverage forces.
 
     The walk covers the whole LEGAL window and the placement policy only
-    reorders it: every time policy allows comes first, then the times it merely
-    discourages, closest to the floor first.  Dropping the latter instead would
-    make the policy cost placements — breaks serialize when a shift carries no
-    spare headcount, so a window shortened by two hours holds four fewer of
-    them, and the crew who no longer fit would be reported as
-    `insufficient_coverage` rather than given the lawful early time they had
-    before.
+    partitions it: the first tier is every time policy allows, the second the
+    times it merely discourages, closest to the floor first.  Dropping the
+    latter instead would make the policy cost placements — breaks serialize
+    when a shift carries no spare headcount, so a window shortened by two hours
+    holds four fewer of them, and the crew who no longer fit would be reported
+    as `insufficient_coverage` rather than given the lawful early time they had
+    before.  The tiers stay separate (rather than one concatenated list) so
+    that `_choose_start` can exhaust every allowed time — clear ones, then
+    shared ones — before it offers a discouraged one.
     """
 
     step = timedelta(minutes=max(1, step_minutes))
@@ -258,23 +267,29 @@ def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
     discouraged = sorted(
         (value for value in candidates if value < slot.policy_earliest), reverse=True,
     )
-    return allowed + discouraged
+    return allowed, discouraged
 
 
-def _fits(
+_Fit = Literal["clear", "shared"]
+
+
+def _fit(
     start: datetime,
     duration: timedelta,
     placed: Sequence[_Placed],
     max_concurrent: int,
     *,
     employee_id: UUID,
-) -> bool:
-    """True when adding [start, start+duration) keeps concurrency in budget.
+) -> _Fit | None:
+    """How [start, start+duration) sits against what is already off the floor.
 
-    Checked against every already-placed interval: a new break may overlap at
-    most ``max_concurrent - 1`` of them at any instant.  Overlap counts are
-    evaluated at each placed interval's start and at ``start`` itself, which is
-    sufficient because concurrency only ever rises at an interval boundary.
+    ``clear`` — nobody else is on break for any part of it; the floor loses
+    exactly one body.  ``shared`` — it overlaps other breaks but stays inside
+    the concurrency budget: a new break may overlap at most
+    ``max_concurrent - 1`` of them at any instant.  ``None`` — it cannot be
+    placed.  Overlap counts are evaluated at each placed interval's start and
+    at ``start`` itself, which is sufficient because concurrency only ever
+    rises at an interval boundary.
 
     One person is not two bodies, so the budget is not the only constraint: a
     break can never overlap another break belonging to the same employee, no
@@ -287,11 +302,11 @@ def _fits(
         if entry.start < end and start < entry.end
     ]
     if not overlapping:
-        return True
+        return "clear"
     if any(entry.employee_id == employee_id for entry in overlapping):
-        return False
+        return None
     if max_concurrent <= 1:
-        return False
+        return None
     for boundary in [start, *(entry.start for entry in overlapping)]:
         if boundary < start or boundary >= end:
             continue
@@ -300,8 +315,43 @@ def _fits(
             if entry.start <= boundary < entry.end
         )
         if concurrent > max_concurrent:
-            return False
-    return True
+            return None
+    return "shared"
+
+
+def _choose_start(
+    slot: _Slot,
+    placed: Sequence[_Placed],
+    max_concurrent: int,
+    step_minutes: int,
+) -> datetime | None:
+    """The start to suggest for one slot, or ``None`` when nothing fits.
+
+    Stagger first, share the budget last.  Within each policy tier the first
+    ``clear`` candidate wins outright — even when the preferred time itself is
+    ``shared`` and lawful.  Two openers on a 06:30 shift both told to break at
+    08:30 because a third person clocks in then is inside the budget and still
+    the wrong answer: the floor is thinnest exactly when it need not be.  Only
+    when the tier holds no clear time at all does the earliest ``shared`` one
+    (closest to preferred, since the walk is outward) get used, and only after
+    both outcomes are exhausted for every allowed time does a discouraged time
+    come into play — a lawful early break still beats no suggestion, and a
+    doubled-up break after two hours of work still beats one after twenty
+    minutes.
+    """
+
+    duration = timedelta(minutes=slot.duration_minutes)
+    for tier in _candidate_tiers(slot, step_minutes):
+        shared: datetime | None = None
+        for candidate in tier:
+            fit = _fit(candidate, duration, placed, max_concurrent, employee_id=slot.employee_id)
+            if fit == "clear":
+                return candidate
+            if fit == "shared" and shared is None:
+                shared = candidate
+        if shared is not None:
+            return shared
+    return None
 
 
 def _collision_reason(slot: _Slot) -> str:
@@ -434,14 +484,7 @@ def stagger_shift_breaks(
     )
     for slot in ordered:
         duration = timedelta(minutes=slot.duration_minutes)
-        chosen: datetime | None = None
-        for candidate in _candidate_starts(slot, step_minutes):
-            if _fits(
-                candidate, duration, placed, max_concurrent,
-                employee_id=slot.employee_id,
-            ):
-                chosen = candidate
-                break
+        chosen = _choose_start(slot, placed, max_concurrent, step_minutes)
         if chosen is None:
             results.append(StaggerResult(
                 employee_id=slot.employee_id,
