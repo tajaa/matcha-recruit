@@ -403,12 +403,30 @@ export interface LocationScheduleProfileTemplate {
   blocks: LocationScheduleProfileBlock[]
 }
 
+/** The three answers that bound a week. Huume refuses to build one until all
+ *  three are saved, so this is what the editor's setup banner reports. */
+export type WeekRuleField = 'operating_hours' | 'staffing_pattern' | 'leader_rule'
+
+export const WEEK_RULE_LABELS: Record<WeekRuleField, string> = {
+  operating_hours: 'hours',
+  staffing_pattern: 'a staffing pattern',
+  leader_rule: 'the leader rule',
+}
+
 export interface LocationScheduleProfile {
   location_id: string
+  /** False until somebody saves this location's setup — distinct from a saved
+   *  profile that happens to hold defaults, which reads identically field by
+   *  field. */
+  profile_exists: boolean
+  week_rules: { established: boolean; missing: WeekRuleField[] }
   operating_hours: OperatingHours
   default_week_template_id: string | null
   leader_job_id: string | null
   leader_job_name: string | null
+  /** null = never asked, false = no lead needed, true = `leader_job_id` names
+   *  the job. Unanswered counts as missing setup. */
+  leader_required: boolean | null
   notes: string | null
   week_start_weekday: number
   /** Minutes before open / after close somebody has to be on the schedule.
@@ -424,6 +442,7 @@ export interface LocationScheduleProfile {
 export interface LocationScheduleProfileUpdate {
   operating_hours?: OperatingHours
   leader_job_id?: string | null
+  leader_required?: boolean | null
   notes?: string | null
   week_start_weekday?: number
   default_week_template_id?: string | null

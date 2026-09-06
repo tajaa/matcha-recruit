@@ -526,3 +526,78 @@ async def test_build_week_schedule_carries_findings_onto_the_staged_action(monke
     assert action["metrics"]["gap_count"] == 1
     # Staged, not applied: a reported gap does not change the confirm contract.
     assert action["status"] == "proposed"
+
+
+@pytest.mark.asyncio
+async def test_save_location_profile_stages_the_leader_answer(monkeypatch):
+    """`leader_required=False` is the answer that completes the setup. It is in
+    the spec's `fields` whitelist, so it survives onto the staged dict — a
+    field missing there is silently dropped and the confirm turn writes a
+    profile the manager never saw."""
+    monkeypatch.setattr(schedule_profile_skill, "resolve_profile_args", AsyncMock(return_value={
+        "status": "ok",
+        "operating_hours": {}, "blocks": [],
+        "leader_job_id": None, "leader_job_name": None, "leader_required": False,
+        "notes": None, "template_name": None,
+        "summary": "no lead required on every shift",
+    }))
+    call = _fake_call("save_location_schedule_profile", {"leader_required": False})
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="Staged that for your approval.")],
+    )
+    action = _result(frames)["state_updates"]["huume_action"]
+
+    assert action["leader_required"] is False
+
+
+def test_leader_required_is_in_the_staged_fields_whitelist():
+    assert "leader_required" in agent._HR_OPS_TOOL_SPECS[
+        "save_location_schedule_profile"
+    ]["fields"]
+
+
+@pytest.mark.asyncio
+async def test_week_rules_refusal_ends_the_turn_and_offers_leader_chips(monkeypatch):
+    """The builder refuses until the location's setup is saved. The refusal is
+    terminal (no second model call) and, when the leader question is the only
+    gap, it comes with the two answers as chips."""
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "clarify",
+        "message": (
+            "I can't build this week yet — Downtown has no answer yet on whether a "
+            "shift lead has to be on every shift."
+        ),
+        "setup_missing": ["leader_rule"],
+    }))
+
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[_fake_call("build_week_schedule", {"source_mode": "auto"})]),
+        AssertionError("the turn made a second model call after a schedule clarification"),
+    ])
+    result = _result(frames)
+
+    assert result["message"].startswith("I can't build this week yet")
+    assert result["token_usage"]["stop_reason"] == "schedule_clarification"
+    assert [o["label"] for o in result["state_updates"]["huume_choice"]["options"]] == ["Yes", "No"]
+    assert "huume_action" not in result["state_updates"]
+
+
+@pytest.mark.asyncio
+async def test_a_multi_answer_setup_refusal_mints_no_chips(monkeypatch):
+    """Only the leader question is a finite choice. Hours are not, and a Yes/No
+    pair under "tell me your hours" would be nonsense."""
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "clarify",
+        "message": "I can't build this week yet — Downtown has no saved hours for every day of the week.",
+        "setup_missing": ["operating_hours", "staffing_pattern", "leader_rule"],
+    }))
+
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[_fake_call("build_week_schedule", {"source_mode": "auto"})]),
+        AssertionError("the turn made a second model call after a schedule clarification"),
+    ])
+    result = _result(frames)
+
+    assert result["state_updates"].get("huume_choice") in (None, {})

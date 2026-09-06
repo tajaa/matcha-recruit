@@ -48,6 +48,23 @@ forever after.
 
 Invariants:
 
+- **No week is built until the rules are established** (migration `schedloc03`).
+  `location_profile.missing_fields` is THE predicate — hours answered for all
+  seven weekdays with at least one open day, a default template carrying
+  blocks, and an answered leader question — and `week_builder._week_rules_gate`
+  turns it into the refusal `week_rules_refusal` writes. It runs in
+  `propose_week_draft` (before demand resolution: draft shifts are demand, not
+  bounds), again in `apply_week_draft` (rules can be edited away between
+  staging and confirmation), and as the FIRST entry in
+  `get_week_build_readiness`'s `blockers` — readiness saying "ready" and the
+  builder then refusing is the loop this surface exists to end. The prompt no
+  longer merely suggests the interview; the builder enforces it.
+- **`leader_required` is tri-state, and that is why it is not just
+  `leader_job_id`.** `NULL` never asked, `false` no lead needed, `true` names
+  the job (DB CHECK). Without the explicit `false` a store that needs no lead
+  could never finish setup, so the gate would block it forever. Both surfaces
+  can answer it: the interview passes `leader_required`, the Week setup pane
+  has a "No leader required" option distinct from an unpicked select.
 - **The default template is always location-scoped.** `_list_templates` also
   returns company-wide rows (`location_id IS NULL`); one of those as a store's
   default would let another store's edits rewrite this store's week. Both the

@@ -10,7 +10,8 @@ import pytest
 from app.matcha.services.huume import schedule_profile_skill
 from app.matcha.services.scheduling import location_profile
 from app.matcha.services.scheduling.location_profile import (
-    missing_fields, open_weekdays, profile_context_lines, validate_operating_hours,
+    hours_answered, missing_fields, open_weekdays, profile_context_lines,
+    validate_operating_hours, week_rules_established, week_rules_refusal,
 )
 
 
@@ -21,11 +22,24 @@ JOB_ID = UUID("88888888-8888-8888-8888-888888888888")
 ACTOR_ID = UUID("77777777-7777-7777-7777-777777777777")
 
 
-def _bundle(*, hours=None, blocks=None, leader=None, week_start=None, notes=None):
+# A week's worth of answered hours: closed Sunday/Saturday, open the rest.
+# `missing_fields` wants every weekday answered, so a one-day dict is NOT a
+# location whose hours are on file.
+FULL_WEEK_HOURS = {
+    "0": None, "6": None,
+    **{str(day): {"open": "08:00", "close": "17:00"} for day in range(1, 6)},
+}
+
+
+def _bundle(*, hours=None, blocks=None, leader=None, week_start=None, notes=None,
+            leader_required=None):
+    if leader_required is None and leader:
+        leader_required = True
     return {
         "profile": {
             "operating_hours": hours if hours is not None else {},
             "leader_job_id": JOB_ID if leader else None,
+            "leader_required": leader_required,
             "week_start_weekday": week_start,
             "notes": notes,
         },
@@ -76,17 +90,67 @@ def test_missing_fields_lists_all_three_for_a_fresh_location():
 
 def test_missing_fields_is_empty_once_everything_is_answered():
     bundle = _bundle(
-        hours={"1": {"open": "08:00", "close": "17:00"}},
+        hours=FULL_WEEK_HOURS,
         blocks=[{"name": "Opener", "job_name": "Barista", "days_of_week": [1],
                  "start_time": "08:00", "end_time": "16:00", "required_staff": 2}],
         leader="Shift Lead",
     )
     assert missing_fields(bundle) == []
+    assert week_rules_established(bundle) is True
+
+
+@pytest.mark.parametrize("hours, answered", [
+    (None, False),
+    ({}, False),
+    # One day answered is not the week: the other six still bound nothing.
+    ({"1": {"open": "08:00", "close": "17:00"}}, False),
+    # "Closed Sundays" and nothing else used to read as hours-on-file because
+    # the check was truthiness of the whole dict.
+    ({"0": None}, False),
+    ({str(day): None for day in range(7)}, False),
+    (FULL_WEEK_HOURS, True),
+])
+def test_hours_answered_needs_all_seven_days_and_one_open_day(hours, answered):
+    assert hours_answered(hours) is answered
+
+
+@pytest.mark.parametrize("leader_required, leader, missing", [
+    (None, None, True),          # never asked
+    (False, None, False),        # answered: no lead needed
+    (True, None, True),          # required but nobody named the job
+    (True, "Shift Lead", False),
+])
+def test_missing_fields_leader_rule_is_tri_state(leader_required, leader, missing):
+    bundle = _bundle(
+        hours=FULL_WEEK_HOURS,
+        blocks=[{"name": "Opener", "job_name": "Barista", "days_of_week": [1],
+                 "start_time": "08:00", "end_time": "16:00", "required_staff": 2}],
+        leader=leader, leader_required=leader_required,
+    )
+    assert ("leader_rule" in missing_fields(bundle)) is missing
+
+
+def test_week_rules_refusal_names_one_missing_answer_and_the_location():
+    fresh = week_rules_refusal({"profile": None, "template": None}, location_name="Downtown")
+    assert "Downtown" in fresh
+    # One question at a time — a list of three is a wall, not an ask.
+    assert "hours" in fresh and "staffing pattern" not in fresh
+
+    hours_only = week_rules_refusal(_bundle(hours=FULL_WEEK_HOURS), location_name="Downtown")
+    assert "staffing pattern" in hours_only
+
+    complete = _bundle(
+        hours=FULL_WEEK_HOURS,
+        blocks=[{"name": "Opener", "job_name": "Barista", "days_of_week": [1],
+                 "start_time": "08:00", "end_time": "16:00", "required_staff": 2}],
+        leader_required=False,
+    )
+    assert week_rules_refusal(complete, location_name="Downtown") is None
 
 
 def test_profile_context_lines_render_pattern_leader_and_gaps():
     lines = profile_context_lines(_bundle(
-        hours={"1": {"open": "08:00", "close": "17:00"}, "0": None},
+        hours=FULL_WEEK_HOURS,
         blocks=[{"name": "Opener", "job_name": "Barista", "days_of_week": [1, 2],
                  "start_time": "08:00", "end_time": "16:00", "required_staff": 2}],
         week_start=0, notes="Busy on match days",
@@ -106,6 +170,14 @@ def test_profile_context_lines_say_so_when_nothing_is_set():
     assert "Hours: not set" in text
     assert "Staffing pattern: not set" in text
     assert "Leader coverage: not set" in text
+
+
+def test_profile_context_lines_distinguish_no_lead_needed_from_unasked():
+    """An answered "no" must not read as an open question, or the interview
+    asks it again on every turn."""
+    text = "\n".join(profile_context_lines(_bundle(hours=FULL_WEEK_HOURS, leader_required=False)))
+    assert "Leader coverage: not required" in text
+    assert "leader_rule" not in text
 
 
 # --- leader-rule materialization ---------------------------------------------
@@ -566,3 +638,95 @@ async def test_execute_writes_a_buffer_only_when_the_turn_carried_one(monkeypatc
     kwargs = upsert.await_args.kwargs
     assert kwargs["open_buffer_minutes"] == 0
     assert "close_buffer_minutes" not in kwargs
+
+
+# --- the leader answer ("no lead needed" is an answer) ------------------------
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_accepts_a_leader_only_no(monkeypatch):
+    """`leader_required=false` is the answer that finishes the setup, so a turn
+    carrying only it is a save — not the "tell me something" clarify."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle(hours=FULL_WEEK_HOURS))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={"leader_required": False},
+    )
+
+    assert result["status"] == "ok"
+    assert result["leader_required"] is False
+    assert result["leader_job_id"] is None
+    assert "no lead required on every shift" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_naming_a_leader_answers_the_question(monkeypatch):
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    monkeypatch.setattr(schedule_profile_skill, "resolve_job_by_name",
+                        AsyncMock(return_value={"id": JOB_ID, "name": "Shift Lead"}))
+    _patch_saved(monkeypatch, _bundle(hours=FULL_WEEK_HOURS))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={"leader_job_name": "Shift Lead"},
+    )
+
+    assert result["leader_required"] is True
+    assert result["leader_job_id"] == str(JOB_ID)
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_asks_which_job_leads_on_a_bare_yes(monkeypatch):
+    """"Yes, a lead is required" with no job named and none saved cannot be
+    written — the DB CHECK refuses it — so ask instead of staging it."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle(hours=FULL_WEEK_HOURS))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={"leader_required": True},
+    )
+
+    assert result["status"] == "clarify"
+    assert result["job_options"] == ["Barista", "Shift Lead"]
+
+
+@pytest.mark.asyncio
+async def test_execute_writes_leader_required_false_as_an_answer(monkeypatch):
+    """Truthiness would drop the "no", leaving the question unanswered forever
+    while the confirm card said it was saved — the buffers' bug."""
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=_null_context())
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=_null_context(conn)))
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(location_profile, "upsert_location_profile", upsert)
+    monkeypatch.setattr(schedule_profile_skill, "log_audit", AsyncMock())
+
+    await schedule_profile_skill.execute(
+        company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        action={"type": "schedule_location_profile", "confirm_id": "ab12cd34",
+                "location_id": str(LOCATION_ID), "operating_hours": {}, "blocks": [],
+                "leader_required": False},
+    )
+
+    assert upsert.await_args.kwargs["leader_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_leaves_the_leader_answer_alone_when_a_turn_omits_it(monkeypatch):
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=_null_context())
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=_null_context(conn)))
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(location_profile, "upsert_location_profile", upsert)
+    monkeypatch.setattr(schedule_profile_skill, "log_audit", AsyncMock())
+
+    await schedule_profile_skill.execute(
+        company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        action={"type": "schedule_location_profile", "confirm_id": "ab12cd34",
+                "location_id": str(LOCATION_ID), "operating_hours": {}, "blocks": [],
+                "leader_required": None, "notes": "Busy on match days"},
+    )
+
+    assert "leader_required" not in upsert.await_args.kwargs

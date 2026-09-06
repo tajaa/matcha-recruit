@@ -215,3 +215,37 @@ async def test_cancelled_automatic_suggestion_does_not_block_replacement(monkeyp
     assert result["status"] == "generated"
     assert "status IN ('proposed', 'applied')" in conn.existing_query
     assert "cancelled" not in conn.existing_query
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_location_yields_not_ready(monkeypatch):
+    """The overnight sweep is the run nobody is watching, so it is the one that
+    must not quietly prepare a week nothing bounded. Readiness carries the same
+    setup blocker the builder enforces, and the worker already stops on it."""
+    company_id, location_id, template_id = uuid4(), uuid4(), uuid4()
+    conn = _SuggestionConn()
+    monkeypatch.setattr(schedule_automation, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(
+        week_builder,
+        "get_week_build_readiness",
+        AsyncMock(return_value={
+            "status": "ok", "ready": False,
+            "week_rules_missing": ["operating_hours", "staffing_pattern", "leader_rule"],
+            "blockers": [
+                "I can't build this week yet — Downtown has no saved hours for every day of the week."
+            ],
+        }),
+    )
+    propose = AsyncMock()
+    monkeypatch.setattr(week_builder, "propose_week_draft", propose)
+
+    result = await schedule_automation.generate_review_suggestion(
+        company_id=company_id,
+        location_id=location_id,
+        week_start=date(2026, 8, 30),
+        week_template_id=template_id,
+    )
+
+    assert result["status"] == "not_ready"
+    assert "no saved hours" in result["message"]
+    propose.assert_not_awaited()

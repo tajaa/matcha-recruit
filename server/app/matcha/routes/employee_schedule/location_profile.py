@@ -17,7 +17,7 @@ from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.scheduling.employee_schedule import LocationScheduleProfileUpdate
 from ...services.scheduling.location_profile import (
-    UNSET, load_profile_bundle, upsert_location_profile,
+    UNSET, load_profile_bundle, missing_fields, upsert_location_profile,
 )
 from ...services.scheduling.schedule_assistant_session import assert_manager_location
 from ...services.scheduling.week_template_writes import JobUnavailable, assert_job_available
@@ -29,14 +29,21 @@ router = APIRouter()
 def _serialize(bundle: dict, *, location_id: UUID) -> dict:
     profile = bundle.get("profile") or {}
     template = bundle.get("template")
+    missing = missing_fields(bundle)
     return {
         "location_id": str(location_id),
+        # A never-configured location and one saved as Sunday-start with no
+        # buffers used to be byte-identical on the wire, so the editor could
+        # not tell "not set up" from "set up plainly" without guessing.
+        "profile_exists": bundle.get("profile") is not None,
+        "week_rules": {"established": not missing, "missing": missing},
         "operating_hours": profile.get("operating_hours") or {},
         "default_week_template_id": (
             str(profile["default_week_template_id"]) if profile.get("default_week_template_id") else None
         ),
         "leader_job_id": str(profile["leader_job_id"]) if profile.get("leader_job_id") else None,
         "leader_job_name": bundle.get("leader_job_name"),
+        "leader_required": profile.get("leader_required"),
         "notes": profile.get("notes"),
         # Sunday unless this location says otherwise — the default every
         # week-start computation in the codebase already assumes.
@@ -108,6 +115,7 @@ async def update_location_schedule_profile(
                     ),
                     default_week_template_id=patch.get("default_week_template_id", UNSET),
                     leader_job_id=patch.get("leader_job_id", UNSET),
+                    leader_required=patch.get("leader_required", UNSET),
                     notes=patch.get("notes", UNSET),
                     week_start_weekday=patch.get("week_start_weekday", UNSET),
                     open_buffer_minutes=patch.get("open_buffer_minutes", UNSET),

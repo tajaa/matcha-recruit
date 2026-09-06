@@ -15,6 +15,32 @@ from app.matcha.services.scheduling.week_builder import _coerce_constraints, bui
 UTC = timezone.utc
 
 
+# A location whose week-set rules are on file. Every test in this module is
+# about the planner, not the setup gate — without this the gate refuses first
+# and nothing below it ever runs. The gate has its own file,
+# `test_week_rules_gate.py`.
+ESTABLISHED_BUNDLE = {
+    "profile": {
+        "operating_hours": {
+            "0": None, "6": None,
+            **{str(day): {"open": "08:00", "close": "17:00"} for day in range(1, 6)},
+        },
+        "leader_job_id": None,
+        "leader_required": False,
+    },
+    "template": {"id": "3f6b1c22-2000-4000-8000-000000000009", "name": "Downtown default week",
+                 "blocks": [{"name": "Opener"}]},
+    "leader_job_name": None,
+}
+
+
+@pytest.fixture(autouse=True)
+def _established_week_rules(monkeypatch):
+    monkeypatch.setattr(
+        week_builder, "load_profile_bundle", AsyncMock(return_value=ESTABLISHED_BUNDLE),
+    )
+
+
 class _AsyncContext:
     def __init__(self, value):
         self.value = value

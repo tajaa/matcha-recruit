@@ -547,8 +547,8 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         # schedule_profile_skill.resolve_profile_args merged in (resolved job
         # ids, materialized leader blocks) — not the model's raw args.
         "fields": (
-            "operating_hours", "blocks", "leader_job_name", "notes", "template_name",
-            "open_buffer_minutes", "close_buffer_minutes",
+            "operating_hours", "blocks", "leader_job_name", "leader_required", "notes",
+            "template_name", "open_buffer_minutes", "close_buffer_minutes",
         ),
         "staged_label": "Staged: location schedule profile",
         "refused_label": "Location profile refused",
@@ -1653,6 +1653,21 @@ async def run_huume_turn(
                             status="rejected", detail=message,
                         )
                         response = {"status": proposal_status or "refused", "message": message}
+                        if proposed.get("setup_missing"):
+                            response["setup_missing"] = proposed["setup_missing"]
+                        # The leader question is the one gate answer that is a
+                        # finite choice, so it gets chips like every other one.
+                        if proposed.get("setup_missing") == ["leader_rule"]:
+                            leader_choice = _build_choice(
+                                "Does a shift lead have to be on every shift?",
+                                ["Yes", "No"],
+                                sends={
+                                    "Yes": "Yes, a lead must be on every shift",
+                                    "No": "No, a lead is not required on every shift",
+                                },
+                            )
+                            if leader_choice:
+                                state_updates["huume_choice"] = leader_choice
                         if proposed.get("week_templates") is not None:
                             response["week_templates"] = proposed["week_templates"]
                             names = [str(t.get("name") or "") for t in proposed["week_templates"]]

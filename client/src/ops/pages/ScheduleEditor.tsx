@@ -1,15 +1,19 @@
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Loader2, Sparkles } from 'lucide-react'
+import { AlertTriangle, Loader2, Sparkles } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useLocationScope, locationLabel } from '../../hooks/useLocationScope'
 import { useScheduleEditor } from '../../hooks/employees/useScheduleEditor'
 import { useToast } from '../../components/ui'
 import { useScheduleJobs } from '../../hooks/employees/useScheduleJobs'
 import { getScheduleSuggestionStatus, type ScheduleSuggestionStatus } from '../../api/employees/scheduleAssistant'
+import { fetchLocationScheduleProfile } from '../../api/employees/locationProfile'
 import LocationPicker from '../../components/shared/LocationPicker'
-import { addDays, startOfWeek, toISODate, type Shift } from '../../types/employeeSchedule'
+import {
+  addDays, startOfWeek, toISODate, WEEK_RULE_LABELS,
+  type LocationScheduleProfile, type Shift,
+} from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
 import RosterPanel from '../../components/employees/schedule-editor/RosterPanel'
 import ScheduleEditorToolbar, { type ScheduleBodyMode } from '../../components/employees/schedule-editor/ScheduleEditorToolbar'
@@ -69,6 +73,7 @@ export default function ScheduleEditor() {
   // One mode rather than a boolean per pane — see ScheduleBodyMode.
   const [bodyMode, setBodyMode] = useState<ScheduleBodyMode>('grid')
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
+  const [weekRules, setWeekRules] = useState<LocationScheduleProfile['week_rules'] | null>(null)
   const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const openBreakPlanner = useCallback((shift: Shift, _employeeId: string, message: string) => {
@@ -111,6 +116,22 @@ export default function ScheduleEditor() {
       })
     return () => { cancelled = true }
   }, [locationId, weekStart])
+
+  /** Whether this store's week-set rules are saved. Huume refuses to build a
+   *  week without them, so the manager is told here rather than finding out
+   *  from a refusal after they ask. A failed read shows no banner — the
+   *  server-side gate is what actually holds. */
+  const reloadWeekRules = useCallback(() => {
+    if (!locationId) {
+      setWeekRules(null)
+      return
+    }
+    void fetchLocationScheduleProfile(locationId)
+      .then((profile) => setWeekRules(profile.week_rules))
+      .catch(() => setWeekRules(null))
+  }, [locationId])
+
+  useEffect(() => { reloadWeekRules() }, [reloadWeekRules])
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {
@@ -229,6 +250,31 @@ export default function ScheduleEditor() {
             </button>
           </div>
         )}
+        {weekRules && !weekRules.established && locationId && bodyMode === 'grid' && (
+          <div className="flex flex-wrap items-center gap-3 border-b border-amber-500/25 bg-amber-500/[0.08] px-4 py-2 text-xs text-amber-100 md:px-6">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
+            <span>
+              {currentLocationName || 'This location'} has no saved{' '}
+              {weekRules.missing.map((field) => WEEK_RULE_LABELS[field]).join(', ')}. Huume can’t build a week until it does.
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBodyMode('chat')}
+                className="rounded-lg border border-amber-400/40 px-2.5 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-400/10"
+              >
+                Set up with Huume
+              </button>
+              <button
+                type="button"
+                onClick={() => setBodyMode('weekStart')}
+                className="rounded-lg border border-amber-400/40 px-2.5 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-400/10"
+              >
+                Fill it in myself
+              </button>
+            </div>
+          </div>
+        )}
         {!locationId ? (
           <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
             <p className="text-sm text-zinc-400">Pick a location to see its schedule.</p>
@@ -244,7 +290,7 @@ export default function ScheduleEditor() {
           </div>
         ) : bodyMode === 'weekStart' ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-            <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} onSaved={() => { void reloadLocations() }} />
+            <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} onSaved={() => { void reloadLocations(); reloadWeekRules() }} />
           </div>
         ) : editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
@@ -279,8 +325,11 @@ export default function ScheduleEditor() {
                 locationId={locationId || null}
                 locationName={currentLocationName}
                 selectedShifts={huumeSelectedShifts}
+                weekRulesEstablished={weekRules?.established ?? true}
                 onClearSelectedShifts={() => setHuumeSelectedShiftIds(new Set())}
-                onApplied={() => { setAutomaticSuggestion(null); void editor.reload() }}
+                // A confirmed setup save lands here too, so the banner clears
+                // the moment the interview finishes.
+                onApplied={() => { setAutomaticSuggestion(null); reloadWeekRules(); void editor.reload() }}
                 onAutomaticActionSettled={() => setAutomaticSuggestion(null)}
                 onClose={() => setBodyMode('grid')}
               />

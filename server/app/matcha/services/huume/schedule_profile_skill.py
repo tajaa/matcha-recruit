@@ -35,6 +35,7 @@ def _clock(value) -> str:
 def _summarize(
     operating_hours: dict, blocks: list[dict], leader_job_name: Optional[str],
     open_buffer: Optional[int] = None, close_buffer: Optional[int] = None,
+    *, leader_required: Optional[bool] = None,
 ) -> str:
     parts = []
     open_days = location_profile.open_weekdays(operating_hours)
@@ -45,6 +46,10 @@ def _summarize(
         parts.append(f"{len(blocks)} shift block{'s' if len(blocks) != 1 else ''} ({positions} positions/day-slot)")
     if leader_job_name:
         parts.append(f"leader: {leader_job_name}")
+    elif leader_required is False:
+        # The confirm card has to show the "no" as something the manager said,
+        # not as an absent line they might read as still-unanswered.
+        parts.append("no lead required on every shift")
     if open_buffer is not None:
         parts.append(f"prep {open_buffer}m")
     if close_buffer is not None:
@@ -242,6 +247,24 @@ async def resolve_profile_args(
                 }
             leader_job = {"id": leader_row["id"], "name": leader_row["name"]}
 
+        # Tri-state, like the buffers: None is "this turn said nothing about
+        # it", False is the manager answering "no lead needed" — an answer the
+        # week builder requires before it will plan anything.
+        leader_required = args.get("leader_required")
+        if leader_required is not None:
+            leader_required = bool(leader_required)
+        if leader_job:
+            leader_required = True
+        saved_leader_job = (saved.get("profile") or {}).get("leader_job_id")
+        if leader_required is True and not leader_job and not saved_leader_job:
+            options = await _job_options(conn, company_id=company_id, location_id=location_id)
+            known = ", ".join(options) if options else "none set up yet"
+            return {
+                "status": "clarify",
+                "message": f"Which job has to be on every shift? Jobs here: {known}.",
+                "job_options": options,
+            }
+
     if leader_job:
         # A leader-only turn still has to produce demand, so the saved pattern
         # is re-staged with the coverage added rather than left untouched.
@@ -260,7 +283,7 @@ async def resolve_profile_args(
     # save.
     if (
         not supplied_hours and not blocks and not leader_job and not notes
-        and open_buffer is None and close_buffer is None
+        and open_buffer is None and close_buffer is None and leader_required is None
     ):
         return {
             "status": "clarify",
@@ -273,13 +296,14 @@ async def resolve_profile_args(
         "blocks": blocks,
         "leader_job_id": str(leader_job["id"]) if leader_job else None,
         "leader_job_name": leader_job["name"] if leader_job else None,
+        "leader_required": leader_required,
         "open_buffer_minutes": open_buffer,
         "close_buffer_minutes": close_buffer,
         "notes": notes,
         "template_name": args.get("template_name"),
         "summary": _summarize(
             operating_hours, blocks, leader_job["name"] if leader_job else None,
-            open_buffer, close_buffer,
+            open_buffer, close_buffer, leader_required=leader_required,
         ),
     }
 
@@ -302,6 +326,11 @@ async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, An
         fields["operating_hours"] = action["operating_hours"]
     if leader_job_id:
         fields["leader_job_id"] = UUID(str(leader_job_id))
+    # `is not None`, not truthiness: False is "no lead needed", the answer that
+    # finishes the setup, and dropping it would leave the question unanswered
+    # forever while the confirm card said otherwise.
+    if action.get("leader_required") is not None:
+        fields["leader_required"] = bool(action["leader_required"])
     if action.get("notes") is not None:
         fields["notes"] = action["notes"]
     # `is not None`, not truthiness: 0 is "nobody comes in early", a real

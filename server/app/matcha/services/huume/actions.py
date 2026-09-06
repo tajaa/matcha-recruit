@@ -403,8 +403,12 @@ def evaluate_huume_action(
         except (TypeError, ValueError):
             return HuumeVerdict(kind="refuse", message="That scheduling profile has no valid location.")
         blocks = staged_action.get("blocks") or []
+        # `leader_required is not None` rather than truthiness: an explicit
+        # "no lead needed" is content — it is the answer that completes the
+        # setup the week builder requires.
         if not any([staged_action.get("operating_hours"), blocks,
-                    staged_action.get("leader_job_id"), staged_action.get("notes")]):
+                    staged_action.get("leader_job_id"), staged_action.get("notes"),
+                    staged_action.get("leader_required") is not None]):
             return HuumeVerdict(kind="refuse", message="Nothing to save in the location profile.")
         # Every block must already carry a resolved job: a free-text block
         # would generate ungated shifts whose role nothing can match back.

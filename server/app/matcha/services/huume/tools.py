@@ -912,6 +912,15 @@ TOOLS: tuple[HuumeTool, ...] = (
                 type=types.Type.STRING,
                 description="Job that must be on every open shift (shift lead / manager), if the manager named one.",
             ),
+            "leader_required": types.Schema(
+                type=types.Type.BOOLEAN,
+                description=(
+                    "true when a shift lead or manager must be on every open shift — name "
+                    "the job in leader_job_name. false when the manager says no lead is "
+                    "needed; that is a real answer and the week cannot be built without "
+                    "it. Omit only while the question is still unasked."
+                ),
+            ),
             "open_buffer_minutes": types.Schema(
                 type=types.Type.INTEGER,
                 description=(
