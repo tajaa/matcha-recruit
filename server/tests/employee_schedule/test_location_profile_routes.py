@@ -278,3 +278,160 @@ async def test_put_leaves_the_leader_answer_untouched_when_omitted(monkeypatch):
     )
 
     assert upsert.await_args.kwargs["leader_required"] is routes.UNSET
+
+
+# --- the leader rule is a SET -------------------------------------------------
+
+SECOND_JOB_ID = UUID("99999999-9999-9999-9999-999999999999")
+
+
+@pytest.mark.asyncio
+async def test_get_serializes_every_leader_job_and_mirrors_the_first(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn, bundle={
+        "profile": {
+            "operating_hours": {}, "leader_job_id": JOB_ID,
+            "leader_job_ids": [JOB_ID, SECOND_JOB_ID], "leader_required": True,
+        },
+        "template": None,
+        "leader_jobs": [
+            {"id": str(JOB_ID), "name": "Shift Lead"},
+            {"id": str(SECOND_JOB_ID), "name": "Assistant Manager"},
+        ],
+        "leader_job_name": "Shift Lead",
+    })
+
+    result = await routes.get_location_schedule_profile(LOCATION_ID, _user())
+
+    assert result["leader_job_ids"] == [str(JOB_ID), str(SECOND_JOB_ID)]
+    assert result["leader_job_names"] == ["Shift Lead", "Assistant Manager"]
+    # The single-value pair is the first entry — what a reader that predates
+    # the set expects to find there.
+    assert result["leader_job_id"] == str(JOB_ID)
+    assert result["leader_job_name"] == "Shift Lead"
+
+
+@pytest.mark.asyncio
+async def test_get_reads_a_scalar_only_bundle_as_a_one_element_set(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn, bundle={
+        "profile": {"operating_hours": {}, "leader_job_id": JOB_ID, "leader_required": True},
+        "template": None, "leader_job_name": "Shift Lead",
+    })
+
+    result = await routes.get_location_schedule_profile(LOCATION_ID, _user())
+
+    assert result["leader_job_ids"] == [str(JOB_ID)]
+    assert result["leader_job_names"] == ["Shift Lead"]
+    assert result["leader_job_id"] == str(JOB_ID)
+
+
+@pytest.mark.asyncio
+async def test_get_with_no_leader_reports_empty_sets(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+
+    result = await routes.get_location_schedule_profile(LOCATION_ID, _user())
+
+    assert result["leader_job_ids"] == []
+    assert result["leader_job_names"] == []
+    assert result["leader_job_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_put_checks_every_leader_job_against_this_location(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    guard = AsyncMock()
+    monkeypatch.setattr(routes, "assert_job_available", guard)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID,
+        LocationScheduleProfileUpdate(leader_job_ids=[JOB_ID, SECOND_JOB_ID, JOB_ID]),
+        _user(),
+    )
+
+    checked = [call.args[2] for call in guard.await_args_list]
+    assert checked == [JOB_ID, SECOND_JOB_ID]          # deduped by the model
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["leader_job_ids"] == [JOB_ID, SECOND_JOB_ID]
+    assert kwargs["leader_job_id"] is routes.UNSET
+
+
+@pytest.mark.asyncio
+async def test_put_rejects_a_leader_set_with_a_job_from_another_location(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    monkeypatch.setattr(routes, "upsert_location_profile", AsyncMock())
+
+    async def _guard(_conn, _company, job_id, *, location_id):
+        if job_id == SECOND_JOB_ID:
+            raise routes.JobUnavailable("Job is not available at this location")
+    monkeypatch.setattr(routes, "assert_job_available", _guard)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await routes.update_location_schedule_profile(
+            LOCATION_ID, LocationScheduleProfileUpdate(leader_job_ids=[JOB_ID, SECOND_JOB_ID]),
+            _user(),
+        )
+    assert excinfo.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_still_forwards_the_legacy_single_job(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID, LocationScheduleProfileUpdate(leader_job_id=JOB_ID), _user(),
+    )
+
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["leader_job_id"] == JOB_ID
+    assert kwargs["leader_job_ids"] is routes.UNSET
+
+
+@pytest.mark.asyncio
+async def test_put_forwards_an_empty_set_as_a_clear(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID,
+        LocationScheduleProfileUpdate(leader_job_ids=[], leader_required=None),
+        _user(),
+    )
+
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["leader_job_ids"] == []
+    assert kwargs["leader_required"] is None
+
+
+@pytest.mark.asyncio
+async def test_put_treats_an_explicit_null_set_as_the_clear_the_service_writes(monkeypatch):
+    """`leader_job_ids: null` reaches `normalize_leader_job_ids` as "no jobs
+    named" and clears the rule, so the route must not read it as "unsupplied"
+    and bless a `leader_job_id` sent beside it: the job it validated is thrown
+    away by the write, and a PUT that named a lead un-answers the question."""
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    guard = AsyncMock()
+    monkeypatch.setattr(routes, "assert_job_available", guard)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID,
+        LocationScheduleProfileUpdate(leader_job_ids=None, leader_job_id=JOB_ID),
+        _user(),
+    )
+
+    guard.assert_not_awaited()
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["leader_job_ids"] is None

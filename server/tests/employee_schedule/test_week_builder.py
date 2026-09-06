@@ -566,7 +566,7 @@ STORE_HOURS = {"1": {"open": "08:00", "close": "17:00"}}
 def _profile(**overrides):
     profile = {
         "operating_hours": STORE_HOURS, "open_buffer_minutes": 0,
-        "close_buffer_minutes": 0, "leader_job_id": None, "leader_job_name": None,
+        "close_buffer_minutes": 0, "leader_job_ids": [], "leader_job_names": [],
     }
     profile.update(overrides)
     return profile
@@ -739,7 +739,7 @@ async def test_editing_the_profile_after_proposing_does_not_stale_the_run(monkey
     # snapshot, or a buffer edit becomes "the schedule changed, rebuild it".
     assert not {
         "operating_hours", "open_buffer_minutes", "close_buffer_minutes",
-        "leader_job_id", "findings",
+        "leader_job_id", "leader_job_ids", "findings",
     } & set(snapshot)
     # And the real builder reads the profile through its own helper, which
     # `apply_week_draft`'s staleness check never calls.

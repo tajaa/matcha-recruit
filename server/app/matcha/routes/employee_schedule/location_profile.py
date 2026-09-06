@@ -17,7 +17,7 @@ from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.scheduling.employee_schedule import LocationScheduleProfileUpdate
 from ...services.scheduling.location_profile import (
-    UNSET, load_profile_bundle, missing_fields, upsert_location_profile,
+    UNSET, bundle_leader_jobs, load_profile_bundle, missing_fields, upsert_location_profile,
 )
 from ...services.scheduling.schedule_assistant_session import assert_manager_location
 from ...services.scheduling.week_template_writes import JobUnavailable, assert_job_available
@@ -30,6 +30,7 @@ def _serialize(bundle: dict, *, location_id: UUID) -> dict:
     profile = bundle.get("profile") or {}
     template = bundle.get("template")
     missing = missing_fields(bundle)
+    leader_jobs = bundle_leader_jobs(bundle)
     return {
         "location_id": str(location_id),
         # A never-configured location and one saved as Sunday-start with no
@@ -41,8 +42,12 @@ def _serialize(bundle: dict, *, location_id: UUID) -> dict:
         "default_week_template_id": (
             str(profile["default_week_template_id"]) if profile.get("default_week_template_id") else None
         ),
-        "leader_job_id": str(profile["leader_job_id"]) if profile.get("leader_job_id") else None,
-        "leader_job_name": bundle.get("leader_job_name"),
+        # The rule is the set: any ONE of these jobs on shift is lead coverage.
+        # The scalar pair is its first entry, kept for readers that predate it.
+        "leader_job_ids": [job["id"] for job in leader_jobs],
+        "leader_job_names": [job["name"] for job in leader_jobs],
+        "leader_job_id": leader_jobs[0]["id"] if leader_jobs else None,
+        "leader_job_name": leader_jobs[0]["name"] if leader_jobs else None,
         "leader_required": profile.get("leader_required"),
         "notes": profile.get("notes"),
         # Sunday unless this location says otherwise — the default every
@@ -80,11 +85,22 @@ async def update_location_schedule_profile(
             conn, company_id=company_id, user_id=current_user.id,
             actor_role=current_user.role, location_id=location_id,
         )
-        if patch.get("leader_job_id") is not None:
+        # Every leader job has to be usable at this store — the set, or the
+        # one-element legacy spelling when that is all the caller sent. Keyed
+        # on the field being PRESENT, matching what the service does with it:
+        # an explicit `leader_job_ids: null` clears the rule there, so reading
+        # it as "unsupplied" and validating a `leader_job_id` sent alongside
+        # left the route blessing a job the write then threw away — a PUT that
+        # named a lead silently un-answering the leader question instead.
+        if "leader_job_ids" in patch:
+            leader_jobs = patch["leader_job_ids"] or []
+        elif patch.get("leader_job_id") is not None:
+            leader_jobs = [patch["leader_job_id"]]
+        else:
+            leader_jobs = []
+        for job_id in leader_jobs:
             try:
-                await assert_job_available(
-                    conn, company_id, patch["leader_job_id"], location_id=location_id,
-                )
+                await assert_job_available(conn, company_id, job_id, location_id=location_id)
             except JobUnavailable as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         if patch.get("default_week_template_id") is not None:
@@ -115,6 +131,7 @@ async def update_location_schedule_profile(
                     ),
                     default_week_template_id=patch.get("default_week_template_id", UNSET),
                     leader_job_id=patch.get("leader_job_id", UNSET),
+                    leader_job_ids=patch.get("leader_job_ids", UNSET),
                     leader_required=patch.get("leader_required", UNSET),
                     notes=patch.get("notes", UNSET),
                     week_start_weekday=patch.get("week_start_weekday", UNSET),

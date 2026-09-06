@@ -23,6 +23,7 @@ const DEFAULT_CLOSE = '17:00'
  *  PUT entirely, so a manager who only fixes Tuesday does not accidentally
  *  declare the other six days closed. */
 type DayStatus = 'unset' | 'closed' | 'open'
+type LeaderMode = 'unset' | 'none' | 'jobs'
 type DayDraft = { status: DayStatus; open: string; close: string }
 
 function hoursToDraft(hours: OperatingHours | undefined): DayDraft[] {
@@ -63,8 +64,10 @@ export default function WeekStartPane(
   const [days, setDays] = useState<DayDraft[]>(() => hoursToDraft(undefined))
   /** 'unset' is not 'none': the week builder treats an unanswered leader
    *  question as missing setup, so "no lead required" has to be a value the
-   *  manager can actually pick. */
-  const [leaderRule, setLeaderRule] = useState<'unset' | 'none' | string>('unset')
+   *  manager can actually pick. 'jobs' is the yes answer; WHICH jobs is the
+   *  set below — any one of them on shift counts as lead coverage. */
+  const [leaderMode, setLeaderMode] = useState<LeaderMode>('unset')
+  const [leaderJobIds, setLeaderJobIds] = useState<string[]>([])
   const [notes, setNotes] = useState('')
   const [openBuffer, setOpenBuffer] = useState('0')
   const [closeBuffer, setCloseBuffer] = useState('0')
@@ -73,7 +76,15 @@ export default function WeekStartPane(
     setProfile(next)
     setWeekStartWeekday(next.week_start_weekday)
     setDays(hoursToDraft(next.operating_hours))
-    setLeaderRule(next.leader_required === false ? 'none' : (next.leader_job_id ?? 'unset'))
+    // A profile from before the set carries only `leader_job_id`; read it as
+    // a one-element set so a single-role store looks exactly as it did.
+    const ids = next.leader_job_ids ?? (next.leader_job_id ? [next.leader_job_id] : [])
+    setLeaderJobIds(ids)
+    setLeaderMode(
+      next.leader_required === false ? 'none'
+        : next.leader_required === true || ids.length ? 'jobs'
+        : 'unset',
+    )
     setNotes(next.notes ?? '')
     setOpenBuffer(String(next.open_buffer_minutes ?? 0))
     setCloseBuffer(String(next.close_buffer_minutes ?? 0))
@@ -134,17 +145,41 @@ export default function WeekStartPane(
     return Math.min(240, Math.max(0, parsed))
   }
 
+  function toggleLeaderJob(jobId: string) {
+    setLeaderJobIds((current) => (
+      current.includes(jobId) ? current.filter((id) => id !== jobId) : [...current, jobId]
+    ))
+  }
+
+  /** "Yes" with nothing picked is the one state the server refuses, so it is
+   *  saved as unanswered instead — clearing every job is how a manager takes
+   *  the answer back without having to say "no lead required". */
+  const leaderAnswered = leaderMode === 'none' || (leaderMode === 'jobs' && leaderJobIds.length > 0)
+
   async function saveSetup() {
     await persist({
       week_start_weekday: weekStartWeekday,
       operating_hours: draftToHours(days),
-      leader_job_id: leaderRule === 'unset' || leaderRule === 'none' ? null : leaderRule,
-      leader_required: leaderRule === 'unset' ? null : leaderRule !== 'none',
+      leader_job_ids: leaderMode === 'jobs' ? leaderJobIds : [],
+      leader_required: leaderAnswered ? leaderMode === 'jobs' : null,
       notes: notes.trim() || null,
       open_buffer_minutes: bufferValue(openBuffer),
       close_buffer_minutes: bufferValue(closeBuffer),
     }, 'Location scheduling setup saved')
   }
+
+  /** The pickable jobs: this location's, plus any saved leader job the list
+   *  does not carry (company-wide, or since moved) so a saved pick is never
+   *  invisible — and never silently dropped on the next save. */
+  const leaderJobs: Array<{ id: string; name: string }> = [
+    ...jobs.map((job) => ({ id: job.id, name: job.name })),
+    ...leaderJobIds
+      .filter((id) => !jobs.some((job) => job.id === id))
+      .map((id) => {
+        const index = profile?.leader_job_ids?.indexOf(id) ?? -1
+        return { id, name: (index >= 0 && profile?.leader_job_names?.[index]) || 'Job no longer listed here' }
+      }),
+  ]
 
   const defaultTemplate = profile?.default_week_template_id
     ? templates.find((template) => template.id === profile.default_week_template_id)
@@ -219,19 +254,34 @@ export default function WeekStartPane(
       <Card className="space-y-3 border-zinc-800 bg-zinc-900/40 p-4 shadow-none">
         <div>
           <h4 className="text-xs font-medium text-zinc-300">Leader on every shift</h4>
-          <p className="mt-1 text-xs text-zinc-500">The job someone must be working for a shift to count as covered by a lead.</p>
+          <p className="mt-1 text-xs text-zinc-500">The jobs someone must be working for a shift to count as covered by a lead. Pick as many as apply — any one of them on shift is enough.</p>
         </div>
-        <Select
-          label="Leader job"
-          className="max-w-64"
-          options={[
-            { value: 'none', label: 'No leader required' },
-            ...jobs.map((job) => ({ value: job.id, label: job.name })),
-          ]}
-          placeholder={jobs.length ? 'Not answered yet' : 'Not answered yet — no jobs at this location'}
-          value={leaderRule === 'unset' ? '' : leaderRule}
-          onChange={(event) => setLeaderRule(event.target.value || 'unset')}
-        />
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Leader rule">
+          <button type="button" aria-pressed={leaderMode === 'none'} onClick={() => setLeaderMode('none')} className={`rounded-md border px-2 py-1 text-[11px] ${leaderMode === 'none' ? 'border-zinc-500 bg-zinc-700 text-zinc-100' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>No leader required</button>
+          <button type="button" aria-pressed={leaderMode === 'jobs'} onClick={() => setLeaderMode('jobs')} className={`rounded-md border px-2 py-1 text-[11px] ${leaderMode === 'jobs' ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>Yes — these jobs</button>
+          {leaderMode === 'unset' && <span className="text-[11px] text-zinc-600">Not answered yet</span>}
+        </div>
+        {leaderMode === 'jobs' && (
+          leaderJobs.length ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Leader jobs">
+                {leaderJobs.map((job) => {
+                  const picked = leaderJobIds.includes(job.id)
+                  return (
+                    <button key={job.id} type="button" aria-pressed={picked} onClick={() => toggleLeaderJob(job.id)} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ${picked ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>
+                      {picked && <Check className="h-3 w-3" />}{job.name}
+                    </button>
+                  )
+                })}
+              </div>
+              {leaderJobIds.length === 0 && (
+                <p className="text-[11px] text-amber-200/90">Pick at least one job, or choose “No leader required” — with none picked the question saves as still unanswered.</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-[11px] text-zinc-500">No jobs at this location yet — add one under Jobs first.</p>
+          )
+        )}
       </Card>
 
       <Card className="space-y-3 border-zinc-800 bg-zinc-900/40 p-4 shadow-none">

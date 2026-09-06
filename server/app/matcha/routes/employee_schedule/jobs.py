@@ -16,6 +16,7 @@ from app.matcha.models.scheduling.employee_schedule import (
     EmployeeJobsReplace, JobCreate, JobCredentialRequirementsReplace,
     JobEmployeesReplace, JobUpdate,
 )
+from ...services.scheduling.location_profile import detach_job_from_leader_rules
 from ...services.scheduling.job_credential_requirements import (
     fetch_job_credential_requirements,
     materialize_job_requirements,
@@ -310,12 +311,21 @@ async def delete_job(job_id: UUID, current_user=Depends(require_admin_or_client)
             )
             if not row:
                 raise HTTPException(status_code=404, detail="Job not found")
+            # Before the delete, not after: `schedule_location_profiles.
+            # leader_job_ids` is a plain array with no per-element FK, so the
+            # delete's ON DELETE SET NULL reaches only the mirror column and
+            # would leave a dangling uuid behind — a leader rule that reads as
+            # answered while the coverage evaluator can no longer check it.
+            detached = await detach_job_from_leader_rules(
+                conn, company_id=company_id, job_id=job_id, actor_user_id=current_user.id,
+            )
             await conn.execute(
                 "DELETE FROM schedule_jobs WHERE id = $1 AND company_id = $2",
                 job_id, company_id,
             )
             await log_audit(
                 conn, company_id, "schedule_job", job_id, current_user.id,
-                "schedule_job.delete", {"name": row["name"]},
+                "schedule_job.delete",
+                {"name": row["name"], "leader_rules_detached": detached},
             )
     return {"ok": True, "id": str(job_id)}

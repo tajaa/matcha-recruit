@@ -422,10 +422,15 @@ export interface LocationScheduleProfile {
   week_rules: { established: boolean; missing: WeekRuleField[] }
   operating_hours: OperatingHours
   default_week_template_id: string | null
+  /** The leader rule is a SET: any one of these jobs on shift counts as lead
+   *  coverage. Empty when no lead is required or the question is unanswered. */
+  leader_job_ids: string[]
+  leader_job_names: string[]
+  /** First entry of the set, kept for readers that predate it. */
   leader_job_id: string | null
   leader_job_name: string | null
-  /** null = never asked, false = no lead needed, true = `leader_job_id` names
-   *  the job. Unanswered counts as missing setup. */
+  /** null = never asked, false = no lead needed, true = `leader_job_ids` names
+   *  at least one job. Unanswered counts as missing setup. */
   leader_required: boolean | null
   notes: string | null
   week_start_weekday: number
@@ -441,6 +446,10 @@ export interface LocationScheduleProfile {
  *  left off entirely rather than sent as an empty value. */
 export interface LocationScheduleProfileUpdate {
   operating_hours?: OperatingHours
+  /** The leader set. Wins over `leader_job_id` when both are sent; `[]` with
+   *  `leader_required: null` un-answers the question. */
+  leader_job_ids?: string[]
+  /** One-element spelling of `leader_job_ids`, kept for older callers. */
   leader_job_id?: string | null
   leader_required?: boolean | null
   notes?: string | null

@@ -31,7 +31,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Literal, Optional, Sequence
 
-from .location_profile import parse_clock
+from .location_profile import join_or, parse_clock
 
 
 # Operational policy: how finely the day is sampled when looking for holes.
@@ -141,8 +141,8 @@ def make_finding(
     kind: str, severity: str, detail: str, *, day: Optional[date] = None,
     window: Optional[tuple[datetime, datetime]] = None,
     shift_key: Optional[str] = None, job_id: Optional[str] = None,
-    job_name: Optional[str] = None, employee_name: Optional[str] = None,
-    minutes: Optional[int] = None,
+    job_name: Optional[str] = None, job_names: Optional[Sequence[str]] = None,
+    employee_name: Optional[str] = None, minutes: Optional[int] = None,
 ) -> dict[str, Any]:
     """One finding, in the single shape every consumer renders.
 
@@ -150,6 +150,11 @@ def make_finding(
     too: a second hand-rolled dict there is how a key quietly goes missing on
     one kind and the card renders a blank row.  Every value is JSON-safe — the
     whole list is persisted into ``schedule_generation_runs.proposal``.
+
+    ``job_name`` is one real job's name, never prose: every other emitter puts
+    a catalog name there, so a finding that concerns SEVERAL jobs leaves it
+    null and lists them in ``job_names`` instead.  The sentence a person reads
+    lives in ``detail``.
     """
     return {
         "kind": kind,
@@ -162,6 +167,7 @@ def make_finding(
         "shift_key": shift_key,
         "job_id": job_id,
         "job_name": job_name,
+        "job_names": [str(name) for name in job_names] if job_names else None,
         "employee_name": employee_name,
         "minutes": minutes,
         "detail": detail,
@@ -225,7 +231,8 @@ def _split_run(
 
 
 def _leader_findings(
-    *, intervals: list[_Interval], leader_job_id: str, leader_job_name: Optional[str],
+    *, intervals: list[_Interval], leader_job_ids: frozenset[str],
+    leader_job_names: Sequence[str],
     day: date, window_start: datetime, open_dt: datetime, close_dt: datetime,
     window_end: datetime, slice_delta: timedelta, uncovered: list[tuple[datetime, datetime]],
     headcount: Headcount,
@@ -236,12 +243,25 @@ def _leader_findings(
     reported instead, and is suppressed here so the same hole is not read
     twice), they just are not the person who can open the till or lock up.
 
+    ``leader_job_ids`` is a SET: any one of those jobs on shift satisfies the
+    rule, and one finding per check is emitted for the whole set — never one
+    per eligible job, which would report the same absence three times.
+
     An UNFILLED lead slot satisfies nothing in ``assigned`` mode — the same
     rule ``_headcount`` states, and the whole reason an empty lead shift must
     not read as a lead being present. ``required`` mode judges the pattern, so
     there the slot existing is exactly the thing being asked about.
     """
-    label = leader_job_name or "shift lead"
+    names = [str(name) for name in leader_job_names if name]
+    label = join_or(names) or "shift lead"
+    # A finding names ONE job in `job_id`/`job_name`; with several eligible
+    # both stay blank rather than blaming the first, and `job_names` carries
+    # the set. The prose label belongs to `detail` alone — `job_name` holds a
+    # real job's name everywhere else it is read, so "Shift Lead or Assistant
+    # Manager" (or the "shift lead" placeholder for an unnamed set) must not
+    # be persisted into it.
+    sole_job_id = next(iter(leader_job_ids)) if len(leader_job_ids) == 1 else None
+    sole_job_name = names[0] if sole_job_id and len(names) == 1 else None
     findings: list[dict[str, Any]] = []
     checks = (
         ("leader_absent_at_open", window_start, open_dt + slice_delta, "at open"),
@@ -251,7 +271,7 @@ def _leader_findings(
         if any(gap_start < hi and gap_end > lo for gap_start, gap_end in uncovered):
             continue
         if any(
-            item.job_id == leader_job_id and item.overlaps(lo, hi)
+            item.job_id in leader_job_ids and item.overlaps(lo, hi)
             and (headcount == "required" or item.staff > 0)
             for item in intervals
         ):
@@ -259,7 +279,8 @@ def _leader_findings(
         findings.append(make_finding(
             kind, "advisory",
             f"No {label} is scheduled {phrase} on {_DAY_LABELS[sunday_weekday(day)]}.",
-            day=day, window=(lo, hi), job_id=leader_job_id, job_name=leader_job_name,
+            day=day, window=(lo, hi), job_id=sole_job_id, job_name=sole_job_name,
+            job_names=names,
         ))
     return findings
 
@@ -271,8 +292,8 @@ def evaluate_week_coverage(
     operating_hours: Optional[dict[str, Any]],
     open_buffer_minutes: int = 0,
     close_buffer_minutes: int = 0,
-    leader_job_id: Optional[str] = None,
-    leader_job_name: Optional[str] = None,
+    leader_job_ids: Sequence[Any] = (),
+    leader_job_names: Sequence[str] = (),
     week_start: date,
     headcount: Headcount = "assigned",
     slice_minutes: int = SLICE_MINUTES,
@@ -284,6 +305,10 @@ def evaluate_week_coverage(
     store already has, so leaving them out would report a store that is
     genuinely covered as empty for most of the week.
 
+    ``leader_job_ids`` is the location's leader rule as a set — any one of
+    those jobs on shift is lead coverage.  ``leader_job_names`` are their
+    display names in the same order; they only shape the finding's wording.
+
     Returns ``[]`` when everything checks out, and one ``no_hours_known``
     finding per day the store has never said anything about — silence about a
     day is never reported as green.
@@ -292,7 +317,7 @@ def evaluate_week_coverage(
     slice_delta = timedelta(minutes=max(1, int(slice_minutes)))
     open_buffer = timedelta(minutes=max(0, int(open_buffer_minutes or 0)))
     close_buffer = timedelta(minutes=max(0, int(close_buffer_minutes or 0)))
-    leader = str(leader_job_id) if leader_job_id else None
+    leaders = frozenset(str(job_id) for job_id in leader_job_ids if job_id)
 
     plan_intervals = _intervals(plan_shifts, headcount)
     # A published shift's staffing is whoever is on it; "required" is a
@@ -365,9 +390,9 @@ def evaluate_week_coverage(
                     kind, "gap", detail, day=day, window=(start, end), minutes=minutes,
                 ))
 
-        if leader:
+        if leaders:
             findings.extend(_leader_findings(
-                intervals=intervals, leader_job_id=leader, leader_job_name=leader_job_name,
+                intervals=intervals, leader_job_ids=leaders, leader_job_names=leader_job_names,
                 day=day, window_start=window_start, open_dt=open_dt, close_dt=close_dt,
                 window_end=window_end, slice_delta=slice_delta, uncovered=runs,
                 headcount=headcount,

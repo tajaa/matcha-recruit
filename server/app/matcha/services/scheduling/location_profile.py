@@ -13,7 +13,7 @@ the pure helpers below them are unit-tested without a database.
 
 import json
 from datetime import time
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID
 
 import asyncpg
@@ -28,9 +28,16 @@ from .week_template_writes import (
 
 PROFILE_COLS = (
     "id, company_id, location_id, operating_hours, default_week_template_id, "
-    "leader_job_id, leader_required, notes, week_start_weekday, open_buffer_minutes, "
-    "close_buffer_minutes, created_at, updated_at"
+    "leader_job_id, leader_job_ids, leader_required, notes, week_start_weekday, "
+    "open_buffer_minutes, close_buffer_minutes, created_at, updated_at"
 )
+
+# `leader_job_ids` is the rule (any ONE of these jobs on shift is lead
+# coverage); `leader_job_id` is a derived mirror of its first element, kept so
+# the FK's ON DELETE SET NULL and any reader that predates the set still see a
+# sensible value. Only `upsert_location_profile` writes either, and it always
+# writes both — a caller that could set them apart would be a bug.
+MAX_LEADER_JOBS = 20
 
 # Operational policy, NOT law: how long before open / after close somebody has
 # to be on the schedule. Nothing statutory caps prep time, so the bound here is
@@ -148,6 +155,78 @@ def hours_answered(operating_hours: Optional[dict]) -> bool:
     )
 
 
+def normalize_leader_job_ids(values: Any) -> list[UUID]:
+    """The leader set as the DB wants it: UUIDs, deduped, in the order given.
+
+    Order matters only as a tiebreak — the first entry is what the mirror
+    column and the single-value wire fields report — so it is the manager's
+    pick order, not sorted. `None` and `[]` both mean "no jobs named".
+    """
+    if values is None:
+        return []
+    if isinstance(values, (str, UUID)):
+        values = [values]
+    out: list[UUID] = []
+    for value in values:
+        if value in (None, ""):
+            continue
+        job_id = value if isinstance(value, UUID) else UUID(str(value))
+        if job_id not in out:
+            out.append(job_id)
+    if len(out) > MAX_LEADER_JOBS:
+        raise ValueError(f"At most {MAX_LEADER_JOBS} jobs can lead a shift")
+    return out
+
+
+def profile_leader_job_ids(profile: Optional[dict]) -> list:
+    """Every job the profile names as lead coverage.
+
+    Reads the set, falling back to the scalar for a row dict built before the
+    set existed (fixtures, callers that only copied `leader_job_id`). Values
+    come back as they were stored — UUIDs from a live row.
+    """
+    profile = profile or {}
+    ids = profile.get("leader_job_ids")
+    if ids:
+        return list(ids)
+    single = profile.get("leader_job_id")
+    return [single] if single else []
+
+
+def bundle_leader_jobs(bundle: dict) -> list[dict]:
+    """`[{"id", "name"}, ...]` for every leader job the bundle RESOLVED.
+
+    `load_profile_bundle` fills `leader_jobs`, having already dropped any id
+    that no longer names a live job. That resolved list — never the raw array
+    on the profile — is what a reader wants: `leader_job_ids` carries no
+    per-element FK, so a deleted job leaves its uuid behind, and counting it
+    claims coverage nothing can satisfy.
+
+    A bundle assembled elsewhere (tests, older callers) has no `leader_jobs`
+    key; its profile columns are read directly so nothing downstream needs two
+    code paths. Only the first name is knowable in that shape.
+    """
+    jobs = bundle.get("leader_jobs")
+    if jobs is not None:
+        return list(jobs)
+    profile = bundle.get("profile") or {}
+    first_name = bundle.get("leader_job_name")
+    return [
+        {"id": str(job_id), "name": first_name if index == 0 else None}
+        for index, job_id in enumerate(profile_leader_job_ids(profile))
+    ]
+
+
+def join_or(names: Sequence[str]) -> str:
+    """"A", "A or B", "A, B or C" — how a set of leader jobs reads in prose."""
+    names = [str(name) for name in names if name]
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} or {names[-1]}"
+
+
 def missing_fields(bundle: dict) -> list[str]:
     """Which of the three intake answers Huume still has to ask for.
 
@@ -165,7 +244,11 @@ def missing_fields(bundle: dict) -> list[str]:
     # Tri-state: None is "never asked", False is a real answer ("no lead
     # needed"), True has to name the job — same distinction the buffers keep.
     leader_required = profile.get("leader_required")
-    if leader_required is None or (leader_required and not profile.get("leader_job_id")):
+    # The RESOLVED set, not the raw array: deleting a leader job leaves its
+    # uuid in `leader_job_ids` (no per-element FK), and counting that would
+    # report the rule answered while `evaluate_week_coverage` — which only
+    # ever sees resolvable ids — silently stops checking for a lead at all.
+    if leader_required is None or (leader_required and not bundle_leader_jobs(bundle)):
         missing.append("leader_rule")
     return missing
 
@@ -253,9 +336,11 @@ def profile_context_lines(bundle: dict) -> list[str]:
     else:
         lines.append("Prep/close buffer: none set")
 
-    leader = bundle.get("leader_job_name")
-    if leader:
-        lines.append(f"Leader coverage: {leader} on every open shift")
+    leaders = bundle_leader_jobs(bundle)
+    if leaders:
+        lines.append(
+            f"Leader coverage: {join_or([job['name'] for job in leaders])} on every open shift"
+        )
     elif profile.get("leader_required") is False:
         # An answered "no" must not read the same as an unasked question, or
         # the interview asks it again on every turn.
@@ -280,6 +365,7 @@ def _row_to_profile(row) -> Optional[dict]:
         return None
     profile = dict(row)
     profile["operating_hours"] = _loads(profile.get("operating_hours"))
+    profile["leader_job_ids"] = list(profile.get("leader_job_ids") or [])
     return profile
 
 
@@ -305,9 +391,17 @@ async def resolve_week_start_weekday(conn, *, company_id: UUID, location_id: Opt
 
 
 async def load_profile_bundle(conn, *, company_id: UUID, location_id: UUID) -> dict:
-    """Profile + its default week template's blocks + the leader job's name."""
+    """Profile + its default week template's blocks + the leader jobs' names.
+
+    `leader_jobs` keeps the profile's order and drops any id that no longer
+    resolves to a job — the FK on the mirror column nulls itself when a job is
+    deleted, but nothing can do that inside the array. `leader_job_name` is
+    the first name, for readers that predate the set.
+    """
     profile = await get_location_profile(conn, company_id=company_id, location_id=location_id)
-    bundle: dict = {"profile": profile, "template": None, "leader_job_name": None}
+    bundle: dict = {
+        "profile": profile, "template": None, "leader_jobs": [], "leader_job_name": None,
+    }
     if not profile:
         return bundle
 
@@ -348,10 +442,18 @@ async def load_profile_bundle(conn, *, company_id: UUID, location_id: UUID) -> d
                 ],
             }
 
-    if profile.get("leader_job_id"):
-        bundle["leader_job_name"] = await conn.fetchval(
-            "SELECT name FROM schedule_jobs WHERE id = $1 AND company_id = $2",
-            profile["leader_job_id"], company_id,
+    leader_ids = profile_leader_job_ids(profile)
+    if leader_ids:
+        rows = await conn.fetch(
+            "SELECT id, name FROM schedule_jobs WHERE company_id = $1 AND id = ANY($2::uuid[])",
+            company_id, leader_ids,
+        )
+        names = {row["id"]: row["name"] for row in rows}
+        bundle["leader_jobs"] = [
+            {"id": str(job_id), "name": names[job_id]} for job_id in leader_ids if job_id in names
+        ]
+        bundle["leader_job_name"] = (
+            bundle["leader_jobs"][0]["name"] if bundle["leader_jobs"] else None
         )
     return bundle
 
@@ -359,11 +461,18 @@ async def load_profile_bundle(conn, *, company_id: UUID, location_id: UUID) -> d
 async def upsert_location_profile(
     conn, *, company_id: UUID, location_id: UUID, actor_user_id: Optional[UUID],
     operating_hours: Any = UNSET, default_week_template_id: Any = UNSET,
-    leader_job_id: Any = UNSET, leader_required: Any = UNSET, notes: Any = UNSET,
-    week_start_weekday: Any = UNSET,
+    leader_job_id: Any = UNSET, leader_job_ids: Any = UNSET, leader_required: Any = UNSET,
+    notes: Any = UNSET, week_start_weekday: Any = UNSET,
     open_buffer_minutes: Any = UNSET, close_buffer_minutes: Any = UNSET,
 ) -> dict:
-    """Create or patch the location's profile. Only supplied fields are written."""
+    """Create or patch the location's profile. Only supplied fields are written.
+
+    `leader_job_ids` is the leader rule; `leader_job_id` is accepted as the
+    one-element spelling of it for callers that predate the set (the Huume
+    interview names one job). When both are supplied the set wins. Either
+    spelling writes BOTH columns — the scalar is a mirror of the first entry,
+    never an independent value.
+    """
     owns = await conn.fetchval(
         "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
         location_id, company_id,
@@ -376,18 +485,24 @@ async def upsert_location_profile(
         supplied["operating_hours"] = json.dumps(validate_operating_hours(operating_hours))
     if default_week_template_id is not UNSET:
         supplied["default_week_template_id"] = default_week_template_id
-    if leader_job_id is not UNSET:
-        supplied["leader_job_id"] = leader_job_id
+    leaders: Any = UNSET
+    if leader_job_ids is not UNSET:
+        leaders = normalize_leader_job_ids(leader_job_ids)
+    elif leader_job_id is not UNSET:
+        leaders = normalize_leader_job_ids(leader_job_id)
+    if leaders is not UNSET:
+        supplied["leader_job_ids"] = leaders
+        supplied["leader_job_id"] = leaders[0] if leaders else None
     if leader_required is not UNSET:
         supplied["leader_required"] = None if leader_required is None else bool(leader_required)
-    elif leader_job_id is not UNSET:
-        # Naming the job IS the answer to "does a lead have to be on?" — a
-        # caller that only sets leader_job_id would otherwise leave the
-        # question reading as unasked forever. Symmetric on the way out:
-        # clearing the job un-answers the question rather than leaving
-        # leader_required=true with nothing named, which is exactly the state
-        # the CHECK refuses — a 422 on a PUT that looked reasonable.
-        supplied["leader_required"] = True if leader_job_id is not None else None
+    elif leaders is not UNSET:
+        # Naming the jobs IS the answer to "does a lead have to be on?" — a
+        # caller that only sets the jobs would otherwise leave the question
+        # reading as unasked forever. Symmetric on the way out: clearing them
+        # un-answers the question rather than leaving leader_required=true
+        # with nothing named, which is exactly the state the CHECK refuses — a
+        # 422 on a PUT that looked reasonable.
+        supplied["leader_required"] = True if leaders else None
     if notes is not UNSET:
         supplied["notes"] = notes
     if week_start_weekday is not UNSET:
@@ -406,9 +521,9 @@ async def upsert_location_profile(
 
     columns = ["company_id", "location_id", "created_by", "updated_by", *supplied]
     values = [company_id, location_id, actor_user_id, actor_user_id, *supplied.values()]
+    casts = {"operating_hours": "::jsonb", "leader_job_ids": "::uuid[]"}
     placeholders = ", ".join(
-        f"${i}::jsonb" if col == "operating_hours" else f"${i}"
-        for i, col in enumerate(columns, start=1)
+        f"${i}{casts.get(col, '')}" for i, col in enumerate(columns, start=1)
     )
     updates = ", ".join(f"{col} = EXCLUDED.{col}" for col in supplied)
     update_sql = (
@@ -431,10 +546,62 @@ async def upsert_location_profile(
         # callers get a sentence they can act on rather than a 500.
         if "leader" in str(exc):
             raise ValueError(
-                "Name the job that leads every shift, or say no lead is required."
+                "Name at least one job that leads every shift, or say no lead is required."
             ) from exc
         raise
     return _row_to_profile(row)
+
+
+# The leader rule in whichever spelling the row carries: the set when it has
+# entries, else the mirror column. `profile_leader_job_ids`, in SQL.
+_LEADER_SET_SQL = (
+    "CASE WHEN cardinality(leader_job_ids) > 0 THEN leader_job_ids "
+    "WHEN leader_job_id IS NOT NULL THEN ARRAY[leader_job_id] "
+    "ELSE '{}'::uuid[] END"
+)
+
+_LEADER_REMAINDER_SQL = f"array_remove({_LEADER_SET_SQL}, $1::uuid)"
+
+
+async def detach_job_from_leader_rules(
+    conn, *, company_id: UUID, job_id: UUID, actor_user_id: Optional[UUID],
+) -> int:
+    """Drop a job that is about to be deleted from every location's leader rule.
+
+    `leader_job_ids` is a plain array — no per-element FK — so the delete's
+    `ON DELETE SET NULL` reaches the mirror column and nothing else. Left
+    behind, the dangling uuid keeps `missing_fields` reporting the rule as
+    answered while the coverage evaluator drops the id it cannot resolve and
+    stops checking for a lead at all: a green gate over an unchecked week.
+
+    A store left with no leader job goes back to `leader_required = NULL`
+    ("nobody has answered"), the same un-answering `upsert_location_profile`
+    does when a caller clears the set — `leader_required = true` with nothing
+    named is the state the CHECK refuses, and the question has to be re-asked
+    rather than silently dropped.
+
+    Runs BEFORE the delete so the mirror column lands on a surviving leader
+    instead of being nulled by the FK. Returns how many stores were touched.
+    Caller owns the transaction.
+    """
+    rows = await conn.fetch(
+        f"""
+        UPDATE schedule_location_profiles
+        SET leader_job_ids = {_LEADER_REMAINDER_SQL},
+            leader_job_id = ({_LEADER_REMAINDER_SQL})[1],
+            leader_required = CASE
+                WHEN cardinality({_LEADER_REMAINDER_SQL}) > 0 THEN leader_required
+                ELSE NULL
+            END,
+            updated_by = COALESCE($3::uuid, updated_by),
+            updated_at = NOW()
+        WHERE company_id = $2
+          AND (leader_job_ids @> ARRAY[$1::uuid] OR leader_job_id = $1::uuid)
+        RETURNING location_id
+        """,
+        job_id, company_id, actor_user_id,
+    )
+    return len(rows)
 
 
 def _block_signature(name: Optional[str], start, end) -> tuple:
