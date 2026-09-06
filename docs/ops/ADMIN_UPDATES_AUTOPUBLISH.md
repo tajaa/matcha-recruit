@@ -31,8 +31,28 @@ that boundary, the trusted collector replaces it with the complete paginated RES
 list before product classification; at the REST endpoint's 3,000-file ceiling it fails
 closed rather than risking an incomplete product update.
 
-The publication date is the deployment date, not the merge date. Existing ids are
-never overwritten, so a hand-edited entry remains authoritative on retries.
+The publication date is the day the change actually went live, not the merge date. The
+collector takes the tightest defensible bound per component a PR needed, the latest
+across those components, floors it at the PR's merge time, and renders it in
+`America/Los_Angeles` (override with `ADMIN_UPDATES_TIMEZONE`). Two bounds are combined:
+
+- the running blue/green container's `started_at`, read fresh in the same run. It proves
+  the component has served an image containing the PR since then, but only as an upper
+  bound -- a retry, a batch released by `deferred`, or a `since_pr` backfill observes a
+  *later* deploy than the one that carried the PR; and
+- the dispatching deploy's own timestamp, for exactly the components its `target`
+  replaced, and only when its source SHA contains the merge commit and it does not
+  predate the merge. This workflow shares one self-hosted runner, so a dispatch can sit
+  queued for a day and describe a deploy that could not have carried the PR at all.
+
+A container that has never run reports Docker's zero-value `0001-01-01T00:00:00Z`, which
+parses cleanly; the collector rejects any start before the year 2000 as unknown. When a
+required component's start time is unknown the collector falls back to whichever is later
+of the dispatch and this run's production check. Rendering in Pacific matters too: a UTC
+calendar day turns every deploy after 17:00 Pacific into tomorrow's entry. The model never
+computes a date; the validator rejects any entry that changes the one it was given.
+Existing ids are never overwritten, so a hand-edited entry remains authoritative on
+retries.
 
 ## Trust boundary
 
@@ -48,8 +68,17 @@ Drafting reuses `scripts/kanban-autopr/run-codex-sandboxed.sh`:
 - empty AWS mount and no GitHub, Matcha, SSH, or production credentials; and
 - `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, so the writing pass cannot change code.
 
-The model receives a bounded plan and production context, inspects the local PR diffs,
-and must emit one entry-or-skip decision for every requested `(PR, product)` pair. The
+The model receives a bounded plan and production context, and must emit one
+entry-or-skip decision for every requested `(PR, product)` pair. It does not read merge
+diffs: the trusted collector calls `gh pr view` for the few candidate PRs only and
+attaches truncated commit messages, review discussion, and per-file stats to each
+candidate (`scripts/admin-updates/enrich.py`), so the writer works from what a human
+wrote about the change and opens current files only to confirm a real control label.
+Discussion is ordered chronologically and reserves a share of its budget for `reviews`,
+whose approve / request-changes rationale a run of long bot comments used to truncate
+away, and the evidence for all candidates shares one plan-wide budget so a backlog run
+cannot grow the plan without bound. Enrichment is evidence, not a gate: if it fails the
+run warns and publishes from PR titles and bodies. The
 validator rejects extra keys, missing decisions, changed ids/dates, unknown categories,
 control characters, oversized prose, setup prerequisites, and `action-needed` tags.
 
