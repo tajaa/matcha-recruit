@@ -1,7 +1,8 @@
 """Pure tests for Huume's deterministic whole-week assignment planner."""
 
 import inspect
-from datetime import date, datetime, time, timezone
+import json
+from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -26,9 +27,12 @@ class _AsyncContext:
 
 
 class _FakeConn:
-    def __init__(self, row, *, scalar=None):
+    def __init__(self, row, *, scalar=None, rows=()):
         self.row = row
         self.scalar = scalar
+        # Readiness reads the live week to use published shifts as a coverage
+        # baseline; every current caller wants an empty week.
+        self.rows = list(rows)
         self.executed = []
 
     def transaction(self):
@@ -36,6 +40,9 @@ class _FakeConn:
 
     async def fetchrow(self, *_args):
         return self.row
+
+    async def fetch(self, *_args):
+        return self.rows
 
     async def fetchval(self, *_args):
         return self.scalar
@@ -517,3 +524,515 @@ async def test_the_locations_own_week_start_is_accepted(monkeypatch):
 
     # Falls through to the normal empty-week clarify, not the alignment refusal.
     assert result["status"] == "clarify"
+
+
+# --- coverage + break findings -------------------------------------------------
+#
+# The planner reports headcount ("18/18 filled"). These cover the second
+# question a manager actually has — is the store covered, and can anyone be
+# relieved for a break — which a filled-position count cannot answer.
+
+WEEK_START = date(2026, 8, 23)                      # a Sunday
+MONDAY = WEEK_START + timedelta(days=1)
+STORE_HOURS = {"1": {"open": "08:00", "close": "17:00"}}
+
+
+def _profile(**overrides):
+    profile = {
+        "operating_hours": STORE_HOURS, "open_buffer_minutes": 0,
+        "close_buffer_minutes": 0, "leader_job_id": None, "leader_job_name": None,
+    }
+    profile.update(overrides)
+    return profile
+
+
+def _demand_shift(start="08:00", end="17:00", *, key="shift-1", required=1, fixed=()):
+    starts_at = datetime.fromisoformat(f"{MONDAY.isoformat()}T{start}:00").replace(tzinfo=UTC)
+    ends_at = datetime.fromisoformat(f"{MONDAY.isoformat()}T{end}:00").replace(tzinfo=UTC)
+    return {
+        "key": key, "source_shift_id": key, "role": "Barista", "department": None,
+        "starts_at": starts_at, "ends_at": ends_at, "break_minutes": 0,
+        "required_staff": required, "color": None, "notes": None, "kind": "work",
+        "template_id": None, "job_id": None, "training_requirement_id": None,
+        "fixed_employee_ids": list(fixed),
+        "worked_minutes": int((ends_at - starts_at).total_seconds() // 60),
+    }
+
+
+def _propose_env(monkeypatch, conn, *, demand, employees=None, profile=None, breaks=None):
+    """Everything `propose_week_draft` reads, faked down to the planner."""
+    employees = employees if employees is not None else [
+        _employee("amy", "Amy", state="windows"),
+    ]
+    snapshot = {
+        "location_id": str(LOCATION_ID), "week_start": WEEK_START.isoformat(),
+        "source_mode": "existing", "week_template_id": None, "demand": demand,
+        "week_shift_state": [], "employees": employees,
+        "availability": {employee["id"]: {} for employee in employees},
+        "existing_assignments": [], "unavailable_ranges": {}, "gated_job_ids": set(),
+    }
+    monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
+    monkeypatch.setattr(week_builder, "resolve_week_start_weekday", AsyncMock(return_value=0))
+    monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=demand))
+    monkeypatch.setattr(
+        week_builder, "_week_shift_counts", AsyncMock(return_value={"draft": 1, "published": 0}),
+    )
+    monkeypatch.setattr(week_builder, "_list_templates", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        week_builder, "_planning_snapshot", AsyncMock(return_value=(snapshot, demand, None)),
+    )
+    monkeypatch.setattr(
+        week_builder, "_preflight_compliance_blocks", AsyncMock(return_value=set()),
+    )
+    monkeypatch.setattr(
+        week_builder, "_coverage_profile", AsyncMock(return_value=profile or _profile()),
+    )
+    monkeypatch.setattr(
+        week_builder, "_break_relief_findings", AsyncMock(return_value=list(breaks or [])),
+    )
+    return snapshot
+
+
+async def _propose(monkeypatch, conn, **kwargs):
+    _propose_env(monkeypatch, conn, **kwargs)
+    return await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+
+def _persisted_proposal(conn):
+    insert = next(call for call in conn.executed if "schedule_generation_runs" in call[0])
+    return json.loads(insert[12]), json.loads(insert[13])
+
+
+@pytest.mark.asyncio
+async def test_findings_and_counts_are_persisted_with_the_proposal(monkeypatch):
+    """The worker path rebuilds its staged action from `proposal`, never from
+    `review` — findings parked anywhere else are invisible on automatic runs."""
+    conn = _FakeConn(None)
+    # Opens at 09:00 for an 08:00 store: an hour of nobody on.
+    result = await _propose(monkeypatch, conn, demand=[_demand_shift("09:00", "17:00")])
+
+    assert result["status"] == "ready"
+    proposal, metrics = _persisted_proposal(conn)
+    assert [f["kind"] for f in proposal["findings"]] == ["coverage_gap"]
+    assert proposal["findings"][0]["minutes"] == 60
+    assert metrics["finding_counts"] == {"coverage_gap": 1}
+    assert metrics["gap_count"] == 1
+    assert metrics["operating_hours_known"] is True
+    assert result["findings"] == proposal["findings"]
+
+
+@pytest.mark.asyncio
+async def test_the_summary_names_the_gaps_and_never_claims_compliance(monkeypatch):
+    conn = _FakeConn(None)
+    result = await _propose(monkeypatch, conn, demand=[_demand_shift("09:00", "17:00")])
+
+    assert "1 coverage/break gap(s)" in result["summary"]
+    assert "compliant" not in result["summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_a_fully_covered_week_says_so_without_the_word_compliant(monkeypatch):
+    conn = _FakeConn(None)
+    result = await _propose(monkeypatch, conn, demand=[_demand_shift()])
+
+    assert "No coverage gaps found" in result["summary"]
+    assert "compliant" not in result["summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_hours_say_coverage_was_not_checked(monkeypatch):
+    """"No gaps found" and "I could not look" must never read the same."""
+    conn = _FakeConn(None)
+    result = await _propose(
+        monkeypatch, conn, demand=[_demand_shift()],
+        profile=_profile(operating_hours={}),
+    )
+
+    assert "not saved" in result["summary"]
+    assert "coverage at open and close was not checked" in result["summary"]
+    assert result["metrics"]["operating_hours_known"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_returned_findings_are_capped_but_the_counts_are_not(monkeypatch):
+    """Truncating the list must never make the week look cleaner than it is."""
+    conn = _FakeConn(None)
+    many = [
+        week_builder.make_finding(
+            "break_relief_thin", "advisory", f"advisory {index}", day=MONDAY,
+        )
+        for index in range(30)
+    ]
+    result = await _propose(
+        monkeypatch, conn, demand=[_demand_shift()], breaks=many,
+    )
+
+    _proposal, metrics = _persisted_proposal(conn)
+    assert metrics["finding_counts"]["break_relief_thin"] == 30
+    # ...and the card is not 30 identical amber rows.
+    assert len(result["findings"]) == week_builder._MAX_THIN_BREAK_FINDINGS_PER_DAY
+    assert metrics["gap_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_week_with_gaps_is_still_ready_to_stage(monkeypatch):
+    """The impossible-compliance case: nobody can work the shift and the store
+    still has to open. Huume reports it; it does not refuse to produce a week
+    the manager can then fix by hand."""
+    conn = _FakeConn(None)
+    result = await _propose(
+        monkeypatch, conn,
+        demand=[_demand_shift(required=2)],
+        employees=[_employee("amy", "Amy", state="unconfirmed")],
+    )
+
+    assert result["status"] == "ready"
+    assert result["generation_run_id"]
+    assert result["metrics"]["open_positions"] == 2
+    assert result["unfilled"][0]["reason"] == "availability unconfirmed"
+    assert any(f["kind"] == "coverage_gap" for f in result["findings"])
+
+
+@pytest.mark.asyncio
+async def test_editing_the_profile_after_proposing_does_not_stale_the_run(monkeypatch):
+    """`_input_hash` covers the snapshot, and the profile is deliberately NOT
+    in it: a manager fixing a buffer minute must not invalidate an otherwise
+    good proposal at confirm time."""
+    conn = _FakeConn(None)
+    snapshot = _propose_env(monkeypatch, conn, demand=[_demand_shift()])
+
+    await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    # The guard is structural: nothing the profile owns may be in the hashed
+    # snapshot, or a buffer edit becomes "the schedule changed, rebuild it".
+    assert not {
+        "operating_hours", "open_buffer_minutes", "close_buffer_minutes",
+        "leader_job_id", "findings",
+    } & set(snapshot)
+    # And the real builder reads the profile through its own helper, which
+    # `apply_week_draft`'s staleness check never calls.
+    module_source = inspect.getsource(week_builder)
+    body = module_source[module_source.index("async def _planning_snapshot"):]
+    body = body[:body.index("async def get_week_build_readiness")]
+    assert "_coverage_profile" not in body and "get_location_profile" not in body
+
+
+@pytest.mark.asyncio
+async def test_readiness_reports_pattern_holes_without_blocking_the_build(monkeypatch):
+    """A hole in the pattern is something to fix in the interview, not a reason
+    to refuse — refusing is the dead end this whole surface exists to end."""
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown"})
+    _empty_week(monkeypatch, conn, [
+        {"id": str(DEFAULT_TEMPLATE_ID), "name": "Downtown default week", "block_count": 2},
+    ])
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [{
+            "id": "employee-1", "name": "Amy", "availability_state": "windows",
+            "target_weekly_minutes": 1200, "max_weekly_minutes": 2400,
+        }],
+    }))
+    monkeypatch.setattr(
+        week_builder, "_load_existing_demand",
+        AsyncMock(return_value=[_demand_shift("09:00", "17:00")]),
+    )
+    monkeypatch.setattr(
+        week_builder, "_coverage_profile",
+        AsyncMock(return_value=_profile(open_buffer_minutes=30)),
+    )
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    kinds = [finding["kind"] for finding in result["pattern_findings"]]
+    assert "open_buffer_uncovered" in kinds and "coverage_gap" in kinds
+    assert result["operating_hours_known"] is True
+    assert result["open_buffer_minutes"] == 30
+    assert result["ready"] is True
+    assert result["blockers"] == []
+
+
+@pytest.mark.asyncio
+async def test_readiness_says_when_hours_were_never_saved(monkeypatch):
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown"})
+    _empty_week(monkeypatch, conn, [])
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [{
+            "id": "employee-1", "name": "Amy", "availability_state": "windows",
+            "target_weekly_minutes": 1200, "max_weekly_minutes": 2400,
+        }],
+    }))
+    monkeypatch.setattr(
+        week_builder, "_coverage_profile", AsyncMock(return_value=_profile(operating_hours={})),
+    )
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    assert result["operating_hours_known"] is False
+    assert result["pattern_findings"] == []
+
+
+# --- break relief --------------------------------------------------------------
+#
+# `stagger_shift_breaks` is pure, so this runs on the in-memory plan: nothing
+# has to be written before a manager can be told the crew cannot be relieved.
+
+BREAK_EMPLOYEE = UUID("3f6b1c22-2000-4000-8000-0000000000b1")
+SECOND_EMPLOYEE = UUID("3f6b1c22-2000-4000-8000-0000000000b2")
+
+
+def _break_plan(*, duration=30, earliest=11, deadline=14, status="complete"):
+    from app.matcha.services.scheduling.schedule_breaks import BreakPlan, BreakRequirement
+    rule_set = UUID("00000000-0000-0000-0000-0000000000ff")
+    return BreakPlan(
+        status=status,
+        requirements=(BreakRequirement(
+            kind="meal", ordinal=1, duration_minutes=duration, paid=False,
+            earliest_local=datetime(2026, 8, 24, earliest, tzinfo=UTC),
+            recommended_local=datetime(2026, 8, 24, earliest + 1, tzinfo=UTC),
+            deadline_local=datetime(2026, 8, 24, deadline, tzinfo=UTC),
+            waived=False, waiver_attestation_id=None, citation="Cal. Lab. Code § 512",
+            rule_set_id=rule_set,
+        ),),
+        advisories=(), rule_set_ids=(rule_set,), rule_set_hash="hash",
+    )
+
+
+def _plan_with(employee_ids, *, required=1):
+    shift = _demand_shift()
+    return {
+        "shifts": [{
+            **{k: v for k, v in shift.items() if k != "fixed_employee_ids"},
+            "starts_at": shift["starts_at"].isoformat(),
+            "ends_at": shift["ends_at"].isoformat(),
+            "required_staff": required,
+            "fixed_employee_ids": [],
+            "proposed_assignments": [
+                {"employee_id": str(value), "employee_name": f"Person {index}"}
+                for index, value in enumerate(employee_ids)
+            ],
+        }],
+    }
+
+
+def _patch_break_loader(monkeypatch, plans, *, unmapped=frozenset()):
+    from zoneinfo import ZoneInfo
+    monkeypatch.setattr(
+        week_builder, "resolve_week_break_plans",
+        AsyncMock(return_value=(ZoneInfo("UTC"), plans, set(unmapped))),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_solo_shift_that_owes_a_break_is_a_gap_not_an_advisory(monkeypatch):
+    """One person on means the break empties the floor. That is a hole, and it
+    is the case a filled-position count is completely blind to."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    _patch_break_loader(monkeypatch, {"shift-1": {BREAK_EMPLOYEE: _break_plan()}})
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={str(BREAK_EMPLOYEE): "Amy"},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_relief_uncovered"]
+    assert findings[0]["severity"] == "gap"
+    assert "Amy" in findings[0]["detail"]
+    assert findings[0]["kind"] in week_builder.GAP_KINDS
+
+
+@pytest.mark.asyncio
+async def test_a_normally_staffed_shift_is_only_an_advisory(monkeypatch):
+    """`coverage_shortfall` fires on nearly every real shift. Reporting each as
+    a gap would bury the holes that matter."""
+    plan = _plan_with([BREAK_EMPLOYEE, SECOND_EMPLOYEE], required=2)
+    _patch_break_loader(monkeypatch, {"shift-1": {
+        BREAK_EMPLOYEE: _break_plan(), SECOND_EMPLOYEE: _break_plan(),
+    }})
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_relief_thin"]
+    assert findings[0]["severity"] == "advisory"
+    assert findings[0]["kind"] not in week_builder.GAP_KINDS
+
+
+@pytest.mark.asyncio
+async def test_a_break_that_cannot_fit_its_window_is_reported_with_the_reason(monkeypatch):
+    plan = _plan_with([BREAK_EMPLOYEE])
+    # A 30-minute meal owed inside an 11:00-11:10 window cannot be taken.
+    _patch_break_loader(monkeypatch, {"shift-1": {
+        BREAK_EMPLOYEE: _break_plan(duration=30, earliest=11, deadline=11),
+    }})
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={str(BREAK_EMPLOYEE): "Amy"},
+    )
+
+    kinds = {f["kind"] for f in findings}
+    assert "break_window_conflict" in kinds
+    conflict = next(f for f in findings if f["kind"] == "break_window_conflict")
+    assert "deadline" in conflict["detail"] or "does not fit" in conflict["detail"]
+
+
+@pytest.mark.asyncio
+async def test_unmapped_break_rules_are_surfaced_once_not_swallowed(monkeypatch):
+    """A jurisdiction with nothing in the catalog must never read as
+    "no breaks required"."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    _patch_break_loader(
+        monkeypatch, {"shift-1": {BREAK_EMPLOYEE: _break_plan(status="unmapped")}},
+        unmapped={date(2026, 8, 24)},
+    )
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={},
+    )
+
+    unmapped = [f for f in findings if f["kind"] == "break_rules_unmapped"]
+    assert len(unmapped) == 1
+    assert "2026-08-24" in unmapped[0]["detail"]
+
+
+@pytest.mark.asyncio
+async def test_an_unstaffed_shift_owes_no_break_relief(monkeypatch):
+    plan = _plan_with([])
+    loader = AsyncMock()
+    monkeypatch.setattr(week_builder, "resolve_week_break_plans", loader)
+
+    assert await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={},
+    ) == []
+    loader.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_break_loader_never_fails_the_build(monkeypatch):
+    """Same contract as the compliance preflight: a findings pass that can take
+    down a build is worse than the silence it replaces."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    monkeypatch.setattr(
+        week_builder, "resolve_week_break_plans", AsyncMock(side_effect=RuntimeError("boom")),
+    )
+
+    assert await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={},
+    ) == []
+
+
+@pytest.mark.asyncio
+async def test_a_findings_pass_that_blows_up_does_not_fail_the_build(monkeypatch):
+    """The guard covers the WHOLE pass, not just its break half: a profile read
+    that raises used to turn a week that built fine into a failed Huume turn."""
+    conn = _FakeConn(None)
+    _propose_env(monkeypatch, conn, demand=[_demand_shift()])
+    monkeypatch.setattr(
+        week_builder, "_coverage_profile", AsyncMock(side_effect=RuntimeError("boom")),
+    )
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    assert result["status"] == "ready"
+    assert result["findings"] == []
+    # ...and it says coverage was NOT checked, never that the week came back clean.
+    assert result["metrics"]["operating_hours_known"] is False
+    assert "was not checked" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_the_cap_keeps_gaps_over_advisories_whatever_day_they_fall_on(monkeypatch):
+    """The list is sorted day-then-time, so a plain slice would drop Saturday's
+    real holes to make room for Sunday's advisories."""
+    conn = _FakeConn(None)
+    saturday = WEEK_START + timedelta(days=6)
+    advisories = [
+        week_builder.make_finding(
+            "break_window_conflict", "advisory", f"advisory {index}",
+            day=WEEK_START, shift_key=f"sun-{index}",
+        )
+        for index in range(week_builder._MAX_FINDINGS + 5)
+    ]
+    gaps = [
+        week_builder.make_finding(
+            "break_relief_impossible", "gap", f"gap {index}",
+            day=saturday, shift_key=f"sat-{index}",
+        )
+        for index in range(3)
+    ]
+    result = await _propose(
+        monkeypatch, conn, demand=[_demand_shift()], breaks=[*advisories, *gaps],
+    )
+
+    # Both boundaries truncate — the persisted list and the shorter one echoed
+    # back — and the Saturday gaps have to survive each of them.
+    kinds = [finding["kind"] for finding in result["findings"]]
+    assert kinds.count("break_relief_impossible") == 3
+    assert len(result["findings"]) == week_builder._FINDINGS_RETURNED
+
+    proposal, metrics = _persisted_proposal(conn)
+    persisted = [finding["kind"] for finding in proposal["findings"]]
+    assert persisted.count("break_relief_impossible") == 3
+    assert len(proposal["findings"]) == week_builder._MAX_FINDINGS
+    # Counts stay uncapped, so the week never reads cleaner than it is.
+    assert metrics["gap_count"] == 3
+
+    # The kept set is still in day order for the card.
+    days = [finding["day"] for finding in result["findings"]]
+    assert days == sorted(days)
+
+
+@pytest.mark.asyncio
+async def test_a_break_plan_that_never_resolved_for_one_person_is_still_reported(monkeypatch):
+    """No date of birth against age-specific rules errors the plan for that
+    person alone, so the date never lands in `unmapped_dates`. The unresolved
+    requirement places no slot either, which silences the coverage advisory —
+    a solo shift owing a meal break would otherwise report NOTHING."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    _patch_break_loader(
+        monkeypatch, {"shift-1": {BREAK_EMPLOYEE: _break_plan(status="error")}},
+    )
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={str(BREAK_EMPLOYEE): "Amy"},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_rules_unresolved"]
+    assert findings[0]["severity"] == "advisory"
+    assert "Amy" in findings[0]["detail"]
+    assert findings[0]["minutes"] == 30
+
+
+@pytest.mark.asyncio
+async def test_an_unresolved_plan_is_not_said_twice_on_an_unmapped_date(monkeypatch):
+    """`break_rules_unmapped` already says it once for the whole date."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    _patch_break_loader(
+        monkeypatch, {"shift-1": {BREAK_EMPLOYEE: _break_plan(status="unmapped")}},
+        unmapped={date(2026, 8, 24)},
+    )
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_rules_unmapped"]

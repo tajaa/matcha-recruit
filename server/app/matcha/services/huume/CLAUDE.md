@@ -36,6 +36,31 @@ the one `build_system_prompt` callsite in `agent.py`) — there is no per-turn
 context builder on the Huume path, since `_run_huume_dispatch` replaces
 `_inject_mode_contexts` wholesale.
 
+**Operational coverage on a generated week (2026-09-06).** `build_week_schedule`
+now returns `findings` alongside `unfilled`, and the staged
+`schedule_week_draft` action carries them (plus `metrics.gap_count` /
+`finding_counts` / `operating_hours_known`). The full spec is in
+`services/scheduling/CLAUDE.md` §"Week coverage + break relief findings"; what
+matters on this surface:
+
+- The tool response echoes `findings` on the SAME turn it stages, because the
+  state block only reaches the model on the NEXT turn — without the echo the
+  model replies "week built" with nothing else.
+- `prompt.build_state_block`'s `schedule_week_draft` branch names the top three
+  findings verbatim, not just a count: a later turn sees only that text, and
+  "3 gaps" is a number the model cannot turn into anything actionable.
+- The system prompt forbids calling a generated week compliant, fully covered,
+  or done, and requires saying plainly that coverage was not checked when
+  `operating_hours_known` is false.
+- `save_location_schedule_profile` gained `open_buffer_minutes` /
+  `close_buffer_minutes` in the tool schema AND in `_HR_OPS_TOOL_SPECS[...]
+  ["fields"]` — a field missing from `fields` is dropped from the staged dict,
+  so the confirm turn would write a profile without the buffer the manager
+  gave. `0` is a real answer ("nobody comes in early") and is kept distinct
+  from "this turn said nothing", all the way through `execute`.
+- Findings are information, not authorization: a week with gaps stages and
+  confirms exactly like a clean one.
+
 `current_state.huume_choice` (`{question, options:[{label, send?}], kind}`) is
 a question whose answer is a finite choice, rendered as tappable chips
 (`work/components/panels/HuumeChoiceChips.tsx`). Set from `finish(question,

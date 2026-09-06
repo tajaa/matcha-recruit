@@ -546,7 +546,10 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         # Like propose_schedule_change, the real staged state is what
         # schedule_profile_skill.resolve_profile_args merged in (resolved job
         # ids, materialized leader blocks) — not the model's raw args.
-        "fields": ("operating_hours", "blocks", "leader_job_name", "notes", "template_name"),
+        "fields": (
+            "operating_hours", "blocks", "leader_job_name", "notes", "template_name",
+            "open_buffer_minutes", "close_buffer_minutes",
+        ),
         "staged_label": "Staged: location schedule profile",
         "refused_label": "Location profile refused",
         "done_label": "Saved location schedule profile",
@@ -1701,6 +1704,10 @@ async def run_huume_turn(
                         response["summary"] = staged.get("summary")
                         response["metrics"] = staged.get("metrics")
                         response["unfilled"] = staged.get("unfilled")
+                        # The model has to be able to relay the gaps in the SAME
+                        # turn it stages; waiting for next turn's state block
+                        # means the manager reads "week built" with nothing else.
+                        response["findings"] = staged.get("findings")
                         response["schedule_preview"] = staged.get("schedule_preview")
                         response["preview_truncated"] = staged.get("preview_truncated")
                     if name == "save_location_schedule_profile":

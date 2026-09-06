@@ -867,12 +867,37 @@ export interface HuumeActionScheduleWeekDraft {
     proposed_positions?: number
     filled_positions?: number
     open_positions?: number
+    /** Every finding by kind, uncapped — `findings` below is trimmed for
+     *  readability, these counts are not. */
+    finding_counts?: Record<string, number>
+    gap_count?: number
+    /** False means the location has no saved opening hours, so coverage at
+     *  open and close was never checked — different from "no gaps found". */
+    operating_hours_known?: boolean
   }
   unfilled?: Array<{
     shift_key?: string
     starts_at?: string
     role?: string | null
     reason?: string
+    /** Every refusal reason counted, not just the most common one. */
+    exclusions?: Record<string, number>
+  }>
+  /** What the week does not cover: holes against the store's operating hours
+   *  and buffers, and breaks nobody can be relieved for. `gap` is a real hole,
+   *  `advisory` is worth a look. */
+  findings?: Array<{
+    kind: string
+    severity: 'gap' | 'advisory'
+    day?: string | null
+    weekday?: number | null
+    window?: { start: string; end: string } | null
+    shift_key?: string | null
+    job_id?: string | null
+    job_name?: string | null
+    employee_name?: string | null
+    minutes?: number | null
+    detail: string
   }>
   schedule_preview?: Array<{
     shift_key: string

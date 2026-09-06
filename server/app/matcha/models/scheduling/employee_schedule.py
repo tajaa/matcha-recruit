@@ -369,6 +369,10 @@ class LocationScheduleProfileUpdate(BaseModel):
     leader_job_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=2000)
     week_start_weekday: Optional[Weekday] = None
+    # Operational policy, not law: minutes somebody must be on the schedule
+    # before the doors open / after they shut. The bound matches the DB CHECK.
+    open_buffer_minutes: Optional[int] = Field(None, ge=0, le=240)
+    close_buffer_minutes: Optional[int] = Field(None, ge=0, le=240)
 
     @model_validator(mode="after")
     def _check_weekday_keys(self) -> "LocationScheduleProfileUpdate":

@@ -486,3 +486,83 @@ def _null_context(value=None):
     context.__aenter__ = AsyncMock(return_value=value)
     context.__aexit__ = AsyncMock(return_value=False)
     return context
+
+
+# --- open/close buffers -------------------------------------------------------
+#
+# Operational policy, not law: how long the store's own open and close take.
+# The coverage evaluator widens each open day's required window by these.
+
+@pytest.mark.parametrize("value,expected", [
+    (None, 0), ("", 0), (0, 0), (30, 30), ("30", 30), (" 45 ", 45), (240, 240),
+])
+def test_validate_buffer_minutes_accepts_real_answers(value, expected):
+    assert location_profile.validate_buffer_minutes(value, label="Prep") == expected
+
+
+@pytest.mark.parametrize("value", [-1, 241, "abc", "30m", 3.5])
+def test_validate_buffer_minutes_rejects_the_rest(value):
+    with pytest.raises(ValueError):
+        location_profile.validate_buffer_minutes(value, label="Prep")
+
+
+def test_profile_context_lines_state_the_buffers_either_way():
+    bundle = _bundle(hours={"1": {"open": "08:00", "close": "17:00"}})
+    bundle["profile"]["open_buffer_minutes"] = 30
+    bundle["profile"]["close_buffer_minutes"] = 20
+    assert "Prep/close buffer: 30m before open, 20m after close" in profile_context_lines(bundle)
+
+    assert "Prep/close buffer: none set" in profile_context_lines(_bundle())
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_stages_a_zero_buffer_as_a_real_answer(monkeypatch):
+    """0 is "nobody comes in early", which is different from "this turn said
+    nothing" — collapsing the two would silently keep an old buffer."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"open_buffer_minutes": 30, "close_buffer_minutes": 0},
+    )
+
+    assert result["status"] == "ok"
+    assert result["open_buffer_minutes"] == 30
+    assert result["close_buffer_minutes"] == 0
+    assert "prep 30m" in result["summary"] and "close 0m" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_clarifies_an_out_of_range_buffer(monkeypatch):
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"open_buffer_minutes": 600},
+    )
+
+    assert result["status"] == "clarify"
+    assert "0 and 240" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_writes_a_buffer_only_when_the_turn_carried_one(monkeypatch):
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=_null_context())
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=_null_context(conn)))
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(location_profile, "upsert_location_profile", upsert)
+    monkeypatch.setattr(schedule_profile_skill, "log_audit", AsyncMock())
+
+    await schedule_profile_skill.execute(
+        company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        action={"type": "schedule_location_profile", "confirm_id": "ab12cd34",
+                "location_id": str(LOCATION_ID), "operating_hours": {}, "blocks": [],
+                "open_buffer_minutes": 0, "close_buffer_minutes": None},
+    )
+
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["open_buffer_minutes"] == 0
+    assert "close_buffer_minutes" not in kwargs

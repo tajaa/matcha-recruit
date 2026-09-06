@@ -74,7 +74,12 @@ export function bannerLabel(action: HuumeAction): string {
     case 'schedule_week_draft': {
       const filled = action.metrics?.filled_positions ?? '?'
       const required = action.metrics?.required_positions ?? '?'
-      return `Use this generated week (${filled}/${required} positions filled)?`
+      // "20/20 filled" reads as done. If the week leaves a hole at open or
+      // nobody to relieve a break, the banner has to say so before the
+      // manager's thumb reaches Confirm.
+      const gaps = action.metrics?.gap_count ?? 0
+      const suffix = gaps ? `, ${gaps} coverage gap${gaps === 1 ? '' : 's'} to review` : ''
+      return `Use this generated week (${filled}/${required} positions filled${suffix})?`
     }
     case 'schedule_note':
       return 'Save this assignment note?'

@@ -1,5 +1,8 @@
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
-import type { HuumeAction, HuumeActionScheduleLocationProfile, HuumeActionSendOffer } from '../../../types'
+import type {
+  HuumeAction, HuumeActionScheduleLocationProfile, HuumeActionScheduleWeekDraft,
+  HuumeActionSendOffer,
+} from '../../../types'
 import { actionIcon, DONE_LABELS } from '../../../utils/huumeActionMeta'
 import { fmtDayLabel, fmtTime, WEEKDAY_LABELS } from '../../../../types/employeeSchedule'
 
@@ -21,6 +24,91 @@ function Meta({ label, value }: { label: string; value?: string | number | null 
 function Prose({ children }: { children?: string | null }) {
   if (!children) return null
   return <p className="max-w-[65ch] whitespace-pre-wrap text-sm leading-relaxed">{children}</p>
+}
+
+type WeekFinding = NonNullable<HuumeActionScheduleWeekDraft['findings']>[number]
+
+/** Plain-English heading per finding kind. An unknown kind falls back to the
+ *  server's own `detail` line under a generic heading rather than vanishing —
+ *  a new backend finding must never render as an empty section. */
+const FINDING_LABELS: Record<string, string> = {
+  coverage_gap: 'Floor uncovered while open',
+  open_buffer_uncovered: 'Nobody for the opening prep',
+  close_buffer_uncovered: 'Nobody scheduled to close',
+  break_relief_uncovered: 'No cover for a required break',
+  break_relief_impossible: 'A required break cannot be scheduled',
+  break_relief_thin: 'Floor drops during breaks',
+  break_window_conflict: 'Break falls outside its legal window',
+  break_rules_unmapped: 'Break rules unavailable',
+  break_rules_unresolved: 'Break requirements not evaluated',
+  leader_absent_at_open: 'No lead at open',
+  leader_absent_at_close: 'No lead at close',
+  thin_open: 'Thin at open',
+  thin_close: 'Thin at close',
+  demand_outside_hours: 'Shift outside opening hours',
+  demand_on_closed_day: 'Shift on a closed day',
+  no_hours_known: 'Day not checked',
+}
+
+function findingRowLabel(finding: WeekFinding): string {
+  const day = finding.day ? fmtDayLabel(finding.day) : null
+  const window = finding.window ? `${finding.window.start}–${finding.window.end}` : null
+  return [day, window].filter(Boolean).join(' · ')
+}
+
+/** Everything the generated week does NOT cover, grouped by kind.
+ *
+ *  Deliberately its own section rather than lines appended to the summary:
+ *  "18/18 positions filled" is the number a manager acts on, and a hole at
+ *  close has to be visible in the same glance or the card reads as done. */
+function NeedsReview(
+  { findings, hoursKnown, chipRed }: {
+    findings?: WeekFinding[]
+    hoursKnown?: boolean
+    chipRed: string
+  },
+) {
+  const grouped = new Map<string, WeekFinding[]>()
+  for (const finding of findings ?? []) {
+    const existing = grouped.get(finding.kind)
+    if (existing) existing.push(finding)
+    else grouped.set(finding.kind, [finding])
+  }
+  if (!grouped.size && hoursKnown !== false) return null
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Needs review</div>
+      {hoursKnown === false && (
+        <p className="mb-1.5 text-[11px] opacity-60">
+          This location&rsquo;s opening hours are not saved, so coverage at open and close was not checked.
+        </p>
+      )}
+      <div className="space-y-2">
+        {[...grouped.entries()].map(([kind, items]) => (
+          <div key={kind}>
+            <div className="mb-0.5 text-[11px] font-medium opacity-80">
+              {FINDING_LABELS[kind] ?? 'Needs a look'}
+            </div>
+            <div className="space-y-1">
+              {items.map((finding, index) => (
+                <div
+                  key={`${kind}-${index}`}
+                  className={
+                    finding.severity === 'gap'
+                      ? `rounded border px-2 py-1.5 text-[11px] ${chipRed}`
+                      : 'rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-600 dark:text-amber-300'
+                  }
+                >
+                  {findingRowLabel(finding) ? `${findingRowLabel(finding)} — ` : ''}
+                  {finding.detail}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function titleFor(action: ActionDocViewerProps['action']): string {
@@ -303,6 +391,11 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Still open" value={action.metrics?.open_positions} />
           </div>
           <Prose>{action.summary}</Prose>
+          <NeedsReview
+            findings={action.findings}
+            hoursKnown={action.metrics?.operating_hours_known}
+            chipRed={chipRed}
+          />
           {!!action.schedule_preview?.length && (
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Proposed shifts</div>

@@ -214,9 +214,23 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
             filled = metrics.get("filled_positions", "?")
             required = metrics.get("required_positions", "?")
             open_positions = metrics.get("open_positions", "?")
+            findings = action.get("findings") or []
+            gap_count = metrics.get("gap_count")
+            coverage = ""
+            if metrics.get("operating_hours_known") is False:
+                coverage = (
+                    "; this location's hours are not saved, so coverage at open/close "
+                    "was NOT checked"
+                )
+            elif findings:
+                # Named in the block, not just counted: a later turn only sees
+                # this text, and "3 gaps" with no detail is a number the model
+                # cannot turn into anything the manager can act on.
+                top = "; ".join(str(item.get("detail")) for item in findings[:3])
+                coverage = f"; {gap_count or 0} coverage/break gap(s), {len(findings)} finding(s) — top: {top}"
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: generated weekly schedule "
-                f"({filled}/{required} positions filled; {open_positions} open), "
+                f"({filled}/{required} positions filled; {open_positions} open){coverage}, "
                 f"confirm_id={action.get('confirm_id')}. Calling build_week_schedule again with "
                 f"EXACTLY this confirm_id after the admin explicitly confirms applies it to the "
                 f"editor as drafts; omitting confirm_id (or using a different one) builds a NEW proposal."
@@ -373,9 +387,9 @@ Use deterministic schedule data for staffing, breaks, notes, eligibility, permit
 
 {location_profile_block or "No scheduling profile saved yet for this location."}
 
-For a request to make the whole week's schedule, call get_week_build_readiness and then build_week_schedule when the demand source is unambiguous. Availability tells you who can work; existing draft shifts, this location's saved staffing pattern, or another saved week template define how many people the store needs and when. The deterministic builder preserves existing assignments, excludes unconfirmed availability, respects qualifications/time away/hour caps, and explains any open positions. A generated week always lands as editable drafts after confirmation; only the manager publishes it.
+For a request to make the whole week's schedule, call get_week_build_readiness and then build_week_schedule when the demand source is unambiguous. Availability tells you who can work; existing draft shifts, this location's saved staffing pattern, or another saved week template define how many people the store needs and when. The deterministic builder preserves existing assignments, excludes unconfirmed availability, respects qualifications/time away/hour caps, explains any open positions, AND returns coverage/break `findings`. Relay every gap in those findings to the manager in your own reply — never describe a generated week as compliant, fully covered, or done. `severity="gap"` means a real hole (nobody on while the store is open, nobody for the open prep or the close, no one to relieve a required break); `"advisory"` is worth a mention. When `metrics.operating_hours_known` is false, say plainly that coverage at open and close could not be checked and offer to save the store's hours. Readiness returns `pattern_findings` the same way — holes in the staffing pattern itself, which you should raise BEFORE building rather than after. A generated week always lands as editable drafts after confirmation; only the manager publishes it.
 
-When the week has no staffing demand yet, do NOT tell the manager to go add draft shifts or build a template by hand — interview them instead. Read get_location_schedule_profile first (much of it may already be saved), then ask for what is still missing, ONE question per turn: the store's opening hours, the shift blocks a normal week needs (name, job, days, times, how many people), and whether a shift lead or manager has to be on every shift. When the answer is one of a short list — a job name, a saved template, yes/no — pass `question` plus `options` to finish so the manager can tap the answer instead of typing it. Use real job names from the location; never invent one. Once you have hours and at least one shift block, stage save_location_schedule_profile — never in the same turn you build a week. After the manager confirms it, call get_week_build_readiness and then build_week_schedule; the saved pattern is picked up automatically, so you will not have to ask which template to use again.
+When the week has no staffing demand yet, do NOT tell the manager to go add draft shifts or build a template by hand — interview them instead. Read get_location_schedule_profile first (much of it may already be saved), then ask for what is still missing, ONE question per turn: the store's opening hours, how many minutes of prep before open and cleanup after close somebody has to be scheduled for, the shift blocks a normal week needs (name, job, days, times, how many people), and whether a shift lead or manager has to be on every shift. When the answer is one of a short list — a job name, a saved template, yes/no — pass `question` plus `options` to finish so the manager can tap the answer instead of typing it. Use real job names from the location; never invent one. Once you have hours and at least one shift block, stage save_location_schedule_profile — never in the same turn you build a week. After the manager confirms it, call get_week_build_readiness and then build_week_schedule; the saved pattern is picked up automatically, so you will not have to ask which template to use again.
 
 Sales projections, break rules and legal compliance are handled deterministically downstream — do not ask the manager about them, and do not promise a forecast you were not given data for.
 
