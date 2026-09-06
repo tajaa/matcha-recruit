@@ -268,7 +268,7 @@ export default function WeekStartPane(
                 {leaderJobs.map((job) => {
                   const picked = leaderJobIds.includes(job.id)
                   return (
-                    <button key={job.id} type="button" aria-pressed={picked} onClick={() => toggleLeaderJob(job.id)} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ${picked ? 'border-emerald-500 bg-emerald-600/20 text-emerald-100' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>
+                    <button key={job.id} type="button" aria-pressed={picked} onClick={() => toggleLeaderJob(job.id)} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ${picked ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'}`}>
                       {picked && <Check className="h-3 w-3" />}{job.name}
                     </button>
                   )
