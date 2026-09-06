@@ -310,3 +310,31 @@ async def test_session_accepts_the_week_start_the_location_does_use(monkeypatch)
 
 async def _monday_weeks(*_args, **_kwargs) -> int:
     return 1
+
+
+def test_an_automatic_proposal_carries_its_coverage_findings():
+    """The worker path rebuilds the staged action from `proposal`, never from
+    `review` — an automatic run nobody watched is exactly the one where an
+    unreported hole reaches a manager as "prepared this week for review"."""
+    run_id = uuid4()
+    location_id = uuid4()
+    findings = [{
+        "kind": "close_buffer_uncovered", "severity": "gap", "day": "2026-08-24",
+        "detail": "Nobody is scheduled to close on Monday.",
+    }]
+    action = session._automatic_action({
+        "id": run_id,
+        "location_id": location_id,
+        "week_start": date(2026, 8, 23),
+        "source_mode": "template",
+        "week_template_id": None,
+        "proposal": json.dumps({
+            "unfilled": [],
+            "findings": findings,
+            "review": {"summary": "Built a draft proposal.", "schedule_preview": []},
+        }),
+        "metrics": json.dumps({"gap_count": 1, "operating_hours_known": True}),
+    })
+
+    assert action["findings"] == findings
+    assert action["metrics"]["gap_count"] == 1

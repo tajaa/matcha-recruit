@@ -912,6 +912,20 @@ TOOLS: tuple[HuumeTool, ...] = (
                 type=types.Type.STRING,
                 description="Job that must be on every open shift (shift lead / manager), if the manager named one.",
             ),
+            "open_buffer_minutes": types.Schema(
+                type=types.Type.INTEGER,
+                description=(
+                    "Minutes of prep BEFORE opening time that somebody has to be "
+                    "scheduled for (0-240). 0 if the manager says nobody comes in early."
+                ),
+            ),
+            "close_buffer_minutes": types.Schema(
+                type=types.Type.INTEGER,
+                description=(
+                    "Minutes of cleanup AFTER closing time that somebody has to be "
+                    "scheduled for (0-240). 0 if staff leave when the doors shut."
+                ),
+            ),
             "notes": types.Schema(type=types.Type.STRING),
             "template_name": types.Schema(
                 type=types.Type.STRING,
@@ -926,7 +940,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         discovery=True,
         intent_hints=(
             "set up the schedule", "our hours are", "we always need", "shift lead",
-            "how many people", "store setup",
+            "how many people", "store setup", "come in early", "prep before open",
         ),
     ),
     _tool(

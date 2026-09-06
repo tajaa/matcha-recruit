@@ -41,6 +41,8 @@ def _serialize(bundle: dict, *, location_id: UUID) -> dict:
         # Sunday unless this location says otherwise — the default every
         # week-start computation in the codebase already assumes.
         "week_start_weekday": int(profile.get("week_start_weekday") or 0),
+        "open_buffer_minutes": int(profile.get("open_buffer_minutes") or 0),
+        "close_buffer_minutes": int(profile.get("close_buffer_minutes") or 0),
         "template": template,
     }
 
@@ -108,6 +110,8 @@ async def update_location_schedule_profile(
                     leader_job_id=patch.get("leader_job_id", UNSET),
                     notes=patch.get("notes", UNSET),
                     week_start_weekday=patch.get("week_start_weekday", UNSET),
+                    open_buffer_minutes=patch.get("open_buffer_minutes", UNSET),
+                    close_buffer_minutes=patch.get("close_buffer_minutes", UNSET),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -32,7 +32,10 @@ def _clock(value) -> str:
     return location_profile.parse_clock(value).strftime("%H:%M")
 
 
-def _summarize(operating_hours: dict, blocks: list[dict], leader_job_name: Optional[str]) -> str:
+def _summarize(
+    operating_hours: dict, blocks: list[dict], leader_job_name: Optional[str],
+    open_buffer: Optional[int] = None, close_buffer: Optional[int] = None,
+) -> str:
     parts = []
     open_days = location_profile.open_weekdays(operating_hours)
     if operating_hours:
@@ -42,6 +45,10 @@ def _summarize(operating_hours: dict, blocks: list[dict], leader_job_name: Optio
         parts.append(f"{len(blocks)} shift block{'s' if len(blocks) != 1 else ''} ({positions} positions/day-slot)")
     if leader_job_name:
         parts.append(f"leader: {leader_job_name}")
+    if open_buffer is not None:
+        parts.append(f"prep {open_buffer}m")
+    if close_buffer is not None:
+        parts.append(f"close {close_buffer}m")
     return ", ".join(parts) or "no changes"
 
 
@@ -130,6 +137,23 @@ async def resolve_profile_args(
     """
     try:
         supplied_hours = location_profile.validate_operating_hours(args.get("operating_hours"))
+    except ValueError as exc:
+        return {"status": "clarify", "message": str(exc)}
+
+    # `None` means this turn said nothing about the buffer; 0 is a real answer
+    # ("nobody comes in early") and has to survive as one, so the two are kept
+    # apart all the way through to `execute`.
+    open_buffer: Optional[int] = None
+    close_buffer: Optional[int] = None
+    try:
+        if args.get("open_buffer_minutes") is not None:
+            open_buffer = location_profile.validate_buffer_minutes(
+                args["open_buffer_minutes"], label="Opening prep buffer",
+            )
+        if args.get("close_buffer_minutes") is not None:
+            close_buffer = location_profile.validate_buffer_minutes(
+                args["close_buffer_minutes"], label="Closing buffer",
+            )
     except ValueError as exc:
         return {"status": "clarify", "message": str(exc)}
 
@@ -234,7 +258,10 @@ async def resolve_profile_args(
     # Deliberately the SUPPLIED hours: merged hours are non-empty for any
     # location that answered once, and a turn that said nothing new is not a
     # save.
-    if not supplied_hours and not blocks and not leader_job and not notes:
+    if (
+        not supplied_hours and not blocks and not leader_job and not notes
+        and open_buffer is None and close_buffer is None
+    ):
         return {
             "status": "clarify",
             "message": "Tell me the store's hours, its usual shift blocks, or who has to be on the floor.",
@@ -246,9 +273,14 @@ async def resolve_profile_args(
         "blocks": blocks,
         "leader_job_id": str(leader_job["id"]) if leader_job else None,
         "leader_job_name": leader_job["name"] if leader_job else None,
+        "open_buffer_minutes": open_buffer,
+        "close_buffer_minutes": close_buffer,
         "notes": notes,
         "template_name": args.get("template_name"),
-        "summary": _summarize(operating_hours, blocks, leader_job["name"] if leader_job else None),
+        "summary": _summarize(
+            operating_hours, blocks, leader_job["name"] if leader_job else None,
+            open_buffer, close_buffer,
+        ),
     }
 
 
@@ -272,6 +304,13 @@ async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, An
         fields["leader_job_id"] = UUID(str(leader_job_id))
     if action.get("notes") is not None:
         fields["notes"] = action["notes"]
+    # `is not None`, not truthiness: 0 is "nobody comes in early", a real
+    # answer the manager gave, and dropping it would leave the previous
+    # buffer in place while the confirm card said otherwise.
+    if action.get("open_buffer_minutes") is not None:
+        fields["open_buffer_minutes"] = action["open_buffer_minutes"]
+    if action.get("close_buffer_minutes") is not None:
+        fields["close_buffer_minutes"] = action["close_buffer_minutes"]
 
     try:
         async with get_connection() as conn:

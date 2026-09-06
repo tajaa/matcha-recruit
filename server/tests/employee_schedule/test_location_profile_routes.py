@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.matcha.models.scheduling.employee_schedule import LocationScheduleProfileUpdate
 from app.matcha.routes.employee_schedule import location_profile as routes
@@ -159,3 +160,46 @@ def test_operating_hours_accepts_a_closed_day_as_null():
     body = LocationScheduleProfileUpdate(operating_hours={"0": None, "1": {"open": "08:00", "close": "17:00"}})
     assert body.operating_hours["0"] is None
     assert body.operating_hours["1"].open.hour == 8
+
+
+# --- open/close buffers -------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_defaults_the_buffers_to_zero(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+
+    result = await routes.get_location_schedule_profile(LOCATION_ID, _user())
+
+    assert result["open_buffer_minutes"] == 0
+    assert result["close_buffer_minutes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_put_passes_the_buffers_through_and_leaves_them_unset_otherwise(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID,
+        LocationScheduleProfileUpdate(open_buffer_minutes=30, close_buffer_minutes=0),
+        _user(),
+    )
+
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["open_buffer_minutes"] == 30
+    # 0 is a real answer ("staff leave when the doors shut"), not "unset".
+    assert kwargs["close_buffer_minutes"] == 0
+    assert kwargs["operating_hours"] is routes.UNSET
+
+
+@pytest.mark.parametrize("payload", [
+    {"open_buffer_minutes": 241},
+    {"open_buffer_minutes": -1},
+    {"close_buffer_minutes": 999},
+])
+def test_buffers_outside_the_allowed_range_are_rejected_by_the_model(payload):
+    with pytest.raises(ValidationError):
+        LocationScheduleProfileUpdate(**payload)

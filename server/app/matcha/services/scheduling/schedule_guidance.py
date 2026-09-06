@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -236,6 +237,132 @@ async def resolve_shift_break_plans_localized(
         status = "error" if resolved.source == "error" or age_unknown else plan.status
         plans[employee_id] = replace(plan, status=status, advisories=tuple(advisories))
     return effective_timezone, plans
+
+
+async def resolve_week_break_plans(
+    conn,
+    company_id: UUID,
+    *,
+    location_id: UUID | None,
+    shifts: Sequence[tuple[str, datetime, datetime, Sequence[UUID]]],
+) -> tuple[ZoneInfo, dict[str, dict[UUID, BreakPlan]], set[date]]:
+    """Evaluate every assignee's break plan across a whole proposed week.
+
+    The per-shift resolvers above are the right shape for one shift and the
+    wrong one for a week: ``resolve_break_rules`` takes a Postgres advisory
+    lock on every call, and the DOB/waiver reads are per shift.  A 40-shift
+    week through those would be 40 locked rule resolutions and 80 queries; this
+    is at most 7 (one per local date) plus two batched reads.
+
+    ``shifts`` is ``(shift_key, starts_at, ends_at, employee_ids)``.  Returns
+    the effective zone, the plans keyed by shift then employee, and the local
+    dates whose rules could not be mapped — a jurisdiction with nothing in the
+    catalog is reported, never silently treated as "no breaks required".
+    """
+    utc = ZoneInfo("UTC")
+    unmapped_dates: set[date] = set()
+    if not shifts:
+        return utc, {}, unmapped_dates
+
+    employee_ids = list(dict.fromkeys(
+        employee_id for _key, _start, _end, ids in shifts for employee_id in ids
+    ))
+    if location_id is None or not employee_ids:
+        return utc, {
+            key: {
+                employee_id: evaluate_break_plan(
+                    starts_at=starts_at, ends_at=ends_at, timezone=utc, rules=(),
+                )
+                for employee_id in ids
+            }
+            for key, starts_at, ends_at, ids in shifts
+        }, unmapped_dates
+
+    timezone_name = await conn.fetchval(
+        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+        location_id, company_id,
+    )
+    try:
+        location_timezone = ZoneInfo(timezone_name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        location_timezone = utc
+
+    birth_rows = await conn.fetch(
+        """
+        SELECT e.id AS employee_id, ed.date_of_birth
+        FROM employees e
+        LEFT JOIN employee_demographics ed ON ed.employee_id = e.id
+        WHERE e.org_id = $1 AND e.id = ANY($2::uuid[])
+        """,
+        company_id, employee_ids,
+    )
+    birth_dates = {row["employee_id"]: row["date_of_birth"] for row in birth_rows}
+
+    latest_date = max(
+        reinterpret_schedule_wall_time(starts_at, location_timezone).date()
+        for _key, starts_at, _end, _ids in shifts
+    )
+    # Every waiver that could apply to any date in the week, newest first; the
+    # per-date pick happens in Python rather than as seven more queries.
+    waiver_rows = await conn.fetch(
+        """
+        SELECT employee_id, id, value, effective_from, confirmed_by, confirmed_at
+        FROM employee_compliance_attestations
+        WHERE company_id = $1 AND employee_id = ANY($2::uuid[])
+          AND attestation_type = 'meal_break_waiver_on_file'
+          AND effective_from <= $3
+        ORDER BY employee_id, effective_from DESC, confirmed_at DESC
+        """,
+        company_id, employee_ids, latest_date,
+    )
+    waivers_by_employee: dict[UUID, list] = {}
+    for row in waiver_rows:
+        waivers_by_employee.setdefault(row["employee_id"], []).append(row)
+
+    def _waiver(employee_id: UUID, on_date: date) -> MealWaiverAttestation | None:
+        for row in waivers_by_employee.get(employee_id, ()):
+            if row["effective_from"] <= on_date:
+                return MealWaiverAttestation(
+                    id=row["id"], on_file=row["value"],
+                    effective_from=row["effective_from"],
+                    confirmed_by=row["confirmed_by"], confirmed_at=row["confirmed_at"],
+                )
+        return None
+
+    resolved_by_date: dict[date, Any] = {}
+    plans: dict[str, dict[UUID, BreakPlan]] = {}
+    effective_timezone = location_timezone
+    for key, starts_at, ends_at, ids in shifts:
+        shift_date = reinterpret_schedule_wall_time(starts_at, location_timezone).date()
+        resolved = resolved_by_date.get(shift_date)
+        if resolved is None:
+            resolved = await resolve_break_rules(
+                conn, company_id=company_id, location_id=location_id,
+                shift_date=shift_date,
+            )
+            resolved_by_date[shift_date] = resolved
+            if resolved.source in ("unmapped", "error"):
+                unmapped_dates.add(shift_date)
+        effective_timezone = resolved.timezone or location_timezone
+        effective_date = reinterpret_schedule_wall_time(starts_at, effective_timezone).date()
+        has_age_rules = any(
+            rule.minimum_age is not None or rule.maximum_age is not None
+            for rule in resolved.rules
+        )
+        for employee_id in ids:
+            employee_age = _age_on(birth_dates.get(employee_id), effective_date)
+            age_unknown = employee_age is None and has_age_rules
+            plan = evaluate_break_plan(
+                starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
+                rules=resolved.rules, waiver=_waiver(employee_id, effective_date),
+                employee_age=employee_age,
+            )
+            plans.setdefault(key, {})[employee_id] = replace(
+                plan,
+                status="error" if resolved.source == "error" or age_unknown else plan.status,
+                advisories=tuple((*plan.advisories, *resolved.advisories)),
+            )
+    return effective_timezone, plans, unmapped_dates
 
 
 async def resolve_open_shift_break_plans(

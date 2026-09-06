@@ -26,8 +26,14 @@ from .week_template_writes import (
 
 PROFILE_COLS = (
     "id, company_id, location_id, operating_hours, default_week_template_id, "
-    "leader_job_id, notes, week_start_weekday, created_at, updated_at"
+    "leader_job_id, notes, week_start_weekday, open_buffer_minutes, "
+    "close_buffer_minutes, created_at, updated_at"
 )
+
+# Operational policy, NOT law: how long before open / after close somebody has
+# to be on the schedule. Nothing statutory caps prep time, so the bound here is
+# only a sanity rail on a typed number (matching the DB CHECK).
+MAX_BUFFER_MINUTES = 240
 
 # 0 = Sunday, the same index `days_of_week` masks and `sunday_indexed_weekday`
 # use. Kept local so this module stays importable without the route layer.
@@ -49,6 +55,25 @@ def parse_clock(value) -> time:
     if len(text) >= 2 and text[1] == ":":
         text = f"0{text}"
     return time.fromisoformat(text)
+
+
+def validate_buffer_minutes(value, *, label: str) -> int:
+    """Minutes of prep before open / cleanup after close, 0–240.
+
+    Operational policy, not a legal threshold — a store decides how long its
+    open takes. Kept strict about the type because the chat surface hands over
+    whatever the model typed, and a silent ``or 0`` would turn "sixty" into
+    "no buffer at all" without anyone noticing.
+    """
+    if value in (None, ""):
+        return 0
+    try:
+        minutes = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a whole number of minutes.")
+    if not 0 <= minutes <= MAX_BUFFER_MINUTES:
+        raise ValueError(f"{label} must be between 0 and {MAX_BUFFER_MINUTES} minutes.")
+    return minutes
 
 
 def _loads(value):
@@ -157,6 +182,15 @@ def profile_context_lines(bundle: dict) -> list[str]:
     else:
         lines.append("Staffing pattern: not set")
 
+    open_buffer = int(profile.get("open_buffer_minutes") or 0)
+    close_buffer = int(profile.get("close_buffer_minutes") or 0)
+    if open_buffer or close_buffer:
+        lines.append(
+            f"Prep/close buffer: {open_buffer}m before open, {close_buffer}m after close"
+        )
+    else:
+        lines.append("Prep/close buffer: none set")
+
     leader = bundle.get("leader_job_name")
     lines.append(f"Leader coverage: {leader} on every open shift" if leader else "Leader coverage: not set")
 
@@ -257,6 +291,7 @@ async def upsert_location_profile(
     conn, *, company_id: UUID, location_id: UUID, actor_user_id: Optional[UUID],
     operating_hours: Any = UNSET, default_week_template_id: Any = UNSET,
     leader_job_id: Any = UNSET, notes: Any = UNSET, week_start_weekday: Any = UNSET,
+    open_buffer_minutes: Any = UNSET, close_buffer_minutes: Any = UNSET,
 ) -> dict:
     """Create or patch the location's profile. Only supplied fields are written."""
     owns = await conn.fetchval(
@@ -280,8 +315,16 @@ async def upsert_location_profile(
         if not 0 <= day <= 6:
             raise ValueError("week_start_weekday must be 0-6")
         supplied["week_start_weekday"] = day
+    if open_buffer_minutes is not UNSET:
+        supplied["open_buffer_minutes"] = validate_buffer_minutes(
+            open_buffer_minutes, label="Opening prep buffer",
+        )
+    if close_buffer_minutes is not UNSET:
+        supplied["close_buffer_minutes"] = validate_buffer_minutes(
+            close_buffer_minutes, label="Closing buffer",
+        )
 
-    columns = ["company_id", "location_id", "created_by", "updated_by", *supplied]
+    columns =["company_id", "location_id", "created_by", "updated_by", *supplied]
     values = [company_id, location_id, actor_user_id, actor_user_id, *supplied.values()]
     placeholders = ", ".join(
         f"${i}::jsonb" if col == "operating_hours" else f"${i}"

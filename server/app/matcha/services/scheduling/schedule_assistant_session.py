@@ -65,6 +65,10 @@ def _automatic_action(row) -> dict:
         "summary": review.get("summary") or "Huume prepared this week for review.",
         "metrics": metrics or proposal.get("metrics") or {},
         "unfilled": (proposal.get("unfilled") or [])[:20],
+        # Read off the PLAN, not `review`: an automatic run nobody watched is
+        # exactly the one where an unreported coverage hole reaches a manager
+        # as "Huume prepared this week for review".
+        "findings": (proposal.get("findings") or [])[:20],
         "schedule_preview": review.get("schedule_preview") or [],
         "preview_truncated": bool(review.get("preview_truncated")),
     }

@@ -256,3 +256,85 @@ def test_choice_keeps_the_send_text_for_an_over_long_option():
     assert len(choice["options"][0]["label"]) == 40
     assert choice["options"][0]["send"] == f"Use the week template named {names[0]}"
     assert choice["options"][1]["send"] == "Use the week template named Weekend"
+
+
+# --- coverage + break findings -------------------------------------------------
+
+FINDINGS = [
+    {"kind": "close_buffer_uncovered", "severity": "gap", "day": "2026-08-24",
+     "weekday": 1, "window": {"start": "17:00", "end": "17:20"}, "shift_key": None,
+     "job_id": None, "job_name": None, "employee_name": None, "minutes": 20,
+     "detail": "Nobody is scheduled to close on Monday (17:00–17:20, 20 min after the doors shut)."},
+    {"kind": "break_relief_uncovered", "severity": "gap", "day": "2026-08-25",
+     "weekday": 2, "window": {"start": "08:00", "end": "17:00"}, "shift_key": "s2",
+     "job_id": None, "job_name": "Barista", "employee_name": "Amy", "minutes": 30,
+     "detail": "Nobody can relieve Amy for their 30-minute break on this shift."},
+    {"kind": "thin_close", "severity": "advisory", "day": "2026-08-26", "weekday": 3,
+     "window": {"start": "16:00", "end": "17:00"}, "shift_key": None, "job_id": None,
+     "job_name": None, "employee_name": None, "minutes": None,
+     "detail": "Wednesday opens with 3 on but closes with one."},
+]
+
+
+def test_state_block_names_the_gaps_not_just_a_count():
+    """A later turn sees only this text. "3 gaps" with no detail is a number
+    the model cannot turn into anything the manager can act on."""
+    block = build_state_block({"huume_action": _action(
+        findings=FINDINGS,
+        metrics={"filled_positions": 8, "required_positions": 10, "open_positions": 2,
+                 "gap_count": 2, "operating_hours_known": True},
+    )}, schedule_surface=True)
+
+    assert "2 coverage/break gap(s), 3 finding(s)" in block
+    assert "Nobody is scheduled to close on Monday" in block
+    assert "Nobody can relieve Amy" in block
+
+
+def test_state_block_says_coverage_was_not_checked_without_saved_hours():
+    """"No gaps found" and "I could not look" must never read the same."""
+    block = build_state_block({"huume_action": _action(
+        findings=[],
+        metrics={"filled_positions": 8, "required_positions": 8, "open_positions": 0,
+                 "operating_hours_known": False},
+    )}, schedule_surface=True)
+
+    assert "hours are not saved" in block
+    assert "was NOT checked" in block
+
+
+def test_the_profile_spec_carries_the_open_and_close_buffers():
+    """A field missing from `fields` is dropped from the staged dict, so the
+    confirm turn would write a profile without the buffer the manager gave."""
+    spec = _HR_OPS_TOOL_SPECS["save_location_schedule_profile"]
+    assert {"open_buffer_minutes", "close_buffer_minutes"} <= set(spec["fields"])
+
+    staged, _confirming = _build_hr_ops_staged(
+        spec, {"open_buffer_minutes": 30, "close_buffer_minutes": 0}, None,
+    )
+    assert staged["open_buffer_minutes"] == 30
+    assert staged["close_buffer_minutes"] == 0
+
+
+def test_the_profile_tool_exposes_the_buffers_to_the_model():
+    properties = TOOLS_BY_NAME["save_location_schedule_profile"].declaration.parameters.properties
+    assert {"open_buffer_minutes", "close_buffer_minutes"} <= set(properties)
+
+
+def test_a_week_with_gaps_still_needs_an_explicit_confirmation():
+    """Findings are information, not authorization: a staged week with holes
+    is staged exactly like a clean one, and confirm stays a separate turn."""
+    staged = evaluate_huume_action(
+        staged_action=_action(findings=FINDINGS, metrics={
+            "filled_positions": 8, "required_positions": 10, "open_positions": 2,
+            "gap_count": 2, "operating_hours_known": True,
+        }),
+        features=FEATURES, role="admin", thread_huume_mode=True,
+        this_turn_staged_new=True, schedule_surface=True,
+    )
+    assert staged.kind == "stage"
+
+    confirmed = evaluate_huume_action(
+        staged_action=_action(findings=FINDINGS), features=FEATURES, role="admin",
+        thread_huume_mode=True, this_turn_staged_new=False, schedule_surface=True,
+    )
+    assert confirmed.ok

@@ -486,3 +486,43 @@ async def test_week_template_clarify_ends_the_turn_too(monkeypatch):
     assert [option["label"] for option in result["state_updates"]["huume_choice"]["options"]] == [
         "Downtown default week", "Holiday week",
     ]
+
+
+@pytest.mark.asyncio
+async def test_build_week_schedule_carries_findings_onto_the_staged_action(monkeypatch):
+    """The card and the next turn's state block both read `findings` off the
+    staged action; the tool response echoes them so the model can relay the
+    gaps in the SAME turn it stages, instead of replying "week built"."""
+    findings = [{
+        "kind": "close_buffer_uncovered", "severity": "gap", "day": "2026-08-24",
+        "window": {"start": "17:00", "end": "17:20"}, "minutes": 20,
+        "detail": "Nobody is scheduled to close on Monday (17:00–17:20).",
+    }]
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "ready",
+        "generation_run_id": str(uuid4()),
+        "source_mode": "existing",
+        "summary": "Built 2 of 2 positions. 1 coverage/break gap(s) need your review.",
+        "metrics": {
+            "shift_count": 1, "required_positions": 2, "filled_positions": 2,
+            "open_positions": 0, "gap_count": 1, "operating_hours_known": True,
+            "finding_counts": {"close_buffer_uncovered": 1},
+        },
+        "unfilled": [],
+        "findings": findings,
+        "schedule_preview": [],
+        "preview_truncated": False,
+    }))
+    call = _fake_call("build_week_schedule", {"source_mode": "auto"})
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[call]), _fake_response(text="Staged, with one gap at close.")],
+    )
+    result = _result(frames)
+    action = result["state_updates"]["huume_action"]
+
+    assert action["findings"] == findings
+    assert action["metrics"]["gap_count"] == 1
+    # Staged, not applied: a reported gap does not change the confirm contract.
+    assert action["status"] == "proposed"

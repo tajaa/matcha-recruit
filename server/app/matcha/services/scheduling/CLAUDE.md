@@ -22,7 +22,8 @@ shifts; the whole-week builder applies only editable drafts and never publishes.
 
 `schedule_location_profiles` (one row per `business_locations` row) is where a
 store's own setup lives: `operating_hours` JSONB, `default_week_template_id`,
-`leader_job_id`, `notes`, and `week_start_weekday`. `services/scheduling/
+`leader_job_id`, `notes`, `week_start_weekday`, and (migration `schedloc02`)
+`open_buffer_minutes` / `close_buffer_minutes`. `services/scheduling/
 location_profile.py` owns it; `routes/employee_schedule/location_profile.py`
 is the hand-editable REST twin of what Huume interviews for
 (`services/huume/schedule_profile_skill.py` — see `services/huume/CLAUDE.md`).
@@ -66,6 +67,65 @@ Invariants:
   keeps auth/audit/serialization and maps `WeekTemplateNotFound`→404,
   `JobUnavailable`→422. Services raise `ValueError` subclasses and never
   `HTTPException` (same rule `shift_writes.py` follows).
+
+### Week coverage + break relief findings (`services/scheduling/schedule_coverage.py`)
+
+The planner answers a headcount question and stops: fill each block to its
+`required_staff`. It reports 20/20 and a manager reads that as done — while the
+week may have nobody in for the open, nobody on for the last hour, and nobody
+who can relieve a solo barista for a legally required meal. `evaluate_week_coverage`
+is the pure check the planner does not do (no DB, no shift ids), and
+`week_builder._break_relief_findings` is its break-time counterpart, running the
+pure `schedule_break_stagger.stagger_shift_breaks` over the IN-MEMORY plan.
+
+Both emit the one `make_finding` shape onto `plan["findings"]`, with
+`metrics.finding_counts` / `gap_count` / `operating_hours_known` beside it.
+
+Invariants:
+
+- **Findings live on the PLAN, not on `review`.** `schedule_assistant_session.
+  _automatic_action` rebuilds the staged action from `proposal["unfilled"]` and
+  never reads `review`, so anything parked there is invisible on exactly the
+  automatic runs nobody is watching.
+- **The profile is deliberately NOT in the planning snapshot.** `_input_hash`
+  hashes the snapshot, so a manager fixing a buffer minute would otherwise
+  stale an otherwise-good proposal at confirm time. `_coverage_profile` is read
+  in `propose_week_draft` and in readiness, never in `_planning_snapshot`.
+- **Severity is `gap | advisory`, never `block`.** `block` already means
+  "cannot be staged" (`_preflight_compliance_blocks`, `check_shift_compliance`),
+  and nothing here prevents staging: a manager may knowingly run a thin close,
+  and the answer is to say so, not to refuse. A generated week with holes is
+  still `ready` and still needs the same explicit confirmation.
+- **The summary never contains the word "compliant".** `_coverage_sentence` has
+  three endings — gaps found, none found, or hours not saved so nothing was
+  checked. "No gaps" and "I could not look" must never read the same.
+- **Published shifts are a coverage baseline.** A half-published week is the
+  common state; judging the proposal alone reports days that are genuinely
+  staffed as empty. Unfilled slots, by contrast, count for nothing — the whole
+  point is that a hole the planner could not fill is still a hole.
+  (`headcount="required"` is the readiness variant: it judges the PATTERN,
+  before anyone is assigned to it, and its `pattern_findings` are reported
+  WITHOUT becoming blockers — a hole to fix in the interview is not a refusal
+  to build, which is the dead end this surface exists to end.)
+- **`coverage_shortfall` fires on nearly every real shift**, because a shift
+  staffed to exactly its requirement has no spare cover. It is split by crew
+  size: solo → `break_relief_uncovered` (a gap — the floor empties), otherwise
+  → `break_relief_thin` (advisory, capped per day in the LIST by
+  `_trim_thin_findings`, uncapped in `finding_counts`). Trimming before counting
+  would make a week look cleaner the busier it is.
+- **Break rules come from the catalog, buffers are policy.** `resolve_break_rules`
+  takes a pg advisory lock per call, so `schedule_guidance.resolve_week_break_plans`
+  hoists it to one call per local DATE (≤7 a build) and batches DOB + waivers.
+  An `unmapped` date becomes one `break_rules_unmapped` finding — a state with
+  nothing in the catalog is surfaced, never silently green. The buffer minutes
+  and the 15-minute sampling slice are operational policy in feature code and
+  say so in their docstrings (memory: `feedback-legal-thresholds-codify`).
+- **The findings pass never fails a build**, same contract as
+  `_preflight_compliance_blocks`: it logs and returns `[]`.
+- **Times stay wall clock.** Shift timestamps are UTC-tagged wall clock and are
+  compared against `operating_hours` as clock faces; converting would move an
+  early shift onto the previous day. An overnight window (`close <= open`) is
+  one window, not two holes.
 
 ### Per-location week start day
 

@@ -63,6 +63,8 @@ export default function WeekStartPane(
   const [days, setDays] = useState<DayDraft[]>(() => hoursToDraft(undefined))
   const [leaderJobId, setLeaderJobId] = useState('')
   const [notes, setNotes] = useState('')
+  const [openBuffer, setOpenBuffer] = useState('0')
+  const [closeBuffer, setCloseBuffer] = useState('0')
 
   const applyProfile = useCallback((next: LocationScheduleProfile) => {
     setProfile(next)
@@ -70,6 +72,8 @@ export default function WeekStartPane(
     setDays(hoursToDraft(next.operating_hours))
     setLeaderJobId(next.leader_job_id ?? '')
     setNotes(next.notes ?? '')
+    setOpenBuffer(String(next.open_buffer_minutes ?? 0))
+    setCloseBuffer(String(next.close_buffer_minutes ?? 0))
   }, [])
 
   const load = useCallback(async () => {
@@ -107,12 +111,22 @@ export default function WeekStartPane(
     setDays((current) => current.map((day, position) => position === index ? { ...day, ...patch } : day))
   }
 
+  /** Clamped rather than rejected: the server enforces 0–240 anyway, and a
+   *  half-typed number must not blow up the whole save of hours + leader. */
+  function bufferValue(raw: string): number {
+    const parsed = Number.parseInt(raw, 10)
+    if (!Number.isFinite(parsed)) return 0
+    return Math.min(240, Math.max(0, parsed))
+  }
+
   async function saveSetup() {
     await persist({
       week_start_weekday: weekStartWeekday,
       operating_hours: draftToHours(days),
       leader_job_id: leaderJobId || null,
       notes: notes.trim() || null,
+      open_buffer_minutes: bufferValue(openBuffer),
+      close_buffer_minutes: bufferValue(closeBuffer),
     }, 'Location scheduling setup saved')
   }
 
@@ -162,6 +176,22 @@ export default function WeekStartPane(
               {day.status === 'unset' && <span className="text-[11px] text-zinc-600">Not set</span>}
             </div>
           ))}
+        </div>
+        <div className="border-t border-zinc-800 pt-3">
+          <h4 className="text-xs font-medium text-zinc-300">Prep and close</h4>
+          <p className="mt-1 text-xs text-zinc-500">Minutes someone must be on the schedule for before the doors open and after they shut. A week that only staffs the open hours reads as fully covered while nobody is in to set up or lock down.</p>
+          <div className="mt-2 flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <span className="w-28">Before open</span>
+              <input type="number" min={0} max={240} step={5} aria-label="Minutes of prep before open" value={openBuffer} onChange={(event) => setOpenBuffer(event.target.value)} className={`${inputCls} w-24`} />
+              <span className="text-zinc-600">min</span>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <span className="w-28">After close</span>
+              <input type="number" min={0} max={240} step={5} aria-label="Minutes of cleanup after close" value={closeBuffer} onChange={(event) => setCloseBuffer(event.target.value)} className={`${inputCls} w-24`} />
+              <span className="text-zinc-600">min</span>
+            </label>
+          </div>
         </div>
       </Card>
 

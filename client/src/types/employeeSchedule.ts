@@ -411,6 +411,11 @@ export interface LocationScheduleProfile {
   leader_job_name: string | null
   notes: string | null
   week_start_weekday: number
+  /** Minutes before open / after close somebody has to be on the schedule.
+   *  Operational policy, not law — the coverage check widens each open day's
+   *  required window by these. */
+  open_buffer_minutes: number
+  close_buffer_minutes: number
   template: LocationScheduleProfileTemplate | null
 }
 
@@ -422,6 +427,8 @@ export interface LocationScheduleProfileUpdate {
   notes?: string | null
   week_start_weekday?: number
   default_week_template_id?: string | null
+  open_buffer_minutes?: number
+  close_buffer_minutes?: number
 }
 
 export interface ScheduleAutomationRule {
