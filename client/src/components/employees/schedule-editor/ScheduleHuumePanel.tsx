@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { Loader2, Mic, Send, Sparkles, Square, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { History, Loader2, Mic, Plus, Send, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { useToast } from '../../ui'
 import { ApiError } from '../../../api/client'
-import { getScheduleHuumeSession, transcribeScheduleVoice } from '../../../api/employees/scheduleAssistant'
+import {
+  archiveScheduleHuumeSession,
+  getScheduleHuumeSession,
+  listScheduleHuumeSessions,
+  transcribeScheduleVoice,
+  type ScheduleHuumeSessionSummary,
+} from '../../../api/employees/scheduleAssistant'
 import { sendMessageStream } from '../../../work/api/matchaWork/messaging'
 import type { HuumeStep, MWMessage, MWSendResponse, MWStreamEvent } from '../../../work/types'
 import { getHuumeState } from '../../../work/utils/huumeState'
@@ -34,6 +40,18 @@ export function selectedShiftContext(shifts: Shift[]): string {
     return `${index + 1}. ${fmtDayLabel(shift.starts_at)} · ${fmtTime(shift.starts_at)}–${fmtTime(shift.ends_at)} · ${shift.role || 'Untitled shift'} · ${assignees.length ? `assigned: ${assignees.join(', ')}` : 'open'} · staffing: ${assignees.length}/${shift.required_staff}`
   })
   return `\n\nSelected schedule blocks — authoritative context for this request:\n${blocks.join('\n')}\nUse these exact blocks as the shift references. Keep any assignee not named in my request on their current shift.`
+}
+
+export function relativeChatTime(value: string, now = Date.now()): string {
+  const at = new Date(value).getTime()
+  if (Number.isNaN(at)) return ''
+  const minutes = Math.floor((now - at) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return days < 7 ? `${days}d ago` : new Date(at).toLocaleDateString()
 }
 
 function optimisticUserMessage(threadId: string, content: string): MWMessage {
@@ -68,6 +86,12 @@ function settledAutomaticActionKey(state: Record<string, unknown>): string | nul
 export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onAutomaticActionSettled, onClose }: ScheduleHuumePanelProps) {
   const { toast } = useToast()
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  // Which chat the next mount opens: null starts a fresh one, an id reopens
+  // the chat the manager picked out of history.
+  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<ScheduleHuumeSessionSummary[]>([])
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [messages, setMessages] = useState<MWMessage[]>([])
   const [currentState, setCurrentState] = useState<Record<string, unknown>>({})
   const [input, setInput] = useState('')
@@ -98,6 +122,13 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
     abortRef.current?.abort()
   }, [])
 
+  const refreshSessions = useCallback(() => {
+    if (!locationId) return
+    void listScheduleHuumeSessions(locationId, weekStart)
+      .then((result) => { if (mountedRef.current) setSessions(result.sessions) })
+      .catch(() => { /* history is a convenience; a failed list never blocks the chat */ })
+  }, [locationId, weekStart])
+
   useEffect(() => {
     let cancelled = false
     // React StrictMode re-runs effects after their simulated cleanup. The
@@ -106,22 +137,27 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
     mountedRef.current = true
     abortRef.current?.abort()
     setThreadId(null)
+    setSessionId(null)
     setMessages([])
     setCurrentState({})
     setSessionError(null)
+    setSteps([])
     setStatus(locationId ? 'Opening the schedule workspace…' : '')
     if (!locationId) {
       setStatus('Choose a location to start the schedule assistant.')
+      setSessions([])
       return () => { cancelled = true }
     }
 
-    void getScheduleHuumeSession(locationId, weekStart)
+    void getScheduleHuumeSession(locationId, weekStart, resumeSessionId)
       .then((session) => {
         if (cancelled || !mountedRef.current) return
         setThreadId(session.thread_id)
+        setSessionId(session.session_id)
         setMessages(session.messages)
         setCurrentState(session.current_state || {})
         setStatus('')
+        refreshSessions()
       })
       .catch((error: unknown) => {
         if (cancelled || !mountedRef.current) return
@@ -129,7 +165,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
         setSessionError(error instanceof Error ? error.message : 'Could not open the schedule assistant.')
       })
     return () => { cancelled = true }
-  }, [locationId, weekStart, sessionAttempt])
+  }, [locationId, weekStart, sessionAttempt, resumeSessionId, refreshSessions])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ block: 'nearest' })
@@ -141,6 +177,29 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
     settledAutomaticKeysRef.current.add(settledAutomaticKey)
     onAutomaticActionSettled()
   }, [onAutomaticActionSettled, settledAutomaticKey])
+
+  function openChat(nextSessionId: string | null) {
+    if (busy) return
+    setHistoryOpen(false)
+    setResumeSessionId(nextSessionId)
+    setSessionAttempt((attempt) => attempt + 1)
+  }
+
+  async function archiveChat(summary: ScheduleHuumeSessionSummary) {
+    try {
+      await archiveScheduleHuumeSession(summary.session_id)
+    } catch (error: unknown) {
+      toast(error instanceof Error ? error.message : 'Could not remove that chat.', 'error')
+      return
+    }
+    if (!mountedRef.current) return
+    setSessions((current) => current.filter((item) => item.session_id !== summary.session_id))
+    // Archiving the chat that is open leaves nothing to talk in — start a new
+    // one rather than keeping a thread the server will now refuse turns on.
+    // openChat is a no-op mid-stream, so the trash button is disabled while
+    // busy and this recovery always lands.
+    if (summary.session_id === sessionId) openChat(null)
+  }
 
   async function send(contentOverride?: string) {
     const displayContent = (contentOverride ?? input).trim()
@@ -184,6 +243,8 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
         setSteps([])
         setStatus('')
         setBusy(false)
+        // The first turn is what names this chat in history.
+        refreshSessions()
         const key = appliedActionKey(response)
         if (key && !appliedKeysRef.current.has(key)) {
           appliedKeysRef.current.add(key)
@@ -259,9 +320,60 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
       <header className="flex items-center gap-2 border-b border-white/[0.08] px-3 py-2">
         <Sparkles className="h-4 w-4 text-emerald-300" />
         <span className="text-xs font-medium text-zinc-200">Huume · Schedule assistant</span>
-        <span className="ml-auto text-[10px] text-zinc-600">{locationName || 'Location'} · {weekStart}</span>
+        <span className="ml-auto truncate text-[10px] text-zinc-600">{locationName || 'Location'} · {weekStart}</span>
+        <button
+          type="button"
+          onClick={() => openChat(null)}
+          disabled={busy || !locationId}
+          className="rounded p-1 text-zinc-500 hover:text-emerald-300 disabled:opacity-40"
+          aria-label="New chat"
+          title="New chat"
+        ><Plus className="h-4 w-4" /></button>
+        <button
+          type="button"
+          onClick={() => { setHistoryOpen((open) => !open); if (!historyOpen) refreshSessions() }}
+          disabled={!locationId}
+          aria-expanded={historyOpen}
+          className={'rounded p-1 disabled:opacity-40 ' + (historyOpen ? 'text-emerald-300' : 'text-zinc-500 hover:text-zinc-100')}
+          aria-label="Previous chats"
+          title="Previous chats"
+        ><History className="h-4 w-4" /></button>
         <button type="button" onClick={onClose} className="rounded p-1 text-zinc-500 hover:text-zinc-100" aria-label="Close schedule assistant"><X className="h-4 w-4" /></button>
       </header>
+      {historyOpen && (
+        <div className="max-h-64 overflow-y-auto border-b border-white/[0.08] bg-white/[0.02]">
+          {sessions.length === 0 ? (
+            <p className="px-3 py-3 text-[11px] text-zinc-500">No earlier chats for this location and week.</p>
+          ) : (
+            <ul className="divide-y divide-white/[0.05]">
+              {sessions.map((summary) => (
+                <li key={summary.session_id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openChat(summary.session_id)}
+                    disabled={busy}
+                    className={'min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-40 hover:bg-white/[0.04] ' + (summary.session_id === sessionId ? 'bg-emerald-500/[0.08]' : '')}
+                  >
+                    <span className="block truncate text-[11px] text-zinc-200">{summary.title}</span>
+                    <span className="mt-0.5 block text-[10px] text-zinc-500">
+                      {relativeChatTime(summary.last_activity_at)} · {summary.message_count} message{summary.message_count === 1 ? '' : 's'}
+                      {summary.session_id === sessionId ? ' · open' : ''}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void archiveChat(summary) }}
+                    disabled={busy}
+                    className="mr-2 shrink-0 rounded p-1 text-zinc-600 hover:text-red-300 disabled:opacity-40"
+                    aria-label={`Remove chat: ${summary.title}`}
+                    title="Remove from history"
+                  ><Trash2 className="h-3.5 w-3.5" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {selectedShifts.length > 0 && (
         <div className="flex items-center gap-2 border-b border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2 text-[11px] text-emerald-100">
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-300" />

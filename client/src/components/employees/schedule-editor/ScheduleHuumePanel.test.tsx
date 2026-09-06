@@ -3,22 +3,33 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleHuumePanel from './ScheduleHuumePanel'
 
-const { getScheduleHuumeSessionMock, sendMessageStreamMock } = vi.hoisted(() => ({
+const { getScheduleHuumeSessionMock, listSessionsMock, archiveSessionMock, sendMessageStreamMock } = vi.hoisted(() => ({
   getScheduleHuumeSessionMock: vi.fn(),
+  listSessionsMock: vi.fn(),
+  archiveSessionMock: vi.fn(),
   sendMessageStreamMock: vi.fn((_threadId: string, _content: string, _callbacks: unknown) => new AbortController()),
 }))
 
 vi.mock('../../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
+  listScheduleHuumeSessions: listSessionsMock,
+  archiveScheduleHuumeSession: archiveSessionMock,
   transcribeScheduleVoice: vi.fn(),
 }))
 vi.mock('../../../work/api/matchaWork/messaging', () => ({ sendMessageStream: sendMessageStreamMock }))
 
-function session(currentState: Record<string, unknown>) {
+function session(currentState: Record<string, unknown>, sessionId = 'session-1') {
   return {
-    session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
-    week_start: '2026-08-09', week_end: '2026-08-16', messages: [],
+    session_id: sessionId, thread_id: `thread-${sessionId}`, location_id: 'loc1',
+    week_start: '2026-08-09', week_end: '2026-08-16', title: 'New chat', messages: [],
     current_state: currentState, version: 1,
+  }
+}
+
+function summary(sessionId: string, title: string) {
+  return {
+    session_id: sessionId, thread_id: `thread-${sessionId}`, title, message_count: 4,
+    created_at: '2026-08-09T10:00:00Z', last_activity_at: '2026-08-09T10:05:00Z',
   }
 }
 
@@ -38,6 +49,8 @@ describe('ScheduleHuumePanel choice chips', () => {
   beforeEach(() => {
     sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
     getScheduleHuumeSessionMock.mockReset()
+    listSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
+    archiveSessionMock.mockReset().mockResolvedValue({ session_id: 'session-1', archived: true })
   })
 
   it('renders the staged question as tappable options', async () => {
@@ -117,5 +130,56 @@ describe('ScheduleHuumePanel choice chips', () => {
 
     await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalled())
     expect(screen.queryByRole('group')).not.toBeInTheDocument()
+  })
+})
+
+describe('ScheduleHuumePanel thread management', () => {
+  beforeEach(() => {
+    sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
+    getScheduleHuumeSessionMock.mockReset().mockResolvedValue(session({}))
+    listSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
+    archiveSessionMock.mockReset().mockResolvedValue({ session_id: 'session-1', archived: true })
+  })
+
+  it('opens a fresh chat rather than resuming one', async () => {
+    renderPanel()
+
+    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalled())
+    expect(getScheduleHuumeSessionMock.mock.calls[0][2]).toBeNull()
+  })
+
+  it('reopens the chat picked out of history', async () => {
+    listSessionsMock.mockResolvedValue({ sessions: [summary('session-2', 'Cover Friday close')] })
+
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Previous chats' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Cover Friday close/ }))
+
+    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
+    expect(getScheduleHuumeSessionMock.mock.calls[1][2]).toBe('session-2')
+  })
+
+  it('starts a new chat from the header without resuming the last one', async () => {
+    getScheduleHuumeSessionMock.mockResolvedValue(session({}, 'session-2'))
+    listSessionsMock.mockResolvedValue({ sessions: [summary('session-2', 'Cover Friday close')] })
+
+    renderPanel()
+    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+
+    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
+    expect(getScheduleHuumeSessionMock.mock.calls[1][2]).toBeNull()
+  })
+
+  it('removes a chat from history and reopens a fresh one when it was open', async () => {
+    getScheduleHuumeSessionMock.mockResolvedValue(session({}, 'session-1'))
+    listSessionsMock.mockResolvedValue({ sessions: [summary('session-1', 'Rebuild the week')] })
+
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Previous chats' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove chat: Rebuild the week' }))
+
+    await waitFor(() => expect(archiveSessionMock).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
   })
 })

@@ -14,8 +14,10 @@ from ...services._shared.uploads import read_wav_or_400
 from ...services.scheduling import schedule_voice
 from ...services.scheduling.schedule_chat_rules import parse_confirm_reply
 from ...services.scheduling.schedule_assistant_session import (
+    archive_schedule_assistant_session,
     get_automatic_suggestion_status,
     get_or_create_schedule_assistant_session,
+    list_schedule_assistant_sessions,
 )
 from ._shared import require_company_id
 
@@ -23,6 +25,9 @@ from ._shared import require_company_id
 class ScheduleAssistantSessionRequest(BaseModel):
     location_id: UUID
     week_start: date
+    # Omitted starts a new conversation; supplied resumes one the manager
+    # picked out of their own history for this same location and week.
+    session_id: UUID | None = None
 
 
 router = APIRouter()
@@ -56,6 +61,40 @@ async def create_schedule_assistant_session(
         actor_role=current_user.role,
         location_id=body.location_id,
         week_start=body.week_start,
+        session_id=body.session_id,
+    )
+
+
+@router.get("/assistant/sessions")
+async def list_schedule_assistant_history(
+    location_id: UUID,
+    week_start: date,
+    current_user=Depends(require_company_member),
+) -> dict:
+    """This manager's earlier chats for the location/week now on screen."""
+    company_id = await require_company_id(current_user)
+    await _require_schedule_huume(company_id)
+    return await list_schedule_assistant_sessions(
+        company_id=company_id,
+        user_id=current_user.id,
+        actor_role=current_user.role,
+        location_id=location_id,
+        week_start=week_start,
+    )
+
+
+@router.post("/assistant/sessions/{session_id}/archive")
+async def archive_schedule_assistant_chat(
+    session_id: UUID,
+    current_user=Depends(require_company_member),
+) -> dict:
+    company_id = await require_company_id(current_user)
+    await _require_schedule_huume(company_id)
+    return await archive_schedule_assistant_session(
+        company_id=company_id,
+        user_id=current_user.id,
+        actor_role=current_user.role,
+        session_id=session_id,
     )
 
 
