@@ -34,6 +34,8 @@ class _Conn:
         self.existing = existing
         self.fetchrow_calls = []
         self.execute_calls = []
+        # What the thread's FIRST user turn is, which is what names the chat.
+        self.first_user_turn = None
 
     def transaction(self):
         return _Transaction()
@@ -60,7 +62,9 @@ class _Conn:
             return {"id": uuid4()}
         raise AssertionError(f"unexpected fetchrow query: {query}")
 
-    async def fetchval(self, *_args):
+    async def fetchval(self, query="", *_args):
+        if "FROM mw_messages" in query and "role='user'" in query:
+            return self.first_user_turn
         return None
 
 
@@ -315,9 +319,12 @@ async def _monday_weeks(*_args, **_kwargs) -> int:
 class _MultiSessionConn(_Conn):
     """A store where the manager's latest chat already has messages in it."""
 
-    def __init__(self, resumable=None):
+    def __init__(self, resumable=None, resumable_archived=False):
         super().__init__()
         self.resumable = resumable
+        # The resumable chat's thread is archived, so a lookup that joins
+        # mw_threads and filters archived rows out finds nothing.
+        self.resumable_archived = resumable_archived
         self.queries = []
 
     async def fetchrow(self, query, *params):
@@ -325,6 +332,8 @@ class _MultiSessionConn(_Conn):
         if "FROM business_locations" in query:
             return {"is_active": True}
         if "FROM schedule_assistant_sessions" in query and "WHERE s.id=$1" in query:
+            if self.resumable_archived and "t.status <> 'archived'" in query:
+                return None
             return self.resumable
         if "FROM schedule_assistant_sessions" in query and "msg.spoken IS NULL" in query:
             return None      # every existing chat has been spoken in
@@ -364,6 +373,9 @@ async def test_resuming_a_chat_reuses_its_thread(monkeypatch):
         "current_state": json.dumps({"huume_surface": {"kind": "schedule_assistant"}}),
         "version": 5,
     })
+    # The title comes off the thread's first turn, read straight from the
+    # store — the message window the panel renders is only the newest slice.
+    conn.first_user_turn = "Add an opener Monday\n\nSelected schedule blocks — ..."
     monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
     monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
     monkeypatch.setattr(
@@ -404,6 +416,69 @@ async def test_resuming_someone_elses_chat_is_not_found(monkeypatch):
 
 async def _messages(rows):
     return rows
+
+
+@pytest.mark.asyncio
+async def test_resuming_an_archived_chat_is_a_404_not_a_dead_thread(monkeypatch):
+    """A chat archived in another tab must not come back looking live.
+
+    Handing the transcript back would render as an open conversation that
+    then 400s on every turn, with nothing on screen saying why.
+    """
+    resumed_session_id = uuid4()
+    conn = _MultiSessionConn(
+        {
+            "id": resumed_session_id,
+            "thread_id": uuid4(),
+            "current_state": json.dumps({"huume_surface": {"kind": "schedule_assistant"}}),
+            "version": 2,
+        },
+        resumable_archived=True,
+    )
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+    monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
+
+    with pytest.raises(HTTPException) as raised:
+        await session.get_or_create_schedule_assistant_session(
+            company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+            location_id=uuid4(), week_start=date(2026, 8, 23),
+            session_id=resumed_session_id,
+        )
+
+    assert raised.value.status_code == 404
+    # Nothing was minted to replace it — the panel decides what happens next.
+    assert not any("INSERT INTO mw_threads" in query for query in conn.queries)
+
+
+@pytest.mark.asyncio
+async def test_title_comes_from_the_first_turn_not_the_message_window(monkeypatch):
+    """Past the message window the rendered slice no longer holds the opening
+    ask, so the title has to be read from the thread rather than from it."""
+    resumed_session_id, thread_id = uuid4(), uuid4()
+    conn = _MultiSessionConn({
+        "id": resumed_session_id,
+        "thread_id": thread_id,
+        "current_state": json.dumps({"huume_surface": {"kind": "schedule_assistant"}}),
+        "version": 9,
+    })
+    conn.first_user_turn = "Rebuild the week from the template"
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+    monkeypatch.setattr(
+        session, "get_thread_messages",
+        lambda thread_id, limit: _messages([
+            {"role": "user", "content": "and swap Dana onto Friday"},
+        ]),
+    )
+
+    result = await session.get_or_create_schedule_assistant_session(
+        company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+        location_id=uuid4(), week_start=date(2026, 8, 23),
+        session_id=resumed_session_id,
+    )
+
+    assert result["title"] == "Rebuild the week from the template"
 
 
 def test_a_chat_is_named_after_the_managers_own_sentence():

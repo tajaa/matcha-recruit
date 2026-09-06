@@ -23,6 +23,8 @@ depends_on = None
 def upgrade() -> None:
     # The constraint name is server-generated (and truncated at 63 chars on
     # some databases), so find it by its column set rather than by name.
+    # attname is ``name``, not ``text`` — without the cast the array compare
+    # has no operator and the whole DO block errors out.
     op.execute(
         """
         DO $$
@@ -33,7 +35,7 @@ def upgrade() -> None:
             WHERE c.conrelid = 'schedule_assistant_sessions'::regclass
               AND c.contype = 'u'
               AND (
-                  SELECT array_agg(a.attname ORDER BY a.attname)
+                  SELECT array_agg(a.attname::text ORDER BY a.attname)
                   FROM pg_attribute a
                   WHERE a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
               ) = ARRAY['company_id', 'location_id', 'user_id', 'week_start']

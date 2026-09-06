@@ -208,6 +208,9 @@ async def get_or_create_schedule_assistant_session(
                 f"schedule-assistant:{company_id}:{user_id}:{location_id}:{week_start.isoformat()}",
             )
             if session_id is not None:
+                # An archived chat is resolved as gone, not resumed: the panel
+                # renders the 404 as a session error, whereas handing back the
+                # transcript would look live and then 400 on every turn.
                 existing = await conn.fetchrow(
                     """
                     SELECT s.id, s.company_id, s.user_id, s.location_id, s.week_start,
@@ -216,6 +219,7 @@ async def get_or_create_schedule_assistant_session(
                     JOIN mw_threads t ON t.id=s.thread_id
                     WHERE s.id=$1 AND s.company_id=$2 AND s.user_id=$3
                       AND s.location_id=$4 AND s.week_start=$5
+                      AND t.status <> 'archived'
                     FOR UPDATE OF t
                     """,
                     session_id,
@@ -312,12 +316,20 @@ async def get_or_create_schedule_assistant_session(
                 current_state=current_state,
                 version=version,
             )
+            # The chat is named after its FIRST turn, so it has to be read
+            # from the whole thread — the message window below is the newest
+            # slice and disagrees once a chat passes that many turns.
+            first_user_turn = await conn.fetchval(
+                """
+                SELECT m.content FROM mw_messages m
+                WHERE m.thread_id=$1 AND m.role='user'
+                ORDER BY m.created_at ASC, m.id ASC
+                LIMIT 1
+                """,
+                thread_id,
+            )
 
     messages = await get_thread_messages(thread_id, limit=50)
-    first_user_turn = next(
-        (message.get("content") for message in messages if message.get("role") == "user"),
-        None,
-    )
     return {
         "session_id": str(session_id),
         "thread_id": str(thread_id),

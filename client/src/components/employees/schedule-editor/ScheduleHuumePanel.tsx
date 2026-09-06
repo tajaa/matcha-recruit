@@ -196,6 +196,8 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
     setSessions((current) => current.filter((item) => item.session_id !== summary.session_id))
     // Archiving the chat that is open leaves nothing to talk in — start a new
     // one rather than keeping a thread the server will now refuse turns on.
+    // openChat is a no-op mid-stream, so the trash button is disabled while
+    // busy and this recovery always lands.
     if (summary.session_id === sessionId) openChat(null)
   }
 
@@ -361,7 +363,8 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
                   <button
                     type="button"
                     onClick={() => { void archiveChat(summary) }}
-                    className="mr-2 shrink-0 rounded p-1 text-zinc-600 hover:text-red-300"
+                    disabled={busy}
+                    className="mr-2 shrink-0 rounded p-1 text-zinc-600 hover:text-red-300 disabled:opacity-40"
                     aria-label={`Remove chat: ${summary.title}`}
                     title="Remove from history"
                   ><Trash2 className="h-3.5 w-3.5" /></button>
