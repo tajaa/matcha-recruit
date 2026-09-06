@@ -21,6 +21,7 @@ MONDAY = WEEK_START + timedelta(days=1)
 TUESDAY = WEEK_START + timedelta(days=2)
 HOURS = {"1": {"open": "08:00", "close": "17:00"}}
 LEADER_JOB = "3f6b1c22-2000-4000-8000-0000000000aa"
+SECOND_LEADER_JOB = "3f6b1c22-2000-4000-8000-0000000000bb"
 
 
 def _shift(day, start, end, *, staffed=1, required=1, job_id=None, key="s", end_day=None):
@@ -175,7 +176,7 @@ def test_a_leader_is_only_reported_absent_when_someone_else_is_there():
     about the same hole is noise."""
     covered_without_lead = _evaluate(
         [_shift(MONDAY, "07:30", "17:00")],
-        open_buffer_minutes=30, leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+        open_buffer_minutes=30, leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
     )
     assert "leader_absent_at_open" in _kinds(covered_without_lead)
     assert "Shift Lead" in next(
@@ -183,7 +184,7 @@ def test_a_leader_is_only_reported_absent_when_someone_else_is_there():
     )["detail"]
 
     nobody_at_all = _evaluate(
-        [], open_buffer_minutes=30, leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+        [], open_buffer_minutes=30, leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
     )
     assert "leader_absent_at_open" not in _kinds(nobody_at_all)
 
@@ -192,7 +193,7 @@ def test_a_lead_on_the_floor_at_open_produces_nothing():
     assert _evaluate(
         [_shift(MONDAY, "07:30", "17:00", job_id=LEADER_JOB)],
         open_buffer_minutes=30, close_buffer_minutes=0,
-        leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+        leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
     ) == []
 
 
@@ -272,7 +273,7 @@ def test_an_unfilled_lead_slot_is_not_a_lead_on_the_floor():
             _shift(MONDAY, "08:00", "17:00", key="floor"),
             _shift(MONDAY, "08:00", "12:00", key="lead", staffed=0, job_id=LEADER_JOB),
         ],
-        leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+        leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
     )
 
     assert "leader_absent_at_open" in _kinds(findings)
@@ -288,8 +289,57 @@ def test_an_unfilled_lead_slot_does_answer_the_pattern_question():
             _shift(MONDAY, "08:00", "17:00", key="lead", staffed=0, job_id=LEADER_JOB),
         ],
         headcount="required",
-        leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+        leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
     )
 
     assert "leader_absent_at_open" not in _kinds(findings)
     assert "leader_absent_at_close" not in _kinds(findings)
+
+
+def test_any_one_of_several_leader_jobs_counts_as_lead_coverage():
+    """The rule is a SET: a store that lets a shift lead OR an assistant
+    manager open must not read the AM's open as "no lead"."""
+    findings = _evaluate(
+        [
+            _shift(MONDAY, "08:00", "17:00", key="floor"),
+            _shift(MONDAY, "08:00", "12:00", key="am-open", job_id=SECOND_LEADER_JOB),
+            _shift(MONDAY, "12:00", "17:00", key="lead-close", job_id=LEADER_JOB),
+        ],
+        leader_job_ids=[LEADER_JOB, SECOND_LEADER_JOB],
+        leader_job_names=["Shift Lead", "Assistant Manager"],
+    )
+
+    assert "leader_absent_at_open" not in _kinds(findings)
+    assert "leader_absent_at_close" not in _kinds(findings)
+
+
+def test_several_leader_jobs_absent_is_one_finding_naming_them_all():
+    """One absence, one finding — never one per eligible job, which would
+    report the same hole three times over."""
+    findings = _evaluate(
+        [_shift(MONDAY, "08:00", "17:00", key="floor")],
+        leader_job_ids=[LEADER_JOB, SECOND_LEADER_JOB],
+        leader_job_names=["Shift Lead", "Assistant Manager"],
+    )
+
+    at_open = [f for f in findings if f["kind"] == "leader_absent_at_open"]
+    assert len(at_open) == 1
+    assert "No Shift Lead or Assistant Manager is scheduled at open" in at_open[0]["detail"]
+    # A finding names ONE job; with several eligible the id stays blank rather
+    # than blaming the first, and the label carries the set.
+    assert at_open[0]["job_id"] is None
+    assert at_open[0]["job_name"] == "Shift Lead or Assistant Manager"
+
+
+def test_a_single_leader_job_still_names_itself_on_the_finding():
+    findings = _evaluate(
+        [_shift(MONDAY, "08:00", "17:00", key="floor")],
+        leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
+    )
+    at_open = next(f for f in findings if f["kind"] == "leader_absent_at_open")
+    assert at_open["job_id"] == LEADER_JOB
+    assert at_open["job_name"] == "Shift Lead"
+
+
+def test_an_empty_leader_set_checks_nothing():
+    assert _evaluate([_shift(MONDAY, "08:00", "17:00")], leader_job_ids=[], leader_job_names=[]) == []

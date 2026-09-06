@@ -37,9 +37,11 @@ const profile = {
   week_rules: { established: false, missing: ['operating_hours', 'staffing_pattern', 'leader_rule'] },
   operating_hours: { '1': { open: '08:00', close: '17:00' } },
   default_week_template_id: null,
-  leader_job_id: null,
-  leader_job_name: null,
-  leader_required: null,
+  leader_job_ids: [] as string[],
+  leader_job_names: [] as string[],
+  leader_job_id: null as string | null,
+  leader_job_name: null as string | null,
+  leader_required: null as boolean | null,
   notes: null,
   week_start_weekday: 0,
   open_buffer_minutes: 30,
@@ -105,6 +107,8 @@ describe('WeekStartPane — prep and close buffers', () => {
 describe('WeekStartPane — the leader answer', () => {
   const jobs = [
     { id: 'job-1', name: 'Shift Lead', location_id: 'loc-1', is_active: true },
+    { id: 'job-2', name: 'Assistant Manager', location_id: 'loc-1', is_active: true },
+    { id: 'job-3', name: 'Barista', location_id: 'loc-1', is_active: true },
   ] as never[]
 
   beforeEach(() => {
@@ -126,38 +130,118 @@ describe('WeekStartPane — the leader answer', () => {
     // so a store that needs no lead has to be able to say so.
     renderWithJobs()
 
-    // `Select` is a button + dropdown, not a native <select>.
-    fireEvent.click(await screen.findByRole('button', { name: /Not answered yet/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'No leader required' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'No leader required' }))
     fireEvent.click(screen.getByText('Save week setup'))
 
     await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
     const payload = mocks.saveProfile.mock.calls[0][1]
     expect(payload.leader_required).toBe(false)
-    expect(payload.leader_job_id).toBeNull()
+    expect(payload.leader_job_ids).toEqual([])
   })
 
   it('leaves the answer null while nobody has picked one', async () => {
     renderWithJobs()
 
-    await screen.findByRole('button', { name: /Not answered yet/ })
+    expect(await screen.findByText('Not answered yet')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Save week setup'))
 
     await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
-    expect(mocks.saveProfile.mock.calls[0][1].leader_required).toBeNull()
+    const payload = mocks.saveProfile.mock.calls[0][1]
+    expect(payload.leader_required).toBeNull()
+    expect(payload.leader_job_ids).toEqual([])
   })
 
-  it('names a leader job as the yes answer', async () => {
+  it('names one leader job as the yes answer', async () => {
     renderWithJobs()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Not answered yet/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Yes — these jobs' }))
     fireEvent.click(screen.getByRole('button', { name: 'Shift Lead' }))
     fireEvent.click(screen.getByText('Save week setup'))
 
     await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
     const payload = mocks.saveProfile.mock.calls[0][1]
     expect(payload.leader_required).toBe(true)
-    expect(payload.leader_job_id).toBe('job-1')
+    expect(payload.leader_job_ids).toEqual(['job-1'])
+  })
+
+  it('lets several jobs lead, in the order they were picked', async () => {
+    // A shift lead OR an assistant manager can open the till: the rule is a
+    // set, and "one of these" has to be sayable without picking a favourite.
+    renderWithJobs()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Yes — these jobs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant Manager' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Shift Lead' }))
+    fireEvent.click(screen.getByText('Save week setup'))
+
+    await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
+    const payload = mocks.saveProfile.mock.calls[0][1]
+    expect(payload.leader_required).toBe(true)
+    expect(payload.leader_job_ids).toEqual(['job-2', 'job-1'])
+  })
+
+  it('shows every saved leader job pressed when the setup is reopened', async () => {
+    mocks.fetchProfile.mockResolvedValue({
+      ...profile, leader_required: true,
+      leader_job_ids: ['job-1', 'job-2'], leader_job_names: ['Shift Lead', 'Assistant Manager'],
+      leader_job_id: 'job-1', leader_job_name: 'Shift Lead',
+    })
+    renderWithJobs()
+
+    expect(await screen.findByRole('button', { name: 'Yes — these jobs', pressed: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Shift Lead', pressed: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Assistant Manager', pressed: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Barista', pressed: false })).toBeInTheDocument()
+  })
+
+  it('reads a single-role profile from before the set exactly as before', async () => {
+    // Older payloads carry only `leader_job_id`; a one-role store must look
+    // and save the same as it always did.
+    const { leader_job_ids: _ids, leader_job_names: _names, ...legacy } = profile
+    mocks.fetchProfile.mockResolvedValue({ ...legacy, leader_required: true, leader_job_id: 'job-1', leader_job_name: 'Shift Lead' })
+    renderWithJobs()
+
+    expect(await screen.findByRole('button', { name: 'Shift Lead', pressed: true })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Save week setup'))
+
+    await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
+    const payload = mocks.saveProfile.mock.calls[0][1]
+    expect(payload.leader_required).toBe(true)
+    expect(payload.leader_job_ids).toEqual(['job-1'])
+  })
+
+  it('un-answers the question when every job is cleared, rather than sending an impossible yes', async () => {
+    // `leader_required: true` with no job is the one state the server refuses;
+    // clearing every pick is how a manager takes the answer back.
+    mocks.fetchProfile.mockResolvedValue({
+      ...profile, leader_required: true, leader_job_ids: ['job-1'], leader_job_names: ['Shift Lead'],
+      leader_job_id: 'job-1', leader_job_name: 'Shift Lead',
+    })
+    renderWithJobs()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Shift Lead', pressed: true }))
+    expect(screen.getByText(/Pick at least one job/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Save week setup'))
+
+    await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
+    const payload = mocks.saveProfile.mock.calls[0][1]
+    expect(payload.leader_required).toBeNull()
+    expect(payload.leader_job_ids).toEqual([])
+  })
+
+  it('keeps a saved leader job the location list does not carry, so it is not silently dropped', async () => {
+    mocks.fetchProfile.mockResolvedValue({
+      ...profile, leader_required: true,
+      leader_job_ids: ['job-1', 'job-hq'], leader_job_names: ['Shift Lead', 'Regional Manager'],
+      leader_job_id: 'job-1', leader_job_name: 'Shift Lead',
+    })
+    renderWithJobs()
+
+    expect(await screen.findByRole('button', { name: 'Regional Manager', pressed: true })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Save week setup'))
+
+    await waitFor(() => expect(mocks.saveProfile).toHaveBeenCalled())
+    expect(mocks.saveProfile.mock.calls[0][1].leader_job_ids).toEqual(['job-1', 'job-hq'])
   })
 
   it('says what is still missing so the manager knows why Huume refuses', async () => {

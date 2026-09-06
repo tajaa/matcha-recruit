@@ -41,9 +41,13 @@ the only gap is the leader question. `leader_required` is a real tool field —
 `false` is the answer "no lead needed", so it must stay in
 `_HR_OPS_TOOL_SPECS[...]["fields"]` (a field missing there is dropped from the
 staged dict) and reach `execute` on an `is not None` test, exactly like the
-buffers. An explicit `false` also clears `leader_job_id` and strips the
-`<Job> coverage` blocks an earlier `true` wrote into the default template —
-half a retraction leaves the profile arguing with the manager on every turn.
+buffers. An explicit `false` also clears the leader set (`leader_job_ids` + its
+`leader_job_id` mirror) and strips the `<Job> coverage` blocks an earlier
+`true` wrote into the default template, for every saved leader job — half a
+retraction leaves the profile arguing with the manager on every turn. The
+tool still takes ONE `leader_job_name`, and naming it REPLACES whatever set the
+Week setup pane saved (several jobs can lead there since `schedloc04`);
+teaching the interview several names is the open follow-up.
 The `operating_hours` tool description tells the model to send `null` for a
 closed day precisely because the gate wants all seven: omitting the days
 nobody mentioned saves cleanly and then refuses to build, which the model

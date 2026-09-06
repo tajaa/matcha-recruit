@@ -19,7 +19,7 @@ from app.database import connection_or_direct
 
 from .location_profile import (
     WEEKDAY_NAMES, get_location_profile, load_profile_bundle, missing_fields,
-    resolve_week_start_weekday, week_rules_refusal,
+    profile_leader_job_ids, resolve_week_start_weekday, week_rules_refusal,
 )
 from .schedule_break_stagger import StaggerAssignment, stagger_shift_breaks
 from .schedule_breaks import reinterpret_schedule_wall_time
@@ -787,27 +787,32 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
 
 
 async def _coverage_profile(conn, *, company_id: UUID, location_id: UUID) -> dict[str, Any]:
-    """The profile fields the coverage evaluator needs, plus the leader's name.
+    """The profile fields the coverage evaluator needs, plus the leaders' names.
 
-    The leader job's NAME costs one extra fetchval and is what makes a finding
-    readable ("No Shift Lead is scheduled at open") instead of a uuid.
+    The leader jobs' NAMES cost one extra fetch and are what make a finding
+    readable ("No Shift Lead or Assistant Manager is scheduled at open")
+    instead of uuids. An id that no longer resolves to a job is dropped: the
+    FK on the mirror column nulls itself on job delete, but nothing can do
+    that inside the array, and a rule naming only a deleted job is no rule.
     """
     profile = await get_location_profile(
         conn, company_id=company_id, location_id=location_id,
     ) or {}
-    leader_job_id = profile.get("leader_job_id")
-    leader_job_name = None
-    if leader_job_id:
-        leader_job_name = await conn.fetchval(
-            "SELECT name FROM schedule_jobs WHERE id=$1 AND company_id=$2",
-            leader_job_id, company_id,
+    leader_ids = profile_leader_job_ids(profile)
+    names_by_id: dict[str, str] = {}
+    if leader_ids:
+        rows = await conn.fetch(
+            "SELECT id, name FROM schedule_jobs WHERE company_id=$1 AND id = ANY($2::uuid[])",
+            company_id, leader_ids,
         )
+        names_by_id = {str(row["id"]): row["name"] for row in rows}
+    leader_job_ids = [str(job_id) for job_id in leader_ids if str(job_id) in names_by_id]
     return {
         "operating_hours": profile.get("operating_hours") or {},
         "open_buffer_minutes": int(profile.get("open_buffer_minutes") or 0),
         "close_buffer_minutes": int(profile.get("close_buffer_minutes") or 0),
-        "leader_job_id": str(leader_job_id) if leader_job_id else None,
-        "leader_job_name": leader_job_name,
+        "leader_job_ids": leader_job_ids,
+        "leader_job_names": [names_by_id[job_id] for job_id in leader_job_ids],
     }
 
 
@@ -887,8 +892,8 @@ async def _attach_findings_core(
         operating_hours=hours,
         open_buffer_minutes=profile["open_buffer_minutes"],
         close_buffer_minutes=profile["close_buffer_minutes"],
-        leader_job_id=profile["leader_job_id"],
-        leader_job_name=profile["leader_job_name"],
+        leader_job_ids=profile["leader_job_ids"],
+        leader_job_names=profile["leader_job_names"],
         week_start=week_start,
     )
     breaks = await _break_relief_findings(
@@ -1195,8 +1200,8 @@ async def get_week_build_readiness(
         operating_hours=profile["operating_hours"],
         open_buffer_minutes=profile["open_buffer_minutes"],
         close_buffer_minutes=profile["close_buffer_minutes"],
-        leader_job_id=profile["leader_job_id"],
-        leader_job_name=profile["leader_job_name"],
+        leader_job_ids=profile["leader_job_ids"],
+        leader_job_names=profile["leader_job_names"],
         week_start=week_start, headcount="required",
     ) if pattern_source else []
     pattern_findings = _cap_findings(pattern_findings, _FINDINGS_RETURNED)
@@ -1262,7 +1267,11 @@ async def get_week_build_readiness(
         "operating_hours_known": bool(profile["operating_hours"]),
         "open_buffer_minutes": profile["open_buffer_minutes"],
         "close_buffer_minutes": profile["close_buffer_minutes"],
-        "leader_job_name": profile["leader_job_name"],
+        # The rule is a set; the scalar is its first entry for readers that
+        # predate the set.
+        "leader_job_ids": profile["leader_job_ids"],
+        "leader_job_names": profile["leader_job_names"],
+        "leader_job_name": profile["leader_job_names"][0] if profile["leader_job_names"] else None,
         "pattern_findings": pattern_findings,
         "employees": [
             {"employee_id": employee["id"], "name": employee["name"],

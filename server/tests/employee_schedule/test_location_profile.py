@@ -903,3 +903,173 @@ async def test_an_explicit_leader_required_still_wins_over_the_auto_answer():
     written = _written(conn)
     assert written["leader_job_id"] is None
     assert written["leader_required"] is False
+
+
+# --- the leader rule is a SET -------------------------------------------------
+
+SECOND_JOB_ID = UUID("99999999-9999-9999-9999-999999999999")
+
+
+@pytest.mark.asyncio
+async def test_several_leader_jobs_are_written_as_the_set_plus_a_mirror():
+    """`leader_job_ids` is the rule; `leader_job_id` is its first entry, kept
+    so the FK and any reader that predates the set still see a value."""
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_ids=[JOB_ID, SECOND_JOB_ID, JOB_ID],
+    )
+    written = _written(conn)
+    assert written["leader_job_ids"] == [JOB_ID, SECOND_JOB_ID]   # deduped, order kept
+    assert written["leader_job_id"] == JOB_ID
+    assert written["leader_required"] is True
+    assert "::uuid[]" in conn.sql
+
+
+@pytest.mark.asyncio
+async def test_the_legacy_scalar_is_the_one_element_spelling_of_the_set():
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_id=str(JOB_ID),
+    )
+    written = _written(conn)
+    assert written["leader_job_ids"] == [JOB_ID]
+    assert written["leader_job_id"] == JOB_ID
+
+
+@pytest.mark.asyncio
+async def test_the_set_wins_when_both_spellings_are_sent():
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_id=SECOND_JOB_ID, leader_job_ids=[JOB_ID],
+    )
+    written = _written(conn)
+    assert written["leader_job_ids"] == [JOB_ID]
+    assert written["leader_job_id"] == JOB_ID
+
+
+@pytest.mark.asyncio
+async def test_an_empty_set_clears_the_mirror_and_un_answers_the_question():
+    conn = _CapturingConn()
+    await location_profile.upsert_location_profile(
+        conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+        leader_job_ids=[],
+    )
+    written = _written(conn)
+    assert written["leader_job_ids"] == []
+    assert written["leader_job_id"] is None
+    assert written["leader_required"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_leader_set_is_refused():
+    conn = _CapturingConn()
+    too_many = [UUID(int=index + 1) for index in range(location_profile.MAX_LEADER_JOBS + 1)]
+    with pytest.raises(ValueError):
+        await location_profile.upsert_location_profile(
+            conn, company_id=COMPANY_ID, location_id=LOCATION_ID, actor_user_id=ACTOR_ID,
+            leader_job_ids=too_many,
+        )
+
+
+def test_missing_fields_reads_the_set_not_just_the_mirror():
+    """A row whose mirror was nulled by the FK (job deleted) but whose set still
+    names another job has answered the question."""
+    bundle = _bundle(hours=FULL_WEEK_HOURS, blocks=[{"name": "Opener"}], leader_required=True)
+    bundle["profile"]["leader_job_id"] = None
+    bundle["profile"]["leader_job_ids"] = [SECOND_JOB_ID]
+    assert "leader_rule" not in missing_fields(bundle)
+
+    bundle["profile"]["leader_job_ids"] = []
+    assert "leader_rule" in missing_fields(bundle)
+
+
+def test_profile_context_lines_name_every_leader_job():
+    bundle = _bundle(hours=FULL_WEEK_HOURS, leader="Shift Lead")
+    bundle["leader_jobs"] = [
+        {"id": str(JOB_ID), "name": "Shift Lead"},
+        {"id": str(SECOND_JOB_ID), "name": "Assistant Manager"},
+    ]
+    text = "\n".join(profile_context_lines(bundle))
+    assert "Leader coverage: Shift Lead or Assistant Manager on every open shift" in text
+
+
+def test_bundle_leader_jobs_reads_a_scalar_only_bundle_as_a_one_element_set():
+    assert location_profile.bundle_leader_jobs(_bundle(leader="Shift Lead")) == [
+        {"id": str(JOB_ID), "name": "Shift Lead"},
+    ]
+    assert location_profile.bundle_leader_jobs(_bundle()) == []
+
+
+@pytest.mark.parametrize("names, expected", [
+    ([], ""),
+    (["Shift Lead"], "Shift Lead"),
+    (["Shift Lead", "AM"], "Shift Lead or AM"),
+    (["Shift Lead", "AM", "GM"], "Shift Lead, AM or GM"),
+])
+def test_join_or(names, expected):
+    assert location_profile.join_or(names) == expected
+
+
+@pytest.mark.asyncio
+async def test_load_profile_bundle_resolves_every_leader_in_profile_order_and_drops_the_dead():
+    """The FK nulls the mirror when a job is deleted; nothing can do that inside
+    the array, so an id that no longer resolves is dropped on read."""
+    dead = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            return {
+                "id": TEMPLATE_ID, "operating_hours": "{}", "default_week_template_id": None,
+                "leader_job_id": SECOND_JOB_ID, "leader_job_ids": [SECOND_JOB_ID, dead, JOB_ID],
+                "leader_required": True,
+            }
+
+        async def fetch(self, sql, *args):
+            assert "ANY($2::uuid[])" in sql
+            return [{"id": JOB_ID, "name": "Shift Lead"}, {"id": SECOND_JOB_ID, "name": "AM"}]
+
+    bundle = await location_profile.load_profile_bundle(
+        _Conn(), company_id=COMPANY_ID, location_id=LOCATION_ID,
+    )
+    assert bundle["leader_jobs"] == [
+        {"id": str(SECOND_JOB_ID), "name": "AM"}, {"id": str(JOB_ID), "name": "Shift Lead"},
+    ]
+    assert bundle["leader_job_name"] == "AM"
+
+
+@pytest.mark.asyncio
+async def test_retracting_the_rule_strips_coverage_for_every_saved_leader_job(monkeypatch):
+    """Two leader jobs, each with generated `<Job> coverage` blocks: a "no lead
+    needed" has to take back both, and leave the manager's own blocks alone."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    bundle = _bundle(
+        hours={"1": {"open": "08:00", "close": "17:00"}},
+        blocks=[
+            {"name": "Opener", "role": "Barista", "job_id": "b0000000-0000-4000-8000-000000000001",
+             "job_name": "Barista", "days_of_week": [1], "start_time": "08:00", "end_time": "16:00",
+             "required_staff": 2, "break_minutes": 30},
+            {"name": "Shift Lead coverage", "role": "Shift Lead", "job_id": str(JOB_ID),
+             "job_name": "Shift Lead", "days_of_week": [1], "start_time": "08:00",
+             "end_time": "17:00", "required_staff": 1, "break_minutes": 0},
+            {"name": "AM coverage", "role": "AM", "job_id": str(SECOND_JOB_ID),
+             "job_name": "AM", "days_of_week": [1], "start_time": "08:00",
+             "end_time": "17:00", "required_staff": 1, "break_minutes": 0},
+        ],
+        leader="Shift Lead",
+    )
+    bundle["profile"]["leader_job_ids"] = [JOB_ID, SECOND_JOB_ID]
+    bundle["leader_jobs"] = [
+        {"id": str(JOB_ID), "name": "Shift Lead"}, {"id": str(SECOND_JOB_ID), "name": "AM"},
+    ]
+    _patch_saved(monkeypatch, bundle)
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={"leader_required": False},
+    )
+
+    assert result["status"] == "ok"
+    assert [block["name"] for block in result["blocks"]] == ["Opener"]

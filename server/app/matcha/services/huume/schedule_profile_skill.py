@@ -286,7 +286,11 @@ async def resolve_profile_args(
             leader_required = bool(leader_required)
         if leader_job:
             leader_required = True
-        saved_leader_job = (saved.get("profile") or {}).get("leader_job_id")
+        # The saved rule is a SET (the Week setup pane can name several jobs);
+        # the interview still names one, and naming it REPLACES the set — the
+        # same single-answer semantics the tool has always had.
+        saved_leaders = location_profile.bundle_leader_jobs(saved)
+        saved_leader_job = saved_leaders[0]["id"] if saved_leaders else None
         if leader_required is True and not leader_job and not saved_leader_job:
             options = await _job_options(conn, company_id=company_id, location_id=location_id)
             known = ", ".join(options) if options else "none set up yet"
@@ -311,9 +315,9 @@ async def resolve_profile_args(
         # confirm card showed. `_leader_blocks` only ever adds coverage on top
         # of an existing pattern, so stripping can never empty one it wrote.
         pattern = blocks or _saved_pattern_blocks(saved)
-        stripped = _strip_leader_coverage(
-            pattern, saved_leader_job, saved.get("leader_job_name"),
-        )
+        stripped = pattern
+        for leader in saved_leaders:
+            stripped = _strip_leader_coverage(stripped, leader["id"], leader.get("name"))
         if stripped and len(stripped) != len(pattern):
             blocks = stripped
 

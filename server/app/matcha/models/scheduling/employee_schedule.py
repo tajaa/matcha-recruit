@@ -366,11 +366,15 @@ class LocationScheduleProfileUpdate(BaseModel):
 
     operating_hours: Optional[dict[str, Optional[OperatingWindow]]] = None
     default_week_template_id: Optional[UUID] = None
+    # The leader rule is a SET: any one of these jobs on shift is lead
+    # coverage. `leader_job_id` is the one-element spelling kept for callers
+    # that predate the set; when both are sent, `leader_job_ids` wins.
+    leader_job_ids: Optional[list[UUID]] = Field(None, max_length=20)
     leader_job_id: Optional[UUID] = None
-    # Tri-state, and the reason it is separate from `leader_job_id`: null is
-    # "nobody has been asked", false is the manager answering "no lead needed",
-    # true requires a named job. The week builder treats an unanswered question
-    # as missing setup, so the two cannot share one nullable column.
+    # Tri-state, and the reason it is separate from the jobs: null is "nobody
+    # has been asked", false is the manager answering "no lead needed", true
+    # requires at least one named job. The week builder treats an unanswered
+    # question as missing setup, so the two cannot share one nullable column.
     leader_required: Optional[bool] = None
     notes: Optional[str] = Field(None, max_length=2000)
     week_start_weekday: Optional[Weekday] = None
@@ -384,6 +388,10 @@ class LocationScheduleProfileUpdate(BaseModel):
         for key in (self.operating_hours or {}):
             if key not in {"0", "1", "2", "3", "4", "5", "6"}:
                 raise ValueError('operating_hours keys must be "0"-"6" (0=Sunday)')
+        if self.leader_job_ids is not None:
+            # Deduped here, in the order sent: the first entry is what the
+            # single-value mirror fields report back.
+            self.leader_job_ids = list(dict.fromkeys(self.leader_job_ids))
         return self
 
 

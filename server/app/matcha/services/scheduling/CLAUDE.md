@@ -34,8 +34,8 @@ shifts; the whole-week builder applies only editable drafts and never publishes.
 
 `schedule_location_profiles` (one row per `business_locations` row) is where a
 store's own setup lives: `operating_hours` JSONB, `default_week_template_id`,
-`leader_job_id`, `notes`, `week_start_weekday`, and (migration `schedloc02`)
-`open_buffer_minutes` / `close_buffer_minutes`. `services/scheduling/
+`leader_job_ids` (+ its `leader_job_id` mirror), `notes`, `week_start_weekday`,
+and (migration `schedloc02`) `open_buffer_minutes` / `close_buffer_minutes`. `services/scheduling/
 location_profile.py` owns it; `routes/employee_schedule/location_profile.py`
 is the hand-editable REST twin of what Huume interviews for
 (`services/huume/schedule_profile_skill.py` — see `services/huume/CLAUDE.md`).
@@ -59,20 +59,36 @@ Invariants:
   `get_week_build_readiness`'s `blockers` — readiness saying "ready" and the
   builder then refusing is the loop this surface exists to end. The prompt no
   longer merely suggests the interview; the builder enforces it.
+- **The leader rule is a SET (migration `schedloc04`).** `leader_job_ids UUID[]`
+  is the rule — any ONE of those jobs on shift is lead coverage — and
+  `leader_job_id` is a derived mirror of its first element, kept so the FK's
+  `ON DELETE SET NULL` and pre-set readers still see a value. Only
+  `upsert_location_profile` writes either and it always writes both
+  (`leader_job_id=` is accepted as the one-element spelling; the set wins when
+  both arrive). Readers go through `profile_leader_job_ids` /
+  `bundle_leader_jobs`, which fall back to the scalar for fixtures that predate
+  the set. Nothing can FK-null an id inside the array, so `load_profile_bundle`
+  and `week_builder._coverage_profile` drop ids that no longer resolve on read.
+  The coverage evaluator emits ONE `leader_absent_*` finding per check for the
+  whole set (label `join_or(names)`, `job_id` only when exactly one job) — never
+  one per eligible job. The Huume interview still names one job and REPLACES
+  the set; extending the tool to several names is the open follow-up.
 - **`leader_required` is tri-state, and that is why it is not just
-  `leader_job_id`.** `NULL` never asked, `false` no lead needed, `true` names
-  the job (DB CHECK). Without the explicit `false` a store that needs no lead
+  `leader_job_ids`.** `NULL` never asked, `false` no lead needed, `true` names
+  at least one job (DB CHECK on `cardinality(leader_job_ids)`). Without the explicit `false` a store that needs no lead
   could never finish setup, so the gate would block it forever. Both surfaces
   can answer it: the interview passes `leader_required`, the Week setup pane
-  has a "No leader required" option distinct from an unpicked select.
+  has a "No leader required" toggle distinct from an unanswered one — and a
+  "Yes" with every job un-picked saves as unanswered (`leader_required: null`,
+  `leader_job_ids: []`) rather than as the state the CHECK refuses.
 - **A retracted leader rule has to give back both halves.** `true` names a job
   AND materializes `<Job> coverage` demand into the default template
   (`schedule_profile_skill._leader_blocks`). A later `false` therefore clears
-  `leader_job_id` too — otherwise `_coverage_profile` keeps emitting leader
+  the leader set too — otherwise `_coverage_profile` keeps emitting leader
   gaps and `profile_context_lines` keeps saying a lead is required — and strips
-  the generated coverage back out (`_strip_leader_coverage`, matched on the
-  generated name AND the job, so a manager-written block on the lead job
-  survives). `upsert_location_profile` is symmetric for the same reason:
+  the generated coverage back out for EVERY saved leader job
+  (`_strip_leader_coverage`, matched on the generated name AND the job, so a
+  manager-written block on a lead job survives). `upsert_location_profile` is symmetric for the same reason:
   naming the job answers the question, clearing it un-answers it rather than
   leaving `leader_required=true` with nothing named — the one state the CHECK
   refuses.
