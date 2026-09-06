@@ -881,8 +881,11 @@ TOOLS: tuple[HuumeTool, ...] = (
                 type=types.Type.OBJECT,
                 description=(
                     "Open/close per weekday keyed '0'..'6' (0=Sunday), e.g. "
-                    "{\"1\": {\"open\": \"08:00\", \"close\": \"17:00\"}}. Use null for a "
-                    "closed day; omit a day nobody has told you about."
+                    "{\"1\": {\"open\": \"08:00\", \"close\": \"17:00\"}}. Send null for a "
+                    "day the store is closed. All seven days need an answer before a "
+                    "week can be built, so ask about the ones the manager did not "
+                    "mention instead of leaving them out — omit a day only while it "
+                    "is still unasked."
                 ),
             ),
             "blocks": types.Schema(
@@ -911,6 +914,15 @@ TOOLS: tuple[HuumeTool, ...] = (
             "leader_job_name": types.Schema(
                 type=types.Type.STRING,
                 description="Job that must be on every open shift (shift lead / manager), if the manager named one.",
+            ),
+            "leader_required": types.Schema(
+                type=types.Type.BOOLEAN,
+                description=(
+                    "true when a shift lead or manager must be on every open shift — name "
+                    "the job in leader_job_name. false when the manager says no lead is "
+                    "needed; that is a real answer and the week cannot be built without "
+                    "it. Omit only while the question is still unasked."
+                ),
             ),
             "open_buffer_minutes": types.Schema(
                 type=types.Type.INTEGER,

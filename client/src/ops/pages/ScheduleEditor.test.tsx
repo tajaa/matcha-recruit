@@ -4,13 +4,15 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
-const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, getScheduleSuggestionStatusMock, sendMessageStreamMock, reloadMock, reloadLocationsMock } = vi.hoisted(() => ({
+const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, getScheduleSuggestionStatusMock, listHuumeSessionsMock, fetchLocationProfileMock, sendMessageStreamMock, reloadMock, reloadLocationsMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   reloadLocationsMock: vi.fn().mockResolvedValue(undefined),
   useEditorMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   getScheduleHuumeSessionMock: vi.fn(),
   getScheduleSuggestionStatusMock: vi.fn(),
+  listHuumeSessionsMock: vi.fn(),
+  fetchLocationProfileMock: vi.fn(),
   sendMessageStreamMock: vi.fn(() => new AbortController()),
   reloadMock: vi.fn().mockResolvedValue(undefined),
 }))
@@ -38,7 +40,15 @@ vi.mock('../../components/employees/schedule-editor/WeekStartPane', () => ({
 vi.mock('../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
   getScheduleSuggestionStatus: getScheduleSuggestionStatusMock,
+  // The panel lists its own chat history on every session load; without these
+  // the module mock is missing the export and every assistant test throws.
+  listScheduleHuumeSessions: listHuumeSessionsMock,
+  archiveScheduleHuumeSession: vi.fn(),
   transcribeScheduleVoice: vi.fn(),
+}))
+vi.mock('../../api/employees/locationProfile', () => ({
+  fetchLocationScheduleProfile: fetchLocationProfileMock,
+  saveLocationScheduleProfile: vi.fn(),
 }))
 vi.mock('../../work/api/matchaWork/messaging', () => ({
   sendMessageStream: sendMessageStreamMock,
@@ -67,6 +77,16 @@ describe('ScheduleEditor', () => {
     })
     getScheduleSuggestionStatusMock.mockResolvedValue({
       available: false, generation_run_id: null, week_start: null, created_at: null,
+    })
+    listHuumeSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
+    // Established by default: most tests here are about the grid and the
+    // assistant, not the setup gate.
+    fetchLocationProfileMock.mockReset().mockResolvedValue({
+      location_id: 'loc1', profile_exists: true,
+      week_rules: { established: true, missing: [] },
+      operating_hours: {}, default_week_template_id: null, leader_job_id: null,
+      leader_job_name: null, leader_required: false, notes: null, week_start_weekday: 0,
+      open_buffer_minutes: 0, close_buffer_minutes: 0, template: null,
     })
     useMeMock.mockReturnValue({
       me: { profile: { name: 'Jamie Rivera' } },
@@ -491,5 +511,108 @@ describe('ScheduleEditor', () => {
     // (and the session the panel opens) must use 2026-08-03.
     expect(screen.getByText('Week of 2026-08-03')).toBeInTheDocument()
     expect(useEditorMock).toHaveBeenCalledWith('2026-08-03', 'loc1', expect.any(Object))
+  })
+
+  it('warns that a location has no saved week setup and routes into it', async () => {
+    // Huume refuses to build a week without these, so the manager is told
+    // here rather than finding out from a refusal after they ask.
+    fetchLocationProfileMock.mockResolvedValue({
+      location_id: 'loc1', profile_exists: false,
+      week_rules: { established: false, missing: ['operating_hours', 'leader_rule'] },
+      operating_hours: {}, default_week_template_id: null, leader_job_id: null,
+      leader_job_name: null, leader_required: null, notes: null, week_start_weekday: 0,
+      open_buffer_minutes: 0, close_buffer_minutes: 0, template: null,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/is still missing hours, the leader rule/)).toBeInTheDocument()
+    // The grid is still usable — a manager may want to draw shifts by hand.
+    expect(screen.getByText('Aisha Rivera')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill it in myself' }))
+    expect(screen.getByText('Week setup pane')).toBeInTheDocument()
+  })
+
+  it('shows no setup banner once the rules are established', async () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(fetchLocationProfileMock).toHaveBeenCalled())
+    expect(screen.queryByText(/is still missing/)).not.toBeInTheDocument()
+  })
+
+  it('re-reads the setup after the Week setup pane saves', async () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(fetchLocationProfileMock).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Week setup' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save week setup' }))
+
+    // Otherwise the banner outlives the answer that cleared it.
+    await waitFor(() => expect(fetchLocationProfileMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('ignores a profile read that lands after the manager switched location', async () => {
+    // The read is also fired imperatively after a save, so two can be in
+    // flight against different stores at once; the slower one used to paint
+    // the store the manager had already left.
+    let resolveWilshire: (value: unknown) => void = () => {}
+    fetchLocationProfileMock
+      .mockReset()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveWilshire = resolve }))
+      .mockResolvedValue({
+        location_id: 'loc2', profile_exists: true,
+        week_rules: { established: true, missing: [] },
+        operating_hours: {}, default_week_template_id: null, leader_job_id: null,
+        leader_job_name: null, leader_required: false, notes: null, week_start_weekday: 0,
+        open_buffer_minutes: 0, close_buffer_minutes: 0, template: null,
+      })
+
+    const locations = [
+      { id: 'loc1', name: 'Wilshire', city: 'Los Angeles', state: 'CA', is_active: true },
+      { id: 'loc2', name: 'Downtown', city: 'Los Angeles', state: 'CA', is_active: true },
+    ]
+    const tree = (
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>
+    )
+    useLocationScopeMock.mockReturnValue({
+      locationId: 'loc1', setLocationId: vi.fn(), locations, loading: false,
+      reloadLocations: reloadLocationsMock,
+    })
+    const view = render(tree)
+
+    useLocationScopeMock.mockReturnValue({
+      locationId: 'loc2', setLocationId: vi.fn(), locations, loading: false,
+      reloadLocations: reloadLocationsMock,
+    })
+    view.rerender(tree)
+    await waitFor(() => expect(fetchLocationProfileMock).toHaveBeenCalledTimes(2))
+
+    // Wilshire's read finishes last, saying its rules are missing.
+    await act(async () => {
+      resolveWilshire({
+        location_id: 'loc1', profile_exists: false,
+        week_rules: { established: false, missing: ['operating_hours'] },
+        operating_hours: {}, default_week_template_id: null, leader_job_id: null,
+        leader_job_name: null, leader_required: null, notes: null, week_start_weekday: 0,
+        open_buffer_minutes: 0, close_buffer_minutes: 0, template: null,
+      })
+    })
+
+    expect(screen.queryByText(/is still missing/)).not.toBeInTheDocument()
   })
 })

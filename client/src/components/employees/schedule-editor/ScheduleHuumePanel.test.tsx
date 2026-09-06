@@ -1,7 +1,7 @@
 import { MemoryRouter } from 'react-router-dom'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import ScheduleHuumePanel from './ScheduleHuumePanel'
+import ScheduleHuumePanel, { SETUP_KICKOFF_PROMPT } from './ScheduleHuumePanel'
 
 const { getScheduleHuumeSessionMock, listSessionsMock, archiveSessionMock, sendMessageStreamMock } = vi.hoisted(() => ({
   getScheduleHuumeSessionMock: vi.fn(),
@@ -181,5 +181,46 @@ describe('ScheduleHuumePanel thread management', () => {
 
     await waitFor(() => expect(archiveSessionMock).toHaveBeenCalledWith('session-1'))
     await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
+  })
+})
+
+
+describe('ScheduleHuumePanel setup gate', () => {
+  beforeEach(() => {
+    sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
+    getScheduleHuumeSessionMock.mockReset().mockResolvedValue(session({}))
+    listSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
+    archiveSessionMock.mockReset().mockResolvedValue({ session_id: 'session-1', archived: true })
+  })
+
+  function renderWithRules(established: boolean) {
+    return render(
+      <MemoryRouter>
+        <ScheduleHuumePanel
+          firstName="Jamie" weekStart="2026-08-09" locationId="loc1" locationName="Wilshire"
+          selectedShifts={[]} weekRulesEstablished={established}
+          onClearSelectedShifts={() => {}} onApplied={() => {}}
+          onAutomaticActionSettled={() => {}} onClose={() => {}}
+        />
+      </MemoryRouter>,
+    )
+  }
+
+  it('offers the interview instead of a build that would be refused', async () => {
+    renderWithRules(false)
+
+    const setup = await screen.findByRole('button', { name: /Set up this location/ })
+    expect(screen.queryByRole('button', { name: /Build my week/ })).not.toBeInTheDocument()
+
+    fireEvent.click(setup)
+    await waitFor(() => expect(sendMessageStreamMock).toHaveBeenCalledTimes(1))
+    expect(sendMessageStreamMock.mock.calls[0][1]).toBe(SETUP_KICKOFF_PROMPT)
+  })
+
+  it('offers the build once the rules are established', async () => {
+    renderWithRules(true)
+
+    expect(await screen.findByRole('button', { name: /Build my week/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set up this location/ })).not.toBeInTheDocument()
   })
 })

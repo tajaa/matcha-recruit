@@ -21,12 +21,21 @@ import { useVoiceDictation } from '../../../hooks/useVoiceDictation'
 import type { Shift } from '../../../types/employeeSchedule'
 import { fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 
+/** The interview kickoff. Deliberately tells Huume NOT to build: the server
+ *  refuses anyway, and a request that asks for both reads as permission to
+ *  try the build first. */
+export const SETUP_KICKOFF_PROMPT = "Set up this location's week. Read the saved scheduling profile first, then ask me one question at a time for whatever is still missing — the hours for every day, the shift blocks a normal week needs, and whether a shift lead has to be on every shift. Don't build the week yet."
+
 interface ScheduleHuumePanelProps {
   firstName: string
   weekStart: string
   locationId: string | null
   locationName?: string
   selectedShifts: Shift[]
+  /** False while this location's hours / staffing pattern / leader rule are
+   *  unsaved. The week builder refuses in that state, so the empty state
+   *  offers the interview instead of a build that cannot succeed. */
+  weekRulesEstablished?: boolean
   onClearSelectedShifts(): void
   onApplied(): void
   onAutomaticActionSettled(): void
@@ -83,7 +92,7 @@ function settledAutomaticActionKey(state: Record<string, unknown>): string | nul
   return `${action.confirm_id}:${action.status}`
 }
 
-export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onAutomaticActionSettled, onClose }: ScheduleHuumePanelProps) {
+export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, weekRulesEstablished = true, onClearSelectedShifts, onApplied, onAutomaticActionSettled, onClose }: ScheduleHuumePanelProps) {
   const { toast } = useToast()
   const [threadId, setThreadId] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -384,17 +393,33 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
       <div className="flex max-h-[min(560px,70vh)] min-h-[220px] flex-col gap-3 overflow-y-auto px-3 py-3" role="log" aria-live="polite">
         {messages.length === 0 && !action && !sessionError && (
           <div className="space-y-3">
-            <div className="text-xs text-zinc-400">Hi, {firstName}. I can review this week or build the whole schedule from confirmed availability.</div>
+            <div className="text-xs text-zinc-400">
+              {weekRulesEstablished
+                ? `Hi, ${firstName}. I can review this week or build the whole schedule from confirmed availability.`
+                : `Hi, ${firstName}. Before I can build a week here I need this location's hours, its usual shift blocks, and whether a lead has to be on.`}
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={!threadId || busy}
-                onClick={() => { void send('Build this entire week for me. Check readiness first, preserve existing assignments, and use existing draft shifts as demand; if there are none, use the saved week template when there is only one choice. Show me the proposal for approval.') }}
-                className="rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-3 py-2 text-left text-[11px] text-emerald-200 hover:bg-emerald-500/[0.14] disabled:opacity-40"
-              >
-                <span className="block font-medium">Build my week</span>
-                <span className="mt-0.5 block text-emerald-300/60">Generate an editable draft</span>
-              </button>
+              {weekRulesEstablished ? (
+                <button
+                  type="button"
+                  disabled={!threadId || busy}
+                  onClick={() => { void send('Build this entire week for me. Check readiness first, preserve existing assignments, and use existing draft shifts as demand; if there are none, use the saved week template when there is only one choice. Show me the proposal for approval.') }}
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-3 py-2 text-left text-[11px] text-emerald-200 hover:bg-emerald-500/[0.14] disabled:opacity-40"
+                >
+                  <span className="block font-medium">Build my week</span>
+                  <span className="mt-0.5 block text-emerald-300/60">Generate an editable draft</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!threadId || busy}
+                  onClick={() => { void send(SETUP_KICKOFF_PROMPT) }}
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-3 py-2 text-left text-[11px] text-amber-200 hover:bg-amber-500/[0.14] disabled:opacity-40"
+                >
+                  <span className="block font-medium">Set up this location</span>
+                  <span className="mt-0.5 block text-amber-300/60">A few questions, then I can build</span>
+                </button>
+              )}
               <button
                 type="button"
                 disabled={!threadId || busy}

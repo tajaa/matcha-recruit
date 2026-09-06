@@ -48,6 +48,41 @@ forever after.
 
 Invariants:
 
+- **No week is built until the rules are established** (migration `schedloc03`).
+  `location_profile.missing_fields` is THE predicate — hours answered for all
+  seven weekdays with at least one open day, a default template carrying
+  blocks, and an answered leader question — and `week_builder._week_rules_gate`
+  turns it into the refusal `week_rules_refusal` writes. It runs in
+  `propose_week_draft` (before demand resolution: draft shifts are demand, not
+  bounds), again in `apply_week_draft` (rules can be edited away between
+  staging and confirmation), and as the FIRST entry in
+  `get_week_build_readiness`'s `blockers` — readiness saying "ready" and the
+  builder then refusing is the loop this surface exists to end. The prompt no
+  longer merely suggests the interview; the builder enforces it.
+- **`leader_required` is tri-state, and that is why it is not just
+  `leader_job_id`.** `NULL` never asked, `false` no lead needed, `true` names
+  the job (DB CHECK). Without the explicit `false` a store that needs no lead
+  could never finish setup, so the gate would block it forever. Both surfaces
+  can answer it: the interview passes `leader_required`, the Week setup pane
+  has a "No leader required" option distinct from an unpicked select.
+- **A retracted leader rule has to give back both halves.** `true` names a job
+  AND materializes `<Job> coverage` demand into the default template
+  (`schedule_profile_skill._leader_blocks`). A later `false` therefore clears
+  `leader_job_id` too — otherwise `_coverage_profile` keeps emitting leader
+  gaps and `profile_context_lines` keeps saying a lead is required — and strips
+  the generated coverage back out (`_strip_leader_coverage`, matched on the
+  generated name AND the job, so a manager-written block on the lead job
+  survives). `upsert_location_profile` is symmetric for the same reason:
+  naming the job answers the question, clearing it un-answers it rather than
+  leaving `leader_required=true` with nothing named — the one state the CHECK
+  refuses.
+- **`hours_answered` wants all seven weekdays, so existing rows need the
+  backfill.** Both the old pane and the old interview wrote only the days
+  somebody mentioned, which is every already-configured location. `schedloc03`
+  fills the absent days in as closed for any row that already opens at least
+  once; a row with no open day is genuinely unanswered and left for the
+  interview. Skipping it does not fail loudly — it refuses every week build and
+  flips `schedule_automation.generate_review_suggestion` to `not_ready`.
 - **The default template is always location-scoped.** `_list_templates` also
   returns company-wide rows (`location_id IS NULL`); one of those as a store's
   default would let another store's edits rewrite this store's week. Both the

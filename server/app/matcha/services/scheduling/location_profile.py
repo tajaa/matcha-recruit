@@ -16,6 +16,8 @@ from datetime import time
 from typing import Any, Optional
 from uuid import UUID
 
+import asyncpg
+
 from app.matcha.models.scheduling.employee_schedule import (
     WeekTemplateBlockReplace, WeekTemplateCreate,
 )
@@ -26,7 +28,7 @@ from .week_template_writes import (
 
 PROFILE_COLS = (
     "id, company_id, location_id, operating_hours, default_week_template_id, "
-    "leader_job_id, notes, week_start_weekday, open_buffer_minutes, "
+    "leader_job_id, leader_required, notes, week_start_weekday, open_buffer_minutes, "
     "close_buffer_minutes, created_at, updated_at"
 )
 
@@ -128,18 +130,78 @@ def open_weekdays(operating_hours: dict) -> list[int]:
     )
 
 
+WEEK_RULE_FIELDS = ("operating_hours", "staffing_pattern", "leader_rule")
+
+
+def hours_answered(operating_hours: Optional[dict]) -> bool:
+    """True once every weekday has an answer and the store opens on one of them.
+
+    Truthiness of the dict is not enough. `{"0": null}` is "closed Sundays" and
+    nothing else — a week planned against it has no bounds on the six days that
+    matter. All seven keys present (a window or an explicit null) is what
+    "somebody answered the hours question" actually means.
+    """
+    hours = operating_hours or {}
+    return (
+        all(str(day) in hours for day in range(7))
+        and any(isinstance(hours.get(str(day)), dict) for day in range(7))
+    )
+
+
 def missing_fields(bundle: dict) -> list[str]:
-    """Which of the three intake answers Huume still has to ask for."""
+    """Which of the three intake answers Huume still has to ask for.
+
+    This is THE predicate for "are this location's week-set rules established":
+    the week builder refuses to plan while it returns anything, the prompt
+    renders it every turn, and the editor's setup banner reads it over REST.
+    """
     profile = bundle.get("profile") or {}
     template = bundle.get("template") or {}
     missing = []
-    if not (profile.get("operating_hours") or {}):
+    if not hours_answered(profile.get("operating_hours")):
         missing.append("operating_hours")
     if not (template.get("blocks") or []):
         missing.append("staffing_pattern")
-    if not profile.get("leader_job_id"):
+    # Tri-state: None is "never asked", False is a real answer ("no lead
+    # needed"), True has to name the job — same distinction the buffers keep.
+    leader_required = profile.get("leader_required")
+    if leader_required is None or (leader_required and not profile.get("leader_job_id")):
         missing.append("leader_rule")
     return missing
+
+
+def week_rules_established(bundle: dict) -> bool:
+    return not missing_fields(bundle)
+
+
+_MISSING_PROMPT = {
+    "operating_hours": (
+        "no saved hours for every day of the week. Tell me the hours (or that it's "
+        "closed) for each day, or set them in Week setup."
+    ),
+    "staffing_pattern": (
+        "no saved staffing pattern. Tell me the shift blocks a normal week needs, "
+        "or set them in Week setup."
+    ),
+    "leader_rule": (
+        "no answer yet on whether a shift lead has to be on every shift. Tell me yes "
+        "(and which job) or no, or set it in Week setup."
+    ),
+}
+
+
+def week_rules_refusal(bundle: dict, *, location_name: str) -> Optional[str]:
+    """The refusal a caller returns instead of planning an unbounded week.
+
+    Names ONE missing answer — the interview asks one question per turn, and a
+    list of three is a wall the manager has to parse before they can answer any
+    of it. Pure, so the builder, readiness and the confirm path all say the
+    same sentence.
+    """
+    missing = missing_fields(bundle)
+    if not missing:
+        return None
+    return f"I can't build this week yet — {location_name} has {_MISSING_PROMPT[missing[0]]}"
 
 
 def _format_window(window: Optional[dict]) -> str:
@@ -192,7 +254,14 @@ def profile_context_lines(bundle: dict) -> list[str]:
         lines.append("Prep/close buffer: none set")
 
     leader = bundle.get("leader_job_name")
-    lines.append(f"Leader coverage: {leader} on every open shift" if leader else "Leader coverage: not set")
+    if leader:
+        lines.append(f"Leader coverage: {leader} on every open shift")
+    elif profile.get("leader_required") is False:
+        # An answered "no" must not read the same as an unasked question, or
+        # the interview asks it again on every turn.
+        lines.append("Leader coverage: not required")
+    else:
+        lines.append("Leader coverage: not set")
 
     week_start = profile.get("week_start_weekday")
     if week_start is not None:
@@ -290,7 +359,8 @@ async def load_profile_bundle(conn, *, company_id: UUID, location_id: UUID) -> d
 async def upsert_location_profile(
     conn, *, company_id: UUID, location_id: UUID, actor_user_id: Optional[UUID],
     operating_hours: Any = UNSET, default_week_template_id: Any = UNSET,
-    leader_job_id: Any = UNSET, notes: Any = UNSET, week_start_weekday: Any = UNSET,
+    leader_job_id: Any = UNSET, leader_required: Any = UNSET, notes: Any = UNSET,
+    week_start_weekday: Any = UNSET,
     open_buffer_minutes: Any = UNSET, close_buffer_minutes: Any = UNSET,
 ) -> dict:
     """Create or patch the location's profile. Only supplied fields are written."""
@@ -308,6 +378,16 @@ async def upsert_location_profile(
         supplied["default_week_template_id"] = default_week_template_id
     if leader_job_id is not UNSET:
         supplied["leader_job_id"] = leader_job_id
+    if leader_required is not UNSET:
+        supplied["leader_required"] = None if leader_required is None else bool(leader_required)
+    elif leader_job_id is not UNSET:
+        # Naming the job IS the answer to "does a lead have to be on?" — a
+        # caller that only sets leader_job_id would otherwise leave the
+        # question reading as unasked forever. Symmetric on the way out:
+        # clearing the job un-answers the question rather than leaving
+        # leader_required=true with nothing named, which is exactly the state
+        # the CHECK refuses — a 422 on a PUT that looked reasonable.
+        supplied["leader_required"] = True if leader_job_id is not None else None
     if notes is not UNSET:
         supplied["notes"] = notes
     if week_start_weekday is not UNSET:
@@ -336,15 +416,24 @@ async def upsert_location_profile(
         if supplied else
         "UPDATE SET updated_by = EXCLUDED.updated_by, updated_at = NOW()"
     )
-    row = await conn.fetchrow(
-        f"""
-        INSERT INTO schedule_location_profiles ({", ".join(columns)})
-        VALUES ({placeholders})
-        ON CONFLICT (location_id) DO {update_sql}
-        RETURNING {PROFILE_COLS}
-        """,
-        *values,
-    )
+    try:
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO schedule_location_profiles ({", ".join(columns)})
+            VALUES ({placeholders})
+            ON CONFLICT (location_id) DO {update_sql}
+            RETURNING {PROFILE_COLS}
+            """,
+            *values,
+        )
+    except asyncpg.exceptions.CheckViolationError as exc:
+        # The DB CHECK is the backstop for "a required lead with no job named";
+        # callers get a sentence they can act on rather than a 500.
+        if "leader" in str(exc):
+            raise ValueError(
+                "Name the job that leads every shift, or say no lead is required."
+            ) from exc
+        raise
     return _row_to_profile(row)
 
 

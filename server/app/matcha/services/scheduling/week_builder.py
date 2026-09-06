@@ -18,7 +18,8 @@ from uuid import UUID, uuid4
 from app.database import connection_or_direct
 
 from .location_profile import (
-    WEEKDAY_NAMES, get_location_profile, resolve_week_start_weekday,
+    WEEKDAY_NAMES, get_location_profile, load_profile_bundle, missing_fields,
+    resolve_week_start_weekday, week_rules_refusal,
 )
 from .schedule_break_stagger import StaggerAssignment, stagger_shift_breaks
 from .schedule_breaks import reinterpret_schedule_wall_time
@@ -810,6 +811,35 @@ async def _coverage_profile(conn, *, company_id: UUID, location_id: UUID) -> dic
     }
 
 
+async def _week_rules_gate(
+    conn, *, company_id: UUID, location_id: UUID, location_name: str | None = None,
+) -> dict[str, Any] | None:
+    """`None` when this location's week-set rules are established, else the
+    clarify to return INSTEAD of planning a week.
+
+    Runs before demand resolution on purpose: draft shifts are demand, not
+    bounds. A store with two stray drafts and no saved hours used to produce a
+    full week that nothing had checked — `operating_hours_known=false` said so
+    in the metrics and nobody reads metrics.
+    """
+    if location_name is None:
+        location_name = await conn.fetchval(
+            "SELECT name FROM business_locations WHERE id=$1 AND company_id=$2",
+            location_id, company_id,
+        ) or "This location"
+    bundle = await load_profile_bundle(
+        conn, company_id=company_id, location_id=location_id,
+    )
+    message = week_rules_refusal(bundle, location_name=location_name)
+    if message is None:
+        return None
+    return {
+        "status": "clarify",
+        "message": message,
+        "setup_missing": missing_fields(bundle),
+    }
+
+
 async def _attach_findings(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     plan: dict[str, Any], snapshot: dict[str, Any],
@@ -1133,6 +1163,12 @@ async def get_week_build_readiness(
         profile = await _coverage_profile(
             conn, company_id=company_id, location_id=location_id,
         )
+        # Readiness has to agree with the builder about whether a week can be
+        # built at all — the model is told to call this first, and "ready" here
+        # followed by a refusal there is the loop this surface exists to end.
+        rules_bundle = await load_profile_bundle(
+            conn, company_id=company_id, location_id=location_id,
+        )
         # Judge the PATTERN, before anyone is assigned to it: `required` asks
         # "would this shape cover the day even with everybody showing up?".
         # A hole here is something to fix in the interview, so it is reported
@@ -1181,7 +1217,13 @@ async def get_week_build_readiness(
         recommendation = "template"
     else:
         recommendation = None
+    rules_missing = missing_fields(rules_bundle)
     blockers = []
+    # First, because it is the one blocker the manager can act on without any
+    # roster or template work — and the one the builder itself enforces.
+    rules_refusal = week_rules_refusal(rules_bundle, location_name=location["name"])
+    if rules_refusal:
+        blockers.append(rules_refusal)
     if not roster["employees"]:
         blockers.append("No active employees are assigned to this location.")
     if not confirmed:
@@ -1216,6 +1258,7 @@ async def get_week_build_readiness(
         "existing_required_positions": existing_positions,
         "week_templates": templates, "recommended_source": recommendation,
         "blockers": blockers,
+        "week_rules_missing": rules_missing,
         "operating_hours_known": bool(profile["operating_hours"]),
         "open_buffer_minutes": profile["open_buffer_minutes"],
         "close_buffer_minutes": profile["close_buffer_minutes"],
@@ -1272,6 +1315,11 @@ async def propose_week_draft(
         )
         if misaligned:
             return misaligned
+        gate = await _week_rules_gate(
+            conn, company_id=company_id, location_id=location_id,
+        )
+        if gate:
+            return gate
         existing = await _load_existing_demand(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
@@ -1483,6 +1531,14 @@ async def apply_week_draft(
                         "message": "That generated draft was already applied."}
             if run["status"] != "proposed":
                 return {"status": "error", "message": "That week proposal is no longer available."}
+            # Re-checked at confirm for the same reason availability and
+            # qualifications are: the rules can be edited away in the Week
+            # setup pane between staging and approval.
+            gate = await _week_rules_gate(
+                conn, company_id=company_id, location_id=location_id,
+            )
+            if gate:
+                return {"status": "error", "message": gate["message"]}
             if run["source_mode"] == "template":
                 shift_counts = await _week_shift_counts(
                     conn, company_id=company_id, location_id=location_id, week_start=week_start,

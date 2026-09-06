@@ -203,3 +203,78 @@ async def test_put_passes_the_buffers_through_and_leaves_them_unset_otherwise(mo
 def test_buffers_outside_the_allowed_range_are_rejected_by_the_model(payload):
     with pytest.raises(ValidationError):
         LocationScheduleProfileUpdate(**payload)
+
+
+@pytest.mark.asyncio
+async def test_get_reports_whether_the_week_rules_are_established(monkeypatch):
+    """A never-configured location and one saved with plain defaults are
+    identical field by field on the wire, so the editor cannot tell "not set
+    up" from "set up plainly" without being told."""
+    conn = _conn()
+    _patch(monkeypatch, conn)
+
+    result = await routes.get_location_schedule_profile(LOCATION_ID, _user())
+
+    assert result["profile_exists"] is False
+    assert result["week_rules"] == {
+        "established": False,
+        "missing": ["operating_hours", "staffing_pattern", "leader_rule"],
+    }
+    assert result["leader_required"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_reports_an_established_location(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn, bundle={
+        "profile": {
+            "operating_hours": {
+                "0": None, "6": None,
+                **{str(day): {"open": "08:00", "close": "17:00"} for day in range(1, 6)},
+            },
+            "leader_job_id": None,
+            "leader_required": False,
+            "week_start_weekday": 1,
+        },
+        "template": {"id": str(TEMPLATE_ID), "name": "Downtown default week",
+                     "blocks": [{"name": "Opener"}]},
+        "leader_job_name": None,
+    })
+
+    result = await routes.get_location_schedule_profile(LOCATION_ID, _user())
+
+    assert result["profile_exists"] is True
+    assert result["week_rules"] == {"established": True, "missing": []}
+    assert result["leader_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_put_passes_the_leader_answer_through(monkeypatch):
+    """"No leader required" is a value the pane can save, not an empty select —
+    the builder counts an unanswered leader question as missing setup."""
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID,
+        LocationScheduleProfileUpdate(leader_job_id=None, leader_required=False),
+        _user(),
+    )
+
+    assert upsert.await_args.kwargs["leader_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_put_leaves_the_leader_answer_untouched_when_omitted(monkeypatch):
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID, LocationScheduleProfileUpdate(week_start_weekday=1), _user(),
+    )
+
+    assert upsert.await_args.kwargs["leader_required"] is routes.UNSET

@@ -30,6 +30,26 @@ the location's real job names, never a free-text block. A leader-coverage rule
 only knows demand, so a rule that stays prose is silently ignored. The staged
 dict carries what the server resolved, not the model's raw args.
 
+**The interview is enforced, not suggested (2026-09-06).** `build_week_schedule`
+returns whatever `week_builder.propose_week_draft` says, and that now refuses
+with `{"status": "clarify", "setup_missing": [...]}` until the location's hours,
+staffing pattern and leader rule are saved — the model cannot route around it,
+which is what it was doing (a store with two stray draft shifts got a full week
+whose `operating_hours_known` was false). The refusal names ONE missing answer,
+rides the existing `_TERMINAL_SCHEDULE_TOOLS` path, and mints Yes/No chips when
+the only gap is the leader question. `leader_required` is a real tool field —
+`false` is the answer "no lead needed", so it must stay in
+`_HR_OPS_TOOL_SPECS[...]["fields"]` (a field missing there is dropped from the
+staged dict) and reach `execute` on an `is not None` test, exactly like the
+buffers. An explicit `false` also clears `leader_job_id` and strips the
+`<Job> coverage` blocks an earlier `true` wrote into the default template —
+half a retraction leaves the profile arguing with the manager on every turn.
+The `operating_hours` tool description tells the model to send `null` for a
+closed day precisely because the gate wants all seven: omitting the days
+nobody mentioned saves cleanly and then refuses to build, which the model
+cannot diagnose and re-asks forever. Full gate spec:
+`services/scheduling/CLAUDE.md`.
+
 The profile is rendered into the schedule system prompt every turn
 (`prompt.build_system_prompt(location_profile_block=...)`, loaded just before
 the one `build_system_prompt` callsite in `agent.py`) — there is no per-turn

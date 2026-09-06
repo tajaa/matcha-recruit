@@ -11,7 +11,7 @@ import { fetchWeekTemplates } from '../../../api/employees/employeeSchedule'
 import type {
   LocationScheduleProfile, LocationScheduleProfileUpdate, OperatingHours, ScheduleJob, WeekTemplate,
 } from '../../../types/employeeSchedule'
-import { WEEKDAY_LABELS, errorMessage } from '../../../types/employeeSchedule'
+import { WEEKDAY_LABELS, WEEK_RULE_LABELS, errorMessage } from '../../../types/employeeSchedule'
 import { TemplateForm } from './TemplateForm'
 
 const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500'
@@ -61,7 +61,10 @@ export default function WeekStartPane(
   const [saving, setSaving] = useState(false)
   const [weekStartWeekday, setWeekStartWeekday] = useState(0)
   const [days, setDays] = useState<DayDraft[]>(() => hoursToDraft(undefined))
-  const [leaderJobId, setLeaderJobId] = useState('')
+  /** 'unset' is not 'none': the week builder treats an unanswered leader
+   *  question as missing setup, so "no lead required" has to be a value the
+   *  manager can actually pick. */
+  const [leaderRule, setLeaderRule] = useState<'unset' | 'none' | string>('unset')
   const [notes, setNotes] = useState('')
   const [openBuffer, setOpenBuffer] = useState('0')
   const [closeBuffer, setCloseBuffer] = useState('0')
@@ -70,7 +73,7 @@ export default function WeekStartPane(
     setProfile(next)
     setWeekStartWeekday(next.week_start_weekday)
     setDays(hoursToDraft(next.operating_hours))
-    setLeaderJobId(next.leader_job_id ?? '')
+    setLeaderRule(next.leader_required === false ? 'none' : (next.leader_job_id ?? 'unset'))
     setNotes(next.notes ?? '')
     setOpenBuffer(String(next.open_buffer_minutes ?? 0))
     setCloseBuffer(String(next.close_buffer_minutes ?? 0))
@@ -93,6 +96,18 @@ export default function WeekStartPane(
   }, [applyProfile, locationId, toast])
 
   useEffect(() => { void load() }, [load])
+
+  /** Re-read `week_rules` without `load()`'s full-pane spinner and WITHOUT
+   *  `applyProfile` — the fields above may hold edits the manager has not
+   *  saved yet, and re-seeding them from the server would silently discard
+   *  those. Only the server-owned half of `profile` is replaced. */
+  const refreshWeekRules = useCallback(async () => {
+    try {
+      setProfile(await fetchLocationScheduleProfile(locationId))
+    } catch {
+      // Leave the banner as it was — the server-side gate is what holds.
+    }
+  }, [locationId])
 
   async function persist(payload: LocationScheduleProfileUpdate, message: string) {
     setSaving(true)
@@ -123,7 +138,8 @@ export default function WeekStartPane(
     await persist({
       week_start_weekday: weekStartWeekday,
       operating_hours: draftToHours(days),
-      leader_job_id: leaderJobId || null,
+      leader_job_id: leaderRule === 'unset' || leaderRule === 'none' ? null : leaderRule,
+      leader_required: leaderRule === 'unset' ? null : leaderRule !== 'none',
       notes: notes.trim() || null,
       open_buffer_minutes: bufferValue(openBuffer),
       close_buffer_minutes: bufferValue(closeBuffer),
@@ -141,6 +157,11 @@ export default function WeekStartPane(
       <div>
         <h3 className="text-sm font-medium text-zinc-200">Week setup</h3>
         <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">How this location runs a normal week. Huume fills this in when it interviews you; anything it got wrong you can correct here.</p>
+        {profile && !profile.week_rules.established && (
+          <p className="mt-2 max-w-2xl rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-1.5 text-xs text-amber-100">
+            Still missing: {profile.week_rules.missing.map((field) => WEEK_RULE_LABELS[field]).join(', ')}. Huume won’t build a week until these are saved.
+          </p>
+        )}
       </div>
 
       <Card className="space-y-3 border-zinc-800 bg-zinc-900/40 p-4 shadow-none">
@@ -203,10 +224,13 @@ export default function WeekStartPane(
         <Select
           label="Leader job"
           className="max-w-64"
-          options={jobs.map((job) => ({ value: job.id, label: job.name }))}
-          placeholder={jobs.length ? 'No leader required' : 'No jobs at this location yet'}
-          value={leaderJobId}
-          onChange={(event) => setLeaderJobId(event.target.value)}
+          options={[
+            { value: 'none', label: 'No leader required' },
+            ...jobs.map((job) => ({ value: job.id, label: job.name })),
+          ]}
+          placeholder={jobs.length ? 'Not answered yet' : 'Not answered yet — no jobs at this location'}
+          value={leaderRule === 'unset' ? '' : leaderRule}
+          onChange={(event) => setLeaderRule(event.target.value || 'unset')}
         />
       </Card>
 
@@ -241,6 +265,12 @@ export default function WeekStartPane(
             if (profile && profile.default_week_template_id !== saved.id) {
               await persist({ default_week_template_id: saved.id }, 'Staffing pattern saved as this location’s default')
             } else {
+              // Already the default, so nothing is written to the profile row —
+              // but the pattern's first block is what clears `staffing_pattern`
+              // from `week_rules.missing`, and both this banner and the
+              // editor's would keep claiming it is missing until a reload.
+              await refreshWeekRules()
+              onSaved?.()
               toast('Staffing pattern saved', 'success')
             }
           }}

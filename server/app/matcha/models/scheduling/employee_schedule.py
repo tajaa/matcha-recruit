@@ -367,6 +367,11 @@ class LocationScheduleProfileUpdate(BaseModel):
     operating_hours: Optional[dict[str, Optional[OperatingWindow]]] = None
     default_week_template_id: Optional[UUID] = None
     leader_job_id: Optional[UUID] = None
+    # Tri-state, and the reason it is separate from `leader_job_id`: null is
+    # "nobody has been asked", false is the manager answering "no lead needed",
+    # true requires a named job. The week builder treats an unanswered question
+    # as missing setup, so the two cannot share one nullable column.
+    leader_required: Optional[bool] = None
     notes: Optional[str] = Field(None, max_length=2000)
     week_start_weekday: Optional[Weekday] = None
     # Operational policy, not law: minutes somebody must be on the schedule
