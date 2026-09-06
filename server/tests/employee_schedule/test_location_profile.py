@@ -1,5 +1,7 @@
 """Pure + fake-connection tests for the per-location scheduling profile."""
 
+import json
+
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -123,7 +125,8 @@ def test_leader_rule_becomes_real_blocks_grouped_by_window():
     weekday_block = next(b for b in blocks if b["start_time"] == "08:00")
     assert weekday_block["days_of_week"] == [1, 2]
     assert weekday_block["required_staff"] == 1
-    assert weekday_block["job_id"] == JOB_ID
+    # str, not UUID: the staged action is persisted as thread JSONB.
+    assert weekday_block["job_id"] == str(JOB_ID)
     assert weekday_block["role"] == "Shift Lead"
 
 
@@ -206,6 +209,9 @@ async def test_replace_default_pattern_creates_a_location_scoped_template(monkey
 def _resolver_conn(job_row):
     conn = MagicMock()
     conn.fetch = AsyncMock(return_value=[{"name": "Barista"}, {"name": "Shift Lead"}])
+    # No saved profile yet: `resolve_profile_args` reads the stored setup so a
+    # later turn can merge onto it rather than overwrite it.
+    conn.fetchrow = AsyncMock(return_value=None)
     context = MagicMock()
     context.__aenter__ = AsyncMock(return_value=conn)
     context.__aexit__ = AsyncMock(return_value=False)
@@ -248,7 +254,7 @@ async def test_resolve_profile_args_labels_blocks_with_the_jobs_real_name(monkey
 
     assert result["status"] == "ok"
     assert result["blocks"][0]["role"] == "Barista"
-    assert result["blocks"][0]["job_id"] == JOB_ID
+    assert result["blocks"][0]["job_id"] == str(JOB_ID)
     assert "1 shift block" in result["summary"]
 
 
@@ -287,3 +293,196 @@ async def test_resolve_profile_args_refuses_an_entirely_empty_call(monkeypatch):
         company_id=COMPANY_ID, location_id=LOCATION_ID, args={},
     )
     assert result["status"] == "clarify"
+
+
+# --- resolve_profile_args merges onto what is already saved --------------------
+
+def _patch_saved(monkeypatch, bundle):
+    monkeypatch.setattr(location_profile, "load_profile_bundle", AsyncMock(return_value=bundle))
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_keeps_hours_saved_on_an_earlier_turn(monkeypatch):
+    """The interview asks one question per turn, so the blocks turn carries no
+    hours. Staging only what this turn said would blank the stored answer."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    monkeypatch.setattr(schedule_profile_skill, "resolve_job_by_name",
+                        AsyncMock(return_value={"id": JOB_ID, "name": "Barista"}))
+    _patch_saved(monkeypatch, _bundle(hours={"1": {"open": "08:00", "close": "17:00"}, "0": None}))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"blocks": [{"name": "Opener", "job_name": "Barista", "days_of_week": [1],
+                          "start_time": "08:00", "end_time": "16:00", "required_staff": 2}]},
+    )
+
+    assert result["status"] == "ok"
+    assert result["operating_hours"] == {"1": {"open": "08:00", "close": "17:00"}, "0": None}
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_lets_a_new_answer_override_one_saved_day(monkeypatch):
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle(hours={
+        "1": {"open": "08:00", "close": "17:00"},
+        "2": {"open": "08:00", "close": "17:00"},
+    }))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"operating_hours": {"2": {"open": "10:00", "close": "22:00"}}},
+    )
+
+    assert result["operating_hours"] == {
+        "1": {"open": "08:00", "close": "17:00"},
+        "2": {"open": "10:00", "close": "22:00"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_still_refuses_a_turn_that_says_nothing_new(monkeypatch):
+    """Merged hours are non-empty for any location that answered once — the
+    "nothing to save" gate has to read the SUPPLIED answer, not the merge."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle(hours={"1": {"open": "08:00", "close": "17:00"}}))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, args={},
+    )
+    assert result["status"] == "clarify"
+
+
+@pytest.mark.asyncio
+async def test_leader_rule_extends_the_saved_pattern_on_a_leader_only_turn(monkeypatch):
+    """"A lead is always on", answered after the pattern was saved, still has
+    to become demand — the saved blocks are re-staged with coverage added."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    lead_id = UUID("99999999-9999-9999-9999-999999999999")
+    monkeypatch.setattr(schedule_profile_skill, "resolve_job_by_name",
+                        AsyncMock(return_value={"id": lead_id, "name": "Shift Lead"}))
+    _patch_saved(monkeypatch, _bundle(
+        hours={"1": {"open": "08:00", "close": "17:00"}},
+        blocks=[{"name": "Opener", "role": "Barista", "job_id": str(JOB_ID), "job_name": "Barista",
+                 "days_of_week": [1], "start_time": "08:00", "end_time": "16:00",
+                 "required_staff": 2, "break_minutes": 30}],
+    ))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"leader_job_name": "Shift Lead"},
+    )
+
+    assert result["status"] == "ok"
+    names = [block["name"] for block in result["blocks"]]
+    assert names == ["Opener", "Shift Lead coverage"]
+    assert result["blocks"][0]["job_id"] == str(JOB_ID)   # existing block survives
+    assert result["leader_job_id"] == str(lead_id)
+
+
+@pytest.mark.asyncio
+async def test_leader_only_turn_leaves_a_jobless_saved_pattern_alone(monkeypatch):
+    """Re-staging a pre-job-link pattern would fail the every-block-needs-a-job
+    gate, so the pattern is left untouched instead."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    monkeypatch.setattr(schedule_profile_skill, "resolve_job_by_name",
+                        AsyncMock(return_value={"id": JOB_ID, "name": "Shift Lead"}))
+    _patch_saved(monkeypatch, _bundle(
+        hours={"1": {"open": "08:00", "close": "17:00"}},
+        blocks=[{"name": "Opener", "job_id": None, "job_name": None, "days_of_week": [1],
+                 "start_time": "08:00", "end_time": "16:00", "required_staff": 1}],
+    ))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"leader_job_name": "Shift Lead"},
+    )
+
+    assert result["status"] == "ok"
+    assert result["blocks"] == []
+
+
+def test_leader_rule_reads_a_saved_blocks_string_job_id():
+    """Saved blocks carry the id as a string, freshly resolved ones as a UUID."""
+    assert schedule_profile_skill._leader_blocks(
+        {"1": {"open": "08:00", "close": "17:00"}},
+        {"id": JOB_ID, "name": "Shift Lead"},
+        [{"name": "Lead cover", "job_id": str(JOB_ID)}],
+    ) == []
+
+
+# --- execute ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_execute_never_blanks_hours_a_turn_did_not_carry(monkeypatch):
+    """`{}` means "this turn said nothing about hours". Writing it would erase
+    the answer an earlier turn already saved."""
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=_null_context())
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=_null_context(conn)))
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(location_profile, "upsert_location_profile", upsert)
+    monkeypatch.setattr(schedule_profile_skill, "log_audit", AsyncMock())
+
+    result = await schedule_profile_skill.execute(
+        company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        action={"type": "schedule_location_profile", "confirm_id": "ab12cd34",
+                "location_id": str(LOCATION_ID), "operating_hours": {},
+                "blocks": [], "notes": "Busy on match days"},
+    )
+
+    assert result["status"] == "created"
+    assert "operating_hours" not in upsert.await_args.kwargs
+    assert upsert.await_args.kwargs["notes"] == "Busy on match days"
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_treats_blank_notes_as_unsaid(monkeypatch):
+    """The model fills `notes` with "" whether or not notes were discussed —
+    writing that would erase what the manager actually wrote."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    _patch_saved(monkeypatch, _bundle(notes="Front desk covers phones from 8."))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={"operating_hours": {"1": {"open": "08:00", "close": "17:00"}}, "notes": "   "},
+    )
+    assert result["status"] == "ok"
+    assert result["notes"] is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_args_stages_json_serializable_values(monkeypatch):
+    """The staged dict is persisted as thread JSONB. A raw UUID in it fails
+    json.dumps for the WHOLE state update, so the confirm card silently never
+    appears — caught live, not by a fake that already used strings."""
+    _, context, _ = _resolver_conn(None)
+    monkeypatch.setattr(schedule_profile_skill, "get_connection", MagicMock(return_value=context))
+    monkeypatch.setattr(schedule_profile_skill, "resolve_job_by_name",
+                        AsyncMock(return_value={"id": JOB_ID, "name": "Opener"}))
+
+    result = await schedule_profile_skill.resolve_profile_args(
+        company_id=COMPANY_ID, location_id=LOCATION_ID,
+        args={
+            "operating_hours": {"1": {"open": "08:00", "close": "17:00"}},
+            "blocks": [{"name": "Opener", "job_name": "Opener", "days_of_week": [1],
+                        "start_time": "08:00", "end_time": "13:00", "required_staff": 2}],
+            "leader_job_name": "Opener",
+        },
+    )
+
+    json.dumps(result)   # would raise TypeError on a UUID
+    assert result["blocks"][0]["job_id"] == str(JOB_ID)
+    assert all(isinstance(block["job_id"], str) for block in result["blocks"])
+
+
+def _null_context(value=None):
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=value)
+    context.__aexit__ = AsyncMock(return_value=False)
+    return context

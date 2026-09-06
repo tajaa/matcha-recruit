@@ -50,6 +50,7 @@ export default function ScheduleEditor() {
     setLocationId,
     locations,
     loading: locationsLoading,
+    reloadLocations,
   } = useLocationScope()
   const locationId = locations.some((location) => location.id === requestedLocationId) ? requestedLocationId : ''
   const weekStartWeekday = locations.find((l) => l.id === locationId)?.week_start_weekday ?? 0
@@ -243,7 +244,7 @@ export default function ScheduleEditor() {
           </div>
         ) : bodyMode === 'weekStart' ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-            <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} />
+            <WeekStartPane key={locationId} locationId={locationId} jobs={jobs} onSaved={() => { void reloadLocations() }} />
           </div>
         ) : editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>

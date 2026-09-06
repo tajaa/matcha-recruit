@@ -4,8 +4,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
-const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, getScheduleSuggestionStatusMock, sendMessageStreamMock, reloadMock } = vi.hoisted(() => ({
+const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, getScheduleSuggestionStatusMock, sendMessageStreamMock, reloadMock, reloadLocationsMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
+  reloadLocationsMock: vi.fn().mockResolvedValue(undefined),
   useEditorMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   getScheduleHuumeSessionMock: vi.fn(),
@@ -25,6 +26,15 @@ vi.mock('../../components/employees/schedule-editor/ScheduleJobsTab', async () =
     },
   }
 })
+vi.mock('../../components/employees/schedule-editor/WeekStartPane', () => ({
+  default: ({ locationId, onSaved }: { locationId: string; onSaved?: () => void }) => (
+    <div>
+      <div>Week setup pane</div>
+      <div>Setup for {locationId}</div>
+      <button onClick={() => onSaved?.()}>Save week setup</button>
+    </div>
+  ),
+}))
 vi.mock('../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
   getScheduleSuggestionStatus: getScheduleSuggestionStatusMock,
@@ -49,6 +59,7 @@ const shift = {
 describe('ScheduleEditor', () => {
   beforeEach(() => {
     reloadMock.mockClear()
+    reloadLocationsMock.mockClear()
     sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
     getScheduleHuumeSessionMock.mockResolvedValue({
       session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
@@ -66,6 +77,7 @@ describe('ScheduleEditor', () => {
       setLocationId: vi.fn(),
       locations: [{ id: 'loc1', name: 'Wilshire', city: 'Los Angeles', state: 'CA', is_active: true }],
       loading: false,
+      reloadLocations: reloadLocationsMock,
     })
     useEditorMock.mockReturnValue({
       shifts: [shift],
@@ -420,5 +432,64 @@ describe('ScheduleEditor', () => {
     })
     await waitFor(() => expect(screen.getByText('The note is still applied.')).toBeInTheDocument())
     expect(reloadMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps week setup exclusive with the jobs and Huume panes', () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Week setup' }))
+    expect(screen.getByText('Week setup pane')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    expect(screen.queryByText('Week setup pane')).not.toBeInTheDocument()
+    expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Week setup' }))
+    expect(screen.queryByText('Huume · Schedule assistant')).not.toBeInTheDocument()
+    expect(screen.getByText('Week setup pane')).toBeInTheDocument()
+  })
+
+  it('re-reads the locations after the week setup pane saves', () => {
+    // week_start_weekday rides on the location row and decides how the grid is
+    // laid out AND which week_start the assistant session accepts, so a stale
+    // copy leaves the editor a day off and 422s Ask Huume.
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Week setup' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save week setup' }))
+
+    expect(reloadLocationsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('snaps a supplied ?week= to the location own week start day', () => {
+    useLocationScopeMock.mockReturnValue({
+      locationId: 'loc1',
+      setLocationId: vi.fn(),
+      locations: [{
+        id: 'loc1', name: 'Wilshire', city: 'Los Angeles', state: 'CA',
+        is_active: true, week_start_weekday: 1,
+      }],
+      loading: false,
+      reloadLocations: reloadLocationsMock,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    // 2026-08-09 is a Sunday; this store's weeks start on Monday, so the grid
+    // (and the session the panel opens) must use 2026-08-03.
+    expect(screen.getByText('Week of 2026-08-03')).toBeInTheDocument()
+    expect(useEditorMock).toHaveBeenCalledWith('2026-08-03', 'loc1', expect.any(Object))
   })
 })

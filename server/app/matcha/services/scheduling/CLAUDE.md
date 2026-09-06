@@ -46,6 +46,12 @@ Invariants:
 - **`operating_hours` has three states per weekday, not two.** A key with a
   window means open, an explicit `null` means closed, and an ABSENT key means
   nobody has said yet. Collapsing the last two makes Huume stop asking.
+- **Writes from the chat surface are partial by nature.** The interview asks
+  one question per turn, so `schedule_profile_skill.resolve_profile_args` merges
+  its answer onto the stored profile before staging, and `upsert_location_profile`
+  is only handed the fields that carry a value. An empty `operating_hours` or a
+  blank `notes` is "unsaid", not "cleared" — the REST pane is the surface that
+  can clear a field, by sending it explicitly.
 - **The chat surface maps blocks onto ids by `(name, start, end)`** before
   calling the id-based reconcile core, so a re-save keeps existing block ids
   and the generated shifts that point at them keep their template link.

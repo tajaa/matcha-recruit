@@ -1,5 +1,8 @@
 """Pure Huume registry, confirmation-envelope, and prompt tests."""
 
+from datetime import date
+from uuid import UUID
+
 import pytest
 
 from app.matcha.services.huume.actions import evaluate_huume_action
@@ -7,8 +10,8 @@ from app.matcha.services.huume.assets import ASSET_SPECS
 from app.matcha.services.huume.agent import (
     _HR_OPS_TOOL_SPECS, _build_choice, _build_hr_ops_staged,
 )
-from app.matcha.services.huume.prompt import build_state_block
-from app.matcha.services.huume.scope import SCHEDULE_TOOLS
+from app.matcha.services.huume.prompt import build_state_block, build_system_prompt
+from app.matcha.services.huume.scope import SCHEDULE_TOOLS, HuumeSurfaceContext
 from app.matcha.services.huume.tools import TOOLS_BY_NAME
 
 
@@ -206,3 +209,50 @@ def test_state_block_carries_metrics_and_exact_confirm_tool():
     assert "ab12cd34" in block
     assert "build_week_schedule" in block
     assert "as drafts" in block
+
+
+def _schedule_surface() -> HuumeSurfaceContext:
+    return HuumeSurfaceContext(
+        surface="schedule_assistant",
+        location_id=UUID(LOCATION_ID),
+        week_start=date(2026, 8, 23),
+        week_end=date(2026, 8, 29),
+        allowed_tools=SCHEDULE_TOOLS,
+    )
+
+
+def test_system_prompt_carries_the_locations_saved_profile():
+    """The schedule surface has no per-turn context builder, so the saved setup
+    rides in the system prompt — otherwise the model spends a tool call
+    rediscovering it before every intake question."""
+    prompt = build_system_prompt(
+        company_name="Sunset Smile", today="2026-08-23",
+        surface_context=_schedule_surface(),
+        location_profile_block="Hours: Mon 08:00–17:00\nMissing: leader_rule",
+    )
+    assert "Hours: Mon 08:00–17:00" in prompt
+    assert "Missing: leader_rule" in prompt
+
+
+def test_system_prompt_says_so_when_no_profile_is_saved_yet():
+    prompt = build_system_prompt(
+        company_name="Sunset Smile", today="2026-08-23",
+        surface_context=_schedule_surface(),
+    )
+    assert "No scheduling profile saved yet" in prompt
+    # ...and the model is told to interview rather than refuse.
+    assert "interview them instead" in prompt
+
+
+def test_choice_keeps_the_send_text_for_an_over_long_option():
+    """The label is trimmed for the button; the send text is keyed on the FULL
+    option, or a long template name would post back a chopped name that
+    resolves to nothing."""
+    names = ["Downtown weekday coverage — standard rotation v2", "Weekend"]
+    choice = _build_choice(
+        "Which week template should I use?", names,
+        sends={name: f"Use the week template named {name}" for name in names},
+    )
+    assert len(choice["options"][0]["label"]) == 40
+    assert choice["options"][0]["send"] == f"Use the week template named {names[0]}"
+    assert choice["options"][1]["send"] == "Use the week template named Weekend"

@@ -43,7 +43,17 @@ function draftToHours(draft: DayDraft[]): OperatingHours {
   return hours
 }
 
-export default function WeekStartPane({ locationId, jobs }: { locationId: string; jobs: ScheduleJob[] }) {
+export default function WeekStartPane(
+  { locationId, jobs, onSaved }: {
+    locationId: string
+    jobs: ScheduleJob[]
+    /** Fires after any successful profile write. The editor re-reads its
+     *  locations from it: `week_start_weekday` decides how the grid is laid
+     *  out and which week_start the assistant session will accept, so a stale
+     *  copy leaves the grid a day off and 422s the Ask Huume panel. */
+    onSaved?: () => void
+  },
+) {
   const { toast } = useToast()
   const [profile, setProfile] = useState<LocationScheduleProfile | null>(null)
   const [templates, setTemplates] = useState<WeekTemplate[]>([])
@@ -84,6 +94,7 @@ export default function WeekStartPane({ locationId, jobs }: { locationId: string
     setSaving(true)
     try {
       applyProfile(await saveLocationScheduleProfile(locationId, payload))
+      onSaved?.()
       toast(message, 'success')
     } catch (error) {
       toast(errorMessage(error), 'error')

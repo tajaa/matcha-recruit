@@ -52,7 +52,10 @@ def _leader_blocks(operating_hours: dict, leader_job: dict, blocks: list[dict]) 
     about demand, so the rule has to become real staffing demand or it is
     silently ignored.
     """
-    if any(b.get("job_id") == leader_job["id"] for b in blocks):
+    leader_id = str(leader_job["id"])
+    # Saved blocks carry their job id as a string, freshly resolved ones as a
+    # UUID — comparing the raw values would re-add coverage that already exists.
+    if any(str(b.get("job_id")) == leader_id for b in blocks):
         return []
     windows: dict[tuple[str, str], list[int]] = {}
     for day in location_profile.open_weekdays(operating_hours):
@@ -62,7 +65,10 @@ def _leader_blocks(operating_hours: dict, leader_job: dict, blocks: list[dict]) 
         {
             "name": f"{leader_job['name']} coverage",
             "role": leader_job["name"],
-            "job_id": leader_job["id"],
+            # str, not UUID: this dict is persisted into the thread's JSONB
+            # state, and json.dumps has no UUID branch — a raw UUID here means
+            # the whole staged action is silently dropped.
+            "job_id": leader_id,
             "job_name": leader_job["name"],
             "days_of_week": days,
             "start_time": opens,
@@ -71,6 +77,33 @@ def _leader_blocks(operating_hours: dict, leader_job: dict, blocks: list[dict]) 
             "break_minutes": 0,
         }
         for (opens, closes), days in sorted(windows.items())
+    ]
+
+
+def _saved_pattern_blocks(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    """The location's saved pattern in the same shape `resolve_profile_args`
+    emits, so a turn that only answers the leader question can still add leader
+    coverage on top of it.
+
+    Empty when any saved block predates job links: rewriting the pattern would
+    stage blocks the every-block-needs-a-job gate refuses.
+    """
+    blocks = ((bundle.get("template") or {}).get("blocks") or [])
+    if not blocks or any(not block.get("job_id") for block in blocks):
+        return []
+    return [
+        {
+            "name": block["name"],
+            "role": block.get("role") or block.get("job_name"),
+            "job_id": block["job_id"],
+            "job_name": block.get("job_name"),
+            "days_of_week": sorted(block.get("days_of_week") or []),
+            "start_time": block["start_time"],
+            "end_time": block["end_time"],
+            "required_staff": block.get("required_staff") or 1,
+            "break_minutes": block.get("break_minutes") or 0,
+        }
+        for block in blocks
     ]
 
 
@@ -96,7 +129,7 @@ async def resolve_profile_args(
     "message": ..., "job_options": [...]}`. Nothing is written here.
     """
     try:
-        operating_hours = location_profile.validate_operating_hours(args.get("operating_hours"))
+        supplied_hours = location_profile.validate_operating_hours(args.get("operating_hours"))
     except ValueError as exc:
         return {"status": "clarify", "message": str(exc)}
 
@@ -105,6 +138,16 @@ async def resolve_profile_args(
         return {"status": "clarify", "message": f"That is more than {_MAX_BLOCKS} shift blocks — split the week up."}
 
     async with get_connection() as conn:
+        # The interview runs one question per turn, so a later call carries
+        # only that turn's answer. Everything staged here is the profile as it
+        # will look AFTER the save — merged with what is already stored, never
+        # a partial that overwrites an earlier answer with nothing.
+        saved = await location_profile.load_profile_bundle(
+            conn, company_id=company_id, location_id=location_id,
+        )
+        saved_hours = (saved.get("profile") or {}).get("operating_hours") or {}
+        operating_hours = {**saved_hours, **supplied_hours}
+
         blocks: list[dict[str, Any]] = []
         for raw in raw_blocks:
             name = str(raw.get("name") or "").strip()
@@ -150,7 +193,9 @@ async def resolve_profile_args(
                 # The job's own name is the canonical role label — same rule
                 # create_shift_core enforces on every generated shift.
                 "role": job["name"],
-                "job_id": job["id"],
+                # str for the same reason as _leader_blocks: staged actions
+                # round-trip through JSONB.
+                "job_id": str(job["id"]),
                 "job_name": job["name"],
                 "days_of_week": days,
                 "start_time": start_time,
@@ -173,11 +218,23 @@ async def resolve_profile_args(
                 }
             leader_job = {"id": leader_row["id"], "name": leader_row["name"]}
 
-    if leader_job and blocks:
-        blocks.extend(_leader_blocks(operating_hours, leader_job, blocks))
+    if leader_job:
+        # A leader-only turn still has to produce demand, so the saved pattern
+        # is re-staged with the coverage added rather than left untouched.
+        pattern = blocks or _saved_pattern_blocks(saved)
+        leader_coverage = _leader_blocks(operating_hours, leader_job, pattern) if pattern else []
+        if leader_coverage:
+            blocks = [*pattern, *leader_coverage]
 
-    notes = args.get("notes")
-    if not operating_hours and not blocks and not leader_job and not notes:
+    # Blank notes are "this turn had nothing to say", not "erase the note the
+    # manager wrote" — the model fills the field with "" whether or not it was
+    # ever discussed. Same reasoning as the empty operating_hours dict.
+    raw_notes = args.get("notes")
+    notes = raw_notes.strip() or None if isinstance(raw_notes, str) else raw_notes
+    # Deliberately the SUPPLIED hours: merged hours are non-empty for any
+    # location that answered once, and a turn that said nothing new is not a
+    # save.
+    if not supplied_hours and not blocks and not leader_job and not notes:
         return {
             "status": "clarify",
             "message": "Tell me the store's hours, its usual shift blocks, or who has to be on the floor.",
@@ -207,7 +264,9 @@ async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, An
     blocks = action.get("blocks") or []
     leader_job_id = action.get("leader_job_id")
     fields: dict[str, Any] = {}
-    if action.get("operating_hours") is not None:
+    # Truthiness, not `is not None`: `{}` means this turn carried no hours,
+    # and writing it would blank out whatever an earlier turn saved.
+    if action.get("operating_hours"):
         fields["operating_hours"] = action["operating_hours"]
     if leader_job_id:
         fields["leader_job_id"] = UUID(str(leader_job_id))

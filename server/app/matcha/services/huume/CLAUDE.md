@@ -50,6 +50,24 @@ button. **`save_location_schedule_profile` had to be added to that gate's tool
 set at `agent.py`** or the model could self-confirm by echoing the confirm_id
 it can read in the state block.
 
+Two invariants the first pass got wrong, both found by running the real flow
+rather than a fake connection:
+
+- **A staged action is JSONB.** `_claim_staged_action` sanitizes with
+  `_json_safe` before it reaches `state_updates`, and skills emit ids as
+  strings. One raw `UUID`/`date` in the dict fails `json.dumps` for the WHOLE
+  state update in `matcha_work_document.versions.apply_update`, which
+  `turn_pipeline` catches and logs — so the confirm card, the chip clear, and
+  anything else that turn set all vanish with a green tool step still on
+  screen.
+- **A profile save merges, it never overwrites.** The intake asks one question
+  per turn, so a later call carries only that answer: `resolve_profile_args`
+  stages the profile as it will look AFTER the save (saved hours merged with
+  the new ones, the saved pattern re-staged when a leader turn adds coverage),
+  and `execute` writes a field only when it is non-empty. An empty
+  `operating_hours` dict or a blank `notes` string means "this turn had nothing
+  to say", never "erase it" — the model fills both in regardless.
+
 The surface has only the tools in `SCHEDULE_TOOLS` and the lookup topics in
 `SCHEDULE_LOOKUP_TOPICS`. All writes are staged and require a later turn with
 the exact `confirm_id`; they apply directly to the published schedule after

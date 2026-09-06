@@ -588,20 +588,27 @@ def _build_choice(
     text = str(question or "").strip()
     if not text:
         return None
-    labels: list[str] = []
+    picked: list[tuple[str, Optional[str]]] = []
+    seen: set[str] = set()
     for raw in options or []:
-        label = str(raw or "").strip()[:_MAX_CHOICE_LABEL]
-        if label and label not in labels:
-            labels.append(label)
-        if len(labels) >= _MAX_CHOICE_OPTIONS:
+        original = str(raw or "").strip()
+        # The send text is keyed on the FULL option, not the trimmed label: a
+        # long template name would otherwise lose its "Use the week template
+        # named ..." phrasing and send back a chopped name nothing resolves.
+        label = original[:_MAX_CHOICE_LABEL]
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        picked.append((label, (sends or {}).get(original)))
+        if len(picked) >= _MAX_CHOICE_OPTIONS:
             break
-    if len(labels) < 2:
+    if len(picked) < 2:
         return None
     return {
         "question": text,
         "options": [
-            {"label": label, **({"send": sends[label]} if sends and label in sends else {})}
-            for label in labels
+            {"label": label, **({"send": send} if send else {})}
+            for label, send in picked
         ],
         "kind": "single",
     }
@@ -787,7 +794,11 @@ async def run_huume_turn(
         if deferred is not None:
             return deferred
         staged_action_this_turn = staged
-        state_updates["huume_action"] = staged
+        # Sanitized on the way into thread state: this dict is persisted as
+        # JSONB, and one UUID/date left in it fails json.dumps for the WHOLE
+        # state update — the staged card, and any other slot this turn set,
+        # vanish with only a swallowed log line to show for it.
+        state_updates["huume_action"] = _json_safe(staged)
         return None
 
     # Pilot-skill turn state: handbook drafts proposed THIS turn (the two-turn
