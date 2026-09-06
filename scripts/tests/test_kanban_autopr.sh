@@ -52,6 +52,120 @@ check "migration graph snapshot works without the backend virtualenv" \
       '(.heads | length) > 0 and (.revisions | length) > 0 and (.pending | length) == (.revisions | length)' \
       >/dev/null 2>&1 && echo 0 || echo 1)
 
+# The trusted path reads migrations a human already merged. An irreversible
+# data migration with no downgrade() is an ordinary thing to land by hand, and
+# it must never take resolve-production-context.sh — and therefore every AutoPR
+# run — down. Bot output is what gets the strict treatment.
+lenient_versions="$TMP_DIR/lenient-versions"
+mkdir -p "$lenient_versions"
+cat > "$lenient_versions/base_test.py" <<'EOF'
+"""Base."""
+
+revision = "base_test"
+down_revision = None
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
+cat > "$lenient_versions/data_only.py" <<'EOF'
+"""Irreversible data backfill."""
+
+revision = "data_only"
+down_revision = "base_test"
+
+
+def upgrade() -> None:
+    pass
+EOF
+lenient_snapshot="$(python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" \
+    "$lenient_versions" 2>/dev/null)"
+check "trusted snapshot tolerates a mainline migration with no downgrade()" \
+    $(printf '%s' "$lenient_snapshot" | jq -e '.heads == ["data_only"]' >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+
+draft_check_stderr="$TMP_DIR/check-drafts.stderr"
+python3 "$REPO_ROOT/scripts/alembic_graph_snapshot.py" --check-drafts \
+    "$lenient_versions" "$lenient_versions/data_only.py" 2>"$draft_check_stderr"
+draft_check_rc=$?
+check "the same file is rejected when it is bot-drafted output" \
+    $([ "$draft_check_rc" != 0 ] \
+      && grep -q 'missing migration entrypoint(s): downgrade' "$draft_check_stderr" \
+      && echo 0 || echo 1)
+
+# The publisher's rules, exercised through the shared helper both it and
+# investigate.sh call. Two copies of these rules would eventually disagree
+# about what the model was told.
+draft_repo="$TMP_DIR/draft-guard-repo"
+mkdir -p "$draft_repo/server/alembic/versions"
+cp "$lenient_versions/base_test.py" "$draft_repo/server/alembic/versions/base_test.py"
+git -C "$draft_repo" init -q
+git -C "$draft_repo" config user.name test
+git -C "$draft_repo" config user.email test@example.com
+git -C "$draft_repo" add -A
+git -C "$draft_repo" commit -qm initial
+git -C "$draft_repo" branch -M main
+
+draft_guard() {
+    (
+        # shellcheck source=../kanban-autopr/lib.sh
+        source "$AUTOPR_DIR/lib.sh"
+        autopr_migration_draft_errors "$draft_repo" main
+    )
+}
+
+check "a clean tree needs no migration base ref at all" \
+    $(draft_guard >/dev/null 2>&1 && echo 0 || echo 1)
+
+cat > "$draft_repo/server/alembic/versions/good_test.py" <<'EOF'
+"""Good draft."""
+
+revision = "good_test"
+down_revision = "base_test"
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+EOF
+check "an untracked draft extending the head is accepted" \
+    $(draft_guard >/dev/null 2>&1 && echo 0 || echo 1)
+
+rm -f "$draft_repo/server/alembic/versions/good_test.py"
+printf '# rewrite\n' >> "$draft_repo/server/alembic/versions/base_test.py"
+# The helper reports by returning non-zero, so `set -o pipefail` would make any
+# `draft_guard | grep` pipeline fail regardless of the match. Capture first.
+draft_errors="$(draft_guard 2>/dev/null || true)"
+check "editing a migration already on main is rejected" \
+    $(printf '%s' "$draft_errors" | grep -q 'may not be edited or deleted' && echo 0 || echo 1)
+git -C "$draft_repo" checkout -q -- server/alembic/versions/base_test.py
+
+printf 'import os\n' > "$draft_repo/server/alembic/versions/__init__.py"
+draft_errors="$(draft_guard 2>/dev/null || true)"
+check "a versions/__init__.py the loader skips is rejected by the shared helper" \
+    $(printf '%s' "$draft_errors" | grep -q 'only new server/alembic/versions' && echo 0 || echo 1)
+rm -f "$draft_repo/server/alembic/versions/__init__.py"
+
+check "investigate.sh turns an unpublishable migration draft into one retry" \
+    $(grep -qF 'CORRECTION_KIND="migration_draft_invalid"' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'autopr_migration_draft_errors "$REPO_ROOT"' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+check "both prompts state the migration rules the publisher enforces" \
+    $(grep -qF 'does not start' "$AUTOPR_DIR/_prompt_todo.txt" \
+      && grep -qF 'never a mid-chain revision' "$AUTOPR_DIR/_prompt_todo.txt" \
+      && grep -qF '`downgrade()`' "$AUTOPR_DIR/_prompt_todo.txt" \
+      && grep -qF 'never a mid-chain revision' "$AUTOPR_DIR/_prompt_rework.txt" \
+      && grep -qF '`downgrade()`' "$AUTOPR_DIR/_prompt_rework.txt" \
+      && echo 0 || echo 1)
+
 check "future frontend images expose a small stable build manifest" \
     $(grep -qF '> dist/version.json' "$REPO_ROOT/client/Dockerfile" \
       && grep -qF '.build_number // .build // empty' "$AUTOPR_DIR/resolve-production-context.sh" \
@@ -235,6 +349,7 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"55555555-0000-4000-8000-000000000005","title":"Consumed go-ahead directive","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed"},
     {"id":"66666666-0000-4000-8000-000000000006","title":"Consumed directive answered with a migration stop","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"},
     {"id":"77777777-0000-4000-8000-000000000007","title":"Queued by hand from the card","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
+    {"id":"88888888-0000-4000-8000-000000000008","title":"Blocked on a vendor that used the words","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY · [autopr:no-spec 2026-09-02T01:00:00Z] external_dependency · note: the vendor said it was already_fixed upstream"},
     {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"}
   ]
 }
@@ -261,6 +376,7 @@ if [[ "$url" == */auth/login ]]; then
     printf '{"access_token":"stub-token"}'
     exit 0
 fi
+printf '%s\n' "$url" >> "${AUTOPR_TEST_COLLECT_URLS:-/dev/null}"
 if [[ "$url" == */history ]]; then
     cp "$AUTOPR_TEST_HISTORY_FILE" "$output_file"
 else
@@ -274,18 +390,26 @@ collected="$(PATH="$TMP_DIR/collect-bin:$PATH" \
     MATCHA_AUTOPR_ENV="$env_file" \
     AUTOPR_TEST_BUNDLE_FILE="$TMP_DIR/collect-bundle.json" \
     AUTOPR_TEST_HISTORY_FILE="$TMP_DIR/collect-history.json" \
+    AUTOPR_TEST_COLLECT_URLS="$TMP_DIR/collect-urls" \
     "$AUTOPR_DIR/collect.sh" 2>"$TMP_DIR/collect-error.log")"
 collect_rc=$?
+# The recovery probe costs an API call and a policy run per card, so the shell
+# filter has to mean the same thing as the anchored jq one above it: a refusal
+# whose verdict IS already_fixed, not a note that merely contains the words.
+check "an already_fixed mention in another verdict's note starts no recovery probe" \
+    $(! grep -q '/tasks/88888888-0000-4000-8000-000000000008/history' "$TMP_DIR/collect-urls" \
+      && grep -q '/tasks/55555555-0000-4000-8000-000000000005/history' "$TMP_DIR/collect-urls" \
+      && echo 0 || echo 1)
+
 check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "5" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "4" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444", "55555555", "66666666", "77777777"]
-         and (.[4].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
+        'map(.id8) == ["11111111", "44444444", "55555555", "77777777"]
+         and (.[3].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
          and .[2].autopr_reconsideration_pending
          and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
-         and .[3].autopr_reconsideration_pending
-         and .[3].autopr_reconsideration_event_id == "consumed-collector-event"' >/dev/null \
+         and (.[3].autopr_reconsideration_pending | not)' >/dev/null \
       && echo 0 || echo 1)
 
 ################################################################################
@@ -1123,6 +1247,10 @@ forced_already_fixed_rc=$?
 check "decision-bound force directives reject another already-fixed exit" \
     $([ "$forced_already_fixed_rc" != 0 ] && echo 0 || echo 1)
 
+# migration_required is retired outright, not merely forbidden under a
+# directive: the operator applies every migration by hand, so authoring the
+# version file is ordinary drafting work. It was the most common refusal and it
+# protected nothing.
 jq '.no_safe_action_reason = "migration_required"' \
     "$TMP_DIR/already-fixed-decision.json" > "$TMP_DIR/migration-required-decision.json"
 "$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
@@ -1130,6 +1258,12 @@ jq '.no_safe_action_reason = "migration_required"' \
 forced_migration_rc=$?
 check "decision-bound draft directive requires authoring a needed migration" \
     $([ "$forced_migration_rc" != 0 ] && echo 0 || echo 1)
+
+"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
+    "$TMP_DIR/bare-migration-decision.json" >/dev/null 2>&1
+bare_migration_rc=$?
+check "migration_required is refused even with no directive at all" \
+    $([ "$bare_migration_rc" != 0 ] && echo 0 || echo 1)
 
 cat > "$TMP_DIR/pending-directive-card.json" <<'EOF'
 {"autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"old-event"}
@@ -1255,8 +1389,8 @@ python3 "$AUTOPR_DIR/resolve-directive-policy.py" \
     --card "$TMP_DIR/consumed-migration-card.json" \
     --history "$TMP_DIR/consumed-migration-history.json" \
     --output "$TMP_DIR/recovered-migration-directive.json"
-check "a migration-required repeat cannot consume the owner's draft authorization" \
-    $(jq -e '.directives == ["draft_pr"] and .source_event_id == "consumed-event"' \
+check "an old migration-required card is not revived by consumed authorization" \
+    $(jq -e '.directives == [] and .source_event_id == null' \
       "$TMP_DIR/recovered-migration-directive.json" >/dev/null && echo 0 || echo 1)
 
 # acceptance_criteria_met is permitted under draft_pr, so a card resting on it
@@ -1476,7 +1610,7 @@ check "pending additional context reopens an unchanged no-spec decision" \
 cat > "$TMP_DIR/run-request-cards.json" <<'EOF'
 [
   {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Ordinary changes-requested work","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"},
-  {"task_id":"99999999-0000-4000-8000-000000000009","id8":"99999999","project_id":"p","title":"Run me now","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-01-02T00:00:00Z] migration_required","autopr_run_requested_at":"2026-01-03T00:00:00+00:00"}
+  {"task_id":"99999999-0000-4000-8000-000000000009","id8":"99999999","project_id":"p","title":"Run me now","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-01-02T00:00:00Z] already_fixed","autopr_run_requested_at":"2026-01-03T00:00:00+00:00"}
 ]
 EOF
 run_requested="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -1486,6 +1620,20 @@ check "an explicit run request outranks routine work and its own no-spec marker"
     $([ "$(printf '%s' "$run_requested" | jq -r '.id8')" = "99999999" ] \
       && [ "$(printf '%s' "$run_requested" | jq -r '.mode')" = "investigate" ] \
       && echo 0 || echo 1)
+
+# Old migration-required decisions stay settled. New runs draft migrations,
+# but abandoned cards must not be resurrected and spend another model run.
+cat > "$TMP_DIR/retired-nospec-cards.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Stopped by a retired verdict","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-04T06:11:02Z] migration_required · note: needs a migration"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/retired-nospec-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/retired-nospec-cards.json" >/dev/null 2>&1
+retired_nospec_rc=$?
+check "an old migration_required marker stays settled until fresh owner action" \
+    $([ "$retired_nospec_rc" = "3" ] && echo 0 || echo 1)
 
 # The same cache now holds a fresh attempt marker for that card: a request
 # newer than the attempt must still beat the cooldown, exactly like

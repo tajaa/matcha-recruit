@@ -45,10 +45,6 @@ NO_SAFE_ACTION_REASON="$(jq -r '.no_safe_action_reason // empty' "$DECISION_FILE
 DIRECTIVE_CSV="$(jq -r '(.autopr_directives // []) | map(select(. == "draft_pr" or . == "trust_still_broken")) | join(",")' "$DECISION_FILE")"
 DIRECTIVE_MARKER=""
 [ -z "$DIRECTIVE_CSV" ] || DIRECTIVE_MARKER=" · [autopr:directives $DIRECTIVE_CSV]"
-ALLOW_MIGRATION_VERSION=false
-case ",$DIRECTIVE_CSV," in
-    *,draft_pr,*) ALLOW_MIGRATION_VERSION=true ;;
-esac
 PRODUCTION_VERIFICATION_JSON="$(jq -c '.production_verification' "$DECISION_FILE")"
 PRODUCTION_VERIFICATION_B64="$(printf '%s' "$PRODUCTION_VERIFICATION_JSON" | base64 | tr -d '\r\n')"
 COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$PUBLICATION_COPY_FILE")" \
@@ -73,7 +69,6 @@ auto_setup_status() {
         case "$NO_SAFE_ACTION_REASON" in
             already_fixed) printf 'NO PR: ALREADY FIXED' ;;
             acceptance_criteria_met) printf 'NO PR: CARD ALREADY SATISFIED' ;;
-            migration_required) printf 'NO PR: MIGRATION REQUIRED' ;;
             policy_blocked) printf 'NO PR: POLICY BLOCKED' ;;
             external_dependency) printf 'NO PR: EXTERNAL DEPENDENCY' ;;
             *) printf 'NO PR: HUMAN ACTION REQUIRED' ;;
@@ -335,18 +330,15 @@ cd "$REPO_ROOT"
 git add --all
 
 # Path guard: denylist is what stops the bot rewriting its own harness or CI.
-# The allowlist is strictly stronger. A decision-bound draft_pr directive may
-# additionally author a migration *version* for human review; it never permits
-# migration configuration/runner changes and this script never applies it.
+# The allowlist is strictly stronger. Authoring a new migration version is
+# ordinary drafting work: publication always opens a GitHub draft PR and this
+# script never runs a migration. Existing mainline migrations and all migration
+# runner/configuration files remain closed.
 changed_paths="$(git diff --cached --no-renames --name-only)"
 unsafe_paths="$(printf '%s\n' "$changed_paths" | grep -E '(^\.github/|^deploy/|^scripts/|^client/src/generated/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
-if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
-    unsafe_migrations="$(printf '%s\n' "$changed_paths" \
-        | grep -E '^server/alembic/' \
-        | grep -vE '^server/alembic/versions/[^/]+\.py$' || true)"
-else
-    unsafe_migrations="$(printf '%s\n' "$changed_paths" | grep -E '^server/alembic/' || true)"
-fi
+unsafe_migrations="$(printf '%s\n' "$changed_paths" \
+    | grep -E '^server/alembic/' \
+    | grep -vE "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
 if [ -n "$unsafe_migrations" ]; then
     unsafe_paths="${unsafe_paths}${unsafe_paths:+$'\n'}${unsafe_migrations}"
 fi
@@ -357,14 +349,40 @@ if [ -n "$unsafe_paths" ]; then
     exit 1
 fi
 
-allowed_paths_re='^(server/(app|tests)/.*\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
-if [ "$ALLOW_MIGRATION_VERSION" = true ]; then
-    allowed_paths_re='^(server/(app|tests)/.*\.py|server/alembic/versions/[^/]+\.py|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$'
-fi
+migration_draft_alternative="${AUTOPR_MIGRATION_DRAFT_RE#^}"
+allowed_paths_re="^(server/(app|tests)/.*\.py|${migration_draft_alternative%$}|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$"
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
     echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
+    git reset --hard >/dev/null 2>&1
+    exit 1
+fi
+
+migration_paths="$(printf '%s\n' "$changed_paths" | grep -E "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
+if [ -n "$migration_paths" ]; then
+    # A version file must be a regular file: a symlink or a mode change is
+    # never how a migration is authored, and the graph parser would follow it.
+    # Destination mode 000000 is a deletion, not an irregular file — the
+    # migration guard below reports that with the reason it actually has.
+    unsafe_migration_modes="$(git diff --cached --raw --no-renames -- \
+        server/alembic/versions \
+        | awk '$2 != "100644" && $2 != "000000" {print $0}' || true)"
+    if [ -n "$unsafe_migration_modes" ]; then
+        echo "Refusing non-regular migration version files:" >&2
+        printf '%s\n' "$unsafe_migration_modes" >&2
+        git reset --hard >/dev/null 2>&1
+        exit 1
+    fi
+fi
+
+# Same check investigate.sh already gave the model a retry on. Reaching it here
+# means the retry did not fix it, so the run ends — but every rejection resets
+# the tree first, including an unusable base ref.
+if ! migration_errors="$(autopr_migration_draft_errors "$REPO_ROOT" \
+    "${AUTOPR_MIGRATION_BASE_REF:-main}")"; then
+    echo "Refusing migration draft:" >&2
+    printf '%s\n' "$migration_errors" >&2
     git reset --hard >/dev/null 2>&1
     exit 1
 fi
@@ -454,7 +472,7 @@ if [ "$OUTCOME" = no_safe_action ]; then
     # a refusal, and the human has no visible way to say "do it anyway".
     NEEDS_CONTEXT_REQUEST=false
     case "$NO_SAFE_ACTION_REASON" in
-        already_fixed|migration_required|acceptance_criteria_met) NEEDS_CONTEXT_REQUEST=true ;;
+        already_fixed|acceptance_criteria_met) NEEDS_CONTEXT_REQUEST=true ;;
     esac
     # A card whose criteria are already met is the one refusal a human must see
     # in full: the point is not "no PR", it is "here is where each thing you

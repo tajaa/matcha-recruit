@@ -162,6 +162,9 @@ async def test_context_request_rechecks_and_inserts_under_one_task_lock(monkeypa
     assert posted is True
     assert any("FOR UPDATE OF t" in query for query in conn.queries)
     persisted.assert_awaited_once()
+    message = persisted.await_args.args[3]
+    assert "Migration changes are drafted automatically" in message
+    assert "migration-required stop" not in message
     broadcast.assert_awaited_once()
     assert conn.in_transaction is False
 

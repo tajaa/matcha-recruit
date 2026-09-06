@@ -71,7 +71,11 @@ _autopr_decision_schema_ok() {
           (.safe_changes_present | not) and (.questions | length > 0) and .no_safe_action_reason == null
         else
           (.safe_changes_present | not) and (.questions | length == 0)
-          and (.no_safe_action_reason | IN("already_fixed", "migration_required", "policy_blocked", "external_dependency", "acceptance_criteria_met"))
+          # migration_required is deliberately absent. A schema change is
+          # ordinary drafting work: the version file is authored for human
+          # review and the operator applies it. "This needs a migration" was
+          # the single most common refusal and it never protected anything.
+          and (.no_safe_action_reason | IN("already_fixed", "policy_blocked", "external_dependency", "acceptance_criteria_met"))
           # acceptance_criteria_met is the one reason that survives an owner
           # directive, so it has to carry its proof: every criterion the card
           # asked for, and the path:line at a named commit that already

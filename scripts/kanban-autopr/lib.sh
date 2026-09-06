@@ -138,3 +138,71 @@ autopr_cosmetic_only_diff() {
         || return 1
     python3 "$script_dir/cosmetic_diff.py" < "$diff_file"
 }
+
+# The only shape the bot may create under server/alembic/: a NEW version file
+# named for its revision id. A leading underscore is excluded so
+# `__init__.py` — the one file the graph loader skips, and therefore the one
+# file no validation would inspect — can never be staged as "a migration".
+AUTOPR_MIGRATION_DRAFT_RE='^server/alembic/versions/[A-Za-z0-9][A-Za-z0-9_]*\.py$'
+
+# autopr_migration_draft_errors REPO_ROOT BASE_REF
+# Prints every reason the working tree's server/alembic/ changes could not be
+# published (one per line) and returns 1; returns 0 silently when there is
+# nothing to publish or the drafts are valid.
+#
+# investigate.sh calls this right after the model pass so an unpublishable
+# migration costs one corrective retry, and publish.sh calls it as the hard
+# gate. Sharing the check is the point: two copies would eventually disagree
+# about what the model was told, and only the publisher's copy discards the
+# run.
+autopr_migration_draft_errors() {
+    local repo_root="$1" base_ref="$2"
+    local script_dir tracked untracked alembic_paths bad drafts path status errors=""
+
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    # Cheap pre-check against HEAD, which always resolves: a run that touched
+    # no migration at all must not depend on the base ref existing.
+    untracked="$(git -C "$repo_root" ls-files --others --exclude-standard -- server/alembic || true)"
+    tracked="$(git -C "$repo_root" diff --no-renames --name-only HEAD -- server/alembic || true)"
+    [ -n "$untracked$tracked" ] || return 0
+
+    git -C "$repo_root" rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1 \
+        || { printf 'migration safety base is unavailable: %s\n' "$base_ref"; return 1; }
+
+    # Worktree vs base covers staged and unstaged edits alike, so this reads
+    # the same before publish.sh's `git add --all` and after it, and it also
+    # catches a migration an earlier rework run already committed.
+    tracked="$(git -C "$repo_root" diff --no-renames --name-only "$base_ref" -- server/alembic || true)"
+    alembic_paths="$(printf '%s\n%s\n' "$tracked" "$untracked" | sed '/^$/d' | sort -u)"
+    [ -n "$alembic_paths" ] || return 0
+
+    bad="$(printf '%s\n' "$alembic_paths" | grep -vE "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
+    if [ -n "$bad" ]; then
+        errors="only new server/alembic/versions/<revision>.py files may change (letters, digits and underscore, no leading underscore):"$'\n'"$bad"$'\n'
+    fi
+
+    drafts="$(printf '%s\n' "$alembic_paths" | grep -E "$AUTOPR_MIGRATION_DRAFT_RE" || true)"
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        # Untracked file: no status line at all. Otherwise only "A" (absent
+        # from the base ref) is a draft; M/D/R mean a merged migration.
+        status="$(git -C "$repo_root" diff --no-renames --name-status "$base_ref" -- "$path" \
+            | awk 'NR == 1 {print $1}')"
+        [ -z "$status" ] || [ "$status" = A ] \
+            || errors="${errors}${path}: migration already present on ${base_ref} may not be edited or deleted"$'\n'
+    done <<< "$drafts"
+
+    if [ -z "$errors" ] && [ -n "$drafts" ]; then
+        # Intentional word splitting: AUTOPR_MIGRATION_DRAFT_RE guarantees each
+        # path is [A-Za-z0-9_/.] only.
+        # shellcheck disable=SC2046
+        errors="$(cd "$repo_root" && python3 "$script_dir/../alembic_graph_snapshot.py" \
+            --check-drafts server/alembic/versions $drafts 2>&1 >/dev/null || true)"
+        [ -z "$errors" ] || errors="${errors}"$'\n'
+    fi
+
+    [ -n "$errors" ] || return 0
+    printf '%s' "$errors"
+    return 1
+}
