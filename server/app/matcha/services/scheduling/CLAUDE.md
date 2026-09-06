@@ -65,17 +65,39 @@ Invariants:
   `ON DELETE SET NULL` and pre-set readers still see a value. Only
   `upsert_location_profile` writes either and it always writes both
   (`leader_job_id=` is accepted as the one-element spelling; the set wins when
-  both arrive). Readers go through `profile_leader_job_ids` /
-  `bundle_leader_jobs`, which fall back to the scalar for fixtures that predate
-  the set. Nothing can FK-null an id inside the array, so `load_profile_bundle`
-  and `week_builder._coverage_profile` drop ids that no longer resolve on read.
-  The coverage evaluator emits ONE `leader_absent_*` finding per check for the
-  whole set (label `join_or(names)`, `job_id` only when exactly one job) — never
-  one per eligible job. The Huume interview still names one job and REPLACES
+  both arrive — including an explicit `leader_job_ids: null`, which clears the
+  rule, so the ROUTE's per-job validation keys on the field being present and
+  not on its truthiness or it would bless a job the write throws away). The
+  CHECK accepts EITHER spelling (`cardinality(leader_job_ids) > 0 OR
+  leader_job_id IS NOT NULL`) — the same thing `profile_leader_job_ids` reads,
+  and what keeps the pre-swap image, which writes only the scalar, from taking
+  a 422 on every leader save for the length of a deploy.
+  The Huume interview still names one job and REPLACES
   the set; extending the tool to several names is the open follow-up.
+- **A deleted job leaves the array behind, so the delete has to sweep it.**
+  Nothing can FK-null an id INSIDE a `UUID[]`. `load_profile_bundle` and
+  `week_builder._coverage_profile` therefore drop unresolvable ids on read —
+  which is why `missing_fields` counts `bundle_leader_jobs(bundle)` (the
+  resolved list) and never the raw array: reading the array made a rule whose
+  only job had been deleted pass the week-rules gate while the evaluator,
+  seeing an empty set, emitted no `leader_absent_*` findings at all — a green
+  gate over a week nobody checked. `routes/employee_schedule/jobs.py:delete_job`
+  calls `location_profile.detach_job_from_leader_rules` BEFORE the delete (after
+  it, the FK has already nulled the mirror), which removes the job from both
+  spellings and un-answers `leader_required` for any store left with nothing to
+  lead with — `true` with nothing named is the one state the CHECK refuses, and
+  the interview asks again rather than the rule silently evaporating.
+- **A finding's `job_name` is a job's name, never prose.** The coverage
+  evaluator emits ONE `leader_absent_*` finding per check for the whole set —
+  never one per eligible job — and the readable "Shift Lead or Assistant
+  Manager" (`join_or(names)`) belongs to `detail`. `job_id`/`job_name` are
+  filled only when exactly one job is eligible; the set rides in `job_names`,
+  a key `make_finding` puts on EVERY finding. Findings are persisted verbatim
+  into `schedule_generation_runs.proposal`, so a sentence parked in `job_name`
+  outlives the run that wrote it.
 - **`leader_required` is tri-state, and that is why it is not just
   `leader_job_ids`.** `NULL` never asked, `false` no lead needed, `true` names
-  at least one job (DB CHECK on `cardinality(leader_job_ids)`). Without the explicit `false` a store that needs no lead
+  at least one job (DB CHECK, on either spelling of the set). Without the explicit `false` a store that needs no lead
   could never finish setup, so the gate would block it forever. Both surfaces
   can answer it: the interview passes `leader_required`, the Week setup pane
   has a "No leader required" toggle distinct from an unanswered one — and a

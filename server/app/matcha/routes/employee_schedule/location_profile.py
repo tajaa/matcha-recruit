@@ -86,11 +86,19 @@ async def update_location_schedule_profile(
             actor_role=current_user.role, location_id=location_id,
         )
         # Every leader job has to be usable at this store — the set, or the
-        # one-element legacy spelling when that is all the caller sent.
-        leader_jobs = patch.get("leader_job_ids")
-        if leader_jobs is None and patch.get("leader_job_id") is not None:
+        # one-element legacy spelling when that is all the caller sent. Keyed
+        # on the field being PRESENT, matching what the service does with it:
+        # an explicit `leader_job_ids: null` clears the rule there, so reading
+        # it as "unsupplied" and validating a `leader_job_id` sent alongside
+        # left the route blessing a job the write then threw away — a PUT that
+        # named a lead silently un-answering the leader question instead.
+        if "leader_job_ids" in patch:
+            leader_jobs = patch["leader_job_ids"] or []
+        elif patch.get("leader_job_id") is not None:
             leader_jobs = [patch["leader_job_id"]]
-        for job_id in leader_jobs or []:
+        else:
+            leader_jobs = []
+        for job_id in leader_jobs:
             try:
                 await assert_job_available(conn, company_id, job_id, location_id=location_id)
             except JobUnavailable as exc:

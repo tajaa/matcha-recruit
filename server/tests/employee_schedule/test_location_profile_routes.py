@@ -411,3 +411,27 @@ async def test_put_forwards_an_empty_set_as_a_clear(monkeypatch):
     kwargs = upsert.await_args.kwargs
     assert kwargs["leader_job_ids"] == []
     assert kwargs["leader_required"] is None
+
+
+@pytest.mark.asyncio
+async def test_put_treats_an_explicit_null_set_as_the_clear_the_service_writes(monkeypatch):
+    """`leader_job_ids: null` reaches `normalize_leader_job_ids` as "no jobs
+    named" and clears the rule, so the route must not read it as "unsupplied"
+    and bless a `leader_job_id` sent beside it: the job it validated is thrown
+    away by the write, and a PUT that named a lead un-answers the question."""
+    conn = _conn()
+    _patch(monkeypatch, conn)
+    guard = AsyncMock()
+    monkeypatch.setattr(routes, "assert_job_available", guard)
+    upsert = AsyncMock(return_value={"id": TEMPLATE_ID})
+    monkeypatch.setattr(routes, "upsert_location_profile", upsert)
+
+    await routes.update_location_schedule_profile(
+        LOCATION_ID,
+        LocationScheduleProfileUpdate(leader_job_ids=None, leader_job_id=JOB_ID),
+        _user(),
+    )
+
+    guard.assert_not_awaited()
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["leader_job_ids"] is None

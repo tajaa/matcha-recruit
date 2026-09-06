@@ -325,10 +325,14 @@ def test_several_leader_jobs_absent_is_one_finding_naming_them_all():
     at_open = [f for f in findings if f["kind"] == "leader_absent_at_open"]
     assert len(at_open) == 1
     assert "No Shift Lead or Assistant Manager is scheduled at open" in at_open[0]["detail"]
-    # A finding names ONE job; with several eligible the id stays blank rather
-    # than blaming the first, and the label carries the set.
+    # A finding names ONE job; with several eligible both the id and the name
+    # stay blank rather than blaming the first, and `job_names` carries the
+    # set. `job_name` is a real job's name everywhere else it is read — and
+    # this list is persisted verbatim into `schedule_generation_runs.proposal`
+    # — so the prose label lives in `detail` and nowhere else.
     assert at_open[0]["job_id"] is None
-    assert at_open[0]["job_name"] == "Shift Lead or Assistant Manager"
+    assert at_open[0]["job_name"] is None
+    assert at_open[0]["job_names"] == ["Shift Lead", "Assistant Manager"]
 
 
 def test_a_single_leader_job_still_names_itself_on_the_finding():
@@ -339,6 +343,32 @@ def test_a_single_leader_job_still_names_itself_on_the_finding():
     at_open = next(f for f in findings if f["kind"] == "leader_absent_at_open")
     assert at_open["job_id"] == LEADER_JOB
     assert at_open["job_name"] == "Shift Lead"
+    assert at_open["job_names"] == ["Shift Lead"]
+
+
+def test_a_leader_set_with_no_resolved_names_leaves_the_job_fields_empty():
+    """Names come from a join that can come back short. The sentence falls back
+    to "shift lead"; the job fields do not — a placeholder in `job_name` reads
+    as a job called "shift lead" to anything matching on it."""
+    findings = _evaluate(
+        [_shift(MONDAY, "08:00", "17:00", key="floor")],
+        leader_job_ids=[LEADER_JOB], leader_job_names=[],
+    )
+    at_open = next(f for f in findings if f["kind"] == "leader_absent_at_open")
+    assert "No shift lead is scheduled at open" in at_open["detail"]
+    assert at_open["job_name"] is None
+    assert at_open["job_names"] is None
+
+
+def test_every_finding_carries_the_job_names_key():
+    """One shape for every consumer: a key that exists on some findings and is
+    absent on others is how a renderer starts guessing."""
+    findings = _evaluate(
+        [_shift(MONDAY, "10:00", "12:00", key="short")],
+        leader_job_ids=[LEADER_JOB], leader_job_names=["Shift Lead"],
+    )
+    assert findings
+    assert all("job_names" in finding for finding in findings)
 
 
 def test_an_empty_leader_set_checks_nothing():

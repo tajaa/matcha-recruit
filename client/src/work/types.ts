@@ -894,7 +894,11 @@ export interface HuumeActionScheduleWeekDraft {
     window?: { start: string; end: string } | null
     shift_key?: string | null
     job_id?: string | null
+    /** One real job's name, and only when the finding is about exactly one.
+     *  A leader-coverage finding names a SET of jobs, so it leaves this null
+     *  and fills `job_names` instead — the readable sentence is `detail`. */
     job_name?: string | null
+    job_names?: string[] | null
     employee_name?: string | null
     minutes?: number | null
     detail: string

@@ -10,8 +10,9 @@ import pytest
 from app.matcha.services.huume import schedule_profile_skill
 from app.matcha.services.scheduling import location_profile
 from app.matcha.services.scheduling.location_profile import (
-    hours_answered, missing_fields, open_weekdays, profile_context_lines,
-    validate_operating_hours, week_rules_established, week_rules_refusal,
+    bundle_leader_jobs, hours_answered, missing_fields, open_weekdays,
+    profile_context_lines, validate_operating_hours, week_rules_established,
+    week_rules_refusal,
 )
 
 
@@ -128,6 +129,51 @@ def test_missing_fields_leader_rule_is_tri_state(leader_required, leader, missin
         leader=leader, leader_required=leader_required,
     )
     assert ("leader_rule" in missing_fields(bundle)) is missing
+
+
+def test_missing_fields_reasks_when_the_only_leader_job_was_deleted():
+    """`leader_job_ids` is a plain array with no per-element FK, so deleting a
+    leader job leaves its uuid on the profile. The gate reads the RESOLVED set
+    — otherwise the rule passes as answered while the coverage evaluator, which
+    only ever sees ids that resolve, stops checking for a lead at all."""
+    bundle = _bundle(
+        hours=FULL_WEEK_HOURS,
+        blocks=[{"name": "Opener", "job_name": "Barista", "days_of_week": [1],
+                 "start_time": "08:00", "end_time": "16:00", "required_staff": 2}],
+        leader_required=True,
+    )
+    bundle["profile"]["leader_job_ids"] = [JOB_ID]
+    bundle["leader_jobs"] = []          # what load_profile_bundle resolved
+
+    assert "leader_rule" in missing_fields(bundle)
+
+
+def test_missing_fields_is_satisfied_while_one_leader_job_survives():
+    """Any ONE of the set is lead coverage, so losing a second leader job is
+    not a re-ask."""
+    bundle = _bundle(
+        hours=FULL_WEEK_HOURS,
+        blocks=[{"name": "Opener", "job_name": "Barista", "days_of_week": [1],
+                 "start_time": "08:00", "end_time": "16:00", "required_staff": 2}],
+        leader_required=True,
+    )
+    bundle["profile"]["leader_job_ids"] = [JOB_ID, TEMPLATE_ID]
+    bundle["leader_jobs"] = [{"id": str(JOB_ID), "name": "Shift Lead"}]
+
+    assert missing_fields(bundle) == []
+
+
+def test_bundle_leader_jobs_reads_a_whole_set_off_an_unresolved_bundle():
+    """A bundle assembled outside `load_profile_bundle` carries no resolved
+    list; its profile columns are the answer, and the set is not truncated to
+    the mirror."""
+    jobs = bundle_leader_jobs({
+        "profile": {"leader_job_ids": [JOB_ID, TEMPLATE_ID], "leader_job_id": JOB_ID},
+        "leader_job_name": "Shift Lead",
+    })
+
+    assert [job["id"] for job in jobs] == [str(JOB_ID), str(TEMPLATE_ID)]
+    assert jobs[0]["name"] == "Shift Lead"
 
 
 def test_week_rules_refusal_names_one_missing_answer_and_the_location():

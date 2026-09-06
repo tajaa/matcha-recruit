@@ -193,6 +193,30 @@ def profile_leader_job_ids(profile: Optional[dict]) -> list:
     return [single] if single else []
 
 
+def bundle_leader_jobs(bundle: dict) -> list[dict]:
+    """`[{"id", "name"}, ...]` for every leader job the bundle RESOLVED.
+
+    `load_profile_bundle` fills `leader_jobs`, having already dropped any id
+    that no longer names a live job. That resolved list — never the raw array
+    on the profile — is what a reader wants: `leader_job_ids` carries no
+    per-element FK, so a deleted job leaves its uuid behind, and counting it
+    claims coverage nothing can satisfy.
+
+    A bundle assembled elsewhere (tests, older callers) has no `leader_jobs`
+    key; its profile columns are read directly so nothing downstream needs two
+    code paths. Only the first name is knowable in that shape.
+    """
+    jobs = bundle.get("leader_jobs")
+    if jobs is not None:
+        return list(jobs)
+    profile = bundle.get("profile") or {}
+    first_name = bundle.get("leader_job_name")
+    return [
+        {"id": str(job_id), "name": first_name if index == 0 else None}
+        for index, job_id in enumerate(profile_leader_job_ids(profile))
+    ]
+
+
 def join_or(names: Sequence[str]) -> str:
     """"A", "A or B", "A, B or C" — how a set of leader jobs reads in prose."""
     names = [str(name) for name in names if name]
@@ -220,7 +244,11 @@ def missing_fields(bundle: dict) -> list[str]:
     # Tri-state: None is "never asked", False is a real answer ("no lead
     # needed"), True has to name the job — same distinction the buffers keep.
     leader_required = profile.get("leader_required")
-    if leader_required is None or (leader_required and not profile_leader_job_ids(profile)):
+    # The RESOLVED set, not the raw array: deleting a leader job leaves its
+    # uuid in `leader_job_ids` (no per-element FK), and counting that would
+    # report the rule answered while `evaluate_week_coverage` — which only
+    # ever sees resolvable ids — silently stops checking for a lead at all.
+    if leader_required is None or (leader_required and not bundle_leader_jobs(bundle)):
         missing.append("leader_rule")
     return missing
 
@@ -339,22 +367,6 @@ def _row_to_profile(row) -> Optional[dict]:
     profile["operating_hours"] = _loads(profile.get("operating_hours"))
     profile["leader_job_ids"] = list(profile.get("leader_job_ids") or [])
     return profile
-
-
-def bundle_leader_jobs(bundle: dict) -> list[dict]:
-    """`[{"id", "name"}, ...]` for every leader job the bundle resolved.
-
-    `load_profile_bundle` fills `leader_jobs`; a bundle assembled elsewhere
-    (tests, older callers) may only carry the scalar pair, which is read as a
-    one-element set so nothing downstream has two code paths.
-    """
-    jobs = bundle.get("leader_jobs")
-    if jobs is not None:
-        return list(jobs)
-    profile = bundle.get("profile") or {}
-    if profile.get("leader_job_id"):
-        return [{"id": str(profile["leader_job_id"]), "name": bundle.get("leader_job_name")}]
-    return []
 
 
 async def get_location_profile(conn, *, company_id: UUID, location_id: UUID) -> Optional[dict]:
@@ -538,6 +550,58 @@ async def upsert_location_profile(
             ) from exc
         raise
     return _row_to_profile(row)
+
+
+# The leader rule in whichever spelling the row carries: the set when it has
+# entries, else the mirror column. `profile_leader_job_ids`, in SQL.
+_LEADER_SET_SQL = (
+    "CASE WHEN cardinality(leader_job_ids) > 0 THEN leader_job_ids "
+    "WHEN leader_job_id IS NOT NULL THEN ARRAY[leader_job_id] "
+    "ELSE '{}'::uuid[] END"
+)
+
+_LEADER_REMAINDER_SQL = f"array_remove({_LEADER_SET_SQL}, $1::uuid)"
+
+
+async def detach_job_from_leader_rules(
+    conn, *, company_id: UUID, job_id: UUID, actor_user_id: Optional[UUID],
+) -> int:
+    """Drop a job that is about to be deleted from every location's leader rule.
+
+    `leader_job_ids` is a plain array — no per-element FK — so the delete's
+    `ON DELETE SET NULL` reaches the mirror column and nothing else. Left
+    behind, the dangling uuid keeps `missing_fields` reporting the rule as
+    answered while the coverage evaluator drops the id it cannot resolve and
+    stops checking for a lead at all: a green gate over an unchecked week.
+
+    A store left with no leader job goes back to `leader_required = NULL`
+    ("nobody has answered"), the same un-answering `upsert_location_profile`
+    does when a caller clears the set — `leader_required = true` with nothing
+    named is the state the CHECK refuses, and the question has to be re-asked
+    rather than silently dropped.
+
+    Runs BEFORE the delete so the mirror column lands on a surviving leader
+    instead of being nulled by the FK. Returns how many stores were touched.
+    Caller owns the transaction.
+    """
+    rows = await conn.fetch(
+        f"""
+        UPDATE schedule_location_profiles
+        SET leader_job_ids = {_LEADER_REMAINDER_SQL},
+            leader_job_id = ({_LEADER_REMAINDER_SQL})[1],
+            leader_required = CASE
+                WHEN cardinality({_LEADER_REMAINDER_SQL}) > 0 THEN leader_required
+                ELSE NULL
+            END,
+            updated_by = COALESCE($3::uuid, updated_by),
+            updated_at = NOW()
+        WHERE company_id = $2
+          AND (leader_job_ids @> ARRAY[$1::uuid] OR leader_job_id = $1::uuid)
+        RETURNING location_id
+        """,
+        job_id, company_id, actor_user_id,
+    )
+    return len(rows)
 
 
 def _block_signature(name: Optional[str], start, end) -> tuple:

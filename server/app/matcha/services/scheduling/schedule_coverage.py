@@ -141,8 +141,8 @@ def make_finding(
     kind: str, severity: str, detail: str, *, day: Optional[date] = None,
     window: Optional[tuple[datetime, datetime]] = None,
     shift_key: Optional[str] = None, job_id: Optional[str] = None,
-    job_name: Optional[str] = None, employee_name: Optional[str] = None,
-    minutes: Optional[int] = None,
+    job_name: Optional[str] = None, job_names: Optional[Sequence[str]] = None,
+    employee_name: Optional[str] = None, minutes: Optional[int] = None,
 ) -> dict[str, Any]:
     """One finding, in the single shape every consumer renders.
 
@@ -150,6 +150,11 @@ def make_finding(
     too: a second hand-rolled dict there is how a key quietly goes missing on
     one kind and the card renders a blank row.  Every value is JSON-safe — the
     whole list is persisted into ``schedule_generation_runs.proposal``.
+
+    ``job_name`` is one real job's name, never prose: every other emitter puts
+    a catalog name there, so a finding that concerns SEVERAL jobs leaves it
+    null and lists them in ``job_names`` instead.  The sentence a person reads
+    lives in ``detail``.
     """
     return {
         "kind": kind,
@@ -162,6 +167,7 @@ def make_finding(
         "shift_key": shift_key,
         "job_id": job_id,
         "job_name": job_name,
+        "job_names": [str(name) for name in job_names] if job_names else None,
         "employee_name": employee_name,
         "minutes": minutes,
         "detail": detail,
@@ -225,7 +231,8 @@ def _split_run(
 
 
 def _leader_findings(
-    *, intervals: list[_Interval], leader_job_ids: frozenset[str], leader_label: str,
+    *, intervals: list[_Interval], leader_job_ids: frozenset[str],
+    leader_job_names: Sequence[str],
     day: date, window_start: datetime, open_dt: datetime, close_dt: datetime,
     window_end: datetime, slice_delta: timedelta, uncovered: list[tuple[datetime, datetime]],
     headcount: Headcount,
@@ -245,10 +252,16 @@ def _leader_findings(
     not read as a lead being present. ``required`` mode judges the pattern, so
     there the slot existing is exactly the thing being asked about.
     """
-    label = leader_label or "shift lead"
-    # A finding can name ONE job; with several eligible the label carries
-    # them all and the id is left blank rather than blaming the first.
+    names = [str(name) for name in leader_job_names if name]
+    label = join_or(names) or "shift lead"
+    # A finding names ONE job in `job_id`/`job_name`; with several eligible
+    # both stay blank rather than blaming the first, and `job_names` carries
+    # the set. The prose label belongs to `detail` alone — `job_name` holds a
+    # real job's name everywhere else it is read, so "Shift Lead or Assistant
+    # Manager" (or the "shift lead" placeholder for an unnamed set) must not
+    # be persisted into it.
     sole_job_id = next(iter(leader_job_ids)) if len(leader_job_ids) == 1 else None
+    sole_job_name = names[0] if sole_job_id and len(names) == 1 else None
     findings: list[dict[str, Any]] = []
     checks = (
         ("leader_absent_at_open", window_start, open_dt + slice_delta, "at open"),
@@ -266,7 +279,8 @@ def _leader_findings(
         findings.append(make_finding(
             kind, "advisory",
             f"No {label} is scheduled {phrase} on {_DAY_LABELS[sunday_weekday(day)]}.",
-            day=day, window=(lo, hi), job_id=sole_job_id, job_name=label,
+            day=day, window=(lo, hi), job_id=sole_job_id, job_name=sole_job_name,
+            job_names=names,
         ))
     return findings
 
@@ -304,7 +318,6 @@ def evaluate_week_coverage(
     open_buffer = timedelta(minutes=max(0, int(open_buffer_minutes or 0)))
     close_buffer = timedelta(minutes=max(0, int(close_buffer_minutes or 0)))
     leaders = frozenset(str(job_id) for job_id in leader_job_ids if job_id)
-    leader_label = join_or([str(name) for name in leader_job_names if name]) or "shift lead"
 
     plan_intervals = _intervals(plan_shifts, headcount)
     # A published shift's staffing is whoever is on it; "required" is a
@@ -379,7 +392,7 @@ def evaluate_week_coverage(
 
         if leaders:
             findings.extend(_leader_findings(
-                intervals=intervals, leader_job_ids=leaders, leader_label=leader_label,
+                intervals=intervals, leader_job_ids=leaders, leader_job_names=leader_job_names,
                 day=day, window_start=window_start, open_dt=open_dt, close_dt=close_dt,
                 window_end=window_end, slice_delta=slice_delta, uncovered=runs,
                 headcount=headcount,
