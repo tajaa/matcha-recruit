@@ -324,7 +324,7 @@ async def upsert_location_profile(
             close_buffer_minutes, label="Closing buffer",
         )
 
-    columns =["company_id", "location_id", "created_by", "updated_by", *supplied]
+    columns = ["company_id", "location_id", "created_by", "updated_by", *supplied]
     values = [company_id, location_id, actor_user_id, actor_user_id, *supplied.values()]
     placeholders = ", ".join(
         f"${i}::jsonb" if col == "operating_hours" else f"${i}"

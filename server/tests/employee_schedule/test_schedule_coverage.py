@@ -262,3 +262,34 @@ def test_a_shift_starting_outside_the_week_is_not_reported_as_an_unchecked_day()
     )
 
     assert [f["day"] for f in findings if f["kind"] == "no_hours_known"] == []
+
+
+def test_an_unfilled_lead_slot_is_not_a_lead_on_the_floor():
+    """The floor is covered by a barista, so no gap suppresses the check — but
+    the lead shift nobody was assigned to must not answer it either."""
+    findings = _evaluate(
+        [
+            _shift(MONDAY, "08:00", "17:00", key="floor"),
+            _shift(MONDAY, "08:00", "12:00", key="lead", staffed=0, job_id=LEADER_JOB),
+        ],
+        leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+    )
+
+    assert "leader_absent_at_open" in _kinds(findings)
+    assert "leader_absent_at_close" in _kinds(findings)
+
+
+def test_an_unfilled_lead_slot_does_answer_the_pattern_question():
+    """`required` judges the shape before anyone is assigned to it, so a lead
+    block existing in the pattern is exactly what is being asked about."""
+    findings = _evaluate(
+        [
+            _shift(MONDAY, "08:00", "17:00", key="floor"),
+            _shift(MONDAY, "08:00", "17:00", key="lead", staffed=0, job_id=LEADER_JOB),
+        ],
+        headcount="required",
+        leader_job_id=LEADER_JOB, leader_job_name="Shift Lead",
+    )
+
+    assert "leader_absent_at_open" not in _kinds(findings)
+    assert "leader_absent_at_close" not in _kinds(findings)

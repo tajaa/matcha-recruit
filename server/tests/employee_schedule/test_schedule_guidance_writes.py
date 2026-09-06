@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -76,3 +77,68 @@ def test_refresh_guidance_atomically_enforces_without_lowering(
     if expected_updates:
         assert conn.updates[0][0] == 30
         assert conn.audits[0]["source"] == "test"
+
+
+class _WeekConn:
+    """The three reads `resolve_week_break_plans` makes, and nothing else."""
+
+    def __init__(self, *, date_of_birth):
+        self.date_of_birth = date_of_birth
+
+    async def fetchval(self, _query, *_args):
+        return "America/Los_Angeles"
+
+    async def fetch(self, query, *_args):
+        if "date_of_birth" in query:
+            return [{"employee_id": EMPLOYEE_ID, "date_of_birth": self.date_of_birth}]
+        return []
+
+
+EMPLOYEE_ID = uuid4()
+
+
+def _age_rule():
+    from app.matcha.services.scheduling.schedule_breaks import BreakRule
+    return BreakRule(
+        rule_set_id=uuid4(), kind="meal", ordinal=1, trigger_after_minutes=300,
+        duration_minutes=30, paid=False, deadline_offset_minutes=300,
+        citation="Minor meal rule", maximum_age=17,
+    )
+
+
+def _resolved(rules):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        rules=tuple(rules), source="catalog", advisories=(),
+        timezone=None, rule_set_ids=(), rule_set_hash="hash",
+    )
+
+
+@pytest.mark.parametrize("date_of_birth, expect_advisory", [(None, True), (date(1990, 5, 1), False)])
+def test_a_missing_date_of_birth_says_so_on_the_week_plan(
+    monkeypatch, date_of_birth, expect_advisory,
+):
+    """The per-shift resolvers both append `employee_age_unverified`; the week
+    resolver dropped it, so the only signal a manager got was a bare `error`."""
+    monkeypatch.setattr(
+        schedule_guidance, "resolve_break_rules",
+        AsyncMock(return_value=_resolved([_age_rule()])),
+    )
+    conn = _WeekConn(date_of_birth=date_of_birth)
+    shifts = [(
+        "shift-1",
+        datetime(2026, 9, 2, 9, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, 17, tzinfo=timezone.utc),
+        [EMPLOYEE_ID],
+    )]
+
+    _tz, plans, unmapped = asyncio.run(schedule_guidance.resolve_week_break_plans(
+        conn, uuid4(), location_id=uuid4(), shifts=shifts,
+    ))
+
+    plan = plans["shift-1"][EMPLOYEE_ID]
+    codes = {item.get("code") for item in plan.advisories}
+    assert ("employee_age_unverified" in codes) is expect_advisory
+    # The date itself mapped fine — this is one person, not the jurisdiction.
+    assert unmapped == set()
+    assert (plan.status == "error") is expect_advisory

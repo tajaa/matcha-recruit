@@ -357,10 +357,19 @@ async def resolve_week_break_plans(
                 rules=resolved.rules, waiver=_waiver(employee_id, effective_date),
                 employee_age=employee_age,
             )
+            advisories = [*plan.advisories, *resolved.advisories]
+            if age_unknown:
+                advisories.append({
+                    "check": "break_rules",
+                    "code": "employee_age_unverified",
+                    "severity": "advisory",
+                    "message": "Employee age is not on file; age-specific break rules "
+                               "require manual review.",
+                })
             plans.setdefault(key, {})[employee_id] = replace(
                 plan,
                 status="error" if resolved.source == "error" or age_unknown else plan.status,
-                advisories=tuple((*plan.advisories, *resolved.advisories)),
+                advisories=tuple(advisories),
             )
     return effective_timezone, plans, unmapped_dates
 

@@ -933,3 +933,106 @@ async def test_a_failing_break_loader_never_fails_the_build(monkeypatch):
         object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
         employee_names={},
     ) == []
+
+
+@pytest.mark.asyncio
+async def test_a_findings_pass_that_blows_up_does_not_fail_the_build(monkeypatch):
+    """The guard covers the WHOLE pass, not just its break half: a profile read
+    that raises used to turn a week that built fine into a failed Huume turn."""
+    conn = _FakeConn(None)
+    _propose_env(monkeypatch, conn, demand=[_demand_shift()])
+    monkeypatch.setattr(
+        week_builder, "_coverage_profile", AsyncMock(side_effect=RuntimeError("boom")),
+    )
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=WEEK_START,
+    )
+
+    assert result["status"] == "ready"
+    assert result["findings"] == []
+    # ...and it says coverage was NOT checked, never that the week came back clean.
+    assert result["metrics"]["operating_hours_known"] is False
+    assert "was not checked" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_the_cap_keeps_gaps_over_advisories_whatever_day_they_fall_on(monkeypatch):
+    """The list is sorted day-then-time, so a plain slice would drop Saturday's
+    real holes to make room for Sunday's advisories."""
+    conn = _FakeConn(None)
+    saturday = WEEK_START + timedelta(days=6)
+    advisories = [
+        week_builder.make_finding(
+            "break_window_conflict", "advisory", f"advisory {index}",
+            day=WEEK_START, shift_key=f"sun-{index}",
+        )
+        for index in range(week_builder._MAX_FINDINGS + 5)
+    ]
+    gaps = [
+        week_builder.make_finding(
+            "break_relief_impossible", "gap", f"gap {index}",
+            day=saturday, shift_key=f"sat-{index}",
+        )
+        for index in range(3)
+    ]
+    result = await _propose(
+        monkeypatch, conn, demand=[_demand_shift()], breaks=[*advisories, *gaps],
+    )
+
+    # Both boundaries truncate — the persisted list and the shorter one echoed
+    # back — and the Saturday gaps have to survive each of them.
+    kinds = [finding["kind"] for finding in result["findings"]]
+    assert kinds.count("break_relief_impossible") == 3
+    assert len(result["findings"]) == week_builder._FINDINGS_RETURNED
+
+    proposal, metrics = _persisted_proposal(conn)
+    persisted = [finding["kind"] for finding in proposal["findings"]]
+    assert persisted.count("break_relief_impossible") == 3
+    assert len(proposal["findings"]) == week_builder._MAX_FINDINGS
+    # Counts stay uncapped, so the week never reads cleaner than it is.
+    assert metrics["gap_count"] == 3
+
+    # The kept set is still in day order for the card.
+    days = [finding["day"] for finding in result["findings"]]
+    assert days == sorted(days)
+
+
+@pytest.mark.asyncio
+async def test_a_break_plan_that_never_resolved_for_one_person_is_still_reported(monkeypatch):
+    """No date of birth against age-specific rules errors the plan for that
+    person alone, so the date never lands in `unmapped_dates`. The unresolved
+    requirement places no slot either, which silences the coverage advisory —
+    a solo shift owing a meal break would otherwise report NOTHING."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    _patch_break_loader(
+        monkeypatch, {"shift-1": {BREAK_EMPLOYEE: _break_plan(status="error")}},
+    )
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={str(BREAK_EMPLOYEE): "Amy"},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_rules_unresolved"]
+    assert findings[0]["severity"] == "advisory"
+    assert "Amy" in findings[0]["detail"]
+    assert findings[0]["minutes"] == 30
+
+
+@pytest.mark.asyncio
+async def test_an_unresolved_plan_is_not_said_twice_on_an_unmapped_date(monkeypatch):
+    """`break_rules_unmapped` already says it once for the whole date."""
+    plan = _plan_with([BREAK_EMPLOYEE])
+    _patch_break_loader(
+        monkeypatch, {"shift-1": {BREAK_EMPLOYEE: _break_plan(status="unmapped")}},
+        unmapped={date(2026, 8, 24)},
+    )
+
+    findings = await week_builder._break_relief_findings(
+        object(), company_id=COMPANY_ID, location_id=LOCATION_ID, plan=plan,
+        employee_names={},
+    )
+
+    assert [f["kind"] for f in findings] == ["break_rules_unmapped"]

@@ -228,12 +228,18 @@ def _leader_findings(
     *, intervals: list[_Interval], leader_job_id: str, leader_job_name: Optional[str],
     day: date, window_start: datetime, open_dt: datetime, close_dt: datetime,
     window_end: datetime, slice_delta: timedelta, uncovered: list[tuple[datetime, datetime]],
+    headcount: Headcount,
 ) -> list[dict[str, Any]]:
     """A set leader rule that nobody satisfies at open or close.
 
     Advisory, not a gap: somebody IS on the floor (a gap would have been
     reported instead, and is suppressed here so the same hole is not read
     twice), they just are not the person who can open the till or lock up.
+
+    An UNFILLED lead slot satisfies nothing in ``assigned`` mode — the same
+    rule ``_headcount`` states, and the whole reason an empty lead shift must
+    not read as a lead being present. ``required`` mode judges the pattern, so
+    there the slot existing is exactly the thing being asked about.
     """
     label = leader_job_name or "shift lead"
     findings: list[dict[str, Any]] = []
@@ -246,6 +252,7 @@ def _leader_findings(
             continue
         if any(
             item.job_id == leader_job_id and item.overlaps(lo, hi)
+            and (headcount == "required" or item.staff > 0)
             for item in intervals
         ):
             continue
@@ -363,6 +370,7 @@ def evaluate_week_coverage(
                 intervals=intervals, leader_job_id=leader, leader_job_name=leader_job_name,
                 day=day, window_start=window_start, open_dt=open_dt, close_dt=close_dt,
                 window_end=window_end, slice_delta=slice_delta, uncovered=runs,
+                headcount=headcount,
             ))
 
         # Thin-at-one-end: the day is covered, but everyone is rostered onto

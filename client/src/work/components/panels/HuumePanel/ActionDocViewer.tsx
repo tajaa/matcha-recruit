@@ -40,6 +40,7 @@ const FINDING_LABELS: Record<string, string> = {
   break_relief_thin: 'Floor drops during breaks',
   break_window_conflict: 'Break falls outside its legal window',
   break_rules_unmapped: 'Break rules unavailable',
+  break_rules_unresolved: 'Break requirements not evaluated',
   leader_absent_at_open: 'No lead at open',
   leader_absent_at_close: 'No lead at close',
   thin_open: 'Thin at open',

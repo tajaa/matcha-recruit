@@ -451,6 +451,29 @@ def _trim_thin_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept
 
 
+def _cap_findings(
+    findings: list[dict[str, Any]], limit: int = _MAX_FINDINGS,
+) -> list[dict[str, Any]]:
+    """Bound a findings list without letting the cap decide by calendar order.
+
+    The list arrives sorted day-then-time, so a plain slice drops Saturday's
+    real holes to make room for Sunday's advisories. Gaps are what the manager
+    has to act on, so they claim the budget first; the kept set is re-sorted so
+    the card still reads in day order.
+
+    Used at every boundary that truncates — the persisted list, the shorter one
+    returned to the model, and readiness `pattern_findings` — because a slice at
+    any of them buries the same holes.
+    """
+    if len(findings) <= limit:
+        return list(findings)
+    gaps = [item for item in findings if item.get("kind") in GAP_KINDS]
+    rest = [item for item in findings if item.get("kind") not in GAP_KINDS]
+    kept = gaps[:limit]
+    kept.extend(rest[:limit - len(kept)])
+    return sort_findings(kept)
+
+
 def _break_relief_finding(
     *, code: str, shift: dict[str, Any], day: date, assigned: int,
     employee_name: str | None, duration: int, reason: str | None,
@@ -497,6 +520,14 @@ def _break_relief_finding(
         return make_finding(
             "break_window_conflict", "advisory",
             reason or "A required break does not fit inside its legal window on this shift.",
+            minutes=duration, **common,
+        )
+    if code == "unresolved":
+        return make_finding(
+            "break_rules_unresolved", "advisory",
+            f"A required {duration}-minute break for {who} could not be evaluated on "
+            f"this shift. "
+            + (reason or "Break requirements could not be resolved; verify manually."),
             minutes=duration, **common,
         )
     return None
@@ -580,7 +611,26 @@ async def _break_relief_findings(
                 )
                 if finding:
                     findings.append(finding)
+            # A plan that never resolved yields `unresolved` results and NO
+            # placed slot, which silences the coverage advisories above — so a
+            # solo shift owing a meal break, worked by somebody with no date of
+            # birth on file against age-specific rules, would otherwise report
+            # nothing at all. One per person per shift; a whole date being
+            # unmapped is already said once by `break_rules_unmapped` below.
+            unresolved_seen: set[UUID] = set()
             for result in stagger.results:
+                if result.status == "unresolved":
+                    if day in unmapped_dates or result.employee_id in unresolved_seen:
+                        continue
+                    unresolved_seen.add(result.employee_id)
+                    finding = _break_relief_finding(
+                        code="unresolved", shift=shift, day=day, assigned=assigned,
+                        employee_name=employee_names.get(str(result.employee_id)),
+                        duration=result.duration_minutes, reason=result.reason,
+                    )
+                    if finding:
+                        findings.append(finding)
+                    continue
                 if result.status not in ("insufficient_coverage", "deadline_conflict"):
                     continue
                 finding = _break_relief_finding(
@@ -752,7 +802,33 @@ async def _attach_findings(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     plan: dict[str, Any], snapshot: dict[str, Any],
 ) -> None:
-    """Add `findings` and the finding metrics to a built plan, in place."""
+    """Add `findings` and the finding metrics to a built plan, in place.
+
+    Never raises — same contract as `_break_relief_findings`, which only
+    covered its own half. The profile read and the coverage evaluator are on
+    the same path, so an error there used to turn a week that built fine into
+    a failed Huume turn. The fallback metrics say coverage was NOT checked
+    (`_coverage_sentence` reads them), never that the week came back clean.
+    """
+    plan["findings"] = []
+    plan["metrics"]["finding_counts"] = {}
+    plan["metrics"]["gap_count"] = 0
+    plan["metrics"]["operating_hours_known"] = False
+    try:
+        await _attach_findings_core(
+            conn, company_id=company_id, location_id=location_id,
+            week_start=week_start, plan=plan, snapshot=snapshot,
+        )
+    except Exception:
+        logger.exception(
+            "week builder findings pass failed for location %s", location_id,
+        )
+
+
+async def _attach_findings_core(
+    conn, *, company_id: UUID, location_id: UUID, week_start: date,
+    plan: dict[str, Any], snapshot: dict[str, Any],
+) -> None:
     profile = await _coverage_profile(
         conn, company_id=company_id, location_id=location_id,
     )
@@ -781,7 +857,7 @@ async def _attach_findings(
     )
     all_findings = sort_findings([*coverage, *breaks])
     counts = Counter(finding["kind"] for finding in all_findings)
-    plan["findings"] = _trim_thin_findings(all_findings)[:_MAX_FINDINGS]
+    plan["findings"] = _cap_findings(_trim_thin_findings(all_findings))
     # A plain dict, not the Counter: `metrics` is its own JSONB column and
     # json.dumps has no Counter branch that survives a round trip cleanly.
     plan["metrics"]["finding_counts"] = dict(sorted(counts.items()))
@@ -1074,7 +1150,8 @@ async def get_week_build_readiness(
         leader_job_id=profile["leader_job_id"],
         leader_job_name=profile["leader_job_name"],
         week_start=week_start, headcount="required",
-    )[:_FINDINGS_RETURNED] if pattern_source else []
+    ) if pattern_source else []
+    pattern_findings = _cap_findings(pattern_findings, _FINDINGS_RETURNED)
     default_template = next(
         (template for template in templates
          if str(template["id"]) == str(default_id) and template["block_count"]), None,
@@ -1346,7 +1423,7 @@ async def propose_week_draft(
         "week_template_id": str(template_uuid) if template_uuid else None,
         "origin": origin, "summary": review["summary"], "metrics": metrics,
         "unfilled": plan["unfilled"][:20],
-        "findings": (plan.get("findings") or [])[:_FINDINGS_RETURNED],
+        "findings": _cap_findings(plan.get("findings") or [], _FINDINGS_RETURNED),
         "schedule_preview": review["schedule_preview"],
         "preview_truncated": review["preview_truncated"],
     }

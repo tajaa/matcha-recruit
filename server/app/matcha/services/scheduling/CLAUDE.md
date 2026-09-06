@@ -117,11 +117,25 @@ Invariants:
   takes a pg advisory lock per call, so `schedule_guidance.resolve_week_break_plans`
   hoists it to one call per local DATE (≤7 a build) and batches DOB + waivers.
   An `unmapped` date becomes one `break_rules_unmapped` finding — a state with
-  nothing in the catalog is surfaced, never silently green. The buffer minutes
-  and the 15-minute sampling slice are operational policy in feature code and
-  say so in their docstrings (memory: `feedback-legal-thresholds-codify`).
+  nothing in the catalog is surfaced, never silently green. A plan that could
+  not be evaluated for ONE person (no DOB against age-specific rules) never
+  reaches that aggregate: it places no slot, so the coverage advisories go
+  quiet too, and without `break_rules_unresolved` (one per person per shift,
+  suppressed on an already-unmapped date) a solo shift owing a meal break would
+  report nothing at all. The buffer minutes and the 15-minute sampling slice are
+  operational policy in feature code and say so in their docstrings (memory:
+  `feedback-legal-thresholds-codify`).
 - **The findings pass never fails a build**, same contract as
-  `_preflight_compliance_blocks`: it logs and returns `[]`.
+  `_preflight_compliance_blocks`: it logs and returns `[]`. That guard wraps
+  the WHOLE of `_attach_findings` (profile read + coverage evaluator + break
+  relief), not just the break half; on failure the metrics say coverage was not
+  checked, which `_coverage_sentence` reports as such — never as a clean week.
+- **Every findings cap is by severity, not calendar order.** The list is sorted
+  day-then-time, so a plain slice would drop Saturday's gaps to keep Sunday's
+  advisories. `_cap_findings` gives gaps the budget first and re-sorts, and it
+  is what all three truncation points use — the persisted `_MAX_FINDINGS` list,
+  the `_FINDINGS_RETURNED` one echoed to the model, and readiness
+  `pattern_findings`.
 - **Times stay wall clock.** Shift timestamps are UTC-tagged wall clock and are
   compared against `operating_hours` as clock faces; converting would move an
   early shift onto the previous day. An overnight window (`close <= open`) is
