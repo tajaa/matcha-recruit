@@ -499,6 +499,26 @@ def test_a_saved_time_is_kept_and_placed_around():
     assert not (other.suggested_start < _local(13, 30) and _local(13) < other.suggested_end)
 
 
+def test_another_shift_break_occupies_the_same_floor_without_becoming_saved():
+    """Daily orchestration can reserve a peer shift's break transparently."""
+    peer = LockedBreak(
+        employee_id=_employee(9), kind="meal", ordinal=1,
+        start=_local(12), duration_minutes=30,
+    )
+
+    plan = stagger_shift_breaks(
+        shift_start_local=_local(9),
+        shift_end_local=_local(17),
+        required_staff=1,
+        assignments=_crew(1),
+        occupied=[peer],
+    )
+
+    result = plan.results[0]
+    assert result.status == "suggested"
+    assert result.suggested_start == _local(12, 30)
+
+
 # ── prune_planned_breaks ──────────────────────────────────────────────────────
 
 

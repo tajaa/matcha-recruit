@@ -330,6 +330,7 @@ def stagger_shift_breaks(
     required_staff: int,
     assignments: Sequence[StaggerAssignment],
     locked: Sequence[LockedBreak] = (),
+    occupied: Sequence[LockedBreak] = (),
     step_minutes: int = 5,
     placement_floor_minutes: int = DEFAULT_PLACEMENT_FLOOR_MINUTES,
 ) -> StaggerPlan:
@@ -340,9 +341,15 @@ def stagger_shift_breaks(
     advisory wording — this module never guesses a time for a rule it could not
     evaluate.
 
-    ``locked`` holds times a manager already reviewed.  They are not re-placed;
-    they occupy the floor before anything else is placed around them, and the
-    placement policy above does not judge them.
+    ``locked`` holds times a manager already reviewed for these assignments.
+    They are not re-placed; they occupy the floor before anything else is
+    placed around them, and the placement policy above does not judge them.
+
+    ``occupied`` holds break times belonging to other shifts on the same
+    floor.  They consume the same coverage budget without being mistaken for a
+    saved answer to this shift's requirement.  Keeping the two inputs separate
+    matters when one employee works two shifts and therefore has the same
+    ``(kind, ordinal)`` key twice in one day.
     """
 
     assigned_count = len(assignments)
@@ -359,7 +366,7 @@ def stagger_shift_breaks(
             end=entry.start + timedelta(minutes=entry.duration_minutes),
             employee_id=entry.employee_id,
         )
-        for entry in locked
+        for entry in (*locked, *occupied)
     ]
 
     for assignment in sorted(assignments, key=lambda value: str(value.employee_id)):
