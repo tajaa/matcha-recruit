@@ -50,6 +50,15 @@ button. **`save_location_schedule_profile` had to be added to that gate's tool
 set at `agent.py`** or the model could self-confirm by echoing the confirm_id
 it can read in the state block.
 
+A schedule clarification or refusal from `_TERMINAL_SCHEDULE_TOOLS`
+(`propose_schedule_change`, `save_location_schedule_profile`,
+`build_week_schedule`) ENDS the turn — its deterministic message becomes the
+reply and no further Gemini call is made. Those messages are already complete
+(the candidate shifts, the location's real job names, the saved templates), so
+another model call can only re-ask what the manager can already read; that
+retry loop is what the August cost audit priced at $3.44 in one day. The chips
+minted alongside the clarify still ride out on the same turn.
+
 Two invariants the first pass got wrong, both found by running the real flow
 rather than a fake connection:
 

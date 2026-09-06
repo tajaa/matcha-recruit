@@ -426,3 +426,63 @@ async def test_no_choice_key_emitted_when_none_was_ever_set(monkeypatch):
     )
     result = _result(frames)
     assert "huume_choice" not in result["state_updates"]
+
+
+@pytest.mark.asyncio
+async def test_profile_clarify_ends_the_turn_without_another_model_call(monkeypatch):
+    """The clarify already names the location's real jobs, so a second model
+    call can only re-ask what the manager can already read — the retry loop the
+    August cost audit found. The deterministic message becomes the reply."""
+    monkeypatch.setattr(schedule_profile_skill, "resolve_profile_args", AsyncMock(return_value={
+        "status": "clarify",
+        "message": "There's no job named 'Barrista' at this location. Jobs here: Barista, Shift Lead.",
+        "job_options": ["Barista", "Shift Lead"],
+    }))
+    call = _fake_call("save_location_schedule_profile", {
+        "blocks": [{
+            "name": "Opener", "job_name": "Barrista", "days_of_week": [1],
+            "start_time": "08:00", "end_time": "16:00", "required_staff": 1,
+        }],
+    })
+
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[call]),
+        AssertionError("the turn made a second model call after a schedule clarification"),
+    ])
+    result = _result(frames)
+
+    assert result["message"] == (
+        "There's no job named 'Barrista' at this location. Jobs here: Barista, Shift Lead."
+    )
+    assert result["token_usage"]["stop_reason"] == "schedule_clarification"
+    assert result["model_calls"] == 1
+    # The chips still ride along, so the manager can tap the answer.
+    assert [option["label"] for option in result["state_updates"]["huume_choice"]["options"]] == [
+        "Barista", "Shift Lead",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_week_template_clarify_ends_the_turn_too(monkeypatch):
+    """Same rule for the builder's "which template?" — it lists the real saved
+    templates, and re-asking costs a full model call per round."""
+    monkeypatch.setattr(week_builder, "propose_week_draft", AsyncMock(return_value={
+        "status": "clarify",
+        "message": "Choose which week template to use.",
+        "week_templates": [
+            {"id": str(uuid4()), "name": "Downtown default week", "block_count": 4},
+            {"id": str(uuid4()), "name": "Holiday week", "block_count": 3},
+        ],
+    }))
+
+    frames = await _run_turn(monkeypatch, [
+        _fake_response(calls=[_fake_call("build_week_schedule", {"source_mode": "auto"})]),
+        AssertionError("the turn made a second model call after a schedule clarification"),
+    ])
+    result = _result(frames)
+
+    assert result["message"] == "Choose which week template to use."
+    assert result["token_usage"]["stop_reason"] == "schedule_clarification"
+    assert [option["label"] for option in result["state_updates"]["huume_choice"]["options"]] == [
+        "Downtown default week", "Holiday week",
+    ]

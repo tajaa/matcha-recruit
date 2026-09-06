@@ -17,8 +17,9 @@ from uuid import UUID, uuid4
 
 from app.database import connection_or_direct
 
+from .location_profile import WEEKDAY_NAMES, resolve_week_start_weekday
 from .schedule_profiles import fetch_effective_job_employee_ids
-from .schedule_rules import availability_violations, template_windows
+from .schedule_rules import align_week_start, availability_violations, template_windows
 from .shift_compliance import check_shift_compliance
 from .shift_writes import (
     apply_assignment_core,
@@ -580,6 +581,32 @@ async def _list_templates(conn, *, company_id: UUID, location_id: UUID) -> list[
             for row in rows]
 
 
+async def _misaligned_week(conn, *, company_id: UUID, location_id: UUID,
+                           week_start: date) -> dict[str, Any] | None:
+    """Refusal when the requested week does not start on the location's own
+    start day.
+
+    Everything downstream (`template_windows`, the seven-day demand load, the
+    editor grid) assumes `week_start` IS the first day of the week, so a
+    Sunday date for a Monday-start store silently plans a window that matches
+    no grid the manager can see. The assistant session gates its own week the
+    same way; this covers every other caller.
+    """
+    weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id, location_id=location_id,
+    )
+    aligned = align_week_start(week_start, weekday)
+    if aligned == week_start:
+        return None
+    return {
+        "status": "refused",
+        "message": (
+            f"This location's weeks start on {WEEKDAY_NAMES[weekday]}. "
+            f"Use {aligned.isoformat()} as the week start."
+        ),
+    }
+
+
 async def _default_template_id(conn, *, company_id: UUID, location_id: UUID) -> UUID | None:
     """The week template this location's scheduling profile points at."""
     return await conn.fetchval(
@@ -678,6 +705,11 @@ async def get_week_build_readiness(
         )
         if not location:
             return {"status": "refused", "message": "That schedule location is not available."}
+        misaligned = await _misaligned_week(
+            conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        )
+        if misaligned:
+            return misaligned
         roster = await _load_roster_context(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )
@@ -789,6 +821,11 @@ async def propose_week_draft(
     except ValueError as exc:
         return {"status": "clarify", "message": str(exc)}
     async with connection_or_direct() as conn:
+        misaligned = await _misaligned_week(
+            conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        )
+        if misaligned:
+            return misaligned
         existing = await _load_existing_demand(
             conn, company_id=company_id, location_id=location_id, week_start=week_start,
         )

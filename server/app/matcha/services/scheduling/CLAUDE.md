@@ -52,6 +52,12 @@ Invariants:
   is only handed the fields that carry a value. An empty `operating_hours` or a
   blank `notes` is "unsaid", not "cleared" — the REST pane is the surface that
   can clear a field, by sending it explicitly.
+- **`week_start` must BE the location's week start.** `template_windows`, the
+  seven-day demand load and the editor grid all treat it as day one, so a
+  Sunday date for a Monday-start store plans a window matching no grid anyone
+  can see. `week_builder._misaligned_week` refuses (naming the aligned date)
+  in both `propose_week_draft` and `get_week_build_readiness`; the assistant
+  session and the automation-rule route gate their own weeks the same way.
 - **The chat surface maps blocks onto ids by `(name, start, end)`** before
   calling the id-based reconcile core, so a re-save keeps existing block ids
   and the generated shifts that point at them keep their template link.

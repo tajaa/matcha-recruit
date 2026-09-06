@@ -65,6 +65,17 @@ _MAX_MODEL_CALLS = 8
 _MAX_SCHEDULE_PROPOSALS_PER_TURN = 1
 _MAX_TURN_PROMPT_TOKENS = 100_000
 
+# Staged schedule tools whose clarification/refusal ENDS the turn: their
+# messages are deterministic and complete (the candidate list, the real job
+# names, the saved templates), so another model call can only re-ask what the
+# manager already has in front of them — the retry loop that cost $3.44 in a
+# single August day. The relayed message becomes the assistant's reply.
+_TERMINAL_SCHEDULE_TOOLS = frozenset({
+    "propose_schedule_change",
+    "save_location_schedule_profile",
+    "build_week_schedule",
+})
+
 
 def _turn_bound_reason(
     *,
@@ -2326,9 +2337,9 @@ async def run_huume_turn(
                     yield {"type": "step", "data": step}
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
 
-                if name == "propose_schedule_change" and payload.get("status") in {"clarify", "refused"}:
+                if name in _TERMINAL_SCHEDULE_TOOLS and payload.get("status") in {"clarify", "refused"}:
                     tool_rejections += 1
-                    terminal_message = str(payload.get("message") or "The schedule change could not be completed.")
+                    terminal_message = str(payload.get("message") or "That schedule request could not be completed.")
                     stop_reason = (
                         "schedule_clarification"
                         if payload.get("status") == "clarify"

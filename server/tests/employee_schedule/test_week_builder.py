@@ -242,8 +242,13 @@ DEFAULT_TEMPLATE_ID = UUID("3f6b1c22-2000-4000-8000-000000000009")
 OTHER_TEMPLATE_ID = UUID("3f6b1c22-2000-4000-8000-00000000000a")
 
 
-def _empty_week(monkeypatch, conn, templates):
+def _empty_week(monkeypatch, conn, templates, *, week_start_weekday=0):
     monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
+    # This fake answers every fetchval with the same scalar; the week-alignment
+    # guard has its own lookup and is exercised on its own below.
+    monkeypatch.setattr(
+        week_builder, "resolve_week_start_weekday", AsyncMock(return_value=week_start_weekday),
+    )
     monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         week_builder, "_week_shift_counts", AsyncMock(return_value={"draft": 0, "published": 0}),
@@ -393,3 +398,49 @@ async def test_apply_template_proposal_rechecks_empty_week_guard(monkeypatch):
     assert "gained shifts" in result["message"]
     planning_snapshot.assert_not_awaited()
     assert any("status='stale'" in call[0] for call in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_builder_refuses_a_week_that_is_not_the_locations_week_start(monkeypatch):
+    """`week_start` IS the first day everywhere downstream (template_windows,
+    the demand load, the grid), so a Sunday date for a Monday-start store plans
+    a window matching no grid the manager can see."""
+    conn = _FakeConn(None)
+    _empty_week(monkeypatch, conn, [], week_start_weekday=1)
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=date(2026, 8, 23),   # a Sunday
+    )
+
+    assert result["status"] == "refused"
+    assert "Monday" in result["message"]
+    assert "2026-08-17" in result["message"]   # the aligned week it should use
+
+
+@pytest.mark.asyncio
+async def test_readiness_refuses_an_unaligned_week_too(monkeypatch):
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown"})
+    _empty_week(monkeypatch, conn, [], week_start_weekday=1)
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={"employees": []}))
+
+    result = await week_builder.get_week_build_readiness(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=date(2026, 8, 23),
+    )
+
+    assert result["status"] == "refused"
+    assert "Monday" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_the_locations_own_week_start_is_accepted(monkeypatch):
+    conn = _FakeConn(None)
+    _empty_week(monkeypatch, conn, [], week_start_weekday=1)
+
+    result = await week_builder.propose_week_draft(
+        company_id=COMPANY_ID, actor_user_id=None, thread_id=None,
+        location_id=LOCATION_ID, week_start=date(2026, 8, 24),   # the Monday
+    )
+
+    # Falls through to the normal empty-week clarify, not the alignment refusal.
+    assert result["status"] == "clarify"
