@@ -1,0 +1,79 @@
+name: Deploy Backend
+
+# Manual only. Backend-only patch path — no target dropdown, no frontend/matcha
+# option. Same swap as deploy.yml's target=backend, just a dedicated,
+# unambiguous entry in the Actions tab for quick backend fixes.
+# Trigger: Actions tab / GitHub mobile app / `gh workflow run deploy-backend.yml`
+on:
+  workflow_dispatch:
+    inputs:
+      hotfix:
+        description: "Hotfix mode — pull + swap only (skip nginx sync, backup, pruning; 5s worker stop)"
+        type: boolean
+        default: true
+
+# Shares the deploy.yml concurrency group — same group name means GitHub
+# serializes across both workflows, so a backend-only run never races a
+# matcha/frontend run's swap.
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-1
+  AWS_ACCOUNT_ID: "010438494410"
+
+jobs:
+  build:
+    name: Build and Push Backend Image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      id-token: write   # OIDC -> AWS_ROLE_ARN (ECR push only)
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and push (backend only)
+        run: |
+          chmod +x ./scripts/build-and-push.sh
+          ./scripts/build-and-push.sh --backend-only
+
+  deploy:
+    name: Blue-green deploy backend to EC2
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - name: Write SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/ec2.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/ec2.pem"
+
+      - name: Deploy (update-ec2.sh --backend, verbatim laptop path)
+        env:
+          SSH_KEY: ${{ runner.temp }}/ec2.pem
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x ./scripts/update-ec2.sh
+          FLAGS="--backend"
+          if [ "${{ inputs.hotfix }}" = "true" ]; then
+            FLAGS="$FLAGS --hotfix"
+          fi
+          ./scripts/update-ec2.sh $FLAGS
