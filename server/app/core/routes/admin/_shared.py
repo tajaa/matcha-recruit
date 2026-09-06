@@ -154,11 +154,11 @@ __all__ = [
 
 KNOWN_PLATFORM_ITEMS = {
     "admin_overview", "client_management", "company_features", "industry_handbooks", "admin_import",
-    "projects", "interviewer", "candidate_metrics", "interview_prep", "test_bot",
+    "projects", "interviewer", "candidate_metrics", "test_bot",
     "onboarding", "employees", "policies", "handbooks", "time_off",
-    "accommodations", "er_copilot", "incidents", "risk_assessment",
+    "er_copilot", "incidents", "risk_assessment",
     "compliance", "jurisdictions", "blog", "hr_news", "matcha_work",
-    "offer_letters", "discipline", "matcha_ops",
+    "offer_letters", "matcha_ops",
 }
 
 

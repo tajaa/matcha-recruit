@@ -18,7 +18,10 @@ from app.core.feature_flags import (
 def test_merge_company_features_defaults_include_handbooks():
     features = merge_company_features(None)
     assert features["handbooks"] is True
-    assert features["accommodations"] is True
+    assert "accommodations" not in features
+    assert "discipline" not in features
+    assert "resident_care" not in features
+    assert "driver_risk" not in features
     assert features["matcha_work"] is False
     assert features["matcha_ops"] is False
 
@@ -45,7 +48,17 @@ def test_ops_children_require_ops_parent():
 def test_merge_company_features_handles_json_string():
     features = merge_company_features('{"handbooks": false}')
     assert features["handbooks"] is False
-    assert features["accommodations"] is True
+    assert "accommodations" not in features
+
+
+def test_merge_company_features_ignores_retired_stored_grants():
+    features = merge_company_features({
+        "accommodations": True,
+        "discipline": True,
+        "resident_care": True,
+        "driver_risk": True,
+    })
+    assert not ({"accommodations", "discipline", "resident_care", "driver_risk"} & features.keys())
 
 
 def test_matcha_lite_tier_forces_handbooks_on():
@@ -61,14 +74,14 @@ def test_matcha_lite_tier_forces_training_on():
 
 
 def test_ir_only_self_serve_forces_full_ir_bundle_on():
-    # Legacy free beta — full bundle (handbooks, training, employees,
-    # discipline, incidents) auto-enabled regardless of stored value.
+    # Legacy free beta — remaining bundle features are auto-enabled regardless
+    # of stored value; retired feature grants are ignored.
     features = merge_company_features(
         {
             "handbooks": False,
             "training": False,
             "employees": False,
-            "discipline": False,
+            "discipline": True,
             "incidents": False,
         },
         "ir_only_self_serve",
@@ -76,7 +89,7 @@ def test_ir_only_self_serve_forces_full_ir_bundle_on():
     assert features["handbooks"] is True
     assert features["training"] is True
     assert features["employees"] is True
-    assert features["discipline"] is True
+    assert "discipline" not in features
     assert features["incidents"] is True
 
 
@@ -84,7 +97,7 @@ def test_matcha_lite_keeps_employees_payment_gated():
     # Stored false stays false — Stripe webhook flips it after payment.
     features = merge_company_features({"employees": False, "discipline": False}, "matcha_lite")
     assert features["employees"] is False
-    assert features["discipline"] is False
+    assert "discipline" not in features
 
 
 def test_bespoke_tier_respects_explicit_disable():
@@ -175,12 +188,12 @@ def test_builtin_tier_composition_buckets_are_disjoint(slug):
             seen[key] = bucket_name
 
 
-def test_matcha_lite_forced_off_bucket_has_training_and_discipline():
-    # These are the flags moved up to Matcha-X — the overlay forces them off
+def test_matcha_lite_forced_off_bucket_has_training():
+    # Training moved up to Matcha-X — the overlay forces it off
     # regardless of any stored True, and that must render as "blocked", not
     # merely absent from "forced_on".
     buckets = builtin_tier_composition("matcha_lite")
-    assert set(buckets["forced_off"]) == {"training", "discipline"}
+    assert set(buckets["forced_off"]) == {"training"}
 
 
 def test_matcha_lite_paid_gate_is_incidents():

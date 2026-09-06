@@ -9,10 +9,7 @@ from .matcha_work import tutor_sessions_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
 from .employee_portal import router as employee_portal_router, portal_ask_hr_router
 from .employee_lifecycle import (
-    accommodations_router,
     cobra_router,
-    discipline_router,
-    discipline_public_router,
     flight_risk_router,
     i9_router,
     offer_letters_router,
@@ -70,12 +67,10 @@ from .insurance import (
     acord_router,
     coi_router,
     controls_evidence_router,
-    driver_risk_router,
     insurance_router,
     limit_adequacy_router,
     management_liability_router,
     property_router,
-    resident_care_router,
     risk_profile_router,
     tcor_router,
     wc_rates_admin_router,
@@ -147,8 +142,6 @@ matcha_router.include_router(matcha_x_onboarding_router, prefix="/matcha-x-onboa
                              dependencies=[Depends(require_any_feature("handbook_audit", "compliance"))])
 matcha_router.include_router(ir_surveys_router, prefix="/ir/surveys", tags=["ir-surveys"],
                              dependencies=[Depends(require_feature("incidents"))])
-matcha_router.include_router(accommodations_router, prefix="/accommodations", tags=["accommodations"],
-                             dependencies=[Depends(require_feature("accommodations"))])
 # Labor Relations — union / CBA admin (Pro-bundled). CBA store + clause library
 # + grievance workflow live under /labor.
 matcha_router.include_router(labor_relations_router, prefix="/labor", tags=["labor-relations"],
@@ -219,8 +212,6 @@ matcha_router.include_router(workforce_compliance_router, prefix="/workforce-com
                              dependencies=[Depends(require_feature("workforce_compliance"))])
 matcha_router.include_router(risk_profile_router, prefix="/risk-profile", tags=["risk-profile"],
                              dependencies=[Depends(require_feature("risk_profile"))])
-matcha_router.include_router(resident_care_router, prefix="/resident-care", tags=["resident-care"],
-                             dependencies=[Depends(require_feature("resident_care"))])
 matcha_router.include_router(controls_evidence_router, prefix="/controls-evidence", tags=["controls-evidence"],
                              dependencies=[Depends(require_feature("controls_evidence"))])
 matcha_router.include_router(legal_defense_router, prefix="/legal-pilot", tags=["legal-pilot"],
@@ -233,8 +224,6 @@ matcha_router.include_router(limit_adequacy_router, prefix="/limit-adequacy", ta
                              dependencies=[Depends(require_feature("limit_adequacy"))])
 matcha_router.include_router(property_router, prefix="/property", tags=["property"],
                              dependencies=[Depends(require_feature("property"))])
-matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["driver-risk"],
-                             dependencies=[Depends(require_feature("driver_risk"))])
 # Employee scheduling — shift builder + templates over the roster (paid add-on).
 matcha_router.include_router(employee_schedule_router, prefix="/employee-schedule",
                               tags=["employee-schedule"],
@@ -322,17 +311,6 @@ matcha_router.include_router(
     prefix="/pre-termination",
     tags=["pre-termination"],
     dependencies=[Depends(require_feature("employees"))],
-)
-matcha_router.include_router(
-    discipline_router,
-    prefix="/discipline",
-    tags=["discipline"],
-    dependencies=[Depends(require_feature("discipline"))],
-)
-matcha_router.include_router(
-    discipline_public_router,
-    prefix="/discipline",
-    tags=["discipline-webhook"],
 )
 matcha_router.include_router(
     flight_risk_router,

@@ -28,10 +28,8 @@ import RiskAssessment from '../pages/app/risk-assessment/RiskAssessment'
 import CredentialTemplates from '../pages/app/employees/CredentialTemplates'
 import WorkforceCompliance from '../pages/app/compliance/WorkforceCompliance'
 import RiskProfile from '../pages/app/risk/RiskProfile'
-import ResidentCare from '../pages/app/risk/ResidentCare'
 import ControlsEvidence from '../pages/app/risk/ControlsEvidence'
 import LimitAdequacy from '../pages/app/limit-adequacy/LimitAdequacy'
-import DriverRisk from '../pages/app/risk/DriverRisk'
 import Tcor from '../pages/app/risk/Tcor'
 import Coi from '../pages/app/risk/Coi'
 import Insurance from '../pages/app/risk/Insurance'
@@ -45,13 +43,8 @@ import Inbox from '../work/pages/Inbox'
 import UserSettings from '../pages/app/settings/UserSettings'
 import Notifications from '../pages/app/dashboard/Notifications'
 import EscalatedQueries from '../pages/app/ask-expert/EscalatedQueries'
-import Accommodations from '../pages/app/employees/Accommodations'
-import AccommodationDetail from '../pages/app/employees/AccommodationDetail'
 import CompanySettings from '../pages/app/settings/CompanySettings'
 import Benefits from '../pages/app/benefits/Benefits'
-import Discipline from '../pages/app/discipline/Discipline'
-import DisciplineDetail from '../pages/app/discipline/DisciplineDetail'
-import DisciplineSettings from '../pages/app/discipline/DisciplineSettings'
 import LaborRelations from '../pages/app/labor/LaborRelations'
 import CBADetail from '../pages/app/labor/CBADetail'
 import GrievanceDetail from '../pages/app/labor/GrievanceDetail'
@@ -95,12 +88,7 @@ export default function AppRoutes() {
         <Route path="safety-meetings/:meetingId" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetingDetail /></FeatureGate>} />
         <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />
-        <Route path="accommodations" element={<FeatureGate feature="accommodations" label="Accommodations"><Accommodations /></FeatureGate>} />
-        <Route path="accommodations/:caseId" element={<FeatureGate feature="accommodations" label="Accommodations"><AccommodationDetail /></FeatureGate>} />
         <Route path="benefits" element={<FeatureGate feature="benefits_admin" label="Benefits"><Benefits /></FeatureGate>} />
-        <Route path="discipline" element={<FeatureGate feature="discipline" label="Performance Action"><Discipline /></FeatureGate>} />
-        <Route path="discipline/:recordId" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineDetail /></FeatureGate>} />
-        <Route path="discipline-settings" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineSettings /></FeatureGate>} />
         <Route path="labor" element={<FeatureGate feature="labor_relations" label="Labor Relations"><LaborRelations /></FeatureGate>} />
         <Route path="labor/cbas/:cbaId" element={<FeatureGate feature="labor_relations" label="Labor Relations"><CBADetail /></FeatureGate>} />
         <Route path="labor/grievances/:grievanceId" element={<FeatureGate feature="labor_relations" label="Labor Relations"><GrievanceDetail /></FeatureGate>} />
@@ -116,10 +104,8 @@ export default function AppRoutes() {
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
         <Route path="workforce-compliance" element={<FeatureGate feature="workforce_compliance" label="Workforce Compliance"><WorkforceCompliance /></FeatureGate>} />
         <Route path="risk-profile" element={<FeatureGate feature="risk_profile" label="Risk Profile"><RiskProfile /></FeatureGate>} />
-        <Route path="resident-care" element={<FeatureGate feature="resident_care" label="Resident-Care Risk"><ResidentCare /></FeatureGate>} />
         <Route path="controls-evidence" element={<FeatureGate feature="controls_evidence" label="Proof of Controls"><ControlsEvidence /></FeatureGate>} />
         <Route path="limit-adequacy" element={<FeatureGate feature="limit_adequacy" label="Limit Adequacy"><LimitAdequacy /></FeatureGate>} />
-        <Route path="driver-risk" element={<FeatureGate feature="driver_risk" label="Driver Risk"><DriverRisk /></FeatureGate>} />
         <Route path="tcor" element={<FeatureGate feature="tcor" label="Total Cost of Risk"><Tcor /></FeatureGate>} />
         <Route path="coi" element={<FeatureGate feature="coi_tracking" label="Certificate Tracking"><Coi /></FeatureGate>} />
         <Route path="ir/insurance" element={<FeatureGate feature="carrier_quotes" label="Insurance"><Insurance /></FeatureGate>} />

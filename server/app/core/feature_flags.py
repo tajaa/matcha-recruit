@@ -2,9 +2,15 @@ import json
 from typing import Any
 from uuid import UUID
 
+RETIRED_COMPANY_FEATURES = frozenset({
+    "accommodations",
+    "discipline",
+    "resident_care",
+    "driver_risk",
+})
+
 DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "handbooks": True,
-    "accommodations": True,
     "matcha_work": False,
     # Matcha Ops — company channels, calls, Events, inventory, and scheduling.
     # Kept separate from Matcha Work so a company can buy the collaboration
@@ -75,7 +81,6 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "hris_deductions": False,
     "paid_channel_creator": False,
     "channel_job_postings": False,
-    "discipline": True,
     # Employee-benefits broker tooling. When on, exposes the benefits roster
     # ingestion (Finch + CSV), eligibility-exception detection (new-hire
     # enrollment gaps + terminated-but-still-deducted "premium leaks"), and the
@@ -103,10 +108,6 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # Client-facing risk portal (composite WC+EPL+compliance index). Gates
     # /risk-profile + /app/risk-profile. Default off; admin-toggle. Not bundled.
     "risk_profile": False,
-    # Healthcare/senior-living resident-care risk asset (safety programs, MVR
-    # reviews, insurer-facing PDF). Gates /resident-care + /app/resident-care.
-    # Default off; admin-toggle (vertical). Not bundled.
-    "resident_care": False,
     # Universal controls-evidence register + "Proof of Controls" underwriter
     # packet (WTW p.85). Auto-fills from existing HR/safety/compliance data;
     # gates /controls-evidence + /app/controls-evidence. Default off;
@@ -119,12 +120,6 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /limit-adequacy + /app/limit-adequacy + the broker limits surfaces.
     # Default off; admin-toggle. Not bundled.
     "limit_adequacy": False,
-    # Driver-risk / MVR (gap-analysis #15) — standalone fleet driver-risk surface
-    # for any employer with drivers (commercial-auto entry). Scores each driver
-    # (clean/marginal/high-risk) from employer-recorded MVR data; reuses the
-    # mvr_reviews table shared with resident_care. Gates /driver-risk +
-    # /app/driver-risk. Default off; admin-toggle. Not bundled.
-    "driver_risk": False,
     # Commercial property (P-side). Tenant Statement of Values (per-building COPE +
     # values), insurance-to-value + COPE grade, property limits via the limit-adequacy
     # engine (line='property') and property loss runs via loss-development, a property
@@ -400,19 +395,17 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
 # Tier-defining features that should always be on for a given signup_source,
 # regardless of what's stored in `companies.enabled_features`. Lets new
 # bundle members inherit features without a per-row backfill migration.
-# Paid gates (incidents/employees/discipline) intentionally NOT here —
+# Paid gates (incidents/employees) intentionally NOT here —
 # those flip via Stripe webhook on checkout completion.
 TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
     # matcha_lite (paid, entry tier) — IR + employees + handbook GENERATION
-    # only. training + discipline are forced OFF here (they moved up to
-    # Matcha-X); the False values override any stored True (incl. existing
-    # Lite rows + the broker-pays signup path) at read time. handbook_audit
+    # only. Training is forced OFF here (it moved up to Matcha-X); the False
+    # value overrides any stored True at read time. handbook_audit
     # + credential_templates stay off via DEFAULT (not granted to Lite).
     "matcha_lite": {
         "handbooks": True,
         "employees": True,
         "training": False,
-        "discipline": False,
     },
     # matcha_lite_essentials — a signup-time choice on the SAME /lite/signup
     # page/checkout as matcha_lite (not a separate product surface), for
@@ -428,22 +421,18 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         "handbooks": True,
         "employees": False,
         "training": False,
-        "discipline": False,
         # osha_export/osha_auto_report need no entry here: both default False
         # and their routes gate on require_any_feature("osha_logs", <flag>),
         # so forcing osha_logs off already denies the whole OSHA surface.
         "osha_logs": False,
     },
-    # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity. Unlike
-    # Lite, `discipline` is in the always-on overlay so the paid bundle is
-    # identical on every payment path (Lite leaves discipline path-dependent:
-    # only set on broker-pays/invite signup). `incidents` stays the single
-    # Stripe-gated flag, flipped by the checkout.session.completed webhook.
+    # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity, with the
+    # additional always-on features below. `incidents` stays the single Stripe-
+    # gated flag, flipped by the checkout.session.completed webhook.
     "matcha_x": {
         "handbooks": True,
         "training": True,
         "employees": True,
-        "discipline": True,
         # X-and-up exclusives — forced on for every Matcha-X company
         # (existing + new) at read time, no per-row backfill.
         "handbook_audit": True,
@@ -486,7 +475,6 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         "handbooks": True,
         "training": True,
         "employees": True,
-        "discipline": True,
         "incidents": True,
     },
 }
@@ -524,7 +512,7 @@ TIER_SIGNUP_PRESETS: dict[str, dict[str, bool]] = {
     "matcha_lite_essentials": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True,
                                 "ir_magic_links": True, "ir_copilot": True},
     # Matcha-X (mid tier): incidents only here, same as Lite — employees/
-    # discipline come from TIER_REQUIRED_FEATURES["matcha_x"] at read time
+    # training comes from TIER_REQUIRED_FEATURES["matcha_x"] at read time
     # via merge_company_features, so don't add them to the preset.
     "matcha_x": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True,
                  "ir_magic_links": True, "ir_copilot": True},
@@ -534,10 +522,10 @@ TIER_SIGNUP_PRESETS: dict[str, dict[str, bool]] = {
     # must be force-set here for admin-created/-tier-changed Pro cos.
     "bespoke": {**dict(DEFAULT_COMPANY_FEATURES), "labor_relations": True,
                 "handbook_pilot": True},
-    # IR self-serve (Cap): incidents + employees + discipline.
+    # IR self-serve (Cap): incidents + employees.
     "ir_only_self_serve": {
         **{k: False for k in DEFAULT_COMPANY_FEATURES},
-        "incidents": True, "employees": True, "discipline": True,
+        "incidents": True, "employees": True,
         "ir_magic_links": True, "ir_copilot": True,
     },
     # Matcha Compliance (standalone): compliance itself plus the 4-pillar
@@ -573,7 +561,7 @@ BUILTIN_TIER_META: dict[str, dict[str, Any]] = {
         "signup_path": "/lite/signup", "stripe_gate_flag": "incidents",
     },
     "matcha_x": {
-        "label": "Matcha-X", "blurb": "Mid tier — training, discipline, handbook audit, compliance taste.",
+        "label": "Matcha-X", "blurb": "Mid tier — training, handbook audit, compliance taste.",
         "signup_path": "/matcha-x/signup", "stripe_gate_flag": "incidents",
     },
     "matcha_compliance": {
@@ -641,6 +629,8 @@ def merge_company_features(
     features = raw_features if isinstance(raw_features, dict) else {}
     merged = dict(DEFAULT_COMPANY_FEATURES)
     for key, value in features.items():
+        if key in RETIRED_COMPANY_FEATURES:
+            continue
         merged[key] = bool(value)
 
     if signup_source and signup_source in TIER_REQUIRED_FEATURES:
