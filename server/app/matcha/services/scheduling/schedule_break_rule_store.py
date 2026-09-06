@@ -10,6 +10,7 @@ from uuid import UUID, NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import schedule_compliance
+from . import shift_compliance
 from .schedule_breaks import BreakRule
 from .schedule_location_readiness import get_schedule_location_readiness
 
@@ -228,9 +229,21 @@ def _location_timezone(value: str | None) -> ZoneInfo | None:
         return None
 
 
-def _legacy_rules(state: str) -> list[BreakRule]:
+def _hours_to_offset_minutes(value: Any) -> int | None:
+    """Whole minutes for a curated/extracted hour threshold, or None.
+
+    `None` is the threshold table's "explicitly no such rule here" and `NO_CAP`
+    its "the law affirmatively imposes no limit"; both mean the same thing to a
+    break offset — there is no such boundary to place against.
+    """
+    if value is None or value is schedule_compliance.NO_CAP:
+        return None
+    return int(float(value) * 60)
+
+
+def _legacy_rules(state: str, db_rules: dict[str, Any] | None = None) -> list[BreakRule]:
     state = (state or "").strip().upper()
-    rules = schedule_compliance.rules_for_state(state)
+    rules = schedule_compliance.rules_for_state(state, db_rules)
     rule_set_id = _uuid_for_legacy(state or "UNKNOWN")
     out: list[BreakRule] = []
     meal_after = rules.get("meal_break_after_hours")
@@ -245,6 +258,13 @@ def _legacy_rules(state: str) -> list[BreakRule]:
             duration_minutes=int(meal_minutes),
             paid=False,
             deadline_offset_minutes=int(float(meal_after) * 60),
+            # States that legislate an earliest measure it from the shift start
+            # for the FIRST meal only (WAC 296-126-092(1), OAR
+            # 839-020-0050(2)(d)); ordinal 2 keeps no earliest rather than
+            # inheriting one that was never written about it.
+            earliest_offset_minutes=_hours_to_offset_minutes(
+                rules.get("meal_break_earliest_after_hours")
+            ),
             citation=citation,
         ))
         second_after = rules.get("second_meal_after_hours")
@@ -337,31 +357,53 @@ async def resolve_break_rules(
         )
 
     # Preserve the current curated CA/federal behavior until structured rule
-    # rows are populated by the reviewed import path.
+    # rows are populated by the reviewed import path.  A state the curated
+    # table has never covered still gets its approved catalog extractions, so
+    # break TIMING comes from the same merged source the write-path gate
+    # already enforces against — `rules_for_state`'s per-state precedence keeps
+    # a curated state from picking up a shadow DB copy of itself.
     state_row = await conn.fetchval(
         "SELECT state FROM business_locations WHERE id = $1 AND company_id = $2",
         location_id,
         company_id,
     )
-    legacy = _legacy_rules(state_row or "")
+    state_code = (state_row or "").strip().upper()
+    db_rules: dict[str, Any] | None = None
+    fallback_advisories: tuple[dict[str, Any], ...] = ()
+    if state_code and not schedule_compliance.is_curated_state(state_code):
+        db_rules, fetch_failed = await shift_compliance._approved_db_rules(conn, state_code)
+        if fetch_failed:
+            # A transient catalog read must not silently read as "this state
+            # legislates no break timing" — same fail-visible posture the write
+            # path takes.
+            fallback_advisories = ({
+                "check": "break_rules",
+                "code": "break_rules_catalog_unavailable",
+                "severity": "advisory",
+                "message": (
+                    "Approved scheduling-law thresholds could not be read for this "
+                    "location; verify break timing manually."
+                ),
+            },)
+    legacy = _legacy_rules(state_code, db_rules)
     if legacy:
         return ResolvedBreakRules(
             rules=tuple(legacy),
             rule_set_ids=tuple(dict.fromkeys(rule.rule_set_id for rule in legacy)),
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
-            source="legacy_curated",
-            advisories=(),
+            source="catalog_extraction" if db_rules else "legacy_curated",
+            advisories=fallback_advisories,
         )
     return ResolvedBreakRules(
         rules=(), rule_set_ids=(),
         timezone=_location_timezone(readiness.timezone),
         industry_code=readiness.industry_code,
         source="unmapped",
-        advisories=({
+        advisories=(*fallback_advisories, {
             "check": "break_rules",
             "code": "break_rules_unmapped",
             "severity": "advisory",
             "message": "No approved break rules are mapped for this location and industry.",
-        },),
+        }),
     )

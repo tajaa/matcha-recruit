@@ -46,6 +46,7 @@ _DB_RULES_CACHE_TTL = 60.0
 _RULE_KEY_TO_CHECK = {
     "meal_break_after_hours": "meal_break",
     "meal_break_minutes": "meal_break",
+    "meal_break_earliest_after_hours": "meal_break_timing",
     "second_meal_after_hours": "meal_break",
     "daily_ot_hours": "daily_overtime",
     "daily_doubletime_hours": "daily_overtime",

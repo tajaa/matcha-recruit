@@ -138,6 +138,18 @@ def test_every_range_key_has_a_rule_key():
     assert set(sre._RANGES) == set(sre.RULE_KEYS)
 
 
+def test_every_rule_key_is_explained_to_the_model():
+    # A key the glossary never describes gets extracted by guesswork.
+    for key in sre.RULE_KEYS:
+        assert key in sre._FIELD_GLOSSARY, key
+
+
+def test_meal_break_earliest_is_extractable():
+    """WA/OR legislate how EARLY a meal may start; break suggestions read it."""
+    assert "meal_break_earliest_after_hours" in sre.RULE_KEYS
+    assert sre._RANGES["meal_break_earliest_after_hours"] == (0.5, 6)
+
+
 def test_sick_leave_not_in_extraction_categories():
     # No evaluator enforces a sick-leave threshold — extracting it would
     # create approved rows nothing reads.

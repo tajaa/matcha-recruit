@@ -10,14 +10,28 @@ import pytest
 from app.core.models.schedule_break_rules import BreakRuleSetImport
 from app.core.services.schedule_break_rule_import import review_break_rule_set
 from app.matcha.services.scheduling.schedule_break_rule_store import resolve_break_rules
+from app.matcha.services.scheduling.shift_compliance import _DB_RULES_CACHE
+
+
+@pytest.fixture(autouse=True)
+def _clear_db_rules_cache():
+    """`_approved_db_rules` memoizes per state for 10 minutes, process-wide."""
+    _DB_RULES_CACHE.clear()
+    yield
+    _DB_RULES_CACHE.clear()
 
 
 class FakeConn:
-    def __init__(self, location, *, industry="retail", structured=None, state="CA"):
+    def __init__(
+        self, location, *, industry="retail", structured=None, state="CA",
+        extractions=None, extractions_fail=False,
+    ):
         self.location = location
         self.industry = industry
         self.structured = structured or []
         self.state = state
+        self.extractions = extractions or []
+        self.extractions_fail = extractions_fail
 
     async def fetchrow(self, query, *args):
         if "FROM business_locations" in query:
@@ -36,6 +50,10 @@ class FakeConn:
     async def fetch(self, query, *args):
         if "FROM schedule_break_rule_sets" in query:
             return self.structured
+        if "FROM schedule_rule_extractions" in query:
+            if self.extractions_fail:
+                raise RuntimeError("catalog unavailable")
+            return self.extractions
         raise AssertionError(query)
 
 
@@ -125,6 +143,74 @@ def test_ca_legacy_rule_is_adapted_until_structured_rows_exist():
     assert result.rules[0].kind == "meal"
     assert result.rules[0].trigger_after_minutes == 300
     assert result.rules[0].duration_minutes == 30
+    # § 512 fixes a deadline and no earliest; the suggester's own placement
+    # floor is what keeps a break off the shift's first minute.
+    assert result.rules[0].earliest_offset_minutes is None
+
+
+def _extraction(rule_key, value, *, no_rule=False, citation="WAC 296-126-092"):
+    return {
+        "rule_key": rule_key, "rule_value": None if no_rule else value,
+        "no_rule": no_rule, "citation": citation, "block_grade": False,
+    }
+
+
+def _wa_location():
+    location = _location()
+    location["state"] = "WA"
+    location["city"] = "Seattle"
+    location["timezone"] = "America/Los_Angeles"
+    return location
+
+
+def test_approved_catalog_earliest_becomes_a_break_offset():
+    location = _wa_location()
+    result = _run(resolve_break_rules(
+        FakeConn(
+            location, structured=[], state="WA",
+            extractions=[
+                _extraction("meal_break_after_hours", 5.0),
+                _extraction("meal_break_minutes", 30.0),
+                _extraction("meal_break_earliest_after_hours", 2.0),
+            ],
+        ),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.source == "catalog_extraction"
+    assert result.rules[0].earliest_offset_minutes == 120
+    assert result.rules[0].deadline_offset_minutes == 300
+
+
+def test_a_state_that_sets_no_earliest_gets_no_offset():
+    location = _wa_location()
+    result = _run(resolve_break_rules(
+        FakeConn(
+            location, structured=[], state="WA",
+            extractions=[
+                _extraction("meal_break_after_hours", 5.0),
+                _extraction("meal_break_minutes", 30.0),
+                _extraction("meal_break_earliest_after_hours", None, no_rule=True),
+            ],
+        ),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.rules[0].earliest_offset_minutes is None
+
+
+def test_a_catalog_read_failure_is_visible_rather_than_silent():
+    location = _wa_location()
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[], state="WA", extractions_fail=True),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    codes = [advisory["code"] for advisory in result.advisories]
+    assert "break_rules_catalog_unavailable" in codes
 
 
 def test_unmapped_state_returns_visible_advisory():
@@ -138,7 +224,7 @@ def test_unmapped_state_returns_visible_advisory():
     ))
     assert result.source == "unmapped"
     assert result.rules == ()
-    assert result.advisories[0]["code"] == "break_rules_unmapped"
+    assert [advisory["code"] for advisory in result.advisories] == ["break_rules_unmapped"]
 
 
 def test_no_jurisdiction_is_unmapped_without_database_rule_query():

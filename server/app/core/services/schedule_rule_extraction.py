@@ -64,11 +64,15 @@ CATALOG_CATEGORIES = ("overtime", "meal_breaks", "scheduling_reporting", "minor_
 # its per-state-precedence rule).
 CODE_CURATED_STATES = ("US", "CA")
 
-# Exactly the fields `schedule_compliance.py`'s pure evaluators consume today.
-# Extracting a wider vocabulary would produce approved rows no evaluator reads.
+# Exactly the fields the scheduling engine consumes today — `schedule_compliance.py`'s
+# pure evaluators, plus `meal_break_earliest_after_hours`, which no evaluator reads
+# (it bounds no write) but which `schedule_break_rule_store._legacy_rules` turns into
+# a break requirement's `earliest_offset_minutes` for break-time suggestions.
+# Extracting a wider vocabulary would produce approved rows nothing reads.
 RULE_KEYS = (
     "meal_break_after_hours",
     "meal_break_minutes",
+    "meal_break_earliest_after_hours",
     "second_meal_after_hours",
     "daily_ot_hours",
     "daily_doubletime_hours",
@@ -86,6 +90,7 @@ RULE_KEYS = (
 _RANGES: dict[str, tuple[float, float]] = {
     "meal_break_after_hours": (2, 12),
     "meal_break_minutes": (10, 120),
+    "meal_break_earliest_after_hours": (0.5, 6),
     "second_meal_after_hours": (2, 16),
     "daily_ot_hours": (4, 24),
     "daily_doubletime_hours": (4, 24),
@@ -100,6 +105,7 @@ _RANGES: dict[str, tuple[float, float]] = {
 _FIELD_GLOSSARY = """
 - meal_break_after_hours: shift length (hours) that TRIGGERS a required meal break.
 - meal_break_minutes: the required meal break's DURATION in minutes.
+- meal_break_earliest_after_hours: hours from the START of the shift before which the first meal period may NOT begin (e.g. WA: 2, "commences no less than two hours from the beginning of the shift"). If the earliest depends on shift length (e.g. OR: after the 2nd hour for work periods of 7h or less, after the 3rd hour beyond that), record the LARGEST value and explain the tiers in rationale — scheduling a break later than required is lawful, earlier is not. Use no_rule when the state fixes only a deadline and sets no earliest (this is the common case, e.g. California).
 - second_meal_after_hours: shift length (hours) that triggers a SECOND required meal break.
 - daily_ot_hours: hours worked in one day after which daily overtime pay is owed.
 - daily_doubletime_hours: hours worked in one day after which DOUBLE time pay is owed (omit if the state has no daily double-time rule).

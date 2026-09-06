@@ -223,7 +223,9 @@ def test_missing_offsets_fall_back_to_the_shift_window():
 
     result = plan.results[0]
     assert result.status == "suggested"
-    assert _local(9) <= result.suggested_start
+    # The shift window is the envelope, but its first two hours are not
+    # offered: a statute-silent rule set still gets the placement floor.
+    assert _local(11) == result.suggested_start
     assert result.suggested_end <= _local(17)
     assert result.suggested_end - result.suggested_start == timedelta(minutes=30)
 
@@ -232,6 +234,116 @@ def test_suggestion_prefers_the_recommended_time():
     plan = _run(_crew(1), required_staff=1)
 
     assert plan.results[0].suggested_start == _local(12)
+
+
+# ── placement floor: a suggestion is never the shift's own start ──────────────
+#
+# The California legacy rule set carries a deadline and nothing else, which is
+# how a 06:30-14:30 shift came to be told to take its meal break at 06:30.
+
+
+def _opener(*requirements, required_staff=1, crew=1, locked=()):
+    """A 06:30-14:30 shift; each assignee owes the given requirement(s)."""
+    factories = requirements or (lambda: _ca_meal(),)
+    return stagger_shift_breaks(
+        shift_start_local=_local(6, 30),
+        shift_end_local=_local(14, 30),
+        required_staff=required_staff,
+        assignments=[
+            StaggerAssignment(
+                employee_id=_employee(index),
+                plan=_plan(*(factory() for factory in factories)),
+            )
+            for index in range(1, crew + 1)
+        ],
+        locked=locked,
+    )
+
+
+def _ca_meal(**overrides):
+    """What `_legacy_rules` produces for California: deadline only."""
+    values = {
+        "earliest_local": None,
+        "recommended_local": None,
+        "deadline_local": _local(11, 30),  # § 512: before the end of the 5th hour
+    }
+    values.update(overrides)
+    return _requirement(**values)
+
+
+def test_early_shift_regression_never_suggests_the_shift_start():
+    plan = _opener()
+
+    result = plan.results[0]
+    assert result.status == "suggested"
+    assert result.suggested_start == _local(8, 30)
+    assert result.suggested_start != _local(6, 30)
+
+
+def test_the_whole_crew_stays_above_the_placement_floor():
+    """Serialized off the floor (budget 1), not spread back over the opening."""
+    plan = _opener(required_staff=3, crew=3)
+
+    starts = sorted(result.suggested_start for result in plan.results)
+    assert starts == [_local(8, 30), _local(9), _local(9, 30)]
+    assert all(start >= _local(8, 30) for start in starts)
+
+
+def test_a_too_early_recommendation_is_pulled_up_to_the_floor():
+    plan = _opener(lambda: _ca_meal(recommended_local=_local(6, 30)))
+
+    assert plan.results[0].suggested_start == _local(8, 30)
+
+
+def test_statutory_earliest_wins_over_the_placement_floor():
+    """OR's >7h tier opens at the 3rd hour — later than the policy floor."""
+    plan = _opener(lambda: _ca_meal(earliest_local=_local(9, 30)))
+
+    assert plan.results[0].suggested_start == _local(9, 30)
+
+
+def test_a_statutory_earliest_below_the_floor_is_not_raised_to_it():
+    """WA opens at the 2nd hour; the floor never overrides a real statute."""
+    plan = _opener(lambda: _ca_meal(earliest_local=_local(8)))
+
+    assert plan.results[0].suggested_start == _local(8)
+
+
+def test_a_zero_offset_statute_still_avoids_the_shift_start():
+    plan = _opener(lambda: _ca_meal(earliest_local=_local(6, 30)))
+
+    assert plan.results[0].suggested_start == _local(6, 35)
+
+
+def test_the_placement_floor_yields_to_the_legal_deadline():
+    """A short shift keeps its legal window: policy never invents a conflict."""
+    plan = stagger_shift_breaks(
+        shift_start_local=_local(6, 30),
+        shift_end_local=_local(12),
+        required_staff=1,
+        assignments=[StaggerAssignment(
+            employee_id=_employee(1),
+            plan=_plan(_ca_meal(deadline_local=_local(8))),
+        )],
+    )
+
+    result = plan.results[0]
+    assert result.status == "suggested"
+    assert result.suggested_start == _local(6, 35)
+    assert result.suggested_end <= _local(8)
+
+
+def test_a_saved_time_below_the_floor_is_still_honored():
+    """The floor is placement policy; a reviewed time is the manager's call."""
+    saved = LockedBreak(
+        employee_id=_employee(1), kind="meal", ordinal=1,
+        start=_local(7), duration_minutes=30,
+    )
+    plan = _opener(crew=1, locked=[saved])
+
+    result = plan.results[0]
+    assert result.status == "saved"
+    assert result.suggested_start == _local(7)
 
 
 def test_placement_is_deterministic():

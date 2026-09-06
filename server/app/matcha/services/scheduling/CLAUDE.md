@@ -186,6 +186,33 @@ first would put a human edit in a column the next retime silently overwrites.
 Invariants, each of which has a regression test in
 `tests/employee_schedule/test_break_stagger*.py`:
 
+- **A suggestion is never the shift's own start time.** Most jurisdictions fix
+  only a deadline, so the rule set carries no `earliest_offset_minutes` and
+  `_build_slot`'s fallback envelope used to open at the shift's first instant —
+  a 06:30–14:30 shift was told to break at 06:30. Two placement rules narrow
+  that envelope: a statute-silent requirement does not start before
+  `DEFAULT_PLACEMENT_FLOOR_MINUTES` (120), and nothing is ever suggested at the
+  first instant even where a statute encodes an earliest of zero. Both are
+  **policy, not law** — they apply only while the break still fits before its
+  deadline (a short shift keeps its legal window rather than gaining a false
+  `deadline_conflict`), a real statutory earliest always wins in both
+  directions, and `locked` times a manager saved are never re-judged against
+  them.
+- **Law and placement policy live in different places, on purpose.** California
+  has no statutory earliest — § 512(a) and *Brinker* (2012) 53 Cal.4th 1004 fix
+  only the deadline, and a first-hour meal is lawful — so
+  `_SCHEDULING_RULES["CA"]["meal_break_earliest_after_hours"]` is an explicit
+  `None`, not 2 hours. States that DO legislate an earliest (WA:
+  WAC 296-126-092(1), 2h; OR: OAR 839-020-0050(2)(d), 2h/3h by work-period
+  length) carry it as the `meal_break_earliest_after_hours` extraction key,
+  which `schedule_break_rule_store._legacy_rules` turns into the requirement's
+  `earliest_offset_minutes` (first meal only). Catalog rows behind that key:
+  `scripts/seed/meal_break_timing.sql`.
+- **The legacy fallback merges approved catalog extractions.** For a state the
+  curated table never covered, `resolve_break_rules` now calls
+  `shift_compliance._approved_db_rules` so break timing comes from the same
+  merged source the write-path gate enforces against; a failed read emits
+  `break_rules_catalog_unavailable` rather than reading as "no rules here".
 - **The concurrency budget floors at 1.** `assigned_count` can never exceed
   `required_staff` on a normal shift (assignment writes 409 `shift_full`), so a
   spare-headcount-only model would suggest nothing on every real shift. The
