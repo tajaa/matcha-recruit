@@ -75,6 +75,22 @@ def _deployment() -> dict:
     }
 
 
+def _stale_deployment() -> dict:
+    """A dispatch whose own deploy predates the merge it is now reporting on."""
+    return {
+        "deploy_id": "deploy-stale",
+        "deployed_at": "2026-09-04T23:46:29Z",
+        "target": "matcha",
+        "sha": "stale-sha",
+        "source": "github",
+    }
+
+
+def _live_only_ancestry(_root, _merge_oid, descendant) -> bool:
+    """The PR is in both live images but not in the dispatching deploy's SHA."""
+    return descendant in ("backend-live", "frontend-live")
+
+
 def test_plan_requires_every_changed_component_to_be_live(monkeypatch, tmp_path):
     monkeypatch.setattr(
         admin_collect,
@@ -491,7 +507,9 @@ def test_entry_date_follows_the_deploy_that_actually_carried_the_pr(monkeypatch,
     runner, ran after the 2026-09-05 evening deploy that first carried the PR
     live, and published it as SEP 4.
     """
-    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    monkeypatch.setattr(admin_collect, "_is_ancestor", _live_only_ancestry)
+    pr = _pr(11, ["server/app/core/x.py", "client/src/pages/X.tsx"])
+    pr["mergedAt"] = "2026-09-05T01:00:00Z"
 
     plan = admin_collect.build_plan(
         production_context=_context(
@@ -500,14 +518,8 @@ def test_entry_date_follows_the_deploy_that_actually_carried_the_pr(monkeypatch,
             frontend_started_at="2026-09-06T02:18:02.987654321Z",
         ),
         production_state=_state(),
-        merged_prs=[_pr(11, ["server/app/core/x.py", "client/src/pages/X.tsx"])],
-        deployment={
-            "deploy_id": "deploy-stale",
-            "deployed_at": "2026-09-04T23:46:29Z",
-            "target": "matcha",
-            "sha": "abc123",
-            "source": "github",
-        },
+        merged_prs=[pr],
+        deployment=_stale_deployment(),
         repo_root=tmp_path,
     )
 
@@ -590,7 +602,93 @@ def test_entry_date_uses_pacific_not_utc_for_an_evening_deploy(monkeypatch, tmp_
         ),
         production_state=_state(),
         merged_prs=[_pr(11, ["server/app/core/x.py"])],
-        deployment=_deployment(),
+        deployment={
+            "deploy_id": "deploy-evening",
+            "deployed_at": "2026-09-06T02:20:00Z",
+            "target": "matcha",
+            "sha": "abc123",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-05"
+
+
+def test_entry_date_uses_the_carrying_deploy_not_a_later_restart(monkeypatch, tmp_path):
+    """A container's start time is the *latest* deploy of that component.
+
+    Any run that is not the first successful dispatch after the carrying
+    deploy -- a retry, a batch released by `deferred`, a `since_pr` backfill --
+    sees a later restart and would date the entry after the change went live.
+    """
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["server/app/core/x.py"])
+    pr["mergedAt"] = "2026-09-01T10:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-04T03:00:00Z",
+            # A deploy three days after the one that carried this PR.
+            backend_started_at="2026-09-04T02:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment={
+            "deploy_id": "deploy-carrying",
+            "deployed_at": "2026-09-01T20:00:00Z",
+            "target": "backend",
+            "sha": "carrying-sha",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    assert plan["candidates"][0]["date"] == "2026-09-01"
+
+
+def test_deploy_bound_is_ignored_for_a_component_it_did_not_replace(monkeypatch, tmp_path):
+    monkeypatch.setattr(admin_collect, "_is_ancestor", lambda *_args: True)
+    pr = _pr(11, ["server/app/core/x.py"])
+    pr["mergedAt"] = "2026-09-01T10:00:00Z"
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-04T03:00:00Z",
+            backend_started_at="2026-09-04T02:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[pr],
+        deployment={
+            "deploy_id": "deploy-frontend-only",
+            "deployed_at": "2026-09-01T20:00:00Z",
+            "target": "frontend",
+            "sha": "carrying-sha",
+            "source": "github",
+        },
+        repo_root=tmp_path,
+    )
+
+    # A frontend-only deploy says nothing about when the backend went live.
+    assert plan["candidates"][0]["date"] == "2026-09-03"
+
+
+def test_zero_value_container_start_is_treated_as_unknown(monkeypatch, tmp_path):
+    """Docker reports `0001-01-01T00:00:00Z` for a container that never ran.
+
+    It parses cleanly, so treating it as a real time made `_live_at` skip the
+    fallback and the merge floor date the entry at the merge date.
+    """
+    monkeypatch.setattr(admin_collect, "_is_ancestor", _live_only_ancestry)
+
+    plan = admin_collect.build_plan(
+        production_context=_context(
+            checked_at="2026-09-06T02:39:00Z",
+            backend_started_at="0001-01-01T00:00:00Z",
+        ),
+        production_state=_state(),
+        merged_prs=[_pr(11, ["server/app/core/x.py"])],
+        deployment=_stale_deployment(),
         repo_root=tmp_path,
     )
 
@@ -633,6 +731,94 @@ def test_writer_reads_authored_evidence_instead_of_merge_diffs(monkeypatch, tmp_
         {"path": "server/app/core/x.py", "additions": 12, "deletions": 3}
     ]
     assert candidate["changeSize"] == {"additions": 12, "deletions": 3, "changedFiles": 1}
+
+
+def _bot_comment(day: int) -> dict:
+    return {
+        "author": {"login": "review-bot"},
+        "createdAt": f"2026-09-{day:02d}T10:00:00Z",
+        "body": "c" * 2500,
+    }
+
+
+def test_review_rationale_survives_a_flood_of_bot_comments():
+    """Reviews used to be appended after every comment and truncated away."""
+    enriched = admin_enrich.enrich({"candidates": [{"sourcePr": 11}]}, {
+        11: {
+            "number": 11,
+            "comments": [_bot_comment(day) for day in range(1, 9)],
+            "reviews": [{
+                "author": {"login": "tajaa"},
+                "submittedAt": "2026-09-09T10:00:00Z",
+                "state": "APPROVED",
+                "body": "Staggering the breaks is the whole point of the change.",
+            }],
+        },
+    })
+    discussion = enriched["candidates"][0]["discussion"]
+
+    assert [item["kind"] for item in discussion].count("review") == 1
+    assert discussion[-1]["state"] == "APPROVED"
+    assert discussion == sorted(discussion, key=lambda item: item["at"])
+    assert sum(len(item["body"]) for item in discussion) <= admin_enrich.MAX_DISCUSSION_TOTAL
+
+
+def test_plan_evidence_shares_one_global_budget():
+    """Per-candidate caps alone let a backlog run grow the plan without bound."""
+    candidates = [{"sourcePr": number} for number in range(1, 21)]
+    details = {
+        number: {
+            "number": number,
+            "commits": [
+                {"messageHeadline": f"Commit {index}", "messageBody": "b" * 1200}
+                for index in range(20)
+            ],
+            "comments": [_bot_comment(day) for day in range(1, 13)],
+            "files": [
+                {"path": f"server/app/matcha/services/area/module_{index}.py"}
+                for index in range(60)
+            ],
+        }
+        for number in range(1, 21)
+    }
+
+    enriched = admin_enrich.enrich({"candidates": candidates}, details)
+    total = sum(
+        len(commit["subject"]) + len(commit["body"])
+        for candidate in enriched["candidates"]
+        for commit in candidate["commits"]
+    ) + sum(
+        len(item["body"])
+        for candidate in enriched["candidates"]
+        for item in candidate["discussion"]
+    ) + sum(
+        len(entry["path"])
+        for candidate in enriched["candidates"]
+        for entry in candidate["fileStats"]
+    )
+
+    assert total <= admin_enrich.MAX_PLAN_EVIDENCE_TOTAL
+    # An even share per remaining candidate: the last one is never starved.
+    assert enriched["candidates"][-1]["commits"]
+    assert enriched["candidates"][-1]["discussion"]
+    assert enriched["candidates"][-1]["fileStats"]
+
+
+def test_enrichment_failure_never_blocks_publication():
+    collector = (ADMIN_UPDATES_DIR / "collect.sh").read_text()
+    enrich_line = next(
+        line for line in collector.splitlines() if "enrich.py" in line and "python3" in line
+    )
+    assert enrich_line.rstrip().endswith("\\")
+    assert "|| echo" in collector.split("enrich.py")[1]
+
+
+def test_pr_detail_lookup_pins_the_repository_and_releases_stdin():
+    collector = (ADMIN_UPDATES_DIR / "collect.sh").read_text()
+    view_line = next(line for line in collector.splitlines() if "gh pr view" in line)
+
+    assert '--repo "$REPO"' in view_line
+    assert "</dev/null" in collector.split("gh pr view")[1].split("then")[0]
 
 
 def test_prompt_forbids_diff_reconstruction_and_model_authored_dates():

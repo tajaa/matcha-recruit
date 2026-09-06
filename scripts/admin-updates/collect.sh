@@ -81,9 +81,12 @@ detail_count=0
 while IFS= read -r pr_number; do
     [ -n "$pr_number" ] || continue
     detail_path="$DETAIL_DIR/pr-$pr_number.json"
-    if gh pr view "$pr_number" \
+    # `--repo` pins the same repository the REST calls above use instead of
+    # whatever remote this checkout happens to have; `</dev/null` keeps gh from
+    # consuming the loop's stdin and swallowing the remaining PR numbers.
+    if gh pr view "$pr_number" --repo "$REPO" \
         --json number,commits,comments,reviews,files,additions,deletions,changedFiles \
-        > "$detail_path" 2>/dev/null; then
+        > "$detail_path" 2>/dev/null </dev/null; then
         detail_files+=("$detail_path")
         detail_count=$((detail_count + 1))
     else
@@ -91,6 +94,10 @@ while IFS= read -r pr_number; do
     fi
 done < <(jq -r '(.candidates // [])[].sourcePr' "$OUTPUT")
 
+# Enrichment is optional evidence, never a gate. Failing the step here would
+# skip publication entirely and open an ops-health issue over a malformed
+# comment body -- the same reason nav grounding is non-fatal in write-content.sh.
 if [ "$detail_count" -gt 0 ]; then
-    python3 "$SCRIPT_DIR/enrich.py" "$OUTPUT" "${detail_files[@]}"
+    python3 "$SCRIPT_DIR/enrich.py" "$OUTPUT" "${detail_files[@]}" \
+        || echo "admin-updates: warning: could not attach PR evidence; the writer falls back to titles and bodies" >&2
 fi

@@ -30,6 +30,18 @@ _IGNORED_PREFIXES = (
 )
 _IGNORED_EXACT = {"CLAUDE.md", "AGENTS.md", "README.md"}
 _MERGE_CURSOR_OVERLAP = timedelta(hours=24)
+# Docker reports a zero-value `State.StartedAt` ("0001-01-01T00:00:00Z") for a
+# container that has never run. It parses cleanly, so it has to be rejected by
+# value or "unknown" silently becomes "ancient" and the merge floor dates the
+# entry at the merge date -- the one date this publisher must never use.
+_MIN_PLAUSIBLE_START = datetime(2000, 1, 1, tzinfo=timezone.utc)
+# Which live components a dispatching deploy actually replaced. Anything else
+# (including a manual dispatch) tells us nothing about a specific component.
+_DEPLOY_TARGET_COMPONENTS = {
+    "matcha": ("backend", "frontend"),
+    "backend": ("backend",),
+    "frontend": ("frontend",),
+}
 # Readers of /admin/updates are in one office. A UTC date turns every
 # late-afternoon Pacific deploy into tomorrow's changelog entry.
 _DEFAULT_DISPLAY_TIMEZONE = "America/Los_Angeles"
@@ -180,11 +192,18 @@ def _optional_timestamp(value: Any) -> datetime | None:
         return None
 
 
+def _container_started_at(value: Any) -> datetime | None:
+    parsed = _optional_timestamp(value)
+    if parsed is None or parsed < _MIN_PLAUSIBLE_START:
+        return None
+    return parsed
+
+
 def _component_started_at(production_context: dict[str, Any]) -> dict[str, datetime | None]:
     """When each live blue/green container actually began serving its image."""
     containers = production_context.get("containers") or {}
     return {
-        component: _optional_timestamp((containers.get(component) or {}).get("started_at"))
+        component: _container_started_at((containers.get(component) or {}).get("started_at"))
         for component in ("backend", "frontend")
     }
 
@@ -194,21 +213,39 @@ def _live_at(
     required_components: list[str],
     started_at: dict[str, datetime | None],
     merged_at: datetime | None,
+    deployed_at: datetime | None,
+    deployed_components: set[str],
     fallback: datetime,
 ) -> datetime:
-    """Best evidence for when a PR became reachable in production.
+    """Tightest defensible upper bound on when a PR became reachable in production.
 
-    The dispatching deploy's own timestamp is unreliable: this workflow runs on
-    one self-hosted runner and a dispatch can sit queued for a day, by which
-    point a *later* deploy is what actually carried the PR live. The running
-    containers' start times are read fresh in the same run, so prefer them and
-    never date an entry before its PR merged.
+    A live container has been serving an image that contains this PR since its
+    own `started_at`, so that start bounds when the component went live with
+    it -- but only as an upper bound. Any run that is not the first successful
+    dispatch after the carrying deploy (a retry, a batch released by
+    `deferred`, a `since_pr` backfill, or a multi-component PR whose other
+    component has been redeployed since) observes a *later* deploy and would
+    date the entry after the fact.
+
+    The dispatching deploy is the tighter bound for the components it actually
+    replaced, but only when it could have carried the PR at all: its source SHA
+    must contain the merge commit and it must not predate the merge. Take the
+    tightest bound per component, the latest across components, and never date
+    an entry before its PR merged.
     """
-    starts = [started_at.get(component) for component in required_components]
-    known = [start for start in starts if start is not None]
-    if not known or len(known) != len(starts):
+    if merged_at is not None and deployed_at is not None and deployed_at < merged_at:
+        deployed_components = set()
+    bounds: list[datetime] = []
+    for component in required_components:
+        start = started_at.get(component)
+        if start is None:
+            return fallback
+        if deployed_at is not None and component in deployed_components:
+            start = min(start, deployed_at)
+        bounds.append(start)
+    if not bounds:
         return fallback
-    live = max(known)
+    live = max(bounds)
     if merged_at is not None and merged_at > live:
         return merged_at
     return live
@@ -254,6 +291,10 @@ def build_plan(
     )
     deployment_date = deployed_at_ts.astimezone(tz).date().isoformat()
     started_at = _component_started_at(production_context)
+    deploy_sha = str(deployment.get("sha") or "")
+    deployed_components = set(
+        _DEPLOY_TARGET_COMPONENTS.get(str(deployment.get("target") or "").strip().lower(), ())
+    )
 
     state_updated_at_raw = production_state.get("updated_at")
     state_updated_at = (
@@ -339,6 +380,14 @@ def build_plan(
                 required_components=sorted(components),
                 started_at=started_at,
                 merged_at=_optional_timestamp(pr.get("mergedAt")),
+                deployed_at=deployed_at_ts,
+                # An image built from a SHA that does not contain the merge
+                # commit cannot have carried this PR, whatever it replaced.
+                deployed_components=(
+                    deployed_components
+                    if _is_ancestor(repo_root, merge_oid, deploy_sha)
+                    else set()
+                ),
                 fallback=fallback_live_at,
             )
             candidates.append({
