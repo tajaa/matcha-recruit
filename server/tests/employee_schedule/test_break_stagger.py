@@ -333,6 +333,33 @@ def test_the_placement_floor_yields_to_the_legal_deadline():
     assert result.suggested_end <= _local(8)
 
 
+def test_the_floor_yields_to_coverage_before_it_costs_a_suggestion():
+    """Policy is a preference: a crew too big for it spills into lawful time.
+
+    Breaks serialize when a shift carries no spare headcount, so the floor
+    window (08:30-11:00 here) holds exactly six 30-minute breaks. Treating the
+    floor as a bound would report `insufficient_coverage` for the rest — a
+    strictly worse answer than the lawful early time they had before the floor
+    existed.
+    """
+    plan = _opener(required_staff=9, crew=9)
+
+    assert [result.status for result in plan.results] == ["suggested"] * 9
+    starts = sorted(result.suggested_start for result in plan.results)
+    # Six above the floor, and the overflow walks backwards from it — closest
+    # to the floor first, never past the shift's own start.
+    assert starts == [
+        _local(7), _local(7, 30), _local(8), _local(8, 30), _local(9),
+        _local(9, 30), _local(10), _local(10, 30), _local(11),
+    ]
+
+
+def test_the_crew_that_fits_the_floor_still_gets_it_whole():
+    plan = _opener(required_staff=6, crew=6)
+
+    assert all(result.suggested_start >= _local(8, 30) for result in plan.results)
+
+
 def test_a_saved_time_below_the_floor_is_still_honored():
     """The floor is placement policy; a reviewed time is the manager's call."""
     saved = LockedBreak(

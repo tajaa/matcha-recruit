@@ -919,6 +919,46 @@ def test_schedlaw_records_render_no_cap_as_no_limit():
     assert "no limit under law" in rec["summary"]
 
 
+def _wa_meal_timing(**summary):
+    values = {
+        "source": "catalog_extraction",
+        "meal_break_after_hours": 5, "meal_break_minutes": 30,
+        "citations": {
+            "meal_break": "WAC 296-126-092(1)",
+            "meal_break_timing": "WAC 296-126-092(1)",
+        },
+    }
+    values.update(summary)
+    return [{"kind": "state_rules", "state": "WA", "summary": values}]
+
+
+def test_schedlaw_records_render_the_earliest_meal_start():
+    """The key is only half-wired unless the LABEL map carries it too.
+
+    `_schedlaw_records` iterates `_SCHEDLAW_RULE_LABELS`, never the summary's
+    own keys, so a key added to `_SCHEDLAW_RULE_KEY_TO_CHECK` alone resolves a
+    citation for a record that is never emitted.
+    """
+    recs = _schedlaw_records(_wa_meal_timing(meal_break_earliest_after_hours=2))
+    rec = next(r for r in recs if r["cid"] == "schedlaw:WA-meal_break_earliest_after_hours")
+    assert "earliest meal break start 2h into shift" in rec["summary"]
+    assert "WAC 296-126-092(1)" in rec["summary"]
+
+
+def test_schedlaw_no_cap_on_a_floor_does_not_read_as_a_missing_ceiling():
+    """"no limit under law" describes the wrong end of an earliest."""
+    recs = _schedlaw_records(_wa_meal_timing(meal_break_earliest_after_hours="no_cap"))
+    rec = next(r for r in recs if r["cid"] == "schedlaw:WA-meal_break_earliest_after_hours")
+    assert "no earliest set by law" in rec["summary"]
+    assert "no limit under law" not in rec["summary"]
+
+
+def test_schedlaw_omits_the_earliest_where_a_state_sets_none():
+    # CA's curated value is an explicit null — an absent record, not a claim.
+    recs = _schedlaw_records(_wa_meal_timing(meal_break_earliest_after_hours=None))
+    assert not any(r["cid"].endswith("-meal_break_earliest_after_hours") for r in recs)
+
+
 def test_schedlaw_records_skip_undetermined_keys():
     recs = _schedlaw_records(_schedlaw_fixture())
     cids = {r["cid"] for r in recs}

@@ -152,6 +152,26 @@ def test_every_state_row_is_cited():
         )
 
 
+def test_rows_carry_their_own_regulation_key():
+    """A NULL `regulation_key` can never be codified, and only a codified row
+    reaches `schedule_rule_extraction`'s catalog query (`codified_sql`). It
+    must also differ from the base row's key, or `match_codifications` would
+    bind this row to the DEADLINE's authority item."""
+    stripped = _strip_comments(_pack_text())
+    assert len(re.findall(r"\bregulation_key\b", stripped)) == len(STATES)
+    assert len(re.findall(r"'meal_break_timing'(?=,)", stripped)) == len(STATES)
+    assert "'meal_break'," not in stripped
+
+
+def test_pack_documents_that_the_rows_are_not_yet_extractable():
+    # The rows are real catalog reference data, but the extraction reads
+    # codified rows only and this pack cannot codify them. Saying otherwise is
+    # how the README came to claim the extraction runs against them.
+    header = _pack_text().split("-- California", 1)[0]
+    assert "codified" in header.lower()
+    assert "citation_verified_at" in header and "citation_item_id" in header
+
+
 def test_state_rows_are_scoped_to_state_level_jurisdictions():
     # A bare `j.state = 'CA'` would also match every CA city/county row.
     assert len(re.findall(r"j\.level = 'state'", _pack_text())) == len(STATES)

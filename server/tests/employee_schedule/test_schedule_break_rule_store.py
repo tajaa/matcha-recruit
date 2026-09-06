@@ -201,6 +201,101 @@ def test_a_state_that_sets_no_earliest_gets_no_offset():
     assert result.rules[0].earliest_offset_minutes is None
 
 
+def test_no_rule_on_the_meal_itself_yields_no_break_rule():
+    """`no_rule=true` arrives as the NO_CAP sentinel, not as a number.
+
+    Before the legacy fallback merged approved extractions, only the curated
+    table reached these reads and no meal key in it is ever NO_CAP; letting the
+    sentinel through to `float()` 500s every break-plan call for the location.
+    """
+    location = _wa_location()
+    location["state"] = "TX"
+    result = _run(resolve_break_rules(
+        FakeConn(
+            location, structured=[], state="TX",
+            extractions=[
+                _extraction("meal_break_after_hours", None, no_rule=True),
+                _extraction("meal_break_minutes", None, no_rule=True),
+            ],
+        ),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.rules == ()
+    assert result.source == "unmapped"
+
+
+def test_no_rule_on_the_second_meal_keeps_the_first():
+    location = _wa_location()
+    result = _run(resolve_break_rules(
+        FakeConn(
+            location, structured=[], state="WA",
+            extractions=[
+                _extraction("meal_break_after_hours", 5.0),
+                _extraction("meal_break_minutes", 30.0),
+                _extraction("meal_break_earliest_after_hours", 2.0),
+                _extraction("second_meal_after_hours", None, no_rule=True),
+            ],
+        ),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert [rule.ordinal for rule in result.rules] == [1]
+    assert result.rules[0].earliest_offset_minutes == 120
+
+
+def test_an_earliest_past_the_deadline_is_dropped_and_reported():
+    """Two independently-approved thresholds can describe an empty window.
+
+    Enforcing it would be a permanent deadline_conflict on every shift at the
+    location with nothing on screen saying why, so the deadline (the one whose
+    breach is the violation) is kept alone and an advisory carries the rest.
+    """
+    location = _wa_location()
+    result = _run(resolve_break_rules(
+        FakeConn(
+            location, structured=[], state="WA",
+            extractions=[
+                _extraction("meal_break_after_hours", 5.0),
+                _extraction("meal_break_minutes", 30.0),
+                _extraction("meal_break_earliest_after_hours", 6.0),
+            ],
+        ),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.rules[0].earliest_offset_minutes is None
+    assert result.rules[0].deadline_offset_minutes == 300
+    advisory = next(
+        item for item in result.advisories if item["code"] == "break_rules_inconsistent"
+    )
+    assert advisory["metadata"] == {
+        "earliest_after_hours": 6.0, "meal_break_after_hours": 5.0,
+    }
+
+
+def test_an_earliest_exactly_at_the_deadline_is_also_dropped():
+    location = _wa_location()
+    result = _run(resolve_break_rules(
+        FakeConn(
+            location, structured=[], state="WA",
+            extractions=[
+                _extraction("meal_break_after_hours", 5.0),
+                _extraction("meal_break_minutes", 30.0),
+                _extraction("meal_break_earliest_after_hours", 5.0),
+            ],
+        ),
+        company_id=uuid4(),
+        location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.rules[0].earliest_offset_minutes is None
+    assert "break_rules_inconsistent" in [item["code"] for item in result.advisories]
+
+
 def test_a_catalog_read_failure_is_visible_rather_than_silent():
     location = _wa_location()
     result = _run(resolve_break_rules(

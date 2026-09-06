@@ -182,7 +182,43 @@ def validate_extraction(
             "rationale": raw.get("rationale"),
         })
 
-    return valid, rejected
+    return _drop_impossible_meal_window(valid, rejected)
+
+
+def _drop_impossible_meal_window(
+    valid: list[dict[str, Any]], rejected: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Reject an earliest that is not strictly before the same run's deadline.
+
+    Every other check here is per row, and `_RANGES` deliberately lets these
+    two keys overlap (2-12 for the deadline, 0.5-6 for the earliest) because
+    neither bound is wrong on its own. Together they can still describe a
+    window no meal period fits in — earliest 6h into a shift that must have
+    started by 5h — which `schedule_break_rule_store` can only report as an
+    unexplained conflict on every shift at the location. Rejecting the earliest
+    (the deadline is the one whose breach is the violation) puts it in front of
+    the reviewer instead, while the row is still attached to its rationale.
+
+    A run emits every key it found at once, so the pair is normally here
+    together; the adaptation layer stays the backstop for the case where they
+    were approved out of separate runs.
+    """
+    deadline = next(
+        (row for row in valid if row["rule_key"] == "meal_break_after_hours"), None,
+    )
+    if deadline is None or deadline["rule_value"] is None:
+        return valid, rejected
+    kept: list[dict[str, Any]] = []
+    for row in valid:
+        if (
+            row["rule_key"] == "meal_break_earliest_after_hours"
+            and row["rule_value"] is not None
+            and row["rule_value"] >= deadline["rule_value"]
+        ):
+            rejected.append({"row": row, "reason": "earliest_not_before_deadline"})
+            continue
+        kept.append(row)
+    return kept, rejected
 
 
 def decide_upsert(existing: Optional[dict[str, Any]], new: dict[str, Any]) -> dict[str, Any]:

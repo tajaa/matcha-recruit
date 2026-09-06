@@ -26,6 +26,13 @@ const SOURCE_LABEL: Record<string, string> = {
   unmapped: 'Not yet researched',
 }
 
+// How `no_cap` reads per field. Every other rule here is a ceiling, so the
+// default is right for them; the earliest meal start is a floor, and "no limit"
+// would describe the wrong end of it.
+const NO_RULE_LABELS: Record<string, string> = {
+  meal_break_earliest_after_hours: 'no earliest under law',
+}
+
 function RuleRow({ ruleKey, value }: { ruleKey: string; value: unknown }) {
   const meta = RULE_LABELS[ruleKey]
   if (!meta) return null
@@ -33,7 +40,7 @@ function RuleRow({ ruleKey, value }: { ruleKey: string; value: unknown }) {
   // distinct from an absent key (not researched, filtered out above) and from
   // no_cap (the law affirmatively imposes no limit).
   const display =
-    value === 'no_cap' ? 'no limit under law'
+    value === 'no_cap' ? (NO_RULE_LABELS[ruleKey] ?? 'no limit under law')
     : value === null ? 'none under state law'
     : `${value}${meta.unit}`
   return (

@@ -191,13 +191,20 @@ Invariants, each of which has a regression test in
   `_build_slot`'s fallback envelope used to open at the shift's first instant —
   a 06:30–14:30 shift was told to break at 06:30. Two placement rules narrow
   that envelope: a statute-silent requirement does not start before
-  `DEFAULT_PLACEMENT_FLOOR_MINUTES` (120), and nothing is ever suggested at the
-  first instant even where a statute encodes an earliest of zero. Both are
-  **policy, not law** — they apply only while the break still fits before its
-  deadline (a short shift keeps its legal window rather than gaining a false
-  `deadline_conflict`), a real statutory earliest always wins in both
-  directions, and `locked` times a manager saved are never re-judged against
-  them.
+  `DEFAULT_PLACEMENT_FLOOR_MINUTES` (120), and nothing starts at the first
+  instant even where a statute encodes an earliest of zero. Both are **policy,
+  not law** — a real statutory earliest always wins in both directions, both
+  yield to law and to coverage (next bullet), and `locked` times a manager
+  saved are never re-judged against them.
+- **Placement policy is a preference, never a bound.** `_build_slot` keeps it in
+  its own `policy_earliest` field beside the legal `earliest`, and
+  `_candidate_starts` only *reorders* the legal window by it: allowed times
+  first, discouraged ones after, closest-to-the-floor first. Narrowing the
+  window instead is wrong twice — a short shift would gain a false
+  `deadline_conflict` (guarded at build time), and, because breaks serialize
+  when a shift carries no spare headcount, a window shortened by two hours
+  holds four fewer of them, so a crew of 9 on a CA opener lost three lawful
+  suggestions to `insufficient_coverage`.
 - **Law and placement policy live in different places, on purpose.** California
   has no statutory earliest — § 512(a) and *Brinker* (2012) 53 Cal.4th 1004 fix
   only the deadline, and a first-hour meal is lawful — so
@@ -207,7 +214,22 @@ Invariants, each of which has a regression test in
   length) carry it as the `meal_break_earliest_after_hours` extraction key,
   which `schedule_break_rule_store._legacy_rules` turns into the requirement's
   `earliest_offset_minutes` (first meal only). Catalog rows behind that key:
-  `scripts/seed/meal_break_timing.sql`.
+  `scripts/seed/meal_break_timing.sql` — reference data the pilots and the law
+  panel cite today; the extraction reads codified rows only and WA/OR are not
+  codified yet (that pack's header has the detail).
+- **`NO_CAP` is not a number, and `_legacy_rules` now sees it.** An approved
+  extraction row with `no_rule=true` arrives as `schedule_compliance.NO_CAP` (a
+  bare `object()`), so every threshold read goes through `_threshold` before
+  `float()`; only the curated table used to reach those reads, and no meal key
+  in it is ever `NO_CAP`.
+- **Two thresholds that cannot both hold are reported, not enforced.** The
+  earliest and the deadline are approved one row at a time and range-checked
+  independently, so `earliest >= meal_break_after_hours` is reachable and
+  describes a window no break fits in. `validate_extraction` rejects the
+  earliest when its own run carries the deadline; `_legacy_rules` is the
+  backstop for rows approved out of separate runs, keeping the deadline (the
+  one whose breach is the violation) and emitting `break_rules_inconsistent`
+  rather than a permanent unexplained `deadline_conflict` on every shift.
 - **The legacy fallback merges approved catalog extractions.** For a state the
   curated table never covered, `resolve_break_rules` now calls
   `shift_compliance._approved_db_rules` so break timing comes from the same

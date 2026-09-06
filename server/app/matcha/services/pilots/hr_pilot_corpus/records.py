@@ -7,7 +7,7 @@ import logging
 import re
 from app.matcha.services.pilots.handbook_pilot import build_corpus
 
-from ._config import _CITATION_RE, _INCIDENT_LOOKBACK_DAYS, _LADDER_STEPS, _MAX_BENEFIT_PLANS, _MAX_RECENT_INCIDENTS, _MAX_SCHEDINT_COVERAGE_RECORDS, _MAX_SCHEDLAW_RECORDS, _MAX_SCHEDULE_SHIFTS, _MAX_TRAINING_DETAIL, _MAX_TRAINING_PROGRAMS, _SCHEDLAW_RULE_KEY_TO_CHECK, _SCHEDLAW_RULE_LABELS, _SCHEDULE_LOOKAHEAD_DAYS, _SUPERVISOR_ONLY_SOURCES
+from ._config import _CITATION_RE, _INCIDENT_LOOKBACK_DAYS, _LADDER_STEPS, _MAX_BENEFIT_PLANS, _MAX_RECENT_INCIDENTS, _MAX_SCHEDINT_COVERAGE_RECORDS, _MAX_SCHEDLAW_RECORDS, _MAX_SCHEDULE_SHIFTS, _MAX_TRAINING_DETAIL, _MAX_TRAINING_PROGRAMS, _SCHEDLAW_NO_RULE_DEFAULT, _SCHEDLAW_NO_RULE_DISPLAY, _SCHEDLAW_RULE_KEY_TO_CHECK, _SCHEDLAW_RULE_LABELS, _SCHEDULE_LOOKAHEAD_DAYS, _SUPERVISOR_ONLY_SOURCES
 from app.matcha.services._shared.text import _hum
 
 logger = logging.getLogger(__name__)
@@ -282,7 +282,10 @@ def _schedlaw_records(data: list[dict] | None) -> list[dict]:
                 value = summary.get(rule_key)
                 if value is None:
                     continue
-                display = "no limit under law" if value == "no_cap" else f"{value}{unit}"
+                display = (
+                    _SCHEDLAW_NO_RULE_DISPLAY.get(rule_key, _SCHEDLAW_NO_RULE_DEFAULT)
+                    if value == "no_cap" else f"{value}{unit}"
+                )
                 citation = citations.get(_SCHEDLAW_RULE_KEY_TO_CHECK.get(rule_key, ""))
                 cite_clause = f", cites {citation}" if citation else ""
                 recs.append({

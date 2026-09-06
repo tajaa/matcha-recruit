@@ -32,9 +32,9 @@ nothing about how early a break may start — California is the case in point
 own start time is legal there and useless everywhere: nobody has worked yet.
 ``DEFAULT_PLACEMENT_FLOOR_MINUTES`` is this module's operational answer, and it
 is policy, not law — it is never written into a ``BreakRequirement``, it only
-ever applies where the rule set states no earliest of its own, it yields to the
-legal deadline rather than manufacturing a conflict, and a time a manager saved
-is never re-judged against it.
+ever applies where the rule set states no earliest of its own, it yields both
+to the legal deadline and to coverage rather than manufacturing a conflict of
+either kind, and a time a manager saved is never re-judged against it.
 """
 
 from __future__ import annotations
@@ -113,6 +113,7 @@ class _Slot:
     ordinal: int
     duration_minutes: int
     earliest: datetime
+    policy_earliest: datetime
     latest_start: datetime
     preferred: datetime
     deadline: datetime
@@ -147,10 +148,15 @@ def _build_slot(
     and neither able to create a conflict the law does not have:
 
     * a statute-silent requirement does not start before the policy floor, and
-    * no requirement is ever suggested at the shift's first instant.
+    * nothing starts at the shift's first instant, even where a rule set
+      encodes an earliest offset of zero.
 
-    Each applies only while it still leaves the break placeable before its
-    deadline; a shift too short to honor them keeps the legal window it had.
+    The result is ``policy_earliest``, kept SEPARATE from the legal ``earliest``
+    because policy is a preference and law is a bound.  Narrowing the legal
+    window itself would be wrong twice over: it applies only while the break
+    still fits before its deadline (checked here), and it must not cost the
+    shift a placement (checked at placement time, since only there is it known
+    how many breaks are competing for the same window).
     """
 
     duration = timedelta(minutes=requirement.duration_minutes)
@@ -164,14 +170,15 @@ def _build_slot(
         earliest = shift_start_local
     if latest_start > shift_end_local - duration:
         latest_start = shift_end_local - duration
+    policy_earliest = earliest
     if requirement.earliest_local is None:
         floor = shift_start_local + timedelta(minutes=max(0, placement_floor_minutes))
-        if earliest < floor <= latest_start:
-            earliest = floor
-    if earliest <= shift_start_local and shift_start_local + step <= latest_start:
+        if policy_earliest < floor <= latest_start:
+            policy_earliest = floor
+    if policy_earliest <= shift_start_local and shift_start_local + step <= latest_start:
         # A break at the moment the shift opens is never the answer, even where
         # a rule set encodes an earliest offset of zero.
-        earliest = shift_start_local + step
+        policy_earliest = shift_start_local + step
     window_too_short = latest_start < earliest
     if window_too_short:
         # A window too tight to hold the break at all: keep it anchored at the
@@ -180,10 +187,12 @@ def _build_slot(
         # which is why the slot carries the flag rather than swallowing it —
         # a break the law cannot fit is not a `suggested` one.
         latest_start = earliest
+    if policy_earliest > latest_start:
+        policy_earliest = latest_start
 
-    preferred = requirement.recommended_local or earliest
-    if preferred < earliest:
-        preferred = earliest
+    preferred = requirement.recommended_local or policy_earliest
+    if preferred < policy_earliest:
+        preferred = policy_earliest
     if preferred > latest_start:
         preferred = latest_start
     return _Slot(
@@ -192,6 +201,7 @@ def _build_slot(
         ordinal=requirement.ordinal,
         duration_minutes=requirement.duration_minutes,
         earliest=earliest,
+        policy_earliest=policy_earliest,
         latest_start=latest_start,
         preferred=preferred,
         deadline=deadline,
@@ -206,6 +216,15 @@ def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
     Preferring the recommended time and only then drifting keeps the first
     employee placed where the rule actually wants the break, and pushes later
     employees off it only as far as coverage forces.
+
+    The walk covers the whole LEGAL window and the placement policy only
+    reorders it: every time policy allows comes first, then the times it merely
+    discourages, closest to the floor first.  Dropping the latter instead would
+    make the policy cost placements — breaks serialize when a shift carries no
+    spare headcount, so a window shortened by two hours holds four fewer of
+    them, and the crew who no longer fit would be reported as
+    `insufficient_coverage` rather than given the lawful early time they had
+    before.
     """
 
     step = timedelta(minutes=max(1, step_minutes))
@@ -231,11 +250,15 @@ def _candidate_starts(slot: _Slot, step_minutes: int) -> list[datetime]:
     # one start that fits and would report insufficient_coverage for a slot
     # that is schedulable.  Boundaries go last: they are the fallback after
     # every preferred-adjacent option has been tried.
-    for boundary in (slot.latest_start, slot.earliest):
+    for boundary in (slot.latest_start, slot.policy_earliest, slot.earliest):
         if boundary not in seen and slot.earliest <= boundary <= slot.latest_start:
             seen.add(boundary)
             candidates.append(boundary)
-    return candidates
+    allowed = [value for value in candidates if value >= slot.policy_earliest]
+    discouraged = sorted(
+        (value for value in candidates if value < slot.policy_earliest), reverse=True,
+    )
+    return allowed + discouraged
 
 
 def _fits(

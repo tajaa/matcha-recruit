@@ -229,45 +229,97 @@ def _location_timezone(value: str | None) -> ZoneInfo | None:
         return None
 
 
-def _hours_to_offset_minutes(value: Any) -> int | None:
-    """Whole minutes for a curated/extracted hour threshold, or None.
+def _threshold(value: Any) -> Any:
+    """A threshold's value, or `None` when there is no such boundary at all.
 
-    `None` is the threshold table's "explicitly no such rule here" and `NO_CAP`
-    its "the law affirmatively imposes no limit"; both mean the same thing to a
-    break offset — there is no such boundary to place against.
+    The curated table writes `None` for "explicitly no such rule here" and
+    `NO_CAP` for "the law affirmatively imposes no limit"; an approved
+    extraction row carrying `no_rule=true` arrives here as `NO_CAP` too. Every
+    reader below wants the same answer from both — there is no boundary to
+    place a break against — and `NO_CAP` is a bare `object()`, so letting it
+    reach `float()` raises `TypeError` instead of degrading gracefully. Before
+    the legacy fallback merged `db_rules`, only the curated table reached these
+    reads and no meal key in it was ever `NO_CAP`.
     """
-    if value is None or value is schedule_compliance.NO_CAP:
+    return None if value is schedule_compliance.NO_CAP else value
+
+
+def _hours_to_offset_minutes(value: Any) -> int | None:
+    """Whole minutes for a curated/extracted hour threshold, or None."""
+    value = _threshold(value)
+    if value is None:
         return None
     return int(float(value) * 60)
 
 
-def _legacy_rules(state: str, db_rules: dict[str, Any] | None = None) -> list[BreakRule]:
+def _inconsistent_window_advisory(earliest_minutes: int, deadline_minutes: int) -> dict[str, Any]:
+    """Said out loud when a state's own two meal thresholds cannot both hold.
+
+    `meal_break_earliest_after_hours` and `meal_break_after_hours` are approved
+    one row at a time and range-checked independently, so an earliest at or
+    past the deadline is reachable. That pair describes a window no break can
+    sit inside, which the stagger renders as a permanent `deadline_conflict` on
+    every shift at the location with nothing on screen saying why.
+    """
+    return {
+        "check": "break_rules",
+        "code": "break_rules_inconsistent",
+        "severity": "advisory",
+        "message": (
+            "This location's meal-break thresholds conflict: the earliest start "
+            "is not before the deadline. The deadline is being applied on its "
+            "own — verify the earliest start manually."
+        ),
+        "metadata": {
+            "earliest_after_hours": round(earliest_minutes / 60, 2),
+            "meal_break_after_hours": round(deadline_minutes / 60, 2),
+        },
+    }
+
+
+def _legacy_rules(
+    state: str, db_rules: dict[str, Any] | None = None,
+) -> tuple[list[BreakRule], list[dict[str, Any]]]:
+    """Curated/extracted thresholds adapted into break rules, plus advisories.
+
+    The rules handed back are always internally consistent; a threshold pair
+    that cannot both be true is dropped down to the one whose breach is the
+    actual violation, and reaches the manager as an advisory instead.
+    """
     state = (state or "").strip().upper()
     rules = schedule_compliance.rules_for_state(state, db_rules)
     rule_set_id = _uuid_for_legacy(state or "UNKNOWN")
     out: list[BreakRule] = []
-    meal_after = rules.get("meal_break_after_hours")
-    meal_minutes = rules.get("meal_break_minutes")
+    advisories: list[dict[str, Any]] = []
+    meal_after = _threshold(rules.get("meal_break_after_hours"))
+    meal_minutes = _threshold(rules.get("meal_break_minutes"))
     citation = rules.get("citations", {}).get("meal_break", "")
     if meal_after is not None and meal_minutes is not None:
+        deadline_offset = int(float(meal_after) * 60)
+        # States that legislate an earliest measure it from the shift start
+        # for the FIRST meal only (WAC 296-126-092(1), OAR
+        # 839-020-0050(2)(d)); ordinal 2 keeps no earliest rather than
+        # inheriting one that was never written about it.
+        earliest_offset = _hours_to_offset_minutes(
+            rules.get("meal_break_earliest_after_hours")
+        )
+        if earliest_offset is not None and earliest_offset >= deadline_offset:
+            advisories.append(
+                _inconsistent_window_advisory(earliest_offset, deadline_offset)
+            )
+            earliest_offset = None
         out.append(BreakRule(
             rule_set_id=rule_set_id,
             kind="meal",
             ordinal=1,
-            trigger_after_minutes=int(float(meal_after) * 60),
+            trigger_after_minutes=deadline_offset,
             duration_minutes=int(meal_minutes),
             paid=False,
-            deadline_offset_minutes=int(float(meal_after) * 60),
-            # States that legislate an earliest measure it from the shift start
-            # for the FIRST meal only (WAC 296-126-092(1), OAR
-            # 839-020-0050(2)(d)); ordinal 2 keeps no earliest rather than
-            # inheriting one that was never written about it.
-            earliest_offset_minutes=_hours_to_offset_minutes(
-                rules.get("meal_break_earliest_after_hours")
-            ),
+            deadline_offset_minutes=deadline_offset,
+            earliest_offset_minutes=earliest_offset,
             citation=citation,
         ))
-        second_after = rules.get("second_meal_after_hours")
+        second_after = _threshold(rules.get("second_meal_after_hours"))
         if second_after is not None:
             out.append(BreakRule(
                 rule_set_id=rule_set_id,
@@ -279,7 +331,7 @@ def _legacy_rules(state: str, db_rules: dict[str, Any] | None = None) -> list[Br
                 deadline_offset_minutes=int(float(second_after) * 60),
                 citation=citation,
             ))
-    return out
+    return out, advisories
 
 
 async def resolve_break_rules(
@@ -385,7 +437,7 @@ async def resolve_break_rules(
                     "location; verify break timing manually."
                 ),
             },)
-    legacy = _legacy_rules(state_code, db_rules)
+    legacy, legacy_advisories = _legacy_rules(state_code, db_rules)
     if legacy:
         return ResolvedBreakRules(
             rules=tuple(legacy),
@@ -393,14 +445,14 @@ async def resolve_break_rules(
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
             source="catalog_extraction" if db_rules else "legacy_curated",
-            advisories=fallback_advisories,
+            advisories=(*fallback_advisories, *legacy_advisories),
         )
     return ResolvedBreakRules(
         rules=(), rule_set_ids=(),
         timezone=_location_timezone(readiness.timezone),
         industry_code=readiness.industry_code,
         source="unmapped",
-        advisories=(*fallback_advisories, {
+        advisories=(*fallback_advisories, *legacy_advisories, {
             "check": "break_rules",
             "code": "break_rules_unmapped",
             "severity": "advisory",
