@@ -168,11 +168,17 @@ async def get_or_create_schedule_assistant_session(
     actor_role: str,
     location_id: UUID,
     week_start: date,
+    session_id: UUID | None = None,
 ) -> dict:
-    """Return the one Huume thread for this manager/location/week.
+    """Open a Huume thread for this manager/location/week.
 
-    The advisory lock makes concurrent panel mounts converge on one session;
-    the unique constraint is the final backstop for older databases.
+    Opening the panel starts a NEW conversation; passing ``session_id`` resumes
+    one the manager picked out of their own history. A latest session nobody
+    has spoken in yet is reused rather than duplicated, so re-opening the panel
+    does not leave a trail of empty threads.
+
+    The advisory lock makes concurrent panel mounts converge on one session
+    instead of racing two empty ones into existence.
     """
     async with get_connection() as conn:
         async with conn.transaction():
@@ -201,20 +207,53 @@ async def get_or_create_schedule_assistant_session(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 f"schedule-assistant:{company_id}:{user_id}:{location_id}:{week_start.isoformat()}",
             )
-            existing = await conn.fetchrow(
-                """
-                SELECT s.id, s.company_id, s.user_id, s.location_id, s.week_start,
-                       s.thread_id, t.current_state, t.version, t.status
-                FROM schedule_assistant_sessions s
-                JOIN mw_threads t ON t.id=s.thread_id
-                WHERE s.company_id=$1 AND s.user_id=$2 AND s.location_id=$3 AND s.week_start=$4
-                FOR UPDATE OF t
-                """,
-                company_id,
-                user_id,
-                location_id,
-                week_start,
-            )
+            if session_id is not None:
+                existing = await conn.fetchrow(
+                    """
+                    SELECT s.id, s.company_id, s.user_id, s.location_id, s.week_start,
+                           s.thread_id, t.current_state, t.version, t.status
+                    FROM schedule_assistant_sessions s
+                    JOIN mw_threads t ON t.id=s.thread_id
+                    WHERE s.id=$1 AND s.company_id=$2 AND s.user_id=$3
+                      AND s.location_id=$4 AND s.week_start=$5
+                    FOR UPDATE OF t
+                    """,
+                    session_id,
+                    company_id,
+                    user_id,
+                    location_id,
+                    week_start,
+                )
+                if not existing:
+                    raise HTTPException(
+                        status_code=404, detail="Schedule assistant session not found"
+                    )
+            else:
+                # An empty latest session IS a fresh conversation, so hand it
+                # back instead of minting a second one — otherwise opening and
+                # closing the panel piles up threads nobody ever spoke in.
+                existing = await conn.fetchrow(
+                    """
+                    SELECT s.id, s.company_id, s.user_id, s.location_id, s.week_start,
+                           s.thread_id, t.current_state, t.version, t.status
+                    FROM schedule_assistant_sessions s
+                    JOIN mw_threads t ON t.id=s.thread_id
+                    LEFT JOIN LATERAL (
+                        SELECT 1 AS spoken FROM mw_messages m
+                        WHERE m.thread_id=s.thread_id LIMIT 1
+                    ) msg ON true
+                    WHERE s.company_id=$1 AND s.user_id=$2 AND s.location_id=$3
+                      AND s.week_start=$4 AND t.status <> 'archived'
+                      AND msg.spoken IS NULL
+                    ORDER BY s.created_at DESC
+                    LIMIT 1
+                    FOR UPDATE OF t
+                    """,
+                    company_id,
+                    user_id,
+                    location_id,
+                    week_start,
+                )
             if existing:
                 session_id = existing["id"]
                 thread_id = existing["thread_id"]
@@ -275,16 +314,146 @@ async def get_or_create_schedule_assistant_session(
             )
 
     messages = await get_thread_messages(thread_id, limit=50)
+    first_user_turn = next(
+        (message.get("content") for message in messages if message.get("role") == "user"),
+        None,
+    )
     return {
         "session_id": str(session_id),
         "thread_id": str(thread_id),
         "location_id": str(location_id),
         "week_start": week_start.isoformat(),
         "week_end": _week_end(week_start).isoformat(),
+        "title": _session_title(first_user_turn),
         "messages": messages,
         "current_state": current_state,
         "version": version,
     }
+
+
+_TITLE_MAX_CHARS = 80
+
+
+def _session_title(first_user_content: str | None) -> str:
+    """Name a chat after what the manager actually asked in it.
+
+    A turn carries the editor's appended selected-shift context after a blank
+    line; the manager's own sentence is the first line of it.
+    """
+    if not first_user_content:
+        return "New chat"
+    lines = first_user_content.strip().splitlines()
+    line = lines[0].strip() if lines else ""
+    if not line:
+        return "New chat"
+    if len(line) <= _TITLE_MAX_CHARS:
+        return line
+    return line[: _TITLE_MAX_CHARS - 1].rstrip() + "…"
+
+
+async def list_schedule_assistant_sessions(
+    *,
+    company_id: UUID,
+    user_id: UUID,
+    actor_role: str,
+    location_id: UUID,
+    week_start: date,
+    limit: int = 30,
+) -> dict:
+    """This manager's own prior chats for one location/week, newest first."""
+    async with get_connection() as conn:
+        await _assert_manager_location(
+            conn,
+            company_id=company_id,
+            user_id=user_id,
+            actor_role=actor_role,
+            location_id=location_id,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT s.id, s.thread_id, s.created_at,
+                   first_turn.content AS first_content,
+                   activity.message_count,
+                   COALESCE(activity.last_at, s.created_at) AS last_activity_at
+            FROM schedule_assistant_sessions s
+            JOIN mw_threads t ON t.id=s.thread_id
+            LEFT JOIN LATERAL (
+                SELECT m.content FROM mw_messages m
+                WHERE m.thread_id=s.thread_id AND m.role='user'
+                ORDER BY m.created_at ASC, m.id ASC
+                LIMIT 1
+            ) first_turn ON true
+            LEFT JOIN LATERAL (
+                SELECT MAX(m.created_at) AS last_at, COUNT(*) AS message_count
+                FROM mw_messages m WHERE m.thread_id=s.thread_id
+            ) activity ON true
+            WHERE s.company_id=$1 AND s.user_id=$2 AND s.location_id=$3
+              AND s.week_start=$4 AND t.status <> 'archived'
+            ORDER BY COALESCE(activity.last_at, s.created_at) DESC, s.created_at DESC
+            LIMIT $5
+            """,
+            company_id,
+            user_id,
+            location_id,
+            week_start,
+            limit,
+        )
+    return {
+        "sessions": [
+            {
+                "session_id": str(row["id"]),
+                "thread_id": str(row["thread_id"]),
+                "title": _session_title(row["first_content"]),
+                "message_count": int(row["message_count"] or 0),
+                "created_at": row["created_at"].isoformat(),
+                "last_activity_at": row["last_activity_at"].isoformat(),
+            }
+            for row in rows
+        ]
+    }
+
+
+async def archive_schedule_assistant_session(
+    *,
+    company_id: UUID,
+    user_id: UUID,
+    actor_role: str,
+    session_id: UUID,
+) -> dict:
+    """Hide one chat from the manager's history.
+
+    The thread is archived, never deleted: its Huume runs are the audit trail
+    behind schedule writes that were actually applied.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT s.id, s.thread_id, s.location_id
+                FROM schedule_assistant_sessions s
+                WHERE s.id=$1 AND s.company_id=$2 AND s.user_id=$3
+                """,
+                session_id,
+                company_id,
+                user_id,
+            )
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail="Schedule assistant session not found"
+                )
+            await _assert_manager_location(
+                conn,
+                company_id=company_id,
+                user_id=user_id,
+                actor_role=actor_role,
+                location_id=row["location_id"],
+            )
+            await conn.execute(
+                """UPDATE mw_threads SET status='archived', updated_at=NOW()
+                   WHERE id=$1""",
+                row["thread_id"],
+            )
+    return {"session_id": str(session_id), "archived": True}
 
 
 async def get_automatic_suggestion_status(
@@ -335,7 +504,14 @@ async def resolve_schedule_assistant_scope(
             thread_id,
             company_id,
         )
-        if not row or row["surface"] != "schedule_assistant" or row["user_id"] != user_id:
+        # An archived chat is gone from the manager's history, so it must not
+        # keep taking turns (and staging schedule writes) behind their back.
+        if (
+            not row
+            or row["surface"] != "schedule_assistant"
+            or row["user_id"] != user_id
+            or row["status"] == "archived"
+        ):
             raise HTTPException(status_code=404, detail="Schedule assistant session not found")
         await _assert_manager_location(
             conn,

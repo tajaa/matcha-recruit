@@ -312,6 +312,186 @@ async def _monday_weeks(*_args, **_kwargs) -> int:
     return 1
 
 
+class _MultiSessionConn(_Conn):
+    """A store where the manager's latest chat already has messages in it."""
+
+    def __init__(self, resumable=None):
+        super().__init__()
+        self.resumable = resumable
+        self.queries = []
+
+    async def fetchrow(self, query, *params):
+        self.queries.append(query)
+        if "FROM business_locations" in query:
+            return {"is_active": True}
+        if "FROM schedule_assistant_sessions" in query and "WHERE s.id=$1" in query:
+            return self.resumable
+        if "FROM schedule_assistant_sessions" in query and "msg.spoken IS NULL" in query:
+            return None      # every existing chat has been spoken in
+        if "FROM schedule_generation_runs" in query:
+            return None
+        if "INSERT INTO mw_threads" in query:
+            return {"id": uuid4(), "current_state": json.dumps({}), "version": 0}
+        if "INSERT INTO schedule_assistant_sessions" in query:
+            return {"id": uuid4()}
+        raise AssertionError(f"unexpected fetchrow query: {query}")
+
+
+@pytest.mark.asyncio
+async def test_opening_the_panel_starts_a_new_chat_when_the_last_one_was_used(monkeypatch):
+    """One unbounded thread per location/week is the bug this replaces — a
+    manager opening the assistant gets a fresh conversation."""
+    conn = _MultiSessionConn()
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+    monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
+
+    result = await session.get_or_create_schedule_assistant_session(
+        company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+        location_id=uuid4(), week_start=date(2026, 8, 23),
+    )
+
+    assert any("INSERT INTO mw_threads" in query for query in conn.queries)
+    assert result["title"] == "New chat"
+
+
+@pytest.mark.asyncio
+async def test_resuming_a_chat_reuses_its_thread(monkeypatch):
+    resumed_session_id, thread_id = uuid4(), uuid4()
+    conn = _MultiSessionConn({
+        "id": resumed_session_id,
+        "thread_id": thread_id,
+        "current_state": json.dumps({"huume_surface": {"kind": "schedule_assistant"}}),
+        "version": 5,
+    })
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+    monkeypatch.setattr(
+        session, "get_thread_messages",
+        lambda thread_id, limit: _messages([
+            {"role": "user", "content": "Add an opener Monday\n\nSelected schedule blocks — ..."},
+        ]),
+    )
+
+    result = await session.get_or_create_schedule_assistant_session(
+        company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+        location_id=uuid4(), week_start=date(2026, 8, 23),
+        session_id=resumed_session_id,
+    )
+
+    assert result["session_id"] == str(resumed_session_id)
+    assert result["thread_id"] == str(thread_id)
+    # The title is the manager's own sentence, not the appended shift context.
+    assert result["title"] == "Add an opener Monday"
+    assert not any("INSERT INTO mw_threads" in query for query in conn.queries)
+
+
+@pytest.mark.asyncio
+async def test_resuming_someone_elses_chat_is_not_found(monkeypatch):
+    conn = _MultiSessionConn(None)
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+
+    with pytest.raises(HTTPException) as exc:
+        await session.get_or_create_schedule_assistant_session(
+            company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+            location_id=uuid4(), week_start=date(2026, 8, 23), session_id=uuid4(),
+        )
+
+    assert exc.value.status_code == 404
+    assert not any("INSERT INTO mw_threads" in query for query in conn.queries)
+
+
+async def _messages(rows):
+    return rows
+
+
+def test_a_chat_is_named_after_the_managers_own_sentence():
+    assert session._session_title(None) == "New chat"
+    assert session._session_title("   ") == "New chat"
+    assert session._session_title("Cover Friday close\n\nSelected schedule blocks — x") == "Cover Friday close"
+    long_ask = "Rebuild the whole week and keep everyone who is already scheduled where they are today"
+    titled = session._session_title(long_ask)
+    assert len(titled) <= 80 and titled.endswith("…")
+
+
+class _ArchiveConn(_Conn):
+    def __init__(self, row):
+        super().__init__()
+        self.row = row
+
+    async def fetchrow(self, query, *params):
+        self.fetchrow_calls.append(query)
+        if "FROM business_locations" in query:
+            return {"is_active": True}
+        if "FROM schedule_assistant_sessions" in query:
+            return self.row
+        raise AssertionError(f"unexpected fetchrow query: {query}")
+
+
+@pytest.mark.asyncio
+async def test_archiving_hides_the_chat_without_deleting_its_audit_trail(monkeypatch):
+    thread_id, session_id = uuid4(), uuid4()
+    conn = _ArchiveConn({"id": session_id, "thread_id": thread_id, "location_id": uuid4()})
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+
+    result = await session.archive_schedule_assistant_session(
+        company_id=uuid4(), user_id=uuid4(), actor_role="manager", session_id=session_id,
+    )
+
+    assert result == {"session_id": str(session_id), "archived": True}
+    statements = [query for query, _params in conn.execute_calls]
+    assert any("status='archived'" in query for query in statements)
+    assert not any("DELETE" in query.upper() for query in statements)
+
+
+@pytest.mark.asyncio
+async def test_archiving_a_session_that_is_not_yours_is_not_found(monkeypatch):
+    conn = _ArchiveConn(None)
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+
+    with pytest.raises(HTTPException) as exc:
+        await session.archive_schedule_assistant_session(
+            company_id=uuid4(), user_id=uuid4(), actor_role="manager", session_id=uuid4(),
+        )
+
+    assert exc.value.status_code == 404
+    assert not conn.execute_calls
+
+
+class _ScopeConn(_Conn):
+    def __init__(self, row):
+        super().__init__()
+        self.row = row
+
+    async def fetchrow(self, query, *params):
+        self.fetchrow_calls.append(query)
+        if "FROM business_locations" in query:
+            return {"is_active": True}
+        return self.row
+
+
+@pytest.mark.asyncio
+async def test_an_archived_chat_can_no_longer_take_turns(monkeypatch):
+    """Removing a chat from history must also stop it staging schedule writes."""
+    thread_id, user_id = uuid4(), uuid4()
+    conn = _ScopeConn({
+        "company_id": uuid4(), "user_id": user_id, "location_id": uuid4(),
+        "week_start": date(2026, 8, 23), "thread_id": thread_id,
+        "surface": "schedule_assistant", "status": "archived",
+    })
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *a, **k: _allow_scope())
+
+    with pytest.raises(HTTPException) as exc:
+        await session.resolve_schedule_assistant_scope(
+            thread_id=thread_id, company_id=uuid4(), user_id=user_id, actor_role="manager",
+        )
+
+    assert exc.value.status_code == 404
+
+
 def test_an_automatic_proposal_carries_its_coverage_findings():
     """The worker path rebuilds the staged action from `proposal`, never from
     `review` — an automatic run nobody watched is exactly the one where an

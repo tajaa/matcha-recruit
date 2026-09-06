@@ -8,9 +8,19 @@ export interface ScheduleHuumeSession {
   location_id: string
   week_start: string
   week_end: string
+  title: string
   messages: MWMessage[]
   current_state: Record<string, unknown>
   version: number
+}
+
+export interface ScheduleHuumeSessionSummary {
+  session_id: string
+  thread_id: string
+  title: string
+  message_count: number
+  created_at: string
+  last_activity_at: string
 }
 
 export interface ScheduleSuggestionStatus {
@@ -20,11 +30,25 @@ export interface ScheduleSuggestionStatus {
   created_at: string | null
 }
 
-export function getScheduleHuumeSession(locationId: string, weekStart: string) {
+/** Omit `sessionId` to start a new chat; pass one to reopen a previous chat. */
+export function getScheduleHuumeSession(locationId: string, weekStart: string, sessionId?: string | null) {
   return api.post<ScheduleHuumeSession>('/employee-schedule/assistant/sessions', {
     location_id: locationId,
     week_start: weekStart,
+    session_id: sessionId ?? null,
   })
+}
+
+export function listScheduleHuumeSessions(locationId: string, weekStart: string) {
+  const params = new URLSearchParams({ location_id: locationId, week_start: weekStart })
+  return api.get<{ sessions: ScheduleHuumeSessionSummary[] }>(`/employee-schedule/assistant/sessions?${params}`)
+}
+
+export function archiveScheduleHuumeSession(sessionId: string) {
+  return api.post<{ session_id: string; archived: boolean }>(
+    `/employee-schedule/assistant/sessions/${sessionId}/archive`,
+    {},
+  )
 }
 
 export function getScheduleSuggestionStatus(locationId: string, weekStart: string) {

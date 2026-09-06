@@ -11,7 +11,19 @@ turns to the canonical Matcha Work SSE route; it does not use the retired
 16 kHz mono WAV, is transcribed only, and is not persisted.
 
 `schedule_assistant_session.py` is the auth boundary for the
-`(company, user, location, week_start)` tuple. `schedule_assistant_context.py`
+`(company, user, location, week_start)` tuple. That tuple is no longer UNIQUE
+(migration `huumesched02`): opening the panel starts a NEW chat and the manager
+picks an earlier one out of `GET /assistant/sessions`, passing its `session_id`
+back to the POST to resume it. Three rules keep that from becoming clutter or a
+back door: a latest session nobody has spoken in yet is REUSED rather than
+duplicated (open/close/open leaves no empty-thread trail); a resume is scoped to
+the same company/user/location/week or it is a 404; and archiving
+(`POST /assistant/sessions/{id}/archive`, `mw_threads.status='archived'`, never a
+delete — the Huume runs are the audit trail behind applied schedule writes) also
+makes `resolve_schedule_assistant_scope` refuse further turns, so a chat removed
+from history cannot keep staging writes. A chat is titled read-time from the
+first line of its first user message — the editor appends selected-shift context
+after a blank line, and that is not what the manager asked. `schedule_assistant_context.py`
 returns complete, non-cancelled shifts and aggregates assignments before its
 500-shift cap. `schedule_chat.py` and `schedule_assistant_actions.py` enforce
 the inclusive selected-week bound at both stage and confirm time. Huume writes
