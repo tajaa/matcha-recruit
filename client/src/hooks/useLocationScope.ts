@@ -10,6 +10,10 @@ export type CompanyLocation = {
   state: string
   zipcode?: string | null
   is_active: boolean
+  /** 0=Sunday .. 6=Saturday, from this location's scheduling profile. Every
+   * location-scoped page computes its own week boundaries, so it has to come
+   * along with the location rather than being fetched per page. */
+  week_start_weekday?: number
 }
 
 export function locationLabel(l: CompanyLocation): string {
@@ -37,6 +41,18 @@ export function useLocationScope(opts: { autoSelectSingle?: boolean } = {}) {
     }, { replace: true })
   }, [setSearchParams])
 
+  /** Re-reads `/locations`. Needed because the row carries scheduling state
+   *  a page can edit (`week_start_weekday`): without a refetch the editor keeps
+   *  laying out the old week and its Huume session 422s on the stale start day. */
+  const reloadLocations = useCallback(async () => {
+    try {
+      const r = await api.get<{ locations: CompanyLocation[] }>('/locations')
+      setLocations(r.locations)
+    } catch {
+      // Keep whatever is on screen: a failed refresh must not empty the picker.
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     api.get<{ locations: CompanyLocation[] }>('/locations')
@@ -50,5 +66,5 @@ export function useLocationScope(opts: { autoSelectSingle?: boolean } = {}) {
     if (autoSelectSingle && !locationId && locations.length === 1) setLocationId(locations[0].id)
   }, [autoSelectSingle, locationId, locations, setLocationId])
 
-  return { locationId, setLocationId, locations, loading }
+  return { locationId, setLocationId, locations, loading, reloadLocations }
 }

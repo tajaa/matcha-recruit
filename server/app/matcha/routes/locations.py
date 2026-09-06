@@ -20,10 +20,13 @@ async def list_company_locations(current_user=Depends(require_company_member)):
         if current_user.role in {"admin", "client", "individual"}:
             rows = await conn.fetch(
                 """
-                SELECT id, name, address, city, state, zipcode, is_active
-                FROM business_locations
-                WHERE company_id = $1
-                ORDER BY is_active DESC, name NULLS LAST, city, state
+                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active,
+                       COALESCE(p.week_start_weekday, 0) AS week_start_weekday
+                FROM business_locations l
+                LEFT JOIN schedule_location_profiles p
+                  ON p.location_id = l.id AND p.company_id = l.company_id
+                WHERE l.company_id = $1
+                ORDER BY l.is_active DESC, l.name NULLS LAST, l.city, l.state
                 """,
                 company_id,
             )
@@ -33,9 +36,12 @@ async def list_company_locations(current_user=Depends(require_company_member)):
             # keeping every other location out of shared location pickers.
             rows = await conn.fetch(
                 """
-                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active
+                SELECT l.id, l.name, l.address, l.city, l.state, l.zipcode, l.is_active,
+                       COALESCE(p.week_start_weekday, 0) AS week_start_weekday
                 FROM business_locations l
                 JOIN employees e ON e.work_location_id = l.id
+                LEFT JOIN schedule_location_profiles p
+                  ON p.location_id = l.id AND p.company_id = l.company_id
                 WHERE l.company_id = $1 AND e.org_id = $1 AND e.user_id = $2
                   AND COALESCE(e.employment_status, 'active') = 'active'
                   AND (COALESCE(e.is_manager, false) OR COALESCE(e.is_supervisor, false))
@@ -46,6 +52,9 @@ async def list_company_locations(current_user=Depends(require_company_member)):
     return {"locations": [
         {"id": str(r["id"]), "name": r["name"], "address": r["address"],
          "city": r["city"], "state": r["state"], "zipcode": r["zipcode"],
-         "is_active": r["is_active"]}
+         "is_active": r["is_active"],
+         # Every location-scoped page computes its own week boundaries; without
+         # this they would all render Sunday weeks for a Monday-start store.
+         "week_start_weekday": int(r["week_start_weekday"] or 0)}
         for r in rows
     ]}

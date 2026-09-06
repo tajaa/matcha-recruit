@@ -93,12 +93,30 @@ async def fetch_effective_job_employee_ids(
     A jobless shift remains ungated. Qualification dates are evaluated against
     the scheduled work date rather than today's date so future scheduling and
     later retimes make the same decision.
+
+    An EMPTY roster means ungated, matching
+    ``routes/employee_schedule/_shared.check_job_qualification`` — gating is
+    opted into by naming who is qualified, not by the mere existence of a job.
+    Picking a job is mandatory on the manual create form and the qualified list
+    is a separate tab, so "job defined, list not filled in yet" is the common
+    state; without this rule chat assignment, coverage ranking and the
+    whole-week builder all refuse every employee for it while the REST grid
+    happily assigns them.
     """
     unique_ids = list(dict.fromkeys(employee_ids))
     if job_id is None:
         return set(unique_ids)
     if not unique_ids:
         return set()
+    has_roster = await conn.fetchval(
+        """SELECT EXISTS (
+               SELECT 1 FROM schedule_job_employees
+                WHERE company_id=$1 AND job_id=$2
+           )""",
+        company_id, job_id,
+    )
+    if not has_roster:
+        return set(unique_ids)
     rows = await conn.fetch(
         """SELECT je.employee_id
              FROM schedule_job_employees je

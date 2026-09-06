@@ -27,6 +27,8 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from . import schedule_compliance
+from .location_profile import resolve_week_start_weekday
+from .schedule_rules import align_week_start
 
 logger = logging.getLogger(__name__)
 
@@ -114,16 +116,17 @@ def _hours(starts_at: datetime, ends_at: datetime, break_minutes: int = 0) -> fl
     return max(0.0, span - (break_minutes or 0) / 60.0)
 
 
-def _week_window(d: datetime) -> tuple[datetime, datetime]:
-    """SUNDAY-anchored 7-day window containing `d` (UTC) — matching the schedule
-    grid (FE startOfWeekSunday / schedule_rules.sunday_indexed_weekday), so the
-    weekly-overtime advisory aggregates the same week the admin is looking at.
-    FLSA permits any fixed 7-day workweek; anchoring elsewhere than the rendered
-    week silently defeats the advisory (48h on the grid can split into two
-    sub-40h windows). No per-company workweek config exists to key off."""
+def _week_window(d: datetime, week_start_weekday: int = 0) -> tuple[datetime, datetime]:
+    """The 7-day window containing `d` (UTC), anchored on the location's own
+    week start day — matching the schedule grid, so the weekly-overtime
+    advisory aggregates the same week the admin is looking at. FLSA permits any
+    fixed 7-day workweek; anchoring elsewhere than the rendered week silently
+    defeats the advisory (48h on the grid can split into two sub-40h windows).
+    Defaults to Sunday, which is what every location without a scheduling
+    profile still uses."""
     day = d.astimezone(timezone.utc).date()
-    sunday = day - timedelta(days=(day.weekday() + 1) % 7)
-    lo = datetime.combine(sunday, datetime.min.time(), tzinfo=timezone.utc)
+    start = align_week_start(day, week_start_weekday)
+    lo = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
     return lo, lo + timedelta(days=7)
 
 
@@ -215,10 +218,17 @@ async def _meal_break_waiver_on_file(
 
 async def _week_hours(conn, company_id: UUID, employee_id: UUID,
                       shift_start: datetime, this_shift_hours: float,
-                      exclude_shift_id: Optional[UUID]) -> float:
+                      exclude_shift_id: Optional[UUID],
+                      location_id: Optional[UUID] = None) -> float:
     """This employee's total scheduled worked-hours for the week containing the
-    shift, including the shift under evaluation."""
-    lo, hi = _week_window(shift_start)
+    shift, including the shift under evaluation.
+
+    Owns resolving the week anchor as well as summing it: the window and the
+    hours have to agree about which seven days they mean."""
+    lo, hi = _week_window(
+        shift_start,
+        await resolve_week_start_weekday(conn, company_id=company_id, location_id=location_id),
+    )
     rows = await conn.fetch(
         """
         SELECT s.starts_at, s.ends_at, s.break_minutes
@@ -446,7 +456,9 @@ async def check_shift_compliance(
             job_id=job_id,
             employee_age=age,
         ))
-        week_hours = await _week_hours(conn, company_id, employee_id, starts_at, worked, exclude_shift_id)
+        week_hours = await _week_hours(
+            conn, company_id, employee_id, starts_at, worked, exclude_shift_id, location_id,
+        )
         min_rest = await _min_rest_gap(conn, company_id, employee_id, starts_at, ends_at, exclude_shift_id)
 
     # Only bother fetching catalog-extraction thresholds for a state the

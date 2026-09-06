@@ -20,6 +20,10 @@ class _Conn:
     async def fetchrow(self, *_args):
         return self.rule
 
+    async def fetchval(self, *_args):
+        # The location's week start day; no profile row in these fixtures.
+        return None
+
     async def execute(self, query, *args):
         self.execute_calls.append((query, args))
         return "UPDATE 1"

@@ -1,5 +1,5 @@
 import type {
-  HuumeAction, HuumeActionSendOffer, HuumeHandbook, HuumeLegal, HuumeOffer, HuumePlan, HuumePlans, HuumeRecordRef,
+  HuumeAction, HuumeActionSendOffer, HuumeChoice, HuumeHandbook, HuumeLegal, HuumeOffer, HuumePlan, HuumePlans, HuumeRecordRef,
 } from '../types'
 
 export interface HuumeState {
@@ -15,6 +15,11 @@ export interface HuumeState {
    * other Huume state slices) — `getHuumeState` always fills it in as `[]`
    * when absent; test-constructed states may simply omit it. */
   records?: HuumeRecordRef[]
+  /** A finite set of answers to the question Huume just asked, rendered as
+   * clickable chips. Transient conversational affordance rather than staged
+   * content — deliberately NOT part of `hasHuumeContent`, so a bare question
+   * doesn't open the right panel over an offer letter's PDF. */
+  choice?: HuumeChoice
 }
 
 /** The one place `current_state`'s untyped Huume keys get cast. The server
@@ -30,6 +35,7 @@ export function getHuumeState(state: Record<string, unknown> | null | undefined)
     legal: state.huume_legal as HuumeLegal | undefined,
     handbook: state.huume_handbook as HuumeHandbook | undefined,
     records: Array.isArray(rawRecords) ? (rawRecords as HuumeRecordRef[]) : [],
+    choice: state.huume_choice as HuumeChoice | undefined,
   }
 }
 
@@ -113,6 +119,7 @@ export function deriveHuumeArtifacts(h: HuumeState): HuumeArtifact[] {
       : h.action.type === 'meal_break_waiver' ? h.action.confirm_id
       : h.action.type === 'work_permit' ? h.action.confirm_id
       : h.action.type === 'eligibility_case_decision' ? h.action.confirm_id
+      : h.action.type === 'schedule_location_profile' ? h.action.confirm_id
       : ((): never => { throw new Error('unreachable') })()
     artifacts.push({ kind: 'action', key: `action:${h.action.type}:${idKey}`, action: h.action })
   }

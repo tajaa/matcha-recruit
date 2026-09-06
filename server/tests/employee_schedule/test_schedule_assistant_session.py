@@ -215,6 +215,9 @@ async def test_session_refreshes_proposal_applied_by_another_manager(monkeypatch
         return "applied"
 
     conn.fetchval = fetchval
+    # This conn answers every fetchval with "applied"; the week-alignment gate
+    # has its own lookup and is not what this test is about.
+    monkeypatch.setattr(session, "resolve_week_start_weekday", _sunday_weeks)
     monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
     monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *args, **kwargs: _allow_scope())
     monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
@@ -226,6 +229,10 @@ async def test_session_refreshes_proposal_applied_by_another_manager(monkeypatch
 
     assert result["current_state"]["huume_action"]["status"] == "applied"
     assert result["version"] == 4
+
+
+async def _sunday_weeks(*_args, **_kwargs) -> int:
+    return 0
 
 
 async def _allow_scope():
@@ -264,3 +271,42 @@ async def _inactive_location():
 
 async def _denied_scope():
     return _DeniedScope()
+
+
+@pytest.mark.asyncio
+async def test_session_rejects_a_week_start_the_location_does_not_use(monkeypatch):
+    """Every write on this surface is bounded by the session's week, so a
+    Sunday week for a Monday-start store would scope Huume to a window that
+    matches no grid the manager can see."""
+    conn = _Conn()
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *args, **kwargs: _allow_scope())
+    monkeypatch.setattr(session, "resolve_week_start_weekday", _monday_weeks)
+
+    with pytest.raises(HTTPException) as exc:
+        await session.get_or_create_schedule_assistant_session(
+            company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+            location_id=uuid4(), week_start=date(2026, 8, 23),   # a Sunday
+        )
+
+    assert exc.value.status_code == 422
+    assert "Monday" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_session_accepts_the_week_start_the_location_does_use(monkeypatch):
+    conn = _Conn()
+    monkeypatch.setattr(session, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(session, "resolve_eligibility_manager_scope", lambda *args, **kwargs: _allow_scope())
+    monkeypatch.setattr(session, "resolve_week_start_weekday", _monday_weeks)
+    monkeypatch.setattr(session, "get_thread_messages", lambda thread_id, limit: _empty_messages())
+
+    result = await session.get_or_create_schedule_assistant_session(
+        company_id=uuid4(), user_id=uuid4(), actor_role="manager",
+        location_id=uuid4(), week_start=date(2026, 8, 24),   # the Monday after
+    )
+    assert result["thread_id"]
+
+
+async def _monday_weeks(*_args, **_kwargs) -> int:
+    return 1

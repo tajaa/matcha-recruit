@@ -223,10 +223,13 @@ def test_week_template_replace_only_retains_editor_owned_block_fields():
         "job_id": "22222222-2222-2222-2222-222222222222",
     }])
 
+    # job_id is editor-owned: an agent-authored block carries a job link, and
+    # leaving it out of this shape made the editor's own save strip it to NULL.
     assert set(body.blocks[0].model_dump()) == {
         "id", "name", "role", "start_time", "end_time", "break_minutes",
-        "required_staff", "days_of_week",
+        "required_staff", "days_of_week", "job_id",
     }
+    assert not {"department", "color", "notes"} & set(body.blocks[0].model_dump())
 
 
 def test_week_template_replace_rejects_duplicate_existing_block_ids():

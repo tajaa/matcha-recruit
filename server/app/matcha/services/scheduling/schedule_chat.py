@@ -61,6 +61,7 @@ from .schedule_chat_rules import (
 )
 from .schedule_intelligence import fetch_lapse_items
 from .schedule_profiles import fetch_effective_job_employee_ids
+from .location_profile import resolve_week_start_weekday
 from .schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES, availability_violations, sunday_indexed_weekday,
     template_windows,
@@ -723,8 +724,15 @@ async def build_proposal(
         if r["location_id"] is None or str(r["location_id"]) == str(location_id)
     ]
 
-    # 3. Per-request time/date resolution
-    resolved_week_start = resolve_week(parsed.get("week_hint"), today, week_start)
+    # 3. Per-request time/date resolution. The week starts on whatever day
+    # this store says it does — resolved AFTER the location, which is why the
+    # lookup lives here rather than at the top of the function.
+    location_week_start_weekday = await resolve_week_start_weekday(
+        conn, company_id=company_id, location_id=location_id,
+    )
+    resolved_week_start = resolve_week(
+        parsed.get("week_hint"), today, week_start, location_week_start_weekday,
+    )
     resolved_shifts: list[dict] = []
 
     for req in parsed["shift_requests"]:
@@ -785,7 +793,10 @@ async def build_proposal(
         else:
             return await _clarify(f"What hours should the {req['label']} run?")
 
-        dates_or_clarify = resolve_dates(req, resolved_week_start, today, template_days=template_days)
+        dates_or_clarify = resolve_dates(
+            req, resolved_week_start, today, template_days=template_days,
+            week_start_weekday=location_week_start_weekday,
+        )
         if isinstance(dates_or_clarify, NeedsClarify):
             return await _clarify(dates_or_clarify.question, dates_or_clarify.options)
 
@@ -910,7 +921,9 @@ async def build_proposal(
         # internally for its own violation checks.
         hours_by_id: dict[str, float] = {}
         for r in free:
-            hours_by_id[str(r["id"])] = await _week_hours(conn, company_id, r["id"], starts_at, 0.0, None)
+            hours_by_id[str(r["id"])] = await _week_hours(
+                conn, company_id, r["id"], starts_at, 0.0, None, location_id,
+            )
 
         pinned_rows = [r for r in free if str(r["id"]) in pinned]
         other_rows = sorted(

@@ -7,6 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.feature_flags import get_company_features
 from app.database import get_connection
+from ...services.scheduling.location_profile import (
+    WEEKDAY_NAMES, resolve_week_start_weekday,
+)
+from ...services.scheduling.schedule_rules import align_week_start
 from app.matcha.models.scheduling.employee_schedule import ScheduleAutomationRuleUpsert
 from app.matcha.services.scheduling.schedule_automation import (
     generate_review_suggestion,
@@ -105,6 +109,20 @@ async def save_auto_schedule(
         )
         if not template_exists:
             raise HTTPException(status_code=422, detail="Choose a week template available to this location.")
+        if body.target_week_start is not None:
+            # The payload can't validate this itself: which weekday starts a
+            # week is the LOCATION's setting, not a global constant.
+            week_start_weekday = await resolve_week_start_weekday(
+                conn, company_id=company_id, location_id=location_id,
+            )
+            if align_week_start(body.target_week_start, week_start_weekday) != body.target_week_start:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"target_week_start must be a "
+                        f"{WEEKDAY_NAMES[week_start_weekday]} for this location."
+                    ),
+                )
         try:
             scheduled_at = next_run_at(
                 cadence=body.cadence,
@@ -169,12 +187,17 @@ async def run_auto_schedule_now(
         raise HTTPException(status_code=404, detail="Configure this location's auto schedule first.")
     if not row["week_template_id"]:
         raise HTTPException(status_code=422, detail="Choose a saved week template first.")
+    async with get_connection() as conn:
+        location_week_start_weekday = await resolve_week_start_weekday(
+            conn, company_id=company_id, location_id=location_id,
+        )
     target = automation_target_week_start(
         cadence=row["cadence"],
         scheduled_for=datetime.now(timezone.utc),
         timezone_name=row["timezone"],
         target_weeks_ahead=row["target_weeks_ahead"],
         one_time_week_start=row["target_week_start"],
+        week_start_weekday=location_week_start_weekday,
     )
     result = await generate_review_suggestion(
         company_id=company_id,

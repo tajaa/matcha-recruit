@@ -346,6 +346,38 @@ class EmployeeScheduleProfileUpdate(BaseModel):
 JobCreate.model_rebuild()
 
 
+class OperatingWindow(BaseModel):
+    """One day's open/close. An overnight window (close <= open) is allowed —
+    bars and 24h stores are real."""
+
+    open: time
+    close: time
+
+
+class LocationScheduleProfileUpdate(BaseModel):
+    """True PATCH on a location's scheduling setup — only supplied fields are
+    written, so the Week Start pane can save one section at a time.
+
+    `operating_hours` is keyed by weekday index as a STRING, "0".."6" with
+    0=Sunday (the same index `days_of_week` masks use). A null value means
+    closed that day; an absent key means nobody has answered for that day yet,
+    which is deliberately not the same thing.
+    """
+
+    operating_hours: Optional[dict[str, Optional[OperatingWindow]]] = None
+    default_week_template_id: Optional[UUID] = None
+    leader_job_id: Optional[UUID] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+    week_start_weekday: Optional[Weekday] = None
+
+    @model_validator(mode="after")
+    def _check_weekday_keys(self) -> "LocationScheduleProfileUpdate":
+        for key in (self.operating_hours or {}):
+            if key not in {"0", "1", "2", "3", "4", "5", "6"}:
+                raise ValueError('operating_hours keys must be "0"-"6" (0=Sunday)')
+        return self
+
+
 class WeekTemplateCreate(BaseModel):
     """A named, reusable week of shift blocks. Location is set once here and
     inherited by every block (block-level location_id is a DB implementation
@@ -385,6 +417,9 @@ class WeekTemplateBlockReplace(BaseModel):
     break_minutes: int = Field(0, ge=0, le=1440)
     required_staff: int = Field(1, ge=1, le=99)
     days_of_week: list[Weekday] = Field(default_factory=list)
+    # Editable here because an agent-authored block carries a job link; leaving
+    # it out of this shape made the editor's own save strip it back to NULL.
+    job_id: Optional[UUID] = None
 
 
 class WeekTemplateReplace(BaseModel):
@@ -587,6 +622,7 @@ class ScheduleAutomationRuleUpsert(BaseModel):
                 raise ValueError("one-time schedules require run_date and target_week_start")
             if self.run_weekday is not None or self.target_weeks_ahead is not None:
                 raise ValueError("one-time schedules cannot include weekly fields")
-            if self.target_week_start.weekday() != 6:
-                raise ValueError("target_week_start must be a Sunday")
+            # Which weekday is valid depends on the LOCATION's own week start
+            # day, which this payload does not carry — the route re-checks
+            # alignment against the location's scheduling profile.
         return self

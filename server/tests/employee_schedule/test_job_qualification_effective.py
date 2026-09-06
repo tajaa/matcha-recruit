@@ -33,6 +33,12 @@ class QualificationConn:
             "has_roster": self.has_roster,
         }
 
+    async def fetchval(self, sql, *args):
+        # The batch gate's roster-existence probe.
+        self.sql = sql
+        self.args = args
+        return self.has_roster
+
     async def fetch(self, sql, *args):
         self.sql = sql
         self.args = args
@@ -87,6 +93,25 @@ async def test_batch_gate_returns_only_effective_members():
     assert result == {EMPLOYEE}
     assert "qualification_status='active'" in conn.sql
     assert conn.args[-1] == date(2026, 9, 15)
+
+
+@pytest.mark.asyncio
+async def test_batch_gate_matches_the_route_gate_on_an_empty_roster():
+    """The two gates must agree. They did not for a while, and the split was
+    visible: the grid assigned someone the chat/coverage/week-builder paths
+    refused for the same job."""
+    conn = QualificationConn(qualified=False, has_roster=False)
+    result = await fetch_effective_job_employee_ids(
+        conn, company_id=COMPANY, job_id=JOB,
+        employee_ids=[EMPLOYEE], as_of=date(2026, 9, 15),
+    )
+    assert result == {EMPLOYEE}
+
+    route_detail = await check_job_qualification(
+        QualificationConn(qualified=False, has_roster=False),
+        COMPANY, EMPLOYEE, JOB, starts_at=STARTS_AT,
+    )
+    assert route_detail is None
 
 
 @pytest.mark.asyncio

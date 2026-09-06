@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
-import type { HuumeAction, HuumeActionSendOffer } from '../../../types'
+import type { HuumeAction, HuumeActionScheduleLocationProfile, HuumeActionSendOffer } from '../../../types'
 import { actionIcon, DONE_LABELS } from '../../../utils/huumeActionMeta'
-import { fmtDayLabel, fmtTime } from '../../../../types/employeeSchedule'
+import { fmtDayLabel, fmtTime, WEEKDAY_LABELS } from '../../../../types/employeeSchedule'
 
 interface ActionDocViewerProps {
   action: Exclude<HuumeAction, HuumeActionSendOffer>
@@ -70,7 +70,20 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return `Schedule Change${action.target_employee_name ? ` — ${action.target_employee_name}` : ''}`
     case 'schedule_week_draft':
       return 'Generated Weekly Schedule'
+    case 'schedule_location_profile':
+      return 'Location Schedule Profile'
   }
+}
+
+/** The server's own "08:00–17:00" for a day the interview covered, "Closed"
+ * for an explicit null, "—" for a weekday it never reached. The three cases
+ * read differently on purpose: an unanswered day is not a claim that the
+ * store is shut. */
+function hoursLabel(hours: HuumeActionScheduleLocationProfile['operating_hours'], weekday: number): string {
+  if (!hours || !(String(weekday) in hours)) return '—'
+  const day = hours[String(weekday)]
+  if (!day) return 'Closed'
+  return `${day.open}–${day.close}`
 }
 
 /** Renders the 5 non-offer staged actions as readable documents instead of
@@ -327,6 +340,51 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             </div>
           )}
           <p className="text-[11px] opacity-60">Confirmation adds this proposal to the editor as drafts. Review or edit it there, then publish when ready.</p>
+        </>
+      )}
+
+      {action.type === 'schedule_location_profile' && (
+        <>
+          <Prose>{action.summary}</Prose>
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Operating hours</div>
+            <div className="space-y-0.5">
+              {WEEKDAY_LABELS.map((dayLabel, weekday) => (
+                <div key={dayLabel} className="flex items-baseline gap-3 text-[11px]">
+                  <span className="w-8 shrink-0 opacity-65">{dayLabel}</span>
+                  <span>{hoursLabel(action.operating_hours, weekday)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {!!action.blocks?.length && (
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide opacity-50">Staffing blocks</div>
+              <div className="space-y-1.5">
+                {action.blocks.map((block, index) => (
+                  <div key={`${block.name}-${index}`} className="rounded border border-current/10 px-2 py-1.5 text-[11px]">
+                    <div className="font-medium">{block.name} · {block.job_name}</div>
+                    <div className="mt-0.5 opacity-65">
+                      {block.days_of_week.map((weekday) => WEEKDAY_LABELS[weekday] ?? '?').join(', ') || 'No days set'}
+                      {' · '}{block.start_time}–{block.end_time} · ×{block.required_staff}
+                      {block.break_minutes ? ` · ${block.break_minutes}m break` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Leader on shift" value={action.leader_job_name} />
+            <Meta label="Template" value={action.template_name} />
+          </div>
+          {action.notes && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide opacity-50">Notes</div>
+              <Prose>{action.notes}</Prose>
+            </div>
+          )}
+          <p className="text-[11px] opacity-60">Confirmation saves this as the location's scheduling setup — it doesn't create any shifts on its own.</p>
         </>
       )}
 

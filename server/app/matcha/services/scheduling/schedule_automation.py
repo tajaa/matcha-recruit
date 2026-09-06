@@ -5,6 +5,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from app.database import connection_or_direct
+from app.matcha.services.scheduling.schedule_rules import align_week_start
 
 
 def location_zone(timezone_name: str | None):
@@ -41,14 +42,15 @@ def next_run_at(
 def target_week_start(
     *, cadence: str, scheduled_for: datetime, timezone_name: str | None,
     target_weeks_ahead: int | None, one_time_week_start: date | None,
+    week_start_weekday: int = 0,
 ) -> date:
     if cadence == "once":
         if one_time_week_start is None:
             raise ValueError("A one-time schedule needs a target week.")
         return one_time_week_start
     local_day = scheduled_for.astimezone(location_zone(timezone_name)).date()
-    current_sunday = local_day - timedelta(days=(local_day.weekday() + 1) % 7)
-    return current_sunday + timedelta(days=7 * int(target_weeks_ahead or 1))
+    current_week = align_week_start(local_day, week_start_weekday)
+    return current_week + timedelta(days=7 * int(target_weeks_ahead or 1))
 
 
 async def generate_review_suggestion(

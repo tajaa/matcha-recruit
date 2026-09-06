@@ -930,6 +930,55 @@ export interface HuumeActionEligibilityDecision {
   acknowledgement_note?: string | null
 }
 
+/** One staged save of a location's scheduling setup — the answers Huume
+ * collected while interviewing the manager (operating hours, the recurring
+ * staffing blocks, who counts as the leader on shift). Every field past the
+ * identity trio is optional: a partial interview still stages, and the
+ * server only writes back the slices it was given. */
+export interface HuumeActionScheduleLocationProfile {
+  type: 'schedule_location_profile'
+  status: 'proposed' | 'saved' | 'failed' | 'cancelled'
+  confirm_id: string
+  location_id: string
+  /** One-line human summary, e.g. "hours on 5 days, 3 shift blocks
+   * (7 positions/day-slot), leader: Shift Lead". */
+  summary?: string
+  /** Keyed by weekday index as a string, "0".."6", 0 = Sunday (matches
+   * WEEKDAY_LABELS in types/employeeSchedule). `null` means closed that day;
+   * an absent key means the interview never covered it — the three cases
+   * render differently, so don't collapse absent into closed. */
+  operating_hours?: Record<string, { open: string; close: string } | null>
+  blocks?: Array<{
+    name: string
+    /** Same value as `job_name` — the server emits both because the shift
+     * row it eventually writes stores the label in a `role` column while
+     * the job catalog names it `job_name`. Render `job_name`. */
+    role: string
+    job_id: string
+    job_name: string
+    days_of_week: number[]
+    start_time: string
+    end_time: string
+    required_staff: number
+    break_minutes: number
+  }>
+  leader_job_id?: string | null
+  leader_job_name?: string | null
+  notes?: string | null
+  template_name?: string | null
+}
+
+/** `current_state.huume_choice` — a finite set of answers to a question Huume
+ * just asked ("Which location?", "Which week template?"). Purely a shortcut:
+ * clicking a chip sends `send ?? label` as an ordinary user turn, exactly the
+ * way the Confirm/Cancel strip sends the literal words. The server clears the
+ * slot on the next turn that doesn't reissue it. */
+export interface HuumeChoice {
+  question: string
+  options: Array<{ label: string; send?: string }>
+  kind: 'single'
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -957,6 +1006,7 @@ export type HuumeAction =
   | HuumeActionMealBreakWaiver
   | HuumeActionWorkPermit
   | HuumeActionEligibilityDecision
+  | HuumeActionScheduleLocationProfile
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */

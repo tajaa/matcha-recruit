@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from app.core.feature_flags import merge_company_features
+from app.matcha.services.scheduling.location_profile import resolve_week_start_weekday
 from app.matcha.services.scheduling.schedule_automation import (
     generate_review_suggestion,
     next_run_at,
@@ -100,6 +101,9 @@ async def _run(rule_id: str, schedule_version: int, scheduled_for: str) -> dict:
             timezone_name=rule["timezone"],
             target_weeks_ahead=rule["target_weeks_ahead"],
             one_time_week_start=rule["target_week_start"],
+            week_start_weekday=await resolve_week_start_weekday(
+                conn, company_id=rule["company_id"], location_id=rule["location_id"],
+            ),
         )
         try:
             if rule["week_template_id"] is None:

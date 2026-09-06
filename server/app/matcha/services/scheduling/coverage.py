@@ -17,11 +17,12 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.scheduling.location_profile import resolve_week_start_weekday
 from app.matcha.services.scheduling.schedule_intelligence import fetch_lapse_items
 from app.matcha.services.scheduling.schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES,
+    align_week_start,
     availability_violations,
-    sunday_indexed_weekday,
 )
 from app.matcha.services.scheduling.schedule_profiles import fetch_effective_job_employee_ids
 from app.matcha.services.scheduling.shift_writes import fetch_availability
@@ -94,7 +95,10 @@ async def find_coverage_candidates(
     )
     roster = [dict(r) for r in roster_rows]
 
-    week_start = target_date - timedelta(days=sunday_indexed_weekday(target_date))
+    week_start = align_week_start(
+        target_date,
+        await resolve_week_start_weekday(conn, company_id=company_id, location_id=location_id),
+    )
     week_lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     week_hi = week_lo + timedelta(days=7)
     hours_rows = await conn.fetch(

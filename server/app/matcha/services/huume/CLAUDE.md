@@ -12,6 +12,71 @@ authorization. `_assert_manager_location` is the authoritative location check.
 The required route flags are `matcha_ops` + `employee_schedule` for the
 session route, and `matcha_work` + `huume` + `employee_schedule` for turns.
 
+**Location scheduling profile + intake chips (2026-09-05).** The week builder
+only knows two demand sources (draft shifts, or a saved week template), so a
+store with an empty week and no template used to get "add draft shifts or a
+week template before I build the week" — a dead end, since building the week
+was the request. Huume now interviews for it instead:
+`get_location_schedule_profile` (read) and `save_location_schedule_profile`
+(staged, action_type `schedule_location_profile`) in
+`services/huume/schedule_profile_skill.py`, writing
+`schedule_location_profiles` + the location's default week template through
+`services/scheduling/location_profile.py`. The builder prefers that default
+afterwards, so the "which template?" question is asked once, ever.
+Job NAMES come from the model and ids are resolved server-side at STAGE time
+(`shift_writes.resolve_job_by_name`); an unresolvable name is a clarify with
+the location's real job names, never a free-text block. A leader-coverage rule
+("a shift lead is always on") is materialized into real blocks — the planner
+only knows demand, so a rule that stays prose is silently ignored. The staged
+dict carries what the server resolved, not the model's raw args.
+
+The profile is rendered into the schedule system prompt every turn
+(`prompt.build_system_prompt(location_profile_block=...)`, loaded just before
+the one `build_system_prompt` callsite in `agent.py`) — there is no per-turn
+context builder on the Huume path, since `_run_huume_dispatch` replaces
+`_inject_mode_contexts` wholesale.
+
+`current_state.huume_choice` (`{question, options:[{label, send?}], kind}`) is
+a question whose answer is a finite choice, rendered as tappable chips
+(`work/components/panels/HuumeChoiceChips.tsx`). Set from `finish(question,
+options)`, from a week-template clarify, or from a job-name clarify; capped at
+6 options / 40 chars and deduped by `agent._build_choice`. It is CLEARED on any
+turn that does not reissue it (`state_updates["huume_choice"] = None`;
+`apply_update` drops None keys) — guarded on the key already existing, so an
+idle turn does not force a document version bump. A chip click sends the option
+label as an ordinary user turn, so it can never satisfy
+`_has_explicit_schedule_confirmation` — confirmation stays on the Confirm
+button. **`save_location_schedule_profile` had to be added to that gate's tool
+set at `agent.py`** or the model could self-confirm by echoing the confirm_id
+it can read in the state block.
+
+A schedule clarification or refusal from `_TERMINAL_SCHEDULE_TOOLS`
+(`propose_schedule_change`, `save_location_schedule_profile`,
+`build_week_schedule`) ENDS the turn — its deterministic message becomes the
+reply and no further Gemini call is made. Those messages are already complete
+(the candidate shifts, the location's real job names, the saved templates), so
+another model call can only re-ask what the manager can already read; that
+retry loop is what the August cost audit priced at $3.44 in one day. The chips
+minted alongside the clarify still ride out on the same turn.
+
+Two invariants the first pass got wrong, both found by running the real flow
+rather than a fake connection:
+
+- **A staged action is JSONB.** `_claim_staged_action` sanitizes with
+  `_json_safe` before it reaches `state_updates`, and skills emit ids as
+  strings. One raw `UUID`/`date` in the dict fails `json.dumps` for the WHOLE
+  state update in `matcha_work_document.versions.apply_update`, which
+  `turn_pipeline` catches and logs — so the confirm card, the chip clear, and
+  anything else that turn set all vanish with a green tool step still on
+  screen.
+- **A profile save merges, it never overwrites.** The intake asks one question
+  per turn, so a later call carries only that answer: `resolve_profile_args`
+  stages the profile as it will look AFTER the save (saved hours merged with
+  the new ones, the saved pattern re-staged when a leader turn adds coverage),
+  and `execute` writes a field only when it is non-empty. An empty
+  `operating_hours` dict or a blank `notes` string means "this turn had nothing
+  to say", never "erase it" — the model fills both in regardless.
+
 The surface has only the tools in `SCHEDULE_TOOLS` and the lookup topics in
 `SCHEDULE_LOOKUP_TOPICS`. All writes are staged and require a later turn with
 the exact `confirm_id`; they apply directly to the published schedule after

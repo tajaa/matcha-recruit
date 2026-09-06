@@ -11,8 +11,11 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
 from app.matcha.services.scheduling.schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES,
+    align_week_start,
     availability_detail,
     availability_violations,
     build_patch,
@@ -23,6 +26,7 @@ from app.matcha.services.scheduling.schedule_rules import (
     sunday_indexed_weekday,
     template_windows,
     week_bounds,
+    week_day_offset,
 )
 
 
@@ -293,3 +297,48 @@ def test_shift_window_on_date_overnight_preserves_duration():
     new_starts, new_ends = shift_window_on_date(starts, ends, date(2026, 8, 10))
     assert new_starts == datetime(2026, 8, 10, 22, tzinfo=timezone.utc)
     assert new_ends == datetime(2026, 8, 11, 6, tzinfo=timezone.utc)
+
+
+# ── Per-location week start (schedloc01) ─────────────────────────────────────
+
+@pytest.mark.parametrize("week_start_weekday,expected", [
+    (0, date(2026, 8, 23)),   # Sunday — the legacy default
+    (1, date(2026, 8, 24)),   # Monday
+    (3, date(2026, 8, 26)),   # Wednesday, the day itself
+    (4, date(2026, 8, 20)),   # Thursday — rolls back into the prior calendar week
+    (6, date(2026, 8, 22)),   # Saturday
+])
+def test_align_week_start_anchors_on_each_weekday(week_start_weekday, expected):
+    # 2026-08-26 is a Wednesday.
+    assert align_week_start(date(2026, 8, 26), week_start_weekday) == expected
+
+
+def test_align_week_start_defaults_to_the_sunday_every_caller_assumed():
+    for day in range(23, 30):
+        assert align_week_start(date(2026, 8, day)) == date(2026, 8, 23)
+
+
+def test_align_week_start_is_idempotent():
+    for weekday in range(7):
+        start = align_week_start(date(2026, 8, 26), weekday)
+        assert align_week_start(start, weekday) == start
+
+
+@pytest.mark.parametrize("weekday,week_start_weekday,expected", [
+    (0, 0, 0), (6, 0, 6),     # Sunday-start: the index IS the offset
+    (1, 1, 0),                # Monday-start: Monday is day 0 of the week
+    (0, 1, 6),                # Monday-start: Sunday is the LAST day
+    (3, 4, 6),
+])
+def test_week_day_offset_converts_index_to_position(weekday, week_start_weekday, expected):
+    assert week_day_offset(weekday, week_start_weekday) == expected
+
+
+def test_week_day_offset_and_align_agree_on_the_calendar():
+    """The pair has to round-trip: offsetting from a week start by a weekday's
+    offset must land on a date whose weekday is that weekday."""
+    for week_start_weekday in range(7):
+        start = align_week_start(date(2026, 8, 26), week_start_weekday)
+        for weekday in range(7):
+            landed = start + timedelta(days=week_day_offset(weekday, week_start_weekday))
+            assert sunday_indexed_weekday(landed) == weekday

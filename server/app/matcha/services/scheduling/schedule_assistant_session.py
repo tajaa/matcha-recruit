@@ -11,9 +11,13 @@ from fastapi import HTTPException
 
 from app.database import get_connection
 from app.matcha.services.matcha_work.matcha_work_document import get_thread_messages
+from app.matcha.services.scheduling.location_profile import (
+    WEEKDAY_NAMES, resolve_week_start_weekday,
+)
 from app.matcha.services.scheduling.schedule_eligibility_authorization import (
     resolve_eligibility_manager_scope,
 )
+from app.matcha.services.scheduling.schedule_rules import align_week_start
 
 @dataclass(frozen=True)
 class ScheduleAssistantScope:
@@ -127,7 +131,7 @@ async def _adopt_automatic_proposal(
     return next_state, next_version
 
 
-async def _assert_manager_location(
+async def assert_manager_location(
     conn, *, company_id: UUID, user_id: UUID, actor_role: str, location_id: UUID
 ) -> None:
     location = await conn.fetchrow(
@@ -145,6 +149,12 @@ async def _assert_manager_location(
     )
     if not scope.permits(location_id):
         raise HTTPException(status_code=403, detail="You are not authorized to manage this location")
+
+
+# The location check is authoritative wherever a manager reaches per-location
+# schedule setup — the Huume session and the Week Start pane both call it, so
+# it is public. Kept under the old private name for existing callers.
+_assert_manager_location = assert_manager_location
 
 
 async def get_or_create_schedule_assistant_session(
@@ -169,6 +179,20 @@ async def get_or_create_schedule_assistant_session(
                 actor_role=actor_role,
                 location_id=location_id,
             )
+            # Every write on this surface is bounded by the session's week, so
+            # a misaligned week_start would silently scope Huume to a window
+            # that matches no grid the manager can see.
+            week_start_weekday = await resolve_week_start_weekday(
+                conn, company_id=company_id, location_id=location_id,
+            )
+            if align_week_start(week_start, week_start_weekday) != week_start:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"week_start must be a {WEEKDAY_NAMES[week_start_weekday]} "
+                        f"for this location."
+                    ),
+                )
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 f"schedule-assistant:{company_id}:{user_id}:{location_id}:{week_start.isoformat()}",

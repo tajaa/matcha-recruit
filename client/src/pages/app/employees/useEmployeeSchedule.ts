@@ -4,7 +4,7 @@ import type {
   Shift, RosterEmployee, ScheduleSummary, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
-  toISODate, addDays, startOfWeekSunday,
+  toISODate, addDays, startOfWeek,
 } from '../../../types/employeeSchedule'
 
 export type EmployeeScheduleTab = 'schedule' | 'templates' | 'auto-schedules' | 'requests' | 'audit' | 'intelligence'
@@ -13,13 +13,17 @@ export function useEmployeeSchedule(
   initialDate?: string,
   initialTab: EmployeeScheduleTab = 'schedule',
   locationId = '',
+  /** 0=Sunday .. 6=Saturday, from the selected location's scheduling profile.
+   * Only seeds the initial week — changing stores does not yank the manager
+   * off the week they are already looking at. */
+  weekStartWeekday = 0,
 ) {
   const [tab, setTab] = useState<EmployeeScheduleTab>(initialTab)
   // `initialDate` (from a ?date= deep link — see systemContent.tsx's
   // shift-link token) opens the week that date falls in, not always "this
   // week": a shift-chat confirmation can land in a future or past week.
   const [weekStart, setWeekStart] = useState(() =>
-    toISODate(startOfWeekSunday(initialDate ? new Date(`${initialDate}T00:00:00Z`) : new Date())),
+    toISODate(startOfWeek(initialDate ? new Date(`${initialDate}T00:00:00Z`) : new Date(), weekStartWeekday)),
   )
   const [shifts, setShifts] = useState<Shift[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])

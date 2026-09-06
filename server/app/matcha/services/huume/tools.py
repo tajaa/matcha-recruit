@@ -860,6 +860,76 @@ TOOLS: tuple[HuumeTool, ...] = (
         intent_hints=("build this week", "create the schedule", "schedule readiness", "staff the week"),
     ),
     _tool(
+        "get_location_schedule_profile", "read",
+        "Read this location's saved scheduling setup: opening hours per day, "
+        "the usual week of shift blocks, the leader-coverage rule, and which "
+        "of those are still missing. Call this before asking the manager "
+        "anything about how the store runs — most of it may already be saved.",
+        properties={},
+        discovery=True,
+        intent_hints=("store hours", "when are we open", "staffing pattern", "how does this store run"),
+    ),
+    _tool(
+        "save_location_schedule_profile", "staged",
+        "Stage this location's scheduling setup so future weeks can be built "
+        "from it: opening hours, the shift blocks a normal week needs, and the "
+        "job that must always be on the floor. Blocks are saved as the "
+        "location's default week template. Nothing is written until the "
+        "manager confirms on a LATER turn with the exact confirm_id.",
+        properties={
+            "operating_hours": types.Schema(
+                type=types.Type.OBJECT,
+                description=(
+                    "Open/close per weekday keyed '0'..'6' (0=Sunday), e.g. "
+                    "{\"1\": {\"open\": \"08:00\", \"close\": \"17:00\"}}. Use null for a "
+                    "closed day; omit a day nobody has told you about."
+                ),
+            ),
+            "blocks": types.Schema(
+                type=types.Type.ARRAY,
+                description="The shift blocks a normal week needs at this location.",
+                items=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "name": types.Schema(type=types.Type.STRING, description="What staff call it, e.g. 'Opener'."),
+                        "job_name": types.Schema(
+                            type=types.Type.STRING,
+                            description="An existing job at this location — never invent one.",
+                        ),
+                        "days_of_week": types.Schema(
+                            type=types.Type.ARRAY, items=types.Schema(type=types.Type.INTEGER),
+                            description="0=Sunday … 6=Saturday.",
+                        ),
+                        "start_time": types.Schema(type=types.Type.STRING, description="HH:MM"),
+                        "end_time": types.Schema(type=types.Type.STRING, description="HH:MM"),
+                        "required_staff": types.Schema(type=types.Type.INTEGER),
+                        "break_minutes": types.Schema(type=types.Type.INTEGER),
+                    },
+                    required=["name", "job_name", "days_of_week", "start_time", "end_time", "required_staff"],
+                ),
+            ),
+            "leader_job_name": types.Schema(
+                type=types.Type.STRING,
+                description="Job that must be on every open shift (shift lead / manager), if the manager named one.",
+            ),
+            "notes": types.Schema(type=types.Type.STRING),
+            "template_name": types.Schema(
+                type=types.Type.STRING,
+                description="Optional name for the saved week template.",
+            ),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit when staging; after explicit approval, echo the staged confirm_id exactly.",
+            ),
+        },
+        required=[],
+        discovery=True,
+        intent_hints=(
+            "set up the schedule", "our hours are", "we always need", "shift lead",
+            "how many people", "store setup",
+        ),
+    ),
+    _tool(
         "build_week_schedule", "staged",
         "Build and stage a deterministic whole-week schedule proposal from "
         "confirmed employee availability and either the week's existing draft "
@@ -1004,7 +1074,25 @@ TOOLS: tuple[HuumeTool, ...] = (
         "End the turn. Call this once you've done what was asked, or to "
         "explain why you couldn't — describe ONLY what actually happened, "
         "never what you intended to do.",
-        properties={"message": types.Schema(type=types.Type.STRING)},
+        properties={
+            "message": types.Schema(type=types.Type.STRING),
+            "question": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "The single question you need answered next, when the answer is one "
+                    "of a short list of choices. Pass `options` with it."
+                ),
+            ),
+            "options": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(type=types.Type.STRING),
+                description=(
+                    "2-6 short answers (max 40 chars each) rendered as buttons the "
+                    "manager can tap instead of typing. Only for a genuinely finite "
+                    "choice — location names, job names, saved templates, yes/no."
+                ),
+            ),
+        },
         required=["message"],
     ),
 )
