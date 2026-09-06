@@ -1036,3 +1036,36 @@ async def test_an_unresolved_plan_is_not_said_twice_on_an_unmapped_date(monkeypa
     )
 
     assert [f["kind"] for f in findings] == ["break_rules_unmapped"]
+
+
+# --- input-hash stability across process restarts -----------------------------
+#
+# Real bug, found live: `_input_hash` must give the SAME answer for the SAME
+# underlying data no matter which process computed it. `gated_job_ids` is a
+# python `set`, and set iteration order depends on the process's string-hash
+# seed (randomized fresh per process start unless PYTHONHASHSEED is pinned).
+# `json.dumps(..., sort_keys=True)` only orders dict KEYS, never list
+# elements, so an unsorted set-to-list conversion made every confirm racy
+# against a dev --reload or a propose/confirm pair landing on different prod
+# workers: nothing about the schedule changed, but the hash did, and
+# apply_week_draft reported "the schedule changed after this proposal was
+# built" on a perfectly good proposal.
+
+def test_input_hash_does_not_depend_on_set_iteration_order():
+    """Two sets holding the same job ids, built in different orders (the
+    closest same-process proxy for "a different hash seed" — see the
+    subprocess proof in the PR/commit for the real cross-seed repro)."""
+    built_one_way = {"job-3", "job-1", "job-2"}
+    built_another_way = {"job-1", "job-2", "job-3"}
+    assert list(built_one_way) != list(built_another_way) or True  # not asserted; sets are unordered by design
+
+    snapshot_a = {"gated_job_ids": built_one_way, "week_start": "2026-08-23"}
+    snapshot_b = {"gated_job_ids": built_another_way, "week_start": "2026-08-23"}
+
+    assert week_builder._input_hash(snapshot_a) == week_builder._input_hash(snapshot_b)
+
+
+def test_iso_serializes_a_set_as_a_sorted_list():
+    """Sorted, not just "some list" — the exact ordering has to be
+    reproducible, not merely consistent within one accidental run."""
+    assert week_builder._iso({"a", "c", "b"}) == ["a", "b", "c"]

@@ -64,7 +64,19 @@ def _iso(value: Any) -> Any:
         return value.isoformat() if not isinstance(value, UUID) else str(value)
     if isinstance(value, dict):
         return {str(key): _iso(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, set):
+        # A set's iteration order depends on the process's string-hash seed,
+        # which is randomized fresh per process start — `sort_keys=True` on
+        # the eventual json.dumps only orders dict KEYS, never list elements,
+        # so an unsorted set-to-list here makes `_input_hash` unstable across
+        # any process restart between propose and confirm (dev's --reload
+        # firing mid-edit, or propose/confirm landing on different prod
+        # workers). Every real proposal then reads as "the schedule changed"
+        # with nothing having changed at all. Sort by the serialized form so
+        # this holds for sets of any JSON-safe element, not just strings.
+        items = [_iso(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    if isinstance(value, (list, tuple)):
         return [_iso(item) for item in value]
     return value
 
