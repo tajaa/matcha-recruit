@@ -154,6 +154,7 @@ def _write_launcher(
                 "esac\n"
                 "case \"$dispatch_command\" in\n"
                 "  '')\n"
+                "    echo 'msandbox: checking services and agent CLI versions; an update may download/build for several minutes...'\n"
                 "    startup_log=$(mktemp \"${TMPDIR:-/tmp}/msandbox-start.XXXXXX\") || exit 1\n"
                 "    if \"$legacy\" system up >\"$startup_log\" 2>&1; then\n"
                 "      rm -f -- \"$startup_log\"\n"

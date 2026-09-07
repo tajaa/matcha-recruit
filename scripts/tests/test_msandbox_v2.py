@@ -1410,6 +1410,7 @@ class HostAndInstallTests(MsandboxTestCase):
             env=bare_environment,
         )
         self.assertTrue(up_marker.is_file())
+        self.assertIn("an update may download/build for several minutes", bare.stdout)
         self.assertIn("msandbox + AutoPR ready", bare.stdout)
         self.assertNotIn("legacy:system up", bare.stdout)
         self.assertIn("No active msandbox sessions", bare.stdout)

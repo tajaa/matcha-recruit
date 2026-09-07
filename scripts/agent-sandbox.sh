@@ -395,7 +395,9 @@ refresh_agent_versions() {
 }
 
 build_workspace_image() {
+    echo "msandbox: checking Codex and Claude Code releases..."
     refresh_agent_versions
+    echo "msandbox: preparing the workspace image; downloads occur only when inputs changed..."
     "${COMPOSE[@]}" build workspace
 }
 
@@ -959,6 +961,7 @@ case "$command_name" in
     start)
         require_docker
         if [ "$OPEN_V2_WIZARD_AFTER_START" = 1 ]; then
+            echo "msandbox: checking services and agent CLI versions; an update may download/build for several minutes..."
             startup_log="$(mktemp "${TMPDIR:-/tmp}/msandbox-start.XXXXXX")"
             if ! start_primary_and_enable_autopr >"$startup_log" 2>&1; then
                 cat "$startup_log" >&2
