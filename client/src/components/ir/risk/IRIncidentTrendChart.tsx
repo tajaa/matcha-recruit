@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useAsync } from '../../../hooks/useAsync'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { TooltipContentProps, TooltipPayloadEntry } from 'recharts'
+import type { TooltipContentProps } from 'recharts'
 import { TrendingDown, TrendingUp } from 'lucide-react'
 import { api } from '../../../api/client'
 import type { IRTrendPoint } from '../../../types/ir'
@@ -48,9 +48,9 @@ function ChartTooltip({ active, payload, label }: Partial<TooltipContentProps<nu
     <div className="bg-zinc-900 border border-white/10 px-4 py-3 shadow-xl text-xs rounded-lg min-w-[160px]">
       <div className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest mb-2">{label}</div>
       {payload
-        .filter((p: TooltipPayloadEntry<number, string>) => (p.value ?? 0) > 0)
+        .filter((p) => Number(p.value ?? 0) > 0)
         .reverse()
-        .map((entry: TooltipPayloadEntry<number, string>) => (
+        .map((entry) => (
           <div key={String(entry.dataKey)} className="flex items-center justify-between gap-6">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
