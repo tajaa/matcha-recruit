@@ -59,7 +59,9 @@ from .schedule_chat_rules import (
     resolve_day_hint,
     resolve_week,
 )
+from .assignment_guard import ProposedAssignment, build_ledgers, evaluate_batch
 from .schedule_batch import net_per_day
+from .schedule_review import build_review, jurisdiction_message, rejected_entry
 from .schedule_intelligence import fetch_lapse_items
 from .schedule_profiles import fetch_effective_job_employee_ids
 from .location_profile import resolve_week_start_weekday
@@ -67,7 +69,9 @@ from .schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES, availability_violations, sunday_indexed_weekday,
     template_windows,
 )
-from .shift_compliance import _approved_db_rules, _fair_workweek_advisories, _week_hours, check_shift_compliance
+from .shift_compliance import (
+    _fair_workweek_advisories, _week_hours, check_shift_compliance, jurisdiction_rule_status,
+)
 from .shift_writes import (
     apply_assignment_core, cancel_shift_core, create_shift_core, fetch_availability,
     find_conflicts, generate_week_template_shifts, log_audit, remove_assignment_core,
@@ -594,6 +598,12 @@ class ProposalBuild:
     # `build_batch_proposal`), so there is no row to point at.
     proposal_id: Optional[UUID]
     pill_text: str
+    # The `ScheduleReview` for a `kind="proposal"` build (see schedule_review).
+    review: Optional[dict] = None
+    # For a clarify: "ambiguous" (which shift/person? — the caller may append
+    # its own "reply with the time…" hint) vs "refused" (every op was rejected
+    # or the state's rules could not be loaded — the message is complete).
+    clarify_kind: str = "ambiguous"
 
 
 class ProposalExecutionClaimError(RuntimeError):
@@ -1022,10 +1032,8 @@ async def _resolve_create_shifts(
     # the manager "I don't have codified thresholds for this state" would be
     # a lie. `rules_summary(state)` alone can't distinguish these cases
     # because it's called with no `db_rules` argument.
-    rules_unmapped = False
-    if location_state and not schedule_compliance.is_curated_state(location_state):
-        db_rules, _fetch_failed = await _approved_db_rules(conn, location_state.strip().upper())
-        rules_unmapped = db_rules is None
+    jurisdiction = jurisdiction_message(await jurisdiction_rule_status(conn, company_id, location_id))
+    rules_unmapped = jurisdiction["status"] in ("unmapped", "unavailable")
 
     return {
         "week_start": resolved_week_start.isoformat(),
@@ -1034,6 +1042,7 @@ async def _resolve_create_shifts(
             "city": location.get("city"), "state": location_state,
         },
         "rules_unmapped": rules_unmapped,
+        "jurisdiction": jurisdiction,
         "shifts": [
             {
                 "label": s["label"], "template_id": s["template_id"],
@@ -1080,9 +1089,12 @@ async def build_proposal(
         "surface": surface,
         "location": resolved["location"],
         "rules_unmapped": resolved["rules_unmapped"],
+        "jurisdiction": resolved["jurisdiction"],
         "clarify_question": None, "clarify_options": [], "clarify_history": clarify_history,
         "shifts": resolved["shifts"],
     }
+    proposal_doc["review"] = build_review(proposal_doc)
+    proposal_doc["compliance_status"] = proposal_doc["review"]["compliance_status"]
     proposal_id = await _persist_proposal(
         conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
         source_message_id=source_message_id, created_by=created_by,
@@ -1092,6 +1104,7 @@ async def build_proposal(
     return ProposalBuild(
         kind="proposal", proposal_id=proposal_id,
         pill_text=proposal_text(proposal_doc, resolved["location"]["state"]),
+        review={**proposal_doc["review"], "proposal_id": str(proposal_id)},
     )
 
 
@@ -1260,6 +1273,148 @@ async def _resolve_shift_ref(
                 rows = narrowed
         return {"ambiguous": rows}
     return {"shift": dict(rows[0])}
+
+
+async def _review_assign_ops(
+    conn, company_id: UUID, ops: list[dict], *, location_id: Optional[UUID],
+) -> None:
+    """Annotate every assign/reassign op with `op["review"]` from
+    `assignment_guard.evaluate_batch`, evaluated as a SET: overlap with the
+    person's existing shifts AND with earlier ops in this same batch, plus
+    the policy warnings (same-day double, rest, consecutive days, weekly
+    cap). The DB-only hard refusals confirm-time would raise anyway —
+    unqualified, outside availability, shift already full (counting earlier
+    ops here) — are folded in as `pre_blocked` so the pill says so BEFORE the
+    manager confirms instead of the op vanishing at confirm. Never raises:
+    a guard failure leaves ops un-annotated and confirm-time rechecks hold.
+    Non-assign ops get a plain `ok` review so renderers need no special case."""
+    for op in ops:
+        op.setdefault("review", {"verdict": "ok", "reasons": [], "before": {}, "after": {}})
+    targets = [
+        (index, op) for index, op in enumerate(ops)
+        if op.get("kind") in ("assign", "reassign") and op.get("to_employee_id")
+    ]
+    if not targets:
+        return
+    try:
+        employee_ids = list(dict.fromkeys(UUID(op["to_employee_id"]) for _i, op in targets))
+        starts = [datetime.fromisoformat(op["starts_at"]) for _i, op in targets]
+        ends = [datetime.fromisoformat(op["ends_at"]) for _i, op in targets]
+        # ±8 days: the 7-day week window of any op plus a day of rest context.
+        ledgers = await build_ledgers(
+            conn, company_id, employee_ids=employee_ids,
+            window_start=min(starts) - timedelta(days=8), window_end=max(ends) + timedelta(days=8),
+        )
+        week_start_weekday = await resolve_week_start_weekday(
+            conn, company_id=company_id, location_id=location_id,
+        )
+        avail_map = await fetch_availability(conn, company_id, employee_ids)
+        shift_ids = list(dict.fromkeys(UUID(op["shift_id"]) for _i, op in targets))
+        headcount_rows = await conn.fetch(
+            """
+            SELECT s.id, COALESCE(s.required_staff, 1) AS required_staff,
+                   COUNT(a.employee_id) AS assigned
+            FROM schedule_shifts s
+            LEFT JOIN schedule_shift_assignments a ON a.shift_id = s.id
+            WHERE s.company_id = $1 AND s.id = ANY($2::uuid[])
+            GROUP BY s.id
+            """,
+            company_id, shift_ids,
+        )
+        headroom = {
+            str(row["id"]): int(row["required_staff"]) - int(row["assigned"]) for row in headcount_rows
+        }
+
+        pre_blocked: dict[int, list[dict]] = {}
+        assignments: list[ProposedAssignment] = []
+        for index, op in targets:
+            to_id = UUID(op["to_employee_id"])
+            starts_at = datetime.fromisoformat(op["starts_at"])
+            ends_at = datetime.fromisoformat(op["ends_at"])
+            reasons: list[dict] = []
+            qualified = await fetch_effective_job_employee_ids(
+                conn, company_id=company_id,
+                job_id=UUID(op["job_id"]) if op.get("job_id") else None,
+                employee_ids=[to_id], as_of=starts_at.date(),
+            )
+            if to_id not in qualified:
+                reasons.append({"code": "not_qualified", "policy": False,
+                                "message": "not actively qualified for this job on that date"})
+            if availability_violations(avail_map.get(to_id, {}), starts_at, ends_at):
+                reasons.append({"code": "outside_availability", "policy": False,
+                                "message": "outside their logged availability"})
+            # A reassign frees a seat on the same shift, so it never competes
+            # for headroom; a plain assign consumes one, including against
+            # earlier assigns to the same shift in this batch.
+            if op.get("kind") == "assign":
+                left = headroom.get(op["shift_id"], 1)
+                if left <= 0:
+                    reasons.append({"code": "shift_full", "policy": False,
+                                    "message": "that shift is already fully staffed"})
+                elif not reasons:
+                    headroom[op["shift_id"]] = left - 1
+            if reasons:
+                pre_blocked[index] = reasons
+            assignments.append(ProposedAssignment(
+                op_index=index, shift_id=op["shift_id"], employee_id=op["to_employee_id"],
+                starts_at=starts_at, ends_at=ends_at,
+                worked_minutes=max(0, int((ends_at - starts_at).total_seconds() // 60)
+                                   - int(op.get("break_minutes") or 0)),
+                employee_name=op.get("to_employee_name") or "",
+                shift_label=(op.get("shift_role") or "shift").title(),
+            ))
+        verdicts = evaluate_batch(
+            assignments, ledgers, week_start_weekday=week_start_weekday, pre_blocked=pre_blocked,
+        )
+        for index, op in targets:
+            verdict = verdicts.get(index)
+            if verdict is None:
+                continue
+            op["review"] = {
+                "verdict": verdict.verdict, "reasons": verdict.reasons,
+                "before": verdict.before, "after": verdict.after,
+            }
+    except Exception:
+        logger.exception("schedule_chat: assignment guard failed for company %s", company_id)
+
+
+def _split_reviewed_ops(ops: list[dict]) -> tuple[list[dict], list[dict]]:
+    accepted = [op for op in ops if (op.get("review") or {}).get("verdict") != "blocked"]
+    rejected = [rejected_entry(op) for op in ops if (op.get("review") or {}).get("verdict") == "blocked"]
+    return accepted, rejected
+
+
+def _rejected_clarify(rejected: list[dict]) -> _Clarify:
+    lines = []
+    for item in rejected[:6]:
+        when = _fmt_date(datetime.fromisoformat(item["starts_at"]))
+        why = "; ".join(r.get("message", "") for r in item.get("reasons") or []) or "can't be staged"
+        who = f"{item['employee_name']} on " if item.get("employee_name") else ""
+        lines.append(f"{who}the {item['role']} {when}: {why}")
+    more = f" …and {len(rejected) - 6} more." if len(rejected) > 6 else ""
+    return _Clarify(
+        "I couldn't stage any of those — " + " · ".join(lines) + more
+        + " Pick someone else for those shifts, or tell me which to drop.",
+        [],
+    )
+
+
+async def _ops_jurisdiction(conn, company_id: UUID, ops: list[dict], location_id: Optional[UUID]) -> dict:
+    """The worst jurisdiction status across the ops' locations (an edit batch
+    is almost always one store, but a company-wide channel edit need not be)."""
+    candidates = ([str(location_id)] if location_id else []) + [
+        op["location_id"] for op in ops if op.get("location_id")
+    ]
+    location_ids = list(dict.fromkeys(candidates))
+    if not location_ids:
+        return jurisdiction_message(await jurisdiction_rule_status(conn, company_id, None))
+    rank = {"unavailable": 3, "unmapped": 2, "catalog": 1, "curated": 0}
+    worst: Optional[dict] = None
+    for raw in location_ids:
+        info = jurisdiction_message(await jurisdiction_rule_status(conn, company_id, UUID(raw)))
+        if worst is None or rank.get(info["status"], 2) > rank.get(worst["status"], 2):
+            worst = info
+    return worst or jurisdiction_message(None)
 
 
 async def _resolve_edit_ops(
@@ -1526,6 +1681,7 @@ async def _resolve_edit_ops(
 
     if not ops:
         return await _clarify("I couldn't figure out what to change — can you be more specific?")
+    await _review_assign_ops(conn, company_id, ops, location_id=location_id)
     return ops
 
 
@@ -1560,11 +1716,36 @@ async def build_edit_proposal(
             source_message_id=source_message_id, created_by=created_by, parsed=parsed,
             clarify_history=clarify_history, base_doc=base_doc, clarify=resolved,
         )
+    accepted, rejected = _split_reviewed_ops(resolved)
+    jurisdiction = await _ops_jurisdiction(conn, company_id, resolved, editor_location_id)
+    if jurisdiction["status"] == "unavailable":
+        # Fail closed on agent paths: a transient rule-fetch failure is not an
+        # all-clear, and there is no `force` here to click through.
+        build = await _persist_clarify(
+            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+            source_message_id=source_message_id, created_by=created_by, parsed=parsed,
+            clarify_history=clarify_history, base_doc=base_doc,
+            clarify=_Clarify(jurisdiction["message"] + " Try again in a minute.", []),
+        )
+        build.clarify_kind = "refused"
+        return build
+    if not accepted:
+        build = await _persist_clarify(
+            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+            source_message_id=source_message_id, created_by=created_by, parsed=parsed,
+            clarify_history=clarify_history, base_doc=base_doc, clarify=_rejected_clarify(rejected),
+        )
+        build.clarify_kind = "refused"
+        return build
     proposal_doc = {
         **base_doc,
         "clarify_question": None, "clarify_options": [], "clarify_history": clarify_history,
-        "ops": resolved,
+        "ops": accepted,
+        "rejected": rejected,
+        "jurisdiction": jurisdiction,
     }
+    proposal_doc["review"] = build_review(proposal_doc)
+    proposal_doc["compliance_status"] = proposal_doc["review"]["compliance_status"]
     proposal_id = await _persist_proposal(
         conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
         source_message_id=source_message_id, created_by=created_by,
@@ -1573,6 +1754,7 @@ async def build_edit_proposal(
     )
     return ProposalBuild(
         kind="proposal", proposal_id=proposal_id, pill_text=edit_proposal_text(proposal_doc),
+        review={**proposal_doc["review"], "proposal_id": str(proposal_id)},
     )
 
 
@@ -2168,7 +2350,7 @@ async def _apply_create_shifts(
         },
     )
 
-    return result_text(shifts_created, dropped), created_shift_ids
+    return result_text(shifts_created, dropped, jurisdiction=proposal.get("jurisdiction")), created_shift_ids
 
 
 async def execute_edit_proposal(
@@ -2201,7 +2383,7 @@ async def execute_edit_proposal(
         text, affected_shift_ids = await _apply_edit_ops(
             conn, company_id=proposal_row["company_id"], proposal_id=proposal_row["id"],
             ops=proposal["ops"], confirmed_by=confirmed_by, edit_published=edit_published,
-            week_start=week_start, week_end=week_end,
+            week_start=week_start, week_end=week_end, jurisdiction=proposal.get("jurisdiction"),
         )
         await _mark_confirmed(conn, proposal_row["id"], affected_shift_ids, confirmed_by)
     return text
@@ -2210,6 +2392,7 @@ async def execute_edit_proposal(
 async def _apply_edit_ops(
     conn, *, company_id: UUID, proposal_id: UUID, ops: list[dict], confirmed_by: UUID,
     edit_published: bool, week_start: Optional[date], week_end: Optional[date],
+    jurisdiction: Optional[dict] = None,
 ) -> tuple[str, list[UUID]]:
     """The write half of `execute_edit_proposal`, minus claim/finalize — the
     caller owns the transaction. Returns the result pill and the de-duplicated
@@ -2217,6 +2400,12 @@ async def _apply_edit_ops(
     the create flow, where it does mean newly created shift ids)."""
     results: list[dict] = []
     affected_shift_ids: list[UUID] = []
+    # Shifts THIS confirm put each person on, so a later op's conflict can be
+    # named honestly ("earlier in this batch") instead of blamed on drift.
+    applied_by_employee: dict[str, list[dict]] = {}
+    # Statutory advisories the manager is acknowledging by confirming — they
+    # reach the result pill and the audit row, never just the log.
+    acknowledged: list[dict] = []
     _details = lambda: {"source": "huume_chat_edit", "proposal_id": str(proposal_id)}  # noqa: E731
 
     def _in_editor_week(row) -> bool:
@@ -2529,7 +2718,14 @@ async def _apply_edit_ops(
         )
         if conflicts:
             await _restore_if_removed(idx)
-            results.append({**op, "ok": False, "reason": "they picked up a conflicting shift in the meantime"})
+            own = {item["shift_id"] for item in applied_by_employee.get(str(to_id), [])}
+            earlier = next((c for c in conflicts if c["shift_id"] in own), None)
+            if earlier is not None:
+                when = f"{_fmt_date(datetime.fromisoformat(earlier['starts_at']))} {_fmt_time(datetime.fromisoformat(earlier['starts_at']))}"
+                reason = f"would overlap the {(earlier.get('role') or 'shift').title()} {when} shift applied earlier in this batch"
+            else:
+                reason = "they picked up a conflicting shift in the meantime"
+            results.append({**op, "ok": False, "reason": reason})
             continue
         assignee_count = await conn.fetchval(
             "SELECT COUNT(*) FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)
@@ -2563,15 +2759,23 @@ async def _apply_edit_ops(
             conn, company_id, shift_row=shift_row, employee_id=to_id,
             actor_user_id=confirmed_by, audit_details=_details(),
         )
+        applied_by_employee.setdefault(str(to_id), []).append({"shift_id": str(shift_id)})
+        for item in violations:
+            acknowledged.append({
+                "message": item.get("message"), "statute": item.get("statute"),
+                "employee_name": op.get("to_employee_name"), "shift_id": str(shift_id),
+            })
         results.append({**op, "ok": True})
         affected_shift_ids.append(shift_id)
 
     await log_audit(
         conn, company_id, "shift", None, confirmed_by, "schedule_chat.edit_confirm",
-        {"proposal_id": str(proposal_id), "results": results},
+        {"proposal_id": str(proposal_id), "results": results,
+         "advisories_acknowledged": acknowledged,
+         "compliance_status": (jurisdiction or {}).get("status")},
     )
 
-    text = edit_result_text(results)
+    text = edit_result_text(results, acknowledged=acknowledged, jurisdiction=jurisdiction)
     unique_ids = list(dict.fromkeys(affected_shift_ids))
     if unique_ids:
         strip_rows = await conn.fetch(
@@ -2631,7 +2835,15 @@ async def build_batch_proposal(
                 kind="clarify", proposal_id=None,
                 pill_text=clarify_text(resolved.question, resolved.options),
             )
-        edit_ops = resolved
+        edit_ops, rejected = _split_reviewed_ops(resolved)
+        if not edit_ops and not shift_requests:
+            refused = _rejected_clarify(rejected)
+            return ProposalBuild(
+                kind="clarify", proposal_id=None, clarify_kind="refused",
+                pill_text=clarify_text(refused.question, refused.options),
+            )
+    else:
+        rejected = []
 
     create_doc: Optional[dict] = None
     if shift_requests:
@@ -2656,6 +2868,16 @@ async def build_batch_proposal(
             pill_text=clarify_text("I couldn't figure out what to change — can you be more specific?", []),
         )
 
+    jurisdiction = await _ops_jurisdiction(conn, company_id, edit_ops, editor_location_id)
+    if create_doc is not None:
+        rank = {"unavailable": 3, "unmapped": 2, "catalog": 1, "curated": 0}
+        if rank.get(create_doc["jurisdiction"]["status"], 2) > rank.get(jurisdiction["status"], 2):
+            jurisdiction = create_doc["jurisdiction"]
+    if jurisdiction["status"] == "unavailable":
+        return ProposalBuild(
+            kind="clarify", proposal_id=None, clarify_kind="refused",
+            pill_text=clarify_text(jurisdiction["message"] + " Try again in a minute.", []),
+        )
     proposal_doc = {
         "kind": "batch",
         "surface": surface,
@@ -2664,8 +2886,12 @@ async def build_batch_proposal(
         "clarify_question": None, "clarify_options": [], "clarify_history": [],
         "edit": {"kind": "edit", "surface": surface, "ack": ack, "ops": edit_ops} if edit_ops else None,
         "create": create_doc,
+        "rejected": rejected,
+        "jurisdiction": jurisdiction,
         "operation_count": len(edit_ops) + len(create_doc["shifts"] if create_doc else []),
     }
+    proposal_doc["review"] = build_review(proposal_doc)
+    proposal_doc["compliance_status"] = proposal_doc["review"]["compliance_status"]
     proposal_id = await _persist_proposal(
         conn, None, company_id=company_id, channel_id=channel_id,
         source_message_id=source_message_id, created_by=created_by,
@@ -2676,6 +2902,7 @@ async def build_batch_proposal(
     )
     return ProposalBuild(
         kind="proposal", proposal_id=proposal_id, pill_text=batch_proposal_text(proposal_doc),
+        review={**proposal_doc["review"], "proposal_id": str(proposal_id)},
     )
 
 
@@ -2713,6 +2940,7 @@ async def execute_batch_proposal(
                 conn, company_id=company_id, proposal_id=proposal_row["id"],
                 ops=edit_doc["ops"], confirmed_by=confirmed_by, edit_published=edit_published,
                 week_start=week_start, week_end=week_end,
+                jurisdiction=proposal.get("jurisdiction"),
             )
             texts.append(text)
             touched.extend(ids)
@@ -2864,7 +3092,37 @@ def schedule_strip(shifts_created: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def result_text(shifts_created: list[dict], dropped: list[dict]) -> str:
+def _jurisdiction_lines(jurisdiction: Optional[dict], *, applied: bool) -> list[str]:
+    """The honesty line for an unmapped/unavailable state. `applied` flips the
+    tense: on a proposal it says what confirming means; on a result it
+    records that the manager confirmed with that in view."""
+    if not jurisdiction or jurisdiction.get("status") in ("curated", "catalog"):
+        return []
+    state = jurisdiction.get("state") or "this state"
+    if jurisdiction.get("status") == "unavailable":
+        return [jurisdiction.get("message") or f"Could not load {state}'s scheduling-law thresholds."]
+    if applied:
+        return [f"Legality was NOT verified for {state} — no researched scheduling thresholds; you confirmed with that in view."]
+    return [jurisdiction.get("message") or f"Legality was NOT verified for {state}."]
+
+
+def _acknowledged_lines(acknowledged: Optional[list[dict]], limit: int = 6) -> list[str]:
+    seen: list[tuple] = []
+    lines: list[str] = []
+    for item in acknowledged or []:
+        key = (item.get("message"), item.get("statute"), item.get("employee_name"))
+        if key in seen or not item.get("message"):
+            continue
+        seen.append(key)
+        statute = f" ({item['statute']})" if item.get("statute") else ""
+        prefix = f"Heads up on {item['employee_name']}: " if item.get("employee_name") else "Heads up: "
+        lines.append(f"{prefix}{item['message']}{statute}")
+    if len(lines) > limit:
+        return lines[:limit] + [f"… and {len(lines) - limit} more advisories (all in the audit log)"]
+    return lines
+
+
+def result_text(shifts_created: list[dict], dropped: list[dict], *, jurisdiction: Optional[dict] = None) -> str:
     """A `[[shift:<id>:<date>]]` token trails each created shift — the ONE
     other markup construct client/.../ChannelView/systemContent.tsx parses
     alongside `**bold**` (see that file's docstring: closed vocabulary by
@@ -2889,6 +3147,7 @@ def result_text(shifts_created: list[dict], dropped: list[dict]) -> str:
     ]
     for d in dropped:
         lines.append(f"Had to drop {d['name']} from the {d['label']}: {d['reason']}")
+    lines.extend(_jurisdiction_lines(jurisdiction, applied=True))
     strip = schedule_strip(shifts_created)
     if strip:
         lines.append(strip)
@@ -2932,8 +3191,54 @@ def edit_proposal_text(proposal: dict) -> str:
             prefix = f"Heads up on {who}: " if who else "Heads up: "
             advisory_lines.append(f"{prefix}{v['message']}{statute}")
     lines.extend(advisory_lines)
-    lines.append("Reply **confirm** and I'll make these changes, or **cancel**.")
+    lines.extend(_policy_warning_lines(proposal.get("ops") or []))
+    lines.extend(_rejected_lines(proposal.get("rejected") or []))
+    jurisdiction = proposal.get("jurisdiction")
+    lines.extend(_jurisdiction_lines(jurisdiction, applied=False))
+    if jurisdiction and jurisdiction.get("status") not in ("curated", "catalog"):
+        lines.append(
+            f"Reply **confirm** to make these changes anyway — that means you've checked "
+            f"{jurisdiction.get('state') or 'the'} rules yourself — or **cancel**."
+        )
+    else:
+        lines.append("Reply **confirm** and I'll make these changes, or **cancel**.")
     return "\n".join(lines)
+
+
+def _policy_warning_lines(ops: list[dict]) -> list[str]:
+    """One `⚠` line per (person, warning) from the assignment guard — the
+    lawful-but-unwise layer, kept visually distinct from the statutory
+    `Heads up` lines above it."""
+    seen: set[tuple] = set()
+    lines: list[str] = []
+    for op in ops:
+        review = op.get("review") or {}
+        if review.get("verdict") != "warn":
+            continue
+        who = op.get("to_employee_name") or op.get("from_employee_name") or "This person"
+        for reason in review.get("reasons") or []:
+            key = (who, reason.get("message"))
+            if key in seen or not reason.get("message"):
+                continue
+            seen.add(key)
+            lines.append(f"⚠ {who}: {reason['message']}")
+    return lines
+
+
+def _rejected_lines(rejected: list[dict], limit: int = 12) -> list[str]:
+    if not rejected:
+        return []
+    lines = [f"**Not staged** ({len(rejected)}) — these can't be applied as asked:"]
+    for item in rejected[:limit]:
+        starts_at = datetime.fromisoformat(item["starts_at"])
+        ends_at = datetime.fromisoformat(item["ends_at"])
+        when = f"{_fmt_date(starts_at)}, {_fmt_time(starts_at)}–{_fmt_time(ends_at)}"
+        who = f"{item['employee_name']} → " if item.get("employee_name") else ""
+        why = "; ".join(r.get("message", "") for r in item.get("reasons") or []) or "can't be staged"
+        lines.append(f"{who}**{item.get('role') or 'Shift'}** — {when}: {why}")
+    if len(rejected) > limit:
+        lines.append(f"… and {len(rejected) - limit} more not staged")
+    return lines
 
 
 def batch_proposal_text(proposal: dict) -> str:
@@ -2962,6 +3267,8 @@ def batch_proposal_text(proposal: dict) -> str:
         create_lines = proposal_text({**create_doc, "ack": ""}, state).split("\n")
         lines.extend(create_lines[1:-1])
 
+    lines.extend(_policy_warning_lines(ops))
+    lines.extend(_rejected_lines(proposal.get("rejected") or []))
     net = net_per_day(ops, shifts)
     if net:
         lines.append("**After this:**")
@@ -2975,14 +3282,21 @@ def batch_proposal_text(proposal: dict) -> str:
                 parts.append(f"{created} new")
             lines.append(f"{_fmt_date(datetime.combine(day, time.min))}: " + ", ".join(parts))
 
+    jurisdiction = proposal.get("jurisdiction")
+    lines.extend(_jurisdiction_lines(jurisdiction, applied=False))
     lines.append(
         "Reply **confirm** and I'll apply all of it in one go — the cancellations and edits "
         "first, then the new shifts — or **cancel**. Nothing changes until you do."
+        + (" Confirming means you've checked this state's rules yourself."
+           if jurisdiction and jurisdiction.get("status") not in ("curated", "catalog") else "")
     )
     return "\n".join(lines)
 
 
-def edit_result_text(results: list[dict]) -> str:
+def edit_result_text(
+    results: list[dict], *, acknowledged: Optional[list[dict]] = None,
+    jurisdiction: Optional[dict] = None,
+) -> str:
     """`[[shift:id:date]]` deep-links each changed shift, same token
     `result_text` uses — opens the real scheduler at that shift."""
     ok = [r for r in results if r["ok"]]
@@ -3025,4 +3339,6 @@ def edit_result_text(results: list[dict]) -> str:
             where = f"**{label}** [[shift:{f['shift_id']}:{shift_date}]]"
         subject = f"{who} on {where}" if who else where
         lines.append(f"Couldn't change {subject}: {f['reason']}")
+    lines.extend(_acknowledged_lines(acknowledged))
+    lines.extend(_jurisdiction_lines(jurisdiction, applied=True))
     return "\n".join(lines)

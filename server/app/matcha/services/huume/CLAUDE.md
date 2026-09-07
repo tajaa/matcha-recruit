@@ -169,3 +169,17 @@ prompt tells the model to relay verbatim; `_MAX_SCHEDULE_PROPOSALS_PER_TURN`
 still means the model gets one attempt per turn. The flat single-edit and
 flat single-create paths are byte-for-byte the old ones. Full mechanics:
 `services/scheduling/CLAUDE.md` §"Batched schedule corrections".
+
+**Assignment guard + review echo (2026-09-07).** Every `propose_schedule_change` stage now returns a
+`ScheduleReview` (`services/scheduling/schedule_review.py`) alongside `proposal_id`/`pill_text`:
+`rejected` (what the server REFUSED — overlap with an existing shift or with an earlier op in the same
+batch, outside availability, unqualified, shift full), `employees[].warnings` (POLICY warnings: second
+shift that day, < 8h rest, 7th consecutive day, over the weekly cap — `assignment_guard.py`, labelled
+policy not law), and `compliance_status` (`unmapped`/`unavailable` = the state's law was NOT evaluated).
+`agent.py` echoes `review`/`rejected_count`/`compliance_status` on the SAME turn (the `findings` rule),
+`prompt.build_state_block`'s `schedule_change` branch spells them out on later turns, and the schedule
+prompt's new "Staffing rules" paragraph forbids stacking one person, tells the model to relay `rejected`
+and warnings verbatim, and forbids calling an `unmapped` result compliant. `operation_count` is what was
+STAGED, never what was asked. `all_vacant_shifts` is scoped to "the manager literally named one person
+for every open shift" and is capped/split like any batch. Full mechanics:
+`services/scheduling/CLAUDE.md` §"Assignment guard + ScheduleReview".

@@ -1715,6 +1715,15 @@ async def run_huume_turn(
                         response["invoice_number"] = staged.get("invoice_number")
                         response["line_count"] = len(staged.get("lines") or [])
                         response["dup_warning"] = staged.get("dup_warning")
+                    if name == "propose_schedule_change":
+                        # Same reason as build_week_schedule's findings echo:
+                        # what the guard REFUSED, the policy warnings, and
+                        # whether legality was verified must reach the model
+                        # on the turn it stages, or it will report nine
+                        # assignments done when four were.
+                        response["review"] = _json_safe(staged.get("review"))
+                        response["rejected_count"] = staged.get("rejected_count")
+                        response["compliance_status"] = staged.get("compliance_status")
                     if name == "build_week_schedule":
                         response["summary"] = staged.get("summary")
                         response["metrics"] = staged.get("metrics")

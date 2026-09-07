@@ -256,6 +256,8 @@ class TestProposeClarify(unittest.TestCase):
         assert result == {
             "status": "ready", "proposal_id": PROPOSAL_ID, "pill_text": "Schedule change pill",
             "operation_count": 1, "operation_summary": {"assign": 1},
+            # A build with no review (fake) reports fail-closed: nothing verified.
+            "review": {}, "rejected_count": 0, "compliance_status": "unmapped",
         }
 
     def test_changes_batch_reaches_existing_multi_op_builder(self):
@@ -716,3 +718,122 @@ class TestExecuteBatchDispatch(unittest.TestCase):
     def test_stale_batch_row_is_refused_before_any_executor(self):
         result = self._run_execute(_batch_row(status="confirmed"), mock.AsyncMock(side_effect=AssertionError("must not run")))
         assert result["status"] == "error"
+
+
+class _VacantConn:
+    """Fake for `_all_vacant_shift_requests`: returns N open shifts, four a day."""
+
+    def __init__(self, count):
+        from datetime import datetime, timedelta, timezone
+        base = datetime(2026, 8, 23, 6, tzinfo=timezone.utc)
+        self.rows = [
+            {"id": f"shift-{i}", "starts_at": base + timedelta(days=i // 4, hours=4 * (i % 4))}
+            for i in range(count)
+        ]
+        self.queries = []
+
+    async def fetch(self, query, *args):
+        self.queries.append((query, args))
+        return self.rows
+
+    async def fetchval(self, *_a, **_k):
+        return "Downtown"
+
+
+def _review(staged, rejected):
+    return {
+        "proposal_id": PROPOSAL_ID, "kind": "edit", "compliance_status": "unmapped",
+        "assignments": [{"shift_id": f"shift-{i}", "op": "assign", "verdict": "ok", "reasons": []} for i in range(staged)],
+        "rejected": [{"shift_id": f"shift-{staged + i}", "role": "Shift Lead", "reasons": [
+            {"code": "intra_batch_overlap", "message": "would overlap …", "policy": False}]} for i in range(rejected)],
+        "unfilled": [], "employees": [{"employee_id": "e1", "name": "Dana Reyes", "before": {}, "after": {},
+                                       "warnings": ["only 0.0h rest next to another shift (policy: 8h minimum)"]}],
+        "advisories": [], "findings": [],
+        "jurisdiction": {"state": "TX", "status": "unmapped", "message": "Legality was NOT verified for TX — …"},
+    }
+
+
+class TestAllVacantGoesThroughTheGuard(unittest.TestCase):
+    """The reported failure path: one named person × every open shift. The
+    server now (a) caps it like any batch and (b) returns what the guard
+    refused, so the model can only describe what was actually staged."""
+
+    def _match(self):
+        async def fake_match(conn, company_id, hint, location_id):
+            return {"employee": {"id": "e1", "first_name": "Dana", "last_name": "Reyes"}}
+        return fake_match
+
+    def test_nine_open_shifts_report_staged_and_rejected_counts(self):
+        from datetime import date
+        from uuid import UUID as _UUID
+        conn = _VacantConn(9)
+        captured = {}
+
+        async def fake_build_edit_proposal(conn_, **kwargs):
+            captured.update(kwargs)
+            return schedule_chat.ProposalBuild(
+                kind="proposal", proposal_id=PROPOSAL_ID, pill_text="pill", review=_review(4, 5),
+            )
+
+        with (
+            mock.patch.object(schedule_chat, "_match_single_employee", self._match()),
+            mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=conn, company_id="c1", actor_user_id="u1",
+                args={"all_vacant_shifts": True, "to_employee_name": "Dana"},
+                location_id=_UUID("c0ffeeee-0001-4001-8001-000000000001"),
+                week_start=date(2026, 8, 23), week_end=date(2026, 8, 29),
+            ))
+
+        assert len(captured["parsed"]["edit_requests"]) == 9
+        assert {r["kind"] for r in captured["parsed"]["edit_requests"]} == {"assign"}
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 4            # what was STAGED, not what was asked
+        assert result["operation_summary"] == {"assign": 4}
+        assert result["rejected_count"] == 5
+        assert result["compliance_status"] == "unmapped"
+        assert result["review"]["employees"][0]["warnings"][0].startswith("only 0.0h rest")
+
+    def test_all_vacant_respects_the_batch_cap_with_a_split_plan(self):
+        from datetime import date
+        from uuid import UUID as _UUID
+        conn = _VacantConn(MAX_BATCH_OPERATIONS + 8)
+
+        async def should_not_build(*a, **k):
+            raise AssertionError("over-cap bulk must not build")
+
+        with (
+            mock.patch.object(schedule_chat, "_match_single_employee", self._match()),
+            mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=conn, company_id="c1", actor_user_id="u1",
+                args={"all_vacant_shifts": True, "to_employee_name": "Dana"},
+                location_id=_UUID("c0ffeeee-0001-4001-8001-000000000001"),
+                week_start=date(2026, 8, 23), week_end=date(2026, 8, 29),
+            ))
+        assert result["status"] == "clarify"
+        assert f"{MAX_BATCH_OPERATIONS + 8} schedule operations" in result["message"]
+        assert "Smallest split is 2 batches" in result["message"]
+
+    def test_a_refused_clarify_is_relayed_without_the_ambiguity_hint(self):
+        build = schedule_chat.ProposalBuild(
+            kind="clarify", proposal_id=PROPOSAL_ID, clarify_kind="refused",
+            pill_text=schedule_chat.clarify_text(
+                "I couldn't stage any of those — Dana Reyes on the Shift Lead Sun Aug 23: already on the Opener. "
+                "Pick someone else for those shifts, or tell me which to drop.", []),
+        )
+
+        async def fake_build_edit_proposal(*a, **k):
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "assign", "to_employee_name": "Dana", "target_date": "2026-08-23"},
+            ))
+        assert result["status"] == "clarify"
+        assert "couldn't stage any of those" in result["message"]
+        assert "Reply with the shift time" not in result["message"]
+        assert "Just reply to this message" not in result["message"]

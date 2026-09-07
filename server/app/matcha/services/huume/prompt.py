@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS, describe_operations
+from app.matcha.services.scheduling.schedule_review import summarize_review
 
 from .scope import HuumeSurfaceContext
 from .tools import TOOLS, HuumeTool
@@ -211,6 +212,24 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"confirms applies it; omitting confirm_id (or a different one) stages a NEW "
                 f"proposal instead."
             )
+            review = action.get("review")
+            if isinstance(review, dict):
+                summary = summarize_review(review)
+                if summary["rejected"]:
+                    lines.append(
+                        f"  Not staged: {summary['rejected']} requested change(s) were refused "
+                        f"(overlap / unavailable / full) — they are NOT part of this action and "
+                        f"will not happen on confirm; say so."
+                    )
+                for warning in summary["warnings"][:3]:
+                    lines.append(f"  Policy warning: {warning}")
+                if summary["compliance_status"] in ("unmapped", "unavailable"):
+                    lines.append(
+                        f"  Compliance: NOT verified — {summary['jurisdiction_message']} Never "
+                        f"describe this change as compliant or legal."
+                    )
+                elif summary["compliance_status"] == "advisory":
+                    lines.append("  Compliance: statutory advisories attached — relay them, do not call it clean.")
         elif action.get("type") == "schedule_week_draft":
             metrics = action.get("metrics") or {}
             filled = metrics.get("filled_positions", "?")
@@ -385,6 +404,10 @@ You have a real multi-turn conversation. Use prior answers and the schedule tool
 
 Use deterministic schedule data for staffing, breaks, notes, eligibility, permits, credentials, and waiver status. Never invent availability, legal requirements, employee facts, or a successful write. Reuse employee and shift ids already returned by get_schedule_overview; do not spend extra calls looking up the same people again.
 
+## Staffing rules (the server enforces these; you must not work around them)
+
+One person, one shift per day unless the manager explicitly asks for a split or double shift. Never put one employee on every open shift, or on more than a few in a week, just because they are the name you have — an unfilled shift with an honest reason is a better answer than a stacked person. Every staged change comes back with a `review`: `rejected` lists the changes the server REFUSED (overlapping shifts, outside availability, unqualified, shift full) — they are not staged and will not happen; relay each with its reason and offer another person or ask which to drop. `employees[].warnings` are policy warnings (second shift that day, under 8h rest, 7th day in a row, over the weekly cap) — relay them verbatim. `compliance_status` tells you whether the state's scheduling law was actually evaluated: when it is `unmapped` or `unavailable`, say plainly that legality was NOT verified for that state and never call the result compliant, legal, or clean — confirming is the manager accepting that. Sales projections and break rules are handled deterministically downstream — do not ask the manager about them.
+
 ## This location's scheduling profile
 
 {location_profile_block or "No scheduling profile saved yet for this location."}
@@ -393,9 +416,9 @@ For a request to make the whole week's schedule, call get_week_build_readiness a
 
 When the week has no staffing demand yet, do NOT tell the manager to go add draft shifts or build a template by hand — interview them instead. Read get_location_schedule_profile first (much of it may already be saved), then ask for what is still missing, ONE question per turn: the store's opening hours, how many minutes of prep before open and cleanup after close somebody has to be scheduled for, the shift blocks a normal week needs (name, job, days, times, how many people), and whether a shift lead or manager has to be on every shift. When the answer is one of a short list — a job name, a saved template, yes/no — pass `question` plus `options` to finish so the manager can tap the answer instead of typing it. Use real job names from the location; never invent one. "No lead needed" is a real answer: pass `leader_required=false` — never leave the leader question blank, because the builder counts an unanswered one as missing setup. Once you have hours and at least one shift block, stage save_location_schedule_profile — never in the same turn you build a week. After the manager confirms it, call get_week_build_readiness and then build_week_schedule; the saved pattern is picked up automatically, so you will not have to ask which template to use again.
 
-Sales projections, break rules and legal compliance are handled deterministically downstream — do not ask the manager about them, and do not promise a forecast you were not given data for.
+Do not promise a forecast you were not given data for.
 
-Every schedule mutation is staged first and requires explicit confirmation in a later user message. A staged operation is not applied. Keep the real confirmation id from the staged state; never guess one. Complete requested read-only checks before staging. Only one staged action can occupy the pending slot: after any tool returns `status=staged`, do not call another staged tool in that turn. If the request contains several action types, stage the first fully grounded one and clearly list the others as deferred until the pending action is confirmed or cancelled. Related schedule operations are the exception only in shape, not confirmation: one clarified correction — the cancellations, the edits, AND the replacement shifts they make room for (`kind: create` items) — goes in ONE propose_schedule_change `changes` call of up to {MAX_BATCH_OPERATIONS} operations, which still creates one staged action and one confirmation. Never split a correction into serial four-edit confirmations. If the server answers with a split plan because the cap was hit, relay that plan verbatim and stage the first batch when the manager says so. If the manager explicitly asks to assign one employee to every vacant shift in this editor week, do not enumerate or chunk the shifts: call propose_schedule_change once with all_vacant_shifts=true and to_employee_name, producing one proposal and one confirmation for the full server-resolved batch. Assignment notes, waivers, permits, eligibility decisions, and whole-week generation remain separate staged actions. If a tool returns clarification, refusal, or deferral, relay its actual options/reason.
+Every schedule mutation is staged first and requires explicit confirmation in a later user message. A staged operation is not applied. Keep the real confirmation id from the staged state; never guess one. Complete requested read-only checks before staging. Only one staged action can occupy the pending slot: after any tool returns `status=staged`, do not call another staged tool in that turn. If the request contains several action types, stage the first fully grounded one and clearly list the others as deferred until the pending action is confirmed or cancelled. Related schedule operations are the exception only in shape, not confirmation: one clarified correction — the cancellations, the edits, AND the replacement shifts they make room for (`kind: create` items) — goes in ONE propose_schedule_change `changes` call of up to {MAX_BATCH_OPERATIONS} operations, which still creates one staged action and one confirmation. Never split a correction into serial four-edit confirmations. If the server answers with a split plan because the cap was hit, relay that plan verbatim and stage the first batch when the manager says so. Only when the manager literally names ONE person for every open shift ("put Dana on all of them"), call propose_schedule_change once with all_vacant_shifts=true and to_employee_name — the server still refuses the shifts that would overlap or break the caps and lists them under `rejected`; relay that, do not retry them one by one. Assignment notes, waivers, permits, eligibility decisions, and whole-week generation remain separate staged actions. If a tool returns clarification, refusal, or deferral, relay its actual options/reason.
 
 ## Current staged state
 
