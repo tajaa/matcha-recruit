@@ -75,3 +75,48 @@ def test_session_create_proceeds_when_both_flags_are_on(monkeypatch):
     ))
     assert "session_id" in result
     assert created["company_id"] == company_id
+
+
+def test_adopt_proposal_route_requires_huume_and_hands_the_scope_to_the_service(monkeypatch):
+    company_id, user = uuid4(), _user()
+    session_id, proposal_id = uuid4(), uuid4()
+    adopted = {}
+
+    async def fake_require_company_id(_user):
+        return company_id
+
+    async def fake_get_company_features(_company_id):
+        return {"huume": True, "matcha_work": True, "employee_schedule": True}
+
+    async def fake_adopt(**kwargs):
+        adopted.update(kwargs)
+        return {"current_state": {"huume_action": {"type": "schedule_change"}}, "version": 2, "confirm_id": "ab12cd34"}
+
+    monkeypatch.setattr(assistant, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(assistant, "get_company_features", fake_get_company_features)
+    monkeypatch.setattr(assistant, "adopt_editor_proposal", fake_adopt)
+
+    result = _run(assistant.adopt_schedule_proposal(
+        session_id, assistant.AdoptProposalRequest(proposal_id=proposal_id), current_user=user,
+    ))
+    assert result["confirm_id"] == "ab12cd34"
+    assert adopted == {"company_id": company_id, "user_id": user.id, "actor_role": "client",
+                       "session_id": session_id, "proposal_id": proposal_id}
+
+
+def test_adopt_proposal_route_refuses_when_huume_is_off(monkeypatch):
+    async def fake_require_company_id(_user):
+        return uuid4()
+
+    async def fake_get_company_features(_company_id):
+        return {"huume": False, "matcha_work": True}
+
+    async def must_not_run(**_kwargs):
+        raise AssertionError("service must not run without huume")
+
+    monkeypatch.setattr(assistant, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(assistant, "get_company_features", fake_get_company_features)
+    monkeypatch.setattr(assistant, "adopt_editor_proposal", must_not_run)
+    with pytest.raises(HTTPException) as exc:
+        _run(assistant.adopt_schedule_proposal(uuid4(), assistant.AdoptProposalRequest(proposal_id=uuid4()), current_user=_user()))
+    assert exc.value.status_code == 403

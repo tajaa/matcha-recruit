@@ -113,6 +113,7 @@ async def preview_fill_vacant(
             original_content=f"[editor] fill vacant shifts{(' — ' + body.label) if body.label else ''}",
             surface="editor", shift_statuses=("draft", "published"),
             editor_location_id=location_id, editor_week_start=body.week_start, editor_week_end=week_end,
+            unfilled=unfilled,
         )
     if build.kind == "clarify":
         text = build.pill_text.removeprefix("\U0001F4C5 ").removesuffix("Just reply to this message.").strip()

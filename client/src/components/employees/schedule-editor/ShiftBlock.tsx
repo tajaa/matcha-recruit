@@ -10,6 +10,9 @@ interface ShiftBlockProps {
   editable: boolean
   selectedEmployeeId: string | null
   huumeSelected: boolean
+  /** A person is selected in the rail and this shift neither has them nor
+   *  room for them — fade it so their week and the open seats stand out. */
+  dimmed?: boolean
   style: React.CSSProperties
   onOpen(): void
   onToggleHuumeSelection(): void
@@ -32,7 +35,7 @@ function AssignmentChip({ employeeId, name, shiftId, editable, availabilityOverr
   return <button ref={setNodeRef} {...listeners} {...attributes} className="flex w-full items-center gap-1 truncate rounded bg-zinc-800 px-1.5 py-0.5 text-left text-[10px] text-zinc-300 hover:bg-zinc-700"><Users className="h-2.5 w-2.5 shrink-0 text-zinc-500" /><span className="truncate">{name}</span>{availabilityOverridden && <span className="ml-auto shrink-0 text-orange-400" title="Availability override">!</span>}</button>
 }
 
-export default function ShiftBlock({ shift, pending, editable, selectedEmployeeId, huumeSelected, style, onOpen, onToggleHuumeSelection, onAssignSelected, onResize }: ShiftBlockProps) {
+export default function ShiftBlock({ shift, pending, editable, selectedEmployeeId, huumeSelected, dimmed = false, style, onOpen, onToggleHuumeSelection, onAssignSelected, onResize }: ShiftBlockProps) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `shift-drop-${shift.id}`, data: { kind: 'shift', shiftId: shift.id } })
   const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
     id: `shift-${shift.id}`,
@@ -64,7 +67,7 @@ export default function ShiftBlock({ shift, pending, editable, selectedEmployeeI
     <div
       ref={setDropRef}
       style={style}
-      className={`absolute z-10 min-w-0 overflow-hidden rounded-md border p-1.5 shadow-lg transition-colors ${shift.status === 'cancelled' ? 'border-red-500/30 bg-red-950/80 opacity-60' : huumeSelected ? 'border-emerald-400 bg-emerald-950/70 ring-1 ring-emerald-400/30' : isOver ? 'border-emerald-400 bg-emerald-950/90' : 'border-zinc-700 bg-zinc-900/95'} ${pending ? 'animate-pulse' : ''} ${isDragging ? 'opacity-30' : ''}`}
+      className={`absolute z-10 min-w-0 overflow-hidden rounded-md border p-1.5 shadow-lg transition-colors ${shift.status === 'cancelled' ? 'border-red-500/30 bg-red-950/80 opacity-60' : huumeSelected ? 'border-emerald-400 bg-emerald-950/70 ring-1 ring-emerald-400/30' : isOver ? 'border-emerald-400 bg-emerald-950/90' : 'border-zinc-700 bg-zinc-900/95'} ${pending ? 'animate-pulse' : ''} ${isDragging ? 'opacity-30' : dimmed ? 'opacity-40 saturate-50' : ''}`}
     >
       <div className="flex items-start gap-1">
         {editable ? <button ref={setDragRef} {...listeners} {...attributes} className="mt-0.5 shrink-0 cursor-grab text-zinc-600 hover:text-zinc-200" aria-label={`Move ${shift.role || 'shift'}`}><GripVertical className="h-3 w-3" /></button> : <Lock className="mt-0.5 h-3 w-3 shrink-0 text-zinc-700" />}

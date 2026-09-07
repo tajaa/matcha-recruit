@@ -51,7 +51,13 @@ export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished,
                 {positioned.map(({ shift, lane, laneCount }) => {
                   const position = shiftPosition(shift)
                   const laneWidth = width / laneCount
-                  return <ShiftBlock key={shift.id} shift={shift} pending={pendingKeys.has(`shift:${shift.id}`)} editable={shift.status !== 'cancelled' && (shift.status === 'draft' || editPublished)} selectedEmployeeId={selectedEmployeeId} huumeSelected={huumeSelectedShiftIds.has(shift.id)} style={{ top: `${position.topPercent}%`, height: `${position.heightPercent}%`, left: lane * laneWidth + 2, width: Math.max(laneWidth - 4, 120) }} onOpen={() => onOpenShift(shift)} onToggleHuumeSelection={() => onToggleHuumeSelection(shift)} onAssignSelected={() => onAssignSelected(shift)} onResize={(endMinute) => onResizeShift(shift, endMinute)} />
+                  // With a person selected, shifts that neither include them nor
+                  // have an open seat for them fade back — their week and the
+                  // places they could still go are what is left bright.
+                  const dimmed = !!selectedEmployeeId
+                    && !shift.assignments.some((assignment) => assignment.employee_id === selectedEmployeeId)
+                    && shift.assignments.length >= shift.required_staff
+                  return <ShiftBlock key={shift.id} shift={shift} pending={pendingKeys.has(`shift:${shift.id}`)} editable={shift.status !== 'cancelled' && (shift.status === 'draft' || editPublished)} selectedEmployeeId={selectedEmployeeId} huumeSelected={huumeSelectedShiftIds.has(shift.id)} dimmed={dimmed} style={{ top: `${position.topPercent}%`, height: `${position.heightPercent}%`, left: lane * laneWidth + 2, width: Math.max(laneWidth - 4, 120) }} onOpen={() => onOpenShift(shift)} onToggleHuumeSelection={() => onToggleHuumeSelection(shift)} onAssignSelected={() => onAssignSelected(shift)} onResize={(endMinute) => onResizeShift(shift, endMinute)} />
                 })}
               </div>
             )

@@ -49,6 +49,9 @@ def _automatic_action(row) -> dict:
     proposal = _coerce_jsonb(row["proposal"])
     metrics = _coerce_jsonb(row["metrics"])
     review = _coerce_jsonb(proposal.get("review"))
+    # The per-person load / advisories / jurisdiction review the workspace's
+    # review pane renders — same shape `build_week_schedule` stages.
+    schedule_review = _coerce_jsonb(proposal.get("schedule_review"))
     return {
         "type": "schedule_week_draft",
         "status": "proposed",
@@ -71,6 +74,9 @@ def _automatic_action(row) -> dict:
         "findings": (proposal.get("findings") or [])[:20],
         "schedule_preview": review.get("schedule_preview") or [],
         "preview_truncated": bool(review.get("preview_truncated")),
+        "review": schedule_review or None,
+        "compliance_status": schedule_review.get("compliance_status"),
+        "jurisdiction": schedule_review.get("jurisdiction"),
     }
 
 
@@ -344,6 +350,138 @@ async def get_or_create_schedule_assistant_session(
 
 
 _TITLE_MAX_CHARS = 80
+
+
+async def adopt_editor_proposal(
+    *, company_id: UUID, user_id: UUID, actor_role: str, session_id: UUID, proposal_id: UUID,
+) -> dict:
+    """Make a REST fill scenario THE staged action of this manager's schedule
+    thread — the Schedule Pilot's "Stage this" button.
+
+    The scenario is a `schedule_chat_proposals` row the same caller previewed
+    (`routes/employee_schedule/planning.py`, `surface='editor'`). Writing it
+    into `mw_threads.current_state.huume_action` as a `schedule_change` staged
+    dict — the shape `schedule_skill.propose` produces, minted `confirm_id`
+    included — means the confirm turn applies it exactly like a Huume-staged
+    change: same `evaluate_huume_action` gate, same `execute_edit_proposal`
+    rechecks, same audit row. A displaced staged action is cancelled so its
+    proposal row / generation run cannot be applied later by accident.
+    """
+    from .schedule_batch import summarize_operations
+    from .schedule_chat import edit_proposal_text
+    from .schedule_review import build_review
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT s.location_id, s.week_start, s.user_id,
+                       t.id AS thread_id, t.surface, t.status, t.current_state, t.version
+                FROM schedule_assistant_sessions s
+                JOIN mw_threads t ON t.id=s.thread_id
+                WHERE s.id=$1 AND s.company_id=$2
+                FOR UPDATE OF t
+                """,
+                session_id, company_id,
+            )
+            if (
+                not row
+                or row["surface"] != "schedule_assistant"
+                or row["user_id"] != user_id
+                or row["status"] == "archived"
+            ):
+                raise HTTPException(status_code=404, detail="Schedule assistant session not found")
+            await _assert_manager_location(
+                conn, company_id=company_id, user_id=user_id,
+                actor_role=actor_role, location_id=row["location_id"],
+            )
+            proposal_row = await conn.fetchrow(
+                """
+                SELECT id, created_by, status, proposal, parse
+                FROM schedule_chat_proposals
+                WHERE id=$1 AND company_id=$2
+                """,
+                proposal_id, company_id,
+            )
+            if not proposal_row:
+                raise HTTPException(status_code=404, detail="That fill preview was not found")
+            if proposal_row["created_by"] != user_id:
+                raise HTTPException(status_code=403, detail="Only the person who previewed this fill can stage it")
+            if proposal_row["status"] != "proposed":
+                raise HTTPException(status_code=409, detail="That fill preview was already applied or discarded")
+            proposal = _coerce_jsonb(proposal_row["proposal"])
+            parse = _coerce_jsonb(proposal_row["parse"])
+            if proposal.get("surface") != "editor" or proposal.get("kind") != "edit":
+                raise HTTPException(status_code=400, detail="That proposal is not an editor fill preview")
+            if (
+                str(parse.get("editor_location_id") or "") != str(row["location_id"])
+                or str(parse.get("editor_week_start") or "") != row["week_start"].isoformat()
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="That fill preview belongs to a different location or week than this chat",
+                )
+
+            review = build_review(proposal, proposal_id=str(proposal_id))
+            staged_ops = [item for item in review["assignments"] if item.get("verdict") != "blocked"]
+            staged = {
+                "type": "schedule_change",
+                "status": "proposed",
+                "confirm_id": uuid4().hex[:8],
+                "kind": "assign",
+                "proposal_id": str(proposal_id),
+                # The scenario came from the strip, not a chat ask — say so
+                # rather than echoing the preview route's "Got it.".
+                "pill_text": edit_proposal_text({**proposal, "ack": "Staged from the scenarios strip."}),
+                "operation_count": len(staged_ops),
+                "operation_summary": summarize_operations([{"kind": item.get("op")} for item in staged_ops], []),
+                "review": review,
+                "rejected_count": len(review["rejected"]),
+                "unfilled_count": len(review["unfilled"]),
+                "compliance_status": review["compliance_status"],
+                "location_id": str(row["location_id"]),
+                "label": parse.get("label"),
+                "adopted_from": "editor_scenario",
+            }
+
+            current_state = _coerce_jsonb(row["current_state"])
+            displaced = current_state.get("huume_action")
+            if isinstance(displaced, dict) and displaced.get("status") == "proposed":
+                if displaced.get("type") == "schedule_change" and displaced.get("proposal_id") \
+                        and str(displaced["proposal_id"]) != str(proposal_id):
+                    try:
+                        displaced_id = UUID(str(displaced["proposal_id"]))
+                    except (TypeError, ValueError):
+                        displaced_id = None
+                    if displaced_id is not None:
+                        await conn.execute(
+                            """UPDATE schedule_chat_proposals
+                               SET status='cancelled', updated_at=NOW()
+                               WHERE id=$1 AND company_id=$2 AND status='proposed'""",
+                            displaced_id, company_id,
+                        )
+                elif displaced.get("type") == "schedule_week_draft" and displaced.get("generation_run_id"):
+                    try:
+                        run_id = UUID(str(displaced["generation_run_id"]))
+                    except (TypeError, ValueError):
+                        run_id = None
+                    if run_id is not None:
+                        await conn.execute(
+                            """UPDATE schedule_generation_runs
+                               SET status='cancelled', updated_at=NOW()
+                               WHERE id=$1 AND company_id=$2 AND status='proposed'""",
+                            run_id, company_id,
+                        )
+            next_state = {key: value for key, value in current_state.items() if key != "huume_choice"}
+            next_state["huume_action"] = staged
+            next_version = int(row["version"] or 0) + 1
+            await conn.execute(
+                """UPDATE mw_threads
+                   SET current_state=$1::jsonb, version=$2, updated_at=NOW()
+                   WHERE id=$3""",
+                json.dumps(next_state, default=str), next_version, row["thread_id"],
+            )
+    return {"current_state": next_state, "version": next_version, "confirm_id": staged["confirm_id"]}
 
 
 def _session_title(first_user_content: str | None) -> str:
