@@ -116,11 +116,9 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
             if existing and existing["id"] == request.parent_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A jurisdiction cannot be its own parent")
 
-        # Use a savepoint so the upsert is rolled back if anything goes wrong,
+        # Use a managed transaction so the upsert is rolled back if anything goes wrong,
         # preventing partial mutations on error.
-        tr = conn.transaction()
-        await tr.start()
-        try:
+        async with conn.transaction():
             display_name = f"{raw_city.strip()}, {state}" if city else state
             row = await conn.fetchrow("""
                 INSERT INTO jurisdictions (city, state, county, parent_id, display_name)
@@ -130,10 +128,6 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
                     county = COALESCE(EXCLUDED.county, jurisdictions.county)
                 RETURNING *
             """, city, state, county, request.parent_id, display_name)
-            await tr.commit()
-        except Exception:
-            await tr.rollback()
-            raise
 
         # Fetch parent info if set
         parent_city = None
@@ -511,5 +505,3 @@ async def get_jurisdictions_tree():
             "total_codified": int(total_codified),
         },
     }
-
-
