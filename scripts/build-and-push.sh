@@ -59,6 +59,14 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CI:-}" = "true" ]; then
 fi
 BUILD_BACKEND=true
 BUILD_FRONTEND=true
+# With no explicit target flag, build only the matcha images whose source
+# changed since the commit tagged on their ECR :latest. Any explicit target
+# flag (or --full) turns this off. Off in CI too: deploy.yml passes explicit
+# targets and its shallow checkout can't diff against an old SHA anyway.
+AUTO_DETECT=true
+if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CI:-}" = "true" ]; then
+    AUTO_DETECT=false
+fi
 BUILD_GUMMFIT_BACKEND=false
 BUILD_GUMMFIT_FRONTEND=false
 BUILD_GUMMLOCAL_BACKEND=false
@@ -142,6 +150,12 @@ OPTIONS:
                            builds on the same machine.
     --deploy               Trigger deployment after pushing (sets deploy flag)
     --platform ARCH        Target platform (default: linux/arm64)
+    (no target flag)       Auto-detect: build only backend/frontend whose source
+                           changed since the commit tagged on ECR :latest
+                           (server/ minus tests → backend; client/ → frontend).
+                           Uncommitted edits count. Exits 0 with nothing to do
+                           when neither changed.
+    --full                 Build both matcha images regardless of what changed
     --backend-only         Build only the matcha backend image
     --frontend-only        Build only the matcha frontend image
     --gummfit-backend      Also build the gummfit backend image
@@ -182,8 +196,11 @@ ENVIRONMENT VARIABLES (required):
     ECR_AGENT_REPO             ECR repository name for matcha-agent (default: matcha-agent)
 
 EXAMPLES:
-    # Build and push matcha to ECR (default)
+    # Build + push whichever matcha image(s) changed since the last push (default)
     $0
+
+    # Force both matcha images
+    $0 --full
 
     # Build locally without pushing
     $0 --no-push
@@ -250,25 +267,36 @@ parse_args() {
                 REMOTE_WATCH=true
                 shift
                 ;;
+            --full)
+                AUTO_DETECT=false
+                BUILD_BACKEND=true
+                BUILD_FRONTEND=true
+                shift
+                ;;
             --backend-only)
+                AUTO_DETECT=false
                 BUILD_BACKEND=true
                 BUILD_FRONTEND=false
                 shift
                 ;;
             --frontend-only)
+                AUTO_DETECT=false
                 BUILD_FRONTEND=true
                 BUILD_BACKEND=false
                 shift
                 ;;
             --gummfit-backend)
+                AUTO_DETECT=false
                 BUILD_GUMMFIT_BACKEND=true
                 shift
                 ;;
             --gummfit-frontend)
+                AUTO_DETECT=false
                 BUILD_GUMMFIT_FRONTEND=true
                 shift
                 ;;
             --gummfit)
+                AUTO_DETECT=false
                 BUILD_BACKEND=false
                 BUILD_FRONTEND=false
                 BUILD_GUMMFIT_BACKEND=true
@@ -276,14 +304,17 @@ parse_args() {
                 shift
                 ;;
             --gumm-local-backend)
+                AUTO_DETECT=false
                 BUILD_GUMMLOCAL_BACKEND=true
                 shift
                 ;;
             --gumm-local-frontend)
+                AUTO_DETECT=false
                 BUILD_GUMMLOCAL_FRONTEND=true
                 shift
                 ;;
             --gumm-local)
+                AUTO_DETECT=false
                 BUILD_BACKEND=false
                 BUILD_FRONTEND=false
                 BUILD_GUMMLOCAL_BACKEND=true
@@ -291,10 +322,12 @@ parse_args() {
                 shift
                 ;;
             --agent)
+                AUTO_DETECT=false
                 BUILD_AGENT=true
                 shift
                 ;;
             --all)
+                AUTO_DETECT=false
                 BUILD_BACKEND=true
                 BUILD_FRONTEND=true
                 BUILD_GUMMFIT_BACKEND=true
@@ -407,6 +440,87 @@ validate_env() {
     fi
 
     log_success "Environment validation complete"
+}
+
+# The short git SHA this script tagged alongside :latest on its last push, or
+# empty when :latest doesn't exist / wasn't produced by this script.
+ecr_latest_sha() {
+    local repo=$1
+    aws ecr describe-images --region "${AWS_REGION:-us-west-1}" \
+        --repository-name "$repo" --image-ids imageTag=latest \
+        --query 'imageDetails[0].imageTags[]' --output text 2>/dev/null \
+        | tr '\t' '\n' | grep -E '^[0-9a-f]{7,40}$' | head -1
+}
+
+# 0 = the given pathspecs changed (committed since $1, or uncommitted now);
+# 1 = untouched. Unknown/unreachable base SHA counts as changed — never skip a
+# build on a guess.
+paths_changed_since() {
+    local base=$1
+    shift
+    if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+        return 0
+    fi
+    if ! git diff --quiet "$base" HEAD -- "$@" 2>/dev/null; then
+        return 0
+    fi
+    if [ -n "$(git status --porcelain -- "$@" 2>/dev/null)" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Narrow BUILD_BACKEND / BUILD_FRONTEND to what actually changed. The
+# pathspecs mirror what each Dockerfile's context ships: server/ minus what
+# server/.dockerignore drops (tests, agent bits — agent has its own image),
+# and client/ wholesale (its nginx.conf + entrypoint are in the image too).
+detect_changed_targets() {
+    log_section "Detecting Changed Targets"
+
+    local backend_repo="${ECR_BACKEND_REPO:-matcha-backend}"
+    local frontend_repo="${ECR_FRONTEND_REPO:-matcha-frontend}"
+    local backend_sha frontend_sha
+    backend_sha=$(ecr_latest_sha "$backend_repo")
+    frontend_sha=$(ecr_latest_sha "$frontend_repo")
+
+    local backend_paths=(server ':(exclude)server/tests' ':(exclude)server/agent' ':(exclude)server/agent-ui' ':(exclude)server/*.md')
+    local frontend_paths=(client)
+
+    if paths_changed_since "$backend_sha" "${backend_paths[@]}"; then
+        BUILD_BACKEND=true
+        log_info "Backend:  CHANGED since ${backend_sha:-<no :latest sha tag>} → will build"
+    else
+        BUILD_BACKEND=false
+        log_info "Backend:  unchanged since ${backend_sha} → skip"
+    fi
+    if paths_changed_since "$frontend_sha" "${frontend_paths[@]}"; then
+        BUILD_FRONTEND=true
+        log_info "Frontend: CHANGED since ${frontend_sha:-<no :latest sha tag>} → will build"
+    else
+        BUILD_FRONTEND=false
+        log_info "Frontend: unchanged since ${frontend_sha} → skip"
+    fi
+
+    if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ]; then
+        log_success "Nothing changed since the last push — no build needed."
+        log_info "Force one anyway with --full, --backend-only, or --frontend-only."
+        exit 0
+    fi
+}
+
+# What to run after the push, phrased for the targets that were actually built.
+next_step_hint() {
+    local flag
+    if [ "$BUILD_BACKEND" = true ] && [ "$BUILD_FRONTEND" = true ]; then
+        flag="--matcha"
+    elif [ "$BUILD_BACKEND" = true ]; then
+        flag="--backend"
+    elif [ "$BUILD_FRONTEND" = true ]; then
+        flag="--frontend"
+    else
+        return 0
+    fi
+    log_info "Next: ./scripts/update-ec2.sh ${flag}"
 }
 
 # Login to ECR
@@ -674,6 +788,12 @@ dispatch_remote_deploy() {
         exit 1
     fi
 
+    # Decide the workflow target from what actually changed, so a backend-only
+    # edit dispatches target=backend instead of rebuilding + swapping both.
+    if [ "$AUTO_DETECT" = true ]; then
+        detect_changed_targets
+    fi
+
     local target
     if [ "$BUILD_BACKEND" = true ] && [ "$BUILD_FRONTEND" = true ]; then
         target="matcha"
@@ -781,6 +901,10 @@ main() {
     # Validate environment
     validate_tools
     validate_env
+
+    if [ "$AUTO_DETECT" = true ]; then
+        detect_changed_targets
+    fi
 
     # Authenticate with ECR
     ecr_login
@@ -916,6 +1040,9 @@ main() {
     fi
     if [ "$BUILD_AGENT" = true ]; then
         log_info "Agent: ${AGENT_ECR_URI}:latest"
+    fi
+    if [ "$PUSH_TO_ECR" = true ]; then
+        next_step_hint
     fi
 }
 

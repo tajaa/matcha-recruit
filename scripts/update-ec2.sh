@@ -56,6 +56,11 @@ OPTIONS:
     --backend        Update only matcha-backend + matcha-worker
     --hotfix         Fast path: skip nginx sync, skip backup trigger, skip all
                      pruning, 5s worker stop. Pull + blue/green swap only.
+    --allow-pending-migrations
+                     Skip the pre-deploy check that prod's alembic_version
+                     covers every migration in this checkout. Backend deploys
+                     otherwise refuse to swap while migrations are pending
+                     (interactively they offer to run migrate-prod.sh first).
     --agent          Deploy/update agent (Gemini API)
     --all            Update matcha + agent
     --status         Show status of all containers
@@ -108,6 +113,84 @@ sync_nginx() {
         log_error "nginx -t failed on EC2 — config NOT reloaded, previous config still serving. Check /etc/nginx/conf.d/*.bak-* to diff."
         exit 1
     fi
+}
+
+# Refuse to ship backend code whose migrations prod hasn't run. "Deployed,
+# forgot migrate-prod.sh" is the drift that produced real 500s; this turns it
+# from a post-mortem into a prompt. Reads prod's alembic_version read-only
+# through the live backend container on the app host (prod-query.sh — the
+# path GitHub runners can already reach; the DB host itself is not open to
+# them), then diffs it against server/alembic/versions with the stdlib
+# alembic_graph.py (no venv needed — the deploy runner has none).
+check_pending_migrations() {
+    if [ "$UPDATE_BACKEND" != true ]; then
+        return 0
+    fi
+    if [ "$ALLOW_PENDING_MIGRATIONS" = true ]; then
+        log_warn "Skipping pending-migration check (--allow-pending-migrations)"
+        return 0
+    fi
+
+    log_info "Checking prod alembic_version against server/alembic/versions..."
+    local prod_json prod_revs pending
+    if ! prod_json="$(SSH_KEY="$SSH_KEY" PROD_HOST="$EC2_HOST" PROD_USER="$EC2_USER" ./scripts/ops-health/prod-query.sh alembic 2>&1)"; then
+        log_error "Could not read prod alembic_version:"
+        echo "$prod_json" | tail -5
+        log_error "Refusing to deploy blind. Fix SSH to the app host, or pass --allow-pending-migrations to skip."
+        exit 1
+    fi
+    prod_revs="$(printf '%s' "$prod_json" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["revisions"]))')" || {
+        log_error "Unparseable alembic_version payload: $prod_json"
+        exit 1
+    }
+    # shellcheck disable=SC2086  # word-splitting the revision list is the point
+    if ! pending="$(python3 scripts/alembic_graph.py pending $prod_revs 2>&1)"; then
+        log_error "$pending"
+        log_error "Prod is at a revision this checkout doesn't know. Deploy from the branch that owns it, or pass --allow-pending-migrations."
+        exit 1
+    fi
+    if [ -z "$pending" ]; then
+        log_success "Prod schema is current — no pending migrations"
+        return 0
+    fi
+
+    log_warn "Prod is MISSING $(printf '%s\n' "$pending" | wc -l | tr -d ' ') migration(s) present in this checkout:"
+    printf '%s\n' "$pending" | sed 's/^/    /'
+
+    if [ "${CI:-}" = "true" ] || [ "${GITHUB_ACTIONS:-}" = "true" ] || [ ! -t 0 ]; then
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+                echo "### Deploy blocked: pending migrations"
+                echo
+                echo "Prod \`alembic_version\` does not include these revisions from the deployed ref:"
+                echo
+                echo '```'
+                printf '%s\n' "$pending"
+                echo '```'
+                echo
+                echo 'Run `./scripts/migrate-prod.sh` from the laptop, then re-dispatch. Or re-run with `allow_pending_migrations=true` if the code genuinely does not need them yet.'
+            } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        log_error "Non-interactive run: apply them with ./scripts/migrate-prod.sh first, or pass --allow-pending-migrations."
+        exit 1
+    fi
+
+    echo
+    read -r -p "Run ./scripts/migrate-prod.sh now, then continue the deploy? [y/N] " answer
+    case "$answer" in
+        y|Y|yes|YES)
+            if ./scripts/migrate-prod.sh; then
+                log_success "Migrations applied — continuing deploy"
+            else
+                log_error "migrate-prod.sh did not complete. Deploy aborted."
+                exit 1
+            fi
+            ;;
+        *)
+            log_error "Deploy aborted. Migrate first, or pass --allow-pending-migrations to ship without them."
+            exit 1
+            ;;
+    esac
 }
 
 ecr_login() {
@@ -328,6 +411,7 @@ UPDATE_FRONTEND=false
 UPDATE_AGENT=false
 SHOW_STATUS=false
 HOTFIX=false
+ALLOW_PENDING_MIGRATIONS=false
 
 if [ $# -eq 0 ]; then
     usage
@@ -351,6 +435,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --hotfix)
             HOTFIX=true
+            shift
+            ;;
+        --allow-pending-migrations)
+            ALLOW_PENDING_MIGRATIONS=true
             shift
             ;;
         --agent)
@@ -402,6 +490,10 @@ if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_AGENT" = false ]; then
     log_error "No app specified. Use --matcha, --frontend, --backend, --agent, or --all"
     exit 1
 fi
+
+# Before anything touches prod: a backend swap with unapplied migrations is
+# the one failure mode this script can prevent outright.
+check_pending_migrations
 
 ecr_login
 # Frontend-only rollouts don't touch the DB; hotfixes skip the trigger too

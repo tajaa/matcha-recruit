@@ -62,10 +62,18 @@ async def _errors(conn: asyncpg.Connection) -> dict:
     }
 
 
+async def _alembic(conn: asyncpg.Connection) -> dict:
+    rows = await conn.fetch("SELECT version_num FROM public.alembic_version ORDER BY version_num")
+    return {"revisions": [row["version_num"] for row in rows]}
+
+
+_MODES = {"domains": _domains, "errors": _errors, "alembic": _alembic}
+
+
 async def main() -> None:
     mode = sys.argv[1] if len(sys.argv) == 2 else ""
-    if mode not in {"domains", "errors"}:
-        raise SystemExit("usage: _prod_query.py domains|errors")
+    if mode not in _MODES:
+        raise SystemExit("usage: _prod_query.py domains|errors|alembic")
 
     conn = await asyncpg.connect(
         os.environ["DATABASE_URL"],
@@ -73,7 +81,7 @@ async def main() -> None:
     )
     try:
         await conn.execute("SET statement_timeout = '15s'")
-        result = await (_domains(conn) if mode == "domains" else _errors(conn))
+        result = await _MODES[mode](conn)
     finally:
         await conn.close()
     json.dump(result, sys.stdout)

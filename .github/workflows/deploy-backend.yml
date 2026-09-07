@@ -11,6 +11,10 @@ on:
         description: "Hotfix mode — pull + swap only (skip nginx sync, backup, pruning; 5s worker stop)"
         type: boolean
         default: true
+      allow_pending_migrations:
+        description: "Deploy even if prod alembic_version is missing migrations from this ref (normally blocked — run migrate-prod.sh first)"
+        type: boolean
+        default: false
 
 # Shares the deploy.yml concurrency group — same group name means GitHub
 # serializes across both workflows, so a backend-only run never races a
@@ -72,8 +76,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           chmod +x ./scripts/update-ec2.sh
-          FLAGS="--backend"
+          flags=(--backend)
           if [ "${{ inputs.hotfix }}" = "true" ]; then
-            FLAGS="$FLAGS --hotfix"
+            flags+=(--hotfix)
           fi
-          ./scripts/update-ec2.sh $FLAGS
+          if [ "${{ inputs.allow_pending_migrations }}" = "true" ]; then
+            flags+=(--allow-pending-migrations)
+          fi
+          ./scripts/update-ec2.sh "${flags[@]}"

@@ -1,0 +1,71 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, ci]
+    # Every workflow SHA-pins its actions; dependabot bumps the SHA and keeps
+    # the version comment, so the pins stay honest without hand-editing.
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, backend]
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Browser revisions are per-playwright-version and server/Dockerfile's
+      # base stage pins ARG PLAYWRIGHT_VERSION to match — bump both by hand.
+      - dependency-name: playwright
+
+  - package-ecosystem: npm
+    directory: /client
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, frontend]
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /client/tellus
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, tellus]
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /client/oceanlab
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, oceanlab]
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /server/agent-ui
+    schedule:
+      interval: monthly
+    labels: [dependencies, agent]
+    open-pull-requests-limit: 2
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
