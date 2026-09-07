@@ -27,6 +27,16 @@ lawfully can, at the same instant, for no reason.  Placement therefore prefers
 a time nobody else is on break — anywhere in the legal window — and spends the
 concurrency budget only when the window cannot hold another serialized break.
 
+Budget and occupancy must describe the same floor.  ``required_staff`` belongs
+to one shift row, but ``occupied`` carries breaks from every row sharing the
+floor, so deriving the ceiling from the opened row alone compares a row-sized
+budget against a location-sized occupancy — a row with two assignees would
+refuse to place anything alongside a peer row's break even with eight spare
+bodies on the floor.  Callers that pass ``occupied`` therefore pass ``floor``
+too: the co-planned rows' own windows and headcounts, from which the ceiling
+is read at each instant.  Without it the ceiling stays the opened row's, which
+is the right answer for a caller planning one shift in isolation.
+
 Times in and out are location-local wall-clock datetimes, matching
 ``BreakRequirement.earliest_local`` / ``recommended_local`` / ``deadline_local``
 as produced by ``evaluate_break_plan``.  This module has no database or FastAPI
@@ -48,7 +58,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal, Sequence
+from typing import Any, Callable, Literal, Sequence
 from uuid import UUID
 
 from .schedule_breaks import BreakKind, BreakPlan, BreakRequirement
@@ -93,6 +103,22 @@ class LockedBreak:
 
 
 @dataclass(frozen=True)
+class FloorWindow:
+    """One shift row's contribution to the floor, over its own window.
+
+    ``assigned`` bodies are there; ``required`` of them have to stay.  The
+    difference is how many of that row's people may be off the floor at once,
+    and the sum of those differences across the rows covering an instant is the
+    whole floor's spare capacity at that instant.
+    """
+
+    start: datetime
+    end: datetime
+    assigned: int
+    required: int
+
+
+@dataclass(frozen=True)
 class StaggerResult:
     employee_id: UUID
     kind: BreakKind
@@ -120,6 +146,7 @@ class _Slot:
     ordinal: int
     duration_minutes: int
     earliest: datetime
+    floor_earliest: datetime
     policy_earliest: datetime
     latest_start: datetime
     preferred: datetime
@@ -154,16 +181,20 @@ def _build_slot(
     two placement rules narrow it — both subordinate to the rule's own window,
     and neither able to create a conflict the law does not have:
 
-    * a statute-silent requirement does not start before the policy floor, and
-    * nothing starts at the shift's first instant, even where a rule set
-      encodes an earliest offset of zero.
+    * a statute-silent requirement does not start before the policy floor
+      (``policy_earliest``), and
+    * nothing starts at the shift's first instant (``floor_earliest``), even
+      where a rule set encodes an earliest offset of zero.
 
-    The result is ``policy_earliest``, kept SEPARATE from the legal ``earliest``
-    because policy is a preference and law is a bound.  Narrowing the legal
-    window itself would be wrong twice over: it applies only while the break
-    still fits before its deadline (checked here), and it must not cost the
-    shift a placement (checked at placement time, since only there is it known
-    how many breaks are competing for the same window).
+    The two live in separate fields because they answer to different things.
+    ``policy_earliest`` is a preference: placement may drop below it when
+    coverage leaves no other lawful time, which is why it must not narrow the
+    legal window (that would cost the shift a placement, and only placement
+    time knows how many breaks compete for the window).  ``floor_earliest``
+    is not a preference — a suggestion equal to the shift's own start is
+    never useful to anybody — so it bounds every candidate, including the
+    ones policy discourages.  Both stay off the legal ``earliest`` itself,
+    which still decides whether the break fits before its deadline.
     """
 
     duration = timedelta(minutes=requirement.duration_minutes)
@@ -177,15 +208,16 @@ def _build_slot(
         earliest = shift_start_local
     if latest_start > shift_end_local - duration:
         latest_start = shift_end_local - duration
-    policy_earliest = earliest
+    floor_earliest = earliest
+    if floor_earliest <= shift_start_local and shift_start_local + step <= latest_start:
+        # A break at the moment the shift opens is never the answer, even where
+        # a rule set encodes an earliest offset of zero.
+        floor_earliest = shift_start_local + step
+    policy_earliest = floor_earliest
     if requirement.earliest_local is None:
         floor = shift_start_local + timedelta(minutes=max(0, placement_floor_minutes))
         if policy_earliest < floor <= latest_start:
             policy_earliest = floor
-    if policy_earliest <= shift_start_local and shift_start_local + step <= latest_start:
-        # A break at the moment the shift opens is never the answer, even where
-        # a rule set encodes an earliest offset of zero.
-        policy_earliest = shift_start_local + step
     window_too_short = latest_start < earliest
     if window_too_short:
         # A window too tight to hold the break at all: keep it anchored at the
@@ -194,6 +226,8 @@ def _build_slot(
         # which is why the slot carries the flag rather than swallowing it —
         # a break the law cannot fit is not a `suggested` one.
         latest_start = earliest
+    if floor_earliest > latest_start:
+        floor_earliest = latest_start
     if policy_earliest > latest_start:
         policy_earliest = latest_start
 
@@ -208,6 +242,7 @@ def _build_slot(
         ordinal=requirement.ordinal,
         duration_minutes=requirement.duration_minutes,
         earliest=earliest,
+        floor_earliest=floor_earliest,
         policy_earliest=policy_earliest,
         latest_start=latest_start,
         preferred=preferred,
@@ -224,16 +259,19 @@ def _candidate_tiers(slot: _Slot, step_minutes: int) -> tuple[list[datetime], li
     employee placed where the rule actually wants the break, and pushes later
     employees off it only as far as coverage forces.
 
-    The walk covers the whole LEGAL window and the placement policy only
-    partitions it: the first tier is every time policy allows, the second the
-    times it merely discourages, closest to the floor first.  Dropping the
-    latter instead would make the policy cost placements — breaks serialize
-    when a shift carries no spare headcount, so a window shortened by two hours
-    holds four fewer of them, and the crew who no longer fit would be reported
-    as `insufficient_coverage` rather than given the lawful early time they had
-    before.  The tiers stay separate (rather than one concatenated list) so
-    that `_choose_start` can exhaust every allowed time — clear ones, then
-    shared ones — before it offers a discouraged one.
+    The walk covers the whole legal window down to ``floor_earliest`` and the
+    placement policy only partitions it: the first tier is every time policy
+    allows, the second the times it merely discourages, closest to the floor
+    first.  Dropping the latter instead would make the policy cost placements —
+    breaks serialize when a shift carries no spare headcount, so a window
+    shortened by two hours holds four fewer of them, and the crew who no longer
+    fit would be reported as `insufficient_coverage` rather than given the
+    lawful early time they had before.  The tiers stay separate (rather than
+    one concatenated list) so that `_choose_start` can exhaust every allowed
+    time — clear ones, then shared ones — before it offers a discouraged one.
+
+    Discouraged is not unbounded: the tier stops at ``floor_earliest``, so
+    spilling below the policy floor can never reach the shift's own start.
     """
 
     step = timedelta(minutes=max(1, step_minutes))
@@ -244,7 +282,7 @@ def _candidate_tiers(slot: _Slot, step_minutes: int) -> tuple[list[datetime], li
         later = slot.preferred + offset
         earlier = slot.preferred - offset
         later_ok = later <= slot.latest_start
-        earlier_ok = earlier >= slot.earliest
+        earlier_ok = earlier >= slot.floor_earliest
         if not later_ok and not earlier_ok:
             break
         # Later first: drifting a break toward its deadline is normal, pulling
@@ -259,8 +297,8 @@ def _candidate_tiers(slot: _Slot, step_minutes: int) -> tuple[list[datetime], li
     # one start that fits and would report insufficient_coverage for a slot
     # that is schedulable.  Boundaries go last: they are the fallback after
     # every preferred-adjacent option has been tried.
-    for boundary in (slot.latest_start, slot.policy_earliest, slot.earliest):
-        if boundary not in seen and slot.earliest <= boundary <= slot.latest_start:
+    for boundary in (slot.latest_start, slot.policy_earliest, slot.floor_earliest):
+        if boundary not in seen and slot.floor_earliest <= boundary <= slot.latest_start:
             seen.add(boundary)
             candidates.append(boundary)
     allowed = [value for value in candidates if value >= slot.policy_earliest]
@@ -270,30 +308,27 @@ def _candidate_tiers(slot: _Slot, step_minutes: int) -> tuple[list[datetime], li
     return allowed, discouraged
 
 
-_Fit = Literal["clear", "shared"]
-
-
 def _fit(
     start: datetime,
     duration: timedelta,
     placed: Sequence[_Placed],
-    max_concurrent: int,
+    capacity: Callable[[datetime], int],
     *,
     employee_id: UUID,
-) -> _Fit | None:
-    """How [start, start+duration) sits against what is already off the floor.
+) -> int | None:
+    """Peak headcount off the floor during [start, start+duration), or None.
 
-    ``clear`` — nobody else is on break for any part of it; the floor loses
-    exactly one body.  ``shared`` — it overlaps other breaks but stays inside
-    the concurrency budget: a new break may overlap at most
-    ``max_concurrent - 1`` of them at any instant.  ``None`` — it cannot be
-    placed.  Overlap counts are evaluated at each placed interval's start and
-    at ``start`` itself, which is sufficient because concurrency only ever
-    rises at an interval boundary.
+    The count includes this break, so ``1`` means nobody else is off the floor
+    for any part of it and anything higher is how many bodies the floor is
+    down at the worst instant.  ``None`` means it cannot be placed: it would
+    put more people off the floor than the floor can spare.  Capacity and
+    overlap counts are evaluated at each placed interval's start and at
+    ``start`` itself, which is sufficient because both only ever change at an
+    interval boundary.
 
-    One person is not two bodies, so the budget is not the only constraint: a
+    One person is not two bodies, so capacity is not the only constraint: a
     break can never overlap another break belonging to the same employee, no
-    matter how much spare headcount the shift carries.
+    matter how much spare headcount the floor carries.
     """
 
     end = start + duration
@@ -302,11 +337,10 @@ def _fit(
         if entry.start < end and start < entry.end
     ]
     if not overlapping:
-        return "clear"
+        return 1
     if any(entry.employee_id == employee_id for entry in overlapping):
         return None
-    if max_concurrent <= 1:
-        return None
+    peak = 1
     for boundary in [start, *(entry.start for entry in overlapping)]:
         if boundary < start or boundary >= end:
             continue
@@ -314,44 +348,89 @@ def _fit(
             1 for entry in overlapping
             if entry.start <= boundary < entry.end
         )
-        if concurrent > max_concurrent:
+        if concurrent > capacity(boundary):
             return None
-    return "shared"
+        peak = max(peak, concurrent)
+    return peak
 
 
 def _choose_start(
     slot: _Slot,
     placed: Sequence[_Placed],
-    max_concurrent: int,
+    capacity: Callable[[datetime], int],
     step_minutes: int,
 ) -> datetime | None:
     """The start to suggest for one slot, or ``None`` when nothing fits.
 
-    Stagger first, share the budget last.  Within each policy tier the first
-    ``clear`` candidate wins outright — even when the preferred time itself is
-    ``shared`` and lawful.  Two openers on a 06:30 shift both told to break at
-    08:30 because a third person clocks in then is inside the budget and still
-    the wrong answer: the floor is thinnest exactly when it need not be.  Only
-    when the tier holds no clear time at all does the earliest ``shared`` one
-    (closest to preferred, since the walk is outward) get used, and only after
-    both outcomes are exhausted for every allowed time does a discouraged time
-    come into play — a lawful early break still beats no suggestion, and a
-    doubled-up break after two hours of work still beats one after twenty
-    minutes.
+    Stagger first, crowd last.  Within each policy tier a candidate nobody
+    else is off the floor for wins outright — even when the preferred time
+    itself would fit alongside others.  Two openers on a 06:30 shift both told
+    to break at 08:30 because a third person clocks in then is inside the
+    budget and still the wrong answer: the floor is thinnest exactly when it
+    need not be.
+
+    When the tier holds no such time, the least crowded one wins, ties going
+    to the candidate closest to preferred since the walk runs outward.  Only
+    once every allowed time is exhausted does a discouraged one come into play
+    — a lawful early break still beats no suggestion, and a doubled-up break
+    after two hours of work still beats a lone one after twenty minutes.
     """
 
     duration = timedelta(minutes=slot.duration_minutes)
     for tier in _candidate_tiers(slot, step_minutes):
-        shared: datetime | None = None
+        crowded: tuple[int, datetime] | None = None
         for candidate in tier:
-            fit = _fit(candidate, duration, placed, max_concurrent, employee_id=slot.employee_id)
-            if fit == "clear":
+            peak = _fit(candidate, duration, placed, capacity, employee_id=slot.employee_id)
+            if peak is None:
+                continue
+            if peak == 1:
                 return candidate
-            if fit == "shared" and shared is None:
-                shared = candidate
-        if shared is not None:
-            return shared
+            if crowded is None or peak < crowded[0]:
+                crowded = (peak, candidate)
+        if crowded is not None:
+            return crowded[1]
     return None
+
+
+def _floor_spare(floor: Sequence[FloorWindow]) -> Callable[[datetime], int]:
+    """Spare bodies on the shared floor at an instant, as the roster has it.
+
+    A row contributes its own spare headcount for as long as its window covers
+    the instant, so a mid-morning arrival raises the number from the minute
+    they clock in and lowers it again when they leave.  Zero and negative are
+    real answers here — a fully-committed floor is the normal shape, and
+    `coverage_shortfall` exists to say so — which is why the floor of one
+    belongs to the ceiling derived from this, not to this.
+    """
+
+    def spare_at(instant: datetime) -> int:
+        return sum(
+            window.assigned - window.required
+            for window in floor
+            if window.start <= instant < window.end
+        )
+
+    return spare_at
+
+
+def _tightest_spare(
+    spare_at: Callable[[datetime], int],
+    floor: Sequence[FloorWindow],
+    shift_start_local: datetime,
+    shift_end_local: datetime,
+) -> int:
+    """The thinnest the floor gets while this shift is on it.
+
+    One number for a capacity that varies by instant, for the payload and the
+    shortfall advisory.  Placement itself always reads the instant, so this is
+    the conservative face of the same model, never the constraint applied.
+    """
+
+    boundaries = [shift_start_local, *(
+        window.start for window in floor
+        if shift_start_local < window.start < shift_end_local
+    )]
+    return min(spare_at(boundary) for boundary in boundaries)
 
 
 def _collision_reason(slot: _Slot) -> str:
@@ -381,6 +460,7 @@ def stagger_shift_breaks(
     assignments: Sequence[StaggerAssignment],
     locked: Sequence[LockedBreak] = (),
     occupied: Sequence[LockedBreak] = (),
+    floor: Sequence[FloorWindow] = (),
     step_minutes: int = 5,
     placement_floor_minutes: int = DEFAULT_PLACEMENT_FLOOR_MINUTES,
 ) -> StaggerPlan:
@@ -400,10 +480,26 @@ def stagger_shift_breaks(
     saved answer to this shift's requirement.  Keeping the two inputs separate
     matters when one employee works two shifts and therefore has the same
     ``(kind, ordinal)`` key twice in one day.
+
+    ``floor`` describes the crew those occupied breaks come off, and belongs
+    with them: pass both or neither.  Given it, the ceiling is read from the
+    whole floor at each instant; without it, from this shift's own headcount,
+    which is the right answer only when nothing else shares the floor.
     """
 
     assigned_count = len(assignments)
-    max_concurrent = max(1, assigned_count - max(0, required_staff))
+    if floor:
+        spare_at = _floor_spare(floor)
+        spare = _tightest_spare(spare_at, floor, shift_start_local, shift_end_local)
+    else:
+        row_spare = assigned_count - max(0, required_staff)
+        spare_at = lambda _instant: row_spare  # noqa: E731 - one expression
+        spare = row_spare
+
+    def capacity(instant: datetime) -> int:
+        return max(1, spare_at(instant))
+
+    max_concurrent = max(1, spare)
     advisories: list[dict[str, Any]] = []
     results: list[StaggerResult] = []
     slots: list[_Slot] = []
@@ -460,7 +556,10 @@ def stagger_shift_breaks(
                 placement_floor_minutes=placement_floor_minutes,
             ))
 
-    if assigned_count and slots and assigned_count <= max(0, required_staff):
+    # Reads the same capacity placement does, so a fully-committed floor is
+    # reported once and a row that only LOOKS short (its own headcount equals
+    # its requirement, but peers cover the floor) is not.
+    if assigned_count and slots and spare <= 0:
         advisories.append({
             "check": "break_stagger",
             "code": "coverage_shortfall",
@@ -484,7 +583,7 @@ def stagger_shift_breaks(
     )
     for slot in ordered:
         duration = timedelta(minutes=slot.duration_minutes)
-        chosen = _choose_start(slot, placed, max_concurrent, step_minutes)
+        chosen = _choose_start(slot, placed, capacity, step_minutes)
         if chosen is None:
             results.append(StaggerResult(
                 employee_id=slot.employee_id,

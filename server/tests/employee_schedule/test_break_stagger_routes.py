@@ -5,7 +5,7 @@ Fake connections throughout — none of these touch a database.
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -309,6 +309,146 @@ def test_the_openers_and_the_mid_morning_arrival_all_break_apart(monkeypatch):
     assert suggested[opener_b].startswith("2026-08-21T09:00:00")
     # Two hours in for the 08:30 arrival, and clear of both openers' breaks.
     assert suggested[arrival].startswith("2026-08-21T10:30:00")
+
+
+# ── the co-planned set: which rows share this one's floor ────────────────────
+
+
+class _FloorConnection:
+    """The location's shifts, answered the way the service asks for them.
+
+    The window predicate is applied for real: a fake that returns every row
+    regardless would pass whatever window the service asked for, which is
+    exactly the bug these tests are about.
+    """
+
+    def __init__(self, rows, assignments):
+        self.rows = rows
+        self.assignments = assignments
+        self.windows = []
+
+    async def fetchrow(self, _query, shift_id, _company_id):
+        return next((row for row in self.rows if row["id"] == shift_id), None)
+
+    async def fetch(self, query, *args):
+        if "FROM schedule_shifts" in query:
+            _company_id, _location_id, window_start, window_end = args
+            self.windows.append((window_start, window_end))
+            return [
+                row for row in self.rows
+                if row["starts_at"] < window_end and row["ends_at"] > window_start
+            ]
+        assert "schedule_shift_assignments" in query
+        assert "company_id" in query, "assignment read must be tenant-scoped"
+        shift_ids = set(args[0])
+        return [
+            entry for entry in self.assignments if entry["shift_id"] in shift_ids
+        ]
+
+
+def _shift(shift_id, location_id, start, end, *, required=1):
+    return {
+        "id": shift_id, "location_id": location_id, "required_staff": required,
+        "starts_at": datetime(2026, 8, 21, tzinfo=timezone.utc) + start,
+        "ends_at": datetime(2026, 8, 21, tzinfo=timezone.utc) + end,
+    }
+
+
+def _assignment(shift_id, employee_id, *, saved=None):
+    return {
+        "shift_id": shift_id, "employee_id": employee_id,
+        "planned_breaks": json.dumps([{
+            "kind": "meal", "ordinal": 1, "start_local": saved,
+            "duration_minutes": 30, "source": "manager",
+        }]) if saved else None,
+    }
+
+
+def _patch_stagger_route(monkeypatch, conn, *, planned_keys=None):
+    async def fake_require_company_id(_user):
+        return uuid4()
+
+    async def fake_plans(*_args, **kwargs):
+        from zoneinfo import ZoneInfo
+        plan = BreakPlan(
+            status="complete", requirements=(_requirement(),), advisories=(),
+            rule_set_ids=(uuid4(),), rule_set_hash="hash",
+        )
+        if planned_keys is not None:
+            planned_keys.extend(key for key, _start, _end, _ids in kwargs["shifts"])
+        return ZoneInfo("UTC"), {
+            key: {employee_id: plan for employee_id in employee_ids}
+            for key, _starts_at, _ends_at, employee_ids in kwargs["shifts"]
+        }, set()
+
+    monkeypatch.setattr(shifts_route, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(
+        shifts_route, "get_connection", lambda: _ConnectionContext(conn),
+    )
+    monkeypatch.setattr(schedule_guidance, "resolve_week_break_plans", fake_plans)
+
+
+def test_an_overnight_peer_is_co_planned_from_either_row(monkeypatch):
+    """Shifts that share floor time co-plan, whichever one is opened.
+
+    The overnight row (22:00-06:00) and the next morning's (00:00-08:00) share
+    six hours of floor, but no calendar day contains both: opening the morning
+    row saw the overnighter, opening the overnighter did not see the morning
+    row, and it was handed a time the other crew had already saved.
+    """
+    location_id = uuid4()
+    overnight = UUID("00000000-0000-0000-0000-0000000000a1")
+    morning = UUID("00000000-0000-0000-0000-0000000000a2")
+    rows = [
+        _shift(overnight, location_id, timedelta(hours=22), timedelta(hours=30)),
+        _shift(morning, location_id, timedelta(hours=24), timedelta(hours=32)),
+    ]
+    assignments = [
+        _assignment(overnight, uuid4()),
+        _assignment(morning, uuid4(), saved="2026-08-22T00:00:00+00:00"),
+    ]
+    conn = _FloorConnection(rows, assignments)
+    _patch_stagger_route(monkeypatch, conn)
+
+    payload = _run(shifts_route.get_shift_break_stagger(overnight, current_user=_user()))
+
+    result = payload["results"][0]
+    assert result["status"] == "suggested"
+    # 00:00 is the morning crew's saved break; the overnighter goes after it.
+    assert result["suggested_start"].startswith("2026-08-22T00:30:00")
+    assert conn.windows[-1][1] >= rows[1]["starts_at"], "the query grew to reach the peer"
+
+
+def test_rows_after_the_target_are_not_planned_but_still_hold_the_floor(monkeypatch):
+    """Opening the first row of a long day plans one row, not the whole day.
+
+    A row later in the order cannot change what the target is offered — the
+    target is placed before it. Its SAVED time is a different thing: that is
+    an answer the floor will actually run on, so it still occupies.
+    """
+    location_id = uuid4()
+    first = UUID("00000000-0000-0000-0000-0000000000b1")
+    second = UUID("00000000-0000-0000-0000-0000000000b2")
+    third = UUID("00000000-0000-0000-0000-0000000000b3")
+    rows = [
+        _shift(first, location_id, timedelta(hours=6), timedelta(hours=14)),
+        _shift(second, location_id, timedelta(hours=7), timedelta(hours=15)),
+        _shift(third, location_id, timedelta(hours=8), timedelta(hours=16)),
+    ]
+    assignments = [
+        _assignment(first, uuid4()),
+        _assignment(second, uuid4()),
+        _assignment(third, uuid4(), saved="2026-08-21T08:00:00+00:00"),
+    ]
+    conn = _FloorConnection(rows, assignments)
+    planned_keys: list[str] = []
+    _patch_stagger_route(monkeypatch, conn, planned_keys=planned_keys)
+
+    payload = _run(shifts_route.get_shift_break_stagger(first, current_user=_user()))
+
+    assert planned_keys == [str(first)], "only up to and including the target"
+    # Two hours in is 08:00, which the third row already holds; 08:30 is clear.
+    assert payload["results"][0]["suggested_start"].startswith("2026-08-21T08:30:00")
 
 
 # ── PUT /shifts/{id}/assignments/{employee_id}/break-plan ─────────────────────

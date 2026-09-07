@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from app.matcha.services.scheduling.schedule_breaks import BreakPlan, BreakRequirement
 from app.matcha.services.scheduling.schedule_break_stagger import (
+    FloorWindow,
     LockedBreak,
     StaggerAssignment,
     prune_planned_breaks,
@@ -568,6 +569,120 @@ def test_another_shift_break_occupies_the_same_floor_without_becoming_saved():
     result = plan.results[0]
     assert result.status == "suggested"
     assert result.suggested_start == _local(12, 30)
+
+
+# ── the ceiling and the occupancy describe the same floor ────────────────────
+
+
+def _floor(start, end, assigned, required):
+    return FloorWindow(start=start, end=end, assigned=assigned, required=required)
+
+
+def _peer_break(index, hour, minute=0, duration=30):
+    return LockedBreak(
+        employee_id=_employee(index), kind="meal", ordinal=1,
+        start=_local(hour, minute), duration_minutes=duration,
+    )
+
+
+def _crowded():
+    return _requirement(
+        earliest_local=_local(12), recommended_local=_local(12),
+        deadline_local=_local(13),
+    )
+
+
+def _shared_floor(*, floor):
+    """Two assignees needing a 12:00-13:00 meal, two peers already in it."""
+    return stagger_shift_breaks(
+        shift_start_local=_local(9),
+        shift_end_local=_local(17),
+        required_staff=2,
+        assignments=_crew(2, _crowded),
+        occupied=[_peer_break(8, 12), _peer_break(9, 12, 30)],
+        floor=floor,
+    )
+
+
+def test_the_ceiling_is_read_from_the_floor_not_from_the_opened_row():
+    """A row-sized budget against a floor-sized occupancy blocks everything.
+
+    This row has no spare headcount of its own (2 assigned, 2 required), but
+    the floor it stands on carries six spare bodies. Both of its breaks fit
+    beside the peers already off the floor; refusing them would report
+    `insufficient_coverage` for a floor with six people to spare.
+    """
+    plan = _shared_floor(floor=[_floor(_local(9), _local(17), 2, 2), _floor(_local(9), _local(17), 6, 0)])
+
+    assert [result.status for result in plan.results] == ["suggested"] * 2
+    assert sorted(_intervals(plan)) == [
+        (_local(12), _local(12, 30)), (_local(12, 30), _local(13)),
+    ]
+    assert plan.max_concurrent_breaks == 6
+    assert plan.advisories == ()
+
+
+def test_a_floor_with_nothing_to_spare_still_serializes():
+    """The same rows on a floor that is fully committed: the peers hold both
+    slots, so neither break fits and the shortfall is reported."""
+    plan = _shared_floor(floor=[_floor(_local(9), _local(17), 2, 2)])
+
+    assert [result.status for result in plan.results] == ["insufficient_coverage"] * 2
+    assert plan.max_concurrent_breaks == 1
+    assert {advisory["code"] for advisory in plan.advisories} == {
+        "coverage_shortfall", "insufficient_coverage",
+    }
+
+
+def test_the_ceiling_follows_the_floor_through_the_shift():
+    """Capacity is read at each instant, not once for the shift.
+
+    A 06:30 opener stands alone until the 08:30 crew arrives. The reported
+    ceiling is the tightest moment (1, before they clock in), and placement
+    still uses the wider ceiling that exists from 08:30 on: the opener's break
+    may sit beside a peer's once there are bodies to spare.
+    """
+    plan = stagger_shift_breaks(
+        shift_start_local=_local(6, 30),
+        shift_end_local=_local(14, 30),
+        required_staff=1,
+        assignments=[StaggerAssignment(
+            employee_id=_employee(1),
+            plan=_plan(_ca_meal(
+                earliest_local=_local(8, 30), recommended_local=_local(8, 30),
+                deadline_local=_local(9),
+            )),
+        )],
+        occupied=[_peer_break(9, 8, 30)],
+        floor=[
+            _floor(_local(6, 30), _local(14, 30), 1, 1),
+            _floor(_local(8, 30), _local(16, 30), 3, 0),
+        ],
+    )
+
+    assert plan.max_concurrent_breaks == 1, "tightest instant is the lone opener"
+    result = plan.results[0]
+    assert result.status == "suggested"
+    assert result.suggested_start == _local(8, 30), "shares once the floor can afford it"
+
+
+def test_a_discouraged_time_never_reaches_the_shift_start():
+    """Spilling below the policy floor stops one step short of the opening.
+
+    A crew of 10 on a CA opener fills 08:30-11:00 and then walks backwards
+    through the discouraged times. The tenth used to land on 06:30-07:00 — the
+    only clear half hour left — and 06:30 is the shift's own start, the exact
+    suggestion the placement floor exists to prevent. It is now reported
+    honestly instead: no lawful time is left that anybody could take.
+    """
+    plan = _opener(required_staff=10, crew=10)
+
+    starts = [result.suggested_start for result in plan.results if result.suggested_start]
+    assert _local(6, 30) not in starts
+    assert min(starts) == _local(7)
+    statuses = [result.status for result in plan.results]
+    assert statuses.count("suggested") == 9
+    assert statuses.count("insufficient_coverage") == 1
 
 
 # ── prune_planned_breaks ──────────────────────────────────────────────────────
