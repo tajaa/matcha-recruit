@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "framer-motion": "^12.42.2",
+    "framer-motion": "^13.2.0",
     "jsqr": "^1.4.0",
     "konva": "^9.3.22",
     "lucide-react": "^0.562.0",
