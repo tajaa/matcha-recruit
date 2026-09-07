@@ -401,11 +401,13 @@ Invariants:
   report nothing at all. The buffer minutes and the 15-minute sampling slice are
   operational policy in feature code and say so in their docstrings (memory:
   `feedback-legal-thresholds-codify`).
-- **The findings pass never fails a build**, same contract as
-  `_preflight_compliance_blocks`: it logs and returns `[]`. That guard wraps
-  the WHOLE of `_attach_findings` (profile read + coverage evaluator + break
-  relief), not just the break half; on failure the metrics say coverage was not
-  checked, which `_coverage_sentence` reports as such — never as a clean week.
+- **The findings pass never fails a build**, independently of the assignment
+  preflight (which fails closed per proposed pair). `_attach_findings` guards
+  profile/coverage/break evaluation as a whole; a jurisdiction lookup failure
+  is handled inside the pass so already-computed coverage and break findings
+  survive while legality is marked `unavailable`. If coverage evaluation itself
+  fails, metrics say it was not checked and `_coverage_sentence` reports that —
+  never a clean week.
 - **Every findings cap is by severity, not calendar order.** The list is sorted
   day-then-time, so a plain slice would drop Saturday's gaps to keep Sunday's
   advisories. `_cap_findings` gives gaps the budget first and re-sorts, and it
@@ -442,9 +444,10 @@ preflight exception as "fine", never validated the `fixed_employee_ids` it inher
 - **New findings** (`_attach_findings_core`, same `make_finding` shape, counted in full in
   `finding_counts`):
   - `staffing_concentration` (advisory) — one person on ≥ `_CONCENTRATION_MIN_SHIFTS` (7: more shifts
-    than days) OR on ≥ 3 shifts that are > 40% of the proposed positions AND ≥ 2× a fair split of the
-    roster (`proposed / roster_size`). Two leads on 4/3 of seven blocks stay quiet; one person on 6 of 6
-    with a second body on the roster is the finding; a one-person roster is never flagged by share.
+    than days) OR on ≥ 3 shifts that are > 40% of the staffed positions AND ≥ 2× their expected share
+    across each shift's eligible pool. Fixed assignments count too. Two qualified leads on 4/3 of seven
+    gated blocks stay quiet even alongside an ineligible barista roster; a one-person eligible pool is
+    never flagged by share (the absolute 7-shift rule still applies).
   - `existing_double_booking` (**gap**, added to `GAP_KINDS`) — an inherited `fixed_employee_ids`
     booking that overlaps another of theirs (in the plan or elsewhere that week). Still counted as
     filled; the finding is how the manager learns.
@@ -456,10 +459,10 @@ preflight exception as "fine", never validated the `fixed_employee_ids` it inher
     before the pass runs is `unavailable` ("not an all-clear"), so a findings pass that fails never reads
     as verified.
 - **`metrics.top_load`** — top 3 `{employee_id, name, shifts, hours}` heaviest first. The summary adds
-  "{name} carries N of the M proposed positions." when concentration fired, and the jurisdiction
+  "{name} carries N of the M staffed positions." when concentration fired, and the jurisdiction
   sentence when not verified. Still never the word "compliant".
 - **The week-draft `ScheduleReview`** — `schedule_review.build_week_draft_review(plan, employee_names,
-  existing_assignments, week_start, week_end, proposal_id)` → `kind="week_draft"`: `assignments`
+  existing_assignments, week_start, week_end, proposal_id, concentration_findings)` → `kind="week_draft"`: `assignments`
   (verdict `warn` when an advisory is attached), `rejected=[]` (the planner refuses before proposing),
   `unfilled` (with `ends_at` looked up), `employees[before/after/warnings]` (the concentration finding
   is the person's warning), `advisories` verbatim, `findings`, `jurisdiction`, `compliance_status`.

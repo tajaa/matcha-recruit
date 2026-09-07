@@ -281,7 +281,7 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                     )
                 elif summary["compliance_status"] == "advisory":
                     lines.append(
-                        f"  Compliance: {len(week_review.get('advisories') or [])} statutory "
+                        f"  Compliance: {summary['advisories']} statutory "
                         f"advisory(ies) attached to this week — relay them, do not call it clean."
                     )
         elif action.get("type") == "schedule_location_profile":

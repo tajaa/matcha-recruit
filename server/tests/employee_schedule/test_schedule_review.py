@@ -6,8 +6,8 @@
 from datetime import date, datetime, timezone
 
 from app.matcha.services.scheduling.schedule_review import (
-    build_review, build_week_draft_review, compliance_status_for, jurisdiction_message, rejected_entry,
-    summarize_review,
+    bounded_review_echo, build_review, build_week_draft_review, compact_review,
+    compliance_status_for, jurisdiction_message, rejected_entry, summarize_review,
 )
 
 
@@ -140,7 +140,8 @@ class TestHelpers:
         })
         summary = summarize_review(review)
         assert summary == {
-            "staged": 2, "rejected": 1, "unfilled": 0, "warnings": ["only 2h rest"],
+            "staged": 2, "rejected": 1, "unfilled": 0, "advisories": 0,
+            "warnings": ["only 2h rest"],
             "compliance_status": "unmapped", "jurisdiction_message": review["jurisdiction"]["message"],
         }
 
@@ -161,7 +162,8 @@ class TestBuildWeekDraftReview:
             ],
             "unfilled": [{"shift_key": "s3", "starts_at": "2026-08-26T06:00:00+00:00", "role": "shift lead",
                           "reason": "policy: second shift that day", "exclusions": {"policy: second shift that day": 1}}],
-            "findings": [{"kind": "staffing_concentration", "severity": "advisory", "employee_name": "Dana Reyes",
+            "findings": [{"kind": "staffing_concentration", "severity": "advisory",
+                          "employee_id": "e-dana", "employee_name": "Dana Reyes",
                           "detail": "Dana Reyes carries 5 of 6 proposed positions (40h scheduled this week) — spread the load."}],
             "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"},
         }
@@ -203,3 +205,41 @@ class TestBuildWeekDraftReview:
         review = build_week_draft_review(plan, employee_names={}, existing_assignments=[],
                                          week_start=date(2026, 8, 23), week_end=date(2026, 8, 29))
         assert review["compliance_status"] == "unmapped" and review["proposal_id"] is None
+
+    def test_concentration_warning_uses_id_and_survives_the_capped_plan_list(self):
+        plan = self._plan()
+        plan["findings"] = []
+        concentration = [{
+            "kind": "staffing_concentration", "employee_id": "e-dana",
+            "employee_name": "Chris Lee", "detail": "Dana-specific warning",
+        }]
+        review = build_week_draft_review(
+            plan, employee_names={"e-dana": "Chris Lee", "e-ben": "Chris Lee"},
+            existing_assignments=[], week_start=date(2026, 8, 23), week_end=date(2026, 8, 29),
+            concentration_findings=concentration,
+        )
+        by_id = {item["employee_id"]: item for item in review["employees"]}
+        assert by_id["e-dana"]["warnings"] == ["Dana-specific warning"]
+        assert by_id["e-ben"]["warnings"] == []
+
+
+def test_compact_review_keeps_counts_and_bounds_actionable_echo():
+    review = {
+        "proposal_id": "p1", "kind": "week_draft", "compliance_status": "advisory",
+        "assignments": [{"shift_id": str(index), "verdict": "ok"} for index in range(25)],
+        "rejected": [{"shift_id": str(index)} for index in range(25)],
+        "unfilled": [{"shift_id": str(index)} for index in range(25)],
+        "advisories": [{"message": str(index)} for index in range(25)],
+        "findings": [{"detail": str(index)} for index in range(25)],
+        "employees": [{"employee_id": "e1", "name": "Dana", "before": {"minutes": 0},
+                       "after": {"minutes": 480}, "warnings": ["warning"]}],
+        "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"},
+    }
+    compact = compact_review(review)
+    assert compact["assignment_count"] == 25
+    assert compact["rejected_count"] == compact["unfilled_count"] == compact["advisory_count"] == 25
+    assert not {"assignments", "rejected", "unfilled", "advisories", "findings"} & compact.keys()
+    assert compact["employees"] == [{"employee_id": "e1", "name": "Dana", "warnings": ["warning"]}]
+    echo = bounded_review_echo(review)
+    assert len(echo["rejected"]) == len(echo["unfilled"]) == len(echo["advisories"]) == 20
+    assert "assignments" not in echo and "findings" not in echo

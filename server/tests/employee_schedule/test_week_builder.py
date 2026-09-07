@@ -1270,7 +1270,7 @@ async def _propose_now():
 
 
 @pytest.mark.asyncio
-async def test_one_lead_holder_gets_one_block_a_day_and_the_concentration_is_named(monkeypatch):
+async def test_one_eligible_lead_gets_one_block_a_day_without_a_false_share_warning(monkeypatch):
     conn = _FakeConn(None)
     demand = []
     for offset in range(7):
@@ -1288,10 +1288,8 @@ async def test_one_lead_holder_gets_one_block_a_day_and_the_concentration_is_nam
     reasons = Counter(item["reason"] for item in result["unfilled"])
     assert reasons == {"policy: second shift that day": 6, "maximum consecutive days": 2}
     assert metrics["top_load"] == [{"employee_id": "dana", "name": "Dana", "shifts": 6, "hours": 24.0}]
-    concentration = next(f for f in result["findings"] if f["kind"] == "staffing_concentration")
-    assert concentration["severity"] == "advisory" and concentration["employee_name"] == "Dana"
-    assert concentration["detail"].startswith("Dana carries 6 of 6 proposed positions (24h scheduled this week)")
-    assert "Dana carries 6 of the 6 proposed positions." in result["summary"]
+    assert "staffing_concentration" not in metrics["finding_counts"]
+    assert "Dana carries" not in result["summary"]
     assert "compliant" not in result["summary"].lower()
 
     review = result["review"]
@@ -1299,7 +1297,7 @@ async def test_one_lead_holder_gets_one_block_a_day_and_the_concentration_is_nam
     assert review["employees"] == [{
         "employee_id": "dana", "name": "Dana",
         "before": {"minutes": 0, "shifts": 0, "days": 0}, "after": {"minutes": 1440, "shifts": 6, "days": 6},
-        "warnings": [concentration["detail"]],
+        "warnings": [],
     }]
     assert len(review["assignments"]) == 6 and review["rejected"] == []
     assert {a["op"] for a in review["assignments"]} == {"assign"} and {a["verdict"] for a in review["assignments"]} == {"ok"}
@@ -1310,13 +1308,27 @@ async def test_one_lead_holder_gets_one_block_a_day_and_the_concentration_is_nam
 
 
 @pytest.mark.asyncio
-async def test_the_only_person_on_the_roster_is_not_flagged_for_carrying_it(monkeypatch):
+async def test_the_only_eligible_person_is_not_flagged_by_the_share_rule(monkeypatch):
     conn = _FakeConn(None)
-    demand = [_day_shift(offset, "08:00", "12:00", job_id=None, role="Barista") for offset in range(6)]
-    result = await _propose(monkeypatch, conn, demand=demand, employees=[_employee("solo", "Solo", state="windows")],
+    monkeypatch.setattr(week_builder, "_CONCENTRATION_MIN_SHIFTS", 99)
+    demand = [_day_shift(offset, "08:00", "12:00", job_id=None, role="Barista") for offset in range(7)]
+    solo = _employee("solo", "Solo", state="windows")
+    solo["max_consecutive_days"] = 7
+    result = await _propose(monkeypatch, conn, demand=demand, employees=[solo],
                             profile=_profile(operating_hours=ALL_WEEK_HOURS))
-    assert result["metrics"]["top_load"][0]["shifts"] == 6
+    assert result["metrics"]["top_load"][0]["shifts"] == 7
     assert "staffing_concentration" not in result["metrics"]["finding_counts"]
+
+
+@pytest.mark.asyncio
+async def test_the_absolute_seven_shift_rule_still_flags_a_solo_roster(monkeypatch):
+    conn = _FakeConn(None)
+    demand = [_day_shift(offset, "08:00", "12:00", job_id=None, role="Barista") for offset in range(7)]
+    solo = _employee("solo", "Solo", state="windows")
+    solo["max_consecutive_days"] = 7
+    result = await _propose(monkeypatch, conn, demand=demand, employees=[solo],
+                            profile=_profile(operating_hours=ALL_WEEK_HOURS))
+    assert result["metrics"]["finding_counts"]["staffing_concentration"] == 1
 
 
 @pytest.mark.asyncio
@@ -1325,7 +1337,10 @@ async def test_two_lead_holders_share_the_blocks_and_nobody_is_flagged(monkeypat
     demand = [_day_shift(offset, "08:00", "12:00") for offset in range(7)]
     result = await _propose(
         monkeypatch, conn, demand=demand,
-        employees=[_lead_employee("ana", "Ana"), _lead_employee("ben", "Ben")],
+        employees=[
+            _lead_employee("ana", "Ana"), _lead_employee("ben", "Ben"),
+            *[_employee(f"barista-{index}", f"Barista {index}") for index in range(8)],
+        ],
         gated_job_ids={"lead"}, profile=_profile(operating_hours=ALL_WEEK_HOURS),
     )
     assert result["unfilled"] == []
@@ -1352,9 +1367,67 @@ async def test_an_inherited_double_booking_is_a_gap_not_a_quietly_filled_seat(mo
         "Amy is already on overlapping shifts: Barista Mon Aug 24 08:00–16:00 and Closer Mon Aug 24 12:00–17:00",
     )
     assert result["metrics"]["finding_counts"]["existing_double_booking"] == 1
-    assert result["metrics"]["gap_count"] >= 1
+    assert result["metrics"]["gap_count"] == 0
+    assert result["metrics"]["booking_conflict_count"] == 1
+    assert "No coverage gaps" in result["summary"]
+    assert "1 existing double-booking conflict" in result["summary"]
     # Still counted as filled — the finding is how the manager learns, the count is not lied about.
     assert result["metrics"]["fixed_positions"] == 2
+
+
+@pytest.mark.asyncio
+async def test_other_location_double_bookings_do_not_leak_into_this_locations_draft(monkeypatch):
+    conn = _FakeConn(None)
+    local = _day_shift(1, "08:00", "16:00", key="local", job_id=None, role="Barista", fixed=["ben"])
+    existing = [
+        {"employee_id": "amy", "shift_id": "other-a", "starts_at": local["starts_at"],
+         "ends_at": local["ends_at"], "worked_minutes": 480, "location_id": "other-location", "status": "draft"},
+        {"employee_id": "amy", "shift_id": "other-b", "starts_at": local["starts_at"] + timedelta(hours=1),
+         "ends_at": local["ends_at"] + timedelta(hours=1), "worked_minutes": 480,
+         "location_id": "another-location", "status": "draft"},
+    ]
+    result = await _propose(
+        monkeypatch, conn, demand=[local],
+        employees=[_employee("amy", "Amy"), _employee("ben", "Ben")], existing=existing,
+    )
+    assert "existing_double_booking" not in result["metrics"]["finding_counts"]
+
+
+@pytest.mark.asyncio
+async def test_fixed_assignments_drive_local_load_and_concentration(monkeypatch):
+    conn = _FakeConn(None)
+    demand = [
+        _day_shift(offset, "08:00", "12:00", key=f"fixed-{offset}", job_id=None,
+                   role="Barista", fixed=["dana"])
+        for offset in range(7)
+    ]
+    existing = [
+        {"employee_id": "dana", "shift_id": shift["key"], "starts_at": shift["starts_at"],
+         "ends_at": shift["ends_at"], "worked_minutes": shift["worked_minutes"],
+         "location_id": str(LOCATION_ID), "status": "draft"}
+        for shift in demand
+    ]
+    # Company-wide policy accounting also sees a large shift at another store;
+    # the location card must remain seven local shifts / 28 local hours.
+    existing.append({
+        "employee_id": "dana", "shift_id": "other-store", "starts_at": demand[0]["starts_at"] - timedelta(days=1),
+        "ends_at": demand[0]["starts_at"], "worked_minutes": 3000,
+        "location_id": "other-location", "status": "draft",
+    })
+    result = await _propose(
+        monkeypatch, conn, demand=demand,
+        employees=[_employee("dana", "Dana"), _employee("amy", "Amy")], existing=existing,
+        profile=_profile(operating_hours=ALL_WEEK_HOURS),
+    )
+    assert result["metrics"]["top_load"][0] == {
+        "employee_id": "dana", "name": "Dana", "shifts": 7, "hours": 28.0,
+    }
+    concentration = next(
+        item for item in result["findings"] if item["kind"] == "staffing_concentration"
+    )
+    assert concentration["employee_id"] == "dana"
+    assert "7 of 7 staffed positions" in concentration["detail"]
+    assert result["review"]["employees"][0]["warnings"] == [concentration["detail"]]
 
 
 @pytest.mark.asyncio
@@ -1458,6 +1531,32 @@ async def test_a_failed_findings_pass_reports_the_law_as_unavailable_never_verif
     assert result["compliance_status"] == "unavailable"
     assert "not an all-clear" in result["summary"]
     assert result["metrics"]["top_load"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_jurisdiction_lookup_keeps_already_computed_coverage(monkeypatch):
+    conn = _FakeConn(None)
+    _propose_env(monkeypatch, conn, demand=[_demand_shift("09:00", "17:00")])
+    monkeypatch.setattr(
+        week_builder, "jurisdiction_rule_status", AsyncMock(side_effect=RuntimeError("catalog down")),
+    )
+    result = await _propose_now()
+    assert result["metrics"]["operating_hours_known"] is True
+    assert result["metrics"]["gap_count"] == 1
+    assert any(item["kind"] == "coverage_gap" for item in result["findings"])
+    assert result["compliance_status"] == "unavailable"
+
+
+def test_unfilled_cap_prioritizes_compliance_blocks_appended_last():
+    ordinary = [
+        {"shift_key": f"ordinary-{index}", "reason": "policy: second shift that day"}
+        for index in range(21)
+    ]
+    blocked = {"shift_key": "blocked-last", "reason": "compliance or eligibility block"}
+    capped = week_builder._cap_unfilled([*ordinary, blocked])
+    assert len(capped) == week_builder._UNFILLED_RETURNED
+    assert blocked in capped
+    assert ordinary[-1] not in capped
 
 
 # ── the preflight itself ─────────────────────────────────────────────────────
@@ -1594,7 +1693,7 @@ async def test_apply_names_what_was_left_open_and_what_the_manager_accepted(monk
     async def qualified(conn_, *, company_id, job_id, employee_ids, as_of):
         return set(employee_ids)
 
-    check = AsyncMock(return_value=[dict(FLSA)])
+    check = AsyncMock(return_value=[dict(FLSA) for _ in range(51)])
     applied, audit = AsyncMock(), AsyncMock()
     monkeypatch.setattr(week_builder, "connection_or_direct", lambda: _AsyncContext(conn))
     monkeypatch.setattr(week_builder, "_week_rules_gate", AsyncMock(return_value=None))
@@ -1628,10 +1727,12 @@ async def test_apply_names_what_was_left_open_and_what_the_manager_accepted(monk
     assert f"Heads up on what was applied — Amy Ng: {FLSA['message']} ({FLSA['statute']})." in message
     assert "Legality was NOT verified for TX" in message and message.endswith("You confirmed with that in view.")
     assert result["compliance_status"] == "unmapped" and result["jurisdiction"]["state"] == "TX"
-    assert result["advisories_acknowledged"] == [{
+    assert len(result["advisories_acknowledged"]) == week_builder._ACKNOWLEDGED_ADVISORIES_RETURNED
+    assert result["advisory_count"] == 51
+    assert result["advisories_acknowledged"][0] == {
         "shift_id": str(s1), "employee_id": str(amy_id), "employee_name": "Amy Ng",
         "check": "weekly_overtime", "message": FLSA["message"], "statute": FLSA["statute"],
-    }]
+    }
     details = audit.await_args.args[6]
     assert details["compliance_status"] == "unmapped" and details["jurisdiction"]["state"] == "TX"
     assert details["advisories_acknowledged"] == result["advisories_acknowledged"]

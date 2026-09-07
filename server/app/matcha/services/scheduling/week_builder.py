@@ -58,6 +58,8 @@ _MAX_COMPLIANCE_REPLANS = 3
 # truncating the list must never make the week look cleaner than it is.
 _MAX_FINDINGS = 40
 _FINDINGS_RETURNED = 20
+_UNFILLED_RETURNED = 20
+_ACKNOWLEDGED_ADVISORIES_RETURNED = 50
 # `coverage_shortfall` fires on every normally-staffed shift that owes a break,
 # which is most of them. Reporting each one turns the card into a wall of amber
 # and buries the real holes, so the per-day advisory is capped and the count
@@ -67,13 +69,14 @@ _MAX_THIN_BREAK_FINDINGS_PER_DAY = 2
 # the LIST shows the first few so the card is not a wall of meal-break lines.
 _MAX_COMPLIANCE_ADVISORY_FINDINGS = 5
 # One person on more shifts than the week has days, or on a lopsided share of
-# the proposed positions relative to a fair split of the roster, is the "nine
-# lead shifts on Dana" shape — reported, never silently accepted. Absolute
-# threshold is 7, not 5: five shifts is an ordinary full-time week.
+# staffed positions relative to their shift-specific eligible pools, is the
+# "nine lead shifts on Dana" shape — reported, never silently accepted.
+# Absolute threshold is 7, not 5: five shifts is an ordinary full-time week.
 _CONCENTRATION_MIN_SHIFTS = 7
 _CONCENTRATION_SHARE = 0.4
 _CONCENTRATION_FAIR_SHARE_MULTIPLE = 2
 _TOP_LOAD = 3
+_COVERAGE_GAP_KINDS = GAP_KINDS - {"existing_double_booking"}
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +118,29 @@ def _coverage_sentence(metrics: dict[str, Any]) -> str:
     counts = metrics.get("finding_counts") or {}
     total = sum(int(value) for value in counts.values())
     gaps = int(metrics.get("gap_count") or 0)
-    advisories = max(0, total - gaps)
+    booking_conflicts = int(
+        metrics.get("booking_conflict_count")
+        or counts.get("existing_double_booking")
+        or 0
+    )
+    advisories = max(0, total - gaps - booking_conflicts)
     if gaps:
+        conflict_text = (
+            f", {booking_conflicts} existing double-booking conflict(s)"
+            if booking_conflicts else ""
+        )
         return (
-            f" {gaps} coverage/break gap(s) and {advisories} advisory finding(s) "
+            f" {gaps} coverage/break gap(s){conflict_text} and "
+            f"{advisories} advisory finding(s) "
+            "need your review."
+        )
+    if booking_conflicts:
+        advisory_text = (
+            f" and {advisories} advisory finding(s)" if advisories else ""
+        )
+        return (
+            " No coverage gaps against this location's hours; "
+            f"{booking_conflicts} existing double-booking conflict(s){advisory_text} "
             "need your review."
         )
     if advisories:
@@ -177,8 +199,8 @@ def _review_payload(
     if (metrics.get("finding_counts") or {}).get("staffing_concentration") and metrics.get("top_load"):
         top = metrics["top_load"][0]
         summary += (
-            f" {top['name']} carries {top['shifts']} of the {metrics['proposed_positions']} "
-            f"proposed positions."
+            f" {top['name']} carries {top['shifts']} of the {metrics['filled_positions']} "
+            f"staffed positions."
         )
     jurisdiction = plan.get("jurisdiction") or {}
     if jurisdiction.get("status") in ("unmapped", "unavailable"):
@@ -476,14 +498,6 @@ def build_plan(
     }
 
 
-def _pairs_in(plan: dict[str, Any]) -> set[tuple[str, str]]:
-    return {
-        (shift["key"], assignment["employee_id"])
-        for shift in plan.get("shifts") or []
-        for assignment in shift.get("proposed_assignments") or []
-    }
-
-
 async def _preflight_compliance(
     conn, *, company_id: UUID, location_id: UUID, plan: dict[str, Any],
 ) -> tuple[set[tuple[str, str]], dict[tuple[str, str], list[dict[str, Any]]]]:
@@ -616,9 +630,7 @@ async def _plan_with_preflight(
         if not blocked - blocked_pairs:
             return plan, advisories
         blocked_pairs |= blocked
-    _strip_blocked_pairs(plan, blocked & _pairs_in(plan))
-    for pair in blocked:
-        advisories.pop(pair, None)
+    _strip_blocked_pairs(plan, blocked)
     return plan, advisories
 
 
@@ -681,6 +693,29 @@ def _cap_findings(
     kept = gaps[:limit]
     kept.extend(rest[:limit - len(kept)])
     return sort_findings(kept)
+
+
+def _cap_unfilled(
+    unfilled: list[dict[str, Any]], limit: int = _UNFILLED_RETURNED,
+) -> list[dict[str, Any]]:
+    """Bound open-seat details while preserving compliance-blocked seats.
+
+    Those seats are appended after a final preflight strip, so a plain prefix
+    slice hides exactly the legally important reason while `open_positions`
+    continues to count it.
+    """
+    if len(unfilled) <= limit:
+        return list(unfilled)
+    priority_indexes = [
+        index for index, item in enumerate(unfilled)
+        if item.get("reason") == "compliance or eligibility block"
+    ]
+    priority = set(priority_indexes[:limit])
+    for index in range(len(unfilled)):
+        if len(priority) >= limit:
+            break
+        priority.add(index)
+    return [item for index, item in enumerate(unfilled) if index in priority]
 
 
 def _break_relief_finding(
@@ -1057,53 +1092,90 @@ async def _week_rules_gate(
 
 
 def _load_by_employee(plan: dict[str, Any], employee_names: dict[str, str]) -> list[dict[str, Any]]:
-    """Proposed shifts and total scheduled hours per person, heaviest first."""
+    """Plan-local assigned shifts and hours per person, heaviest first.
+
+    Count inherited fixed assignees as well as proposed ones, and derive both
+    columns from the same plan shifts. `hours_by_employee` is intentionally
+    company-wide for overtime/cap decisions, so pairing it with a location's
+    proposed-only shift count produced rows such as "1 shift / 80h".
+    """
     shifts: Counter = Counter()
+    minutes: Counter = Counter()
     names: dict[str, str] = {}
     for shift in plan.get("shifts") or []:
+        worked_minutes = int(shift.get("worked_minutes") or 0)
+        for employee_id in shift.get("fixed_employee_ids") or []:
+            employee_id = str(employee_id)
+            shifts[employee_id] += 1
+            minutes[employee_id] += worked_minutes
         for assignment in shift.get("proposed_assignments") or []:
-            shifts[assignment["employee_id"]] += 1
-            names.setdefault(assignment["employee_id"], assignment.get("employee_name") or "")
-    hours = plan.get("hours_by_employee") or {}
+            employee_id = str(assignment["employee_id"])
+            shifts[employee_id] += 1
+            minutes[employee_id] += worked_minutes
+            names.setdefault(employee_id, assignment.get("employee_name") or "")
     load = [{
         "employee_id": employee_id,
         "name": employee_names.get(employee_id) or names.get(employee_id) or "Employee",
         "shifts": count,
-        "hours": round(int(hours.get(employee_id, 0)) / 60, 1),
+        "hours": round(minutes[employee_id] / 60, 1),
     } for employee_id, count in shifts.items()]
     load.sort(key=lambda item: (-item["shifts"], -item["hours"], item["name"], item["employee_id"]))
     return load
 
 
 def _concentration_findings(
-    plan: dict[str, Any], load: list[dict[str, Any]], *, roster_size: int,
+    plan: dict[str, Any], load: list[dict[str, Any]], *,
+    employees: list[dict[str, Any]], gated_job_ids: set[str],
 ) -> list[dict[str, Any]]:
     """One person carrying the week. Advisory: sometimes it IS the roster —
     but "18/18 filled" must never hide that nine of them are the same name.
 
-    Relative to a fair split (`proposed / roster_size`): two leads on 4/3 of
-    seven blocks is fair and stays quiet; one person on 6 of 6 with a second
-    body on the roster is the finding. A one-person roster has nobody to
-    spread to and is never flagged by share."""
-    proposed = int((plan.get("metrics") or {}).get("proposed_positions") or 0)
-    if proposed < 3:
+    Relative to a fair split of each shift's eligible pool: two leads on 4/3
+    of seven gated lead blocks stay quiet even if eight ineligible baristas
+    share the location roster. Fixed assignments participate in both the
+    observed load and the expected fair share.
+    """
+    staffed = sum(item["shifts"] for item in load)
+    if staffed < 3:
         return []
-    fair_share = proposed / max(roster_size, 1)
+    employee_by_id = {str(employee["id"]): employee for employee in employees}
+    fair_share_by_employee: Counter = Counter()
+    for shift in plan.get("shifts") or []:
+        assigned_ids = {
+            *(str(value) for value in shift.get("fixed_employee_ids") or []),
+            *(str(item["employee_id"]) for item in shift.get("proposed_assignments") or []),
+        }
+        filled = len(assigned_ids)
+        if not filled:
+            continue
+        shift_date = _as_datetime(shift["starts_at"]).date()
+        eligible_ids = {
+            employee_id for employee_id, employee in employee_by_id.items()
+            if _job_qualified(employee, shift.get("job_id"), shift_date, gated_job_ids)
+        }
+        # An inherited assignee can be absent from today's active roster or
+        # carry legacy qualification data. Their real assignment must still
+        # contribute to the pool instead of receiving a zero fair share.
+        eligible_ids |= assigned_ids
+        share = filled / max(len(eligible_ids), 1)
+        for employee_id in eligible_ids:
+            fair_share_by_employee[employee_id] += share
     out = []
     for item in load:
+        fair_share = float(fair_share_by_employee[item["employee_id"]])
         heavy = item["shifts"] >= _CONCENTRATION_MIN_SHIFTS
         lopsided = (
             item["shifts"] >= 3
-            and item["shifts"] > _CONCENTRATION_SHARE * proposed
+            and item["shifts"] > _CONCENTRATION_SHARE * staffed
             and item["shifts"] >= _CONCENTRATION_FAIR_SHARE_MULTIPLE * fair_share
         )
         if heavy or lopsided:
             out.append(make_finding(
                 "staffing_concentration", "advisory",
-                f"{item['name']} carries {item['shifts']} of {proposed} proposed positions "
+                f"{item['name']} carries {item['shifts']} of {staffed} staffed positions "
                 f"({item['hours']:g}h scheduled this week) — spread the load across the roster "
                 f"or confirm this is intended.",
-                employee_name=item["name"],
+                employee_id=item["employee_id"], employee_name=item["name"],
             ))
     return out
 
@@ -1140,18 +1212,24 @@ def _double_booking_findings(
     two overlapping shifts is carried, counted as filled, and counted twice on
     the coverage floor. Report it as a gap so the week is fixed before publish."""
     plan_shift_ids = {shift.get("source_shift_id") for shift in plan.get("shifts") or [] if shift.get("source_shift_id")}
-    intervals: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
+    planned_employee_ids = {
+        str(employee_id)
+        for shift in plan.get("shifts") or []
+        for employee_id in shift.get("fixed_employee_ids") or []
+    }
+    intervals: dict[str, list[tuple[datetime, datetime, str, bool]]] = defaultdict(list)
     for shift in plan.get("shifts") or []:
         starts, ends = _as_datetime(shift["starts_at"]), _as_datetime(shift["ends_at"])
         label = f"{shift.get('role') or 'shift'} {starts:%a %b %d %H:%M}–{ends:%H:%M}"
         for employee_id in shift.get("fixed_employee_ids") or []:
-            intervals[str(employee_id)].append((starts, ends, label))
+            intervals[str(employee_id)].append((starts, ends, label, True))
     for assignment in existing_assignments:
-        if assignment.get("shift_id") in plan_shift_ids:
+        employee_id = str(assignment["employee_id"])
+        if employee_id not in planned_employee_ids or assignment.get("shift_id") in plan_shift_ids:
             continue
         starts, ends = _as_datetime(assignment["starts_at"]), _as_datetime(assignment["ends_at"])
-        intervals[str(assignment["employee_id"])].append(
-            (starts, ends, f"another shift {starts:%a %b %d %H:%M}–{ends:%H:%M}"),
+        intervals[employee_id].append(
+            (starts, ends, f"another shift {starts:%a %b %d %H:%M}–{ends:%H:%M}", False),
         )
     out = []
     for employee_id, items in sorted(intervals.items()):
@@ -1161,7 +1239,7 @@ def _double_booking_findings(
         clashes = [
             (items[i], items[j])
             for i in range(len(items)) for j in range(i + 1, len(items))
-            if _overlaps(items[i][:2], items[j][:2])
+            if (items[i][3] or items[j][3]) and _overlaps(items[i][:2], items[j][:2])
         ]
         if not clashes:
             continue
@@ -1172,7 +1250,8 @@ def _double_booking_findings(
             "existing_double_booking", "gap",
             f"{name} is already on overlapping shifts: {first[2]} and {second[2]}{more} — "
             f"the week was planned around that booking; fix it before publishing.",
-            day=first[0].date(), window=(first[0], first[1]), employee_name=name,
+            day=first[0].date(), window=(first[0], first[1]),
+            employee_id=employee_id, employee_name=name,
         ))
     return out
 
@@ -1180,8 +1259,8 @@ def _double_booking_findings(
 async def _attach_findings(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     plan: dict[str, Any], snapshot: dict[str, Any],
-) -> None:
-    """Add `findings` and the finding metrics to a built plan, in place.
+) -> list[dict[str, Any]]:
+    """Add findings/metrics in place; return uncapped concentration findings.
 
     Never raises — same contract as `_break_relief_findings`, which only
     covered its own half. The profile read and the coverage evaluator are on
@@ -1192,13 +1271,14 @@ async def _attach_findings(
     plan["findings"] = []
     plan["metrics"]["finding_counts"] = {}
     plan["metrics"]["gap_count"] = 0
+    plan["metrics"]["booking_conflict_count"] = 0
     plan["metrics"]["operating_hours_known"] = False
     plan["metrics"]["top_load"] = []
     # Until the pass says otherwise, legality was NOT evaluated — the honest
     # default when the pass itself failed, never an all-clear.
     plan["jurisdiction"] = jurisdiction_message({"state": None, "status": "unavailable"})
     try:
-        await _attach_findings_core(
+        return await _attach_findings_core(
             conn, company_id=company_id, location_id=location_id,
             week_start=week_start, plan=plan, snapshot=snapshot,
         )
@@ -1206,12 +1286,13 @@ async def _attach_findings(
         logger.exception(
             "week builder findings pass failed for location %s", location_id,
         )
+        return []
 
 
 async def _attach_findings_core(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     plan: dict[str, Any], snapshot: dict[str, Any],
-) -> None:
+) -> list[dict[str, Any]]:
     profile = await _coverage_profile(
         conn, company_id=company_id, location_id=location_id,
     )
@@ -1239,13 +1320,23 @@ async def _attach_findings_core(
     )
     load = _load_by_employee(plan, employee_names)
     plan["metrics"]["top_load"] = load[:_TOP_LOAD]
-    jurisdiction = jurisdiction_message(
-        await jurisdiction_rule_status(conn, company_id, location_id),
-    )
+    try:
+        jurisdiction = jurisdiction_message(
+            await jurisdiction_rule_status(conn, company_id, location_id),
+        )
+    except Exception:
+        logger.exception(
+            "week builder jurisdiction lookup failed for location %s", location_id,
+        )
+        jurisdiction = jurisdiction_message({"state": None, "status": "unavailable"})
     plan["jurisdiction"] = jurisdiction
+    concentration_findings = _concentration_findings(
+        plan, load, employees=snapshot.get("employees") or [],
+        gated_job_ids=set(snapshot.get("gated_job_ids") or []),
+    )
     extra = [
         *_compliance_advisory_findings(plan, employee_names),
-        *_concentration_findings(plan, load, roster_size=len(snapshot.get("employees") or [])),
+        *concentration_findings,
         *_double_booking_findings(plan, snapshot.get("existing_assignments") or [], employee_names),
     ]
     if jurisdiction["status"] in ("unmapped", "unavailable"):
@@ -1257,9 +1348,11 @@ async def _attach_findings_core(
     # json.dumps has no Counter branch that survives a round trip cleanly.
     plan["metrics"]["finding_counts"] = dict(sorted(counts.items()))
     plan["metrics"]["gap_count"] = sum(
-        1 for finding in all_findings if finding["kind"] in GAP_KINDS
+        1 for finding in all_findings if finding["kind"] in _COVERAGE_GAP_KINDS
     )
+    plan["metrics"]["booking_conflict_count"] = counts.get("existing_double_booking", 0)
     plan["metrics"]["operating_hours_known"] = bool(hours)
+    return concentration_findings
 
 
 async def _load_existing_demand(conn, *, company_id: UUID, location_id: UUID,
@@ -1423,9 +1516,10 @@ async def plan_vacant_fill(
             allow_split_shift=allow_split_shift,
         )
 
-    plan, _advisories = await _plan_with_preflight(
+    plan, advisories = await _plan_with_preflight(
         conn, company_id=company_id, location_id=location_id, build=_build,
     )
+    _attach_advisories(plan, advisories)
 
     by_key = {shift["key"]: shift for shift in demand}
     assignments = [
@@ -1433,7 +1527,7 @@ async def plan_vacant_fill(
             "shift_id": shift["key"], "role": shift.get("role"),
             "starts_at": shift["starts_at"], "ends_at": shift["ends_at"],
             "employee_id": item["employee_id"], "employee_name": item["employee_name"],
-            "reason": item["reason"],
+            "reason": item["reason"], "advisories": list(item.get("advisories") or []),
         }
         for shift in plan["shifts"]
         for item in shift.get("proposed_assignments") or []
@@ -1962,7 +2056,7 @@ async def propose_week_draft(
         # The profile is read here and deliberately NOT added to the snapshot:
         # `_input_hash` hashes the snapshot, so a manager editing a buffer
         # minute would otherwise stale an otherwise-good proposal at confirm.
-        await _attach_findings(
+        concentration_findings = await _attach_findings(
             conn, company_id=company_id, location_id=location_id,
             week_start=week_start, plan=plan, snapshot=snapshot,
         )
@@ -1980,6 +2074,7 @@ async def propose_week_draft(
             existing_assignments=snapshot["existing_assignments"],
             week_start=week_start, week_end=week_start + timedelta(days=6),
             proposal_id=str(run_id),
+            concentration_findings=concentration_findings,
         )
         persisted_plan = {**plan, "review": review, "schedule_review": schedule_review}
         input_hash = _input_hash(snapshot)
@@ -2006,7 +2101,7 @@ async def propose_week_draft(
         "status": "ready", "generation_run_id": str(run_id), "source_mode": selected_source,
         "week_template_id": str(template_uuid) if template_uuid else None,
         "origin": origin, "summary": review["summary"], "metrics": metrics,
-        "unfilled": plan["unfilled"][:20],
+        "unfilled": _cap_unfilled(plan["unfilled"]),
         "findings": _cap_findings(plan.get("findings") or [], _FINDINGS_RETURNED),
         "schedule_preview": review["schedule_preview"],
         "preview_truncated": review["preview_truncated"],
@@ -2242,7 +2337,9 @@ async def apply_week_draft(
                  # What the manager confirmed with in view: the statutory
                  # advisories on what was applied, and whether the state's
                  # law was evaluated at all.
-                 "advisories_acknowledged": advisories_acknowledged[:50],
+                 "advisories_acknowledged": advisories_acknowledged[
+                     :_ACKNOWLEDGED_ADVISORIES_RETURNED
+                 ],
                  "compliance_status": compliance_status_for(jurisdiction, advisories_acknowledged),
                  "jurisdiction": jurisdiction},
             )
@@ -2284,7 +2381,10 @@ async def apply_week_draft(
         "status": "created", "record_id": str(generation_run_id), "message": message,
         "created_shift_ids": [str(value) for value in created_shift_ids],
         "touched_shift_ids": [str(value) for value in touched_shift_ids], "dropped": dropped,
-        "advisories_acknowledged": advisories_acknowledged,
+        "advisories_acknowledged": advisories_acknowledged[
+            :_ACKNOWLEDGED_ADVISORIES_RETURNED
+        ],
+        "advisory_count": len(advisories_acknowledged),
         "compliance_status": compliance_status_for(jurisdiction, advisories_acknowledged),
         "jurisdiction": jurisdiction,
     }

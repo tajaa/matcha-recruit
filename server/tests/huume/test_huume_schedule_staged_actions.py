@@ -216,6 +216,16 @@ async def test_build_week_schedule_stages_scoped_preview(monkeypatch):
         "summary": "Built 2 of 2 positions.",
         "metrics": {"shift_count": 1, "required_positions": 2, "filled_positions": 2, "open_positions": 0},
         "unfilled": [],
+        "review": {
+            "proposal_id": str(run_id), "kind": "week_draft", "compliance_status": "advisory",
+            "assignments": [{"shift_id": str(index), "verdict": "ok"} for index in range(25)],
+            "rejected": [], "unfilled": [],
+            "employees": [{"employee_id": "e1", "name": "Amy", "warnings": ["Spread the load."]}],
+            "advisories": [{"message": str(index)} for index in range(25)],
+            "findings": [{"detail": str(index)} for index in range(25)],
+            "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"},
+        },
+        "compliance_status": "advisory",
         "schedule_preview": [{
             "shift_key": "shift-1", "starts_at": "2026-08-24T09:00:00+00:00",
             "ends_at": "2026-08-24T17:00:00+00:00", "role": "Floor",
@@ -237,6 +247,10 @@ async def test_build_week_schedule_stages_scoped_preview(monkeypatch):
     assert action["location_id"]
     assert action["week_start"] == "2026-08-23"
     assert action["schedule_preview"][0]["assignment_names"] == ["Amy", "Ben"]
+    assert action["review"]["assignment_count"] == 25
+    assert action["review"]["advisory_count"] == 25
+    assert action["review"]["employees"][0]["warnings"] == ["Spread the load."]
+    assert not {"assignments", "unfilled", "advisories", "findings"} & action["review"].keys()
     assert ("build_week_schedule", "ok") in _step_statuses(result)
 
 

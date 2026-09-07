@@ -26,11 +26,13 @@ NOT evaluate this state's law and the output must never be called compliant.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
 from .schedule_batch import summarize_operations
 
 _STATUS_SOURCE_LABEL = {"curated": "hand-curated", "catalog": "approved catalog research"}
+_REVIEW_ECHO_ITEMS = 20
 
 
 def jurisdiction_message(info: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -210,8 +212,7 @@ def _week_bucket(assignments: list[dict[str, Any]], *, week_start, week_end) -> 
     for item in assignments:
         starts = item.get("starts_at")
         if isinstance(starts, str):
-            from datetime import datetime as _dt
-            starts = _dt.fromisoformat(starts)
+            starts = datetime.fromisoformat(starts)
         day = starts.date() if hasattr(starts, "date") else None
         if day is None or not (week_start <= day <= week_end):
             continue
@@ -232,6 +233,7 @@ def build_week_draft_review(
     plan: dict[str, Any], *, employee_names: dict[str, str],
     existing_assignments: list[dict[str, Any]], week_start, week_end,
     proposal_id: Optional[str] = None,
+    concentration_findings: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """The `ScheduleReview` for a week-builder plan (`kind="week_draft"`).
 
@@ -268,21 +270,36 @@ def build_week_draft_review(
                 "worked_minutes": shift.get("worked_minutes") or 0,
             })
     before = _week_bucket(existing_assignments, week_start=week_start, week_end=week_end)
-    after = _week_bucket([
-        *existing_assignments, *proposed_rows,
-    ], week_start=week_start, week_end=week_end)
+    after = {
+        employee_id: {
+            "minutes": entry["minutes"], "shifts": entry["shifts"],
+            "days": set(entry["days"]),
+        }
+        for employee_id, entry in before.items()
+    }
+    for employee_id, delta in _week_bucket(
+        proposed_rows, week_start=week_start, week_end=week_end,
+    ).items():
+        entry = after.setdefault(employee_id, {"minutes": 0, "shifts": 0, "days": set()})
+        entry["minutes"] += delta["minutes"]
+        entry["shifts"] += delta["shifts"]
+        entry["days"].update(delta["days"])
     findings = list(plan.get("findings") or [])
     concentration = {
-        finding.get("employee_name"): finding.get("detail")
-        for finding in findings if finding.get("kind") == "staffing_concentration"
+        str(finding["employee_id"]): finding.get("detail")
+        for finding in (
+            concentration_findings if concentration_findings is not None else findings
+        )
+        if finding.get("kind") == "staffing_concentration" and finding.get("employee_id")
     }
     employees: list[dict[str, Any]] = []
-    for employee_id in sorted({row["employee_id"] for row in proposed_rows},
+    review_employee_ids = {row["employee_id"] for row in proposed_rows} | set(concentration)
+    for employee_id in sorted(review_employee_ids,
                               key=lambda eid: (-after.get(eid, {}).get("minutes", 0), eid)):
         name = employee_names.get(employee_id) or next(
             (a["employee_name"] for a in assignments if a["employee_id"] == employee_id), "Employee",
         )
-        warning = concentration.get(name)
+        warning = concentration.get(employee_id)
         employees.append({
             "employee_id": employee_id, "name": name,
             "before": _load_shape(before.get(employee_id)), "after": _load_shape(after.get(employee_id)),
@@ -327,11 +344,73 @@ def rejected_entry(op: dict[str, Any]) -> dict[str, Any]:
 def summarize_review(review: dict[str, Any]) -> dict[str, Any]:
     """The few numbers the Huume state block / banner render."""
     warnings = [w for person in review.get("employees") or [] for w in person.get("warnings") or []]
+    staged = review.get("assignment_count")
+    if staged is None:
+        staged = len([
+            item for item in review.get("assignments") or []
+            if item.get("verdict") != "blocked"
+        ])
+    rejected = review.get("rejected_count")
+    if rejected is None:
+        rejected = len(review.get("rejected") or [])
+    unfilled = review.get("unfilled_count")
+    if unfilled is None:
+        unfilled = len(review.get("unfilled") or [])
+    advisories = review.get("advisory_count")
+    if advisories is None:
+        advisories = len(review.get("advisories") or [])
     return {
-        "staged": len([a for a in review.get("assignments") or [] if a.get("verdict") != "blocked"]),
-        "rejected": len(review.get("rejected") or []),
-        "unfilled": len(review.get("unfilled") or []),
+        "staged": int(staged),
+        "rejected": int(rejected),
+        "unfilled": int(unfilled),
+        "advisories": int(advisories),
         "warnings": warnings,
         "compliance_status": review.get("compliance_status"),
         "jurisdiction_message": (review.get("jurisdiction") or {}).get("message"),
+    }
+
+
+def compact_review(review: dict[str, Any]) -> dict[str, Any]:
+    """Bounded schedule-review state for a staged Huume action.
+
+    The generation proposal remains the source of truth. Thread state only
+    needs counts, warning text, and the jurisdiction verdict for the next-turn
+    confirmation prompt and card; duplicating every assignment/open seat/
+    finding/advisory there makes each later model call carry the week twice.
+    """
+    warnings = []
+    for person in review.get("employees") or []:
+        messages = list(person.get("warnings") or [])
+        if messages:
+            warnings.append({
+                "employee_id": person.get("employee_id"),
+                "name": person.get("name"),
+                "warnings": messages,
+            })
+    return {
+        "proposal_id": review.get("proposal_id"),
+        "kind": review.get("kind"),
+        "compliance_status": review.get("compliance_status"),
+        "assignment_count": len([
+            item for item in review.get("assignments") or []
+            if item.get("verdict") != "blocked"
+        ]),
+        "rejected_count": len(review.get("rejected") or []),
+        "unfilled_count": len(review.get("unfilled") or []),
+        "advisory_count": len(review.get("advisories") or []),
+        "finding_count": len(review.get("findings") or []),
+        "employees": warnings,
+        "jurisdiction": dict(review.get("jurisdiction") or {}),
+    }
+
+
+def bounded_review_echo(
+    review: dict[str, Any], *, limit: int = _REVIEW_ECHO_ITEMS,
+) -> dict[str, Any]:
+    """Same-turn model payload: compact state plus bounded actionable detail."""
+    return {
+        **compact_review(review),
+        "rejected": list(review.get("rejected") or [])[:limit],
+        "unfilled": list(review.get("unfilled") or [])[:limit],
+        "advisories": list(review.get("advisories") or [])[:limit],
     }

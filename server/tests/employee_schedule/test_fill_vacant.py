@@ -56,7 +56,8 @@ def _roster(employees, *, existing=()):
             "unavailable_ranges": {}, "gated_job_ids": {"lead"}}
 
 
-def _fill(*, demand, roster, preflight=None, jurisdiction=CURATED, job_match=None, **kwargs):
+def _fill(*, demand, roster, preflight=None, advisories=None,
+          jurisdiction=CURATED, job_match=None, **kwargs):
     calls = {"demand": [], "job": [], "preflight": 0}
 
     async def fake_demand(conn, **kw):
@@ -71,7 +72,7 @@ def _fill(*, demand, roster, preflight=None, jurisdiction=CURATED, job_match=Non
 
     async def fake_preflight(conn, *, company_id, location_id, plan):
         calls["preflight"] += 1
-        return (preflight(plan) if preflight else set()), {}
+        return (preflight(plan) if preflight else set()), dict(advisories or {})
 
     async def fake_job(conn, company_id, name, *, location_id=None):
         calls["job"].append(name)
@@ -145,6 +146,18 @@ class TestPlanVacantFill:
         result, calls = _fill(demand=demand, roster=_roster([_employee(ANA, "Ana"), _employee(BEN, "Ben")]), preflight=block_ana)
         assert _who(result) == {"a": "Ben"}
         assert calls["preflight"] == 2
+
+    def test_statutory_advisories_are_attached_to_the_preview_assignment(self):
+        advisory = {
+            "check": "weekly_overtime", "severity": "advisory",
+            "message": "Past 40h incurs overtime.", "statute": "FLSA", "state": "CA",
+        }
+        result, _ = _fill(
+            demand=[_open("a", 23, 6, 14)],
+            roster=_roster([_employee(ANA, "Ana")]),
+            advisories={("a", ANA): [advisory]},
+        )
+        assert result["assignments"][0]["advisories"] == [advisory]
 
     def test_a_role_hint_resolves_to_a_job_before_falling_back_to_a_label_match(self):
         job_id = uuid4()
