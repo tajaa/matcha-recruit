@@ -20,6 +20,7 @@ from app.matcha.services.huume.agent import _HR_OPS_TOOL_SPECS, _build_hr_ops_st
 from app.matcha.services.huume.tools import TOOLS_BY_NAME
 from app.matcha.services.huume import schedule_skill
 from app.matcha.services.scheduling import schedule_chat
+from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS
 
 BASE_ON = {"huume": True, "matcha_work": True, "employee_schedule": True}
 PROPOSAL_ID = "3f6b1c22-2000-4000-8000-000000000001"
@@ -82,13 +83,23 @@ class TestRegistry:
         assert "target_staffing_hint" in props
         assert set(props["target_staffing_hint"].enum) == {"staffed", "unstaffed"}
 
-    def test_schema_declares_bounded_edit_batch(self):
+    def test_schema_declares_bounded_batch_with_creates(self):
+        """The batch cap in the tool schema IS the domain constant — the
+        prompt, the schema and the refusal copy can never disagree — and a
+        replacement shift (`kind: create`) rides the same array as the
+        cancellations that make room for it."""
         tool = TOOLS_BY_NAME["propose_schedule_change"]
         changes = tool.declaration.parameters.properties["changes"]
         assert changes.min_items == 1
-        assert changes.max_items == 4
+        assert changes.max_items == MAX_BATCH_OPERATIONS
+        assert MAX_BATCH_OPERATIONS > 4
         assert changes.items.required == ["kind"]
-        assert "create" not in changes.items.properties["kind"].enum
+        assert "create" in changes.items.properties["kind"].enum
+        for create_field in ("label", "date", "start_time", "end_time", "count", "employee_names"):
+            assert create_field in changes.items.properties
+        # The flat legacy fields keep their edit-only enum: a top-level
+        # create still goes through build_proposal unchanged.
+        assert "create" in tool.declaration.parameters.properties["kind"].enum
 
     def test_confirm_call_does_not_require_irrelevant_kind(self):
         tool = TOOLS_BY_NAME["propose_schedule_change"]
@@ -244,7 +255,7 @@ class TestProposeClarify(unittest.TestCase):
 
         assert result == {
             "status": "ready", "proposal_id": PROPOSAL_ID, "pill_text": "Schedule change pill",
-            "operation_count": 1,
+            "operation_count": 1, "operation_summary": {"assign": 1},
         }
 
     def test_changes_batch_reaches_existing_multi_op_builder(self):
@@ -364,21 +375,52 @@ class TestProposeClarify(unittest.TestCase):
         assert captured["surface"] == "editor"
         assert captured["shift_statuses"] == ("draft", "published")
 
-    def test_batch_over_four_is_rejected_before_builder(self):
+    def test_batch_over_cap_is_refused_with_a_split_plan_before_any_builder(self):
+        """Over the cap the server answers with the smallest day-contiguous
+        split, never a silently staged prefix: 7 days × 8 ops = 56 > 40 →
+        two batches, and NOTHING is resolved or persisted."""
         async def should_not_build(*args, **kwargs):
             raise AssertionError("oversized batch must not persist a proposal")
 
         changes = [
-            {"kind": "cancel", "target_date": f"2026-08-{day:02d}"}
-            for day in range(20, 25)
+            {"kind": "cancel", "target_date": f"2026-08-{day:02d}", "target_time_hint": f"{hour:02d}:00"}
+            for day in range(23, 30) for hour in range(8, 16)
         ]
-        with mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build):
+        assert len(changes) == 56
+        with (
+            mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build),
+            mock.patch.object(schedule_chat, "build_batch_proposal", should_not_build),
+        ):
             result = _run(schedule_skill.propose(
                 conn=None, company_id="c1", actor_user_id="u1", args={"changes": changes},
             ))
 
         assert result["status"] == "clarify"
-        assert "up to 4" in result["message"]
+        assert f"up to {MAX_BATCH_OPERATIONS}" in result["message"]
+        assert "56 schedule operations" in result["message"]
+        assert "2 batches" in result["message"]
+        assert "(1) Sun Aug 23–Thu Aug 27, 40 operations" in result["message"]
+        assert "(2) Fri Aug 28–Sat Aug 29, 16 operations" in result["message"]
+
+    def test_named_swap_weighs_two_toward_the_cap(self):
+        async def should_not_build(*args, **kwargs):
+            raise AssertionError("oversized batch must not persist a proposal")
+
+        # 20 named-person swaps = 40 operations (at cap) + one cancel = 41.
+        changes = [
+            {"kind": "swap", "target_employee_name": "A", "second_employee_name": "B",
+             "target_date": "2026-08-24", "target_time_hint": f"{8 + i % 8:02d}:00"}
+            for i in range(20)
+        ] + [{"kind": "cancel", "target_date": "2026-08-25"}]
+        with (
+            mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build),
+            mock.patch.object(schedule_chat, "build_batch_proposal", should_not_build),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1", args={"changes": changes},
+            ))
+        assert result["status"] == "clarify"
+        assert "41 schedule operations" in result["message"]
 
     def test_named_people_swap_becomes_two_individual_reassignments(self):
         build = schedule_chat.ProposalBuild(
@@ -439,3 +481,238 @@ class TestProposeClarify(unittest.TestCase):
 
         assert result["status"] == "refused"
         assert "Schedule page" in result["message"]
+
+
+def _seven_day_correction_changes() -> list[dict]:
+    """The reported interaction: four drafts a day for a week were wrong; scrap
+    them and put the corrected one-shift-a-day pattern in. 28 cancels + 7
+    creates = 35 operations, one confirmation."""
+    cancels = [
+        {"kind": "cancel", "target_date": f"2026-08-{day:02d}", "target_time_hint": f"{hour:02d}:00",
+         "target_role_hint": "barista"}
+        for day in range(23, 30) for hour in (6, 10, 14, 18)
+    ]
+    creates = [
+        {"kind": "create", "label": "barista", "date": f"2026-08-{day:02d}",
+         "start_time": "07:00", "end_time": "15:00", "count": 2}
+        for day in range(23, 30)
+    ]
+    return cancels + creates
+
+
+class TestSevenDayCorrectionBatch(unittest.TestCase):
+    """A clarified multi-day correction is ONE staged batch: cancellations and
+    replacement creates resolve through `build_batch_proposal` together —
+    neither single-kind builder is touched — and the staged dict carries the
+    per-kind summary the state block renders."""
+
+    def test_cancels_and_replacements_stage_as_one_batch(self):
+        build = schedule_chat.ProposalBuild(
+            kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill",
+        )
+        captured = {}
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        async def should_not_build(*args, **kwargs):
+            raise AssertionError("a correction must not split across single-kind builders")
+
+        with (
+            mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal),
+            mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build),
+            mock.patch.object(schedule_chat, "build_proposal", should_not_build),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"changes": _seven_day_correction_changes(), "location_name": "Downtown"},
+            ))
+
+        assert result["status"] == "ready"
+        assert result["proposal_id"] == PROPOSAL_ID
+        assert result["operation_count"] == 35
+        assert result["operation_summary"] == {"cancel": 28, "create": 7}
+        assert len(captured["edit_requests"]) == 28
+        assert {r["kind"] for r in captured["edit_requests"]} == {"cancel"}
+        assert len(captured["shift_requests"]) == 7
+        assert captured["shift_requests"][0]["date"] == "2026-08-23"
+        assert captured["shift_requests"][0]["start_time"] == "07:00"
+        assert captured["shift_requests"][0]["count"] == 2
+        assert captured["location_hint"] == "Downtown"
+        assert captured["shift_statuses"] == ("published",)  # thread surface, no editor scope
+
+    def test_editor_scope_reaches_the_batch_builder(self):
+        from datetime import date
+        from uuid import UUID as _UUID
+        build = schedule_chat.ProposalBuild(kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill")
+        captured = {}
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        class _Conn:
+            async def fetchval(self, *_a, **_k):
+                return "Downtown"
+
+        location_id = _UUID("c0ffeeee-0001-4001-8001-000000000001")
+        with mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal):
+            result = _run(schedule_skill.propose(
+                conn=_Conn(), company_id="c1", actor_user_id="u1",
+                args={"changes": _seven_day_correction_changes()},
+                location_id=location_id, week_start=date(2026, 8, 23), week_end=date(2026, 8, 29),
+            ))
+        assert result["status"] == "ready"
+        assert captured["shift_statuses"] == ("draft", "published")
+        assert captured["editor_location_id"] == location_id
+        assert captured["week_start"] == date(2026, 8, 23)
+        assert captured["location_hint"] == "Downtown"
+
+    def test_batch_clarify_is_terminal_and_names_the_gap(self):
+        pill = schedule_chat.clarify_text("Which shift did you mean?", ["Barista — Sun Aug 23 06:00–10:00 · Aisha Kim"])
+        build = schedule_chat.ProposalBuild(kind="clarify", proposal_id=None, pill_text=pill)
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            return build
+
+        with mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"changes": _seven_day_correction_changes()},
+            ))
+        assert result["status"] == "clarify"
+        assert "Aisha Kim" in result["message"]
+        assert "Just reply to this message" not in result["message"]
+
+    def test_create_item_missing_hours_rejects_the_whole_batch(self):
+        async def should_not_build(*args, **kwargs):
+            raise AssertionError("an unusable item must reject the batch before resolution")
+
+        changes = [
+            {"kind": "cancel", "target_date": "2026-08-23", "target_time_hint": "06:00"},
+            {"kind": "create", "label": "barista", "date": "2026-08-23"},
+        ]
+        with mock.patch.object(schedule_chat, "build_batch_proposal", should_not_build):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1", args={"changes": changes},
+            ))
+        assert result["status"] == "clarify"
+        assert "Schedule change 2" in result["message"]
+        assert "start time" in result["message"]
+
+    def test_single_flat_edit_still_uses_the_single_kind_builder(self):
+        """The existing one-edit path is untouched: no batch row for a plain
+        reassign."""
+        build = schedule_chat.ProposalBuild(kind="proposal", proposal_id=PROPOSAL_ID, pill_text="pill")
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            return build
+
+        async def should_not_batch(*args, **kwargs):
+            raise AssertionError("a single edit must not become a batch row")
+
+        with (
+            mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal),
+            mock.patch.object(schedule_chat, "build_batch_proposal", should_not_batch),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "reassign", "target_employee_name": "Aisha Kim",
+                      "to_employee_name": "Elena Iyer", "target_date": "2026-08-24"},
+            ))
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 1
+        assert result["operation_summary"] == {"reassign": 1}
+
+
+class _ConnCtx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *_a):
+        return False
+
+
+class _ProposalConn:
+    def __init__(self, row):
+        self.row = row
+
+    async def fetchrow(self, *_a, **_k):
+        return self.row
+
+
+def _batch_row(status="proposed"):
+    return {
+        "id": PROPOSAL_ID, "company_id": "c1", "channel_id": None, "status": status,
+        "proposal": {"kind": "batch", "edit": {"ops": [{"kind": "cancel"}]}, "create": {"shifts": []}},
+    }
+
+
+class TestExecuteBatchDispatch(unittest.TestCase):
+    """The confirm turn routes a `kind='batch'` row to the batch executor and
+    reports its rollback failures as "nothing was applied" — never as a
+    partial success, never through the agent's generic failure path."""
+
+    def _run_execute(self, row, executor):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        with (
+            mock.patch.object(database, "get_connection", lambda: _ConnCtx(_ProposalConn(row))),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(schedule_chat, "execute_batch_proposal", executor),
+            mock.patch.object(schedule_chat, "execute_edit_proposal", mock.AsyncMock(side_effect=AssertionError("wrong executor"))),
+            mock.patch.object(schedule_chat, "execute_proposal", mock.AsyncMock(side_effect=AssertionError("wrong executor"))),
+        ):
+            return _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1", action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+    def test_batch_row_dispatches_to_the_batch_executor(self):
+        captured = {}
+
+        async def fake_execute_batch(conn, **kwargs):
+            captured.update(kwargs)
+            return "✅ Done — 28 changes are live\n✅ Done — 7 shifts are live"
+
+        result = self._run_execute(_batch_row(), fake_execute_batch)
+        assert result["status"] == "created"
+        assert result["record_id"] == PROPOSAL_ID
+        assert "28 changes" in result["message"] and "7 shifts" in result["message"]
+        assert captured["proposal_row"]["proposal"]["kind"] == "batch"
+
+    def test_scope_failure_reports_nothing_applied(self):
+        async def failing(conn, **kwargs):
+            raise schedule_chat.ProposalScopeError("That schedule proposal is outside the selected schedule week.")
+
+        result = self._run_execute(_batch_row(), failing)
+        assert result["status"] == "error"
+        assert result["message"].startswith("Nothing was applied")
+        assert "outside the selected schedule week" in result["message"]
+
+    def test_unexpected_failure_in_a_batch_reports_rollback(self):
+        async def failing(conn, **kwargs):
+            raise RuntimeError("boom")
+
+        result = self._run_execute(_batch_row(), failing)
+        assert result["status"] == "error"
+        assert "rolled back" in result["message"]
+
+    def test_already_claimed_batch_is_refused(self):
+        async def failing(conn, **kwargs):
+            raise schedule_chat.ProposalExecutionClaimError("That proposal is already being applied or is no longer available.")
+
+        result = self._run_execute(_batch_row(), failing)
+        assert result["status"] == "error"
+        assert "already being applied" in result["message"]
+
+    def test_stale_batch_row_is_refused_before_any_executor(self):
+        result = self._run_execute(_batch_row(status="confirmed"), mock.AsyncMock(side_effect=AssertionError("must not run")))
+        assert result["status"] == "error"

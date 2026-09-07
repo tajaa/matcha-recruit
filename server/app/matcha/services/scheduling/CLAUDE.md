@@ -30,6 +30,50 @@ the inclusive selected-week bound at both stage and confirm time. Huume writes
 remain confirmation-gated. Individual schedule edits may affect published
 shifts; the whole-week builder applies only editable drafts and never publishes.
 
+### Batched schedule corrections (`schedule_chat_proposals.proposal.kind='batch'`, 2026-09-06)
+
+One clarified correction is one confirmation. `propose_schedule_change`'s
+`changes` array takes cancellations, edits AND `kind: create` replacement
+shifts together, bounded by `schedule_batch.MAX_BATCH_OPERATIONS` (40 — a
+module constant, not a tenant setting: the cap protects the reviewer, and the
+tool schema `max_items`, the system prompt copy and the refusal all import the
+same number so they cannot drift). `schedule_chat.build_batch_proposal`
+resolves BOTH halves before anything persists — `_resolve_edit_ops` and
+`_resolve_create_shifts` are the old builder bodies with persistence lifted
+out; `build_edit_proposal`/`build_proposal` are now thin wrappers over them —
+then writes ONE row `{kind:'batch', edit:{ops}, create:{shifts,location,…},
+operation_count}`. A clarify from either half is returned with
+`proposal_id=None` and nothing written, so a batch can never be confirmed with
+a create the manager never saw resolved. The create half receives the edit
+half's cancelled `shift_id`s as `ignore_shift_ids`: those drafts still exist
+at stage time, and without it the busy/conflict pre-filter keeps everyone on
+the old draft off its own replacement.
+
+`execute_batch_proposal` is one claim + one transaction: `_apply_edit_ops`
+(cancels and edits, the two-phase removal/addition write unchanged) THEN
+`_apply_create_shifts`, so a replacement's conflict check runs after the
+draft it replaces is already cancelled. Per-op refusals inside either half
+are reported, not raised (same contract as the single-kind executors — a
+stale op shouldn't veto the rest of a reviewed batch), but anything that DOES
+raise (`ProposalScopeError`, the claim, an unexpected error) rolls back both
+halves; `_create_scope_error` is checked before the claim too, so an
+out-of-week replacement never cancels anything. Audit: each half keeps its own
+`schedule_chat.edit_confirm` / `schedule_chat.confirm` row with the batch's
+`proposal_id`, plus one `schedule_chat.batch_confirm` summary. The review
+pill (`batch_proposal_text`) lists every op, every new shift with its
+assignees/open slots and verbatim advisories, a per-day "After this:" net
+(`schedule_batch.net_per_day`), and exactly one confirm line.
+
+Over the cap, `huume/schedule_skill._coerce_tool_batch` refuses BEFORE any
+resolution with `schedule_batch.split_plan_message`: the real total, the cap,
+and the smallest day-contiguous split (`plan_batches` — a day's cancellations
+and its replacements are never separated; a single day over the cap is
+flagged "split that day by kind"). Never a silently staged prefix: the pill
+must equal the ask. The one-staged-action-per-turn rule and the two-turn
+confirm are unchanged — the batch IS the one action. Channel `@huume` still
+uses the single-kind builders; `_MAX_EDIT_REQUESTS`/`_MAX_SHIFT_REQUESTS`
+there bound the Gemini parse, not this path.
+
 ### Per-location scheduling profile (migration `schedloc01`)
 
 `schedule_location_profiles` (one row per `business_locations` row) is where a

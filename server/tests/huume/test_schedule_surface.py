@@ -49,7 +49,8 @@ def test_schedule_prompt_is_conversational_and_does_not_expose_global_huume_tool
     assert "get_schedule_overview" in prompt
     assert "propose_schedule_change" in prompt
     assert "one staged action can occupy the pending slot" in prompt
-    assert "batch up to four" in prompt
+    assert "goes in ONE propose_schedule_change `changes` call" in prompt
+    assert "Never split a correction into serial four-edit confirmations" in prompt
     assert "clearly list the others as deferred" in prompt
     assert "Reuse employee and shift ids already returned by get_schedule_overview" in prompt
     assert "capable coworker, not a form or schema validator" in prompt

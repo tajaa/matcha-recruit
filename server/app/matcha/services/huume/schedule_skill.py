@@ -1,6 +1,14 @@
 """Thread Huume's schedule capability — a read tool (`find_shift_coverage`)
 plus one staged write (`propose_schedule_change`, action_type
-`schedule_change`). Reuses `services/scheduling/schedule_chat.py`'s
+`schedule_change`). One staged action can hold a whole correction: the
+`changes` array takes cancellations, edits AND `kind='create'` replacement
+shifts together (bounded by `schedule_batch.MAX_BATCH_OPERATIONS`), which
+`schedule_chat.build_batch_proposal` resolves into ONE `kind='batch'` row
+that ONE confirmation applies in ONE transaction — the "four edits per
+confirmation, one staged action at a time" serial-confirm loop a seven-day
+correction used to fall into is gone. Over the cap, `_coerce_tool_batch`
+answers with a server-computed day-contiguous split plan, never a silently
+truncated prefix. Reuses `services/scheduling/schedule_chat.py`'s
 resolution/dry-run/execute machinery wholesale rather than reimplementing
 shift lookup a third time (channel regex fork, channel ASK-loop tool, and
 now here) — `schedule_chat_proposals` becomes shared scratch storage
@@ -25,12 +33,19 @@ round trip the way channels do — so it's surfaced as a terminal clarification
 asking the admin to be more specific, not staged. That's a deliberate v1
 scope cut, not an oversight."""
 
+import logging
 from datetime import date as _date
 from typing import Any, Literal, NotRequired, Optional, TypedDict
 from uuid import UUID
 
+from app.matcha.services.scheduling.schedule_batch import (
+    MAX_BATCH_OPERATIONS, BatchItem, item_day, plan_batches, split_plan_message,
+    summarize_operations,
+)
+
+logger = logging.getLogger(__name__)
+
 _ALLOWED_ROLES = frozenset({"client", "admin"})
-_MAX_SCHEDULE_EDIT_OPS = 4
 _MAX_BULK_VACANT_SHIFTS = 500
 
 
@@ -40,6 +55,7 @@ class ScheduleProposalResult(TypedDict):
     proposal_id: NotRequired[str]
     pill_text: NotRequired[str]
     operation_count: NotRequired[int]
+    operation_summary: NotRequired[dict[str, int]]
 
 
 def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
@@ -77,15 +93,29 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _coerce_tool_edit_requests(schedule_chat, args: dict[str, Any]) -> tuple[list[dict[str, Any]], Optional[str]]:
-    """Normalize either one legacy flat edit or a bounded `changes` batch.
+def _is_named_people_swap(change: dict[str, Any]) -> bool:
+    return (
+        str(change.get("kind") or "").strip().lower() == "swap"
+        and bool(change.get("target_employee_name"))
+        and bool(change.get("second_employee_name"))
+    )
 
-    The schedule engine already executes ``parsed['edit_requests']`` as one
-    transactional proposal. This is the Huume-only adapter that used to
-    collapse the tool call to one request. A named-person swap expands to two
-    reassignments and therefore consumes two of the four concrete-op slots.
-    The whole batch is rejected if any item is unusable; silently staging a
-    partial write would make the confirmation pill differ from the ask.
+
+def _coerce_tool_batch(
+    schedule_chat, args: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], Optional[str]]:
+    """Normalize one legacy flat edit or a bounded `changes` batch into
+    ``(edit_requests, shift_requests, error)``.
+
+    The schedule engine executes ``edit_requests`` as one transactional
+    proposal and, since the batch row exists, ``shift_requests`` right after
+    them in the same transaction — so a correction's cancellations and its
+    replacement `kind='create'` items ride one confirmation. A named-person
+    swap expands to two reassignments and weighs two operations. The cap is
+    checked BEFORE anything resolves: an over-cap request gets the smallest
+    day-contiguous split plan back, never a silently staged prefix (the pill
+    would then differ from the ask). The whole batch is rejected if any item
+    is unusable, for the same reason.
     """
     raw_changes = args.get("changes")
     # Structured-output providers materialize optional array fields as [] even
@@ -95,31 +125,46 @@ def _coerce_tool_edit_requests(schedule_chat, args: dict[str, Any]) -> tuple[lis
     # single-edit validation below.
     is_batch = isinstance(raw_changes, list) and bool(raw_changes)
     if raw_changes is not None and not isinstance(raw_changes, list):
-        return [], "Give me schedule changes as a list."
+        return [], [], "Give me schedule changes as a list."
     if is_batch:
-        if len(raw_changes) > _MAX_SCHEDULE_EDIT_OPS:
-            return [], (
-                f"I can stage up to {_MAX_SCHEDULE_EDIT_OPS} schedule edits in one confirmation. "
-                "Split the remaining edits into a later request."
-            )
         if str(args.get("kind") or "").strip().lower() == "create":
-            return [], "New shifts and edits need separate schedule proposals."
+            return [], [], (
+                "Put the new shift inside `changes` as a `kind: create` item so it "
+                "rides the same confirmation as the other changes."
+            )
         changes = raw_changes
     else:
         changes = [args]
 
-    edit_requests: list[dict[str, Any]] = []
+    items: list[BatchItem] = []
     for index, change in enumerate(changes, start=1):
         if not isinstance(change, dict):
-            return [], f"Schedule change {index} is not a usable edit."
+            return [], [], f"Schedule change {index} is not a usable edit."
+        items.append(BatchItem(day=item_day(change), operations=2 if _is_named_people_swap(change) else 1))
+    total = sum(item.operations for item in items)
+    if total > MAX_BATCH_OPERATIONS:
+        return [], [], split_plan_message(total, plan_batches(items, MAX_BATCH_OPERATIONS), MAX_BATCH_OPERATIONS)
+
+    edit_requests: list[dict[str, Any]] = []
+    shift_requests: list[dict[str, Any]] = []
+    for index, change in enumerate(changes, start=1):
         kind = str(change.get("kind") or "").strip().lower()
         if kind == "create":
-            return [], "New shifts and edits need separate schedule proposals."
+            if not is_batch:
+                return [], [], "New shifts and edits need separate schedule proposals."
+            request = _coerce_tool_shift_request(change)
+            if not (request["date"] and request["start_time"] and request["end_time"]):
+                return [], [], (
+                    f"Schedule change {index} needs a date, start time, and end time "
+                    "before I can create that shift."
+                )
+            shift_requests.append(request)
+            continue
 
         # `schedule_chat` reserves kind='swap' for a roster-level swap: every
         # assignee on one shift moves to the other. On this surface, a request
         # naming two people means exchange only those assignment rows.
-        if kind == "swap" and change.get("target_employee_name") and change.get("second_employee_name"):
+        if _is_named_people_swap(change):
             first = schedule_chat.coerce_edit_request({
                 "kind": "reassign",
                 "target_employee_name": change.get("target_employee_name"),
@@ -144,15 +189,10 @@ def _coerce_tool_edit_requests(schedule_chat, args: dict[str, Any]) -> tuple[lis
 
         if not normalized:
             prefix = f"Schedule change {index} " if is_batch else "That schedule change "
-            return [], prefix + "needs an employee and a specific shift before I can stage it."
-        if len(edit_requests) + len(normalized) > _MAX_SCHEDULE_EDIT_OPS:
-            return [], (
-                f"I can stage up to {_MAX_SCHEDULE_EDIT_OPS} concrete schedule edits in one confirmation. "
-                "A named-person swap counts as two edits."
-            )
+            return [], [], prefix + "needs an employee and a specific shift before I can stage it."
         edit_requests.extend(normalized)
 
-    return edit_requests, None
+    return edit_requests, shift_requests, None
 
 
 async def _all_vacant_shift_requests(
@@ -288,7 +328,9 @@ async def propose(
                 week_end=week_end, surface=surface,
             )
             operation_count = 1
+            operation_summary = {"create": 1}
         else:
+            shift_requests: list[dict[str, Any]] = []
             if args.get("all_vacant_shifts") is True:
                 edit_requests, error = await _all_vacant_shift_requests(
                     conn, company_id=company_id, location_id=location_id,
@@ -297,27 +339,44 @@ async def propose(
                     schedule_chat=schedule_chat,
                 )
             else:
-                edit_requests, error = _coerce_tool_edit_requests(schedule_chat, args)
+                edit_requests, shift_requests, error = _coerce_tool_batch(schedule_chat, args)
             if error:
                 return {"status": "clarify", "message": error}
-            if not edit_requests:
+            if not edit_requests and not shift_requests:
                 return {
                     "status": "clarify",
                     "message": "I need the employee and the specific shift before I can make that change. "
                                "Reply with the shift date and time, or the employee currently assigned.",
                 }
-            parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": edit_requests}
-            build = await schedule_chat.build_edit_proposal(
-                conn, company_id=company_id, channel_id=None, source_message_id=None,
-                created_by=actor_user_id, parsed=parsed, today=today,
-                original_content=f"[huume thread] {kind} request",
-                surface=surface,
-                shift_statuses=("draft", "published") if is_editor_surface else ("published",),
-                editor_location_id=location_id,
-                editor_week_start=week_start, editor_week_end=week_end,
-            )
-            operation_count = len(edit_requests)
+            shift_statuses = ("draft", "published") if is_editor_surface else ("published",)
+            if shift_requests:
+                # A correction: cancellations/edits plus the replacement
+                # shifts they make room for — ONE row, ONE confirmation, ONE
+                # transaction (edits first, then creates).
+                build = await schedule_chat.build_batch_proposal(
+                    conn, company_id=company_id, channel_id=None, source_message_id=None,
+                    created_by=actor_user_id, edit_requests=edit_requests,
+                    shift_requests=shift_requests, location_hint=args.get("location_name"),
+                    ack="Got it.", today=today,
+                    original_content="[huume thread] batched schedule correction",
+                    surface=surface, shift_statuses=shift_statuses,
+                    editor_location_id=location_id, week_start=week_start, week_end=week_end,
+                )
+            else:
+                parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": edit_requests}
+                build = await schedule_chat.build_edit_proposal(
+                    conn, company_id=company_id, channel_id=None, source_message_id=None,
+                    created_by=actor_user_id, parsed=parsed, today=today,
+                    original_content=f"[huume thread] {kind} request",
+                    surface=surface,
+                    shift_statuses=shift_statuses,
+                    editor_location_id=location_id,
+                    editor_week_start=week_start, editor_week_end=week_end,
+                )
+            operation_count = len(edit_requests) + len(shift_requests)
+            operation_summary = summarize_operations(edit_requests, shift_requests)
     except Exception:
+        logger.exception("schedule_skill.propose failed for company %s", company_id)
         return {"status": "refused", "message": "That failed just now — try the Schedule page instead."}
 
     if build.kind == "clarify":
@@ -341,6 +400,7 @@ async def propose(
         "proposal_id": str(build.proposal_id),
         "pill_text": build.pill_text,
         "operation_count": operation_count,
+        "operation_summary": operation_summary,
     }
 
 
@@ -373,10 +433,13 @@ async def execute(
         if isinstance(proposal, str):
             proposal = _json.loads(proposal)
         features = await get_company_features(company_id, conn=conn)
-        executor = (
-            schedule_chat.execute_edit_proposal if proposal.get("kind") == "edit"
-            else schedule_chat.execute_proposal
-        )
+        proposal_kind = proposal.get("kind")
+        if proposal_kind == "batch":
+            executor = schedule_chat.execute_batch_proposal
+        elif proposal_kind == "edit":
+            executor = schedule_chat.execute_edit_proposal
+        else:
+            executor = schedule_chat.execute_proposal
         try:
             text = await executor(
                 conn, proposal_row={**dict(row), "proposal": proposal},
@@ -385,4 +448,20 @@ async def execute(
             )
         except schedule_chat.ProposalExecutionClaimError as exc:
             return {"status": "error", "message": str(exc)}
+        except schedule_chat.ProposalScopeError as exc:
+            # Raised inside the batch transaction → everything rolled back.
+            return {"status": "error", "message": f"Nothing was applied — {exc}"}
+        except Exception:
+            if proposal_kind != "batch":
+                raise
+            # The batch executor runs both halves in one transaction, so an
+            # unexpected failure here means the DB rolled ALL of it back —
+            # say so plainly rather than letting the agent's generic failure
+            # path imply a partial write.
+            logger.exception("schedule batch %s failed and was rolled back", proposal_id)
+            return {
+                "status": "error",
+                "message": "Nothing was applied — that batch failed partway and was rolled back. "
+                           "Try confirming again, or make the change on the Schedule page.",
+            }
     return {"status": "created", "message": text, "record_id": proposal_id, "bg_tasks": []}

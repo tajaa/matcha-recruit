@@ -23,6 +23,8 @@ from typing import Optional
 
 from google.genai import types
 
+from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS
+
 LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents", "er_cases",
@@ -98,6 +100,26 @@ _SCHEDULE_EDIT_PROPERTIES = {
     "shift_by_minutes": types.Schema(
         type=types.Type.INTEGER,
         description="For a relative retime with no clock time given.",
+    ),
+}
+
+# One item of `propose_schedule_change.changes`: every edit kind PLUS
+# `create`, so a correction's replacement shifts ride the same batch (and the
+# same single confirmation) as the cancellations that make room for them.
+_SCHEDULE_BATCH_ITEM_PROPERTIES = {
+    **_SCHEDULE_EDIT_PROPERTIES,
+    "kind": types.Schema(
+        type=types.Type.STRING,
+        enum=["reassign", "assign", "unassign", "retime", "cancel", "swap", "create"],
+    ),
+    "label": types.Schema(type=types.Type.STRING, description="For kind='create' — e.g. 'opener', or a real job name."),
+    "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='create'."),
+    "start_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
+    "end_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
+    "count": types.Schema(type=types.Type.INTEGER, description="Headcount for kind='create'; default 1."),
+    "employee_names": types.Schema(
+        type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+        description="For kind='create' — people to pin onto the new shift.",
     ),
 }
 
@@ -1017,17 +1039,21 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "propose_schedule_change", "staged",
-        "Stage one schedule proposal for the admin to confirm. Use `changes` "
-        "to batch up to four related edits (swap, reassign, assign, unassign, "
-        "retime, or cancel) into one confirmation; use the legacy flat `kind` "
-        "fields for one edit or a brand new shift. When the manager explicitly "
-        "asks to assign one employee to every vacant shift in the selected "
-        "editor week, set all_vacant_shifts=true and to_employee_name instead "
-        "of enumerating changes. Do not mix creates and edits. "
-        "Nothing happens until they confirm on a LATER turn by calling this "
-        "again with EXACTLY the same confirm_id. Use real names/dates from "
-        "lookup_context(topic='schedule') or find_shift_coverage — never "
-        "invent one.",
+        "Stage one schedule proposal for the admin to confirm. Put EVERY "
+        "operation one request needs into `changes` — swap, reassign, assign, "
+        "unassign, retime, cancel, AND kind='create' for replacement shifts — "
+        f"up to {MAX_BATCH_OPERATIONS} operations that resolve into one proposal and one "
+        "confirmation, applied in one transaction (edits and cancellations "
+        "first, then new shifts). Never split a correction into several "
+        "confirmations; if the cap is hit the server replies with a split plan "
+        "to relay. Use the legacy flat `kind` fields only for a single edit or "
+        "a single brand-new shift. When the manager explicitly asks to assign "
+        "one employee to every vacant shift in the selected editor week, set "
+        "all_vacant_shifts=true and to_employee_name instead of enumerating "
+        "changes. Nothing happens until they confirm on a LATER turn by "
+        "calling this again with EXACTLY the same confirm_id. Use real "
+        "names/dates from lookup_context(topic='schedule') or "
+        "find_shift_coverage — never invent one.",
         properties={
             "kind": types.Schema(
                 type=types.Type.STRING,
@@ -1037,12 +1063,16 @@ TOOLS: tuple[HuumeTool, ...] = (
                 type=types.Type.ARRAY,
                 items=types.Schema(
                     type=types.Type.OBJECT,
-                    properties=_SCHEDULE_EDIT_PROPERTIES,
+                    properties=_SCHEDULE_BATCH_ITEM_PROPERTIES,
                     required=["kind"],
                 ),
                 min_items=1,
-                max_items=4,
-                description="One to four edit operations resolved and confirmed as one proposal. Creates are not allowed here.",
+                max_items=MAX_BATCH_OPERATIONS,
+                description=(
+                    f"One to {MAX_BATCH_OPERATIONS} operations resolved and confirmed as ONE proposal — "
+                    "cancellations, edits and kind='create' replacement shifts together. "
+                    "A named-person swap counts as two."
+                ),
             ),
             "all_vacant_shifts": types.Schema(
                 type=types.Type.BOOLEAN,
