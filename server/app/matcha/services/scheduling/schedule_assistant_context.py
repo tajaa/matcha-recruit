@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
 from app.database import get_connection
 
+from .planning_inputs import build_planning_inputs, compact_roster_load
 from .schedule_eligibility import (
     _BLOCKING_AUTHORITY_EXPR,
     _credential_problem,
@@ -84,6 +86,28 @@ async def get_schedule_overview(
             start,
             end,
         )
+        # What the model needs to pick a PERSON, not just a shift: each
+        # employee's load this week, jobs, availability state, caps, the open
+        # seats, the policy constants and whether the state's law is on file.
+        # Once per overview (not per shift row), and it never fails the overview —
+        # a shift list without it is still useful.
+        planning: dict = {}
+        try:
+            inputs = await build_planning_inputs(
+                conn, company_id=company_id, location_id=location_id, week_start=week_start,
+            )
+            planning = {
+                "roster_load": compact_roster_load(inputs),
+                "roster_truncated": inputs["roster_truncated"],
+                "open_slots": inputs["open_slots"],
+                "policy": inputs["policy"],
+                "jurisdiction": inputs["jurisdiction"],
+                "week_rules": inputs["week_rules"],
+            }
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "schedule overview: planning inputs unavailable for location %s", location_id,
+            )
     by_shift: dict[str, dict] = {}
     for row in shifts:
         key = str(row["id"])
@@ -127,6 +151,7 @@ async def get_schedule_overview(
             max(0, (s["required_staff"] or 0) - len(s["assignments"])) for s in result
         ),
         "shifts": result,
+        **planning,
     }
 
 

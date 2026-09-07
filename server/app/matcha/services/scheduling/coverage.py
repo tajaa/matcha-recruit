@@ -34,6 +34,7 @@ _CANDIDATE_CAP = 5
 async def find_coverage_candidates(
     conn, *, company_id: UUID, target_date: date, location_id: Optional[UUID],
     role_hint: Optional[str], features: Optional[dict[str, Any]],
+    statuses: tuple[str, ...] = ("published",),
 ) -> dict[str, Any]:
     """{"shifts": [...], "role_note": Optional[str]}.
 
@@ -45,12 +46,16 @@ async def find_coverage_candidates(
     day_start = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
 
-    shift_rows = await _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, role_hint)
+    # `statuses`: the channel default is published-only (what the team can
+    # see); the schedule editor passes drafts too, or the tool returns
+    # nothing for exactly the week being built.
+    shift_rows = await _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, role_hint, statuses)
     role_note = None
     if not shift_rows and role_hint:
-        shift_rows = await _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, None)
+        shift_rows = await _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, None, statuses)
         if shift_rows:
-            role_note = f"Nothing matched \"{role_hint}\" — showing every published shift that day instead."
+            label = "published shift" if statuses == ("published",) else "shift"
+            role_note = f"Nothing matched \"{role_hint}\" — showing every {label} that day instead."
 
     if not shift_rows:
         return {"shifts": [], "role_note": None}
@@ -185,13 +190,30 @@ async def find_coverage_candidates(
             "candidates": candidates[:_CANDIDATE_CAP],
         })
 
+    # The same person is legitimately free for the opener AND the closer; say
+    # so on each row, so taking both suggestions is a choice, not a surprise
+    # 16-hour day.
+    suggested_on: dict[str, list] = {}
+    for shift in result_shifts:
+        for candidate in shift["candidates"]:
+            suggested_on.setdefault(candidate["employee_id"], []).append(shift["id"])
+    for shift in result_shifts:
+        for candidate in shift["candidates"]:
+            candidate["also_suggested_for"] = [
+                sid for sid in suggested_on.get(candidate["employee_id"], []) if sid != shift["id"]
+            ]
+
     return {"shifts": result_shifts, "role_note": role_note}
 
 
-async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, role_hint):
-    if role_hint:
-        return await conn.fetch(
-            """
+async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, role_hint,
+                            statuses=("published",)):
+    if statuses == ("published",):
+        # Keep the historical published-only SQL text byte-for-byte: the
+        # fake-conn tests route on `status = 'published'`.
+        if role_hint:
+            return await conn.fetch(
+                """
             SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
             FROM schedule_shifts
             WHERE company_id = $1 AND status = 'published'
@@ -200,10 +222,10 @@ async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, r
               AND role ILIKE '%' || $5 || '%'
             ORDER BY starts_at LIMIT $6
             """,
-            company_id, day_start, day_end, location_id, role_hint, _SHIFT_CAP,
-        )
-    return await conn.fetch(
-        """
+                company_id, day_start, day_end, location_id, role_hint, _SHIFT_CAP,
+            )
+        return await conn.fetch(
+            """
         SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
         FROM schedule_shifts
         WHERE company_id = $1 AND status = 'published'
@@ -211,5 +233,29 @@ async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, r
           AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
         ORDER BY starts_at LIMIT $5
         """,
-        company_id, day_start, day_end, location_id, _SHIFT_CAP,
+            company_id, day_start, day_end, location_id, _SHIFT_CAP,
+        )
+    if role_hint:
+        return await conn.fetch(
+            """
+            SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
+            FROM schedule_shifts
+            WHERE company_id = $1 AND status = ANY($7::text[])
+              AND starts_at < $3 AND ends_at > $2
+              AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
+              AND role ILIKE '%' || $5 || '%'
+            ORDER BY starts_at LIMIT $6
+            """,
+            company_id, day_start, day_end, location_id, role_hint, _SHIFT_CAP, list(statuses),
+        )
+    return await conn.fetch(
+        """
+        SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
+        FROM schedule_shifts
+        WHERE company_id = $1 AND status = ANY($6::text[])
+          AND starts_at < $3 AND ends_at > $2
+          AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
+        ORDER BY starts_at LIMIT $5
+        """,
+        company_id, day_start, day_end, location_id, _SHIFT_CAP, list(statuses),
     )

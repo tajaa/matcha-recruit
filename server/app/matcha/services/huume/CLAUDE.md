@@ -183,3 +183,18 @@ and warnings verbatim, and forbids calling an `unmapped` result compliant. `oper
 STAGED, never what was asked. `all_vacant_shifts` is scoped to "the manager literally named one person
 for every open shift" and is capped/split like any batch. Full mechanics:
 `services/scheduling/CLAUDE.md` §"Assignment guard + ScheduleReview".
+
+**Server-side fill + roster load (2026-09-07).** "Fill / staff / cover the open shifts" is no longer the
+model naming a person per shift: `propose_schedule_change(fill_vacant_shifts=true, fill_job_name?,
+fill_shift_ids?, to_employee_name? [only that person], exclude_employee_names?, allow_split_shift?)` calls
+`week_builder.plan_vacant_fill` (the whole-week planner's `build_plan` + compliance preflight, pointed at
+the week's open seats, no week-rules gate), and `schedule_skill._fill_vacant_requests` turns the plan into
+plain `assign` edit requests for the SAME `build_edit_proposal`. `unfilled` (seat + reason + exclusion
+counts) rides the `ScheduleReview`, the stage-turn echo (`unfilled_count`) and an "Unfilled:" line in the
+state block; zero assignments is a clarify that names the reasons. The five fields are in the
+`_HR_OPS_TOOL_SPECS` whitelist (a field missing there is dropped from the staged dict). Alongside,
+`get_schedule_overview` now returns `roster_load` (each person's jobs, availability state, hours / shifts /
+days this week, time away, cap, `allow_overtime`), `open_slots`, `policy`, `jurisdiction`, `week_rules` —
+the prompt tells the model to read it before naming anyone in an explicit edit — and `find_shift_coverage`
+on the schedule surface sees draft shifts and tags candidates with `also_suggested_for`. Full mechanics:
+`services/scheduling/CLAUDE.md` §"Fill vacant shifts".

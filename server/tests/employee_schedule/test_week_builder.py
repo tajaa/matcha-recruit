@@ -1095,3 +1095,121 @@ def test_iso_serializes_a_set_as_a_sorted_list():
     """Sorted, not just "some list" — the exact ordering has to be
     reproducible, not merely consistent within one accidental run."""
     assert week_builder._iso({"a", "c", "b"}) == ["a", "b", "c"]
+
+
+# ── policy guardrails + fairness (2026-09-07) ───────────────────────────────
+# The reported failure: one leader-job holder, one leader block per open day,
+# scarcity-first → that person on every block. `build_plan` now refuses a
+# second shift the same day, under-8h rest and a 7th consecutive day as
+# `policy:` reasons, and spreads equal work by shift count before minutes.
+
+def _shift_at(key, day, start_hour, end_hour, *, job_id="lead", required=1):
+    item = _shift(key, day, job_id=job_id, required=required)
+    item["role"] = "Shift Lead"
+    item["starts_at"] = datetime(2026, 8, day, start_hour, tzinfo=UTC)
+    item["ends_at"] = datetime(2026, 8, day, end_hour, tzinfo=UTC)
+    item["worked_minutes"] = (end_hour - start_hour) * 60
+    return item
+
+
+def _existing(employee_id, day, start_hour, end_hour):
+    starts = datetime(2026, 8, day, start_hour, tzinfo=UTC)
+    ends = datetime(2026, 8, day, end_hour, tzinfo=UTC)
+    return {"employee_id": employee_id, "shift_id": f"db-{day}-{start_hour}", "starts_at": starts,
+            "ends_at": ends, "worked_minutes": (end_hour - start_hour) * 60,
+            "location_id": None, "status": "published"}
+
+
+def _lead(employee_id, name, **overrides):
+    employee = _employee(employee_id, name, jobs=[{
+        "job_id": "lead", "qualification_status": "active", "qualified_from": None, "qualified_until": None,
+    }])
+    employee.update(overrides)
+    return employee
+
+
+def _picks(plan):
+    return {shift["key"]: [item["employee_id"] for item in shift["proposed_assignments"]] for shift in plan["shifts"]}
+
+
+def test_a_second_shift_the_same_day_is_a_policy_refusal_with_its_reason():
+    dana = _lead("e1", "Dana")
+    demand = [_shift_at("open", 24, 6, 14), _shift_at("close", 24, 14, 22)]
+    plan = _plan(demand=demand, employees=[dana], availability={})
+    assert plan["metrics"]["filled_positions"] == 1
+    assert plan["unfilled"] == [{
+        "shift_key": "close", "starts_at": "2026-08-24T14:00:00+00:00", "role": "Shift Lead",
+        "reason": "policy: second shift that day", "exclusions": {"policy: second shift that day": 1},
+    }]
+    assert plan["hours_by_employee"] == {"e1": 480}
+
+
+def test_a_manager_who_allowed_splits_gets_the_double_and_the_rest_rule_still_holds_across_days():
+    dana = _lead("e1", "Dana")
+    demand = [_shift_at("am", 24, 6, 10), _shift_at("pm", 24, 16, 20), _shift_at("early", 25, 2, 8)]
+    strict = _plan(demand=demand, employees=[dana], availability={})
+    assert _picks(strict) == {"am": ["e1"], "pm": [], "early": ["e1"]}
+    relaxed = build_plan(
+        demand=demand, employees=[dana], availability={}, existing_assignments=[], unavailable_ranges={},
+        exclude_employee_ids=set(), employee_hour_caps={}, gated_job_ids={"lead"}, allow_split_shift=True,
+    )
+    # The split day fills; the 02:00 start six hours after the 20:00 finish
+    # is a between-days rest breach and stays refused.
+    assert _picks(relaxed) == {"am": ["e1"], "pm": ["e1"], "early": []}
+    assert relaxed["unfilled"][0]["reason"] == "policy: less than 8h rest"
+
+
+def test_under_eight_hours_rest_after_an_existing_shift_is_refused_and_eight_is_allowed():
+    dana = _lead("e1", "Dana")
+    existing = [_existing("e1", 23, 14, 22)]
+    too_soon = _plan(demand=[_shift_at("s", 24, 4, 12)], employees=[dana], availability={}, existing=existing)
+    assert too_soon["unfilled"][0]["reason"] == "policy: less than 8h rest"
+    just_enough = _plan(demand=[_shift_at("s", 24, 6, 14)], employees=[dana], availability={}, existing=existing)
+    assert _picks(just_enough) == {"s": ["e1"]}
+
+
+def test_seventh_consecutive_day_uses_the_policy_default_when_the_profile_has_no_cap():
+    existing = [_existing("e1", day, 9, 13) for day in range(17, 23)]  # six days in a row
+    no_cap = _lead("e1", "Dana", max_consecutive_days=None)
+    refused = _plan(demand=[_shift_at("s", 23, 9, 13)], employees=[no_cap], availability={}, existing=existing)
+    assert refused["unfilled"][0]["reason"] == "maximum consecutive days"
+    seven_ok = _lead("e1", "Dana", max_consecutive_days=7)
+    allowed = _plan(demand=[_shift_at("s", 23, 9, 13)], employees=[seven_ok], availability={}, existing=existing)
+    assert _picks(allowed) == {"s": ["e1"]}
+
+
+def test_two_leads_split_seven_leader_blocks_instead_of_stacking_one():
+    ana, ben = _lead("e1", "Ana"), _lead("e2", "Ben")
+    demand = [_shift_at(f"d{day}", day, 9, 13) for day in range(23, 30)]
+    plan = _plan(demand=demand, employees=[ana, ben], availability={})
+    picks = [item[0] for item in _picks(plan).values()]
+    assert plan["unfilled"] == []
+    assert sorted((picks.count("e1"), picks.count("e2"))) == [3, 4]
+    assert plan["hours_by_employee"] == {"e1": 960, "e2": 720}
+
+
+def test_fewer_shifts_this_week_wins_before_fewer_minutes():
+    # Ana holds two short shifts (2h total); Ben holds one long one (5h).
+    # Minutes-first would pick Ana again; the shift-count key picks Ben.
+    ana = _lead("e1", "Ana", target_weekly_minutes=None)
+    ben = _lead("e2", "Ben", target_weekly_minutes=None)
+    existing = [_existing("e1", 17, 9, 10), _existing("e1", 18, 9, 10), _existing("e2", 19, 9, 14)]
+    plan = _plan(demand=[_shift_at("s", 24, 9, 13)], employees=[ana, ben], availability={}, existing=existing)
+    assert _picks(plan) == {"s": ["e2"]}
+
+
+def test_a_single_lead_gets_one_block_a_day_and_the_rest_stay_open_with_policy_reasons():
+    dana = _lead("e1", "Dana")
+    demand = []
+    for day in (23, 24, 25):
+        demand += [_shift_at(f"am{day}", day, 6, 14), _shift_at(f"pm{day}", day, 14, 22)]
+    plan = _plan(demand=demand, employees=[dana], availability={})
+    picks = _picks(plan)
+    assert all(picks[f"am{day}"] == ["e1"] for day in (23, 24, 25))
+    assert all(picks[f"pm{day}"] == [] for day in (23, 24, 25))
+    assert {item["reason"] for item in plan["unfilled"]} == {"policy: second shift that day"}
+    assert plan["metrics"] == {
+        "shift_count": 6, "required_positions": 6, "fixed_positions": 0, "overstaffed_positions": 0,
+        "proposed_positions": 3, "filled_positions": 3, "open_positions": 3,
+    }
+    assert plan["hours_by_employee"] == {"e1": 1440}

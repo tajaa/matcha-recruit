@@ -1039,7 +1039,14 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "propose_schedule_change", "staged",
-        "Stage one schedule proposal for the admin to confirm. Put EVERY "
+        "Stage one schedule proposal for the admin to confirm. To FILL open "
+        "shifts (all of them, one job like 'shift lead', or specific shifts), "
+        "set fill_vacant_shifts=true — the SERVER picks people from the roster "
+        "under the staffing rules (one shift per person per day, rest, caps, "
+        "qualifications, availability) and returns `unfilled` with a reason per "
+        "seat it could not fill; never pick the names yourself for a fill. "
+        "Narrow with fill_job_name / fill_shift_ids / to_employee_name (only "
+        "that person) / exclude_employee_names. For explicit edits, put EVERY "
         "operation one request needs into `changes` — swap, reassign, assign, "
         "unassign, retime, cancel, AND kind='create' for replacement shifts — "
         f"up to {MAX_BATCH_OPERATIONS} operations that resolve into one proposal and one "
@@ -1074,9 +1081,32 @@ TOOLS: tuple[HuumeTool, ...] = (
                     "A named-person swap counts as two."
                 ),
             ),
+            "fill_vacant_shifts": types.Schema(
+                type=types.Type.BOOLEAN,
+                description=(
+                    "True to have the server fill the week's open shifts from the roster "
+                    "(deterministic, policy-checked). Use for 'fill / staff / cover the open shifts'."
+                ),
+            ),
+            "fill_job_name": types.Schema(
+                type=types.Type.STRING,
+                description="With fill_vacant_shifts: only open shifts of this job/role (a real job name from the location).",
+            ),
+            "fill_shift_ids": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="With fill_vacant_shifts: only these shift ids (from get_schedule_overview).",
+            ),
+            "exclude_employee_names": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="With fill_vacant_shifts: people the manager asked not to use.",
+            ),
+            "allow_split_shift": types.Schema(
+                type=types.Type.BOOLEAN,
+                description="With fill_vacant_shifts: true only when the manager explicitly allowed one person to work two shifts in a day.",
+            ),
             "all_vacant_shifts": types.Schema(
                 type=types.Type.BOOLEAN,
-                description="True only when the manager explicitly requested assigning to every vacant shift in the selected editor week.",
+                description="True only when the manager literally named ONE person for every vacant shift; the server still refuses the ones that overlap or break the caps.",
             ),
             "location_name": types.Schema(
                 type=types.Type.STRING,
@@ -1108,7 +1138,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         # routing.HINT_INDEX / prompt.build_discovery_block would then steer
         # a training-assignment ask at this tool instead of assign_training.
         intent_hints=("swap shift", "reassign shift", "assign a shift", "put someone on",
-                      "move shift", "cancel shift", "cover for"),
+                      "move shift", "cancel shift", "cover for", "fill the open shifts",
+                      "fill the vacant", "staff the open", "cover the open shifts",
+                      "fill the empty shifts"),
     ),
     _tool(
         "list_assets", "read",

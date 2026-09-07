@@ -512,7 +512,8 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         # reads is proposal_id, merged in below by schedule_skill.propose —
         # not reconstructed from these on the confirm turn.
         "fields": (
-            "kind", "changes", "all_vacant_shifts", "location_name", "target_shift_id",
+            "kind", "changes", "all_vacant_shifts", "fill_vacant_shifts", "fill_job_name",
+            "fill_shift_ids", "exclude_employee_names", "allow_split_shift", "location_name", "target_shift_id",
             "target_employee_name", "target_date", "target_time_hint",
             "target_staffing_hint", "target_role_hint",
             "to_employee_name", "second_employee_name", "second_date", "second_time_hint", "second_role_hint",

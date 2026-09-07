@@ -17,19 +17,24 @@ from uuid import UUID, uuid4
 
 from app.database import connection_or_direct
 
+from .assignment_guard import (
+    POLICY_MAX_CONSECUTIVE_DAYS, POLICY_MAX_SHIFTS_PER_DAY, POLICY_MIN_REST_HOURS,
+)
 from .location_profile import (
     WEEKDAY_NAMES, get_location_profile, load_profile_bundle, missing_fields,
     profile_leader_job_ids, resolve_week_start_weekday, week_rules_refusal,
 )
 from .schedule_break_stagger import StaggerAssignment, stagger_shift_breaks
+from .schedule_batch import BatchItem, MAX_BATCH_OPERATIONS, plan_batches, split_plan_message
 from .schedule_breaks import reinterpret_schedule_wall_time
 from .schedule_coverage import (
     GAP_KINDS, evaluate_week_coverage, make_finding, sort_findings,
 )
 from .schedule_guidance import resolve_week_break_plans
 from .schedule_profiles import fetch_effective_job_employee_ids
+from .schedule_review import jurisdiction_message
 from .schedule_rules import align_week_start, availability_violations, template_windows
-from .shift_compliance import check_shift_compliance
+from .shift_compliance import check_shift_compliance, jurisdiction_rule_status
 from .shift_writes import (
     apply_assignment_core,
     create_shift_core,
@@ -179,6 +184,21 @@ def _consecutive_day_count(days: set[date], candidate: date) -> int:
     return (after - before).days + 1
 
 
+def _min_rest_gap_hours(
+    windows: list[tuple[datetime, datetime]], starts_at: datetime, ends_at: datetime,
+) -> float | None:
+    """Hours between this shift and the nearest NON-overlapping window the
+    person already holds; None when they hold nothing adjacent. Overlaps are
+    the overlap check's business, not a rest gap."""
+    gaps = []
+    for w_start, w_end in windows:
+        if w_end <= starts_at:
+            gaps.append((starts_at - w_end).total_seconds() / 3600.0)
+        elif w_start >= ends_at:
+            gaps.append((w_start - ends_at).total_seconds() / 3600.0)
+    return min(gaps) if gaps else None
+
+
 def _is_unavailable(employee_id: str, shift_date: date, ranges: dict[str, list[tuple[date, date]]]) -> bool:
     return any(start <= shift_date <= end for start, end in ranges.get(employee_id, []))
 
@@ -228,8 +248,20 @@ def build_plan(
     exclude_employee_ids: set[str], employee_hour_caps: dict[str, int],
     gated_job_ids: set[str],
     blocked_pairs: set[tuple[str, str]] | None = None,
+    allow_split_shift: bool = False,
+    adjacent_assignments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic scarcity-first assignment planner.
+
+    Policy guardrails (operational defaults, not statute — see
+    `assignment_guard`): one shift per person per day unless the manager
+    asked for splits (`allow_split_shift`), at least `POLICY_MIN_REST_HOURS`
+    between a person's shifts, and `POLICY_MAX_CONSECUTIVE_DAYS` when the
+    profile sets no `max_consecutive_days`. They are hard skips here, with a
+    `policy:`-prefixed reason in `unfilled.exclusions`, because a planner
+    that stacks the only qualified lead onto every lead block is the failure
+    this exists to stop. Among eligible candidates, fewer shifts this week
+    wins before fewer minutes, so demand spreads across the roster.
 
     Existing assignments are fixed inputs.  Open slots are processed by the
     size of their feasible candidate pool, then by time/id; this prevents a
@@ -246,11 +278,21 @@ def build_plan(
     busy: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
     minutes: dict[str, int] = defaultdict(int)
     scheduled_days: dict[str, set[date]] = defaultdict(set)
+    shifts_by_day: dict[str, Counter] = defaultdict(Counter)
+    shift_count: dict[str, int] = defaultdict(int)
+    # Adjacent weeks affect rest and consecutive days, but never this week's
+    # hours, target progress, or fairness score.
+    for assignment in adjacent_assignments or []:
+        employee_id = assignment["employee_id"]
+        busy[employee_id].append((assignment["starts_at"], assignment["ends_at"]))
+        scheduled_days[employee_id].add(assignment["starts_at"].date())
     for assignment in existing_assignments:
         employee_id = assignment["employee_id"]
         busy[employee_id].append((assignment["starts_at"], assignment["ends_at"]))
         minutes[employee_id] += assignment["worked_minutes"]
         scheduled_days[employee_id].add(assignment["starts_at"].date())
+        shifts_by_day[employee_id][assignment["starts_at"].date()] += 1
+        shift_count[employee_id] += 1
 
     def refusal(employee: dict[str, Any], shift: dict[str, Any]) -> str | None:
         employee_id = employee["id"]
@@ -272,8 +314,20 @@ def build_plan(
             return "outside confirmed availability"
         if any(_overlaps(window, (shift["starts_at"], shift["ends_at"])) for window in busy[employee_id]):
             return "overlapping assignment"
+        if not allow_split_shift and shifts_by_day[employee_id][shift_date] >= POLICY_MAX_SHIFTS_PER_DAY:
+            return "policy: second shift that day"
+        rest_windows = busy[employee_id]
+        if allow_split_shift:
+            # The manager allowed doubles: the rest rule still holds between
+            # DAYS, not between the two halves of the split day they asked for.
+            rest_windows = [window for window in rest_windows if window[0].date() != shift_date]
+        rest_gap = _min_rest_gap_hours(rest_windows, shift["starts_at"], shift["ends_at"])
+        if rest_gap is not None and rest_gap < POLICY_MIN_REST_HOURS:
+            return f"policy: less than {POLICY_MIN_REST_HOURS:g}h rest"
         max_days = employee.get("max_consecutive_days")
-        if max_days is not None and _consecutive_day_count(scheduled_days[employee_id], shift_date) > max_days:
+        if max_days is None:
+            max_days = POLICY_MAX_CONSECUTIVE_DAYS
+        if _consecutive_day_count(scheduled_days[employee_id], shift_date) > max_days:
             return "maximum consecutive days"
         new_minutes = minutes[employee_id] + shift["worked_minutes"]
         explicit_cap = employee_hour_caps.get(employee_id)
@@ -300,6 +354,7 @@ def build_plan(
             target_overshoot,
             -target_shortfall,
             extra_hours_bonus,
+            shift_count[employee_id],
             minutes[employee_id],
             employee.get("name") or "",
             employee_id,
@@ -361,6 +416,8 @@ def build_plan(
         busy[employee_id].append((shift["starts_at"], shift["ends_at"]))
         minutes[employee_id] = after
         scheduled_days[employee_id].add(shift["starts_at"].date())
+        shifts_by_day[employee_id][shift["starts_at"].date()] += 1
+        shift_count[employee_id] += 1
 
     proposal_shifts = []
     for shift in sorted(demand, key=lambda item: (item["starts_at"], item["key"])):
@@ -722,6 +779,10 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
             windows.sort(key=lambda window: (window[0], window[1]))
     lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     hi = lo + timedelta(days=7)
+    context_days = max(
+        [POLICY_MAX_CONSECUTIVE_DAYS]
+        + [employee.get("max_consecutive_days") or POLICY_MAX_CONSECUTIVE_DAYS for employee in employees]
+    )
     assignment_rows = await conn.fetch(
         """
         SELECT a.employee_id, s.id AS shift_id, s.starts_at, s.ends_at,
@@ -730,11 +791,13 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         JOIN schedule_shifts s ON s.id=a.shift_id
         WHERE s.company_id=$1 AND s.status <> 'cancelled'
           AND s.starts_at < $3 AND s.ends_at > $2
+          AND (a.employee_id = ANY($4::uuid[]) OR (s.starts_at < $6 AND s.ends_at > $5))
         ORDER BY s.starts_at, s.id, a.employee_id
         """,
-        company_id, lo, hi,
+        company_id, lo - timedelta(days=context_days), hi + timedelta(days=context_days),
+        employee_ids, lo, hi,
     )
-    existing_assignments = [{
+    all_assignments = [{
         "employee_id": str(row["employee_id"]),
         "shift_id": str(row["shift_id"]),
         "starts_at": row["starts_at"], "ends_at": row["ends_at"],
@@ -745,6 +808,14 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         "location_id": str(row["location_id"]) if row["location_id"] else None,
         "status": row["status"],
     } for row in assignment_rows]
+    existing_assignments = [
+        item for item in all_assignments if item["starts_at"] < hi and item["ends_at"] > lo
+    ]
+    adjacent_assignments = [
+        item for item in all_assignments
+        if item["employee_id"] in employees_by_id
+        and not (item["starts_at"] < hi and item["ends_at"] > lo)
+    ]
 
     unavailable: dict[str, list[tuple[date, date]]] = defaultdict(list)
     request_rows = await conn.fetch(
@@ -781,6 +852,7 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         "employees": employees,
         "availability": availability,
         "existing_assignments": existing_assignments,
+        "adjacent_assignments": adjacent_assignments,
         "unavailable_ranges": dict(unavailable),
         "gated_job_ids": {str(row["job_id"]) for row in gated_rows},
     }
@@ -950,6 +1022,184 @@ async def _load_existing_demand(conn, *, company_id: UUID, location_id: UUID,
             - int(row["break_minutes"] or 0),
         ),
     } for row in rows]
+
+
+async def _load_vacant_demand(
+    conn, *, company_id: UUID, location_id: UUID, week_start: date,
+    week_end: date | None = None, job_ids: list[UUID] | None = None,
+    shift_ids: list[UUID] | None = None, role_ilike: str | None = None,
+    statuses: tuple[str, ...] = ("draft", "published"),
+) -> list[dict[str, Any]]:
+    """Existing shifts in the week with an OPEN seat, as planner demand
+    (same shape as `_load_existing_demand`; current assignees ride as
+    `fixed_employee_ids`). Drafts AND published — an assignment onto a
+    published shift is a routine edit (`_apply_edit_ops` does it today), and
+    a store's open published shifts are exactly what "fill the vacant ones"
+    means."""
+    lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
+    hi = datetime.combine(week_end + timedelta(days=1), time.min, tzinfo=timezone.utc) if week_end else lo + timedelta(days=7)
+    rows = await conn.fetch(
+        """
+        SELECT s.id, s.role, s.department, s.starts_at, s.ends_at,
+               s.break_minutes, s.required_staff, s.color, s.notes, s.kind,
+               s.template_id, s.job_id, s.training_requirement_id,
+               COALESCE(array_agg(a.employee_id ORDER BY a.employee_id)
+                        FILTER (WHERE a.employee_id IS NOT NULL), ARRAY[]::uuid[]) AS employee_ids
+        FROM schedule_shifts s
+        LEFT JOIN schedule_shift_assignments a ON a.shift_id=s.id
+        WHERE s.company_id=$1 AND s.location_id=$2 AND s.status = ANY($3::text[])
+          AND s.starts_at >= $4 AND s.starts_at < $5
+          AND ($6::uuid[] IS NULL OR s.job_id = ANY($6::uuid[]))
+          AND ($7::uuid[] IS NULL OR s.id = ANY($7::uuid[]))
+          AND ($8::text IS NULL OR s.role ILIKE '%' || $8 || '%')
+        GROUP BY s.id
+        HAVING COUNT(a.employee_id) < COALESCE(s.required_staff, 1)
+        ORDER BY s.starts_at, s.id
+        LIMIT $9
+        """,
+        company_id, location_id, list(statuses), lo, hi,
+        job_ids or None, shift_ids or None, role_ilike, _MAX_DEMAND_SHIFTS,
+    )
+    return [{
+        "key": str(row["id"]), "source_shift_id": str(row["id"]),
+        "role": row["role"], "department": row["department"],
+        "starts_at": row["starts_at"], "ends_at": row["ends_at"],
+        "break_minutes": row["break_minutes"] or 0,
+        "required_staff": row["required_staff"], "color": row["color"],
+        "notes": row["notes"], "kind": row["kind"],
+        "template_id": str(row["template_id"]) if row["template_id"] else None,
+        "job_id": str(row["job_id"]) if row["job_id"] else None,
+        "training_requirement_id": str(row["training_requirement_id"]) if row["training_requirement_id"] else None,
+        "fixed_employee_ids": [str(employee_id) for employee_id in row["employee_ids"]],
+        "worked_minutes": max(
+            0, int((row["ends_at"] - row["starts_at"]).total_seconds() // 60)
+            - int(row["break_minutes"] or 0),
+        ),
+    } for row in rows]
+
+
+async def plan_vacant_fill(
+    conn, *, company_id: UUID, location_id: UUID, week_start: date,
+    week_end: date | None = None, job_ids: list[UUID] | None = None,
+    role_hint: str | None = None, shift_ids: list[UUID] | None = None,
+    only_employee_ids: list[UUID] | None = None,
+    exclude_employee_ids: list[UUID] | None = None,
+    allow_split_shift: bool = False,
+) -> dict[str, Any]:
+    """Server-side "fill the open shifts": the same deterministic planner the
+    week builder uses (`build_plan` + the compliance preflight), pointed at
+    the week's OPEN seats instead of a template, with NO week-rules gate —
+    the demand is the shifts that already exist, so the store's hours and
+    pattern are irrelevant. Nothing is persisted here: the caller turns
+    `assignments` into an edit proposal (thread Huume / the REST preview),
+    which is what makes a preview a free simulation.
+
+    `only_employee_ids` narrows the roster to the people named ("fill them
+    with Dana") — the planner then refuses, per slot and with a reason, the
+    ones that person cannot lawfully or sensibly take, instead of the model
+    multiplying one name across every shift."""
+    role_ilike = None
+    if role_hint and (role_hint or "").strip():
+        matched = await resolve_job_by_name(conn, company_id, role_hint.strip(), location_id=location_id)
+        if matched:
+            job_ids = list(job_ids or []) + [matched["id"]]
+        else:
+            role_ilike = role_hint.strip()
+    demand = await _load_vacant_demand(
+        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        week_end=week_end, job_ids=job_ids, shift_ids=shift_ids, role_ilike=role_ilike,
+    )
+    jurisdiction = jurisdiction_message(
+        await jurisdiction_rule_status(conn, company_id, location_id),
+    )
+    if not demand:
+        scope = f" matching \"{role_hint}\"" if role_hint else ""
+        return {
+            "status": "clarify",
+            "message": f"There are no open shifts{scope} in this week to fill.",
+            "assignments": [], "unfilled": [], "jurisdiction": jurisdiction,
+        }
+    roster = await _load_roster_context(
+        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+    )
+    employees = roster["employees"]
+    if only_employee_ids:
+        keep = {str(value) for value in only_employee_ids}
+        employees = [employee for employee in employees if employee["id"] in keep]
+    if exclude_employee_ids:
+        drop = {str(value) for value in exclude_employee_ids}
+        employees = [employee for employee in employees if employee["id"] not in drop]
+    if not employees:
+        return {
+            "status": "refused",
+            "message": "No active employees at this location match that request.",
+            "assignments": [], "unfilled": [], "jurisdiction": jurisdiction,
+        }
+
+    def _build(blocked_pairs: set[tuple[str, str]]) -> dict[str, Any]:
+        return build_plan(
+            demand=demand, employees=employees, availability=roster["availability"],
+            existing_assignments=roster["existing_assignments"],
+            adjacent_assignments=roster.get("adjacent_assignments", []),
+            unavailable_ranges=roster["unavailable_ranges"],
+            exclude_employee_ids=set(), employee_hour_caps={},
+            gated_job_ids=roster["gated_job_ids"], blocked_pairs=blocked_pairs,
+            allow_split_shift=allow_split_shift,
+        )
+
+    blocked_pairs: set[tuple[str, str]] = set()
+    plan = _build(blocked_pairs)
+    for _attempt in range(_MAX_COMPLIANCE_REPLANS):
+        newly_blocked = await _preflight_compliance_blocks(
+            conn, company_id=company_id, location_id=location_id, plan=plan,
+        ) - blocked_pairs
+        if not newly_blocked:
+            break
+        blocked_pairs.update(newly_blocked)
+        plan = _build(blocked_pairs)
+
+    by_key = {shift["key"]: shift for shift in demand}
+    assignments = [
+        {
+            "shift_id": shift["key"], "role": shift.get("role"),
+            "starts_at": shift["starts_at"], "ends_at": shift["ends_at"],
+            "employee_id": item["employee_id"], "employee_name": item["employee_name"],
+            "reason": item["reason"],
+        }
+        for shift in plan["shifts"]
+        for item in shift.get("proposed_assignments") or []
+    ]
+    unfilled = [
+        {
+            "shift_id": item["shift_key"], "role": item.get("role"),
+            "starts_at": item["starts_at"],
+            "ends_at": _iso(by_key[item["shift_key"]]["ends_at"]) if item["shift_key"] in by_key else None,
+            "reason": item["reason"], "exclusions": item.get("exclusions") or {},
+        }
+        for item in plan["unfilled"]
+    ]
+    return {
+        "status": "ready",
+        "assignments": assignments,
+        "unfilled": unfilled,
+        "hours_by_employee": plan["hours_by_employee"],
+        "metrics": plan["metrics"],
+        "roster_size": len(employees),
+        "demand_size": len(demand),
+        "jurisdiction": jurisdiction,
+    }
+
+
+def vacant_fill_edit_requests(assignments: list[dict[str, Any]]) -> tuple[list[dict], str | None]:
+    """Adapt a server-selected fill without losing identities or the review cap."""
+    if len(assignments) > MAX_BATCH_OPERATIONS:
+        items = [BatchItem(day=date.fromisoformat(str(_iso(item["starts_at"]))[:10])) for item in assignments]
+        return [], split_plan_message(len(items), plan_batches(items), MAX_BATCH_OPERATIONS)
+    return [
+        {"kind": "assign", "target_shift_id": str(item["shift_id"]),
+         "to_employee_id": str(item["employee_id"]), "to_employee_name": item["employee_name"]}
+        for item in assignments
+    ], None
 
 
 async def _week_shift_counts(conn, *, company_id: UUID, location_id: UUID,
@@ -1424,6 +1674,7 @@ async def propose_week_draft(
             plan = build_plan(
                 demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
                 existing_assignments=snapshot["existing_assignments"],
+                adjacent_assignments=snapshot.get("adjacent_assignments", []),
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],
@@ -1442,6 +1693,7 @@ async def propose_week_draft(
             plan = build_plan(
                 demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
                 existing_assignments=snapshot["existing_assignments"],
+                adjacent_assignments=snapshot.get("adjacent_assignments", []),
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],

@@ -272,3 +272,46 @@ class TestScheduleChangeReviewInStateBlock:
         }}
         block = build_state_block(state)
         assert "Compliance:" not in block and "Not staged" not in block
+
+
+def _schedule_prompt():
+    from datetime import date
+    from uuid import UUID
+    from app.matcha.services.huume.scope import HuumeSurfaceContext
+    return build_system_prompt(
+        company_name="Acme", today="2026-08-24",
+        surface_context=HuumeSurfaceContext(
+            surface="schedule_assistant", location_id=UUID("c0ffeeee-0001-4001-8001-000000000001"),
+            week_start=date(2026, 8, 23), week_end=date(2026, 8, 29),
+        ),
+    )
+
+
+class TestStaffingRulesAndFill:
+    def test_the_prompt_sends_fills_through_the_server_and_points_at_roster_load(self):
+        prompt = _schedule_prompt()
+        assert "## Staffing rules" in prompt
+        assert "Never put one employee on every open shift" in prompt
+        assert "fill_vacant_shifts=true" in prompt
+        assert "never choose the names yourself for a fill" in prompt
+        assert "`roster_load`" in prompt
+        assert "legal compliance is handled deterministically" not in prompt.lower()
+
+    def test_all_vacant_is_scoped_to_a_manager_who_literally_named_one_person(self):
+        prompt = _schedule_prompt()
+        assert "Only when the manager literally names ONE person for every open shift" in prompt
+        assert "lists them under `rejected`" in prompt
+
+    def test_unfilled_seats_are_spelled_out_in_the_state_block(self):
+        state = {"huume_action": {
+            "type": "schedule_change", "status": "proposed", "confirm_id": "ab12cd34", "operation_count": 3,
+            "review": {"assignments": [{"op": "assign", "verdict": "ok"}] * 3, "rejected": [],
+                       "unfilled": [{"shift_id": "a", "reason": "policy: second shift that day"},
+                                    {"shift_id": "b", "reason": "not qualified for the shift job"}],
+                       "employees": [], "compliance_status": "verified",
+                       "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"}},
+        }}
+        block = build_state_block(state)
+        assert "Unfilled: 2 open seat(s) the server could not staff" in block
+        assert "they stay open" in block
+        assert "Not staged" not in block

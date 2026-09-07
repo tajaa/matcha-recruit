@@ -257,7 +257,7 @@ class TestProposeClarify(unittest.TestCase):
             "status": "ready", "proposal_id": PROPOSAL_ID, "pill_text": "Schedule change pill",
             "operation_count": 1, "operation_summary": {"assign": 1},
             # A build with no review (fake) reports fail-closed: nothing verified.
-            "review": {}, "rejected_count": 0, "compliance_status": "unmapped",
+            "review": {}, "rejected_count": 0, "unfilled_count": 0, "compliance_status": "unmapped",
         }
 
     def test_changes_batch_reaches_existing_multi_op_builder(self):
@@ -837,6 +837,202 @@ class TestAllVacantGoesThroughTheGuard(unittest.TestCase):
         assert "couldn't stage any of those" in result["message"]
         assert "Reply with the shift time" not in result["message"]
         assert "Just reply to this message" not in result["message"]
+
+
+# ── fill_vacant_shifts: the SERVER picks people (2026-09-07) ─────────────────
+
+DANA_ID = "33333333-3333-3333-3333-000000000001"
+BEN_ID = "33333333-3333-3333-3333-000000000002"
+
+
+def _fill_plan(assignments, unfilled=(), *, status="ready", message=None):
+    from datetime import datetime, timezone
+    plan = {
+        "status": status, "message": message, "assignments": list(assignments), "unfilled": list(unfilled),
+        "hours_by_employee": {}, "metrics": {}, "roster_size": 2, "demand_size": len(assignments) + len(unfilled),
+        "jurisdiction": {"state": "CA", "status": "curated", "message": "Scheduling law for CA is on file (hand-curated)."},
+    }
+    if unfilled:
+        # The planner hands back real datetimes here; the skill must serialize them.
+        plan["unfilled"] = [{**item, "starts_at": datetime(2026, 8, 23, 14, tzinfo=timezone.utc),
+                             "ends_at": datetime(2026, 8, 23, 22, tzinfo=timezone.utc)} for item in unfilled]
+    return plan
+
+
+def _planned(shift_id, name, employee_id):
+    return {"shift_id": shift_id, "role": "Shift Lead", "starts_at": "2026-08-23T06:00:00+00:00",
+            "ends_at": "2026-08-23T14:00:00+00:00", "employee_id": employee_id, "employee_name": name,
+            "reason": "Available and qualified; scheduled hours become 8h."}
+
+
+class TestFillVacantShifts(unittest.TestCase):
+    """`fill_vacant_shifts=true` → `week_builder.plan_vacant_fill` picks the
+    people → the SAME `build_edit_proposal` stages them (guard, pill, confirm).
+    The model never names anyone for a fill."""
+
+    LOCATION = "c0ffeeee-0001-4001-8001-000000000001"
+
+    def _propose(self, args, *, plan, build=None, match=None, location=True):
+        from datetime import date
+        from uuid import UUID as _UUID
+        from app.matcha.services.scheduling import week_builder
+        captured = {"plan": None, "build": None}
+        people = {"Dana": {"id": _UUID(DANA_ID), "first_name": "Dana", "last_name": "Reyes"},
+                  "Ben": {"id": _UUID(BEN_ID), "first_name": "Ben", "last_name": "Ortiz"}}
+
+        async def fake_plan(conn, **kwargs):
+            captured["plan"] = kwargs
+            return plan
+
+        async def fake_build(conn_, **kwargs):
+            captured["build"] = kwargs
+            return build or schedule_chat.ProposalBuild(
+                kind="proposal", proposal_id=PROPOSAL_ID, pill_text="pill", review=_review(2, 0),
+            )
+
+        async def fake_match(conn, company_id, hint, location_id):
+            if match and hint in match:
+                return match[hint]
+            return {"employee": people[hint]}
+
+        with (
+            mock.patch.object(week_builder, "plan_vacant_fill", fake_plan),
+            mock.patch.object(schedule_chat, "_match_single_employee", fake_match),
+            mock.patch.object(schedule_chat, "build_edit_proposal", fake_build),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=_VacantConn(0), company_id="c1", actor_user_id="u1", args=args,
+                location_id=_UUID(self.LOCATION) if location else None,
+                week_start=date(2026, 8, 23) if location else None,
+                week_end=date(2026, 8, 29) if location else None,
+            ))
+        return result, captured
+
+    def test_the_server_picks_people_and_the_guard_stages_them(self):
+        from datetime import date
+        from uuid import UUID as _UUID
+        shift_uuid = "55555555-5555-4555-8555-000000000001"
+        plan = _fill_plan(
+            [_planned("shift-0", "Dana Reyes", DANA_ID), _planned("shift-1", "Ben Ortiz", BEN_ID)],
+            [{"shift_id": "shift-2", "role": "Shift Lead", "reason": "policy: second shift that day",
+              "exclusions": {"policy: second shift that day": 2}}],
+        )
+        result, captured = self._propose({
+            "fill_vacant_shifts": True, "fill_job_name": " shift lead ", "exclude_employee_names": ["Ben", ""],
+            "fill_shift_ids": [shift_uuid], "allow_split_shift": True,
+        }, plan=plan)
+
+        assert captured["plan"] == {
+            "company_id": "c1", "location_id": _UUID(self.LOCATION),
+            "week_start": date(2026, 8, 23), "week_end": date(2026, 8, 29),
+            "role_hint": "shift lead", "shift_ids": [_UUID(shift_uuid)],
+            "only_employee_ids": None, "exclude_employee_ids": [_UUID(BEN_ID)], "allow_split_shift": True,
+        }
+        assert captured["build"]["parsed"]["edit_requests"] == [
+            {"kind": "assign", "target_shift_id": "shift-0", "to_employee_name": "Dana Reyes", "to_employee_id": DANA_ID},
+            {"kind": "assign", "target_shift_id": "shift-1", "to_employee_name": "Ben Ortiz", "to_employee_id": BEN_ID},
+        ]
+        assert captured["build"]["surface"] == "editor"
+        assert captured["build"]["shift_statuses"] == ("draft", "published")
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 2 and result["operation_summary"] == {"assign": 2}
+        assert result["unfilled_count"] == 1
+        assert result["review"]["unfilled"] == [{
+            "shift_id": "shift-2", "role": "Shift Lead", "reason": "policy: second shift that day",
+            "exclusions": {"policy: second shift that day": 2},
+            "starts_at": "2026-08-23T14:00:00+00:00", "ends_at": "2026-08-23T22:00:00+00:00",
+        }]
+
+    def test_naming_one_person_narrows_the_roster_instead_of_multiplying_the_name(self):
+        from uuid import UUID as _UUID
+        result, captured = self._propose(
+            {"fill_vacant_shifts": True, "to_employee_name": "Dana"},
+            plan=_fill_plan([_planned("shift-0", "Dana Reyes", DANA_ID)]),
+        )
+        assert captured["plan"]["only_employee_ids"] == [_UUID(DANA_ID)]
+        assert captured["plan"]["exclude_employee_ids"] is None
+        assert captured["plan"]["role_hint"] is None and captured["plan"]["shift_ids"] is None
+        assert captured["plan"]["allow_split_shift"] is False
+        assert result["status"] == "ready" and result["unfilled_count"] == 0
+
+    def test_nothing_fillable_is_a_clarify_that_names_the_reasons(self):
+        plan = _fill_plan([], [
+            {"shift_id": "a", "role": "Shift Lead", "reason": "policy: second shift that day", "exclusions": {}},
+            {"shift_id": "b", "role": "Opener", "reason": "not qualified for the shift job", "exclusions": {}},
+        ])
+        result, captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
+        assert result["status"] == "clarify"
+        assert result["message"].startswith("I couldn't fill any of those shifts: Shift Lead 2026-08-23 14:00 — policy: second shift that day; Opener 2026-08-23 14:00 — not qualified for the shift job.")
+        assert "allow a split shift" in result["message"]
+        assert captured["build"] is None
+
+    def test_a_planner_clarify_or_refusal_is_relayed_verbatim(self):
+        result, captured = self._propose(
+            {"fill_vacant_shifts": True, "fill_job_name": "barista"},
+            plan=_fill_plan([], status="clarify", message='There are no open shifts matching "barista" in this week to fill.'),
+        )
+        assert result == {"status": "clarify", "message": 'There are no open shifts matching "barista" in this week to fill.'}
+        assert captured["build"] is None
+
+    def test_a_fill_needs_the_scoped_schedule_workspace(self):
+        result, captured = self._propose({"fill_vacant_shifts": True}, plan=_fill_plan([]), location=False)
+        assert result["status"] == "clarify"
+        assert "requires a scoped schedule workspace" in result["message"]
+        assert captured["plan"] is None
+
+    def test_an_unknown_or_ambiguous_name_stops_before_planning(self):
+        result, captured = self._propose(
+            {"fill_vacant_shifts": True, "exclude_employee_names": ["Zed"]}, plan=_fill_plan([]),
+            match={"Zed": {"none": "I couldn't find anyone named Zed at this location."}},
+        )
+        assert result == {"status": "clarify", "message": "I couldn't find anyone named Zed at this location."}
+        assert captured["plan"] is None
+        result, captured = self._propose(
+            {"fill_vacant_shifts": True, "to_employee_name": "Sam"}, plan=_fill_plan([]),
+            match={"Sam": {"ambiguous": ["Sam Lee", "Sam Park"]}},
+        )
+        assert result["status"] == "clarify" and "Which Sam did you mean? Sam Lee, Sam Park" in result["message"]
+
+    def test_a_bad_shift_id_is_a_clarify_not_a_crash(self):
+        result, captured = self._propose({"fill_vacant_shifts": True, "fill_shift_ids": ["shift-9"]}, plan=_fill_plan([]))
+        assert result["status"] == "clarify" and "use ids from get_schedule_overview" in result["message"]
+        assert captured["plan"] is None
+
+    def test_the_fill_fields_survive_the_staged_whitelist_and_the_tool_schema(self):
+        fields = set(_HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"])
+        new = {"fill_vacant_shifts", "fill_job_name", "fill_shift_ids", "exclude_employee_names", "allow_split_shift"}
+        assert new <= fields, new - fields
+        properties = TOOLS_BY_NAME["propose_schedule_change"].declaration.parameters.properties
+        assert new <= set(properties)
+        hints = TOOLS_BY_NAME["propose_schedule_change"].intent_hints
+        assert any("fill" in hint and "open" in hint for hint in hints)
+
+    def test_fill_refuses_over_cap_before_building_a_proposal(self):
+        result, captured = self._propose({"fill_vacant_shifts": True}, plan=_fill_plan([
+            _planned(f"shift-{i}", "Dana Reyes", DANA_ID) for i in range(41)
+        ]))
+        assert result["status"] == "clarify"
+        assert "41 schedule operations" in result["message"]
+        assert captured["build"] is None
+
+
+def test_coverage_editor_includes_drafts_and_channel_stays_published_only():
+    from contextlib import asynccontextmanager
+    from uuid import uuid4
+    from app.matcha.services.scheduling import coverage
+
+    @asynccontextmanager
+    async def connection():
+        yield object()
+
+    finder = mock.AsyncMock(return_value={"shifts": []})
+    with mock.patch("app.database.get_connection", connection), mock.patch.object(coverage, "find_coverage_candidates", finder):
+        for surface, statuses in ((True, ("draft", "published")), (False, ("published",))):
+            _run(schedule_skill.find_coverage(
+                company_id=uuid4(), role="client", features={"employee_schedule": True},
+                date_str="2026-08-23", role_hint=None, location_id=uuid4(), schedule_surface=surface,
+            ))
+            assert finder.await_args.kwargs["statuses"] == statuses
 
 
 class TestResolvedCreateCounts(unittest.TestCase):
