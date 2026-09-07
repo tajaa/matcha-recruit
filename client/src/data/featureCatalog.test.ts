@@ -48,6 +48,7 @@ describe('applyFeatureToggle', () => {
       inventory_voice: false,
       sales_intake: false,
       inventory_forecasting: false,
+      inventory_waste: false,
     })
   })
 
