@@ -22,6 +22,7 @@ from scripts.msandbox.agent_adapters import (
     launch_agent,
     refresh_capability_context,
 )
+from scripts.msandbox.agent_versions import resolve_agent_versions
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
 from scripts.msandbox.capabilities import (
     CONTAINER_CONFIG_DIR,
@@ -68,7 +69,13 @@ from scripts.msandbox.git_worktrees import (
     session_git_dir,
 )
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
-from scripts.msandbox.install import InstallError, install_release, rollback_release
+from scripts.msandbox.install import (
+    InstallError,
+    _primary_worktree,
+    _write_launcher,
+    install_release,
+    rollback_release,
+)
 from scripts.msandbox.models import (
     CapabilityReport,
     PortSet,
@@ -153,6 +160,7 @@ class MsandboxTestCase(unittest.TestCase):
                 "MSANDBOX_DATA_DIR": str(self.root / "data"),
                 "MSANDBOX_CONFIG_DIR": str(self.root / "config"),
                 "MSANDBOX_SKIP_FETCH": "1",
+                "MSANDBOX_AGENT_AUTO_UPDATE": "0",
             },
             clear=False,
         )
@@ -186,6 +194,77 @@ class MsandboxTestCase(unittest.TestCase):
             git(self.repo, "rev-parse", "HEAD"),
             "codex/test",
         )
+
+
+class AgentVersionTests(MsandboxTestCase):
+    def runtime_root(self) -> Path:
+        runtime = self.root / "runtime"
+        dockerfile = runtime / "docker/agent-sandbox/Dockerfile"
+        dockerfile.parent.mkdir(parents=True)
+        dockerfile.write_text(
+            "ARG CODEX_VERSION=0.153.4\nARG CLAUDE_CODE_VERSION=2.1.263\n",
+            encoding="utf-8",
+        )
+        return runtime
+
+    def test_latest_versions_are_resolved_and_cached(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "MSANDBOX_AGENT_AUTO_UPDATE": "1",
+                "CODEX_VERSION": "",
+                "CLAUDE_CODE_VERSION": "",
+            },
+            clear=False,
+        ), mock.patch(
+            "scripts.msandbox.agent_versions._latest_version",
+            side_effect=lambda package, timeout: {
+                "@openai/codex": "0.154.0",
+                "@anthropic-ai/claude-code": "2.1.264",
+            }[package],
+        ) as latest:
+            versions = resolve_agent_versions(self.runtime_root())
+
+        self.assertEqual(
+            versions,
+            {"CODEX_VERSION": "0.154.0", "CLAUDE_CODE_VERSION": "2.1.264"},
+        )
+        self.assertEqual(latest.call_count, 2)
+        cached = json.loads((self.root / "state/agent-versions.json").read_text(encoding="utf-8"))
+        self.assertEqual(cached["versions"], versions)
+
+    def test_unavailable_registry_uses_the_last_resolved_versions(self) -> None:
+        runtime = self.runtime_root()
+        cache = self.root / "state/agent-versions.json"
+        cache.parent.mkdir(parents=True)
+        cache.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "versions": {
+                        "CODEX_VERSION": "0.154.0",
+                        "CLAUDE_CODE_VERSION": "2.1.264",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "MSANDBOX_AGENT_AUTO_UPDATE": "1",
+                "CODEX_VERSION": "",
+                "CLAUDE_CODE_VERSION": "",
+            },
+            clear=False,
+        ), mock.patch(
+            "scripts.msandbox.agent_versions._latest_version",
+            side_effect=OSError("offline"),
+        ):
+            self.assertEqual(
+                resolve_agent_versions(runtime),
+                {"CODEX_VERSION": "0.154.0", "CLAUDE_CODE_VERSION": "2.1.264"},
+            )
 
 
 class StateTests(MsandboxTestCase):
@@ -1345,6 +1424,7 @@ class HostAndInstallTests(MsandboxTestCase):
         )
         self.assertEqual(failed_bare.returncode, 42)
         self.assertNotIn("msandbox + AutoPR ready", failed_bare.stdout)
+
         self.assertNotIn("No active msandbox sessions", failed_bare.stdout)
         interactive_environment = dict(os.environ)
         interactive_marker = self.root / "interactive-system-up-called"
@@ -1412,6 +1492,46 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(capabilities.returncode, 1)
         self.assertIn("unknown msandbox session", capabilities.stderr)
         self.assertNotIn("legacy:", capabilities.stdout)
+
+    def test_installed_launcher_falls_back_after_source_worktree_is_removed(self) -> None:
+        project_root = Path(__file__).resolve().parents[2]
+        stable_repo = self.root / "stable-repo"
+        legacy = stable_repo / "scripts/agent-sandbox.sh"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            '#!/bin/sh\nprintf "stable:%s\\n" "$*"\n',
+            encoding="utf-8",
+        )
+        legacy.chmod(0o755)
+        removed_worktree = self.root / "removed-worktree"
+        bin_dir = self.root / "fallback-bin"
+        _write_launcher(
+            project_root,
+            removed_worktree,
+            bin_dir,
+            fallback_repo_root=stable_repo,
+        )
+
+        completed = subprocess.run(
+            [str(bin_dir / "msandbox"), "system", "status"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "stable:system status")
+
+    def test_primary_worktree_is_the_fallback_for_a_linked_install_source(self) -> None:
+        legacy = self.repo / "scripts/agent-sandbox.sh"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("#!/bin/sh\n", encoding="utf-8")
+        legacy.chmod(0o755)
+        git(self.repo, "add", "scripts/agent-sandbox.sh")
+        git(self.repo, "commit", "-m", "add legacy controller")
+        linked = self.root / "linked-install-source"
+        git(self.repo, "worktree", "add", "-b", "linked-install", str(linked), "main")
+
+        self.assertEqual(_primary_worktree(linked), self.repo.resolve())
 
     def test_install_retains_only_current_and_one_rollback_release(self) -> None:
         bin_dir = self.root / "bin"
@@ -1704,7 +1824,12 @@ class DockerGcTests(MsandboxTestCase):
     def sandbox_tree(self, root: Path, marker: str) -> Path:
         directory = root / "docker/agent-sandbox"
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "Dockerfile").write_text(f"FROM scratch # {marker}\n", encoding="utf-8")
+        (directory / "Dockerfile").write_text(
+            "ARG CODEX_VERSION=0.153.4\n"
+            "ARG CLAUDE_CODE_VERSION=2.1.263\n"
+            f"FROM scratch # {marker}\n",
+            encoding="utf-8",
+        )
         (directory / "Dockerfile.browser").write_text(
             f"ARG SANDBOX_BASE_IMAGE\nFROM ${{SANDBOX_BASE_IMAGE}} # {marker}\n",
             encoding="utf-8",

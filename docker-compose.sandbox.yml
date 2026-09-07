@@ -13,6 +13,8 @@ services:
       context: ${SANDBOX_BUILD_CONTEXT:-.}
       dockerfile: ${SANDBOX_DOCKERFILE:-docker/agent-sandbox/Dockerfile}
       args:
+        CODEX_VERSION: ${CODEX_VERSION:-0.153.4}
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.263}
         INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-false}
         DEPENDENCY_TEMPLATE_ID: ${SANDBOX_DEPENDENCY_TEMPLATE_ID:-legacy}
         USER_UID: ${SANDBOX_UID:-501}

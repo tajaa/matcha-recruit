@@ -13,6 +13,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
 
+from .agent_versions import resolve_agent_versions
 from .git_worktrees import git_common_dir, session_git_dir, session_git_pointer
 from .models import PortSet, SessionRecord
 from .state import ARTIFACT_LIFECYCLE_LOCK, data_root, state_lock, state_root
@@ -115,12 +116,20 @@ def build_context_sources(record: SessionRecord, runtime_root: Path) -> dict[str
     }
 
 
-def build_identifier(sources: dict[str, Path], *, playwright: bool) -> str:
+def build_identifier(
+    sources: dict[str, Path],
+    *,
+    playwright: bool,
+    agent_versions: dict[str, str] | None = None,
+) -> str:
     """Content-address a build. Pure — garbage collection reads it without
     materializing a context directory for every candidate it has to consider."""
     digest = hashlib.sha256()
     digest.update(platform.machine().encode())
     digest.update(f"playwright={playwright}".encode())
+    for name, version in sorted((agent_versions or {}).items()):
+        digest.update(name.encode())
+        digest.update(version.encode())
     for relative, source in sources.items():
         # Browser overlay changes must not invalidate the multi-gigabyte base.
         if relative == BROWSER_DOCKERFILE and not playwright:
@@ -132,13 +141,21 @@ def build_identifier(sources: dict[str, Path], *, playwright: bool) -> str:
     return digest.hexdigest()[:20]
 
 
-def _materialize_build_context(record: SessionRecord, runtime_root: Path) -> tuple[Path, str, str]:
+def _materialize_build_context(
+    record: SessionRecord,
+    runtime_root: Path,
+    agent_versions: dict[str, str],
+) -> tuple[Path, str, str]:
     """Create one immutable Docker context for this controller+lockfile set."""
     # GC removes orphaned contexts. Serialize this short materialization step
     # with its sweep so it cannot remove the temporary directory mid-copy.
     with state_lock(ARTIFACT_LIFECYCLE_LOCK, timeout_s=600):
         sources = build_context_sources(record, runtime_root)
-        identifier = build_identifier(sources, playwright=record.playwright)
+        identifier = build_identifier(
+            sources,
+            playwright=record.playwright,
+            agent_versions=agent_versions,
+        )
         destination = data_root() / "build-contexts" / identifier
         if not destination.is_dir():
             with state_lock(f"build-context-{identifier}"):
@@ -194,12 +211,19 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
     for directory in (home, attachments):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     runtime_root = Path(os.environ.get("MSANDBOX_RUNTIME_ROOT", record.repo_path))
+    agent_versions = resolve_agent_versions(runtime_root)
     # Build inputs are copied to a content-addressed context. This prevents two
     # parallel PRs with different lockfiles from racing on one mutable `latest`
     # image, and keeps the controller/Dockerfile stable across branch switches.
-    build_context, image, _ = _materialize_build_context(record, runtime_root)
+    build_context, image, _ = _materialize_build_context(
+        record,
+        runtime_root,
+        agent_versions,
+    )
     dependency_template_id = build_identifier(
-        build_context_sources(record, runtime_root), playwright=False
+        build_context_sources(record, runtime_root),
+        playwright=False,
+        agent_versions=agent_versions,
     )
     environment = dict(os.environ)
     environment.update(
@@ -219,6 +243,7 @@ def compose_environment(record: SessionRecord) -> dict[str, str]:
             "SANDBOX_UID": str(os.getuid()),
             "SANDBOX_GID": str(os.getgid()),
             "INSTALL_PLAYWRIGHT_BROWSERS": "true" if record.playwright else "false",
+            **agent_versions,
         }
     )
     if record.playwright:
