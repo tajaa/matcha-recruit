@@ -69,7 +69,13 @@ from scripts.msandbox.git_worktrees import (
     session_git_dir,
 )
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
-from scripts.msandbox.install import InstallError, install_release, rollback_release
+from scripts.msandbox.install import (
+    InstallError,
+    _primary_worktree,
+    _write_launcher,
+    install_release,
+    rollback_release,
+)
 from scripts.msandbox.models import (
     CapabilityReport,
     PortSet,
@@ -1418,6 +1424,7 @@ class HostAndInstallTests(MsandboxTestCase):
         )
         self.assertEqual(failed_bare.returncode, 42)
         self.assertNotIn("msandbox + AutoPR ready", failed_bare.stdout)
+
         self.assertNotIn("No active msandbox sessions", failed_bare.stdout)
         interactive_environment = dict(os.environ)
         interactive_marker = self.root / "interactive-system-up-called"
@@ -1485,6 +1492,46 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(capabilities.returncode, 1)
         self.assertIn("unknown msandbox session", capabilities.stderr)
         self.assertNotIn("legacy:", capabilities.stdout)
+
+    def test_installed_launcher_falls_back_after_source_worktree_is_removed(self) -> None:
+        project_root = Path(__file__).resolve().parents[2]
+        stable_repo = self.root / "stable-repo"
+        legacy = stable_repo / "scripts/agent-sandbox.sh"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            '#!/bin/sh\nprintf "stable:%s\\n" "$*"\n',
+            encoding="utf-8",
+        )
+        legacy.chmod(0o755)
+        removed_worktree = self.root / "removed-worktree"
+        bin_dir = self.root / "fallback-bin"
+        _write_launcher(
+            project_root,
+            removed_worktree,
+            bin_dir,
+            fallback_repo_root=stable_repo,
+        )
+
+        completed = subprocess.run(
+            [str(bin_dir / "msandbox"), "system", "status"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "stable:system status")
+
+    def test_primary_worktree_is_the_fallback_for_a_linked_install_source(self) -> None:
+        legacy = self.repo / "scripts/agent-sandbox.sh"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("#!/bin/sh\n", encoding="utf-8")
+        legacy.chmod(0o755)
+        git(self.repo, "add", "scripts/agent-sandbox.sh")
+        git(self.repo, "commit", "-m", "add legacy controller")
+        linked = self.root / "linked-install-source"
+        git(self.repo, "worktree", "add", "-b", "linked-install", str(linked), "main")
+
+        self.assertEqual(_primary_worktree(linked), self.repo.resolve())
 
     def test_install_retains_only_current_and_one_rollback_release(self) -> None:
         bin_dir = self.root / "bin"

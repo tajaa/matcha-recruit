@@ -8,7 +8,9 @@ agent, or the host Docker socket.
 
 Quickstart, from anywhere. `msandbox install` creates a versioned controller
 under `~/.local/share/matcha-msandbox/releases/`; the launcher no longer points
-into whichever branch happens to be checked out:
+into whichever branch happens to be checked out. If the install came from a
+temporary linked worktree, the launcher falls back to the primary checkout
+after that worktree is removed:
 
 ```bash
 msandbox install
