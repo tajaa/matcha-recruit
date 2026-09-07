@@ -47,6 +47,6 @@ openpyxl>=3.1
 Pillow>=10.0
 # Pre-staged for Oceanlab's delivery phase in BUILD_PLAN.md; currently unused
 # until audio metadata extraction and YouTube delivery are implemented.
-mutagen>=1.47
+mutagen>=1.48.1
 google-api-python-client>=2.100
 google-auth-oauthlib>=1.2
