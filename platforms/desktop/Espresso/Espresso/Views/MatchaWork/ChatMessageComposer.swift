@@ -9,6 +9,10 @@ import SwiftUI
 /// `ScrollView`/`LazyVStack`/`ForEach` descriptors and re-evaluated every
 /// realized `MessageBubbleView`, which is what made typing stall on long
 /// threads and large drafts.
+///
+/// The field itself is `ComposerTextView` (NSTextView), not
+/// `TextField(axis: .vertical)`: the latter can't scroll past its line limit
+/// on macOS, so drafts appeared to stop accepting input at ~6 lines.
 struct ChatMessageComposer: View {
     @Environment(AppState.self) private var appState
 
@@ -49,32 +53,29 @@ struct ChatMessageComposer: View {
             .disabled(isUploadingImages)
             .help("Attach files — images, PDF, DOC/DOCX, TXT, MD, CSV, JSON")
 
-            TextField(placeholder, text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundColor(appState.themeText)
-                .lineLimit(1...6)
-                .padding(.vertical, 8)
-                .onChange(of: text) { _, newValue in
-                    // Hard cap: trim past the limit so paste-bombs can't bypass
-                    // send-disable. The reassignment re-enters this handler,
-                    // which is where trimmedCount then settles.
-                    if newValue.count > charLimit {
-                        text = String(newValue.prefix(charLimit))
-                        return
-                    }
-                    trimmedCount = newValue
-                        .trimmingCharacters(in: .whitespacesAndNewlines).count
+            ComposerTextView(
+                text: $text,
+                placeholder: placeholder,
+                font: .systemFont(ofSize: 14),
+                textColor: appState.themeText,
+                placeholderColor: appState.themeTextSecondary,
+                maxLines: 6,
+                submitKey: .returnSends,
+                onSubmit: submit
+            )
+            .padding(.vertical, 8)
+            .onChange(of: text) { _, newValue in
+                // Hard cap: trim past the limit so paste-bombs can't bypass
+                // send-disable. The reassignment re-enters this handler,
+                // which is where trimmedCount then settles.
+                if newValue.count > charLimit {
+                    text = String(newValue.prefix(charLimit))
+                    return
                 }
-                .onChange(of: seedNonce) { applySeed() }
-                .onKeyPress(keys: [.return], phases: .down) { press in
-                    // Shift+Return must fall through to the field so the break
-                    // lands at the caret. Handling it here (and appending "\n"
-                    // manually) always put the newline at the END of the draft.
-                    guard !press.modifiers.contains(.shift) else { return .ignored }
-                    submit()
-                    return .handled
-                }
+                trimmedCount = newValue
+                    .trimmingCharacters(in: .whitespacesAndNewlines).count
+            }
+            .onChange(of: seedNonce) { applySeed() }
 
             if trimmedCount > charLimit - 500 {
                 Text("\(trimmedCount)/\(charLimit)")

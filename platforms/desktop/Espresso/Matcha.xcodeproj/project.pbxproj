@@ -45,6 +45,7 @@
 		1F1E3134D0EC19008540D307 /* ProjectDetailViewModel+Core.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBAE334A7AAA459BAEE4E4F8 /* ProjectDetailViewModel+Core.swift */; };
 		1FEDFFD4BC1C7F59E9CFD687 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210A398CCEA5FA1784C2C92D /* AuthModels.swift */; };
 		208F703F48307B35717A911B /* LoadingDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13338371A8BC76142D4A946 /* LoadingDots.swift */; };
+		C0A9051E7B2D4F1A8E3C6D01 /* ComposerTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A9051E7B2D4F1A8E3C6D02 /* ComposerTextView.swift */; };
 		2200E28DD83F146D6E9B397B /* PresentationPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC65D71C638B8C8239D71F61 /* PresentationPreview.swift */; };
 		2293DEFAA778F0D8D492D67C /* TicketUpdatesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */; };
 		237FCE930EBAD7F83F6C99B0 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C18F579031442253A1AD76A9 /* AppDelegate.swift */; };
@@ -559,6 +560,7 @@
 		B06A176992AA39C8E304EFD0 /* BillingUsageModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BillingUsageModels.swift; sourceTree = "<group>"; };
 		B12BB8B1B4D72B72BC796BEA /* InboxListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InboxListView.swift; sourceTree = "<group>"; };
 		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
+		C0A9051E7B2D4F1A8E3C6D02 /* ComposerTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextView.swift; sourceTree = "<group>"; };
 		B33F45D64D5F32FDC6B32F98 /* CollabThreadsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CollabThreadsView.swift; sourceTree = "<group>"; };
 		B82B73C2F5E841DB07F22370 /* NewConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NewConversationView.swift; sourceTree = "<group>"; };
 		B9E4D71F3C825A064D17F308 /* SkillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsView.swift; sourceTree = "<group>"; };
@@ -760,6 +762,7 @@
 			children = (
 				FAD09F509367E88989F2B765 /* StatusBadge.swift */,
 				B13338371A8BC76142D4A946 /* LoadingDots.swift */,
+				C0A9051E7B2D4F1A8E3C6D02 /* ComposerTextView.swift */,
 				AA11BB22CC33DD44EE6600F5 /* ChannelToastOverlay.swift */,
 				5C0FF11E570E000000000012 /* SkeletonView.swift */,
 				2D655D6AC071C9A9085DFAF8 /* WorkToastCenter.swift */,
@@ -1715,6 +1718,7 @@
 				A1B2C3D4E5F60708AA000001 /* ProfileSheet.swift in Sources */,
 				59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */,
 				208F703F48307B35717A911B /* LoadingDots.swift in Sources */,
+				C0A9051E7B2D4F1A8E3C6D01 /* ComposerTextView.swift in Sources */,
 				C0C0C0C0C0C0C0C001010001 /* ProjectWebSocket.swift in Sources */,
 				C0C0C0C0C0C0C0C001010003 /* ProjectPresenceViewModel.swift in Sources */,
 				C0C0C0C0C0C0C0C001010005 /* ProjectPresenceOverlay.swift in Sources */,
