@@ -237,3 +237,38 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
         assert "`changes` array" in prompt
         assert "server preserves the first and defers later attempts" in prompt
+
+
+class TestScheduleChangeReviewInStateBlock:
+    def test_rejected_warnings_and_unverified_compliance_are_spelled_out(self):
+        state = {"huume_action": {
+            "type": "schedule_change", "status": "proposed", "confirm_id": "ab12cd34",
+            "operation_count": 4, "operation_summary": {"assign": 4},
+            "review": {
+                "assignments": [{"op": "assign", "verdict": "ok"}] * 4,
+                "rejected": [{"shift_id": f"s{i}", "reasons": []} for i in range(5)],
+                "unfilled": [],
+                "employees": [{"name": "Dana Reyes", "warnings": ["only 0.0h rest next to another shift (policy: 8h minimum)",
+                                                                   "42h this week — over 40h and overtime isn't enabled for them"]}],
+                "compliance_status": "unmapped",
+                "jurisdiction": {"state": "TX", "status": "unmapped",
+                                 "message": "Legality was NOT verified for TX — Matcha has no researched scheduling thresholds for it."},
+            },
+        }}
+        block = build_state_block(state)
+        assert "schedule change (4 operations: 4 assign)" in block
+        assert "Not staged: 5 requested change(s) were refused" in block
+        assert "will not happen on confirm" in block
+        assert "Policy warning: only 0.0h rest" in block
+        assert "Policy warning: 42h this week" in block
+        assert "Compliance: NOT verified — Legality was NOT verified for TX" in block
+        assert "Never describe this change as compliant" in block
+
+    def test_verified_batch_adds_no_compliance_caveat(self):
+        state = {"huume_action": {
+            "type": "schedule_change", "status": "proposed", "confirm_id": "ab12cd34", "operation_count": 2,
+            "review": {"assignments": [], "rejected": [], "unfilled": [], "employees": [],
+                       "compliance_status": "verified", "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"}},
+        }}
+        block = build_state_block(state)
+        assert "Compliance:" not in block and "Not staged" not in block

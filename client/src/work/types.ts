@@ -847,6 +847,45 @@ export interface HuumeActionScheduleChange {
   end_time?: string | null
   count?: number | null
   employee_names?: string[] | null
+  // Server-computed on the stage turn (services/scheduling/schedule_review.py).
+  operation_count?: number
+  operation_summary?: Record<string, number>
+  rejected_count?: number
+  compliance_status?: 'verified' | 'advisory' | 'unmapped' | 'unavailable'
+  review?: HuumeScheduleReview
+}
+
+/** The `ScheduleReview` contract: what a staged schedule write will do, as
+ *  checked by the assignment guard — what was refused (`rejected`), the
+ *  policy warnings per person, and whether the state's law was evaluated at
+ *  all (`compliance_status`). Rendered by the action banner today and the
+ *  Schedule Pilot review pane later; kept loose here because work/ must not
+ *  import from the Matcha app's types tree. */
+export interface HuumeScheduleReview {
+  proposal_id?: string | null
+  kind?: 'edit' | 'create' | 'batch' | 'week_draft'
+  operation_count?: number
+  operation_summary?: Record<string, number>
+  compliance_status?: 'verified' | 'advisory' | 'unmapped' | 'unavailable'
+  assignments?: Array<{
+    shift_id?: string | null; role?: string; starts_at?: string; ends_at?: string
+    employee_id?: string | null; employee_name?: string | null; op?: string
+    verdict?: 'ok' | 'warn' | 'blocked'; reasons?: Array<{ code?: string; message?: string; policy?: boolean }>
+  }>
+  rejected?: Array<{
+    shift_id?: string | null; role?: string; starts_at?: string; ends_at?: string
+    employee_name?: string | null; op?: string; reasons?: Array<{ code?: string; message?: string; policy?: boolean }>
+  }>
+  unfilled?: Array<Record<string, unknown>>
+  employees?: Array<{
+    employee_id?: string; name?: string
+    before?: { minutes?: number; shifts?: number; days?: number }
+    after?: { minutes?: number; shifts?: number; days?: number }
+    warnings?: string[]
+  }>
+  advisories?: Array<{ message?: string; statute?: string | null; employee_name?: string | null; shift_id?: string | null }>
+  findings?: Array<Record<string, unknown>>
+  jurisdiction?: { state?: string | null; status?: string; message?: string }
 }
 
 export interface HuumeActionScheduleWeekDraft {

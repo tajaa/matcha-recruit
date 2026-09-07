@@ -30,6 +30,74 @@ the inclusive selected-week bound at both stage and confirm time. Huume writes
 remain confirmation-gated. Individual schedule edits may affect published
 shifts; the whole-week builder applies only editable drafts and never publishes.
 
+### Assignment guard + `ScheduleReview` (2026-09-07) — POLICY vs statute, reject-at-stage
+
+Why: "fill the vacant shift-leader shifts" put ONE employee on nine shifts, some overlapping, and Huume
+could not say whether it was legal. Audit found the structural causes: stage-time review of an assign
+op ran only `check_shift_compliance` (no overlap, no cumulative hours, no availability, no "state not
+researched" signal — that function returns `[]` for an ordinary adult shift in an unmapped state), the
+batch was never evaluated as a set, and confirm-time dropped the self-inflicted overlaps with copy that
+blamed drift. Every adult statutory check is `advisory`; the only hard stops were strict overlap
+(`find_conflicts`), minor caps and credential eligibility.
+
+- **`assignment_guard.py`** — `evaluate_batch(assignments, ledgers, week_start_weekday, allow_split_shift,
+  pre_blocked)` walks a batch in op order with a per-employee working set (DB intervals + accepted ops), so
+  op N sees ops 1..N-1. `blocked` (removed from the proposal): `existing_overlap`, `intra_batch_overlap`,
+  plus the caller's DB refusals (`not_qualified`, `outside_availability`, `shift_full` — counting earlier
+  assigns to the same shift). `warn` (stays, with the line in the pill): `second_shift_same_day`,
+  `rest_gap` (< `POLICY_MIN_REST_HOURS`=8), `consecutive_days` (> profile `max_consecutive_days` else
+  `POLICY_MAX_CONSECUTIVE_DAYS`=6), `weekly_cap` (> profile `max_weekly_minutes`) or
+  `weekly_overtime_policy` (> 40h without `allow_overtime`). **These `POLICY_*` constants are operational
+  defaults, not law** — every reason carries `policy: True/False`; statutes stay in `schedule_compliance`
+  / the catalog and are cited verbatim. Applies to agent/planner paths ONLY; manual REST routes and
+  `force` are untouched. `build_ledgers` is one query over the batch's employees (same predicate as
+  `find_conflicts`) + `employee_schedule_profiles` caps — the knobs the week builder already honoured
+  and the chat paths never read.
+  The ledger preserves net worked minutes separately from full overlap windows. Its query window
+  expands for the largest employee consecutive-day cap, including the supported 14-day setting.
+  `ProposedRemoval` mirrors confirm's two phases: unassigns and eligible reassignment sources are
+  removed first; cancellations apply in operation order. A rejected reassignment restores its source
+  and triggers another review pass so later assignments cannot depend on phantom free time or seats.
+  Shift headroom is consumed only after the overlap and eligibility verdict accepts an assignment.
+- **`shift_compliance.jurisdiction_rule_status`** → `{state, status ∈ curated|catalog|unmapped|unavailable}`.
+  `schedule_review.jurisdiction_message` turns it into the one sentence every surface renders.
+  `compliance_status` = `verified` / `advisory` (rules on file) / `unmapped` / `unavailable`. On agent
+  paths `unavailable` REFUSES to stage (fail closed; there is no `force` to click through); `unmapped`
+  stages with the honesty line and a confirm line that says confirming means you checked the state's
+  rules yourself. Result text repeats "Legality was NOT verified for {ST} … you confirmed with that in
+  view." The create pill's `rules_unmapped` line now derives from the same helper.
+  Standalone creates use the same unavailable refusal as edits/batches. Cross-store swaps retain
+  both locations; an unlocated shift is included as unmapped even alongside a curated location.
+- **`schedule_review.build_review(doc)`** — the `ScheduleReview` contract (`assignments`, `rejected`,
+  `unfilled`, `employees[before/after/warnings]`, `advisories`, `findings`, `jurisdiction`,
+  `compliance_status`). Stored on the proposal doc (`doc["review"]`, `doc["compliance_status"]`,
+  `doc["rejected"]`, `doc["jurisdiction"]`), returned on `ProposalBuild.review`, merged into Huume's
+  staged dict, echoed in the stage-turn tool response (`agent.py`: same reason as `findings`), summarized
+  in the state block, and rendered by the pill. Later consumers: the REST preview and the Schedule
+  Pilot review pane.
+- `schedule_chat._review_assign_ops` (called at the end of `_resolve_edit_ops`) annotates `op["review"]`;
+  `build_edit_proposal` / `build_batch_proposal` split accepted vs `rejected`, refuse when nothing
+  survives (`ProposalBuild.clarify_kind="refused"` — the skill relays it without the "reply with the
+  shift time" hint), and refuse on `unavailable`. `_apply_edit_ops` names an overlap with a shift
+  applied earlier in the SAME confirm ("would overlap the … shift applied earlier in this batch") and
+  keeps the drift copy only for a real race; acknowledged statutory advisories now reach
+  `edit_result_text` and the `schedule_chat.edit_confirm` audit row (`advisories_acknowledged`,
+  `compliance_status`).
+  Resolved edit operations retain `job_id` for the stage-time qualification check. Confirm-time
+  overlap attribution also tracks successful retimes and both sides of a shift swap.
+- The bulk `all_vacant_shifts` path is capped by `MAX_BATCH_OPERATIONS` (split plan) like any batch and
+  goes through the guard, so "put Dana on everything" lists blocked assignments under
+  **Not staged** with reasons; non-overlapping doubles and cap warnings remain stageable policy
+  advisories. `propose` reports `operation_count` = what was STAGED, plus
+  `rejected_count`, `compliance_status`, `review`.
+  `review.operation_count`/`operation_summary` count resolved edits and new shifts before assignments
+  are flattened; new shifts have no database IDs yet, and multiple assignees do not inflate the count.
+- Tests: `tests/employee_schedule/test_assignment_guard.py` (nine-shift scenario, back-to-back, caps,
+  determinism), `test_schedule_review.py`, `test_schedule_chat_guard_integration.py` (split, refused
+  clarify, unavailable gate, intra-batch confirm copy), renderer cases in `test_schedule_chat_edits.py`,
+  `jurisdiction_rule_status` in `test_shift_compliance.py`, and the all-vacant/state-block cases in
+  `tests/huume/`.
+
 ### Batched schedule corrections (`schedule_chat_proposals.proposal.kind='batch'`, 2026-09-06)
 
 One clarified correction is one confirmation. `propose_schedule_change`'s

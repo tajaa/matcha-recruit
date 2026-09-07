@@ -69,8 +69,23 @@ export function bannerLabel(action: HuumeAction): string {
       return 'Archive this inventory item?'
     case 'inventory_receipt':
       return `Commit this receipt (${action.lines.length} line${action.lines.length === 1 ? '' : 's'})?`
-    case 'schedule_change':
-      return action.pill_text?.split('\n', 1)[0] ?? 'Apply this schedule change?'
+    case 'schedule_change': {
+      // The banner is the one line a thumb reads before Confirm: it has to
+      // carry what was REFUSED and whether legality was verified, not just
+      // the pill's cheerful lead line.
+      const staged = action.operation_count
+      const rejected = action.rejected_count ?? action.review?.rejected?.length ?? 0
+      const warnings = (action.review?.employees ?? []).reduce((n, e) => n + (e.warnings?.length ?? 0), 0)
+      if (staged == null && !rejected && !warnings && !action.compliance_status) {
+        return action.pill_text?.split('\n', 1)[0] ?? 'Apply this schedule change?'
+      }
+      const parts = [`Apply ${staged ?? '?'} schedule change${staged === 1 ? '' : 's'}`]
+      if (rejected) parts.push(`${rejected} not staged`)
+      if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`)
+      const status = action.compliance_status
+      const tail = status === 'unmapped' || status === 'unavailable' ? ' — compliance NOT verified' : ''
+      return `${parts.join(', ')}${tail}?`
+    }
     case 'schedule_week_draft': {
       const filled = action.metrics?.filled_positions ?? '?'
       const required = action.metrics?.required_positions ?? '?'

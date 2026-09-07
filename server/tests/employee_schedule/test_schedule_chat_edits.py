@@ -266,3 +266,53 @@ class TestEditResultText:
     def test_plural_agreement(self):
         text = edit_result_text([{**_op(), "ok": True}, {**_op(shift_id="s2"), "ok": True}])
         assert "2 changes are live" in text
+
+
+class TestGuardAwareRenderers:
+    """The pill and the result are the manager's only view of what the guard
+    decided; both must carry rejected ops, policy warnings, acknowledged
+    statutory advisories and the jurisdiction honesty line."""
+
+    def _rejected(self):
+        return [{"shift_id": "s9", "role": "Shift Lead", "starts_at": "2026-08-13T10:00:00+00:00",
+                 "ends_at": "2026-08-13T18:00:00+00:00", "employee_name": "Casey Nguyen", "op": "assign",
+                 "reasons": [{"code": "intra_batch_overlap", "policy": False,
+                              "message": "would overlap the Shift Lead Thu Aug 13 06:00–14:00 shift earlier in this batch"}]}]
+
+    def test_proposal_lists_not_staged_warnings_and_the_honesty_line(self):
+        warned = _op(review={"verdict": "warn", "before": {}, "after": {},
+                             "reasons": [{"code": "rest_gap", "policy": True, "message": "only 0.0h rest next to another shift (policy: 8h minimum)"}]})
+        text = edit_proposal_text({
+            "ack": "Got it.", "ops": [warned], "rejected": self._rejected(),
+            "jurisdiction": {"state": "TX", "status": "unmapped",
+                             "message": "Legality was NOT verified for TX — Matcha has no researched scheduling thresholds for it. Confirming means you've checked meal-break, overtime and rest rules yourself."},
+        })
+        assert "⚠ Casey Nguyen: only 0.0h rest next to another shift (policy: 8h minimum)" in text
+        assert "**Not staged** (1) — these can't be applied as asked:" in text
+        assert "Casey Nguyen → **Shift Lead** — Thu Aug 13, 10:00–18:00: would overlap the Shift Lead" in text
+        assert "Legality was NOT verified for TX" in text
+        assert "Reply **confirm** to make these changes anyway — that means you've checked TX rules yourself" in text
+        # Order: op lines, warnings, not-staged, honesty, confirm.
+        assert text.index("⚠") < text.index("**Not staged**") < text.index("NOT verified") < text.index("Reply **confirm**")
+
+    def test_curated_state_keeps_the_plain_confirm_line(self):
+        text = edit_proposal_text({"ack": "ok", "ops": [_op()], "rejected": [],
+                                   "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"}})
+        assert "NOT verified" not in text and "anyway" not in text
+        assert "Reply **confirm** and I'll make these changes, or **cancel**." in text
+
+    def test_result_renders_acknowledged_advisories_once_and_the_not_verified_line(self):
+        text = edit_result_text(
+            [{**_op(), "ok": True}],
+            acknowledged=[
+                {"message": "past 40h incurs weekly overtime", "statute": "FLSA", "employee_name": "Casey Nguyen", "shift_id": "s1"},
+                {"message": "past 40h incurs weekly overtime", "statute": "FLSA", "employee_name": "Casey Nguyen", "shift_id": "s2"},
+            ],
+            jurisdiction={"state": "TX", "status": "unmapped", "message": "…"},
+        )
+        assert text.count("Heads up on Casey Nguyen: past 40h incurs weekly overtime (FLSA)") == 1
+        assert text.endswith("Legality was NOT verified for TX — no researched scheduling thresholds; you confirmed with that in view.")
+
+    def test_result_without_review_data_is_unchanged(self):
+        assert edit_result_text([{**_op(), "ok": True}]) == edit_result_text([{**_op(), "ok": True}], acknowledged=None, jurisdiction=None)
+        assert "NOT verified" not in edit_result_text([{**_op(), "ok": True}], jurisdiction={"state": "CA", "status": "catalog"})

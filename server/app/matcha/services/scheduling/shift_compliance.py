@@ -399,6 +399,25 @@ def shape_lapse_advisories(
     return violations
 
 
+async def jurisdiction_rule_status(conn, company_id: UUID, location_id: Optional[UUID]) -> dict:
+    """Whether this location's state actually has scheduling law on file:
+    `{"state", "status"}` with status ∈ curated / catalog / unmapped /
+    unavailable. `check_shift_compliance` returns `[]` for an ordinary adult
+    shift in an unmapped state — indistinguishable from "checked and clean" —
+    so every agent/planner surface reads THIS first and refuses to call an
+    `unmapped`/`unavailable` result compliant (`schedule_review`)."""
+    state, _city = await _location_state(conn, company_id, location_id)
+    st = (state or "").strip().upper()
+    if not st:
+        return {"state": None, "status": "unmapped"}
+    if schedule_compliance.is_curated_state(st):
+        return {"state": st, "status": "curated"}
+    db_rules, fetch_failed = await _approved_db_rules(conn, st)
+    if fetch_failed:
+        return {"state": st, "status": "unavailable"}
+    return {"state": st, "status": "catalog" if db_rules else "unmapped"}
+
+
 async def check_shift_compliance(
     conn,
     company_id: UUID,

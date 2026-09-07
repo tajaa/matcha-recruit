@@ -183,6 +183,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Channel `@huume` shift EDITS (swap/reassign/unassign/retime/cancel) → `services/scheduling/schedule_chat.py:build_edit_proposal` / `execute_edit_proposal`, writing through the four shared cores in `services/scheduling/shift_writes.py` (`apply_assignment_core`, `remove_assignment_core`, `retime_shift_core`, `cancel_shift_core`)
 - Channel ASK-loop NL schedule-change tool (anaphora/compound asks) → `services/ems/channel_agent.py:propose_schedule_change` tool → `services/ems/channel_grounding.py:run_schedule_change`
 - Thread Huume schedule tools (`find_shift_coverage` read, `propose_schedule_change` staged) → `services/huume/schedule_skill.py`
+- Agent-path assignment guard (POLICY caps, intra-batch overlap, reject-at-stage) → `services/scheduling/assignment_guard.py`; the `ScheduleReview` contract → `services/scheduling/schedule_review.py`; jurisdiction on-file check → `services/scheduling/shift_compliance.py:jurisdiction_rule_status`
 - Channel receipt/invoice attachment ingest (@huume + a dropped CSV/PDF/photo) → `werk/routes/channels_ws.py:_bg_inventory_receipt` / `_bg_receipt_reply`, staging table `inventory_receipt_drafts` (migration `receiptdraft01`)
 
 ### Inventory (channel stock tracking)

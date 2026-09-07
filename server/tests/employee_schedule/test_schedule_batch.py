@@ -127,9 +127,13 @@ def _edit_doc():
     }
 
 
+_CURATED = {"state": "CA", "status": "curated", "message": "Scheduling law for CA is on file (hand-curated)."}
+
+
 def _create_doc():
     return {
         "surface": "editor", "week_start": "2026-08-23", "rules_unmapped": False,
+        "jurisdiction": dict(_CURATED),
         "location": {"id": "l1", "name": "Downtown", "city": "SF", "state": "CA"},
         "shifts": [{
             "label": "barista", "role": "barista", "template_id": None, "job_id": None,
@@ -186,10 +190,14 @@ class TestBuildBatchProposal:
             persisted["existing_id"] = existing_id
             return UUID("3f6b1c22-2000-4000-8000-000000000001")
 
+        async def fake_jurisdiction(conn, company_id, ops, location_id):
+            return dict(_CURATED)
+
         with (
             mock.patch.object(schedule_chat, "_resolve_edit_ops", fake_edits),
             mock.patch.object(schedule_chat, "_resolve_create_shifts", fake_creates),
             mock.patch.object(schedule_chat, "_persist_proposal", fake_persist),
+            mock.patch.object(schedule_chat, "_ops_jurisdiction", fake_jurisdiction),
         ):
             build = _run(schedule_chat.build_batch_proposal(
                 None, company_id=uuid4(), channel_id=None, source_message_id=None, created_by=uuid4(),
@@ -211,6 +219,10 @@ class TestBuildBatchProposal:
         assert [op["kind"] for op in doc["edit"]["ops"]] == ["cancel", "cancel"]
         assert doc["create"]["surface"] == "editor"
         assert len(doc["create"]["shifts"]) == 1
+        # the edit fixture carries a Fair Workweek advisory → statutory advisories attached
+        assert doc["compliance_status"] == "advisory"
+        assert doc["review"]["kind"] == "batch"
+        assert build.review["proposal_id"] == "3f6b1c22-2000-4000-8000-000000000001"
         assert "Reply **confirm**" in build.pill_text
 
     def test_edit_clarify_persists_nothing_and_skips_the_create_half(self):

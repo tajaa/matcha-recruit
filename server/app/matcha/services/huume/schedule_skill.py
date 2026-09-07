@@ -56,6 +56,12 @@ class ScheduleProposalResult(TypedDict):
     pill_text: NotRequired[str]
     operation_count: NotRequired[int]
     operation_summary: NotRequired[dict[str, int]]
+    # The `ScheduleReview` (services/scheduling/schedule_review.py) for what
+    # was staged — the model relays `rejected`/warnings/compliance from it on
+    # the SAME turn; the state block re-renders a summary on later turns.
+    review: NotRequired[dict[str, Any]]
+    rejected_count: NotRequired[int]
+    compliance_status: NotRequired[str]
 
 
 def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
@@ -220,7 +226,7 @@ async def _all_vacant_shift_requests(
     inclusive_end = week_end or (week_start + _date.resolution * 6)
     rows = await conn.fetch(
         """
-        SELECT s.id
+        SELECT s.id, s.starts_at
         FROM schedule_shifts s
         WHERE s.company_id=$1 AND s.location_id=$2
           AND s.status = ANY($3::text[])
@@ -244,6 +250,11 @@ async def _all_vacant_shift_requests(
         )
     if not rows:
         return [], f"There are no vacant shifts in this editor week for {employee_full_name} to pick up."
+    if len(rows) > MAX_BATCH_OPERATIONS:
+        # Same reviewability cap as an enumerated batch — the bulk path used
+        # to bypass it (500 ops behind a one-line banner).
+        items = [BatchItem(day=row["starts_at"].date()) for row in rows]
+        return [], split_plan_message(len(rows), plan_batches(items, MAX_BATCH_OPERATIONS), MAX_BATCH_OPERATIONS)
     return [
         {
             "kind": "assign", "target_shift_id": str(row["id"]),
@@ -391,16 +402,35 @@ async def propose(
         # instead — leaving both in was a direct contradiction.
         text = build.pill_text.removeprefix("\U0001F4C5 ").strip()
         text = text.removesuffix("Just reply to this message.").strip()
+        if build.clarify_kind == "refused":
+            # Every op was rejected (overlaps, unavailable, full) or the state's
+            # rules could not be loaded — the message already says what to do.
+            return {"status": "clarify", "message": text}
         return {"status": "clarify", "message": (
             f"{text}\nReply with the shift time, employee, or whether you mean the "
             "staffed or unstaffed shift."
         )}
+    review = build.review or {}
+    if review:
+        # Count what was actually STAGED: the guard may have rejected some of
+        # the requested ops, and the model must not describe those as done.
+        staged_ops = [a for a in review.get("assignments") or [] if a.get("op") != "create"]
+        # New shifts have no database IDs yet, and one shift can carry several
+        # assignees. The review counts resolved operations before flattening them.
+        operation_count = review.get("operation_count", len(staged_ops) or operation_count)
+        operation_summary = review.get("operation_summary") or (
+            summarize_operations([{"kind": a.get("op")} for a in staged_ops], [])
+            if staged_ops else operation_summary
+        )
     return {
         "status": "ready",
         "proposal_id": str(build.proposal_id),
         "pill_text": build.pill_text,
         "operation_count": operation_count,
         "operation_summary": operation_summary,
+        "review": review,
+        "rejected_count": len(review.get("rejected") or []),
+        "compliance_status": review.get("compliance_status") or "unmapped",
     }
 
 
