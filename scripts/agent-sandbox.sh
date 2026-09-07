@@ -383,6 +383,22 @@ ensure_host_dev_services() {
     export HOST_DB_PORT HOST_REDIS_PORT
 }
 
+refresh_agent_versions() {
+    local runtime_root="${MSANDBOX_RUNTIME_ROOT:-$PROJECT_ROOT}" exports
+    exports="$(
+        PYTHONPATH="$runtime_root${PYTHONPATH:+:$PYTHONPATH}" \
+            python3 -m scripts.msandbox.agent_versions \
+            --runtime-root "$runtime_root" --shell
+    )" || return 1
+    eval "$exports"
+    export CODEX_VERSION CLAUDE_CODE_VERSION
+}
+
+build_workspace_image() {
+    refresh_agent_versions
+    "${COMPOSE[@]}" build workspace
+}
+
 start_services() {
     # The dedicated AutoPR lane may start only while the primary msandbox is
     # explicitly enabled. Check both before and after `up` so `msandbox stop`
@@ -393,6 +409,10 @@ start_services() {
     if [ "${AGENT_SANDBOX_SKIP_HOST_SERVICES:-0}" != 1 ]; then
         ensure_host_dev_services
     fi
+    # Resolve exact current agent releases on the host before entering the
+    # immutable container. Changed build args invalidate only the agent layer;
+    # Compose then recreates a running workspace from the refreshed image.
+    build_workspace_image
     "${COMPOSE[@]}" up --detach workspace
     if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ] && ! autopr_system_ready; then
         "${COMPOSE[@]}" stop workspace >/dev/null 2>&1 || true
@@ -903,6 +923,7 @@ fi
 case "$command_name" in
     build)
         require_docker
+        refresh_agent_versions
         if [[ "${1:-}" == "--playwright" ]]; then
             INSTALL_PLAYWRIGHT_BROWSERS=true "${COMPOSE[@]}" build workspace
         else
@@ -1049,7 +1070,6 @@ case "$command_name" in
         # start services, drop into a shell ready to run an agent.
         require_docker
         guard_interactive_entry "open another sandbox shell" || exit 3
-        "${COMPOSE[@]}" build workspace
         start_primary_and_enable_autopr
         exec_workspace_with_file_proxy bash
         ;;

@@ -100,6 +100,12 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   `force` are untouched. `build_ledgers` is one query over the batch's employees (same predicate as
   `find_conflicts`) + `employee_schedule_profiles` caps — the knobs the week builder already honoured
   and the chat paths never read.
+  The ledger preserves net worked minutes separately from full overlap windows. Its query window
+  expands for the largest employee consecutive-day cap, including the supported 14-day setting.
+  `ProposedRemoval` mirrors confirm's two phases: unassigns and eligible reassignment sources are
+  removed first; cancellations apply in operation order. A rejected reassignment restores its source
+  and triggers another review pass so later assignments cannot depend on phantom free time or seats.
+  Shift headroom is consumed only after the overlap and eligibility verdict accepts an assignment.
 - **`shift_compliance.jurisdiction_rule_status`** → `{state, status ∈ curated|catalog|unmapped|unavailable}`.
   `schedule_review.jurisdiction_message` turns it into the one sentence every surface renders.
   `compliance_status` = `verified` / `advisory` (rules on file) / `unmapped` / `unavailable`. On agent
@@ -107,6 +113,8 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   stages with the honesty line and a confirm line that says confirming means you checked the state's
   rules yourself. Result text repeats "Legality was NOT verified for {ST} … you confirmed with that in
   view." The create pill's `rules_unmapped` line now derives from the same helper.
+  Standalone creates use the same unavailable refusal as edits/batches. Cross-store swaps retain
+  both locations; an unlocated shift is included as unmapped even alongside a curated location.
 - **`schedule_review.build_review(doc)`** — the `ScheduleReview` contract (`assignments`, `rejected`,
   `unfilled`, `employees[before/after/warnings]`, `advisories`, `findings`, `jurisdiction`,
   `compliance_status`). Stored on the proposal doc (`doc["review"]`, `doc["compliance_status"]`,
@@ -122,10 +130,15 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   keeps the drift copy only for a real race; acknowledged statutory advisories now reach
   `edit_result_text` and the `schedule_chat.edit_confirm` audit row (`advisories_acknowledged`,
   `compliance_status`).
+  Resolved edit operations retain `job_id` for the stage-time qualification check. Confirm-time
+  overlap attribution also tracks successful retimes and both sides of a shift swap.
 - The bulk `all_vacant_shifts` path is capped by `MAX_BATCH_OPERATIONS` (split plan) like any batch and
-  goes through the guard, so "put Dana on everything" stages ≤1/day and lists the rest under
-  **Not staged** with reasons. `propose` reports `operation_count` = what was STAGED, plus
+  goes through the guard, so "put Dana on everything" lists blocked assignments under
+  **Not staged** with reasons; non-overlapping doubles and cap warnings remain stageable policy
+  advisories. `propose` reports `operation_count` = what was STAGED, plus
   `rejected_count`, `compliance_status`, `review`.
+  `review.operation_count`/`operation_summary` count resolved edits and new shifts before assignments
+  are flattened; new shifts have no database IDs yet, and multiple assignees do not inflate the count.
 - Tests: `tests/employee_schedule/test_assignment_guard.py` (nine-shift scenario, back-to-back, caps,
   determinism), `test_schedule_review.py`, `test_schedule_chat_guard_integration.py` (split, refused
   clarify, unavailable gate, intra-batch confirm copy), renderer cases in `test_schedule_chat_edits.py`,
@@ -150,6 +163,9 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   the `policy:` prefix in `unfilled.exclusions` so law/eligibility and operational defaults stay
   distinguishable. `candidate_score` puts `shift_count` before `minutes`, so with equal target status the
   person with fewer shifts wins — two leads split seven blocks 4/3 instead of 7/0.
+  The roster loader also returns `adjacent_assignments`, looking backward and forward by the largest
+  applicable consecutive-day cap. These affect rest and consecutive days, never this week's minutes
+  or fairness count. They ride the whole-week snapshot/hash so changes invalidate an older preview.
 - **`_load_vacant_demand`** — same row shape as `_load_existing_demand`, but `status IN (draft,
   published)` (an assignment onto a published shift is a routine edit; `_apply_edit_ops` does it today),
   `HAVING COUNT(assignees) < required_staff`, optional `job_id = ANY`, `id = ANY`, `role ILIKE`. Current
@@ -171,6 +187,10 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   assignments ⇒ a clarify that names the top reasons per seat. The prompt's "Staffing rules" paragraph
   routes every "fill / staff / cover the open shifts" ask here and forbids the model choosing names for
   a fill. `all_vacant_shifts` stays as the literal "one named person on every open shift" path.
+  Both REST and Huume use `vacant_fill_edit_requests`: it preserves the selected employee UUID and
+  refuses more than `MAX_BATCH_OPERATIONS` seats with the existing day split before resolution or
+  persistence. `_resolve_edit_ops` validates that UUID against the active tenant/location roster;
+  equal employee names cannot change the choice or trigger a needless name clarification.
 - **The model can see load** — `planning_inputs.build_planning_inputs` is ONE builder behind two readers:
   `get_schedule_overview` gains `roster_load` (`compact_roster_load`: per person jobs, availability
   state, scheduled minutes/shift count/days this week, time away, weekly cap, `allow_overtime`),
@@ -190,6 +210,8 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   `POST /fill-vacant/{proposal_id}/apply` — creator-only (403), `status='proposed'` (409),
   editor/edit only (400), `execute_edit_proposal` with the week bound from the parse, claim error → 409,
   scope error → 422, returns `touched_shift_ids`; **no `force`** (agent/planner paths never force);
+  missing or malformed saved scope → 400 and a request to preview again (including legacy Huume
+  editor rows with no saved scope). Location authorization is unconditional before execution.
   `DELETE /fill-vacant/{proposal_id}` → 204 (409 once spent). Each preview is one scenario and the
   proposal row is its handle — the Schedule Pilot workspace (PR4) builds its scenarios strip on exactly
   this. Client: `api/employees/employeeSchedule.ts` (`fetchPlanningInputs`, `previewFillVacant`,
@@ -426,11 +448,13 @@ Invariants:
   report nothing at all. The buffer minutes and the 15-minute sampling slice are
   operational policy in feature code and say so in their docstrings (memory:
   `feedback-legal-thresholds-codify`).
-- **The findings pass never fails a build**, same contract as
-  `_preflight_compliance_blocks`: it logs and returns `[]`. That guard wraps
-  the WHOLE of `_attach_findings` (profile read + coverage evaluator + break
-  relief), not just the break half; on failure the metrics say coverage was not
-  checked, which `_coverage_sentence` reports as such — never as a clean week.
+- **The findings pass never fails a build**, independently of the assignment
+  preflight (which fails closed per proposed pair). `_attach_findings` guards
+  profile/coverage/break evaluation as a whole; a jurisdiction lookup failure
+  is handled inside the pass so already-computed coverage and break findings
+  survive while legality is marked `unavailable`. If coverage evaluation itself
+  fails, metrics say it was not checked and `_coverage_sentence` reports that —
+  never a clean week.
 - **Every findings cap is by severity, not calendar order.** The list is sorted
   day-then-time, so a plain slice would drop Saturday's gaps to keep Sunday's
   advisories. `_cap_findings` gives gaps the budget first and re-sorts, and it
@@ -467,9 +491,10 @@ preflight exception as "fine", never validated the `fixed_employee_ids` it inher
 - **New findings** (`_attach_findings_core`, same `make_finding` shape, counted in full in
   `finding_counts`):
   - `staffing_concentration` (advisory) — one person on ≥ `_CONCENTRATION_MIN_SHIFTS` (7: more shifts
-    than days) OR on ≥ 3 shifts that are > 40% of the proposed positions AND ≥ 2× a fair split of the
-    roster (`proposed / roster_size`). Two leads on 4/3 of seven blocks stay quiet; one person on 6 of 6
-    with a second body on the roster is the finding; a one-person roster is never flagged by share.
+    than days) OR on ≥ 3 shifts that are > 40% of the staffed positions AND ≥ 2× their expected share
+    across each shift's eligible pool. Fixed assignments count too. Two qualified leads on 4/3 of seven
+    gated blocks stay quiet even alongside an ineligible barista roster; a one-person eligible pool is
+    never flagged by share (the absolute 7-shift rule still applies).
   - `existing_double_booking` (**gap**, added to `GAP_KINDS`) — an inherited `fixed_employee_ids`
     booking that overlaps another of theirs (in the plan or elsewhere that week). Still counted as
     filled; the finding is how the manager learns.
@@ -481,10 +506,10 @@ preflight exception as "fine", never validated the `fixed_employee_ids` it inher
     before the pass runs is `unavailable` ("not an all-clear"), so a findings pass that fails never reads
     as verified.
 - **`metrics.top_load`** — top 3 `{employee_id, name, shifts, hours}` heaviest first. The summary adds
-  "{name} carries N of the M proposed positions." when concentration fired, and the jurisdiction
+  "{name} carries N of the M staffed positions." when concentration fired, and the jurisdiction
   sentence when not verified. Still never the word "compliant".
 - **The week-draft `ScheduleReview`** — `schedule_review.build_week_draft_review(plan, employee_names,
-  existing_assignments, week_start, week_end, proposal_id)` → `kind="week_draft"`: `assignments`
+  existing_assignments, week_start, week_end, proposal_id, concentration_findings)` → `kind="week_draft"`: `assignments`
   (verdict `warn` when an advisory is attached), `rejected=[]` (the planner refuses before proposing),
   `unfilled` (with `ends_at` looked up), `employees[before/after/warnings]` (the concentration finding
   is the person's warning), `advisories` verbatim, `findings`, `jurisdiction`, `compliance_status`.

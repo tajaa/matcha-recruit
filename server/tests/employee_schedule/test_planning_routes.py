@@ -161,8 +161,10 @@ def test_preview_plans_then_stages_one_editor_proposal_for_the_caller(monkeypatc
     assert built["editor_location_id"] == LOCATION
     assert built["editor_week_start"] == WEEK and built["editor_week_end"] == date(2026, 8, 29)
     assert built["parsed"]["edit_requests"] == [
-        {"kind": "assign", "target_shift_id": "s1", "to_employee_name": "Dana Reyes"},
-        {"kind": "assign", "target_shift_id": "s2", "to_employee_name": "Ben Ortiz"},
+        {"kind": "assign", "target_shift_id": "s1", "to_employee_name": "Dana Reyes",
+         "to_employee_id": plan["assignments"][0]["employee_id"]},
+        {"kind": "assign", "target_shift_id": "s2", "to_employee_name": "Ben Ortiz",
+         "to_employee_id": plan["assignments"][1]["employee_id"]},
     ]
     # Apply reads these back — the proposal doc itself carries no location or week.
     assert built["parsed"]["editor_location_id"] == str(LOCATION)
@@ -319,3 +321,114 @@ def test_discard_cancels_only_the_callers_proposed_row(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _run(planning.discard_fill_vacant(row["id"], current_user=user))
     assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("parse", [
+    {}, {"editor_location_id": str(LOCATION)}, {"editor_week_start": "2026-08-23"},
+    {"editor_location_id": "bad", "editor_week_start": "2026-08-23"},
+    {"editor_location_id": str(LOCATION), "editor_week_start": "bad"},
+    {"editor_location_id": str(LOCATION), "editor_week_start": "9999-12-31"},
+])
+def test_apply_requires_valid_persisted_scope_before_execution(monkeypatch, parse):
+    user = _user("employee")
+    executor = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        _apply(monkeypatch, row=_row(created_by=user.id, parse=parse), user=user, execute=executor)
+    assert exc.value.status_code == 400
+    executor.assert_not_awaited()
+
+
+def test_apply_rechecks_revoked_location_permission(monkeypatch):
+    user = _user("employee")
+    row = _row(created_by=user.id)
+    authz = _wire(monkeypatch, _Conn(proposal_row=row), company_id=row["company_id"])
+    authz.side_effect = HTTPException(status_code=403, detail="not your store")
+    executor = AsyncMock()
+    monkeypatch.setattr(schedule_chat, "execute_edit_proposal", executor)
+    with pytest.raises(HTTPException) as exc:
+        _run(planning.apply_fill_vacant(row["id"], current_user=user))
+    assert exc.value.status_code == 403
+    executor.assert_not_awaited()
+
+
+def test_apply_body_cannot_override_saved_scope_or_force(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    user = _user()
+    row = _row(created_by=user.id)
+    authz = _wire(monkeypatch, _Conn(proposal_row=row), company_id=row["company_id"])
+    monkeypatch.setattr(planning, "get_company_features", AsyncMock(return_value={"employee_schedule": True}))
+    executor = AsyncMock(return_value="applied")
+    monkeypatch.setattr(schedule_chat, "execute_edit_proposal", executor)
+    app = FastAPI()
+    app.include_router(planning.router)
+    app.dependency_overrides[planning.require_company_member] = lambda: user
+    with TestClient(app) as client:
+        response = client.post(f"/fill-vacant/{row['id']}/apply?force=true", json={
+            "force": True, "editor_location_id": str(uuid4()), "editor_week_start": "2026-01-01",
+        })
+    assert response.status_code == 200
+    assert authz.await_args.kwargs["location_id"] == LOCATION
+    assert executor.await_args.kwargs["week_start"] == WEEK
+    assert "force" not in executor.await_args.kwargs
+
+
+def test_preview_refuses_over_cap_before_resolving_or_persisting(monkeypatch):
+    result, captured, _ = _preview(monkeypatch, plan=_plan([
+        _assignment(str(uuid4()), "Alex Lee") for _ in range(41)
+    ]))
+    assert result["status"] == "refused" and "41 schedule operations" in result["message"]
+    assert captured["build"] is None
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_selected_employee_identity_reaches_real_resolution_and_saved_proposal(monkeypatch, available):
+    import json
+
+    company_id, user, employee_id, other_id, shift_id = uuid4(), _user(), uuid4(), uuid4(), uuid4()
+    # Two equal names; only the selected UUID is valid for this assignment.
+    people = {eid: {"id": eid, "first_name": "Alex", "last_name": "Lee"} for eid in (employee_id, other_id)}
+
+    class IdentityConn:
+        saved = None
+
+        async def fetchrow(self, query, *args):
+            if "FROM employees" in query:
+                assert "id=$1 AND org_id=$2" in query and "work_location_id=$3" in query
+                assert "NOT IN ('terminated', 'offboarded')" in query
+                assert args == (employee_id, company_id, LOCATION)
+                return people[employee_id] if available else None
+            assert "INSERT INTO schedule_chat_proposals" in query
+            self.saved = {"status": args[4], "proposal": json.loads(args[5]), "parse": json.loads(args[6])}
+            return {"id": uuid4()}
+
+    conn = IdentityConn()
+    _wire(monkeypatch, conn, company_id=company_id)
+    assignment = {**_assignment(shift_id, "Alex Lee"), "employee_id": str(employee_id)}
+    monkeypatch.setattr(planning, "plan_vacant_fill", AsyncMock(return_value=_plan([assignment])))
+    name_matcher = AsyncMock(side_effect=AssertionError("Planner IDs must not be matched by name"))
+    monkeypatch.setattr(schedule_chat, "_match_single_employee", name_matcher)
+    monkeypatch.setattr(schedule_chat, "_resolve_shift_ref", AsyncMock(return_value={"shift": {
+        "id": shift_id, "role": "Lead", "location_id": LOCATION, "job_id": None,
+        "starts_at": datetime(2026, 8, 24, 6, tzinfo=UTC), "ends_at": datetime(2026, 8, 24, 14, tzinfo=UTC),
+        "break_minutes": 0, "kind": "work", "training_requirement_id": None, "published_at": None,
+    }}))
+    monkeypatch.setattr(schedule_chat, "check_shift_compliance", AsyncMock(return_value=[]))
+    guard = AsyncMock()
+    monkeypatch.setattr(schedule_chat, "_review_assign_ops", guard)
+    monkeypatch.setattr(schedule_chat, "_ops_jurisdiction", AsyncMock(return_value={"state": "CA", "status": "curated"}))
+    result = _run(planning.preview_fill_vacant(
+        LOCATION, FillVacantPreviewRequest(week_start=WEEK, employee_id=employee_id), current_user=user,
+    ))
+    name_matcher.assert_not_awaited()
+    if available:
+        assert result["status"] == "ready"
+        assert guard.await_args.args[2][0]["to_employee_id"] == str(employee_id)
+        assert conn.saved["proposal"]["ops"][0]["to_employee_id"] == str(employee_id)
+        assert conn.saved["parse"]["editor_location_id"] == str(LOCATION)
+        assert conn.saved["parse"]["editor_week_start"] == WEEK.isoformat()
+    else:
+        assert result["status"] == "clarify" and "no longer active" in result["message"]
+        guard.assert_not_awaited()
+        assert conn.saved["status"] == "clarifying"

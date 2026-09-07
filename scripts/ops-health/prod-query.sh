@@ -2,9 +2,9 @@
 # Emit a narrow, read-only JSON view of production through the active backend.
 set -euo pipefail
 
-MODE="${1:?usage: prod-query.sh domains|errors}"
+MODE="${1:?usage: prod-query.sh domains|errors|alembic}"
 case "$MODE" in
-    domains|errors) ;;
+    domains|errors|alembic) ;;
     *) echo "unknown mode: $MODE" >&2; exit 2 ;;
 esac
 

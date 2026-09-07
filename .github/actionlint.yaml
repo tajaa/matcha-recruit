@@ -1,0 +1,6 @@
+# actionlint config — read by the `lint` job in ci.yml.
+self-hosted-runner:
+  # The autopr / schema-drift / silent-error-autofix workflows run on the
+  # self-hosted Mac registered with this custom label.
+  labels:
+    - opencode

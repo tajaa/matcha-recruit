@@ -21,3 +21,7 @@ and legacy AutoPR control plane remain in `docs/ops/AGENT_SANDBOX.md`.
 
 Set `INSTALL_PLAYWRIGHT_BROWSERS=true` (or `msandbox build --playwright`) to
 include an isolated Chromium binary for Playwright.
+
+Codex and Claude Code are checked against npm when msandbox starts, then baked
+into a new immutable image only when a newer release exists. See
+`docs/ops/AGENT_SANDBOX.md` for offline fallback and version-override controls.

@@ -1,0 +1,4 @@
+# Default reviewer for everything. Automation (kanban-autopr, silent-error
+# autofix, dependabot) opens PRs against this repo; this makes the human owner
+# the requested reviewer on each of them without per-workflow wiring.
+* @tajaa

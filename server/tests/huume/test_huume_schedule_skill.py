@@ -929,8 +929,8 @@ class TestFillVacantShifts(unittest.TestCase):
             "only_employee_ids": None, "exclude_employee_ids": [_UUID(BEN_ID)], "allow_split_shift": True,
         }
         assert captured["build"]["parsed"]["edit_requests"] == [
-            {"kind": "assign", "target_shift_id": "shift-0", "to_employee_name": "Dana Reyes"},
-            {"kind": "assign", "target_shift_id": "shift-1", "to_employee_name": "Ben Ortiz"},
+            {"kind": "assign", "target_shift_id": "shift-0", "to_employee_name": "Dana Reyes", "to_employee_id": DANA_ID},
+            {"kind": "assign", "target_shift_id": "shift-1", "to_employee_name": "Ben Ortiz", "to_employee_id": BEN_ID},
         ]
         assert captured["build"]["surface"] == "editor"
         assert captured["build"]["shift_statuses"] == ("draft", "published")
@@ -1006,3 +1006,84 @@ class TestFillVacantShifts(unittest.TestCase):
         assert new <= set(properties)
         hints = TOOLS_BY_NAME["propose_schedule_change"].intent_hints
         assert any("fill" in hint and "open" in hint for hint in hints)
+
+    def test_fill_refuses_over_cap_before_building_a_proposal(self):
+        result, captured = self._propose({"fill_vacant_shifts": True}, plan=_fill_plan([
+            _planned(f"shift-{i}", "Dana Reyes", DANA_ID) for i in range(41)
+        ]))
+        assert result["status"] == "clarify"
+        assert "41 schedule operations" in result["message"]
+        assert captured["build"] is None
+
+
+def test_coverage_editor_includes_drafts_and_channel_stays_published_only():
+    from contextlib import asynccontextmanager
+    from uuid import uuid4
+    from app.matcha.services.scheduling import coverage
+
+    @asynccontextmanager
+    async def connection():
+        yield object()
+
+    finder = mock.AsyncMock(return_value={"shifts": []})
+    with mock.patch("app.database.get_connection", connection), mock.patch.object(coverage, "find_coverage_candidates", finder):
+        for surface, statuses in ((True, ("draft", "published")), (False, ("published",))):
+            _run(schedule_skill.find_coverage(
+                company_id=uuid4(), role="client", features={"employee_schedule": True},
+                date_str="2026-08-23", role_hint=None, location_id=uuid4(), schedule_surface=surface,
+            ))
+            assert finder.await_args.kwargs["statuses"] == statuses
+
+
+class TestResolvedCreateCounts(unittest.TestCase):
+    def test_two_new_shifts_count_twice_even_with_multiple_assignees_and_no_ids(self):
+        from app.matcha.services.scheduling.schedule_review import build_review
+        shifts = [{"label": "lead", "starts_at": f"2026-08-{day}T06:00:00+00:00",
+                   "ends_at": f"2026-08-{day}T14:00:00+00:00", "assignees": people}
+                  for day, people in ((23, [{"employee_id": "a"}, {"employee_id": "b"}]), (24, []))]
+        review = build_review({"kind": "batch", "create": {"shifts": shifts},
+                               "jurisdiction": {"state": "CA", "status": "curated"}})
+        build = schedule_chat.ProposalBuild(kind="proposal", proposal_id=PROPOSAL_ID,
+                                            pill_text="two shifts", review=review)
+        with mock.patch.object(schedule_chat, "build_batch_proposal", mock.AsyncMock(return_value=build)):
+            result = _run(schedule_skill.propose(
+                None, company_id="c1", actor_user_id="u1", args={"changes": [
+                    {"kind": "create", "label": "lead", "date": f"2026-08-{day}",
+                     "start_time": "06:00", "end_time": "14:00"} for day in (23, 24)
+                ]},
+            ))
+        assert result["status"] == "ready"
+        assert len(review["assignments"]) == 3  # not an operation count
+        assert all(a["shift_id"] is None for a in review["assignments"])
+        assert result["operation_count"] == 2
+        assert result["operation_summary"] == {"create": 2}
+
+    def test_unavailable_rules_never_return_ready_on_create_batch_or_bulk_paths(self):
+        from uuid import uuid4
+        unavailable = {"state": "TX", "status": "unavailable", "message": "Rules unavailable."}
+        resolved_op = {
+            "kind": "assign", "shift_id": str(uuid4()), "location_id": str(uuid4()),
+            "starts_at": "2026-08-23T06:00:00+00:00", "ends_at": "2026-08-23T14:00:00+00:00",
+            "review": {"verdict": "ok", "reasons": []},
+        }
+        create_args = {"kind": "create", "label": "lead", "date": "2026-08-23",
+                       "start_time": "06:00", "end_time": "14:00"}
+        requests = [create_args, {"changes": [create_args]},
+                    {"all_vacant_shifts": True, "to_employee_name": "Dana"}]
+        for args in requests:
+            with self.subTest(args=args):
+                persist = mock.AsyncMock(return_value=uuid4())
+                with (
+                    mock.patch.object(schedule_chat, "_resolve_create_shifts", mock.AsyncMock(return_value={
+                        "jurisdiction": unavailable, "shifts": [],
+                    })),
+                    mock.patch.object(schedule_chat, "_resolve_edit_ops", mock.AsyncMock(return_value=[resolved_op])),
+                    mock.patch.object(schedule_chat, "_ops_jurisdiction", mock.AsyncMock(return_value=unavailable)),
+                    mock.patch.object(schedule_chat, "_persist_proposal", persist),
+                    mock.patch.object(schedule_skill, "_all_vacant_shift_requests", mock.AsyncMock(return_value=([{}], None))),
+                ):
+                    result = _run(schedule_skill.propose(None, company_id=uuid4(), actor_user_id=uuid4(), args=args))
+                assert result["status"] == "clarify"
+                assert "Rules unavailable" in result["message"]
+                assert "Reply with the shift time" not in result["message"]
+                assert all(c.kwargs["status"] == "clarifying" for c in persist.await_args_list)

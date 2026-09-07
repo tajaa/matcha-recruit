@@ -1,0 +1,63 @@
+name: CodeQL
+
+# Static analysis for the Python backends and the TypeScript frontends.
+# Separate from ci.yml so a slow analysis never gates the fast PR checks;
+# results land in the Security tab, and PR runs annotate new alerts inline.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "client/**"
+      - "scripts/**/*.py"
+      - ".github/workflows/codeql.yml"
+  schedule:
+    # Weekly full scan of main regardless of PR activity.
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Generated/vendored trees are noise, not code we own.
+          config: |
+            paths-ignore:
+              - client/src/generated
+              - client/dist
+              - "**/node_modules"
+              - server/venv
+              - server/agent/static
+
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        with:
+          category: "/language:${{ matrix.language }}"

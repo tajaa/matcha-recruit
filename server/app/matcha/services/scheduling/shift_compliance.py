@@ -286,15 +286,18 @@ async def _fair_workweek_advisories(
     city: Optional[str] = None,
 ) -> list[dict]:
     """Write-time Fair Workweek advisories for one schedule change, or `[]`
-    when there's no event, no location, or no curated ordinance for it (NYC +
-    LA only — see `fair_workweek._FAIR_WORKWEEK_ORDINANCES`).
+    when there's no event, no location, the shift is still a draft, or no
+    curated ordinance applies (NYC + LA only — see
+    `fair_workweek._FAIR_WORKWEEK_ORDINANCES`). Fair Workweek notice/pay rules
+    only apply to changes to a published schedule, so returning before the
+    location/company reads keeps draft preflight O(1) for this check.
 
     `state`/`city` may be pre-fetched by the caller (`check_shift_compliance`
     already has them) to avoid a second `business_locations` round trip;
     passed `None`/`None` fetches them here, for the callers that skip the full
     compliance suite (unassign, shift delete/cancel — see their call sites).
     """
-    if event is None or location_id is None:
+    if event is None or location_id is None or not shift_published:
         return []
     if state is None or city is None:
         loc = await conn.fetchrow(

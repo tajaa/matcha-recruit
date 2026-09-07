@@ -182,7 +182,11 @@ grep -qF '/opt/node/bin:/usr/local/aws-cli/v2/current/bin:$PATH' \
     "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
 echo "PASS: login shells restore the pinned Node and AWS toolchains"
 
-grep -qF 'ARG CODEX_VERSION=0.151.0' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
+grep -qF 'ARG CODEX_VERSION=0.153.4' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
+grep -qF 'ARG CLAUDE_CODE_VERSION=2.1.263' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
+grep -qF 'CODEX_VERSION: ${CODEX_VERSION:-0.153.4}' "$REPO_ROOT/docker-compose.sandbox.yml"
+grep -qF 'CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.263}' "$REPO_ROOT/docker-compose.sandbox.yml"
+grep -qF 'python3 -m scripts.msandbox.agent_versions' "$REPO_ROOT/scripts/agent-sandbox.sh"
 grep -qF 'check_for_update_on_startup = false' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
 grep -qF 'in_app_updates = false' "$REPO_ROOT/docker/agent-sandbox/Dockerfile"
 echo "PASS: the immutable sandbox centrally manages Codex CLI updates"

@@ -89,9 +89,39 @@ def _release_id(root: Path) -> str:
     return f"{sha}-dirty-{digest.hexdigest()[:10]}"
 
 
-def _write_launcher(destination: Path, repo_root: Path, bin_dir: Path) -> None:
+def _primary_worktree(repo_root: Path) -> Path:
+    """Return the durable checkout that owns a linked worktree's common Git dir."""
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return repo_root
+    common_dir = Path(result.stdout.strip())
+    candidate = common_dir.parent if common_dir.name == ".git" else repo_root
+    legacy = candidate / "scripts/agent-sandbox.sh"
+    return candidate.resolve() if legacy.is_file() else repo_root
+
+
+def _write_launcher(
+    destination: Path,
+    repo_root: Path,
+    bin_dir: Path,
+    *,
+    fallback_repo_root: Path | None = None,
+) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
     launcher = bin_dir / "msandbox"
+    fallback = (fallback_repo_root or repo_root).resolve()
     descriptor, temporary_name = tempfile.mkstemp(prefix=".msandbox.", dir=bin_dir)
     temporary = Path(temporary_name)
     try:
@@ -99,11 +129,16 @@ def _write_launcher(destination: Path, repo_root: Path, bin_dir: Path) -> None:
             handle.write(
                 "#!/bin/sh\n"
                 f"export MSANDBOX_RUNTIME_ROOT={shlex.quote(str(destination))}\n"
-                f"export MATCHA_REPO_ROOT={shlex.quote(str(repo_root))}\n"
                 f"runtime_root={shlex.quote(str(destination))}\n"
                 f"repo_root={shlex.quote(str(repo_root))}\n"
+                f"fallback_repo_root={shlex.quote(str(fallback))}\n"
                 "run_v2() { cd \"$runtime_root\" || exit 1; exec python3 -m scripts.msandbox \"$@\"; }\n"
                 "legacy=\"$repo_root/scripts/agent-sandbox.sh\"\n"
+                "if [ ! -x \"$legacy\" ] && [ -x \"$fallback_repo_root/scripts/agent-sandbox.sh\" ]; then\n"
+                "  repo_root=$fallback_repo_root\n"
+                "  legacy=\"$repo_root/scripts/agent-sandbox.sh\"\n"
+                "fi\n"
+                "export MATCHA_REPO_ROOT=\"$repo_root\"\n"
                 "if [ ! -x \"$legacy\" ]; then\n"
                 "  echo \"msandbox: legacy control plane is unavailable at $legacy\" >&2\n"
                 "  exit 1\n"
@@ -222,6 +257,7 @@ def _prune_installed_releases(releases: Path, keep: set[Path]) -> None:
 def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | None = None) -> Path:
     ensure_roots()
     root = (repo_root or source_root()).resolve()
+    fallback_repo_root = _primary_worktree(root)
     release_id = _release_id(root)
     releases = data_root() / "releases"
     previous = _active_release(releases)
@@ -267,7 +303,12 @@ def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | No
                 target = temporary / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / relative, target)
-            manifest = {"version": __version__, "release": release_id, "repo_root": str(root)}
+            manifest = {
+                "version": __version__,
+                "release": release_id,
+                "repo_root": str(root),
+                "fallback_repo_root": str(fallback_repo_root),
+            }
             (temporary / "manifest.json").write_text(
                 json.dumps(manifest, indent=2) + "\n",
                 encoding="utf-8",
@@ -303,7 +344,12 @@ def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | No
     finally:
         config_temporary.unlink(missing_ok=True)
     resolved_bin_dir = (bin_dir or Path.home() / ".local/bin").expanduser()
-    _write_launcher(destination, root, resolved_bin_dir)
+    _write_launcher(
+        destination,
+        root,
+        resolved_bin_dir,
+        fallback_repo_root=fallback_repo_root,
+    )
     if bin_dir is None:
         _remove_legacy_host_service()
     return destination
@@ -335,5 +381,8 @@ def rollback_release(release_id: str, *, bin_dir: Path | None = None) -> Path:
             destination,
             Path(manifest["repo_root"]),
             (bin_dir or Path.home() / ".local/bin").expanduser(),
+            fallback_repo_root=Path(
+                manifest.get("fallback_repo_root", manifest["repo_root"])
+            ),
         )
         return destination

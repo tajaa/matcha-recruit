@@ -54,7 +54,8 @@ async def find_coverage_candidates(
     if not shift_rows and role_hint:
         shift_rows = await _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, None, statuses)
         if shift_rows:
-            role_note = f"Nothing matched \"{role_hint}\" — showing every published shift that day instead."
+            label = "published shift" if statuses == ("published",) else "shift"
+            role_note = f"Nothing matched \"{role_hint}\" — showing every {label} that day instead."
 
     if not shift_rows:
         return {"shifts": [], "role_note": None}
@@ -213,25 +214,25 @@ async def _fetch_day_shifts(conn, company_id, day_start, day_end, location_id, r
         if role_hint:
             return await conn.fetch(
                 """
-                SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
-                FROM schedule_shifts
-                WHERE company_id = $1 AND status = 'published'
-                  AND starts_at < $3 AND ends_at > $2
-                  AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
-                  AND role ILIKE '%' || $5 || '%'
-                ORDER BY starts_at LIMIT $6
-                """,
-                company_id, day_start, day_end, location_id, role_hint, _SHIFT_CAP,
-            )
-        return await conn.fetch(
-            """
             SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
             FROM schedule_shifts
             WHERE company_id = $1 AND status = 'published'
               AND starts_at < $3 AND ends_at > $2
               AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
-            ORDER BY starts_at LIMIT $5
+              AND role ILIKE '%' || $5 || '%'
+            ORDER BY starts_at LIMIT $6
             """,
+                company_id, day_start, day_end, location_id, role_hint, _SHIFT_CAP,
+            )
+        return await conn.fetch(
+            """
+        SELECT id, starts_at, ends_at, role, required_staff, location_id, job_id
+        FROM schedule_shifts
+        WHERE company_id = $1 AND status = 'published'
+          AND starts_at < $3 AND ends_at > $2
+          AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
+        ORDER BY starts_at LIMIT $5
+        """,
             company_id, day_start, day_end, location_id, _SHIFT_CAP,
         )
     if role_hint:

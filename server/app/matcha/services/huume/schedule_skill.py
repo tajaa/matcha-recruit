@@ -273,7 +273,7 @@ async def _fill_vacant_requests(
     the result becomes plain `assign` edit requests so the SAME
     `build_edit_proposal` (guard, pill, confirm) stages them. Returns
     ``(edit_requests, unfilled, error)``."""
-    from app.matcha.services.scheduling.week_builder import plan_vacant_fill
+    from app.matcha.services.scheduling.week_builder import plan_vacant_fill, vacant_fill_edit_requests
 
     if location_id is None or week_start is None:
         return [], [], "Filling open shifts requires a scoped schedule workspace."
@@ -326,11 +326,8 @@ async def _fill_vacant_requests(
             "I couldn't fill any of those shifts: " + reasons
             + " Loosen the request (another job, allow a split shift, or exclude nobody) or assign by hand."
         )
-    edit_requests = [
-        {"kind": "assign", "target_shift_id": str(item["shift_id"]), "to_employee_name": item["employee_name"]}
-        for item in plan["assignments"]
-    ]
-    return edit_requests, unfilled, None
+    edit_requests, error = vacant_fill_edit_requests(plan["assignments"])
+    return edit_requests, unfilled, error
 
 
 def _iso(value: Any) -> Any:
@@ -371,6 +368,7 @@ async def find_coverage(
         result = await find_coverage_candidates(
             conn, company_id=company_id, target_date=target, location_id=location_id,
             role_hint=(role_hint or "").strip() or None, features=features,
+            statuses=("draft", "published") if schedule_surface else ("published",),
         )
     return result
 
@@ -511,11 +509,13 @@ async def propose(
         # Count what was actually STAGED: the guard may have rejected some of
         # the requested ops, and the model must not describe those as done.
         staged_ops = [a for a in review.get("assignments") or [] if a.get("op") != "create"]
-        create_count = len({a.get("shift_id") for a in review.get("assignments") or [] if a.get("op") == "create"})
-        operation_count = len(staged_ops) + (create_count or (1 if kind == "create" else 0))
-        operation_summary = summarize_operations(
-            [{"kind": a.get("op")} for a in staged_ops], [None] * create_count,
-        ) if staged_ops or create_count else operation_summary
+        # New shifts have no database IDs yet, and one shift can carry several
+        # assignees. The review counts resolved operations before flattening them.
+        operation_count = review.get("operation_count", len(staged_ops) or operation_count)
+        operation_summary = review.get("operation_summary") or (
+            summarize_operations([{"kind": a.get("op")} for a in staged_ops], [])
+            if staged_ops else operation_summary
+        )
     return {
         "status": "ready",
         "proposal_id": str(build.proposal_id),

@@ -1,0 +1,83 @@
+name: Production backup restore drill
+
+# Weekly proof that the newest S3 logical backup actually restores, not just
+# that it lists. Runs entirely on the app EC2 (its IAM identity already reads
+# the bucket; GitHub's OIDC role is ECR-only) inside a throwaway, memory-capped
+# pgvector container that is removed on exit. Never writes to the live DB.
+on:
+  schedule:
+    # Sunday 10:40 UTC — after the 06:00 UTC pg-backup.timer run has landed.
+    - cron: "40 10 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ops-backup-restore-drill
+  cancel-in-progress: false
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Restore newest backup into a throwaway container
+        id: drill
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ./scripts/ops-health/backup-restore-drill.sh > "$RUNNER_TEMP/restore-drill.json"
+          jq . "$RUNNER_TEMP/restore-drill.json"
+          echo "status=$(jq -r '.status' "$RUNNER_TEMP/restore-drill.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        if: always()
+        run: |
+          echo '## Production backup restore drill' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/restore-drill.json" ] && [ -s "$RUNNER_TEMP/restore-drill.json" ]; then
+            { echo '```json'; jq . "$RUNNER_TEMP/restore-drill.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'The drill did not produce a report (SSH / S3 / docker failure on the app host).' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publish alert / recovery
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          workflow="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "${{ steps.drill.outcome }}" != success ]; then
+            printf 'The weekly backup restore drill could not run to completion.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/drill-monitor.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:restore-drill-monitor 'ops: backup restore drill failed to run' "$RUNNER_TEMP/drill-monitor.md" ops-health
+          elif [ "${{ steps.drill.outputs.status }}" != healthy ]; then
+            { printf 'The newest production backup did NOT restore cleanly.\n\n```json\n'; jq . "$RUNNER_TEMP/restore-drill.json"; printf '```\n\nWorkflow: %s\n' "$workflow"; } > "$RUNNER_TEMP/drill-report.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:restore-drill 'ops: production backup does not restore' "$RUNNER_TEMP/drill-report.md" ops-health
+            printf 'Restore drill monitor recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/drill-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:restore-drill-monitor 'ops: backup restore drill failed to run' "$RUNNER_TEMP/drill-recovery.md" ops-health --recover
+          else
+            printf 'Restore drill healthy at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/drill-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:restore-drill 'ops: production backup does not restore' "$RUNNER_TEMP/drill-recovery.md" ops-health --recover
+            ./scripts/ops-health/publish-issue.sh ops-health:restore-drill-monitor 'ops: backup restore drill failed to run' "$RUNNER_TEMP/drill-recovery.md" ops-health --recover
+          fi
+
+      - name: Mark failure
+        if: always() && (steps.drill.outcome != 'success' || steps.drill.outputs.status != 'healthy')
+        run: exit 1
+
+      - name: Delete report and SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/restore-drill.json "$RUNNER_TEMP"/drill-*.md "$RUNNER_TEMP/matcha-prod.pem"
