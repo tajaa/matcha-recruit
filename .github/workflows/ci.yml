@@ -220,7 +220,11 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
+          # HEAD is the PR merge commit: ^1 = the main tip it was built on,
+          # ^2 = the PR head. Diffing those (not the event's base.sha, which
+          # goes stale when main moves after the event) yields only PR changes.
+          if git rev-parse -q --verify HEAD^2 >/dev/null; then base=HEAD^1; head=HEAD^2; else base="$BASE_SHA"; head=HEAD; fi
+          changed="$(git diff --name-only "$base"..."$head")"
           ran=0
           if grep -q '^platforms/desktop/Espresso/' <<< "$changed"; then
             ./scripts/xcode-build.sh espresso build
@@ -256,7 +260,12 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git diff --name-only --diff-filter=ACMR "$BASE_SHA"...HEAD > "$RUNNER_TEMP/changed.txt"
+          # HEAD is the PR merge commit (^1 = main tip it was built on, ^2 =
+          # PR head). The event's base.sha goes stale when main moves after
+          # the event and then drags main's own commits into "changed".
+          if git rev-parse -q --verify HEAD^2 >/dev/null; then base=HEAD^1; head=HEAD^2; else base="$BASE_SHA"; head=HEAD; fi
+          git rev-parse "$base" > "$RUNNER_TEMP/base-sha.txt"
+          git diff --name-only --diff-filter=ACMR "$base"..."$head" > "$RUNNER_TEMP/changed.txt"
           echo "Changed files: $(wc -l < "$RUNNER_TEMP/changed.txt")"
           { grep -E '^(server/(app|alembic|scripts)/|scripts/).*\.py$' "$RUNNER_TEMP/changed.txt" || true; } > "$RUNNER_TEMP/changed-py.txt"
           { grep -E '^client/src/.*\.(ts|tsx)$' "$RUNNER_TEMP/changed.txt" || true; } > "$RUNNER_TEMP/changed-ts.txt"
@@ -279,12 +288,10 @@ jobs:
         # The repo runs multiple intentional heads. A PR must not ADD one: a
         # new migration has to chain off an existing head, otherwise dev and
         # prod each end up applying it against a different graph.
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ ! -s "$RUNNER_TEMP/changed-migrations.txt" ]; then echo "No migration changes."; exit 0; fi
           base_dir="$(mktemp -d)"
-          git archive "$BASE_SHA" server/alembic/versions | tar -x -C "$base_dir"
+          git archive "$(cat "$RUNNER_TEMP/base-sha.txt")" server/alembic/versions | tar -x -C "$base_dir"
           python3 scripts/alembic_graph.py heads --versions "$base_dir/server/alembic/versions" | sort > "$RUNNER_TEMP/heads-base.txt"
           python3 scripts/alembic_graph.py heads | sort > "$RUNNER_TEMP/heads-pr.txt"
           base_n="$(wc -l < "$RUNNER_TEMP/heads-base.txt")"
@@ -339,7 +346,9 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
+          # Same merge-commit parent diff as the lint job — see its comment.
+          if git rev-parse -q --verify HEAD^2 >/dev/null; then base=HEAD^1; head=HEAD^2; else base="$BASE_SHA"; head=HEAD; fi
+          changed="$(git diff --name-only "$base"..."$head")"
           backend=false; frontend=false
           # server/ minus what server/.dockerignore leaves out of the image.
           if grep -E '^server/' <<< "$changed" | grep -vqE '^server/(tests|agent|agent-ui)/|\.md$'; then backend=true; fi
