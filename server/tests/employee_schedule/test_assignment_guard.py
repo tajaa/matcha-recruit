@@ -8,11 +8,12 @@ the nine-shift request comes back as "these N are staged, these M are not,
 and here is why" — before the manager confirms anything.
 """
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from app.matcha.services.scheduling.assignment_guard import (
     POLICY_DEFAULT_WEEKLY_CAP_MINUTES, POLICY_MAX_CONSECUTIVE_DAYS, POLICY_MIN_REST_HOURS,
-    EmployeeLedger, ProposedAssignment, consecutive_day_count, evaluate_batch,
+    EmployeeLedger, ProposedAssignment, ProposedRemoval, consecutive_day_count, evaluate_batch,
 )
 
 UTC = timezone.utc
@@ -168,3 +169,95 @@ class TestPreBlockedAndDeterminism:
         assert consecutive_day_count(days, _at(22, 9).date()) == 4
         assert consecutive_day_count(days, _at(25, 9).date()) == 1
         assert consecutive_day_count(set(), (_at(22, 9) + timedelta(days=1)).date()) == 1
+
+
+class TestWorkingState:
+    def test_overlap_rejection_leaves_seat_for_next_employee(self):
+        ledger = EmployeeLedger(intervals=[(_at(23, 8), _at(23, 16), "old", "Opener")])
+        headroom = {"target": 1}
+        batch = [_shift(0, 23, 9, 17, shift_id="target"),
+                 _shift(1, 23, 9, 17, employee="other", shift_id="target")]
+        verdicts = evaluate_batch(batch, {DANA: ledger}, headroom=headroom)
+        assert verdicts[0].verdict == "blocked"
+        assert verdicts[1].verdict == "ok"
+        assert headroom == {"target": 1}  # inputs remain reusable
+        assert len(ledger.intervals) == 1
+
+    def test_accepted_assignment_consumes_the_last_seat(self):
+        verdicts = evaluate_batch(
+            [_shift(0, 23, 9, 17, shift_id="target"),
+             _shift(1, 23, 9, 17, employee="other", shift_id="target")],
+            {}, headroom={"target": 1},
+        )
+        assert verdicts[0].verdict == "ok"
+        assert _codes(verdicts[1]) == ["shift_full"]
+
+    def test_cancellation_frees_overlap_only_for_later_ops(self):
+        ledger = EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "old", "Old")])
+        removal = ProposedRemoval(1, "old")
+        verdicts = evaluate_batch(
+            [_shift(0, 23, 9, 17), _shift(2, 23, 9, 17)], {DANA: ledger}, removals=[removal],
+        )
+        assert verdicts[0].verdict == "blocked"
+        assert verdicts[2].verdict == "ok" and verdicts[2].before["minutes"] == 0
+
+    def test_unassign_frees_headroom_in_the_confirm_removal_phase(self):
+        verdicts = evaluate_batch(
+            [_shift(0, 23, 9, 17, employee="other", shift_id="old")],
+            {DANA: EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "old", "Old")])},
+            removals=[ProposedRemoval(1, "old", DANA, before_batch=True)], headroom={"old": 0},
+        )
+        assert verdicts[0].verdict == "ok"
+
+    def test_two_reassignments_can_exchange_overlapping_shifts(self):
+        ledgers = {
+            DANA: EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "s0", "Lead")]),
+            "other": EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "s1", "Lead")]),
+        }
+        batch = [replace(_shift(0, 23, 9, 17, employee="other"), from_employee_id=DANA),
+                 replace(_shift(1, 23, 9, 17), from_employee_id="other")]
+        first = evaluate_batch(batch, ledgers, headroom={"s0": 0, "s1": 0})
+        assert [v.verdict for v in first.values()] == ["ok", "ok"]
+        second = evaluate_batch(list(reversed(batch)), dict(reversed(list(ledgers.items()))),
+                                headroom={"s1": 0, "s0": 0})
+        assert first == second
+
+    def test_rejected_reassignment_restores_source_before_reviewing_dependents(self):
+        ledgers = {
+            DANA: EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "s0", "Lead")]),
+            "other": EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "busy", "Other")]),
+        }
+        verdicts = evaluate_batch(
+            [replace(_shift(0, 23, 9, 17, employee="other"), from_employee_id=DANA),
+             _shift(1, 23, 9, 17)], ledgers, headroom={"s0": 0, "s1": 1},
+        )
+        assert verdicts[0].verdict == verdicts[1].verdict == "blocked"
+        assert "existing_overlap" in _codes(verdicts[1])
+        assert verdicts[1].before["minutes"] == 480
+
+    def test_rejected_reassignment_does_not_free_headroom(self):
+        ledgers = {
+            DANA: EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "s0", "Lead")]),
+            "other": EmployeeLedger(intervals=[(_at(23, 9), _at(23, 17), "busy", "Other")]),
+        }
+        verdicts = evaluate_batch(
+            [replace(_shift(0, 23, 9, 17, employee="other"), from_employee_id=DANA),
+             _shift(1, 23, 9, 17, employee="third", shift_id="s0")],
+            ledgers, headroom={"s0": 0},
+        )
+        assert _codes(verdicts[1]) == ["shift_full"]
+
+    def test_net_worked_minutes_are_preserved_across_the_batch(self):
+        batch = [replace(_shift(i, 23 + i, 8, 17), worked_minutes=480) for i in range(5)]
+        verdicts = evaluate_batch(batch, {})
+        assert [v.after["minutes"] for v in verdicts.values()] == [480, 960, 1440, 1920, 2400]
+        assert all(v.verdict == "ok" for v in verdicts.values())
+
+    def test_existing_net_minutes_and_full_overlap_windows_are_both_preserved(self):
+        ledger = EmployeeLedger(
+            intervals=[(_at(23, 8), _at(23, 17), "old", "Opener")], worked_minutes={"old": 480},
+        )
+        verdicts = evaluate_batch([_shift(0, 23, 16, 18), _shift(1, 24, 8, 16)], {DANA: ledger})
+        assert verdicts[0].verdict == "blocked"
+        assert verdicts[1].before["minutes"] == 480
+        assert verdicts[1].after["minutes"] == 960

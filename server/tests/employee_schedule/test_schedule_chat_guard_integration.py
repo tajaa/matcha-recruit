@@ -6,9 +6,11 @@ an overlap Huume itself created. Fakes only; no DB.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 from uuid import UUID, uuid4
+
+import pytest
 
 from app.matcha.services.scheduling import schedule_chat
 
@@ -240,3 +242,256 @@ class TestApplyEditOpsIntraBatchCopy:
         assert touched == []
         assert "they picked up a conflicting shift in the meantime" in text
         assert "NOT verified" not in text
+
+
+class _GuardConn:
+    """Read-only scheduling fake; range predicates and qualification are real inputs."""
+    def __init__(self, shifts, assignments=(), *, max_days=None, qualified=()):
+        self.shifts = {row["id"]: row for row in shifts}
+        self.assignments = list(assignments)  # (shift_id, employee_id)
+        self.max_days = max_days
+        self.qualified = set(qualified)
+
+    async def fetchval(self, query, *args):
+        if "schedule_job_employees" in query:
+            return True  # this job has a roster, so qualification is gated
+        return None
+
+    async def fetch(self, query, *args):
+        if "employee_schedule_profiles" in query:
+            return [{"id": eid, "first_name": "Crew", "last_name": "Member",
+                     "max_weekly_minutes": None, "max_consecutive_days": self.max_days,
+                     "allow_overtime": False} for eid in args[1]]
+        if "s.id AS shift_id" in query:
+            return [{"employee_id": eid, "shift_id": sid, **{k: row[k] for k in
+                     ("starts_at", "ends_at", "role", "break_minutes")}}
+                    for sid, eid in self.assignments for row in [self.shifts[sid]]
+                    if eid in args[1] and row["starts_at"] < args[3] and row["ends_at"] > args[2]]
+        if "COUNT(a.employee_id)" in query:
+            return [{"id": sid, "required_staff": self.shifts[sid]["required_staff"],
+                     "assigned": sum(s == sid for s, _ in self.assignments)} for sid in args[1]]
+        if "FROM schedule_job_employees" in query:
+            return [{"employee_id": eid} for eid in args[2] if eid in self.qualified]
+        raise AssertionError(query)
+
+
+def _guard(conn, ops):
+    with (
+        mock.patch.object(schedule_chat, "resolve_week_start_weekday", mock.AsyncMock(return_value=0)),
+        mock.patch.object(schedule_chat, "fetch_availability", mock.AsyncMock(return_value={})),
+    ):
+        _run(schedule_chat._review_assign_ops(conn, COMPANY, ops, location_id=None))
+
+
+class TestGuardAdapter:
+    def test_overlap_rejected_before_headroom_is_consumed(self):
+        old, target, other = uuid4(), uuid4(), uuid4()
+        conn = _GuardConn([_shift_row(old, hour=6), _shift_row(target, hour=10)], [(old, UUID(DANA))])
+        ops = [_op(0, shift_id=str(target), start=(23, 10), end=(23, 18)),
+               {**_op(1, shift_id=str(target), start=(23, 10), end=(23, 18)), "to_employee_id": str(other)}]
+        _guard(conn, ops)
+        assert ops[0]["review"]["verdict"] == "blocked"
+        assert ops[1]["review"]["verdict"] == "ok"
+
+    def test_cancellation_frees_the_employee_for_replacement(self):
+        old, target = uuid4(), uuid4()
+        conn = _GuardConn([_shift_row(old, hour=6), _shift_row(target, hour=6)], [(old, UUID(DANA))])
+        ops = [{**_op(0, shift_id=str(old)), "kind": "cancel", "to_employee_id": None,
+                "from_employee_id": DANA}, _op(1, shift_id=str(target))]
+        _guard(conn, ops)
+        assert ops[1]["review"]["verdict"] == "ok"
+        assert ops[1]["review"]["before"]["minutes"] == 0
+
+    def test_loader_counts_breaks_and_extends_context_for_profile_cap(self):
+        target = _shift_row(uuid4(), hour=9)
+        old = [{**target, "id": uuid4(), "starts_at": target["starts_at"] - timedelta(days=d),
+                "ends_at": target["ends_at"] - timedelta(days=d), "break_minutes": 60}
+               for d in range(1, 15)]
+        conn = _GuardConn([target, *old], [(s["id"], UUID(DANA)) for s in old], max_days=14)
+        op = _op(0, shift_id=str(target["id"]), start=(23, 9), end=(23, 17))
+        _guard(conn, [op])
+        assert any(r["code"] == "consecutive_days" and "15 days" in r["message"]
+                   for r in op["review"]["reasons"])
+        # Review an additional shift in the existing week to verify DB break deductions.
+        op = _op(1, shift_id=str(target["id"]), start=(22, 18), end=(22, 22))
+        _guard(conn, [op])
+        assert op["review"]["before"]["minutes"] == 7 * 7 * 60
+
+    def test_resolver_preserves_job_and_persists_only_qualified_assignments(self):
+        sid, job, eligible = uuid4(), uuid4(), uuid4()
+        row = {**_shift_row(sid, hour=6), "job_id": job}
+        conn = _GuardConn([row], qualified=[eligible])
+        persist = mock.AsyncMock(return_value=uuid4())
+
+        async def match(_conn, _company, name, _location):
+            return {"employee": {"id": UUID(DANA) if name == "Dana" else eligible,
+                                 "first_name": name, "last_name": "Employee"}}
+
+        with (
+            mock.patch.object(schedule_chat, "_match_single_employee", match),
+            mock.patch.object(schedule_chat, "_resolve_shift_ref", mock.AsyncMock(return_value={"shift": row})),
+            mock.patch.object(schedule_chat, "check_shift_compliance", mock.AsyncMock(return_value=[])),
+            mock.patch.object(schedule_chat, "resolve_week_start_weekday", mock.AsyncMock(return_value=0)),
+            mock.patch.object(schedule_chat, "fetch_availability", mock.AsyncMock(return_value={})),
+            mock.patch.object(schedule_chat, "_ops_jurisdiction", mock.AsyncMock(return_value=CURATED)),
+            mock.patch.object(schedule_chat, "_persist_proposal", persist),
+        ):
+            build = _run(schedule_chat.build_edit_proposal(
+                conn, company_id=COMPANY, channel_id=None, source_message_id=None,
+                created_by=USER, parsed={"edit_requests": [
+                    {"kind": "assign", "target_shift_id": str(sid), "to_employee_name": name}
+                    for name in ("Dana", "Eligible")
+                ]}, today=row["starts_at"].date(), original_content="assign two people",
+            ))
+        doc = persist.await_args.kwargs["proposal"]
+        assert build.kind == "proposal"
+        assert [op["to_employee_id"] for op in doc["ops"]] == [str(eligible)]
+        assert doc["ops"][0]["job_id"] == str(job)
+        assert doc["rejected"][0]["reasons"][0]["code"] == "not_qualified"
+
+
+class TestCrossStoreJurisdiction:
+    @pytest.mark.parametrize("second_status", ["unmapped", "unavailable"])
+    def test_swap_resolves_and_checks_both_locations(self, second_status):
+        first = {**_shift_row(uuid4(), hour=6), "location_id": uuid4()}
+        second = {**_shift_row(uuid4(), hour=10), "location_id": uuid4()}
+        status = mock.AsyncMock(side_effect=lambda _c, _co, loc: (
+            {"state": "CA", "status": "curated"} if loc == first["location_id"]
+            else {"state": "TX", "status": second_status}
+        ))
+        persist = mock.AsyncMock(return_value=uuid4())
+        with (
+            mock.patch.object(schedule_chat, "_resolve_shift_ref", mock.AsyncMock(side_effect=[
+                {"shift": first}, {"shift": second},
+            ])),
+            mock.patch.object(schedule_chat, "jurisdiction_rule_status", status),
+            mock.patch.object(schedule_chat, "_persist_proposal", persist),
+        ):
+            build = _run(schedule_chat.build_edit_proposal(
+                _PersistConn(), company_id=COMPANY, channel_id=None, source_message_id=None,
+                created_by=USER, parsed={"edit_requests": [{"kind": "swap", "second_role_hint": "lead"}]},
+                today=first["starts_at"].date(), original_content="swap stores",
+            ))
+        assert [c.args[2] for c in status.await_args_list] == [first["location_id"], second["location_id"]]
+        doc = persist.await_args.kwargs["proposal"]
+        if second_status == "unavailable":
+            assert build.kind == "clarify" and build.clarify_kind == "refused"
+            assert persist.await_args.kwargs["status"] == "clarifying"
+        else:
+            assert build.review["compliance_status"] == "unmapped"
+            assert doc["ops"][0]["second_location_id"] == str(second["location_id"])
+            assert "NOT verified for TX" in build.pill_text
+
+    def test_unlocated_operation_is_not_hidden_by_a_curated_neighbor(self):
+        loc = uuid4()
+        status = mock.AsyncMock(side_effect=lambda _c, _co, location: (
+            {"state": "CA", "status": "curated"} if location else {"state": None, "status": "unmapped"}
+        ))
+        with mock.patch.object(schedule_chat, "jurisdiction_rule_status", status):
+            jurisdiction = _run(schedule_chat._ops_jurisdiction(
+                None, COMPANY, [{"location_id": str(loc)}, {"location_id": None}], None,
+            ))
+        assert jurisdiction["status"] == "unmapped"
+
+
+def _resolved_create(jurisdiction):
+    return {"week_start": "2026-08-23", "location": {"id": str(uuid4()), "name": "Store", "state": "TX"},
+            "rules_unmapped": True, "jurisdiction": jurisdiction, "shifts": [{
+                "label": "lead", "starts_at": "2026-08-23T06:00:00+00:00",
+                "ends_at": "2026-08-23T14:00:00+00:00", "assignees": [], "open_slots": 1,
+                "intrinsic_violations": [], "excluded": [],
+            }]}
+
+
+class TestCreateJurisdictionGate:
+    @pytest.mark.parametrize("jurisdiction", [UNAVAILABLE, UNMAPPED])
+    def test_standalone_create_refuses_unavailable_but_stages_unmapped(self, jurisdiction):
+        persist = mock.AsyncMock(return_value=uuid4())
+        with (
+            mock.patch.object(schedule_chat, "_resolve_create_shifts", mock.AsyncMock(return_value=_resolved_create(jurisdiction))),
+            mock.patch.object(schedule_chat, "_persist_proposal", persist),
+        ):
+            build = _run(schedule_chat.build_proposal(
+                _PersistConn(), company_id=COMPANY, channel_id=None, source_message_id=None,
+                created_by=USER, parsed={"ack": "OK"}, today=datetime(2026, 8, 20).date(), original_content="create",
+            ))
+        kwargs = persist.await_args.kwargs
+        if jurisdiction["status"] == "unavailable":
+            assert build.kind == "clarify" and build.clarify_kind == "refused"
+            assert kwargs["status"] == "clarifying" and not kwargs["proposal"].get("shifts")
+            assert "Try again" in build.pill_text
+        else:
+            assert build.kind == "proposal" and kwargs["status"] == "proposed"
+            assert build.review["compliance_status"] == "unmapped"
+
+    @pytest.mark.parametrize("all_blocked", [True, False])
+    @pytest.mark.parametrize("with_create", [True, False])
+    def test_batch_persists_only_accepted_ops_and_counts_creates(self, all_blocked, with_create):
+        rejected = _op(0, verdict="blocked", reasons=[{
+            "code": "existing_overlap", "policy": False, "message": "already on another shift",
+        }])
+        ops = [rejected] if all_blocked else [rejected, _op(1)]
+        persist = mock.AsyncMock(return_value=uuid4())
+        with (
+            mock.patch.object(schedule_chat, "_resolve_edit_ops", mock.AsyncMock(return_value=ops)),
+            mock.patch.object(schedule_chat, "_resolve_create_shifts", mock.AsyncMock(return_value=_resolved_create(CURATED))),
+            mock.patch.object(schedule_chat, "_ops_jurisdiction", mock.AsyncMock(return_value=CURATED)),
+            mock.patch.object(schedule_chat, "_persist_proposal", persist),
+        ):
+            build = _run(schedule_chat.build_batch_proposal(
+                None, company_id=COMPANY, channel_id=None, source_message_id=None, created_by=USER,
+                edit_requests=[{}], shift_requests=[{}] if with_create else [], location_hint=None,
+                ack="OK", today=datetime(2026, 8, 20).date(), original_content="correct the week",
+            ))
+        if all_blocked and not with_create:
+            assert build.kind == "clarify" and build.clarify_kind == "refused"
+            persist.assert_not_awaited()
+            return
+        doc = persist.await_args.kwargs["proposal"]
+        assert [op["shift_id"] for op in (doc.get("edit") or {}).get("ops", [])] == ([] if all_blocked else ["s1"])
+        assert doc["rejected"][0]["shift_id"] == "s0"
+        assert doc["rejected"][0]["reasons"][0]["code"] == "existing_overlap"
+        assert build.review["operation_count"] == int(not all_blocked) + int(with_create)
+
+
+class TestConfirmRetimeAttribution:
+    def test_earlier_retime_is_named_as_the_source_of_the_overlap(self):
+        first, second = uuid4(), uuid4()
+        rows = {first: _shift_row(first, hour=6), second: _shift_row(second, hour=12)}
+        rows[first]["ends_at"] = rows[first]["ends_at"].replace(hour=10)
+        rows[second]["ends_at"] = rows[second]["ends_at"].replace(hour=16)
+
+        class Conn(_ApplyConn):
+            async def fetch(self, query, *args):
+                if "SELECT employee_id FROM schedule_shift_assignments" in query:
+                    return [{"employee_id": UUID(DANA)}]
+                return await super().fetch(query, *args)
+
+        async def conflicts(_conn, _company, _employee, start, end, *, exclude_shift_id=None):
+            row = rows[first]
+            if exclude_shift_id != first and row["starts_at"] < end and row["ends_at"] > start:
+                return [{"shift_id": str(first), "starts_at": row["starts_at"].isoformat(),
+                         "ends_at": row["ends_at"].isoformat(), "role": "shift lead"}]
+            return []
+
+        async def retime(_conn, _company, **kwargs):
+            rows[kwargs["shift_id"]].update(starts_at=kwargs["new_starts_at"], ends_at=kwargs["new_ends_at"])
+
+        ops = [{**_op(0, shift_id=str(first)), "kind": "retime", "to_employee_id": None,
+                "new_starts_at": "2026-08-23T10:00:00+00:00", "new_ends_at": "2026-08-23T14:00:00+00:00"},
+               _op(1, shift_id=str(second), start=(23, 12), end=(23, 16))]
+        with (
+            mock.patch.object(schedule_chat, "find_conflicts", conflicts),
+            mock.patch.object(schedule_chat, "retime_shift_core", retime),
+            mock.patch.object(schedule_chat, "fetch_effective_job_employee_ids", mock.AsyncMock(return_value={UUID(DANA)})),
+            mock.patch.object(schedule_chat, "check_shift_compliance", mock.AsyncMock(return_value=[])),
+            mock.patch.object(schedule_chat, "lock_scheduling_employees", mock.AsyncMock()),
+            mock.patch.object(schedule_chat, "log_audit", mock.AsyncMock()),
+        ):
+            text, touched = _run(schedule_chat._apply_edit_ops(
+                Conn(rows), company_id=COMPANY, proposal_id=uuid4(), ops=ops, confirmed_by=USER,
+                edit_published=True, week_start=None, week_end=None,
+            ))
+        assert touched == [first]
+        assert "shift applied earlier in this batch" in text
+        assert "picked up a conflicting shift in the meantime" not in text
