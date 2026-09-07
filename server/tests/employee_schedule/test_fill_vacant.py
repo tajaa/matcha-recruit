@@ -69,7 +69,7 @@ def _fill(*, demand, roster, preflight=None, jurisdiction=CURATED, job_match=Non
 
     async def fake_preflight(conn, *, company_id, location_id, plan):
         calls["preflight"] += 1
-        return preflight(plan) if preflight else set()
+        return (preflight(plan) if preflight else set()), {}
 
     async def fake_job(conn, company_id, name, *, location_id=None):
         calls["job"].append(name)
@@ -82,7 +82,7 @@ def _fill(*, demand, roster, preflight=None, jurisdiction=CURATED, job_match=Non
         mock.patch.object(week_builder, "_load_vacant_demand", fake_demand),
         mock.patch.object(week_builder, "_load_roster_context", fake_roster),
         mock.patch.object(week_builder, "jurisdiction_rule_status", fake_rules),
-        mock.patch.object(week_builder, "_preflight_compliance_blocks", fake_preflight),
+        mock.patch.object(week_builder, "_preflight_compliance", fake_preflight),
         mock.patch.object(week_builder, "resolve_job_by_name", fake_job),
         mock.patch.object(week_builder, "_week_rules_gate", gate_must_not_run),
         mock.patch.object(week_builder, "load_profile_bundle", gate_must_not_run),

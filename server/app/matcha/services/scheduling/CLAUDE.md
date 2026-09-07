@@ -346,7 +346,7 @@ Invariants:
   stale an otherwise-good proposal at confirm time. `_coverage_profile` is read
   in `propose_week_draft` and in readiness, never in `_planning_snapshot`.
 - **Severity is `gap | advisory`, never `block`.** `block` already means
-  "cannot be staged" (`_preflight_compliance_blocks`, `check_shift_compliance`),
+  "cannot be staged" (`_preflight_compliance`, `check_shift_compliance`),
   and nothing here prevents staging: a manager may knowingly run a thin close,
   and the answer is to say so, not to refuse. A generated week with holes is
   still `ready` and still needs the same explicit confirmation.
@@ -394,6 +394,71 @@ Invariants:
   compared against `operating_hours` as clock faces; converting would move an
   early shift onto the previous day. An overnight window (`close <= open`) is
   one window, not two holes.
+
+### Week builder hardening (2026-09-07) — advisories surfaced, replans checked, load named
+
+Why: on the one path where the server already picked people, the builder still discarded every
+statutory advisory at both boundaries (`_preflight_compliance_blocks` kept only `block`; apply did the
+same), sent the final rebuild out UNCHECKED when the replan budget ran out, swallowed a per-pair
+preflight exception as "fine", never validated the `fixed_employee_ids` it inherited, and reported
+"18/18 positions filled" for nine shifts on one person. A TX week was indistinguishable from a CA week.
+
+- **`_preflight_compliance(conn, company_id, location_id, plan) -> (blocked, advisories)`** replaces
+  `_preflight_compliance_blocks`. Advisories are returned per `(shift_key, employee_id)` verbatim
+  (`check`, `message`, `statute`, `state`) and persisted on each `proposed_assignment["advisories"]`
+  by `_attach_advisories`. **Fails closed per pair**: a checker that raises marks that pair blocked
+  (logged) instead of letting it through. Passes `fw_event="assign"` (drafts: `fw_shift_published=False`)
+  and prefetches `fetch_lapse_items` ONCE for everyone proposed (feature flags via
+  `get_company_features(conn=conn)`); if the prefetch fails, `lapse_items=None` and the checker queries
+  per call — only the batching is lost.
+- **`_plan_with_preflight(conn, …, build)`** is the loop both `propose_week_draft` and
+  `plan_vacant_fill` use: build → preflight → replan around blocks, up to `_MAX_COMPLIANCE_REPLANS`
+  more times, and **the plan handed back was always checked**. When the budget runs out with a block
+  still in it, `_strip_blocked_pairs` removes that pair, books it as `unfilled` with reason
+  `compliance or eligibility block`, and fixes `metrics`/`hours_by_employee` — a manager is never shown
+  a seat filled by someone the gate refused.
+- **New findings** (`_attach_findings_core`, same `make_finding` shape, counted in full in
+  `finding_counts`):
+  - `staffing_concentration` (advisory) — one person on ≥ `_CONCENTRATION_MIN_SHIFTS` (7: more shifts
+    than days) OR on ≥ 3 shifts that are > 40% of the proposed positions AND ≥ 2× a fair split of the
+    roster (`proposed / roster_size`). Two leads on 4/3 of seven blocks stay quiet; one person on 6 of 6
+    with a second body on the roster is the finding; a one-person roster is never flagged by share.
+  - `existing_double_booking` (**gap**, added to `GAP_KINDS`) — an inherited `fixed_employee_ids`
+    booking that overlaps another of theirs (in the plan or elsewhere that week). Still counted as
+    filled; the finding is how the manager learns.
+  - `compliance_advisory` (advisory) — one per assignment × advisory, `"{name}: {message} ({statute})"`,
+    on the shift's day/window. `_trim_thin_findings` caps the LIST at `_MAX_COMPLIANCE_ADVISORY_FINDINGS`
+    (5); the count and the review keep every one.
+  - `jurisdiction_unmapped` / `jurisdiction_unavailable` (advisory, once) — from
+    `jurisdiction_rule_status`; `plan["jurisdiction"]` carries the `jurisdiction_message`. The default
+    before the pass runs is `unavailable` ("not an all-clear"), so a findings pass that fails never reads
+    as verified.
+- **`metrics.top_load`** — top 3 `{employee_id, name, shifts, hours}` heaviest first. The summary adds
+  "{name} carries N of the M proposed positions." when concentration fired, and the jurisdiction
+  sentence when not verified. Still never the word "compliant".
+- **The week-draft `ScheduleReview`** — `schedule_review.build_week_draft_review(plan, employee_names,
+  existing_assignments, week_start, week_end, proposal_id)` → `kind="week_draft"`: `assignments`
+  (verdict `warn` when an advisory is attached), `rejected=[]` (the planner refuses before proposing),
+  `unfilled` (with `ends_at` looked up), `employees[before/after/warnings]` (the concentration finding
+  is the person's warning), `advisories` verbatim, `findings`, `jurisdiction`, `compliance_status`.
+  Persisted as `proposal["schedule_review"]` (the older `proposal["review"]` summary/preview payload is
+  unchanged) and returned as `review` + `compliance_status` + `jurisdiction`, which `agent.py` merges
+  into the staged dict — so the Schedule Pilot review pane renders a week draft and a schedule change
+  with one component.
+- **`apply_week_draft`** re-checks with `fw_event="assign"` and `fw_shift_published` from the live row,
+  keeps the non-block violations of what it applied as `advisories_acknowledged` (returned, and on the
+  `schedule_generation.apply` audit row with `compliance_status` + `jurisdiction`), names each dropped
+  assignee with role/time/reason in the message ("Left open after current-state rechecks: …", first 5),
+  adds a "Heads up on what was applied — …" line (deduped, first 3), and repeats the not-verified
+  sentence "… You confirmed with that in view." when the state's law was not evaluated.
+- Client: `HuumeActionScheduleWeekDraft` gains `metrics.top_load`, `review`, `compliance_status`,
+  `jurisdiction`; the banner appends ", {name} on N shifts" when concentration fired and
+  " — compliance NOT verified"; the card shows a "Heaviest load" row and labels the new finding kinds.
+- Tests: `test_week_builder.py` (one-lead-holder end to end, two leads unflagged, solo roster unflagged,
+  inherited double-booking gap, advisories on assignment/findings/review, list cap vs count, budget-spent
+  strip, unmapped state, failed pass ⇒ unavailable, `_preflight_compliance` fail-closed + lapse batching
+  + fallback, apply naming dropped/acknowledged/not-verified), `test_schedule_review.py`
+  (`build_week_draft_review`), state-block cases in `tests/huume/test_huume_week_builder.py`.
 
 ### Per-location week start day
 

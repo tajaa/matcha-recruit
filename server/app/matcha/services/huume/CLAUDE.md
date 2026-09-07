@@ -198,3 +198,16 @@ days this week, time away, cap, `allow_overtime`), `open_slots`, `policy`, `juri
 the prompt tells the model to read it before naming anyone in an explicit edit — and `find_shift_coverage`
 on the schedule surface sees draft shifts and tags candidates with `also_suggested_for`. Full mechanics:
 `services/scheduling/CLAUDE.md` §"Fill vacant shifts".
+
+**Week builder hardening (2026-09-07).** `build_week_schedule`'s staged dict now carries the same
+`ScheduleReview` a schedule_change does (`review`, kind `week_draft`: who goes where, per-person load
+before/after, statutory advisories verbatim, the planner's open seats with reasons, findings,
+jurisdiction) plus `compliance_status`/`jurisdiction`, and `metrics.top_load` (top 3 people by shifts
+and hours). `agent.py` echoes `review` (minus the long lists already echoed) and `compliance_status`
+on the stage turn; `prompt.build_state_block`'s `schedule_week_draft` branch adds a "Load:" line, the
+concentration finding as a "Policy warning:", and the same "Compliance: NOT verified — …" line the
+schedule_change branch renders. Four new finding kinds reach the card: `staffing_concentration`
+(advisory), `existing_double_booking` (gap), `compliance_advisory` (advisory, statute verbatim),
+`jurisdiction_unmapped`/`jurisdiction_unavailable` (advisory). The apply result names who was left open
+and why, lists the statutory advisories the manager accepted, and repeats the not-verified line. Full
+mechanics: `services/scheduling/CLAUDE.md` §"Week builder hardening".

@@ -1,7 +1,8 @@
 """`ScheduleReview` — the one shape for "what this schedule write will do".
 
 Produced from a resolved `schedule_chat_proposals` doc (`kind` edit / create /
-batch) after `assignment_guard` has annotated its ops, and consumed by three
+batch) after `assignment_guard` has annotated its ops — or, via
+`build_week_draft_review`, from a week-builder plan — and consumed by three
 renderers that must never disagree: the thread/channel pill
 (`schedule_chat.edit_proposal_text` & co.), Huume's stage-turn tool response
 and state block (`huume/schedule_skill.propose`, `huume/prompt`), and — later
@@ -188,6 +189,112 @@ def build_review(proposal: dict[str, Any], *, proposal_id: Optional[str] = None)
         "rejected": rejected,
         "unfilled": list(proposal.get("unfilled") or []),
         "employees": _employees_from_ops(ops),
+        "advisories": advisories,
+        "findings": findings,
+        "jurisdiction": jurisdiction,
+    }
+
+
+def _week_bucket(assignments: list[dict[str, Any]], *, week_start, week_end) -> dict[str, dict[str, Any]]:
+    """Per-employee minutes / shifts / days from a list of `{employee_id,
+    starts_at, worked_minutes}` rows, counting only the given week."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in assignments:
+        starts = item.get("starts_at")
+        if isinstance(starts, str):
+            from datetime import datetime as _dt
+            starts = _dt.fromisoformat(starts)
+        day = starts.date() if hasattr(starts, "date") else None
+        if day is None or not (week_start <= day <= week_end):
+            continue
+        entry = out.setdefault(str(item["employee_id"]), {"minutes": 0, "shifts": 0, "days": set()})
+        entry["minutes"] += int(item.get("worked_minutes") or 0)
+        entry["shifts"] += 1
+        entry["days"].add(day)
+    return out
+
+
+def _load_shape(entry: Optional[dict[str, Any]]) -> dict[str, int]:
+    entry = entry or {}
+    return {"minutes": int(entry.get("minutes", 0)), "shifts": int(entry.get("shifts", 0)),
+            "days": len(entry.get("days") or ())}
+
+
+def build_week_draft_review(
+    plan: dict[str, Any], *, employee_names: dict[str, str],
+    existing_assignments: list[dict[str, Any]], week_start, week_end,
+    proposal_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """The `ScheduleReview` for a week-builder plan (`kind="week_draft"`).
+
+    Same contract as an edit review so one pane renders both: `assignments`
+    are the planner's proposed pairs (verdict `warn` when the preflight
+    attached a statutory advisory), `unfilled` the open seats with the
+    planner's reason, `employees` each person's load before/after with the
+    concentration finding as their warning, `advisories` verbatim, and
+    `jurisdiction`/`compliance_status` from the findings pass. `rejected` is
+    empty by construction — the planner refuses before proposing."""
+    shifts = list(plan.get("shifts") or [])
+    by_key = {shift.get("key"): shift for shift in shifts}
+    assignments: list[dict[str, Any]] = []
+    advisories: list[dict[str, Any]] = []
+    proposed_rows: list[dict[str, Any]] = []
+    for shift in shifts:
+        role = (shift.get("role") or "shift").title()
+        for item in shift.get("proposed_assignments") or []:
+            employee_id = str(item["employee_id"])
+            name = item.get("employee_name") or employee_names.get(employee_id) or "Employee"
+            items = list(item.get("advisories") or [])
+            assignments.append({
+                "shift_id": shift.get("key"), "role": role,
+                "starts_at": shift.get("starts_at"), "ends_at": shift.get("ends_at"),
+                "employee_id": employee_id, "employee_name": name, "op": "assign",
+                "verdict": "warn" if items else "ok", "reasons": [],
+            })
+            advisories.extend({
+                "message": adv.get("message"), "statute": adv.get("statute"),
+                "employee_name": name, "shift_id": shift.get("key"),
+            } for adv in items)
+            proposed_rows.append({
+                "employee_id": employee_id, "starts_at": shift.get("starts_at"),
+                "worked_minutes": shift.get("worked_minutes") or 0,
+            })
+    before = _week_bucket(existing_assignments, week_start=week_start, week_end=week_end)
+    after = _week_bucket([
+        *existing_assignments, *proposed_rows,
+    ], week_start=week_start, week_end=week_end)
+    findings = list(plan.get("findings") or [])
+    concentration = {
+        finding.get("employee_name"): finding.get("detail")
+        for finding in findings if finding.get("kind") == "staffing_concentration"
+    }
+    employees: list[dict[str, Any]] = []
+    for employee_id in sorted({row["employee_id"] for row in proposed_rows},
+                              key=lambda eid: (-after.get(eid, {}).get("minutes", 0), eid)):
+        name = employee_names.get(employee_id) or next(
+            (a["employee_name"] for a in assignments if a["employee_id"] == employee_id), "Employee",
+        )
+        warning = concentration.get(name)
+        employees.append({
+            "employee_id": employee_id, "name": name,
+            "before": _load_shape(before.get(employee_id)), "after": _load_shape(after.get(employee_id)),
+            "warnings": [warning] if warning else [],
+        })
+    unfilled = [{
+        "shift_id": item.get("shift_key"), "role": item.get("role"),
+        "starts_at": item.get("starts_at"),
+        "ends_at": (by_key.get(item.get("shift_key")) or {}).get("ends_at"),
+        "reason": item.get("reason"), "exclusions": dict(item.get("exclusions") or {}),
+    } for item in plan.get("unfilled") or []]
+    jurisdiction = jurisdiction_message(plan.get("jurisdiction"))
+    return {
+        "proposal_id": proposal_id,
+        "kind": "week_draft",
+        "compliance_status": compliance_status_for(jurisdiction, advisories),
+        "assignments": assignments,
+        "rejected": [],
+        "unfilled": unfilled,
+        "employees": employees,
         "advisories": advisories,
         "findings": findings,
         "jurisdiction": jurisdiction,
