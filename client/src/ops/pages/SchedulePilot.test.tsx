@@ -300,6 +300,29 @@ describe('SchedulePilot — Huume', () => {
     expect(content).toContain('Sun 8/9 · 9a–5p · Opener · open · staffing: 0/1')
   })
 
+  it('shows a vacant seat on the board without making it Huume context', async () => {
+    // The rail's open-seat rows are navigation. Huume's context set is the ✨
+    // toggle's job — a link that quietly added to it would put blocks the
+    // manager never picked into every later turn as authoritative.
+    planningInputsMock.mockResolvedValue(planningInputs({
+      open_slots: [{
+        shift_id: 'shift-1', role: 'Opener', job_id: null,
+        starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z', required_staff: 1, open: 1,
+      }],
+    }))
+    renderPilot()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Opener 1 open/ }))
+
+    expect(screen.queryByText(/selected shift as context/)).not.toBeInTheDocument()
+    const input = await screen.findByPlaceholderText('Try: add an opener Monday')
+    fireEvent.change(input, { target: { value: 'Who can cover it?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+
+    const [, content] = sendMessageStreamMock.mock.calls[0]
+    expect(content).not.toContain('Selected schedule blocks')
+  })
+
   it('reloads the week and the inputs once for an applied action', async () => {
     renderPilot()
     await waitFor(() => expect(planningInputsMock).toHaveBeenCalledTimes(1))
@@ -391,6 +414,31 @@ describe('SchedulePilot — scenarios', () => {
     // The chip stops being a free simulation — the thread owns it now.
     const chip = await screen.findByRole('button', { name: /^Scenario 1: all open shifts/ })
     await waitFor(() => expect(within(chip).getByText('staged')).toBeInTheDocument())
+  })
+
+  it('follows what is still selected when a comparison is dropped', async () => {
+    // Apply and Stage act on the pane's scenario. If a compare-click that
+    // deselects a chip left the pane on it, they would act on a scenario the
+    // manager is no longer looking at.
+    previewFillMock
+      .mockResolvedValueOnce({ status: 'ready', proposal_id: 'proposal-1', pill_text: 'pill', review: review(), label: 'Openers spread' })
+      .mockResolvedValueOnce({ status: 'ready', proposal_id: 'proposal-2', pill_text: 'pill', review: review({ proposal_id: 'proposal-2' }), label: 'Leads doubled' })
+    renderPilot()
+    for (const _ of [0, 1]) {
+      fireEvent.click(screen.getByRole('button', { name: /New scenario/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Preview/ }))
+      await waitFor(() => expect(screen.queryByRole('button', { name: /^Preview/ })).not.toBeInTheDocument())
+    }
+
+    const first = await screen.findByRole('button', { name: /^Openers spread/ })
+    const second = await screen.findByRole('button', { name: /^Leads doubled/ })
+    fireEvent.click(first, { shiftKey: true })
+    fireEvent.click(first, { shiftKey: true })
+
+    expect(second).toHaveAttribute('aria-pressed', 'true')
+    expect(first).toHaveAttribute('aria-pressed', 'false')
+    expect(within(reviewPane()).getByText(/Leads doubled/)).toBeInTheDocument()
+    expect(within(reviewPane()).queryByText(/Openers spread/)).not.toBeInTheDocument()
   })
 
   it('applies a scenario over REST and refreshes the week', async () => {

@@ -13,10 +13,10 @@ function review(overrides: Partial<ScheduleReview> = {}): ScheduleReview {
   }
 }
 
-function assignment(shiftId: string) {
+function assignment(shiftId: string, verdict: 'ok' | 'warn' | 'blocked' = 'ok') {
   return {
     shift_id: shiftId, role: 'Shift Lead', starts_at: '2026-08-24T06:00:00+00:00', ends_at: '2026-08-24T14:00:00+00:00',
-    employee_id: 'e1', employee_name: 'Dana Reyes', op: 'assign', verdict: 'ok' as const, reasons: [],
+    employee_id: 'e1', employee_name: 'Dana Reyes', op: 'assign', verdict, reasons: [],
   }
 }
 
@@ -99,6 +99,16 @@ describe('ScenariosStrip — chips', () => {
     expect(props.onSelect).toHaveBeenLastCalledWith('proposal-1', { compare: true })
   })
 
+  it('counts only the rows the chip would actually stage', () => {
+    // A blocked row is not staged anywhere else either — the chip must not
+    // promise a seat the apply would refuse.
+    renderStrip({
+      scenarios: [scenario({ review: review({ assignments: [assignment('s1'), assignment('s2', 'blocked')] }) })],
+    })
+
+    expect(screen.getByText('1 staged')).toBeInTheDocument()
+  })
+
   it('marks a scenario that has already been applied or staged', () => {
     const { unmount } = render(<ScenariosStrip {...PROPS} scenarios={[scenario({ status: 'applied' })]} />)
     expect(screen.getByText('applied')).toBeInTheDocument()
@@ -126,6 +136,16 @@ describe('ScenariosStrip — acting on the selected scenario', () => {
   it('cannot stage into a thread that is not open', () => {
     renderStrip({ scenarios: [scenario()], selectedIds: ['proposal-1'], canStage: false })
     expect(screen.getByRole('button', { name: /Stage in thread/ })).toBeDisabled()
+  })
+
+  it('sends a staged scenario back to its thread to be cancelled', () => {
+    // The thread owns the staged action; discarding here would leave the
+    // thread pointing at a row that no longer exists.
+    renderStrip({ scenarios: [scenario({ status: 'staged' })], selectedIds: ['proposal-1'] })
+
+    const discard = screen.getByRole('button', { name: 'Discard Spread the leads' })
+    expect(discard).toBeDisabled()
+    expect(discard).toHaveAttribute('title', 'Staged in the Huume thread — cancel it there')
   })
 
   it('offers nothing to act on once the scenario is applied', () => {

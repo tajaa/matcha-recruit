@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useScheduleScenarios } from './useScheduleScenarios'
+import { ApiError } from '../../api/client'
 import type { ScheduleReview } from '../../types/employeeSchedule'
 
 const { previewMock, applyMock, cancelMock } = vi.hoisted(() => ({
@@ -107,6 +108,19 @@ describe('useScheduleScenarios — previewing', () => {
   })
 })
 
+/** Applies and returns what it threw. The rejection has to be caught inside
+ *  `act`, or the state updates the hook queued while failing are never
+ *  flushed and every assertion reads the state from before the apply. */
+async function applyExpectingFailure(
+  result: { current: ReturnType<typeof useScheduleScenarios> },
+  proposalId: string,
+): Promise<unknown> {
+  let thrown: unknown = null
+  await act(async () => { await result.current.apply(proposalId).catch((error: unknown) => { thrown = error }) })
+  expect(thrown).not.toBeNull()
+  return thrown
+}
+
 describe('useScheduleScenarios — acting on one', () => {
   async function withScenario() {
     previewMock.mockResolvedValue(ready('proposal-1'))
@@ -126,11 +140,28 @@ describe('useScheduleScenarios — acting on one', () => {
 
   it('puts a failed apply back within reach instead of leaving it stuck', async () => {
     const { result } = await withScenario()
-    applyMock.mockRejectedValue(new Error('That fill preview was already applied or discarded'))
+    applyMock.mockRejectedValue(new Error('The planner is unreachable'))
 
-    await expect(act(async () => { await result.current.apply('proposal-1') })).rejects.toThrow(/already applied/)
+    // Caught inside act(): a rejection that escapes it leaves the updates the
+    // hook queued unflushed, and the assertion reads the pre-apply state.
+    const failure = await applyExpectingFailure(result, 'proposal-1')
 
+    expect(failure).toHaveProperty('message', 'The planner is unreachable')
     expect(result.current.scenarios[0].status).toBe('ready')
+  })
+
+  it('retires a scenario the server has already spent', async () => {
+    const { result } = await withScenario()
+    act(() => result.current.select('proposal-1'))
+    applyMock.mockRejectedValue(new ApiError('That fill preview was already applied or discarded', 409, null))
+
+    const failure = await applyExpectingFailure(result, 'proposal-1')
+
+    // A 409 means the row is gone server-side: re-offering Apply on it would
+    // only 409 again.
+    expect(failure).toBeInstanceOf(ApiError)
+    expect(result.current.scenarios).toEqual([])
+    expect(result.current.selectedIds).toEqual([])
   })
 
   it('discards a scenario, cancelling the row it left on the server', async () => {
@@ -140,6 +171,23 @@ describe('useScheduleScenarios — acting on one', () => {
 
     expect(cancelMock).toHaveBeenCalledWith('proposal-1')
     expect(result.current.scenarios).toEqual([])
+    expect(result.current.selectedIds).toEqual([])
+  })
+
+  it('drops the chip the server cancelled when a second scenario is staged', async () => {
+    previewMock.mockResolvedValueOnce(ready('proposal-1')).mockResolvedValueOnce(ready('proposal-2'))
+    const { result } = render()
+    await act(async () => { await result.current.preview({}) })
+    await act(async () => { await result.current.preview({}) })
+
+    act(() => result.current.markStaged('proposal-1'))
+    act(() => result.current.select('proposal-1'))
+    // The thread holds one staged action, so adopting the second cancelled the
+    // first server-side — its chip goes with it.
+    act(() => result.current.markStaged('proposal-2'))
+
+    expect(result.current.scenarios.map((item) => item.proposal_id)).toEqual(['proposal-2'])
+    expect(result.current.scenarios[0].status).toBe('staged')
     expect(result.current.selectedIds).toEqual([])
   })
 
@@ -172,6 +220,22 @@ describe('useScheduleScenarios — selection', () => {
 
     act(() => result.current.select('proposal-1'))
     expect(result.current.selectedIds).toEqual([])
+  })
+
+  it('hands back the resulting selection, so the caller can follow it', async () => {
+    const { result } = await withTwo()
+
+    let next: string[] = []
+    act(() => { next = result.current.select('proposal-1') })
+    expect(next).toEqual(['proposal-1'])
+
+    act(() => { next = result.current.select('proposal-2', { compare: true }) })
+    expect(next).toEqual(['proposal-1', 'proposal-2'])
+
+    // A compare click on the selected chip drops it; the caller needs to know
+    // what is left, not what was clicked.
+    act(() => { next = result.current.select('proposal-2', { compare: true }) })
+    expect(next).toEqual(['proposal-1'])
   })
 
   it('holds at most two for a comparison', async () => {

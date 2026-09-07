@@ -122,6 +122,17 @@ describe('compareReviews', () => {
     expect(diff.employees[1]).toEqual({ employee_id: 'e2', name: 'Ben Ortiz', left: 600, right: 480 })
   })
 
+  it('keeps a scenario that empties someone’s week at zero', () => {
+    // Presence, not a zero, decides the backfill: a scenario that leaves Dana
+    // with no hours is a real outcome, not a person the scenario never touched.
+    const left = review({ employees: [employee('e1', 'Dana Reyes', 480, 0)] })
+    const right = review({ employees: [employee('e1', 'Dana Reyes', 480, 540)] })
+
+    expect(compareReviews(left, right).employees[0]).toEqual({
+      employee_id: 'e1', name: 'Dana Reyes', left: 0, right: 540,
+    })
+  })
+
   it('carries each side’s staged and unfilled totals for the chip line', () => {
     const left = review({ assignments: [assignment('s1', 'Dana Reyes')], unfilled: [] })
     const right = review({
