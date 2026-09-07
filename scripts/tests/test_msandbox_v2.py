@@ -22,6 +22,7 @@ from scripts.msandbox.agent_adapters import (
     launch_agent,
     refresh_capability_context,
 )
+from scripts.msandbox.agent_versions import resolve_agent_versions
 from scripts.msandbox.attachments import AttachmentError, import_files, parse_pasted_file_payload
 from scripts.msandbox.capabilities import (
     CONTAINER_CONFIG_DIR,
@@ -153,6 +154,7 @@ class MsandboxTestCase(unittest.TestCase):
                 "MSANDBOX_DATA_DIR": str(self.root / "data"),
                 "MSANDBOX_CONFIG_DIR": str(self.root / "config"),
                 "MSANDBOX_SKIP_FETCH": "1",
+                "MSANDBOX_AGENT_AUTO_UPDATE": "0",
             },
             clear=False,
         )
@@ -186,6 +188,77 @@ class MsandboxTestCase(unittest.TestCase):
             git(self.repo, "rev-parse", "HEAD"),
             "codex/test",
         )
+
+
+class AgentVersionTests(MsandboxTestCase):
+    def runtime_root(self) -> Path:
+        runtime = self.root / "runtime"
+        dockerfile = runtime / "docker/agent-sandbox/Dockerfile"
+        dockerfile.parent.mkdir(parents=True)
+        dockerfile.write_text(
+            "ARG CODEX_VERSION=0.153.4\nARG CLAUDE_CODE_VERSION=2.1.263\n",
+            encoding="utf-8",
+        )
+        return runtime
+
+    def test_latest_versions_are_resolved_and_cached(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "MSANDBOX_AGENT_AUTO_UPDATE": "1",
+                "CODEX_VERSION": "",
+                "CLAUDE_CODE_VERSION": "",
+            },
+            clear=False,
+        ), mock.patch(
+            "scripts.msandbox.agent_versions._latest_version",
+            side_effect=lambda package, timeout: {
+                "@openai/codex": "0.154.0",
+                "@anthropic-ai/claude-code": "2.1.264",
+            }[package],
+        ) as latest:
+            versions = resolve_agent_versions(self.runtime_root())
+
+        self.assertEqual(
+            versions,
+            {"CODEX_VERSION": "0.154.0", "CLAUDE_CODE_VERSION": "2.1.264"},
+        )
+        self.assertEqual(latest.call_count, 2)
+        cached = json.loads((self.root / "state/agent-versions.json").read_text(encoding="utf-8"))
+        self.assertEqual(cached["versions"], versions)
+
+    def test_unavailable_registry_uses_the_last_resolved_versions(self) -> None:
+        runtime = self.runtime_root()
+        cache = self.root / "state/agent-versions.json"
+        cache.parent.mkdir(parents=True)
+        cache.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "versions": {
+                        "CODEX_VERSION": "0.154.0",
+                        "CLAUDE_CODE_VERSION": "2.1.264",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "MSANDBOX_AGENT_AUTO_UPDATE": "1",
+                "CODEX_VERSION": "",
+                "CLAUDE_CODE_VERSION": "",
+            },
+            clear=False,
+        ), mock.patch(
+            "scripts.msandbox.agent_versions._latest_version",
+            side_effect=OSError("offline"),
+        ):
+            self.assertEqual(
+                resolve_agent_versions(runtime),
+                {"CODEX_VERSION": "0.154.0", "CLAUDE_CODE_VERSION": "2.1.264"},
+            )
 
 
 class StateTests(MsandboxTestCase):
@@ -1704,7 +1777,12 @@ class DockerGcTests(MsandboxTestCase):
     def sandbox_tree(self, root: Path, marker: str) -> Path:
         directory = root / "docker/agent-sandbox"
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "Dockerfile").write_text(f"FROM scratch # {marker}\n", encoding="utf-8")
+        (directory / "Dockerfile").write_text(
+            "ARG CODEX_VERSION=0.153.4\n"
+            "ARG CLAUDE_CODE_VERSION=2.1.263\n"
+            f"FROM scratch # {marker}\n",
+            encoding="utf-8",
+        )
         (directory / "Dockerfile.browser").write_text(
             f"ARG SANDBOX_BASE_IMAGE\nFROM ${{SANDBOX_BASE_IMAGE}} # {marker}\n",
             encoding="utf-8",

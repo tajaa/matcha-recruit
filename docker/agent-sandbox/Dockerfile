@@ -95,14 +95,16 @@ RUN case "${TARGETARCH}" in \
 ENV PATH=/opt/node/bin:${PATH}
 
 # ---------------------------------------------------------------------------
-# agents: all three agent CLIs, pinned so a rebuild is reproducible. Bump
-# these when intentionally upgrading, not silently on every image build.
+# agents: all three agent CLIs. Codex and Claude defaults are safe offline
+# fallbacks; msandbox resolves their current npm releases on the host and
+# passes exact versions into every build so the resulting image remains
+# reproducible. OpenCode remains manually pinned.
 # Layered directly on `node` so `runtime` picks up Node + all three CLIs
 # with a single COPY --from=agents /opt/node /opt/node.
 # ---------------------------------------------------------------------------
 FROM node AS agents
-ARG CODEX_VERSION=0.151.0
-ARG CLAUDE_CODE_VERSION=2.1.243
+ARG CODEX_VERSION=0.153.4
+ARG CLAUDE_CODE_VERSION=2.1.263
 ARG OPENCODE_VERSION=1.18.22
 RUN --mount=type=cache,target=/root/.npm,id=npm-agents \
     npm install --global \

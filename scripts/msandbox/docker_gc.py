@@ -29,6 +29,7 @@ from .docker_runtime import (
     build_context_sources,
     build_identifier,
 )
+from .agent_versions import resolve_agent_versions
 from .models import SessionRecord
 from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
@@ -188,7 +189,17 @@ def reachable(repo: Path) -> Reachable:
         for root in roots:
             sources = build_context_sources(record, root)
             try:
-                dependency_identifier = build_identifier(sources, playwright=False)
+                agent_versions = resolve_agent_versions(root)
+            except (OSError, RuntimeError, ValueError) as exc:
+                result.complete = False
+                result.reason = f"cannot resolve agent versions: {exc}"
+                return result
+            try:
+                dependency_identifier = build_identifier(
+                    sources,
+                    playwright=False,
+                    agent_versions=agent_versions,
+                )
                 for prefix, manifest in DEPENDENCY_MANIFESTS:
                     result.volumes.add(
                         _dependency_volume(
@@ -207,7 +218,11 @@ def reachable(repo: Path) -> Reachable:
             # layer and shares the exact same dependency volumes with its base.
             for playwright in (False, True):
                 try:
-                    identifier = build_identifier(sources, playwright=playwright)
+                    identifier = build_identifier(
+                        sources,
+                        playwright=playwright,
+                        agent_versions=agent_versions,
+                    )
                 except (DockerError, OSError) as exc:
                     result.complete = False
                     result.reason = f"{record.id}: {exc}"

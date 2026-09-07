@@ -15,6 +15,21 @@ msandbox install
 msandbox                # start sandbox + AutoPR together, then open the wizard
 ```
 
+## Agent CLI updates
+
+Each host-side `msandbox` entry resolves the npm `latest` release of Codex and
+Claude Code before building or starting a workspace. Those exact versions are
+passed as Docker build arguments and become part of the image identity, so a
+new upstream release automatically creates a refreshed immutable image; a
+running workspace is recreated from it. The container itself remains
+read-only—never run a global npm update from inside it.
+
+The Dockerfile defaults are the offline fallback. If npm cannot be reached,
+msandbox uses the last successfully resolved version (or those defaults) and
+continues with a warning. Set `MSANDBOX_AGENT_AUTO_UPDATE=0` to intentionally
+disable lookup, or set `CODEX_VERSION` and/or `CLAUDE_CODE_VERSION` to force a
+specific valid release for one invocation.
+
 Every session owns a detached Git worktree, Compose project, home directory,
 tmux TUI, attachment inbox, and validation record. Multiple sessions of the
 same agent can run simultaneously. See `docs/ops/MSANDBOX_SESSIONS.md` for the
