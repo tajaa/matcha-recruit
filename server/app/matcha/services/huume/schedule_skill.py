@@ -415,11 +415,13 @@ async def propose(
         # Count what was actually STAGED: the guard may have rejected some of
         # the requested ops, and the model must not describe those as done.
         staged_ops = [a for a in review.get("assignments") or [] if a.get("op") != "create"]
-        create_count = len({a.get("shift_id") for a in review.get("assignments") or [] if a.get("op") == "create"})
-        operation_count = len(staged_ops) + (create_count or (1 if kind == "create" else 0))
-        operation_summary = summarize_operations(
-            [{"kind": a.get("op")} for a in staged_ops], [None] * create_count,
-        ) if staged_ops or create_count else operation_summary
+        # New shifts have no database IDs yet, and one shift can carry several
+        # assignees. The review counts resolved operations before flattening them.
+        operation_count = review.get("operation_count", len(staged_ops) or operation_count)
+        operation_summary = review.get("operation_summary") or (
+            summarize_operations([{"kind": a.get("op")} for a in staged_ops], [])
+            if staged_ops else operation_summary
+        )
     return {
         "status": "ready",
         "proposal_id": str(build.proposal_id),

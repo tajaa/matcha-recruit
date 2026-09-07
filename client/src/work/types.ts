@@ -864,6 +864,8 @@ export interface HuumeActionScheduleChange {
 export interface HuumeScheduleReview {
   proposal_id?: string | null
   kind?: 'edit' | 'create' | 'batch' | 'week_draft'
+  operation_count?: number
+  operation_summary?: Record<string, number>
   compliance_status?: 'verified' | 'advisory' | 'unmapped' | 'unavailable'
   assignments?: Array<{
     shift_id?: string | null; role?: string; starts_at?: string; ends_at?: string

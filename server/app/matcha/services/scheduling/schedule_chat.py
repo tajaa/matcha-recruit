@@ -59,7 +59,7 @@ from .schedule_chat_rules import (
     resolve_day_hint,
     resolve_week,
 )
-from .assignment_guard import ProposedAssignment, build_ledgers, evaluate_batch
+from .assignment_guard import ProposedAssignment, ProposedRemoval, build_ledgers, evaluate_batch
 from .schedule_batch import net_per_day
 from .schedule_review import build_review, jurisdiction_message, rejected_entry
 from .schedule_intelligence import fetch_lapse_items
@@ -1082,6 +1082,15 @@ async def build_proposal(
             source_message_id=source_message_id, created_by=created_by, parsed=parsed,
             clarify_history=clarify_history, base_doc=base_doc, clarify=resolved,
         )
+    if resolved["jurisdiction"]["status"] == "unavailable":
+        build = await _persist_clarify(
+            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+            source_message_id=source_message_id, created_by=created_by, parsed=parsed,
+            clarify_history=clarify_history, base_doc=base_doc,
+            clarify=_Clarify(resolved["jurisdiction"]["message"] + " Try again in a minute.", []),
+        )
+        build.clarify_kind = "refused"
+        return build
     proposal_doc = {
         "original_content": original_content,
         "ack": parsed.get("ack") or "",
@@ -1284,7 +1293,7 @@ async def _review_assign_ops(
     the policy warnings (same-day double, rest, consecutive days, weekly
     cap). The DB-only hard refusals confirm-time would raise anyway —
     unqualified, outside availability, shift already full (counting earlier
-    ops here) — are folded in as `pre_blocked` so the pill says so BEFORE the
+    ops here) — are checked before acceptance so the pill says so BEFORE the
     manager confirms instead of the op vanishing at confirm. Never raises:
     a guard failure leaves ops un-annotated and confirm-time rechecks hold.
     Non-assign ops get a plain `ok` review so renderers need no special case."""
@@ -1297,13 +1306,16 @@ async def _review_assign_ops(
     if not targets:
         return
     try:
-        employee_ids = list(dict.fromkeys(UUID(op["to_employee_id"]) for _i, op in targets))
-        starts = [datetime.fromisoformat(op["starts_at"]) for _i, op in targets]
-        ends = [datetime.fromisoformat(op["ends_at"]) for _i, op in targets]
-        # ±8 days: the 7-day week window of any op plus a day of rest context.
+        employee_ids = list(dict.fromkeys(
+            UUID(raw) for op in ops
+            for raw in (op.get("to_employee_id"), op.get("from_employee_id")) if raw
+        ))
+        starts = [datetime.fromisoformat(op["starts_at"]) for op in ops]
+        ends = [datetime.fromisoformat(op["ends_at"]) for op in ops]
+        # The loader expands this range for each employee's consecutive-day cap.
         ledgers = await build_ledgers(
             conn, company_id, employee_ids=employee_ids,
-            window_start=min(starts) - timedelta(days=8), window_end=max(ends) + timedelta(days=8),
+            window_start=min(starts), window_end=max(ends),
         )
         week_start_weekday = await resolve_week_start_weekday(
             conn, company_id=company_id, location_id=location_id,
@@ -1343,16 +1355,6 @@ async def _review_assign_ops(
             if availability_violations(avail_map.get(to_id, {}), starts_at, ends_at):
                 reasons.append({"code": "outside_availability", "policy": False,
                                 "message": "outside their logged availability"})
-            # A reassign frees a seat on the same shift, so it never competes
-            # for headroom; a plain assign consumes one, including against
-            # earlier assigns to the same shift in this batch.
-            if op.get("kind") == "assign":
-                left = headroom.get(op["shift_id"], 1)
-                if left <= 0:
-                    reasons.append({"code": "shift_full", "policy": False,
-                                    "message": "that shift is already fully staffed"})
-                elif not reasons:
-                    headroom[op["shift_id"]] = left - 1
             if reasons:
                 pre_blocked[index] = reasons
             assignments.append(ProposedAssignment(
@@ -1362,9 +1364,17 @@ async def _review_assign_ops(
                                    - int(op.get("break_minutes") or 0)),
                 employee_name=op.get("to_employee_name") or "",
                 shift_label=(op.get("shift_role") or "shift").title(),
+                from_employee_id=op.get("from_employee_id") if op["kind"] == "reassign" else None,
             ))
+        removals = [
+            ProposedRemoval(index, op["shift_id"], op.get("from_employee_id") if op["kind"] == "unassign" else None,
+                            before_batch=op["kind"] == "unassign")
+            for index, op in enumerate(ops)
+            if op["kind"] == "cancel" or (op["kind"] == "unassign" and op.get("from_employee_id"))
+        ]
         verdicts = evaluate_batch(
             assignments, ledgers, week_start_weekday=week_start_weekday, pre_blocked=pre_blocked,
+            removals=removals, headroom=headroom,
         )
         for index, op in targets:
             verdict = verdicts.get(index)
@@ -1402,16 +1412,18 @@ def _rejected_clarify(rejected: list[dict]) -> _Clarify:
 async def _ops_jurisdiction(conn, company_id: UUID, ops: list[dict], location_id: Optional[UUID]) -> dict:
     """The worst jurisdiction status across the ops' locations (an edit batch
     is almost always one store, but a company-wide channel edit need not be)."""
-    candidates = ([str(location_id)] if location_id else []) + [
-        op["location_id"] for op in ops if op.get("location_id")
-    ]
+    candidates = [str(location_id)] if location_id else []
+    for op in ops:
+        candidates.append(op.get("location_id"))
+        if op.get("second_shift_id"):
+            candidates.append(op.get("second_location_id"))
     location_ids = list(dict.fromkeys(candidates))
     if not location_ids:
         return jurisdiction_message(await jurisdiction_rule_status(conn, company_id, None))
     rank = {"unavailable": 3, "unmapped": 2, "catalog": 1, "curated": 0}
     worst: Optional[dict] = None
     for raw in location_ids:
-        info = jurisdiction_message(await jurisdiction_rule_status(conn, company_id, UUID(raw)))
+        info = jurisdiction_message(await jurisdiction_rule_status(conn, company_id, UUID(raw) if raw else None))
         if worst is None or rank.get(info["status"], 2) > rank.get(worst["status"], 2):
             worst = info
     return worst or jurisdiction_message(None)
@@ -1663,9 +1675,13 @@ async def _resolve_edit_ops(
             "second_shift_role": second_shift["role"] if second_shift else None,
             "second_starts_at": second_shift["starts_at"].isoformat() if second_shift else None,
             "second_ends_at": second_shift["ends_at"].isoformat() if second_shift else None,
+            "second_location_id": (
+                str(second_shift["location_id"]) if second_shift and second_shift["location_id"] else None
+            ),
             "shift_role": shift["role"],
             "starts_at": shift["starts_at"].isoformat(), "ends_at": shift["ends_at"].isoformat(),
             "location_id": str(shift["location_id"]) if shift["location_id"] else None,
+            "job_id": str(shift["job_id"]) if shift.get("job_id") else None,
             "break_minutes": shift["break_minutes"], "shift_kind": shift["kind"],
             "training_requirement_id": (
                 str(shift["training_requirement_id"]) if shift["training_requirement_id"] else None
@@ -2400,8 +2416,8 @@ async def _apply_edit_ops(
     the create flow, where it does mean newly created shift ids)."""
     results: list[dict] = []
     affected_shift_ids: list[UUID] = []
-    # Shifts THIS confirm put each person on, so a later op's conflict can be
-    # named honestly ("earlier in this batch") instead of blamed on drift.
+    # Shifts THIS confirm assigned, retimed, or swapped for each person, so a
+    # later conflict is named as "earlier in this batch" instead of drift.
     applied_by_employee: dict[str, list[dict]] = {}
     # Statutory advisories the manager is acknowledging by confirming — they
     # reach the result pill and the audit row, never just the log.
@@ -2625,10 +2641,12 @@ async def _apply_edit_ops(
                 await apply_assignment_core(
                     conn, company_id, shift_row=other_row, employee_id=eid,
                     actor_user_id=confirmed_by, audit_details=_details())
+                applied_by_employee.setdefault(str(eid), []).append({"shift_id": str(other_row["id"])})
             for eid in b_ids:
                 await apply_assignment_core(
                     conn, company_id, shift_row=shift_row, employee_id=eid,
                     actor_user_id=confirmed_by, audit_details=_details())
+                applied_by_employee.setdefault(str(eid), []).append({"shift_id": str(shift_id)})
             results.append({**op, "ok": True})
             affected_shift_ids.extend([shift_id, other_row["id"]])
             continue
@@ -2692,6 +2710,8 @@ async def _apply_edit_ops(
                 new_starts_at=new_starts_at, new_ends_at=new_ends_at,
                 actor_user_id=confirmed_by, audit_details=_details(),
             )
+            for assignee in assignee_rows:
+                applied_by_employee.setdefault(str(assignee["employee_id"]), []).append({"shift_id": str(shift_id)})
             results.append({**op, "ok": True})
             affected_shift_ids.append(shift_id)
             continue
@@ -2868,7 +2888,10 @@ async def build_batch_proposal(
             pill_text=clarify_text("I couldn't figure out what to change — can you be more specific?", []),
         )
 
-    jurisdiction = await _ops_jurisdiction(conn, company_id, edit_ops, editor_location_id)
+    jurisdiction = (
+        create_doc["jurisdiction"] if create_doc and not edit_ops and not editor_location_id
+        else await _ops_jurisdiction(conn, company_id, edit_ops, editor_location_id)
+    )
     if create_doc is not None:
         rank = {"unavailable": 3, "unmapped": 2, "catalog": 1, "curated": 0}
         if rank.get(create_doc["jurisdiction"]["status"], 2) > rank.get(jurisdiction["status"], 2):

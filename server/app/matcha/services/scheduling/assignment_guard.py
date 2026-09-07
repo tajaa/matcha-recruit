@@ -64,6 +64,20 @@ class ProposedAssignment:
     worked_minutes: int
     employee_name: str = ""
     shift_label: str = "shift"
+    from_employee_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ProposedRemoval:
+    """An unassign (phase one) or cancellation (in operation order).
+
+    A missing employee means cancel the entire shift. Reassignment removals
+    are carried by ProposedAssignment so a rejection can restore its source.
+    """
+    op_index: int
+    shift_id: str
+    employee_id: Optional[str] = None
+    before_batch: bool = False
 
 
 @dataclass
@@ -77,6 +91,9 @@ class EmployeeLedger:
     max_weekly_minutes: Optional[int] = None
     allow_overtime: bool = False
     max_consecutive_days: Optional[int] = None
+    # Net minutes are separate from the full interval: breaks reduce hours,
+    # but never make a person available for an overlapping shift.
+    worked_minutes: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -127,23 +144,73 @@ def evaluate_batch(
     week_start_weekday: int = 0,
     allow_split_shift: bool = False,
     pre_blocked: Optional[dict[int, list[dict[str, Any]]]] = None,
+    removals: Optional[list[ProposedRemoval]] = None,
+    headroom: Optional[dict[str, int]] = None,
 ) -> dict[int, GuardVerdict]:
-    """Pure. Walk the batch in op order, growing a per-employee working set as
-    ops are accepted, so later ops see earlier ones. `pre_blocked` carries
-    DB-derived hard refusals the caller already established for an op index
-    (unqualified, outside availability, shift full) — those ops are reported
-    blocked and never consume capacity. Returns a verdict per op_index."""
+    """Pure review, matching confirm's removal phase then ordered additions.
+
+    Reassignments tentatively free their sources so two people can exchange
+    overlapping shifts. If one is rejected, re-run without its removal:
+    dependent assignments must not rely on a seat or interval it never freed.
+    Each repeat rejects at least one more reassignment, so this is bounded by
+    the batch size. Inputs are never mutated; blocked ops consume no capacity.
+    """
+    blocked = {index: reasons for index, reasons in (pre_blocked or {}).items() if reasons}
+    while True:
+        verdicts = _evaluate_batch(
+            assignments, ledgers, week_start_weekday=week_start_weekday,
+            allow_split_shift=allow_split_shift, pre_blocked=blocked,
+            removals=removals or [], headroom=headroom or {},
+        )
+        newly_blocked = [
+            item for item in assignments if item.from_employee_id
+            and item.op_index not in blocked and verdicts[item.op_index].verdict == "blocked"
+        ]
+        if not newly_blocked:
+            return verdicts
+        for item in newly_blocked:
+            blocked[item.op_index] = verdicts[item.op_index].reasons
+
+
+def _evaluate_batch(
+    assignments: list[ProposedAssignment], ledgers: dict[str, EmployeeLedger], *,
+    week_start_weekday: int, allow_split_shift: bool,
+    pre_blocked: dict[int, list[dict[str, Any]]],
+    removals: list[ProposedRemoval], headroom: dict[str, int],
+) -> dict[int, GuardVerdict]:
     pre_blocked = pre_blocked or {}
+    headroom = dict(headroom)
     # Working sets start as the DB ledger and grow with accepted batch ops.
-    intervals: dict[str, list[tuple[datetime, datetime, str, str, bool]]] = defaultdict(list)
+    intervals: dict[str, list[tuple[datetime, datetime, str, str, bool, int]]] = defaultdict(list)
     for employee_id, ledger in ledgers.items():
         for starts_at, ends_at, shift_id, label in ledger.intervals:
-            intervals[employee_id].append((starts_at, ends_at, shift_id, label, False))
+            minutes = ledger.worked_minutes.get(shift_id, _minutes(starts_at, ends_at))
+            intervals[employee_id].append((starts_at, ends_at, shift_id, label, False, minutes))
+
+    def remove(shift_id: str, employee_id: Optional[str]) -> None:
+        for eid in ([employee_id] if employee_id is not None else list(intervals)):
+            rows = intervals.get(eid, [])
+            kept = [row for row in rows if row[2] != shift_id]
+            if len(kept) != len(rows) and shift_id in headroom:
+                headroom[shift_id] += len(rows) - len(kept)
+            intervals[eid] = kept
+
+    for removal in removals:
+        if removal.before_batch:
+            remove(removal.shift_id, removal.employee_id)
+    for item in sorted(assignments, key=lambda a: a.op_index):
+        if item.from_employee_id and not pre_blocked.get(item.op_index):
+            remove(item.shift_id, item.from_employee_id)
+    pending_removals = iter(sorted(
+        (r for r in removals if not r.before_batch), key=lambda r: r.op_index,
+    ))
+    next_removal = next(pending_removals, None)
+    cancelled: set[str] = set()
 
     def snapshot(employee_id: str, week: date) -> dict[str, Any]:
         rows = intervals.get(employee_id, [])
         minutes = sum(
-            _minutes(s, e) for s, e, _sid, _label, _batch in rows
+            minutes for s, _e, _sid, _label, _batch, minutes in rows
             if _week_key(s, week_start_weekday) == week
         )
         return {
@@ -154,14 +221,24 @@ def evaluate_batch(
 
     verdicts: dict[int, GuardVerdict] = {}
     for item in sorted(assignments, key=lambda a: a.op_index):
+        while next_removal is not None and next_removal.op_index < item.op_index:
+            remove(next_removal.shift_id, next_removal.employee_id)
+            if next_removal.employee_id is None:
+                cancelled.add(next_removal.shift_id)
+            next_removal = next(pending_removals, None)
         ledger = ledgers.get(item.employee_id) or EmployeeLedger(name=item.employee_name)
         week = _week_key(item.starts_at, week_start_weekday)
         before = snapshot(item.employee_id, week)
         reasons: list[dict[str, Any]] = list(pre_blocked.get(item.op_index) or [])
+        existing = [row for row in intervals.get(item.employee_id, []) if row[2] == item.shift_id]
+        if item.shift_id in cancelled:
+            reasons.append(_reason("shift_cancelled", "that shift is cancelled earlier in this batch", policy=False))
+        elif not existing and headroom.get(item.shift_id, 1) <= 0:
+            reasons.append(_reason("shift_full", "that shift is already fully staffed", policy=False))
         blocked = bool(reasons)
 
         own = [row for row in intervals.get(item.employee_id, []) if row[2] != item.shift_id]
-        for starts_at, ends_at, _shift_id, label, from_batch in own:
+        for starts_at, ends_at, _shift_id, label, from_batch, _worked in own:
             if not _overlaps(item.starts_at, item.ends_at, starts_at, ends_at):
                 continue
             if from_batch:
@@ -180,7 +257,12 @@ def evaluate_batch(
             break
 
         if blocked:
-            verdicts[item.op_index] = GuardVerdict("blocked", reasons, before, before)
+            # A restored-source pass may discover the original refusal again.
+            unique_reasons: list[dict[str, Any]] = []
+            for reason in reasons:
+                if reason not in unique_reasons:
+                    unique_reasons.append(reason)
+            verdicts[item.op_index] = GuardVerdict("blocked", unique_reasons, before, before)
             continue
 
         # ── Policy warnings (lawful-but-unwise) ──
@@ -216,7 +298,7 @@ def evaluate_batch(
                 policy=True,
             ))
 
-        after_minutes = before["minutes"] + item.worked_minutes
+        after_minutes = before["minutes"] + item.worked_minutes - sum(row[5] for row in existing)
         if ledger.max_weekly_minutes is not None and after_minutes > ledger.max_weekly_minutes:
             reasons.append(_reason(
                 "weekly_cap",
@@ -234,9 +316,11 @@ def evaluate_batch(
                 policy=True,
             ))
 
-        intervals[item.employee_id].append(
-            (item.starts_at, item.ends_at, item.shift_id, item.shift_label, True)
-        )
+        intervals[item.employee_id] = own + [
+            (item.starts_at, item.ends_at, item.shift_id, item.shift_label, True, item.worked_minutes)
+        ]
+        if not existing and item.shift_id in headroom:
+            headroom[item.shift_id] -= 1
         after = snapshot(item.employee_id, week)
         verdicts[item.op_index] = GuardVerdict("warn" if reasons else "ok", reasons, before, after)
     return verdicts
@@ -246,8 +330,9 @@ async def build_ledgers(
     conn, company_id: UUID, *, employee_ids: list[UUID],
     window_start: datetime, window_end: datetime,
 ) -> dict[str, EmployeeLedger]:
-    """DB half: every non-cancelled shift each employee is on inside the
-    window (same predicate as `shift_writes.find_conflicts`, one query for the
+    """DB half: expand the operation window for weekly/rest/consecutive-day
+    context, then load non-cancelled shifts (same predicate as
+    `shift_writes.find_conflicts`, one query for the
     whole batch instead of one per op) plus their `employee_schedule_profiles`
     caps. Employees with no profile row get the defaults — the same
     `PROFILE_DEFAULTS` the week builder reads."""
@@ -273,9 +358,15 @@ async def build_ledgers(
         ledger.max_weekly_minutes = row["max_weekly_minutes"]
         ledger.max_consecutive_days = row["max_consecutive_days"]
         ledger.allow_overtime = bool(row["allow_overtime"])
+    context_days = max(8, max(
+        (ledger.max_consecutive_days or POLICY_MAX_CONSECUTIVE_DAYS) + 1
+        for ledger in ledgers.values()
+    ))
+    window_start -= timedelta(days=context_days)
+    window_end += timedelta(days=context_days)
     rows = await conn.fetch(
         """
-        SELECT a.employee_id, s.id AS shift_id, s.starts_at, s.ends_at, s.role
+        SELECT a.employee_id, s.id AS shift_id, s.starts_at, s.ends_at, s.role, s.break_minutes
         FROM schedule_shift_assignments a
         JOIN schedule_shifts s ON s.id = a.shift_id
         WHERE s.company_id = $1 AND a.employee_id = ANY($2::uuid[])
@@ -286,7 +377,9 @@ async def build_ledgers(
         company_id, ids, window_start, window_end,
     )
     for row in rows:
-        ledgers.setdefault(str(row["employee_id"]), EmployeeLedger()).intervals.append(
+        ledger = ledgers.setdefault(str(row["employee_id"]), EmployeeLedger())
+        ledger.intervals.append(
             (row["starts_at"], row["ends_at"], str(row["shift_id"]), (row["role"] or "shift").title())
         )
+        ledger.worked_minutes[str(row["shift_id"])] = _minutes(row["starts_at"], row["ends_at"], row["break_minutes"])
     return ledgers

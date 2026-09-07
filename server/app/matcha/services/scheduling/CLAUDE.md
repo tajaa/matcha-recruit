@@ -53,6 +53,12 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   `force` are untouched. `build_ledgers` is one query over the batch's employees (same predicate as
   `find_conflicts`) + `employee_schedule_profiles` caps — the knobs the week builder already honoured
   and the chat paths never read.
+  The ledger preserves net worked minutes separately from full overlap windows. Its query window
+  expands for the largest employee consecutive-day cap, including the supported 14-day setting.
+  `ProposedRemoval` mirrors confirm's two phases: unassigns and eligible reassignment sources are
+  removed first; cancellations apply in operation order. A rejected reassignment restores its source
+  and triggers another review pass so later assignments cannot depend on phantom free time or seats.
+  Shift headroom is consumed only after the overlap and eligibility verdict accepts an assignment.
 - **`shift_compliance.jurisdiction_rule_status`** → `{state, status ∈ curated|catalog|unmapped|unavailable}`.
   `schedule_review.jurisdiction_message` turns it into the one sentence every surface renders.
   `compliance_status` = `verified` / `advisory` (rules on file) / `unmapped` / `unavailable`. On agent
@@ -60,6 +66,8 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   stages with the honesty line and a confirm line that says confirming means you checked the state's
   rules yourself. Result text repeats "Legality was NOT verified for {ST} … you confirmed with that in
   view." The create pill's `rules_unmapped` line now derives from the same helper.
+  Standalone creates use the same unavailable refusal as edits/batches. Cross-store swaps retain
+  both locations; an unlocated shift is included as unmapped even alongside a curated location.
 - **`schedule_review.build_review(doc)`** — the `ScheduleReview` contract (`assignments`, `rejected`,
   `unfilled`, `employees[before/after/warnings]`, `advisories`, `findings`, `jurisdiction`,
   `compliance_status`). Stored on the proposal doc (`doc["review"]`, `doc["compliance_status"]`,
@@ -75,10 +83,15 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   keeps the drift copy only for a real race; acknowledged statutory advisories now reach
   `edit_result_text` and the `schedule_chat.edit_confirm` audit row (`advisories_acknowledged`,
   `compliance_status`).
+  Resolved edit operations retain `job_id` for the stage-time qualification check. Confirm-time
+  overlap attribution also tracks successful retimes and both sides of a shift swap.
 - The bulk `all_vacant_shifts` path is capped by `MAX_BATCH_OPERATIONS` (split plan) like any batch and
-  goes through the guard, so "put Dana on everything" stages ≤1/day and lists the rest under
-  **Not staged** with reasons. `propose` reports `operation_count` = what was STAGED, plus
+  goes through the guard, so "put Dana on everything" lists blocked assignments under
+  **Not staged** with reasons; non-overlapping doubles and cap warnings remain stageable policy
+  advisories. `propose` reports `operation_count` = what was STAGED, plus
   `rejected_count`, `compliance_status`, `review`.
+  `review.operation_count`/`operation_summary` count resolved edits and new shifts before assignments
+  are flattened; new shifts have no database IDs yet, and multiple assignees do not inflate the count.
 - Tests: `tests/employee_schedule/test_assignment_guard.py` (nine-shift scenario, back-to-back, caps,
   determinism), `test_schedule_review.py`, `test_schedule_chat_guard_integration.py` (split, refused
   clarify, unavailable gate, intra-batch confirm copy), renderer cases in `test_schedule_chat_edits.py`,

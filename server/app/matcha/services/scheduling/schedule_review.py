@@ -9,6 +9,7 @@ and state block (`huume/schedule_skill.propose`, `huume/prompt`), and — later
 
 Contract (JSON-safe):
     proposal_id, kind, compliance_status ∈ {verified, advisory, unmapped, unavailable},
+    operation_count, operation_summary,  # resolved edits + new shifts, not flattened assignees
     assignments: [{shift_id, role, starts_at, ends_at, employee_id, employee_name, op, verdict, reasons}],
     rejected:    [{shift_id, role, starts_at, ends_at, employee_name, op, reasons}],   # not staged
     unfilled:    [...],                                                                # planner only
@@ -25,6 +26,8 @@ NOT evaluate this state's law and the output must never be called compliant.
 from __future__ import annotations
 
 from typing import Any, Optional
+
+from .schedule_batch import summarize_operations
 
 _STATUS_SOURCE_LABEL = {"curated": "hand-curated", "catalog": "approved catalog research"}
 
@@ -161,19 +164,22 @@ def build_review(proposal: dict[str, Any], *, proposal_id: Optional[str] = None)
         edit_doc = proposal.get("edit") or {}
         create_doc = proposal.get("create") or {}
         ops = list(edit_doc.get("ops") or [])
-        create_assignments, create_advisories = _create_assignments(create_doc.get("shifts") or [])
+        shifts = list(create_doc.get("shifts") or [])
+        create_assignments, create_advisories = _create_assignments(shifts)
         rejected = list(edit_doc.get("rejected") or []) + list(proposal.get("rejected") or [])
         jurisdiction = proposal.get("jurisdiction") or edit_doc.get("jurisdiction") or create_doc.get("jurisdiction")
         findings = list(create_doc.get("findings") or [])
     elif kind == "edit":
         ops = list(proposal.get("ops") or [])
+        shifts = []
         create_assignments, create_advisories = [], []
         rejected = list(proposal.get("rejected") or [])
         jurisdiction = proposal.get("jurisdiction")
         findings = []
     else:
         ops = []
-        create_assignments, create_advisories = _create_assignments(proposal.get("shifts") or [])
+        shifts = list(proposal.get("shifts") or [])
+        create_assignments, create_advisories = _create_assignments(shifts)
         rejected = []
         jurisdiction = proposal.get("jurisdiction")
         findings = list(proposal.get("findings") or [])
@@ -183,6 +189,8 @@ def build_review(proposal: dict[str, Any], *, proposal_id: Optional[str] = None)
     return {
         "proposal_id": proposal_id,
         "kind": kind,
+        "operation_count": len(ops) + len(shifts),
+        "operation_summary": summarize_operations(ops, shifts),
         "compliance_status": compliance_status_for(jurisdiction, advisories),
         "assignments": [_assignment_from_op(op) for op in ops] + create_assignments,
         "rejected": rejected,
