@@ -1,4 +1,4 @@
-import { ArrowLeftRight, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, ClipboardCheck, LayoutTemplate, MousePointer2, Send, ShieldAlert, Sparkles, Tag, Users, X } from 'lucide-react'
+import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, ClipboardCheck, LayoutTemplate, MousePointer2, Send, Sparkles, Users, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Modal } from '../../ui'
 
@@ -17,76 +17,56 @@ type GuideStep = {
 
 const STEPS: GuideStep[] = [
   {
-    eyebrow: '01 / Define the work',
-    title: 'Create jobs before you build shifts',
-    body: 'Open the Jobs tab and add the work areas your location schedules, such as Box Office, Concessions, or Ushers. Every manually created shift requires one of these company roles; department remains optional free-text context.',
-    icon: BriefcaseBusiness,
-    detail: <span>Start with a separate job for each area where the qualified roster is different.</span>,
-  },
-  {
-    eyebrow: '02 / Define eligibility',
-    title: 'Set qualifications and credential rules',
-    body: 'Expand a job to choose qualified employees and add required credentials, such as a Food Handler Card. In the employee record’s Credentials tab, upload the document and confirm its expiration date when approving it.',
-    icon: ClipboardCheck,
-    detail: <span>Required credentials belong to the job, so they affect only relevant work. An extracted or unconfirmed expiration date is never trusted for scheduling.</span>,
-  },
-  {
-    eyebrow: '03 / Attach the work',
-    title: 'Choose a job on the shift',
-    body: 'When you create a shift, choose its Role from the jobs available at that location. You can also choose a Job on a template block so every generated shift inherits the same qualification rule.',
-    icon: Tag,
-    detail: <span>Existing legacy shifts can remain unassigned to a role, but every new manual shift must select one.</span>,
-  },
-  {
-    eyebrow: '04 / Repeat the pattern',
-    title: 'Generate a qualified week',
-    body: 'Use Templates to define recurring blocks, attach each block to a job, and generate draft shifts across a date range. Review the generated week before publishing.',
-    icon: LayoutTemplate,
-    detail: <span>Generated shifts carry the block job automatically; you do not need to reselect it for every date.</span>,
-  },
-  {
-    eyebrow: '05 / Build a draft',
-    title: 'Start with the empty grid',
-    body: 'Click any time slot to create a draft shift, or drag an employee from the roster onto an empty slot to create a shift with that person already assigned.',
-    icon: MousePointer2,
-    detail: <span>Draft changes save automatically. Nothing is visible to employees until you publish.</span>,
-  },
-  {
-    eyebrow: '06 / Staff it',
-    title: 'Place people where they belong',
-    body: 'Drag a roster person onto a shift to assign them. Drag an assignment chip to another shift to move them, or click a person and then a shift if you prefer not to drag.',
+    eyebrow: '01 / See before you decide',
+    title: 'Start from the inputs rail',
+    body: 'The left rail is what a good scheduler keeps in their head: each person’s hours this week as a bar against the 40h policy tick, who is confirmed available, who is away, the open seats by day, and whether this state’s scheduling law is on file. Huume reads exactly this list before it names anyone.',
     icon: Users,
-    detail: <span>Roster qualifications can be overridden deliberately and are audit-logged. Conflicts, availability, staffing limits, and missing or expired required credentials cannot be overridden.</span>,
+    detail: <span>Click a person to fade every full shift they are not on; drag them onto a shift to assign. The policy lines are house rules, not law — the law status is the banner above them.</span>,
   },
   {
-    eyebrow: '07 / Review and publish',
-    title: 'Review the week before it goes live',
-    body: 'Click any shift to edit its exact time, role, location, staffing, break, and notes. When the draft looks right, use Publish in the top bar.',
-    icon: Send,
-    detail: <span>Published shifts are locked by default. Turn on Edit published only when you intentionally need to change live schedules.</span>,
+    eyebrow: '02 / Define the work',
+    title: 'Jobs, credentials and week setup live in the rail',
+    body: 'Open Jobs to add the work areas your location schedules and who is qualified for each; open Week setup for hours, week start, staffing pattern and the leader rule. Huume refuses to build a week until setup is saved — the rail says what is missing.',
+    icon: BriefcaseBusiness,
+    detail: <span>Required credentials belong to the job. An extracted or unconfirmed expiration date is never trusted for scheduling.</span>,
   },
   {
-    eyebrow: '08 / Ask Huume',
-    title: 'Build shifts by talking, not clicking',
-    body: 'Use Ask Huume in the top bar to build the whole week from confirmed availability, describe a smaller change in plain language, or dictate by voice. Huume shows a proposal first; generated schedules land as editable drafts and only you publish them.',
+    eyebrow: '03 / Build on the board',
+    title: 'The board still works the way you know',
+    body: 'Click any time slot to create a draft shift, drag a person from the rail onto a shift or an empty slot, drag an assignment to move it, click a shift to edit its time, role, staffing, break and notes. Draft changes save automatically.',
+    icon: MousePointer2,
+    detail: <span>Nothing is visible to employees until you publish. Published shifts are locked unless you turn on Edit published.</span>,
+  },
+  {
+    eyebrow: '04 / Ask Huume',
+    title: 'Huume is always on the right',
+    body: 'Ask in plain language or by voice: fill the open shifts, build the whole week, move someone, cover a call-out. The server picks people under the staffing rules; Huume relays what it staged, what it refused and why, and what stayed open.',
     icon: Sparkles,
-    detail: <span>Every AI-drafted change lands as an editable draft first — nothing is assigned or published without your confirmation.</span>,
+    detail: <span>Every AI-drafted change is staged first. The card in the thread is where you confirm or cancel it.</span>,
   },
   {
-    eyebrow: '09 / Compliance guidance',
-    title: 'Review break rules and waivers before you publish',
-    body: 'Assignments now carry individualized compliance guidance — break-rule requirements checked against the shift, and any waiver attestations on file for that employee. Unresolved warnings also surface as events in Ops so the team catches them outside the editor.',
-    icon: ShieldAlert,
-    detail: <span>A guidance note does not block the shift. Read it, resolve it, or record a waiver attestation before you publish.</span>,
+    eyebrow: '05 / Review before it is real',
+    title: 'The review pane shows what a change will do',
+    body: 'When Huume stages something, Review opens: each person’s hours before → after on the same bar as the rail, what is staged, what was refused (and why), the seats still open, statutory advisories with their statute, and coverage findings. Click a row to see it on the board or to ask Huume about it.',
+    icon: ClipboardCheck,
+    detail: <span>The compliance banner is the server’s sentence, not ours. “NOT verified” means exactly that — confirming is you accepting it.</span>,
   },
   {
-    eyebrow: '10 / Keep cards current',
-    title: 'Food-handler expiry protection runs automatically',
-    body: 'Two weeks before a Food Handler Card expires, the employee and relevant managers receive a reminder. At expiry, future affected shifts are removed and every new assignment, move, Huume change, and publish is blocked until a renewed card is approved.',
-    icon: ArrowLeftRight,
-    detail: <span>This protection starts only when Food Handler Card is required for the job. Approving a replacement card clears the scheduling block; every enforcement decision is audit-logged.</span>,
+    eyebrow: '06 / Run scenarios',
+    title: 'Simulate a fill before you commit',
+    body: 'New scenario in the strip runs a free server-side fill: all open shifts, one job, or the shifts you selected; only one person, or leaving people out; splits allowed or not. Each chip is a simulation you can review, compare with a second (shift-click), stage in the thread, or apply directly.',
+    icon: LayoutTemplate,
+    detail: <span>Nothing is written until you apply or confirm. Discarded scenarios are gone; the ones you leave behind are cleared when you change week.</span>,
+  },
+  {
+    eyebrow: '07 / Publish',
+    title: 'Publish when the week reads right',
+    body: 'Publish in the top bar makes the drafts live. Break rules, waivers, credential expiry protection and the audit trail all keep working exactly as before.',
+    icon: Send,
+    detail: <span>Two weeks before a Food Handler Card expires the team is reminded; at expiry, affected future shifts are removed and new assignments are blocked until a renewed card is approved.</span>,
   },
 ]
+
 
 export default function ScheduleEditorGuide({ open, onClose }: ScheduleEditorGuideProps) {
   const [step, setStep] = useState(0)
@@ -104,11 +84,11 @@ export default function ScheduleEditorGuide({ open, onClose }: ScheduleEditorGui
       <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl sm:p-7">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-400">
-            <span>Schedule editor</span>
+            <span>Schedule Pilot</span>
             <span className="text-zinc-700">·</span>
             <span>{current.eyebrow}</span>
           </div>
-          <button onClick={close} className="text-zinc-600 hover:text-zinc-200" aria-label="Close schedule editor guide"><X className="h-4 w-4" /></button>
+          <button onClick={close} className="text-zinc-600 hover:text-zinc-200" aria-label="Close Schedule Pilot guide"><X className="h-4 w-4" /></button>
         </div>
         <div className="mt-8 flex h-12 w-12 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300"><Icon className="h-6 w-6" /></div>
         <h2 className="mt-5 text-2xl font-light tracking-tight text-zinc-100">{current.title}</h2>

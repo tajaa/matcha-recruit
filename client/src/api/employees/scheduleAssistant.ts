@@ -51,6 +51,16 @@ export function archiveScheduleHuumeSession(sessionId: string) {
   )
 }
 
+/** Schedule Pilot "Stage this": make a fill scenario (a proposal the caller
+ *  previewed) the thread's staged schedule change. Returns the thread's new
+ *  `current_state`, whose `huume_action` the review pane and card render. */
+export function adoptScheduleProposal(sessionId: string, proposalId: string) {
+  return api.post<{ current_state: Record<string, unknown>; version: number; confirm_id: string }>(
+    `/employee-schedule/assistant/sessions/${sessionId}/adopt-proposal`,
+    { proposal_id: proposalId },
+  )
+}
+
 export function getScheduleSuggestionStatus(locationId: string, weekStart: string) {
   const params = new URLSearchParams({ location_id: locationId, week_start: weekStart })
   return api.get<ScheduleSuggestionStatus>(`/employee-schedule/assistant/suggestions?${params}`)

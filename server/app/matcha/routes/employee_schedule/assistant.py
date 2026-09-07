@@ -14,6 +14,7 @@ from ...services._shared.uploads import read_wav_or_400
 from ...services.scheduling import schedule_voice
 from ...services.scheduling.schedule_chat_rules import parse_confirm_reply
 from ...services.scheduling.schedule_assistant_session import (
+    adopt_editor_proposal,
     archive_schedule_assistant_session,
     get_automatic_suggestion_status,
     get_or_create_schedule_assistant_session,
@@ -28,6 +29,10 @@ class ScheduleAssistantSessionRequest(BaseModel):
     # Omitted starts a new conversation; supplied resumes one the manager
     # picked out of their own history for this same location and week.
     session_id: UUID | None = None
+
+
+class AdoptProposalRequest(BaseModel):
+    proposal_id: UUID
 
 
 router = APIRouter()
@@ -95,6 +100,25 @@ async def archive_schedule_assistant_chat(
         user_id=current_user.id,
         actor_role=current_user.role,
         session_id=session_id,
+    )
+
+
+@router.post("/assistant/sessions/{session_id}/adopt-proposal")
+async def adopt_schedule_proposal(
+    session_id: UUID,
+    body: AdoptProposalRequest,
+    current_user=Depends(require_company_member),
+) -> dict:
+    """Schedule Pilot "Stage this": a REST fill scenario becomes the thread's
+    staged schedule_change, confirmable in the chat like any Huume-staged one."""
+    company_id = await require_company_id(current_user)
+    await _require_schedule_huume(company_id)
+    return await adopt_editor_proposal(
+        company_id=company_id,
+        user_id=current_user.id,
+        actor_role=current_user.role,
+        session_id=session_id,
+        proposal_id=body.proposal_id,
     )
 
 

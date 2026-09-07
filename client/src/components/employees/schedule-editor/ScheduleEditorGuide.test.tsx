@@ -3,29 +3,23 @@ import { describe, expect, it, vi } from 'vitest'
 import ScheduleEditorGuide from './ScheduleEditorGuide'
 
 describe('ScheduleEditorGuide', () => {
-  it('walks through the actual editor workflow', () => {
+  it('walks through the Schedule Pilot workflow', () => {
     const onClose = vi.fn()
     render(<ScheduleEditorGuide open onClose={onClose} />)
 
-    expect(screen.getByText('Create jobs before you build shifts')).toBeInTheDocument()
+    expect(screen.getByText('Start from the inputs rail')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Set qualifications and credential rules')).toBeInTheDocument()
+    expect(screen.getByText('Jobs, credentials and week setup live in the rail')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Choose a job on the shift')).toBeInTheDocument()
+    expect(screen.getByText('The board still works the way you know')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Generate a qualified week')).toBeInTheDocument()
+    expect(screen.getByText('Huume is always on the right')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Start with the empty grid')).toBeInTheDocument()
+    expect(screen.getByText('The review pane shows what a change will do')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Place people where they belong')).toBeInTheDocument()
+    expect(screen.getByText('Simulate a fill before you commit')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Review the week before it goes live')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Build shifts by talking, not clicking')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Review break rules and waivers before you publish')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Food-handler expiry protection runs automatically')).toBeInTheDocument()
+    expect(screen.getByText('Publish when the week reads right')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Start scheduling' }))
     expect(onClose).toHaveBeenCalledOnce()
   })

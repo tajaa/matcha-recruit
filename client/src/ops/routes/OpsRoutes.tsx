@@ -14,7 +14,7 @@ import { FeatureGate } from '../../components/shared/FeatureGate'
 import EmployeeSchedule from '../../pages/app/employees/EmployeeSchedule'
 import OpsHome from '../pages/OpsHome'
 import OpsAccess from '../pages/OpsAccess'
-import ScheduleEditor from '../pages/ScheduleEditor'
+import SchedulePilot from '../pages/SchedulePilot'
 import { WorkSurfaceProvider } from '../../work/routes/WorkSurfaceContext'
 import type { ReactNode } from 'react'
 
@@ -70,7 +70,7 @@ export default function OpsRoutes() {
               path="schedule"
               element={<EmployeeSchedule />}
             />
-            <Route path="schedule/editor" element={<ScheduleEditor />} />
+            <Route path="schedule/editor" element={<SchedulePilot />} />
             <Route
               path="schedule-intelligence"
               element={<Navigate to="/ops/schedule?tab=intelligence" replace />}
