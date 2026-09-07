@@ -46,6 +46,9 @@ GAP_KINDS = frozenset({
     "close_buffer_uncovered",
     "break_relief_uncovered",
     "break_relief_impossible",
+    # A person the plan inherited on two overlapping shifts: the week was
+    # built around a booking that cannot be worked.
+    "existing_double_booking",
 })
 
 Headcount = Literal["assigned", "required"]

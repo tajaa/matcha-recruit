@@ -3,8 +3,11 @@
     cd server && ./venv/bin/python -m pytest tests/employee_schedule/test_schedule_review.py -q
 """
 
+from datetime import date, datetime, timezone
+
 from app.matcha.services.scheduling.schedule_review import (
-    build_review, compliance_status_for, jurisdiction_message, rejected_entry, summarize_review,
+    build_review, build_week_draft_review, compliance_status_for, jurisdiction_message, rejected_entry,
+    summarize_review,
 )
 
 
@@ -140,3 +143,63 @@ class TestHelpers:
             "staged": 2, "rejected": 1, "unfilled": 0, "warnings": ["only 2h rest"],
             "compliance_status": "unmapped", "jurisdiction_message": review["jurisdiction"]["message"],
         }
+
+
+class TestBuildWeekDraftReview:
+    def _plan(self):
+        flsa = {"check": "weekly_overtime", "severity": "advisory", "message": "past 40h", "statute": "FLSA", "state": "CA"}
+        return {
+            "shifts": [
+                {"key": "s1", "role": "shift lead", "starts_at": "2026-08-24T06:00:00+00:00", "ends_at": "2026-08-24T14:00:00+00:00",
+                 "worked_minutes": 480, "fixed_employee_ids": ["e-existing"],
+                 "proposed_assignments": [{"employee_id": "e-dana", "employee_name": "Dana Reyes", "reason": "ok", "advisories": [flsa]}]},
+                {"key": "s2", "role": "shift lead", "starts_at": "2026-08-25T06:00:00+00:00", "ends_at": "2026-08-25T14:00:00+00:00",
+                 "worked_minutes": 480, "fixed_employee_ids": [],
+                 "proposed_assignments": [{"employee_id": "e-ben", "employee_name": "Ben Ortiz", "reason": "ok", "advisories": []}]},
+                {"key": "s3", "role": "shift lead", "starts_at": "2026-08-26T06:00:00+00:00", "ends_at": "2026-08-26T14:00:00+00:00",
+                 "worked_minutes": 480, "fixed_employee_ids": [], "proposed_assignments": []},
+            ],
+            "unfilled": [{"shift_key": "s3", "starts_at": "2026-08-26T06:00:00+00:00", "role": "shift lead",
+                          "reason": "policy: second shift that day", "exclusions": {"policy: second shift that day": 1}}],
+            "findings": [{"kind": "staffing_concentration", "severity": "advisory", "employee_name": "Dana Reyes",
+                          "detail": "Dana Reyes carries 5 of 6 proposed positions (40h scheduled this week) — spread the load."}],
+            "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"},
+        }
+
+    def test_the_shape_matches_an_edit_review(self):
+        existing = [{"employee_id": "e-dana", "starts_at": datetime(2026, 8, 23, 6, tzinfo=timezone.utc), "worked_minutes": 480},
+                    {"employee_id": "e-dana", "starts_at": datetime(2026, 8, 20, 6, tzinfo=timezone.utc), "worked_minutes": 480}]  # last week
+        review = build_week_draft_review(
+            self._plan(), employee_names={"e-dana": "Dana Reyes", "e-ben": "Ben Ortiz"},
+            existing_assignments=existing, week_start=date(2026, 8, 23), week_end=date(2026, 8, 29), proposal_id="run-1",
+        )
+        assert review["proposal_id"] == "run-1" and review["kind"] == "week_draft"
+        assert review["compliance_status"] == "advisory"
+        assert review["assignments"] == [
+            {"shift_id": "s1", "role": "Shift Lead", "starts_at": "2026-08-24T06:00:00+00:00", "ends_at": "2026-08-24T14:00:00+00:00",
+             "employee_id": "e-dana", "employee_name": "Dana Reyes", "op": "assign", "verdict": "warn", "reasons": []},
+            {"shift_id": "s2", "role": "Shift Lead", "starts_at": "2026-08-25T06:00:00+00:00", "ends_at": "2026-08-25T14:00:00+00:00",
+             "employee_id": "e-ben", "employee_name": "Ben Ortiz", "op": "assign", "verdict": "ok", "reasons": []},
+        ]
+        assert review["rejected"] == []
+        assert review["unfilled"] == [{"shift_id": "s3", "role": "shift lead", "starts_at": "2026-08-26T06:00:00+00:00",
+                                       "ends_at": "2026-08-26T14:00:00+00:00", "reason": "policy: second shift that day",
+                                       "exclusions": {"policy: second shift that day": 1}}]
+        assert review["employees"] == [
+            {"employee_id": "e-dana", "name": "Dana Reyes", "before": {"minutes": 480, "shifts": 1, "days": 1},
+             "after": {"minutes": 960, "shifts": 2, "days": 2},
+             "warnings": ["Dana Reyes carries 5 of 6 proposed positions (40h scheduled this week) — spread the load."]},
+            {"employee_id": "e-ben", "name": "Ben Ortiz", "before": {"minutes": 0, "shifts": 0, "days": 0},
+             "after": {"minutes": 480, "shifts": 1, "days": 1}, "warnings": []},
+        ]
+        assert review["advisories"] == [{"message": "past 40h", "statute": "FLSA", "employee_name": "Dana Reyes", "shift_id": "s1"}]
+        assert review["findings"][0]["kind"] == "staffing_concentration"
+        assert review["jurisdiction"]["status"] == "curated"
+        assert summarize_review(review)["unfilled"] == 1 and summarize_review(review)["staged"] == 2
+
+    def test_a_plan_without_jurisdiction_reads_as_unmapped(self):
+        plan = self._plan()
+        del plan["jurisdiction"]
+        review = build_week_draft_review(plan, employee_names={}, existing_assignments=[],
+                                         week_start=date(2026, 8, 23), week_end=date(2026, 8, 29))
+        assert review["compliance_status"] == "unmapped" and review["proposal_id"] is None

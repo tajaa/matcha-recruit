@@ -261,6 +261,29 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"EXACTLY this confirm_id after the admin explicitly confirms applies it to the "
                 f"editor as drafts; omitting confirm_id (or using a different one) builds a NEW proposal."
             )
+            top_load = metrics.get("top_load") or []
+            if top_load:
+                # Who carries the week, by name: "18/18 filled" with nine of
+                # them on one person is the failure this line exists to show.
+                lines.append("  Load: " + "; ".join(
+                    f"{item.get('name')} {item.get('shifts')} shift(s) / {item.get('hours')}h"
+                    for item in top_load[:3]
+                ))
+            week_review = action.get("review")
+            if isinstance(week_review, dict):
+                summary = summarize_review(week_review)
+                for warning in summary["warnings"][:3]:
+                    lines.append(f"  Policy warning: {warning}")
+                if summary["compliance_status"] in ("unmapped", "unavailable"):
+                    lines.append(
+                        f"  Compliance: NOT verified — {summary['jurisdiction_message']} Never "
+                        f"describe this week as compliant or legal."
+                    )
+                elif summary["compliance_status"] == "advisory":
+                    lines.append(
+                        f"  Compliance: {len(week_review.get('advisories') or [])} statutory "
+                        f"advisory(ies) attached to this week — relay them, do not call it clean."
+                    )
         elif action.get("type") == "schedule_location_profile":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: location schedule profile "

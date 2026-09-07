@@ -913,6 +913,9 @@ export interface HuumeActionScheduleWeekDraft {
     /** False means the location has no saved opening hours, so coverage at
      *  open and close was never checked — different from "no gaps found". */
     operating_hours_known?: boolean
+    /** Who carries the week, heaviest first (top 3). "18/18 filled" with nine
+     *  of them on one person is what this exists to show. */
+    top_load?: Array<{ employee_id: string; name: string; shifts: number; hours: number }>
   }
   unfilled?: Array<{
     shift_key?: string
@@ -954,6 +957,12 @@ export interface HuumeActionScheduleWeekDraft {
   preview_truncated?: boolean
   origin?: 'manual' | 'automatic'
   auto_generated?: boolean
+  /** The same `ScheduleReview` a staged schedule_change carries (kind
+   *  'week_draft'): per-person load before/after, statutory advisories,
+   *  the planner's open seats, and whether the state's law was evaluated. */
+  review?: HuumeScheduleReview
+  compliance_status?: 'verified' | 'advisory' | 'unmapped' | 'unavailable'
+  jurisdiction?: { state?: string | null; status?: string; message?: string }
 }
 
 export interface HuumeActionScheduleNote {

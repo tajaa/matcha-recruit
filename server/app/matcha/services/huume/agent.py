@@ -1735,6 +1735,15 @@ async def run_huume_turn(
                         response["findings"] = staged.get("findings")
                         response["schedule_preview"] = staged.get("schedule_preview")
                         response["preview_truncated"] = staged.get("preview_truncated")
+                        # Load per person, statutory advisories and whether the
+                        # state's law was evaluated — same-turn, same reason.
+                        week_review = staged.get("review")
+                        if isinstance(week_review, dict):
+                            response["review"] = _json_safe({
+                                key: value for key, value in week_review.items()
+                                if key not in ("assignments", "findings")
+                            })
+                        response["compliance_status"] = staged.get("compliance_status")
                     if name == "save_location_schedule_profile":
                         response["summary"] = staged.get("summary")
                         response["blocks"] = staged.get("blocks")
