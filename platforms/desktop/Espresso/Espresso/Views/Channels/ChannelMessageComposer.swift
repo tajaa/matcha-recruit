@@ -183,7 +183,8 @@ struct ChannelMessageComposer: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack(alignment: .center, spacing: 8) {
+            let canSend = (!text.trimmingCharacters(in: .whitespaces).isEmpty || !pendingAttachments.isEmpty) && !isUploading
+            HStack(alignment: .bottom, spacing: 8) {
                 Text("\(userHandle)@\(channelSlug) ›")
                     .font(.system(size: 11))
                     .foregroundColor(appState.themeText.opacity(0.45))
@@ -207,16 +208,17 @@ struct ChannelMessageComposer: View {
                 .help("Paste image from clipboard (⌃⌘⇧4 to screenshot)")
                 .disabled(pendingAttachments.count >= maxAttachments || isUploading)
 
-                TextField(
-                    "",
+                ComposerTextView(
                     text: $text,
-                    prompt: Text("type a message (⌘↵ to send)").foregroundColor(appState.themeText.opacity(0.2)),
-                    axis: .vertical
+                    placeholder: "type a message (⌘↵ to send)",
+                    font: .systemFont(ofSize: 13),
+                    textColor: appState.themeText.opacity(0.9),
+                    placeholderColor: appState.themeText.opacity(0.2),
+                    maxLines: 8,
+                    submitKey: .commandReturnSends,
+                    onSubmit: { if canSend { onSend(text) } },
+                    onPasteImage: onPasteImage
                 )
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundColor(appState.themeText.opacity(0.9))
-                .lineLimit(1...8)
                 .onChange(of: text) {
                     guard !text.isEmpty else { return }
                     let now = Date()
@@ -226,10 +228,9 @@ struct ChannelMessageComposer: View {
                     }
                 }
                 .onChange(of: seedNonce) { text = seed }
-                // No .onSubmit — Enter inserts a newline (vertical-axis field).
-                // Send via the ↵ button / ⌘↵ shortcut below.
+                // ↵ inserts a newline; ⌘↵ sends (handled inside the text view
+                // so it fires while the field is first responder).
 
-                let canSend = (!text.trimmingCharacters(in: .whitespaces).isEmpty || !pendingAttachments.isEmpty) && !isUploading
                 Button { onSend(text) } label: {
                     if isUploading {
                         ProgressView().controlSize(.small)
@@ -241,7 +242,6 @@ struct ChannelMessageComposer: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
-                .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding(.horizontal, 16)
