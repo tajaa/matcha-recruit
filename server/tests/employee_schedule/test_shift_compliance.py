@@ -5,6 +5,20 @@ from uuid import uuid4
 from app.matcha.services.scheduling import schedule_eligibility, shift_compliance
 
 
+def test_draft_fair_workweek_check_skips_all_database_reads():
+    class NoQueries:
+        async def fetchrow(self, *_args, **_kwargs):
+            raise AssertionError("draft Fair Workweek checks must not query")
+
+    result = asyncio.run(shift_compliance._fair_workweek_advisories(
+        NoQueries(), uuid4(), location_id=uuid4(),
+        starts_at=datetime(2026, 8, 21, 9, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 8, 21, 17, tzinfo=timezone.utc),
+        event="assign", shift_published=False, min_rest_gap_hours=None,
+    ))
+    assert result == []
+
+
 def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
     company_id = uuid4()
     employee_id = uuid4()

@@ -185,6 +185,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Thread Huume schedule tools (`find_shift_coverage` read, `propose_schedule_change` staged) → `services/huume/schedule_skill.py`
 - Agent-path assignment guard (POLICY caps, intra-batch overlap, reject-at-stage) → `services/scheduling/assignment_guard.py`; the `ScheduleReview` contract → `services/scheduling/schedule_review.py`; jurisdiction on-file check → `services/scheduling/shift_compliance.py:jurisdiction_rule_status`
 - Server-side "fill the open shifts" planner → `services/scheduling/week_builder.py:plan_vacant_fill` (+ `_load_vacant_demand`); what a scheduler should see (roster load, open seats, policy, jurisdiction) → `services/scheduling/planning_inputs.py:build_planning_inputs`; REST preview/apply/discard + planning-inputs → `routes/employee_schedule/planning.py`
+- Week-builder compliance preflight (fail-closed, advisories kept, checked replans) → `services/scheduling/week_builder.py:_preflight_compliance` / `_plan_with_preflight`; concentration / double-booking / advisory / jurisdiction findings → `week_builder._concentration_findings` & co.; the week-draft `ScheduleReview` → `services/scheduling/schedule_review.py:build_week_draft_review`
 - Channel receipt/invoice attachment ingest (@huume + a dropped CSV/PDF/photo) → `werk/routes/channels_ws.py:_bg_inventory_receipt` / `_bg_receipt_reply`, staging table `inventory_receipt_drafts` (migration `receiptdraft01`)
 
 ### Inventory (channel stock tracking)

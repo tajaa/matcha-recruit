@@ -46,6 +46,9 @@ GAP_KINDS = frozenset({
     "close_buffer_uncovered",
     "break_relief_uncovered",
     "break_relief_impossible",
+    # A person the plan inherited on two overlapping shifts: the week was
+    # built around a booking that cannot be worked.
+    "existing_double_booking",
 })
 
 Headcount = Literal["assigned", "required"]
@@ -142,7 +145,8 @@ def make_finding(
     window: Optional[tuple[datetime, datetime]] = None,
     shift_key: Optional[str] = None, job_id: Optional[str] = None,
     job_name: Optional[str] = None, job_names: Optional[Sequence[str]] = None,
-    employee_name: Optional[str] = None, minutes: Optional[int] = None,
+    employee_id: Optional[str] = None, employee_name: Optional[str] = None,
+    minutes: Optional[int] = None,
 ) -> dict[str, Any]:
     """One finding, in the single shape every consumer renders.
 
@@ -156,7 +160,7 @@ def make_finding(
     null and lists them in ``job_names`` instead.  The sentence a person reads
     lives in ``detail``.
     """
-    return {
+    finding = {
         "kind": kind,
         "severity": severity,
         "day": day.isoformat() if day else None,
@@ -172,6 +176,9 @@ def make_finding(
         "minutes": minutes,
         "detail": detail,
     }
+    if employee_id is not None:
+        finding["employee_id"] = str(employee_id)
+    return finding
 
 
 def sort_findings(findings: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:

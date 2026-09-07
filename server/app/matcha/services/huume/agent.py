@@ -46,6 +46,7 @@ from google.genai import types
 from app.core.services.ai_usage import feature_scope
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
+from app.matcha.services.scheduling.schedule_review import bounded_review_echo, compact_review
 
 from . import (
     actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
@@ -1534,6 +1535,7 @@ async def run_huume_turn(
                 # decision — one flow, table-driven (see _HR_OPS_TOOL_SPECS).
                 spec = _HR_OPS_TOOL_SPECS[name]
                 staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
+                schedule_review_echo: dict[str, Any] | None = None
                 if (
                     name in {
                         "propose_schedule_change", "build_week_schedule",
@@ -1595,6 +1597,10 @@ async def run_huume_turn(
                             "status": proposal_status or "refused",
                             "message": message,
                         }, step
+                    full_review = proposed.get("review")
+                    if isinstance(full_review, dict):
+                        schedule_review_echo = bounded_review_echo(full_review)
+                        proposed = {**proposed, "review": compact_review(full_review)}
                     staged.update({k: v for k, v in proposed.items() if k != "status"})
                 if name == "save_location_schedule_profile" and not confirming:
                     # Same shape as the two special cases above: job names are
@@ -1690,6 +1696,13 @@ async def run_huume_turn(
                             company_id=company_id,
                             generation_run_id=UUID(str(pre_turn_action["generation_run_id"])),
                         )
+                    full_review = proposed.get("review")
+                    if isinstance(full_review, dict):
+                        # Exact open seats/findings already have bounded
+                        # top-level echoes for this tool. Keep only counts,
+                        # warnings, and jurisdiction in the duplicate review.
+                        schedule_review_echo = compact_review(full_review)
+                        proposed = {**proposed, "review": schedule_review_echo}
                     staged.update({
                         key: value for key, value in proposed.items() if key != "status"
                     })
@@ -1722,7 +1735,9 @@ async def run_huume_turn(
                         # whether legality was verified must reach the model
                         # on the turn it stages, or it will report nine
                         # assignments done when four were.
-                        response["review"] = _json_safe(staged.get("review"))
+                        response["review"] = _json_safe(
+                            schedule_review_echo or staged.get("review")
+                        )
                         response["rejected_count"] = staged.get("rejected_count")
                         response["compliance_status"] = staged.get("compliance_status")
                     if name == "build_week_schedule":
@@ -1735,6 +1750,12 @@ async def run_huume_turn(
                         response["findings"] = staged.get("findings")
                         response["schedule_preview"] = staged.get("schedule_preview")
                         response["preview_truncated"] = staged.get("preview_truncated")
+                        # Load per person, statutory advisories and whether the
+                        # state's law was evaluated — same-turn, same reason.
+                        week_review = schedule_review_echo or staged.get("review")
+                        if isinstance(week_review, dict):
+                            response["review"] = _json_safe(week_review)
+                        response["compliance_status"] = staged.get("compliance_status")
                     if name == "save_location_schedule_profile":
                         response["summary"] = staged.get("summary")
                         response["blocks"] = staged.get("blocks")

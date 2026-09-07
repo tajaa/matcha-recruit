@@ -48,6 +48,11 @@ const FINDING_LABELS: Record<string, string> = {
   demand_outside_hours: 'Shift outside opening hours',
   demand_on_closed_day: 'Shift on a closed day',
   no_hours_known: 'Day not checked',
+  staffing_concentration: 'One person carries most of the week',
+  existing_double_booking: 'Already double-booked',
+  compliance_advisory: 'Statutory advisory',
+  jurisdiction_unmapped: 'Legality not verified for this state',
+  jurisdiction_unavailable: 'State rules could not be loaded',
 }
 
 function findingRowLabel(finding: WeekFinding): string {
@@ -389,6 +394,12 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Positions filled" value={action.metrics?.filled_positions} />
             <Meta label="Positions needed" value={action.metrics?.required_positions} />
             <Meta label="Still open" value={action.metrics?.open_positions} />
+            {action.metrics?.top_load?.[0] && (
+              <Meta
+                label="Heaviest load"
+                value={`${action.metrics.top_load[0].name} · ${action.metrics.top_load[0].shifts} shifts / ${action.metrics.top_load[0].hours}h`}
+              />
+            )}
           </div>
           <Prose>{action.summary}</Prose>
           <NeedsReview

@@ -94,7 +94,15 @@ export function bannerLabel(action: HuumeAction): string {
       // manager's thumb reaches Confirm.
       const gaps = action.metrics?.gap_count ?? 0
       const suffix = gaps ? `, ${gaps} coverage gap${gaps === 1 ? '' : 's'} to review` : ''
-      return `Use this generated week (${filled}/${required} positions filled${suffix})?`
+      // Same for one person carrying the week, and for a state whose law was
+      // never evaluated: neither may hide behind a filled-position count.
+      const top = action.metrics?.top_load?.[0]
+      const concentrated = (action.metrics?.finding_counts?.staffing_concentration ?? 0) > 0 && top
+      const load = concentrated ? `, ${top.name} on ${top.shifts} shifts` : ''
+      const law = action.compliance_status === 'unmapped' || action.compliance_status === 'unavailable'
+        ? ' — compliance NOT verified'
+        : ''
+      return `Use this generated week (${filled}/${required} positions filled${suffix}${load})${law}?`
     }
     case 'schedule_note':
       return 'Save this assignment note?'

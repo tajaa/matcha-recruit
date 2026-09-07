@@ -15,6 +15,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
 from uuid import UUID, uuid4
 
+from app.core.feature_flags import get_company_features
 from app.database import connection_or_direct
 
 from .assignment_guard import (
@@ -32,7 +33,8 @@ from .schedule_coverage import (
 )
 from .schedule_guidance import resolve_week_break_plans
 from .schedule_profiles import fetch_effective_job_employee_ids
-from .schedule_review import jurisdiction_message
+from .schedule_intelligence import fetch_lapse_items
+from .schedule_review import build_week_draft_review, compliance_status_for, jurisdiction_message
 from .schedule_rules import align_week_start, availability_violations, template_windows
 from .shift_compliance import check_shift_compliance, jurisdiction_rule_status
 from .shift_writes import (
@@ -56,11 +58,25 @@ _MAX_COMPLIANCE_REPLANS = 3
 # truncating the list must never make the week look cleaner than it is.
 _MAX_FINDINGS = 40
 _FINDINGS_RETURNED = 20
+_UNFILLED_RETURNED = 20
+_ACKNOWLEDGED_ADVISORIES_RETURNED = 50
 # `coverage_shortfall` fires on every normally-staffed shift that owes a break,
 # which is most of them. Reporting each one turns the card into a wall of amber
 # and buries the real holes, so the per-day advisory is capped and the count
 # carries the rest.
 _MAX_THIN_BREAK_FINDINGS_PER_DAY = 2
+# Statutory advisories are persisted on every assignment and counted in full;
+# the LIST shows the first few so the card is not a wall of meal-break lines.
+_MAX_COMPLIANCE_ADVISORY_FINDINGS = 5
+# One person on more shifts than the week has days, or on a lopsided share of
+# staffed positions relative to their shift-specific eligible pools, is the
+# "nine lead shifts on Dana" shape — reported, never silently accepted.
+# Absolute threshold is 7, not 5: five shifts is an ordinary full-time week.
+_CONCENTRATION_MIN_SHIFTS = 7
+_CONCENTRATION_SHARE = 0.4
+_CONCENTRATION_FAIR_SHARE_MULTIPLE = 2
+_TOP_LOAD = 3
+_COVERAGE_GAP_KINDS = GAP_KINDS - {"existing_double_booking"}
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +118,29 @@ def _coverage_sentence(metrics: dict[str, Any]) -> str:
     counts = metrics.get("finding_counts") or {}
     total = sum(int(value) for value in counts.values())
     gaps = int(metrics.get("gap_count") or 0)
-    advisories = max(0, total - gaps)
+    booking_conflicts = int(
+        metrics.get("booking_conflict_count")
+        or counts.get("existing_double_booking")
+        or 0
+    )
+    advisories = max(0, total - gaps - booking_conflicts)
     if gaps:
+        conflict_text = (
+            f", {booking_conflicts} existing double-booking conflict(s)"
+            if booking_conflicts else ""
+        )
         return (
-            f" {gaps} coverage/break gap(s) and {advisories} advisory finding(s) "
+            f" {gaps} coverage/break gap(s){conflict_text} and "
+            f"{advisories} advisory finding(s) "
+            "need your review."
+        )
+    if booking_conflicts:
+        advisory_text = (
+            f" and {advisories} advisory finding(s)" if advisories else ""
+        )
+        return (
+            " No coverage gaps against this location's hours; "
+            f"{booking_conflicts} existing double-booking conflict(s){advisory_text} "
             "need your review."
         )
     if advisories:
@@ -161,6 +196,15 @@ def _review_payload(
     # needs review is the honest ending; saying the week is compliant is a
     # claim this planner is not in a position to make.
     summary += _coverage_sentence(metrics)
+    if (metrics.get("finding_counts") or {}).get("staffing_concentration") and metrics.get("top_load"):
+        top = metrics["top_load"][0]
+        summary += (
+            f" {top['name']} carries {top['shifts']} of the {metrics['filled_positions']} "
+            f"staffed positions."
+        )
+    jurisdiction = plan.get("jurisdiction") or {}
+    if jurisdiction.get("status") in ("unmapped", "unavailable"):
+        summary += " " + str(jurisdiction.get("message"))
     return {
         "summary": summary,
         "schedule_preview": schedule_preview,
@@ -454,51 +498,149 @@ def build_plan(
     }
 
 
-async def _preflight_compliance_blocks(
+async def _preflight_compliance(
     conn, *, company_id: UUID, location_id: UUID, plan: dict[str, Any],
-) -> set[tuple[str, str]]:
-    """Return selected employee/shift pairs that hit a current hard block.
+) -> tuple[set[tuple[str, str]], dict[tuple[str, str], list[dict[str, Any]]]]:
+    """Run the shared statutory/credential gate over every proposed pair.
 
-    The planner handles availability, qualifications, conflicts, time away,
-    hour caps, and consecutive days in memory. This pass adds the shared
-    statutory/credential eligibility gate before a manager sees the proposal.
-    Application still repeats the same check under row locks.
+    Returns ``(blocked, advisories)``: the pairs that hit a hard block (a
+    replan routes around them) and the advisory violations per pair —
+    verbatim, so they are persisted on the assignment, become
+    `compliance_advisory` findings and reach the review. Nothing the checker
+    said is discarded any more; the planner used to keep only the blocks.
+
+    Fails CLOSED per pair: a checker that raises for one person/shift marks
+    that pair blocked (and logs) instead of letting it through unchecked —
+    application repeats the check under row locks, but the manager reads
+    this proposal first. Lapse items are fetched once for everyone proposed.
     """
+    pairs = [
+        (shift, assignment)
+        for shift in plan.get("shifts") or []
+        for assignment in shift.get("proposed_assignments") or []
+    ]
     blocked: set[tuple[str, str]] = set()
+    advisories: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if not pairs:
+        return blocked, advisories
+    lapse_map: dict[str, list[dict[str, Any]]] | None = None
+    try:
+        features = await get_company_features(company_id, conn=conn)
+        lapse_map = await fetch_lapse_items(
+            conn, company_id,
+            sorted({UUID(assignment["employee_id"]) for _shift, assignment in pairs}, key=str),
+            credential_templates_enabled=bool(features.get("credential_templates")),
+            training_enabled=bool(features.get("training")),
+        )
+    except Exception:
+        # Only the batching is lost: check_shift_compliance queries per call
+        # when it is handed no prefetched items.
+        logger.exception("week builder lapse prefetch failed for location %s", location_id)
+        lapse_map = None
+    for shift, assignment in pairs:
+        pair = (shift["key"], assignment["employee_id"])
+        try:
+            violations = await check_shift_compliance(
+                conn, company_id,
+                location_id=location_id,
+                job_id=UUID(shift["job_id"]) if shift.get("job_id") else None,
+                starts_at=datetime.fromisoformat(shift["starts_at"]),
+                ends_at=datetime.fromisoformat(shift["ends_at"]),
+                break_minutes=int(shift.get("break_minutes") or 0),
+                employee_id=UUID(assignment["employee_id"]),
+                exclude_shift_id=(
+                    UUID(shift["source_shift_id"])
+                    if shift.get("source_shift_id") else None
+                ),
+                fw_event="assign", fw_shift_published=False,
+                shift_kind=shift.get("kind") or "work",
+                training_requirement_id=(
+                    UUID(shift["training_requirement_id"])
+                    if shift.get("training_requirement_id") else None
+                ),
+                lapse_items=(
+                    lapse_map.get(assignment["employee_id"], []) if lapse_map is not None else None
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "week builder compliance preflight failed for shift %s employee %s — pair blocked",
+                shift.get("key"), assignment.get("employee_id"),
+            )
+            blocked.add(pair)
+            continue
+        if any(item.get("severity") == "block" for item in violations):
+            blocked.add(pair)
+            continue
+        kept = [dict(item) for item in violations if item.get("severity") != "block"]
+        if kept:
+            advisories[pair] = kept
+    return blocked, advisories
+
+
+def _strip_blocked_pairs(plan: dict[str, Any], pairs: set[tuple[str, str]]) -> None:
+    """Remove known-blocked assignments from a plan IN PLACE and account for
+    them as open seats. Used only when the replan budget is spent: the last
+    plan was checked, still carries a pair the preflight refused, and a
+    manager must never be shown a seat filled by someone who cannot take it."""
+    if not pairs:
+        return
+    removed = 0
+    hours = plan.get("hours_by_employee") or {}
+    for shift in plan.get("shifts") or []:
+        keep, drop = [], []
+        for assignment in shift.get("proposed_assignments") or []:
+            (drop if (shift["key"], assignment["employee_id"]) in pairs else keep).append(assignment)
+        if not drop:
+            continue
+        shift["proposed_assignments"] = keep
+        for assignment in drop:
+            removed += 1
+            employee_id = assignment["employee_id"]
+            if employee_id in hours:
+                hours[employee_id] = max(0, int(hours[employee_id]) - int(shift.get("worked_minutes") or 0))
+            plan["unfilled"].append({
+                "shift_key": shift["key"], "starts_at": shift["starts_at"], "role": shift.get("role"),
+                "reason": "compliance or eligibility block",
+                "exclusions": {"compliance or eligibility block": 1},
+            })
+    metrics = plan["metrics"]
+    metrics["proposed_positions"] -= removed
+    metrics["filled_positions"] -= removed
+    metrics["open_positions"] = len(plan["unfilled"])
+
+
+async def _plan_with_preflight(
+    conn, *, company_id: UUID, location_id: UUID, build,
+) -> tuple[dict[str, Any], dict[tuple[str, str], list[dict[str, Any]]]]:
+    """Build → preflight → replan around hard blocks, up to
+    `_MAX_COMPLIANCE_REPLANS` more times. The plan handed back was ALWAYS
+    checked: when the budget runs out with a block still in it, that pair
+    is stripped and reported as an open seat instead of shown as filled
+    (the old loop's final rebuild went out unchecked)."""
+    blocked_pairs: set[tuple[str, str]] = set()
+    plan: dict[str, Any] = {}
+    blocked: set[tuple[str, str]] = set()
+    advisories: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for _attempt in range(_MAX_COMPLIANCE_REPLANS + 1):
+        plan = build(blocked_pairs)
+        blocked, advisories = await _preflight_compliance(
+            conn, company_id=company_id, location_id=location_id, plan=plan,
+        )
+        if not blocked - blocked_pairs:
+            return plan, advisories
+        blocked_pairs |= blocked
+    _strip_blocked_pairs(plan, blocked)
+    return plan, advisories
+
+
+def _attach_advisories(
+    plan: dict[str, Any], advisories: dict[tuple[str, str], list[dict[str, Any]]],
+) -> None:
+    """Persist each pair's statutory advisories on its proposed assignment."""
     for shift in plan.get("shifts") or []:
         for assignment in shift.get("proposed_assignments") or []:
-            try:
-                violations = await check_shift_compliance(
-                    conn, company_id,
-                    location_id=location_id,
-                    job_id=UUID(shift["job_id"]) if shift.get("job_id") else None,
-                    starts_at=datetime.fromisoformat(shift["starts_at"]),
-                    ends_at=datetime.fromisoformat(shift["ends_at"]),
-                    break_minutes=int(shift.get("break_minutes") or 0),
-                    employee_id=UUID(assignment["employee_id"]),
-                    exclude_shift_id=(
-                        UUID(shift["source_shift_id"])
-                        if shift.get("source_shift_id") else None
-                    ),
-                    shift_kind=shift.get("kind") or "work",
-                    training_requirement_id=(
-                        UUID(shift["training_requirement_id"])
-                        if shift.get("training_requirement_id") else None
-                    ),
-                    lapse_items=[],
-                )
-            except Exception:
-                # Application performs the authoritative locked recheck. A
-                # transient preview failure should stay visible in logs, not
-                # make the whole scheduling assistant unusable.
-                logger.exception(
-                    "week builder compliance preflight failed for shift %s employee %s",
-                    shift.get("key"), assignment.get("employee_id"),
-                )
-                continue
-            if any(item.get("severity") == "block" for item in violations):
-                blocked.add((shift["key"], assignment["employee_id"]))
-    return blocked
+            assignment["advisories"] = list(advisories.get((shift["key"], assignment["employee_id"]), []))
 
 
 def _trim_thin_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -510,8 +652,17 @@ def _trim_thin_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     kept: list[dict[str, Any]] = []
     seen: Counter = Counter()
+    advisories_seen = 0
     for finding in findings:
-        if finding.get("kind") != "break_relief_thin":
+        kind = finding.get("kind")
+        if kind == "compliance_advisory":
+            # Same idea, whole-week cap: every advisory is on its assignment
+            # and in `finding_counts`; the card shows the first few.
+            advisories_seen += 1
+            if advisories_seen <= _MAX_COMPLIANCE_ADVISORY_FINDINGS:
+                kept.append(finding)
+            continue
+        if kind != "break_relief_thin":
             kept.append(finding)
             continue
         day = finding.get("day")
@@ -542,6 +693,29 @@ def _cap_findings(
     kept = gaps[:limit]
     kept.extend(rest[:limit - len(kept)])
     return sort_findings(kept)
+
+
+def _cap_unfilled(
+    unfilled: list[dict[str, Any]], limit: int = _UNFILLED_RETURNED,
+) -> list[dict[str, Any]]:
+    """Bound open-seat details while preserving compliance-blocked seats.
+
+    Those seats are appended after a final preflight strip, so a plain prefix
+    slice hides exactly the legally important reason while `open_positions`
+    continues to count it.
+    """
+    if len(unfilled) <= limit:
+        return list(unfilled)
+    priority_indexes = [
+        index for index, item in enumerate(unfilled)
+        if item.get("reason") == "compliance or eligibility block"
+    ]
+    priority = set(priority_indexes[:limit])
+    for index in range(len(unfilled)):
+        if len(priority) >= limit:
+            break
+        priority.add(index)
+    return [item for index, item in enumerate(unfilled) if index in priority]
 
 
 def _break_relief_finding(
@@ -618,7 +792,7 @@ async def _break_relief_findings(
     shift row, so nothing has to be written before the manager can see it.
     Break rules themselves come from the compliance catalog, never from here.
 
-    Never raises — same contract as `_preflight_compliance_blocks`. A findings
+    Never raises — unlike the compliance preflight, which fails closed. A findings
     pass that could fail a build would be worse than the silence it replaces.
     """
     try:
@@ -917,11 +1091,176 @@ async def _week_rules_gate(
     }
 
 
+def _load_by_employee(plan: dict[str, Any], employee_names: dict[str, str]) -> list[dict[str, Any]]:
+    """Plan-local assigned shifts and hours per person, heaviest first.
+
+    Count inherited fixed assignees as well as proposed ones, and derive both
+    columns from the same plan shifts. `hours_by_employee` is intentionally
+    company-wide for overtime/cap decisions, so pairing it with a location's
+    proposed-only shift count produced rows such as "1 shift / 80h".
+    """
+    shifts: Counter = Counter()
+    minutes: Counter = Counter()
+    names: dict[str, str] = {}
+    for shift in plan.get("shifts") or []:
+        worked_minutes = int(shift.get("worked_minutes") or 0)
+        for employee_id in shift.get("fixed_employee_ids") or []:
+            employee_id = str(employee_id)
+            shifts[employee_id] += 1
+            minutes[employee_id] += worked_minutes
+        for assignment in shift.get("proposed_assignments") or []:
+            employee_id = str(assignment["employee_id"])
+            shifts[employee_id] += 1
+            minutes[employee_id] += worked_minutes
+            names.setdefault(employee_id, assignment.get("employee_name") or "")
+    load = [{
+        "employee_id": employee_id,
+        "name": employee_names.get(employee_id) or names.get(employee_id) or "Employee",
+        "shifts": count,
+        "hours": round(minutes[employee_id] / 60, 1),
+    } for employee_id, count in shifts.items()]
+    load.sort(key=lambda item: (-item["shifts"], -item["hours"], item["name"], item["employee_id"]))
+    return load
+
+
+def _concentration_findings(
+    plan: dict[str, Any], load: list[dict[str, Any]], *,
+    employees: list[dict[str, Any]], gated_job_ids: set[str],
+) -> list[dict[str, Any]]:
+    """One person carrying the week. Advisory: sometimes it IS the roster —
+    but "18/18 filled" must never hide that nine of them are the same name.
+
+    Relative to a fair split of each shift's eligible pool: two leads on 4/3
+    of seven gated lead blocks stay quiet even if eight ineligible baristas
+    share the location roster. Fixed assignments participate in both the
+    observed load and the expected fair share.
+    """
+    staffed = sum(item["shifts"] for item in load)
+    if staffed < 3:
+        return []
+    employee_by_id = {str(employee["id"]): employee for employee in employees}
+    fair_share_by_employee: Counter = Counter()
+    for shift in plan.get("shifts") or []:
+        assigned_ids = {
+            *(str(value) for value in shift.get("fixed_employee_ids") or []),
+            *(str(item["employee_id"]) for item in shift.get("proposed_assignments") or []),
+        }
+        filled = len(assigned_ids)
+        if not filled:
+            continue
+        shift_date = _as_datetime(shift["starts_at"]).date()
+        eligible_ids = {
+            employee_id for employee_id, employee in employee_by_id.items()
+            if _job_qualified(employee, shift.get("job_id"), shift_date, gated_job_ids)
+        }
+        # An inherited assignee can be absent from today's active roster or
+        # carry legacy qualification data. Their real assignment must still
+        # contribute to the pool instead of receiving a zero fair share.
+        eligible_ids |= assigned_ids
+        share = filled / max(len(eligible_ids), 1)
+        for employee_id in eligible_ids:
+            fair_share_by_employee[employee_id] += share
+    out = []
+    for item in load:
+        fair_share = float(fair_share_by_employee[item["employee_id"]])
+        heavy = item["shifts"] >= _CONCENTRATION_MIN_SHIFTS
+        lopsided = (
+            item["shifts"] >= 3
+            and item["shifts"] > _CONCENTRATION_SHARE * staffed
+            and item["shifts"] >= _CONCENTRATION_FAIR_SHARE_MULTIPLE * fair_share
+        )
+        if heavy or lopsided:
+            out.append(make_finding(
+                "staffing_concentration", "advisory",
+                f"{item['name']} carries {item['shifts']} of {staffed} staffed positions "
+                f"({item['hours']:g}h scheduled this week) — spread the load across the roster "
+                f"or confirm this is intended.",
+                employee_id=item["employee_id"], employee_name=item["name"],
+            ))
+    return out
+
+
+def _compliance_advisory_findings(plan: dict[str, Any], employee_names: dict[str, str]) -> list[dict[str, Any]]:
+    """The preflight's statutory advisories, verbatim (message + statute),
+    one finding per assignment × advisory. Counted in full; the list is capped
+    by `_trim_thin_findings`."""
+    out = []
+    for shift in plan.get("shifts") or []:
+        starts = datetime.fromisoformat(shift["starts_at"])
+        ends = datetime.fromisoformat(shift["ends_at"])
+        for assignment in shift.get("proposed_assignments") or []:
+            name = assignment.get("employee_name") or employee_names.get(assignment["employee_id"], "Employee")
+            for item in assignment.get("advisories") or []:
+                statute = item.get("statute")
+                out.append(make_finding(
+                    "compliance_advisory", "advisory",
+                    f"{name}: {item.get('message')}" + (f" ({statute})" if statute else ""),
+                    day=starts.date(), window=(starts, ends), shift_key=shift.get("key"),
+                    job_id=shift.get("job_id"), job_name=shift.get("role"), employee_name=name,
+                ))
+    return out
+
+
+def _as_datetime(value: Any) -> datetime:
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+
+
+def _double_booking_findings(
+    plan: dict[str, Any], existing_assignments: list[dict[str, Any]], employee_names: dict[str, str],
+) -> list[dict[str, Any]]:
+    """`fixed_employee_ids` are inherited, never validated: a person already on
+    two overlapping shifts is carried, counted as filled, and counted twice on
+    the coverage floor. Report it as a gap so the week is fixed before publish."""
+    plan_shift_ids = {shift.get("source_shift_id") for shift in plan.get("shifts") or [] if shift.get("source_shift_id")}
+    planned_employee_ids = {
+        str(employee_id)
+        for shift in plan.get("shifts") or []
+        for employee_id in shift.get("fixed_employee_ids") or []
+    }
+    intervals: dict[str, list[tuple[datetime, datetime, str, bool]]] = defaultdict(list)
+    for shift in plan.get("shifts") or []:
+        starts, ends = _as_datetime(shift["starts_at"]), _as_datetime(shift["ends_at"])
+        label = f"{shift.get('role') or 'shift'} {starts:%a %b %d %H:%M}–{ends:%H:%M}"
+        for employee_id in shift.get("fixed_employee_ids") or []:
+            intervals[str(employee_id)].append((starts, ends, label, True))
+    for assignment in existing_assignments:
+        employee_id = str(assignment["employee_id"])
+        if employee_id not in planned_employee_ids or assignment.get("shift_id") in plan_shift_ids:
+            continue
+        starts, ends = _as_datetime(assignment["starts_at"]), _as_datetime(assignment["ends_at"])
+        intervals[employee_id].append(
+            (starts, ends, f"another shift {starts:%a %b %d %H:%M}–{ends:%H:%M}", False),
+        )
+    out = []
+    for employee_id, items in sorted(intervals.items()):
+        if len(items) < 2:
+            continue
+        items.sort()
+        clashes = [
+            (items[i], items[j])
+            for i in range(len(items)) for j in range(i + 1, len(items))
+            if (items[i][3] or items[j][3]) and _overlaps(items[i][:2], items[j][:2])
+        ]
+        if not clashes:
+            continue
+        first, second = clashes[0]
+        name = employee_names.get(employee_id, "An employee")
+        more = f" (+{len(clashes) - 1} more)" if len(clashes) > 1 else ""
+        out.append(make_finding(
+            "existing_double_booking", "gap",
+            f"{name} is already on overlapping shifts: {first[2]} and {second[2]}{more} — "
+            f"the week was planned around that booking; fix it before publishing.",
+            day=first[0].date(), window=(first[0], first[1]),
+            employee_id=employee_id, employee_name=name,
+        ))
+    return out
+
+
 async def _attach_findings(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     plan: dict[str, Any], snapshot: dict[str, Any],
-) -> None:
-    """Add `findings` and the finding metrics to a built plan, in place.
+) -> list[dict[str, Any]]:
+    """Add findings/metrics in place; return uncapped concentration findings.
 
     Never raises — same contract as `_break_relief_findings`, which only
     covered its own half. The profile read and the coverage evaluator are on
@@ -932,9 +1271,14 @@ async def _attach_findings(
     plan["findings"] = []
     plan["metrics"]["finding_counts"] = {}
     plan["metrics"]["gap_count"] = 0
+    plan["metrics"]["booking_conflict_count"] = 0
     plan["metrics"]["operating_hours_known"] = False
+    plan["metrics"]["top_load"] = []
+    # Until the pass says otherwise, legality was NOT evaluated — the honest
+    # default when the pass itself failed, never an all-clear.
+    plan["jurisdiction"] = jurisdiction_message({"state": None, "status": "unavailable"})
     try:
-        await _attach_findings_core(
+        return await _attach_findings_core(
             conn, company_id=company_id, location_id=location_id,
             week_start=week_start, plan=plan, snapshot=snapshot,
         )
@@ -942,12 +1286,13 @@ async def _attach_findings(
         logger.exception(
             "week builder findings pass failed for location %s", location_id,
         )
+        return []
 
 
 async def _attach_findings_core(
     conn, *, company_id: UUID, location_id: UUID, week_start: date,
     plan: dict[str, Any], snapshot: dict[str, Any],
-) -> None:
+) -> list[dict[str, Any]]:
     profile = await _coverage_profile(
         conn, company_id=company_id, location_id=location_id,
     )
@@ -968,22 +1313,46 @@ async def _attach_findings_core(
         leader_job_names=profile["leader_job_names"],
         week_start=week_start,
     )
+    employee_names = {employee["id"]: employee["name"] for employee in snapshot["employees"]}
     breaks = await _break_relief_findings(
         conn, company_id=company_id, location_id=location_id, plan=plan,
-        employee_names={
-            employee["id"]: employee["name"] for employee in snapshot["employees"]
-        },
+        employee_names=employee_names,
     )
-    all_findings = sort_findings([*coverage, *breaks])
+    load = _load_by_employee(plan, employee_names)
+    plan["metrics"]["top_load"] = load[:_TOP_LOAD]
+    try:
+        jurisdiction = jurisdiction_message(
+            await jurisdiction_rule_status(conn, company_id, location_id),
+        )
+    except Exception:
+        logger.exception(
+            "week builder jurisdiction lookup failed for location %s", location_id,
+        )
+        jurisdiction = jurisdiction_message({"state": None, "status": "unavailable"})
+    plan["jurisdiction"] = jurisdiction
+    concentration_findings = _concentration_findings(
+        plan, load, employees=snapshot.get("employees") or [],
+        gated_job_ids=set(snapshot.get("gated_job_ids") or []),
+    )
+    extra = [
+        *_compliance_advisory_findings(plan, employee_names),
+        *concentration_findings,
+        *_double_booking_findings(plan, snapshot.get("existing_assignments") or [], employee_names),
+    ]
+    if jurisdiction["status"] in ("unmapped", "unavailable"):
+        extra.append(make_finding(f"jurisdiction_{jurisdiction['status']}", "advisory", jurisdiction["message"]))
+    all_findings = sort_findings([*coverage, *breaks, *extra])
     counts = Counter(finding["kind"] for finding in all_findings)
     plan["findings"] = _cap_findings(_trim_thin_findings(all_findings))
     # A plain dict, not the Counter: `metrics` is its own JSONB column and
     # json.dumps has no Counter branch that survives a round trip cleanly.
     plan["metrics"]["finding_counts"] = dict(sorted(counts.items()))
     plan["metrics"]["gap_count"] = sum(
-        1 for finding in all_findings if finding["kind"] in GAP_KINDS
+        1 for finding in all_findings if finding["kind"] in _COVERAGE_GAP_KINDS
     )
+    plan["metrics"]["booking_conflict_count"] = counts.get("existing_double_booking", 0)
     plan["metrics"]["operating_hours_known"] = bool(hours)
+    return concentration_findings
 
 
 async def _load_existing_demand(conn, *, company_id: UUID, location_id: UUID,
@@ -1147,16 +1516,10 @@ async def plan_vacant_fill(
             allow_split_shift=allow_split_shift,
         )
 
-    blocked_pairs: set[tuple[str, str]] = set()
-    plan = _build(blocked_pairs)
-    for _attempt in range(_MAX_COMPLIANCE_REPLANS):
-        newly_blocked = await _preflight_compliance_blocks(
-            conn, company_id=company_id, location_id=location_id, plan=plan,
-        ) - blocked_pairs
-        if not newly_blocked:
-            break
-        blocked_pairs.update(newly_blocked)
-        plan = _build(blocked_pairs)
+    plan, advisories = await _plan_with_preflight(
+        conn, company_id=company_id, location_id=location_id, build=_build,
+    )
+    _attach_advisories(plan, advisories)
 
     by_key = {shift["key"]: shift for shift in demand}
     assignments = [
@@ -1164,7 +1527,7 @@ async def plan_vacant_fill(
             "shift_id": shift["key"], "role": shift.get("role"),
             "starts_at": shift["starts_at"], "ends_at": shift["ends_at"],
             "employee_id": item["employee_id"], "employee_name": item["employee_name"],
-            "reason": item["reason"],
+            "reason": item["reason"], "advisories": list(item.get("advisories") or []),
         }
         for shift in plan["shifts"]
         for item in shift.get("proposed_assignments") or []
@@ -1668,10 +2031,8 @@ async def propose_week_draft(
                     "location's active roster. Check readiness again and use its employee ids."
                 ),
             }
-        blocked_pairs: set[tuple[str, str]] = set()
-        needs_final_rebuild = False
-        for _attempt in range(_MAX_COMPLIANCE_REPLANS):
-            plan = build_plan(
+        def _build(blocked_pairs: set[tuple[str, str]]) -> dict[str, Any]:
+            return build_plan(
                 demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
                 existing_assignments=snapshot["existing_assignments"],
                 adjacent_assignments=snapshot.get("adjacent_assignments", []),
@@ -1681,25 +2042,11 @@ async def propose_week_draft(
                 gated_job_ids=snapshot["gated_job_ids"],
                 blocked_pairs=blocked_pairs,
             )
-            newly_blocked = await _preflight_compliance_blocks(
-                conn, company_id=company_id, location_id=location_id, plan=plan,
-            ) - blocked_pairs
-            if not newly_blocked:
-                needs_final_rebuild = False
-                break
-            blocked_pairs.update(newly_blocked)
-            needs_final_rebuild = True
-        if needs_final_rebuild:
-            plan = build_plan(
-                demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
-                existing_assignments=snapshot["existing_assignments"],
-                adjacent_assignments=snapshot.get("adjacent_assignments", []),
-                unavailable_ranges=snapshot["unavailable_ranges"],
-                exclude_employee_ids=set(constraints["exclude_employee_ids"]),
-                employee_hour_caps=constraints["employee_hour_caps"],
-                gated_job_ids=snapshot["gated_job_ids"],
-                blocked_pairs=blocked_pairs,
-            )
+
+        plan, advisories = await _plan_with_preflight(
+            conn, company_id=company_id, location_id=location_id, build=_build,
+        )
+        _attach_advisories(plan, advisories)
         # Coverage + break relief run on the FINAL plan, and their output lives
         # on the plan rather than on `review`: the automatic worker path
         # rebuilds its staged action from `proposal["unfilled"]`, never from
@@ -1709,7 +2056,7 @@ async def propose_week_draft(
         # The profile is read here and deliberately NOT added to the snapshot:
         # `_input_hash` hashes the snapshot, so a manager editing a buffer
         # minute would otherwise stale an otherwise-good proposal at confirm.
-        await _attach_findings(
+        concentration_findings = await _attach_findings(
             conn, company_id=company_id, location_id=location_id,
             week_start=week_start, plan=plan, snapshot=snapshot,
         )
@@ -1717,8 +2064,19 @@ async def propose_week_draft(
             plan=plan, snapshot=snapshot, source_mode=selected_source,
             template_name=template_name,
         )
-        persisted_plan = {**plan, "review": review}
         run_id = uuid4()
+        # The `ScheduleReview` every schedule surface renders (same contract
+        # as a staged schedule_change): who goes where, per-person load
+        # before/after, statutory advisories verbatim, findings, jurisdiction.
+        schedule_review = build_week_draft_review(
+            plan,
+            employee_names={employee["id"]: employee["name"] for employee in snapshot["employees"]},
+            existing_assignments=snapshot["existing_assignments"],
+            week_start=week_start, week_end=week_start + timedelta(days=6),
+            proposal_id=str(run_id),
+            concentration_findings=concentration_findings,
+        )
+        persisted_plan = {**plan, "review": review, "schedule_review": schedule_review}
         input_hash = _input_hash(snapshot)
         insert_result = await conn.execute(
             """
@@ -1743,10 +2101,13 @@ async def propose_week_draft(
         "status": "ready", "generation_run_id": str(run_id), "source_mode": selected_source,
         "week_template_id": str(template_uuid) if template_uuid else None,
         "origin": origin, "summary": review["summary"], "metrics": metrics,
-        "unfilled": plan["unfilled"][:20],
+        "unfilled": _cap_unfilled(plan["unfilled"]),
         "findings": _cap_findings(plan.get("findings") or [], _FINDINGS_RETURNED),
         "schedule_preview": review["schedule_preview"],
         "preview_truncated": review["preview_truncated"],
+        "review": schedule_review,
+        "compliance_status": schedule_review["compliance_status"],
+        "jurisdiction": schedule_review["jurisdiction"],
     }
 
 
@@ -1886,6 +2247,10 @@ async def apply_week_draft(
                 created_shift_ids.append(new_id)
                 touched_shift_ids.append(new_id)
 
+            jurisdiction = jurisdiction_message(
+                await jurisdiction_rule_status(conn, company_id, location_id),
+            )
+            advisories_acknowledged: list[dict[str, Any]] = []
             employee_ids = sorted({
                 UUID(assignment["employee_id"])
                 for shift in proposal.get("shifts") or []
@@ -1930,23 +2295,35 @@ async def apply_week_draft(
                         )
                         if employee_id not in qualified:
                             reason = "employee is no longer qualified for this job"
+                    acknowledged_here: list[dict[str, Any]] = []
                     if reason is None:
                         violations = await check_shift_compliance(
                             conn, company_id, location_id=live["location_id"], job_id=live["job_id"],
                             starts_at=live["starts_at"], ends_at=live["ends_at"],
                             break_minutes=live["break_minutes"] or 0, employee_id=employee_id,
-                            exclude_shift_id=shift_id, shift_kind=live["kind"],
+                            exclude_shift_id=shift_id, fw_event="assign",
+                            fw_shift_published=bool(live["published_at"]), shift_kind=live["kind"],
                             training_requirement_id=live["training_requirement_id"],
                         )
                         block = next((item for item in violations if item.get("severity") == "block"), None)
                         if block:
                             reason = block.get("message") or "hard scheduling compliance block"
+                        else:
+                            acknowledged_here = [item for item in violations if item.get("severity") != "block"]
                     if reason:
                         dropped.append({
                             "shift_id": str(shift_id), "employee_id": str(employee_id),
                             "employee_name": assignment.get("employee_name"), "reason": reason,
+                            "role": live["role"], "starts_at": live["starts_at"].isoformat(),
                         })
                         continue
+                    for item in acknowledged_here:
+                        advisories_acknowledged.append({
+                            "shift_id": str(shift_id), "employee_id": str(employee_id),
+                            "employee_name": assignment.get("employee_name"),
+                            "check": item.get("check"), "message": item.get("message"),
+                            "statute": item.get("statute"),
+                        })
                     await apply_assignment_core(
                         conn, company_id, shift_row=live, employee_id=employee_id,
                         actor_user_id=actor_user_id,
@@ -1956,7 +2333,15 @@ async def apply_week_draft(
                 conn, company_id, "schedule_generation", generation_run_id,
                 actor_user_id, "schedule_generation.apply",
                 {"source_mode": run["source_mode"], "created_shift_ids": [str(value) for value in created_shift_ids],
-                 "dropped": dropped},
+                 "dropped": dropped,
+                 # What the manager confirmed with in view: the statutory
+                 # advisories on what was applied, and whether the state's
+                 # law was evaluated at all.
+                 "advisories_acknowledged": advisories_acknowledged[
+                     :_ACKNOWLEDGED_ADVISORIES_RETURNED
+                 ],
+                 "compliance_status": compliance_status_for(jurisdiction, advisories_acknowledged),
+                 "jurisdiction": jurisdiction},
             )
             await conn.execute(
                 """UPDATE schedule_generation_runs
@@ -1973,9 +2358,40 @@ async def apply_week_draft(
         f"{applied_assignments} assignment(s) added."
     )
     if dropped:
-        message += f" {len(dropped)} assignment(s) were left open after current-state rechecks."
+        named = "; ".join(
+            f"{item.get('employee_name') or 'someone'} — {item.get('role') or 'shift'} "
+            f"{_when(item.get('starts_at'))} ({item['reason']})"
+            for item in dropped[:5]
+        )
+        more = f"; and {len(dropped) - 5} more" if len(dropped) > 5 else ""
+        message += f" Left open after current-state rechecks: {named}{more}."
+    seen_messages: list[str] = []
+    for item in advisories_acknowledged:
+        line = f"{item.get('employee_name') or 'An employee'}: {item.get('message')}"
+        if item.get("statute"):
+            line += f" ({item['statute']})"
+        if line not in seen_messages:
+            seen_messages.append(line)
+    if seen_messages:
+        more = f"; and {len(seen_messages) - 3} more" if len(seen_messages) > 3 else ""
+        message += " Heads up on what was applied — " + "; ".join(seen_messages[:3]) + more + "."
+    if jurisdiction.get("status") in ("unmapped", "unavailable"):
+        message += f" {jurisdiction['message']} You confirmed with that in view."
     return {
         "status": "created", "record_id": str(generation_run_id), "message": message,
         "created_shift_ids": [str(value) for value in created_shift_ids],
         "touched_shift_ids": [str(value) for value in touched_shift_ids], "dropped": dropped,
+        "advisories_acknowledged": advisories_acknowledged[
+            :_ACKNOWLEDGED_ADVISORIES_RETURNED
+        ],
+        "advisory_count": len(advisories_acknowledged),
+        "compliance_status": compliance_status_for(jurisdiction, advisories_acknowledged),
+        "jurisdiction": jurisdiction,
     }
+
+
+def _when(value: Any) -> str:
+    try:
+        return _as_datetime(value).strftime("%a %b %d %H:%M")
+    except (TypeError, ValueError):
+        return str(value or "")

@@ -338,3 +338,49 @@ def test_a_week_with_gaps_still_needs_an_explicit_confirmation():
         thread_huume_mode=True, this_turn_staged_new=False, schedule_surface=True,
     )
     assert confirmed.ok
+
+
+# ── load + honesty in the week-draft state block (2026-09-07) ────────────────
+
+def _week_review(**overrides):
+    review = {
+        "kind": "week_draft", "compliance_status": "verified", "assignments": [], "rejected": [], "unfilled": [],
+        "employees": [], "advisories": [], "findings": [],
+        "jurisdiction": {"state": "CA", "status": "curated", "message": "Scheduling law for CA is on file (hand-curated)."},
+    }
+    review.update(overrides)
+    return review
+
+
+def test_state_block_names_who_carries_the_week_and_an_unverified_state():
+    concentration = ("Dana Reyes carries 6 of 6 proposed positions (24h scheduled this week) — "
+                     "spread the load across the roster or confirm this is intended.")
+    block = build_state_block({"huume_action": _action(
+        metrics={"filled_positions": 6, "required_positions": 14, "open_positions": 8, "gap_count": 0,
+                 "operating_hours_known": True,
+                 "top_load": [{"employee_id": "e1", "name": "Dana Reyes", "shifts": 6, "hours": 24.0}]},
+        review=_week_review(
+            compliance_status="unmapped",
+            employees=[{"employee_id": "e1", "name": "Dana Reyes", "before": {}, "after": {}, "warnings": [concentration]}],
+            jurisdiction={"state": "TX", "status": "unmapped",
+                          "message": "Legality was NOT verified for TX — Matcha has no researched scheduling thresholds for it."},
+        ),
+    )}, schedule_surface=True)
+
+    assert "Load: Dana Reyes 6 shift(s) / 24.0h" in block
+    assert "Policy warning: Dana Reyes carries 6 of 6 proposed positions" in block
+    assert "Compliance: NOT verified — Legality was NOT verified for TX" in block
+    assert "Never describe this week as compliant" in block
+
+
+def test_state_block_counts_statutory_advisories_on_a_verified_state():
+    block = build_state_block({"huume_action": _action(
+        review=_week_review(compliance_status="advisory", advisories=[{"message": "a"}, {"message": "b"}]),
+    )}, schedule_surface=True)
+    assert "Compliance: 2 statutory advisory(ies) attached to this week" in block
+    assert "NOT verified" not in block
+
+
+def test_a_clean_verified_week_adds_no_compliance_line():
+    block = build_state_block({"huume_action": _action(review=_week_review())}, schedule_surface=True)
+    assert "Compliance:" not in block and "Load:" not in block
