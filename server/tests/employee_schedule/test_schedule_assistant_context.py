@@ -371,3 +371,35 @@ async def test_a_failing_planning_builder_never_fails_the_overview(monkeypatch):
     monkeypatch.setattr(context, "build_planning_inputs", boom)
     result = await context.get_schedule_overview(company_id=company_id, location_id=location_id, week_start=date(2026, 8, 23))
     assert result["status"] == "ok" and "roster_load" not in result
+
+
+@pytest.mark.asyncio
+async def test_real_planning_builder_uses_an_acquired_connection(monkeypatch):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+    from app.matcha.services.scheduling import planning_inputs
+
+    class Connection(_Conn):
+        released = False
+
+        async def fetch(self, query, *params):
+            assert not self.released, "connection has been released back to the pool"
+            return []
+
+    conn = Connection(_LOCATION_ROW, [])
+
+    @asynccontextmanager
+    async def connection():
+        try:
+            yield conn
+        finally:
+            conn.released = True
+
+    monkeypatch.setattr(context, "get_connection", connection)
+    monkeypatch.setattr(planning_inputs, "load_profile_bundle", AsyncMock(return_value={}))
+    monkeypatch.setattr(planning_inputs, "jurisdiction_rule_status", AsyncMock(return_value={"state": "TX", "status": "unmapped"}))
+    result = await context.get_schedule_overview(company_id=uuid4(), location_id=uuid4(), week_start=date(2026, 8, 23))
+    assert conn.released
+    assert result["roster_load"] == []
+    assert result["open_slots"] == []
+    assert result["jurisdiction"]["status"] == "unmapped"

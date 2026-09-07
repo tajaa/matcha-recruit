@@ -25,6 +25,7 @@ from .location_profile import (
     profile_leader_job_ids, resolve_week_start_weekday, week_rules_refusal,
 )
 from .schedule_break_stagger import StaggerAssignment, stagger_shift_breaks
+from .schedule_batch import BatchItem, MAX_BATCH_OPERATIONS, plan_batches, split_plan_message
 from .schedule_breaks import reinterpret_schedule_wall_time
 from .schedule_coverage import (
     GAP_KINDS, evaluate_week_coverage, make_finding, sort_findings,
@@ -248,6 +249,7 @@ def build_plan(
     gated_job_ids: set[str],
     blocked_pairs: set[tuple[str, str]] | None = None,
     allow_split_shift: bool = False,
+    adjacent_assignments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic scarcity-first assignment planner.
 
@@ -278,6 +280,12 @@ def build_plan(
     scheduled_days: dict[str, set[date]] = defaultdict(set)
     shifts_by_day: dict[str, Counter] = defaultdict(Counter)
     shift_count: dict[str, int] = defaultdict(int)
+    # Adjacent weeks affect rest and consecutive days, but never this week's
+    # hours, target progress, or fairness score.
+    for assignment in adjacent_assignments or []:
+        employee_id = assignment["employee_id"]
+        busy[employee_id].append((assignment["starts_at"], assignment["ends_at"]))
+        scheduled_days[employee_id].add(assignment["starts_at"].date())
     for assignment in existing_assignments:
         employee_id = assignment["employee_id"]
         busy[employee_id].append((assignment["starts_at"], assignment["ends_at"]))
@@ -771,6 +779,10 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
             windows.sort(key=lambda window: (window[0], window[1]))
     lo = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     hi = lo + timedelta(days=7)
+    context_days = max(
+        [POLICY_MAX_CONSECUTIVE_DAYS]
+        + [employee.get("max_consecutive_days") or POLICY_MAX_CONSECUTIVE_DAYS for employee in employees]
+    )
     assignment_rows = await conn.fetch(
         """
         SELECT a.employee_id, s.id AS shift_id, s.starts_at, s.ends_at,
@@ -779,11 +791,13 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         JOIN schedule_shifts s ON s.id=a.shift_id
         WHERE s.company_id=$1 AND s.status <> 'cancelled'
           AND s.starts_at < $3 AND s.ends_at > $2
+          AND (a.employee_id = ANY($4::uuid[]) OR (s.starts_at < $6 AND s.ends_at > $5))
         ORDER BY s.starts_at, s.id, a.employee_id
         """,
-        company_id, lo, hi,
+        company_id, lo - timedelta(days=context_days), hi + timedelta(days=context_days),
+        employee_ids, lo, hi,
     )
-    existing_assignments = [{
+    all_assignments = [{
         "employee_id": str(row["employee_id"]),
         "shift_id": str(row["shift_id"]),
         "starts_at": row["starts_at"], "ends_at": row["ends_at"],
@@ -794,6 +808,14 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         "location_id": str(row["location_id"]) if row["location_id"] else None,
         "status": row["status"],
     } for row in assignment_rows]
+    existing_assignments = [
+        item for item in all_assignments if item["starts_at"] < hi and item["ends_at"] > lo
+    ]
+    adjacent_assignments = [
+        item for item in all_assignments
+        if item["employee_id"] in employees_by_id
+        and not (item["starts_at"] < hi and item["ends_at"] > lo)
+    ]
 
     unavailable: dict[str, list[tuple[date, date]]] = defaultdict(list)
     request_rows = await conn.fetch(
@@ -830,6 +852,7 @@ async def _load_roster_context(conn, *, company_id: UUID, location_id: UUID,
         "employees": employees,
         "availability": availability,
         "existing_assignments": existing_assignments,
+        "adjacent_assignments": adjacent_assignments,
         "unavailable_ranges": dict(unavailable),
         "gated_job_ids": {str(row["job_id"]) for row in gated_rows},
     }
@@ -1117,6 +1140,7 @@ async def plan_vacant_fill(
         return build_plan(
             demand=demand, employees=employees, availability=roster["availability"],
             existing_assignments=roster["existing_assignments"],
+            adjacent_assignments=roster.get("adjacent_assignments", []),
             unavailable_ranges=roster["unavailable_ranges"],
             exclude_employee_ids=set(), employee_hour_caps={},
             gated_job_ids=roster["gated_job_ids"], blocked_pairs=blocked_pairs,
@@ -1164,6 +1188,18 @@ async def plan_vacant_fill(
         "demand_size": len(demand),
         "jurisdiction": jurisdiction,
     }
+
+
+def vacant_fill_edit_requests(assignments: list[dict[str, Any]]) -> tuple[list[dict], str | None]:
+    """Adapt a server-selected fill without losing identities or the review cap."""
+    if len(assignments) > MAX_BATCH_OPERATIONS:
+        items = [BatchItem(day=date.fromisoformat(str(_iso(item["starts_at"]))[:10])) for item in assignments]
+        return [], split_plan_message(len(items), plan_batches(items), MAX_BATCH_OPERATIONS)
+    return [
+        {"kind": "assign", "target_shift_id": str(item["shift_id"]),
+         "to_employee_id": str(item["employee_id"]), "to_employee_name": item["employee_name"]}
+        for item in assignments
+    ], None
 
 
 async def _week_shift_counts(conn, *, company_id: UUID, location_id: UUID,
@@ -1638,6 +1674,7 @@ async def propose_week_draft(
             plan = build_plan(
                 demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
                 existing_assignments=snapshot["existing_assignments"],
+                adjacent_assignments=snapshot.get("adjacent_assignments", []),
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],
@@ -1656,6 +1693,7 @@ async def propose_week_draft(
             plan = build_plan(
                 demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
                 existing_assignments=snapshot["existing_assignments"],
+                adjacent_assignments=snapshot.get("adjacent_assignments", []),
                 unavailable_ranges=snapshot["unavailable_ranges"],
                 exclude_employee_ids=set(constraints["exclude_employee_ids"]),
                 employee_hour_caps=constraints["employee_hour_caps"],

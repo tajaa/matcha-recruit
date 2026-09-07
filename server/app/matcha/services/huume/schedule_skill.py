@@ -273,7 +273,7 @@ async def _fill_vacant_requests(
     the result becomes plain `assign` edit requests so the SAME
     `build_edit_proposal` (guard, pill, confirm) stages them. Returns
     ``(edit_requests, unfilled, error)``."""
-    from app.matcha.services.scheduling.week_builder import plan_vacant_fill
+    from app.matcha.services.scheduling.week_builder import plan_vacant_fill, vacant_fill_edit_requests
 
     if location_id is None or week_start is None:
         return [], [], "Filling open shifts requires a scoped schedule workspace."
@@ -326,11 +326,8 @@ async def _fill_vacant_requests(
             "I couldn't fill any of those shifts: " + reasons
             + " Loosen the request (another job, allow a split shift, or exclude nobody) or assign by hand."
         )
-    edit_requests = [
-        {"kind": "assign", "target_shift_id": str(item["shift_id"]), "to_employee_name": item["employee_name"]}
-        for item in plan["assignments"]
-    ]
-    return edit_requests, unfilled, None
+    edit_requests, error = vacant_fill_edit_requests(plan["assignments"])
+    return edit_requests, unfilled, error
 
 
 def _iso(value: Any) -> Any:
@@ -371,6 +368,7 @@ async def find_coverage(
         result = await find_coverage_candidates(
             conn, company_id=company_id, target_date=target, location_id=location_id,
             role_hint=(role_hint or "").strip() or None, features=features,
+            statuses=("draft", "published") if schedule_surface else ("published",),
         )
     return result
 

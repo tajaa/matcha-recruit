@@ -1453,6 +1453,7 @@ async def _resolve_edit_ops(
         location_id = editor_location_id
 
     employee_match_cache: dict[str, dict] = {}
+    employee_id_cache: dict[UUID, dict | None] = {}
 
     async def _match_employee(name_hint: str) -> dict:
         # A bulk editor proposal can target the same person hundreds of
@@ -1499,7 +1500,26 @@ async def _resolve_edit_ops(
             from_employee_id = m["employee"]["id"]
             from_employee_name = f"{m['employee']['first_name']} {m['employee']['last_name']}"
 
-        if req.get("to_employee_name"):
+        if req.get("to_employee_id") is not None:
+            # Server planners already chose an identity. Validate that identity
+            # in the same tenant/location instead of resolving its name again.
+            try:
+                to_employee_id = UUID(str(req["to_employee_id"]))
+            except (TypeError, ValueError):
+                return await _clarify("That selected employee id is invalid; preview the fill again.")
+            if to_employee_id not in employee_id_cache:
+                employee_id_cache[to_employee_id] = await conn.fetchrow(
+                    """SELECT id, first_name, last_name FROM employees
+                       WHERE id=$1 AND org_id=$2
+                         AND ($3::uuid IS NULL OR work_location_id=$3)
+                         AND COALESCE(employment_status, 'active') NOT IN ('terminated', 'offboarded')""",
+                    to_employee_id, company_id, location_id,
+                )
+            employee = employee_id_cache[to_employee_id]
+            if employee is None:
+                return await _clarify("That selected employee is no longer active at this location; preview the fill again.")
+            to_employee_name = " ".join(filter(None, [employee["first_name"], employee["last_name"]]))
+        elif req.get("to_employee_name"):
             m = await _match_employee(req["to_employee_name"])
             if "none" in m:
                 return await _clarify(m["none"])

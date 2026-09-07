@@ -31,7 +31,7 @@ from ...models.scheduling.employee_schedule import FillVacantPreviewRequest
 from ...services.scheduling import schedule_chat
 from ...services.scheduling.planning_inputs import build_planning_inputs
 from ...services.scheduling.schedule_assistant_session import assert_manager_location
-from ...services.scheduling.week_builder import plan_vacant_fill
+from ...services.scheduling.week_builder import plan_vacant_fill, vacant_fill_edit_requests
 from ._shared import require_company_id
 
 router = APIRouter()
@@ -94,10 +94,10 @@ async def preview_fill_vacant(
                 "message": "No open shift could be filled under the staffing rules.",
                 "unfilled": unfilled, "jurisdiction": plan.get("jurisdiction"),
             }
-        edit_requests = [
-            {"kind": "assign", "target_shift_id": str(item["shift_id"]), "to_employee_name": item["employee_name"]}
-            for item in plan["assignments"]
-        ]
+        edit_requests, error = vacant_fill_edit_requests(plan["assignments"])
+        if error:
+            return {"status": "refused", "message": error, "unfilled": unfilled,
+                    "jurisdiction": plan.get("jurisdiction")}
         build = await schedule_chat.build_edit_proposal(
             conn, company_id=company_id, channel_id=None, source_message_id=None,
             created_by=current_user.id,
@@ -160,20 +160,23 @@ async def apply_fill_vacant(proposal_id: UUID, current_user=Depends(require_comp
         )
         if row["status"] != "proposed":
             raise HTTPException(status_code=409, detail="That fill preview was already applied or discarded")
-        location_id = UUID(parse["editor_location_id"]) if parse.get("editor_location_id") else None
-        week_start = date.fromisoformat(parse["editor_week_start"]) if parse.get("editor_week_start") else None
-        if location_id is not None:
-            await assert_manager_location(
-                conn, company_id=company_id, user_id=current_user.id,
-                actor_role=current_user.role, location_id=location_id,
-            )
+        try:
+            location_id = UUID(parse["editor_location_id"])
+            week_start = date.fromisoformat(parse["editor_week_start"])
+            week_end = week_start + timedelta(days=6)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=400, detail="That preview has no valid saved scope; preview the fill again")
+        await assert_manager_location(
+            conn, company_id=company_id, user_id=current_user.id,
+            actor_role=current_user.role, location_id=location_id,
+        )
         features = await get_company_features(company_id, conn=conn)
         try:
             text = await schedule_chat.execute_edit_proposal(
                 conn, proposal_row={**dict(row), "proposal": proposal},
                 confirmed_by=current_user.id, features=features,
                 week_start=week_start,
-                week_end=(week_start + timedelta(days=6)) if week_start else None,
+                week_end=week_end,
             )
         except schedule_chat.ProposalExecutionClaimError as exc:
             raise HTTPException(status_code=409, detail=str(exc))

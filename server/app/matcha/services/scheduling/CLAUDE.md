@@ -103,6 +103,9 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   the `policy:` prefix in `unfilled.exclusions` so law/eligibility and operational defaults stay
   distinguishable. `candidate_score` puts `shift_count` before `minutes`, so with equal target status the
   person with fewer shifts wins — two leads split seven blocks 4/3 instead of 7/0.
+  The roster loader also returns `adjacent_assignments`, looking backward and forward by the largest
+  applicable consecutive-day cap. These affect rest and consecutive days, never this week's minutes
+  or fairness count. They ride the whole-week snapshot/hash so changes invalidate an older preview.
 - **`_load_vacant_demand`** — same row shape as `_load_existing_demand`, but `status IN (draft,
   published)` (an assignment onto a published shift is a routine edit; `_apply_edit_ops` does it today),
   `HAVING COUNT(assignees) < required_staff`, optional `job_id = ANY`, `id = ANY`, `role ILIKE`. Current
@@ -124,6 +127,10 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   assignments ⇒ a clarify that names the top reasons per seat. The prompt's "Staffing rules" paragraph
   routes every "fill / staff / cover the open shifts" ask here and forbids the model choosing names for
   a fill. `all_vacant_shifts` stays as the literal "one named person on every open shift" path.
+  Both REST and Huume use `vacant_fill_edit_requests`: it preserves the selected employee UUID and
+  refuses more than `MAX_BATCH_OPERATIONS` seats with the existing day split before resolution or
+  persistence. `_resolve_edit_ops` validates that UUID against the active tenant/location roster;
+  equal employee names cannot change the choice or trigger a needless name clarification.
 - **The model can see load** — `planning_inputs.build_planning_inputs` is ONE builder behind two readers:
   `get_schedule_overview` gains `roster_load` (`compact_roster_load`: per person jobs, availability
   state, scheduled minutes/shift count/days this week, time away, weekly cap, `allow_overtime`),
@@ -143,6 +150,8 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   `POST /fill-vacant/{proposal_id}/apply` — creator-only (403), `status='proposed'` (409),
   editor/edit only (400), `execute_edit_proposal` with the week bound from the parse, claim error → 409,
   scope error → 422, returns `touched_shift_ids`; **no `force`** (agent/planner paths never force);
+  missing or malformed saved scope → 400 and a request to preview again (including legacy Huume
+  editor rows with no saved scope). Location authorization is unconditional before execution.
   `DELETE /fill-vacant/{proposal_id}` → 204 (409 once spent). Each preview is one scenario and the
   proposal row is its handle — the Schedule Pilot workspace (PR4) builds its scenarios strip on exactly
   this. Client: `api/employees/employeeSchedule.ts` (`fetchPlanningInputs`, `previewFillVacant`,

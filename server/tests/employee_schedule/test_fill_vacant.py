@@ -12,6 +12,8 @@ from datetime import date, datetime, timezone
 from unittest import mock
 from uuid import UUID, uuid4
 
+import pytest
+
 from app.matcha.services.scheduling import week_builder
 
 UTC = timezone.utc
@@ -228,3 +230,77 @@ class TestLoadVacantDemand:
         assert args[2] == ["published"]
         assert args[4] == datetime(2026, 8, 30, tzinfo=UTC)   # no week_end → seven days
         assert args[5] == [job_id] and args[6] == [shift_id] and args[7] == "lead"
+
+
+class _BoundaryConn:
+    def __init__(self, assignments, max_days=None):
+        self.assignments = assignments
+        self.max_days = max_days
+
+    async def fetch(self, query, *args):
+        if "FROM employees e" in query:
+            return [{"id": UUID(ANA), "first_name": "Ana", "last_name": "Example", "job_title": "Lead",
+                     "availability_state": "windows", "min_weekly_minutes": None, "target_weekly_minutes": None,
+                     "max_weekly_minutes": 2400, "max_consecutive_days": self.max_days,
+                     "allow_overtime": False, "prefer_extra_hours": False}]
+        if "SELECT a.employee_id, s.id AS shift_id" in query:
+            assert args[3] == [UUID(ANA)]
+            return [row for row in self.assignments if row["starts_at"] < args[2] and row["ends_at"] > args[1]]
+        return []
+
+
+def _db_assignment(day, start, end):
+    return {"employee_id": UUID(ANA), "shift_id": uuid4(),
+            "starts_at": datetime(2026, 8, day, start, tzinfo=UTC),
+            "ends_at": datetime(2026, 8, day, end, tzinfo=UTC),
+            "break_minutes": 0, "location_id": LOCATION, "status": "published"}
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("existing,demand", [
+    ([_db_assignment(22, 19, 23)], _open("s", 23, 3, 7, job_id=None)),
+    ([_db_assignment(30, 3, 7)], _open("s", 29, 19, 23, job_id=None)),
+])
+def test_rest_checks_use_real_roster_history_on_both_week_boundaries(existing, demand, split):
+    roster = _run(week_builder._load_roster_context(
+        _BoundaryConn(existing), company_id=COMPANY, location_id=LOCATION, week_start=WEEK,
+    ))
+    result, _ = _fill(demand=[demand], roster=roster, allow_split_shift=split)
+    assert result["assignments"] == []
+    assert result["unfilled"][0]["reason"] == "policy: less than 8h rest"
+    assert result["hours_by_employee"][ANA] == 0
+
+
+@pytest.mark.parametrize("max_days", [None, 14])
+def test_consecutive_day_history_crosses_weeks_without_counting_previous_hours(max_days):
+    count = max_days or 6
+    history = [_db_assignment(day, 9, 13) for day in range(23 - count, 23)]
+    roster = _run(week_builder._load_roster_context(
+        _BoundaryConn(history, max_days), company_id=COMPANY, location_id=LOCATION, week_start=WEEK,
+    ))
+    result, _ = _fill(demand=[_open("s", 23, 9, 13, job_id=None)], roster=roster)
+    assert result["unfilled"][0]["reason"] == "maximum consecutive days"
+    assert result["hours_by_employee"][ANA] == 0
+
+
+def test_adjacent_week_hours_do_not_consume_the_current_week_cap():
+    history = [_db_assignment(day, 7, 15) for day in range(16, 22)]  # 48 hours, then a day off
+    roster = _run(week_builder._load_roster_context(
+        _BoundaryConn(history), company_id=COMPANY, location_id=LOCATION, week_start=WEEK,
+    ))
+    result, _ = _fill(demand=[_open("s", 23, 7, 11, job_id=None)], roster=roster)
+    assert len(result["assignments"]) == 1 and result["hours_by_employee"][ANA] == 240
+
+
+def test_fill_counts_seats_for_the_cap_and_returns_a_day_split():
+    people = [_employee(str(uuid4()), f"Employee {i}", lead=False) for i in range(7)]
+    result, _ = _fill(
+        demand=[_open(f"s{day}", day, 9, 13, job_id=None, required=7) for day in range(23, 29)],
+        roster=_roster(people),
+    )
+    assert len(result["assignments"]) == 42
+    requests, error = week_builder.vacant_fill_edit_requests(result["assignments"])
+    assert requests == [] and "42 schedule operations" in error and "2 batches" in error
+    requests, error = week_builder.vacant_fill_edit_requests(result["assignments"][:40])
+    assert len(requests) == 40 and error is None
+    assert requests[0]["to_employee_id"] == result["assignments"][0]["employee_id"]
