@@ -45,7 +45,7 @@ function hasSeenGuide(): boolean {
 /** Snaps to the location's own week start: a `?week=` carried over from
  * another store (or from before the manager changed the start day) would
  * otherwise scope the grid to a week the server now refuses. */
-export function parseWeek(value: string | null, weekStartWeekday: number): string {
+function parseWeek(value: string | null, weekStartWeekday: number): string {
   if (value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())) {
     return toISODate(startOfWeek(new Date(`${value}T00:00:00Z`), weekStartWeekday))
   }

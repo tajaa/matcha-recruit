@@ -136,8 +136,7 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
       .filter((promise): promise is Promise<unknown> => !!promise)
       .map((promise) => promise.catch(() => undefined))
     const run = Promise.all(previous).then(execute)
-    let tracked: Promise<T | null>
-    tracked = run.finally(() => {
+    const tracked: Promise<T | null> = run.finally(() => {
       for (const key of mutationKeys) {
         if (mutationQueues.current.get(key) === tracked) mutationQueues.current.delete(key)
       }

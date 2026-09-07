@@ -424,11 +424,13 @@ describe('SchedulePilot — scenarios', () => {
       .mockResolvedValueOnce({ status: 'ready', proposal_id: 'proposal-1', pill_text: 'pill', review: review(), label: 'Openers spread' })
       .mockResolvedValueOnce({ status: 'ready', proposal_id: 'proposal-2', pill_text: 'pill', review: review({ proposal_id: 'proposal-2' }), label: 'Leads doubled' })
     renderPilot()
-    for (const _ of [0, 1]) {
+    async function previewScenario() {
       fireEvent.click(screen.getByRole('button', { name: /New scenario/ }))
       fireEvent.click(screen.getByRole('button', { name: /^Preview/ }))
       await waitFor(() => expect(screen.queryByRole('button', { name: /^Preview/ })).not.toBeInTheDocument())
     }
+    await previewScenario()
+    await previewScenario()
 
     const first = await screen.findByRole('button', { name: /^Openers spread/ })
     const second = await screen.findByRole('button', { name: /^Leads doubled/ })

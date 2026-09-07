@@ -35,6 +35,11 @@ export function usePlanningInputs(locationId: string, weekStart: string) {
       .finally(() => { if (token === requestToken.current) setLoading(false) })
   }, [locationId, weekStart])
 
+  // Fetch on mount and whenever the scope changes — the same shape as every
+  // sibling hook here (useScheduleJobs, useEmployees, useOnboardingTasks). The
+  // synchronous setState the rule objects to is the spinner going up before
+  // the request leaves.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { reload() }, [reload])
 
   return { inputs, loading, error, reload }
