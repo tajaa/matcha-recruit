@@ -61,9 +61,9 @@ logger = logging.getLogger(__name__)
 # Kept as an alias (not re-literaled) so stored token usage and any caller
 # asking which model Huume uses track routing.py's canonical Luna catalog.
 _MODEL = routing.LUNA
-_MAX_MODEL_CALLS = 8
+_MAX_MODEL_CALLS = 16
 _MAX_SCHEDULE_PROPOSALS_PER_TURN = 1
-_MAX_TURN_PROMPT_TOKENS = 100_000
+_MAX_TURN_PROMPT_TOKENS = 180_000
 
 # Staged schedule tools whose clarification/refusal ENDS the turn: their
 # messages are deterministic and complete (the candidate list, the real job
@@ -113,7 +113,7 @@ def _rate_limit_disposition(model_calls: int) -> str:
 # — the single heaviest tool call in the loop today — and 240s left too
 # little room for the model to still report the result afterward, especially
 # on a deep-tier turn thinking hard across multiple model calls.
-_WALL_CLOCK_SECONDS = 300.0
+_WALL_CLOCK_SECONDS = 480.0
 _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
 # Per-message cap in history — one long pilot answer in an earlier turn
