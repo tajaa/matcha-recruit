@@ -21,6 +21,8 @@ from .schedule_breaks import (
     reinterpret_schedule_wall_time,
 )
 from .schedule_break_stagger import (
+    FloorWindow,
+    LockedBreak,
     StaggerAssignment,
     StaggerPlan,
     locked_breaks_from_planned,
@@ -549,26 +551,110 @@ async def refresh_assignment_break_guidance_and_minimum(
     return plan
 
 
+_CO_PLANNED_QUERY = """
+    SELECT id, location_id, starts_at, ends_at, required_staff
+    FROM schedule_shifts
+    WHERE company_id = $1 AND location_id = $2
+      AND status <> 'cancelled'
+      AND starts_at < $4 AND ends_at > $3
+    ORDER BY starts_at, ends_at, id
+"""
+
+# Each round widens the window to the extent of what the last one found, so a
+# chain of overlapping shifts is followed rather than cut at a clock boundary.
+# Three is a bound on a pathological floor (a 24/7 store whose rows overlap
+# without a break in the chain, where the component is the whole week and
+# co-planning it would be quadratic for no operational gain); the chain is
+# truncated there, and the rows past the truncation simply reserve nothing.
+_CO_PLANNED_ROUNDS = 3
+
+
+def _shifts_overlap(left: Any, right: Any) -> bool:
+    return left["starts_at"] < right["ends_at"] and right["starts_at"] < left["ends_at"]
+
+
+def _overlap_component(rows: Sequence[Any], *, target_id: UUID) -> list[Any]:
+    """The rows sharing floor time with the target, following the chain.
+
+    Overlap is symmetric, so every member of a component reaches the same set
+    no matter which one is opened — which is the whole point.  A calendar day
+    is not symmetric: a 22:00-06:00 row and a 00:00-08:00 row share six hours
+    of floor, but only one of the two days contains both.
+    """
+
+    by_id = {row["id"]: row for row in rows}
+    component = {target_id: by_id[target_id]}
+    frontier = [by_id[target_id]]
+    while frontier:
+        current = frontier.pop()
+        for row in rows:
+            if row["id"] in component or not _shifts_overlap(current, row):
+                continue
+            component[row["id"]] = row
+            frontier.append(row)
+    return sorted(
+        component.values(),
+        key=lambda row: (row["starts_at"], row["ends_at"], str(row["id"])),
+    )
+
+
+async def _co_planned_shifts(conn, company_id: UUID, *, target: Any) -> list[Any]:
+    """Every shift that shares floor time with ``target``, transitively."""
+
+    window_start, window_end = target["starts_at"], target["ends_at"]
+    component: list[Any] = [target]
+    for _round in range(_CO_PLANNED_ROUNDS):
+        rows = list(await conn.fetch(
+            _CO_PLANNED_QUERY,
+            company_id, target["location_id"], window_start, window_end,
+        ))
+        # The tenant-scoped read of the target is authoritative.  Keeping it in
+        # the set also makes this robust to a concurrently cancelled shift: the
+        # manager still receives a plan for the row they opened.
+        if not any(row["id"] == target["id"] for row in rows):
+            rows.append(target)
+        component = _overlap_component(rows, target_id=target["id"])
+        extent_start = min(row["starts_at"] for row in component)
+        extent_end = max(row["ends_at"] for row in component)
+        if (extent_start, extent_end) == (window_start, window_end):
+            # Nothing outside the window can overlap anything inside it.
+            break
+        window_start, window_end = extent_start, extent_end
+    return component
+
+
 async def resolve_shift_stagger_plan(
     conn,
     company_id: UUID,
     *,
     shift_id: UUID,
 ) -> StaggerPlan | None:
-    """Suggest staggered break times for every assignee on one shift.
+    """Suggest break times while accounting for the same-location day's floor.
 
     Read-time only: nothing here writes.  The legal requirements still come
     from the same evaluator the write path stores on each assignment, so a
     suggestion can never disagree with the guidance already shown.
 
-    Times a manager already saved are read back as fixed inputs.  Re-deriving
-    the whole plan from rules alone would place everyone else around what was
-    suggested for that person before their edit — which is not where they will
-    actually be off the floor.
+    A shift row represents one staffing need, not necessarily the whole floor.
+    Planning only its assignees lets two otherwise identical rows recommend the
+    same time.  Every row sharing floor time with this one is therefore planned
+    in a stable order, and each later row treats earlier suggestions as
+    occupied floor time.  Those rows are also the floor's headcount, so they
+    are what the concurrency ceiling is read from — a ceiling taken from the
+    opened row alone would be a row-sized budget against a floor-sized
+    occupancy.
+
+    Only the rows up to and including the target are planned: a row that comes
+    after it in the order cannot constrain it, and skipping them keeps opening
+    the first inspector of a long day cheap.  Their saved times still occupy
+    the floor, because those are answers, not suggestions.
+
+    Times a manager already saved on any of those shifts are fixed inputs with
+    priority over every suggestion.  Nothing here writes.
     """
     shift = await conn.fetchrow(
         """
-        SELECT location_id, starts_at, ends_at, required_staff
+        SELECT id, location_id, starts_at, ends_at, required_staff
         FROM schedule_shifts
         WHERE id = $1 AND company_id = $2
         """,
@@ -576,38 +662,106 @@ async def resolve_shift_stagger_plan(
     )
     if shift is None:
         return None
+    shifts = [shift]
+    if shift["location_id"] is not None:
+        shifts = await _co_planned_shifts(conn, company_id, target=shift)
+
+    shift_ids = [row["id"] for row in shifts]
     assignment_rows = await conn.fetch(
         """
-        SELECT employee_id, planned_breaks
+        SELECT shift_id, employee_id, planned_breaks
         FROM schedule_shift_assignments
-        WHERE shift_id = $1 AND company_id = $2 AND status <> 'declined'
-        ORDER BY employee_id
+        WHERE shift_id = ANY($1::uuid[]) AND company_id = $2 AND status <> 'declined'
+        ORDER BY shift_id, employee_id
         """,
-        shift_id, company_id,
+        shift_ids, company_id,
     )
-    employee_ids = [row["employee_id"] for row in assignment_rows]
-    effective_timezone, plans = await resolve_shift_break_plans_localized(
+    assignments_by_shift: dict[UUID, list[Any]] = {}
+    for row in assignment_rows:
+        assignments_by_shift.setdefault(row["shift_id"], []).append(row)
+
+    target_index = next(
+        index for index, row in enumerate(shifts) if row["id"] == shift_id
+    )
+    planned = shifts[:target_index + 1]
+    # The target is last, so the zone that comes back is the one resolved for
+    # its own date rather than whichever row happened to be evaluated last.
+    effective_timezone, plans_by_shift, _unmapped_dates = await resolve_week_break_plans(
         conn, company_id, location_id=shift["location_id"],
-        starts_at=shift["starts_at"], ends_at=shift["ends_at"],
-        employee_ids=employee_ids,
-    )
-    locked = [
-        entry
-        for row in assignment_rows
-        for entry in locked_breaks_from_planned(
-            decode_jsonb(row["planned_breaks"]),
-            employee_id=row["employee_id"],
-            timezone=effective_timezone,
-        )
-    ]
-    return stagger_shift_breaks(
-        shift_start_local=reinterpret_schedule_wall_time(shift["starts_at"], effective_timezone),
-        shift_end_local=reinterpret_schedule_wall_time(shift["ends_at"], effective_timezone),
-        required_staff=int(shift["required_staff"] or 0),
-        assignments=[
-            StaggerAssignment(employee_id=employee_id, plan=plans[employee_id])
-            for employee_id in employee_ids
-            if employee_id in plans
+        shifts=[
+            (
+                str(row["id"]), row["starts_at"], row["ends_at"],
+                [entry["employee_id"] for entry in assignments_by_shift.get(row["id"], [])],
+            )
+            for row in planned
         ],
-        locked=locked,
     )
+    floor = [
+        FloorWindow(
+            start=reinterpret_schedule_wall_time(row["starts_at"], effective_timezone),
+            end=reinterpret_schedule_wall_time(row["ends_at"], effective_timezone),
+            assigned=len(assignments_by_shift.get(row["id"], [])),
+            required=int(row["required_staff"] or 0),
+        )
+        for row in shifts
+    ]
+    locked_by_shift: dict[UUID, list[LockedBreak]] = {}
+    for row in assignment_rows:
+        locked_by_shift.setdefault(row["shift_id"], []).extend(
+            locked_breaks_from_planned(
+                decode_jsonb(row["planned_breaks"]),
+                employee_id=row["employee_id"],
+                timezone=effective_timezone,
+            )
+        )
+
+    earlier_suggestions: list[LockedBreak] = []
+    target_plan: StaggerPlan | None = None
+    for peer in planned:
+        peer_id = peer["id"]
+        peer_rows = assignments_by_shift.get(peer_id, [])
+        peer_plans = plans_by_shift.get(str(peer_id), {})
+        own_locked = locked_by_shift.get(peer_id, [])
+        other_saved = [
+            entry
+            for other_id, entries in locked_by_shift.items()
+            if other_id != peer_id
+            for entry in entries
+        ]
+        plan = stagger_shift_breaks(
+            shift_start_local=reinterpret_schedule_wall_time(
+                peer["starts_at"], effective_timezone,
+            ),
+            shift_end_local=reinterpret_schedule_wall_time(
+                peer["ends_at"], effective_timezone,
+            ),
+            required_staff=int(peer["required_staff"] or 0),
+            assignments=[
+                StaggerAssignment(
+                    employee_id=row["employee_id"],
+                    plan=peer_plans[row["employee_id"]],
+                )
+                for row in peer_rows
+                if row["employee_id"] in peer_plans
+            ],
+            locked=own_locked,
+            occupied=(*other_saved, *earlier_suggestions),
+            floor=floor,
+        )
+        if peer_id == shift_id:
+            target_plan = plan
+            break
+        earlier_suggestions.extend(
+            LockedBreak(
+                employee_id=result.employee_id,
+                kind=result.kind,
+                ordinal=result.ordinal,
+                start=result.suggested_start,
+                duration_minutes=result.duration_minutes,
+            )
+            for result in plan.results
+            if result.status in {"suggested", "deadline_conflict"}
+            and result.suggested_start is not None
+        )
+
+    return target_plan

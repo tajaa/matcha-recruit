@@ -354,7 +354,10 @@ Invariants, each of which has a regression test in
   instant even where a statute encodes an earliest of zero. Both are **policy,
   not law** — a real statutory earliest always wins in both directions, both
   yield to law and to coverage (next bullet), and `locked` times a manager
-  saved are never re-judged against them.
+  saved are never re-judged against them. The two sit in different fields for a
+  reason: `policy_earliest` is a preference placement may drop below, while
+  `floor_earliest` bounds every tier, so spilling below the policy floor cannot
+  walk all the way back to the shift's opening minute.
 - **Placement policy is a preference, never a bound.** `_build_slot` keeps it in
   its own `policy_earliest` field beside the legal `earliest`, and
   `_candidate_starts` only *reorders* the legal window by it: allowed times
@@ -399,7 +402,38 @@ Invariants, each of which has a regression test in
   spare-headcount-only model would suggest nothing on every real shift. The
   floor is paired with a `coverage_shortfall` advisory — under-covering for 30
   minutes is the manager's call; hiding it is not.
-- **A person is not two bodies.** `_fits` refuses any overlap with the same
+- **The budget is a ceiling, not a target — stagger first, crowd last.**
+  `_fit` returns the peak headcount off the floor during a candidate interval
+  (`1` = nobody else), and `_choose_start` takes the first `1` anywhere in the
+  legal window before it will double up, then the least crowded time, and only
+  then a policy-discouraged one. Two openers on a 06:30 shift were both told
+  08:30 because a third person clocks in then — lawful, in budget, and the
+  wrong suggestion (the 2026-09-06 send-back).
+- **The ceiling and the occupancy must describe the same floor.**
+  `required_staff` is one row's, but `occupied` is the whole floor's, so a
+  caller passing `occupied` passes `floor` too — a `FloorWindow` per co-planned
+  row — and the ceiling is read from it at each instant (`_floor_spare`), which
+  is how a mid-morning arrival widens it. Deriving it from the opened row
+  instead compares a row-sized budget against a floor-sized occupancy: a row
+  with no spare of its own would refuse every time a peer's break touches, on a
+  floor with six people to spare. Without `floor` the ceiling stays the row's,
+  correct for `week_builder`, which plans each shift in isolation. The floor of
+  one lives on the ceiling, never on the spare count itself, so
+  `coverage_shortfall` can still tell a committed floor from a spare one.
+- **Coverage is the shifts that share floor time, not a calendar day.**
+  `resolve_shift_stagger_plan` co-plans the target's overlap component
+  (`_overlap_component`, widening the query up to `_CO_PLANNED_ROUNDS` times to
+  follow the chain), in `(starts_at, ends_at, id)` order, feeding each earlier
+  row's suggestions and every other row's saved times to the next as `occupied`
+  — a separate input from `locked` so a peer's break is never mistaken for this
+  row's saved answer (one employee on two rows has the same `(kind, ordinal)`
+  twice in a day). Overlap is symmetric and a calendar day is not: a
+  22:00–06:00 row and a 00:00–08:00 row share six hours of floor that no single
+  day contains, and the overnighter used to be handed a time the morning crew
+  had already saved. Only rows up to and including the target are planned (a
+  later row cannot change what the target is offered, and its saved time
+  occupies regardless), which also makes the returned zone the target's own.
+- **A person is not two bodies.** `_fit` refuses any overlap with the same
   employee's other break regardless of budget. With `max_concurrent >= 2` the
   budget alone let one employee's meal and rest land at the same instant.
 - **A break that cannot fit its legal window is never `suggested`.** It is
