@@ -45,8 +45,20 @@ class TestBuildStateBlock:
             "confirm_id": "ab12cd34", "status": "proposed",
         }}
         block = build_state_block(state)
-        assert "3 edits" in block
+        assert "3 operations" in block
         assert "(None)" not in block
+
+    def test_staged_schedule_batch_names_per_kind_summary(self):
+        # A seven-day correction: the model must see WHAT is staged, not just
+        # a number, on the confirm turn.
+        state = {"huume_action": {
+            "type": "schedule_change", "operation_count": 35,
+            "operation_summary": {"cancel": 28, "create": 7},
+            "confirm_id": "ab12cd34", "status": "proposed",
+        }}
+        block = build_state_block(state)
+        assert "35 operations: 28 cancel, 7 create" in block
+        assert "confirm_id=ab12cd34" in block
 
     def test_staged_send_offer_names_recipient_email(self):
         # "Send Maria's latest offer letter" — the admin must be told which

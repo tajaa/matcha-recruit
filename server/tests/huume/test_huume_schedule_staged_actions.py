@@ -601,3 +601,45 @@ async def test_a_multi_answer_setup_refusal_mints_no_chips(monkeypatch):
     result = _result(frames)
 
     assert result["state_updates"].get("huume_choice") in (None, {})
+
+
+@pytest.mark.asyncio
+async def test_seven_day_correction_stages_one_batch_and_executes_nothing(monkeypatch):
+    """The reported serial-confirm loop: 28 cancellations + 7 replacement
+    shifts must land as ONE staged action carrying the full review, with the
+    executor never touched on the stage turn."""
+    proposal_id = str(uuid4())
+    monkeypatch.setattr(schedule_skill, "propose", AsyncMock(return_value={
+        "status": "ready", "proposal_id": proposal_id,
+        "pill_text": "📅 Got it. Here's the whole correction, applied together:\n…\nReply **confirm** …",
+        "operation_count": 35, "operation_summary": {"cancel": 28, "create": 7},
+    }))
+    execute = AsyncMock(side_effect=AssertionError("nothing may execute on the stage turn"))
+    monkeypatch.setattr(schedule_skill, "execute", execute)
+    changes = [
+        {"kind": "cancel", "target_date": f"2026-08-{day:02d}", "target_time_hint": f"{hour:02d}:00"}
+        for day in range(23, 30) for hour in (6, 10, 14, 18)
+    ] + [
+        {"kind": "create", "label": "barista", "date": f"2026-08-{day:02d}",
+         "start_time": "07:00", "end_time": "15:00"}
+        for day in range(23, 30)
+    ]
+
+    frames = await _run_turn(
+        monkeypatch,
+        [_fake_response(calls=[_fake_call("propose_schedule_change", {"changes": changes})]),
+         _fake_response(text="Staged the whole correction — confirm to apply it.")],
+    )
+    result = _result(frames)
+
+    staged = result["state_updates"]["huume_action"]
+    assert staged["type"] == "schedule_change"
+    assert staged["status"] == "proposed"
+    assert staged["proposal_id"] == proposal_id
+    assert staged["operation_count"] == 35
+    assert staged["operation_summary"] == {"cancel": 28, "create": 7}
+    assert staged["confirm_id"]
+    assert len(staged["changes"]) == 35
+    assert "Here's the whole correction" in staged["pill_text"]
+    assert _step_statuses(result) == [("propose_schedule_change", "ok")]
+    execute.assert_not_awaited()

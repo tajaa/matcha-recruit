@@ -59,6 +59,7 @@ from .schedule_chat_rules import (
     resolve_day_hint,
     resolve_week,
 )
+from .schedule_batch import net_per_day
 from .schedule_intelligence import fetch_lapse_items
 from .schedule_profiles import fetch_effective_job_employee_ids
 from .location_profile import resolve_week_start_weekday
@@ -589,12 +590,27 @@ async def parse_schedule_request(
 @dataclass
 class ProposalBuild:
     kind: Literal["proposal", "clarify"]
-    proposal_id: UUID
+    # None only for a batch clarify: nothing was persisted (see
+    # `build_batch_proposal`), so there is no row to point at.
+    proposal_id: Optional[UUID]
     pill_text: str
 
 
 class ProposalExecutionClaimError(RuntimeError):
     """Another confirmation already claimed this proposal."""
+
+
+class ProposalScopeError(RuntimeError):
+    """The proposal targets a date outside the selected schedule week."""
+
+
+@dataclass
+class _Clarify:
+    """A resolver's "ask before staging" outcome, not yet persisted — the
+    `build_*` wrappers turn it into a `clarifying` row; `build_batch_proposal`
+    relays it without ever writing the half-resolved batch."""
+    question: str
+    options: list[str]
 
 
 async def _claim_proposal_execution(conn, proposal_id: UUID) -> None:
@@ -646,34 +662,47 @@ async def _persist_proposal(
     return row["id"]
 
 
-async def build_proposal(
-    conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
-    created_by: UUID, parsed: dict, today: date, original_content: str,
-    week_start: Optional[date] = None, week_end: Optional[date] = None,
-    surface: str = "channel",
-    clarify_history: Optional[list[dict]] = None,
-    existing_proposal_id: Optional[UUID] = None,
+async def _persist_clarify(
+    conn, existing_id: Optional[UUID], *, company_id: UUID, channel_id: Optional[UUID],
+    source_message_id: Optional[UUID], created_by: UUID, parsed: dict,
+    clarify_history: list[dict], base_doc: dict, clarify: _Clarify,
 ) -> ProposalBuild:
-    clarify_history = clarify_history or []
+    proposal_doc = {
+        **base_doc,
+        "clarify_question": clarify.question,
+        "clarify_options": clarify.options,
+        "clarify_history": clarify_history,
+    }
+    pid = await _persist_proposal(
+        conn, existing_id, company_id=company_id, channel_id=channel_id,
+        source_message_id=source_message_id, created_by=created_by,
+        status="clarifying", proposal=proposal_doc, parsed=parsed,
+        clarify_rounds=len(clarify_history),
+    )
+    return ProposalBuild(
+        kind="clarify", proposal_id=pid, pill_text=clarify_text(clarify.question, clarify.options),
+    )
+
+
+async def _resolve_create_shifts(
+    conn, *, company_id: UUID, channel_id: Optional[UUID], parsed: dict, today: date,
+    week_start: Optional[date] = None, week_end: Optional[date] = None,
+    ignore_shift_ids: tuple[str, ...] = (),
+) -> dict | _Clarify:
+    """Stage B for a create: location → templates → dates → ranked
+    candidates, with NO persistence — `build_proposal` wraps it into a row of
+    its own and `build_batch_proposal` folds it into a batch alongside the
+    edits it belongs with. `ignore_shift_ids` are shifts the same batch is
+    about to cancel: they still exist at stage time, so without this the
+    busy/conflict pre-filter would keep everyone on the old draft off its own
+    replacement. Week-hour and rest-gap advisories still count them (they're
+    advisory, and confirm re-checks everything after the cancels land)."""
     if week_start is not None and week_end is None:
         week_end = week_start + timedelta(days=6)
+    ignored = {str(shift_id) for shift_id in ignore_shift_ids}
 
-    async def _clarify(question: str, options: Optional[list[str]] = None) -> ProposalBuild:
-        proposal_doc = {
-            "original_content": original_content,
-            "ack": parsed.get("ack") or "",
-            "surface": surface,
-            "clarify_question": question,
-            "clarify_options": options or [],
-            "clarify_history": clarify_history,
-        }
-        pid = await _persist_proposal(
-            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
-            source_message_id=source_message_id, created_by=created_by,
-            status="clarifying", proposal=proposal_doc, parsed=parsed,
-            clarify_rounds=len(clarify_history),
-        )
-        return ProposalBuild(kind="clarify", proposal_id=pid, pill_text=clarify_text(question, options or []))
+    async def _clarify(question: str, options: Optional[list[str]] = None) -> _Clarify:
+        return _Clarify(question, options or [])
 
     # 1. Location
     location_rows = await conn.fetch(
@@ -900,8 +929,9 @@ async def build_proposal(
             JOIN schedule_shift_assignments a ON a.shift_id = s.id
             WHERE s.company_id = $1 AND s.status <> 'cancelled'
               AND s.starts_at < $3 AND s.ends_at > $2
+              AND NOT (s.id = ANY($4::uuid[]))
             """,
-            company_id, starts_at, ends_at,
+            company_id, starts_at, ends_at, [UUID(shift_id) for shift_id in ignored],
         )
         busy = {str(r["employee_id"]) for r in busy_rows} | (already_today - pinned)
         # Pinned employees skip the pre-filter — their conflict is reported
@@ -949,6 +979,8 @@ async def build_proposal(
                 continue  # not schedulable — same treatment as inactive employees
             name = f"{r['first_name']} {r['last_name']}".strip()
             conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
+            if ignored:
+                conflicts = [c for c in conflicts if str(c.get("shift_id")) not in ignored]
             violations = await check_shift_compliance(
                 conn, company_id, location_id=location_id, job_id=shift.get("job_id"),
                 starts_at=starts_at, ends_at=ends_at,
@@ -995,17 +1027,13 @@ async def build_proposal(
         db_rules, _fetch_failed = await _approved_db_rules(conn, location_state.strip().upper())
         rules_unmapped = db_rules is None
 
-    proposal_doc = {
-        "original_content": original_content,
-        "ack": parsed.get("ack") or "",
+    return {
         "week_start": resolved_week_start.isoformat(),
-        "surface": surface,
         "location": {
             "id": str(location_id), "name": location.get("name"),
             "city": location.get("city"), "state": location_state,
         },
         "rules_unmapped": rules_unmapped,
-        "clarify_question": None, "clarify_options": [], "clarify_history": clarify_history,
         "shifts": [
             {
                 "label": s["label"], "template_id": s["template_id"],
@@ -1019,6 +1047,42 @@ async def build_proposal(
             for s in resolved_shifts
         ],
     }
+
+
+async def build_proposal(
+    conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
+    created_by: UUID, parsed: dict, today: date, original_content: str,
+    week_start: Optional[date] = None, week_end: Optional[date] = None,
+    surface: str = "channel",
+    clarify_history: Optional[list[dict]] = None,
+    existing_proposal_id: Optional[UUID] = None,
+) -> ProposalBuild:
+    clarify_history = clarify_history or []
+    base_doc = {
+        "original_content": original_content,
+        "ack": parsed.get("ack") or "",
+        "surface": surface,
+    }
+    resolved = await _resolve_create_shifts(
+        conn, company_id=company_id, channel_id=channel_id, parsed=parsed, today=today,
+        week_start=week_start, week_end=week_end,
+    )
+    if isinstance(resolved, _Clarify):
+        return await _persist_clarify(
+            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+            source_message_id=source_message_id, created_by=created_by, parsed=parsed,
+            clarify_history=clarify_history, base_doc=base_doc, clarify=resolved,
+        )
+    proposal_doc = {
+        "original_content": original_content,
+        "ack": parsed.get("ack") or "",
+        "week_start": resolved["week_start"],
+        "surface": surface,
+        "location": resolved["location"],
+        "rules_unmapped": resolved["rules_unmapped"],
+        "clarify_question": None, "clarify_options": [], "clarify_history": clarify_history,
+        "shifts": resolved["shifts"],
+    }
     proposal_id = await _persist_proposal(
         conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
         source_message_id=source_message_id, created_by=created_by,
@@ -1027,7 +1091,7 @@ async def build_proposal(
     )
     return ProposalBuild(
         kind="proposal", proposal_id=proposal_id,
-        pill_text=proposal_text(proposal_doc, location_state),
+        pill_text=proposal_text(proposal_doc, resolved["location"]["state"]),
     )
 
 
@@ -1198,43 +1262,24 @@ async def _resolve_shift_ref(
     return {"shift": dict(rows[0])}
 
 
-async def build_edit_proposal(
-    conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
-    created_by: UUID, parsed: dict, today: date, original_content: str,
-    surface: str = "channel", shift_statuses: tuple[str, ...] = ("published",),
-    clarify_history: Optional[list[dict]] = None,
-    existing_proposal_id: Optional[UUID] = None,
+async def _resolve_edit_ops(
+    conn, *, company_id: UUID, channel_id: Optional[UUID], parsed: dict, today: date,
+    shift_statuses: tuple[str, ...] = ("published",),
     editor_location_id: Optional[UUID] = None,
     editor_week_start: Optional[date] = None,
     editor_week_end: Optional[date] = None,
-) -> ProposalBuild:
+) -> list[dict] | _Clarify:
     """Resolve every edit_request into a concrete op against a real shift +
     real employee ids, with a build-time advisory preview (never blocking —
     `execute_edit_proposal` re-checks for real at confirm time, since the
-    proposal may sit for minutes or hours). Persists to the same
-    `schedule_chat_proposals` table `build_proposal` uses — `proposal['kind']
-    == 'edit'` is what `_bg_schedule_reply` dispatches on at confirm."""
-    clarify_history = clarify_history or []
+    proposal may sit for minutes or hours). No persistence here:
+    `build_edit_proposal` wraps the ops into a row of their own and
+    `build_batch_proposal` folds them in alongside replacement creates."""
     if editor_week_start is not None and editor_week_end is None:
         editor_week_end = editor_week_start + timedelta(days=6)
 
-    async def _clarify(question: str, options: Optional[list[str]] = None) -> ProposalBuild:
-        proposal_doc = {
-            "kind": "edit",
-            "surface": surface,
-            "original_content": original_content,
-            "ack": parsed.get("ack") or "",
-            "clarify_question": question,
-            "clarify_options": options or [],
-            "clarify_history": clarify_history,
-        }
-        pid = await _persist_proposal(
-            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
-            source_message_id=source_message_id, created_by=created_by,
-            status="clarifying", proposal=proposal_doc, parsed=parsed,
-            clarify_rounds=len(clarify_history),
-        )
-        return ProposalBuild(kind="clarify", proposal_id=pid, pill_text=clarify_text(question, options or []))
+    async def _clarify(question: str, options: Optional[list[str]] = None) -> _Clarify:
+        return _Clarify(question, options or [])
 
     # Channel-bound location narrows the search; the editor surface passes its
     # own selected location the same way. Unscoped (neither given) searches
@@ -1481,14 +1526,44 @@ async def build_edit_proposal(
 
     if not ops:
         return await _clarify("I couldn't figure out what to change — can you be more specific?")
+    return ops
 
-    proposal_doc = {
+
+async def build_edit_proposal(
+    conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
+    created_by: UUID, parsed: dict, today: date, original_content: str,
+    surface: str = "channel", shift_statuses: tuple[str, ...] = ("published",),
+    clarify_history: Optional[list[dict]] = None,
+    existing_proposal_id: Optional[UUID] = None,
+    editor_location_id: Optional[UUID] = None,
+    editor_week_start: Optional[date] = None,
+    editor_week_end: Optional[date] = None,
+) -> ProposalBuild:
+    """Persists `_resolve_edit_ops`' result to the same `schedule_chat_proposals`
+    table `build_proposal` uses — `proposal['kind'] == 'edit'` is what
+    `_bg_schedule_reply` dispatches on at confirm."""
+    clarify_history = clarify_history or []
+    base_doc = {
         "kind": "edit",
         "surface": surface,
         "original_content": original_content,
         "ack": parsed.get("ack") or "",
+    }
+    resolved = await _resolve_edit_ops(
+        conn, company_id=company_id, channel_id=channel_id, parsed=parsed, today=today,
+        shift_statuses=shift_statuses, editor_location_id=editor_location_id,
+        editor_week_start=editor_week_start, editor_week_end=editor_week_end,
+    )
+    if isinstance(resolved, _Clarify):
+        return await _persist_clarify(
+            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+            source_message_id=source_message_id, created_by=created_by, parsed=parsed,
+            clarify_history=clarify_history, base_doc=base_doc, clarify=resolved,
+        )
+    proposal_doc = {
+        **base_doc,
         "clarify_question": None, "clarify_options": [], "clarify_history": clarify_history,
-        "ops": ops,
+        "ops": resolved,
     }
     proposal_id = await _persist_proposal(
         conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
@@ -1924,6 +1999,27 @@ def compose_clarify_followup(proposal: dict, answer: str) -> str:
     return "\n".join(lines)
 
 
+async def _mark_confirmed(conn, proposal_id: UUID, shift_ids: list[UUID], confirmed_by: UUID) -> None:
+    await conn.execute(
+        """
+        UPDATE schedule_chat_proposals
+        SET status = 'confirmed', created_shift_ids = $1, confirmed_by = $2,
+            confirmed_at = NOW(), updated_at = NOW()
+        WHERE id = $3
+        """,
+        shift_ids, confirmed_by, proposal_id,
+    )
+
+
+def _create_scope_error(proposal: dict, week_start: Optional[date], week_end: Optional[date]) -> Optional[str]:
+    for shift in proposal["shifts"]:
+        if not _date_in_week(
+            datetime.fromisoformat(shift["starts_at"]).date(), week_start, week_end,
+        ):
+            return "That schedule proposal is outside the selected schedule week."
+    return None
+
+
 async def execute_proposal(
     conn, *, proposal_row: dict, confirmed_by: UUID, features: dict,
     create_status: str = _CREATE_STATUS,
@@ -1939,7 +2035,34 @@ async def execute_proposal(
     proposal = proposal_row["proposal"]
     if isinstance(proposal, str):
         proposal = json.loads(proposal)
-    company_id = proposal_row["company_id"]
+    scope_error = _create_scope_error(proposal, week_start, week_end)
+    if scope_error:
+        return scope_error
+    async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
+        text, created_shift_ids = await _apply_create_shifts(
+            conn, company_id=proposal_row["company_id"], proposal_id=proposal_row["id"],
+            channel_id=proposal_row.get("channel_id"), proposal=proposal,
+            confirmed_by=confirmed_by, features=features, create_status=create_status,
+            week_start=week_start, week_end=week_end,
+        )
+        await _mark_confirmed(conn, proposal_row["id"], created_shift_ids, confirmed_by)
+    return text
+
+
+async def _apply_create_shifts(
+    conn, *, company_id: UUID, proposal_id: UUID, channel_id: Optional[UUID], proposal: dict,
+    confirmed_by: UUID, features: dict, create_status: str,
+    week_start: Optional[date], week_end: Optional[date],
+) -> tuple[str, list[UUID]]:
+    """The write half of `execute_proposal`, minus claim/finalize — the caller
+    owns the transaction, which is what lets `execute_batch_proposal` run
+    this AFTER a batch's cancellations inside the same one. Raises
+    `ProposalScopeError` instead of returning the scope message so a batch
+    rolls back whole rather than keeping its edits and losing its creates."""
+    scope_error = _create_scope_error(proposal, week_start, week_end)
+    if scope_error:
+        raise ProposalScopeError(scope_error)
 
     training_enabled = bool(features.get("training"))
     credential_templates_enabled = bool(features.get("credential_templates"))
@@ -1948,12 +2071,6 @@ async def execute_proposal(
     dropped: list[dict] = []
     created_shift_ids: list[UUID] = []
     violations_acknowledged: list[dict] = []
-
-    for shift in proposal["shifts"]:
-        if not _date_in_week(
-            datetime.fromisoformat(shift["starts_at"]).date(), week_start, week_end,
-        ):
-            return "That schedule proposal is outside the selected schedule week."
 
     # One batched lapse-item fetch over every assignee across every shift —
     # fetch_lapse_items already takes a list; looping it per assignee (as
@@ -1971,98 +2088,87 @@ async def execute_proposal(
         )
         avail_map = await fetch_availability(conn, company_id, list(dict.fromkeys(all_employee_ids)))
 
-    async with conn.transaction():
-        await _claim_proposal_execution(conn, proposal_row["id"])
-        await lock_scheduling_employees(conn, company_id, all_employee_ids)
-        for shift in proposal["shifts"]:
-            starts_at = datetime.fromisoformat(shift["starts_at"])
-            ends_at = datetime.fromisoformat(shift["ends_at"])
-            location_id = UUID(shift["location_id"]) if shift.get("location_id") else None
-            template_id = UUID(shift["template_id"]) if shift.get("template_id") else None
-            job_id = UUID(shift["job_id"]) if shift.get("job_id") else None
+    await lock_scheduling_employees(conn, company_id, all_employee_ids)
+    for shift in proposal["shifts"]:
+        starts_at = datetime.fromisoformat(shift["starts_at"])
+        ends_at = datetime.fromisoformat(shift["ends_at"])
+        location_id = UUID(shift["location_id"]) if shift.get("location_id") else None
+        template_id = UUID(shift["template_id"]) if shift.get("template_id") else None
+        job_id = UUID(shift["job_id"]) if shift.get("job_id") else None
 
-            surviving_ids: list[UUID] = []
-            assignee_names: list[str] = []
-            proposed_ids = [UUID(a["employee_id"]) for a in shift["assignees"]]
-            qualified_ids = await fetch_effective_job_employee_ids(
-                conn, company_id=company_id, job_id=job_id,
-                employee_ids=proposed_ids, as_of=starts_at.date(),
-            )
-            for a in shift["assignees"]:
-                eid = UUID(a["employee_id"])
-                if eid not in qualified_ids:
-                    dropped.append({
-                        "name": a["name"], "label": shift["label"],
-                        "reason": "they are not actively qualified for this job on the shift date",
-                    })
-                    continue
-                conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
-                avail = availability_violations(avail_map.get(eid, {}), starts_at, ends_at)
-                violations = await check_shift_compliance(
-                    conn, company_id, location_id=location_id, job_id=job_id,
-                    starts_at=starts_at, ends_at=ends_at,
-                    break_minutes=shift["break_minutes"], employee_id=eid,
-                    lapse_items=lapse_map.get(str(eid), []),
-                    fw_event="assign", fw_shift_published=True,
-                )
-                block = next((v for v in violations if v.get("severity") == "block"), None)
-                if conflicts or block or avail:
-                    if block:
-                        statute = f" ({block['statute']})" if block.get("statute") else ""
-                        reason = f"{block['message']}{statute}"
-                    elif avail:
-                        reason = "this is outside their logged availability"
-                    else:
-                        reason = "they picked up a conflicting shift in the meantime"
-                    dropped.append({"name": a["name"], "label": shift["label"], "reason": reason})
-                    continue
-                surviving_ids.append(eid)
-                assignee_names.append(a["name"])
-                violations_acknowledged.extend(violations)
-
-            shift_id = await create_shift_core(
-                conn, company_id,
-                location_id=location_id, role=shift.get("role"), department=None,
-                starts_at=starts_at, ends_at=ends_at,
-                break_minutes=shift["break_minutes"], required_staff=shift["required_staff"],
-                template_id=template_id,
-                job_id=job_id,
-                employee_ids=surviving_ids, created_by=confirmed_by,
-                status=create_status,
-                audit_details={
-                    "source": "editor_chat" if proposal.get("surface") == "editor" else "huume_chat",
-                    "proposal_id": str(proposal_row["id"]),
-                    "channel_id": str(proposal_row["channel_id"]) if proposal_row.get("channel_id") else None,
-                },
-            )
-            created_shift_ids.append(shift_id)
-            shifts_created.append({
-                "id": str(shift_id), "date": starts_at.date().isoformat(),
-                "label": shift["label"], "when": _fmt_date(starts_at),
-                "assignee_names": assignee_names,
-                "starts_at": starts_at, "ends_at": ends_at,
-            })
-
-        await conn.execute(
-            """
-            UPDATE schedule_chat_proposals
-            SET status = 'confirmed', created_shift_ids = $1, confirmed_by = $2,
-                confirmed_at = NOW(), updated_at = NOW()
-            WHERE id = $3
-            """,
-            created_shift_ids, confirmed_by, proposal_row["id"],
+        surviving_ids: list[UUID] = []
+        assignee_names: list[str] = []
+        proposed_ids = [UUID(a["employee_id"]) for a in shift["assignees"]]
+        qualified_ids = await fetch_effective_job_employee_ids(
+            conn, company_id=company_id, job_id=job_id,
+            employee_ids=proposed_ids, as_of=starts_at.date(),
         )
-        await log_audit(
-            conn, company_id, "shift", None, confirmed_by, "schedule_chat.confirm",
-            {
-                "proposal_id": str(proposal_row["id"]),
-                "shift_ids": [str(s) for s in created_shift_ids],
-                "violations_acknowledged": violations_acknowledged,
-                "dropped_assignees": dropped,
+        for a in shift["assignees"]:
+            eid = UUID(a["employee_id"])
+            if eid not in qualified_ids:
+                dropped.append({
+                    "name": a["name"], "label": shift["label"],
+                    "reason": "they are not actively qualified for this job on the shift date",
+                })
+                continue
+            conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
+            avail = availability_violations(avail_map.get(eid, {}), starts_at, ends_at)
+            violations = await check_shift_compliance(
+                conn, company_id, location_id=location_id, job_id=job_id,
+                starts_at=starts_at, ends_at=ends_at,
+                break_minutes=shift["break_minutes"], employee_id=eid,
+                lapse_items=lapse_map.get(str(eid), []),
+                fw_event="assign", fw_shift_published=True,
+            )
+            block = next((v for v in violations if v.get("severity") == "block"), None)
+            if conflicts or block or avail:
+                if block:
+                    statute = f" ({block['statute']})" if block.get("statute") else ""
+                    reason = f"{block['message']}{statute}"
+                elif avail:
+                    reason = "this is outside their logged availability"
+                else:
+                    reason = "they picked up a conflicting shift in the meantime"
+                dropped.append({"name": a["name"], "label": shift["label"], "reason": reason})
+                continue
+            surviving_ids.append(eid)
+            assignee_names.append(a["name"])
+            violations_acknowledged.extend(violations)
+
+        shift_id = await create_shift_core(
+            conn, company_id,
+            location_id=location_id, role=shift.get("role"), department=None,
+            starts_at=starts_at, ends_at=ends_at,
+            break_minutes=shift["break_minutes"], required_staff=shift["required_staff"],
+            template_id=template_id,
+            job_id=job_id,
+            employee_ids=surviving_ids, created_by=confirmed_by,
+            status=create_status,
+            audit_details={
+                "source": "editor_chat" if proposal.get("surface") == "editor" else "huume_chat",
+                "proposal_id": str(proposal_id),
+                "channel_id": str(channel_id) if channel_id else None,
             },
         )
+        created_shift_ids.append(shift_id)
+        shifts_created.append({
+            "id": str(shift_id), "date": starts_at.date().isoformat(),
+            "label": shift["label"], "when": _fmt_date(starts_at),
+            "assignee_names": assignee_names,
+            "starts_at": starts_at, "ends_at": ends_at,
+        })
 
-    return result_text(shifts_created, dropped)
+    await log_audit(
+        conn, company_id, "shift", None, confirmed_by, "schedule_chat.confirm",
+        {
+            "proposal_id": str(proposal_id),
+            "shift_ids": [str(s) for s in created_shift_ids],
+            "violations_acknowledged": violations_acknowledged,
+            "dropped_assignees": dropped,
+        },
+    )
+
+    return result_text(shifts_created, dropped), created_shift_ids
 
 
 async def execute_edit_proposal(
@@ -2090,15 +2196,28 @@ async def execute_edit_proposal(
     proposal = proposal_row["proposal"]
     if isinstance(proposal, str):
         proposal = json.loads(proposal)
-    company_id = proposal_row["company_id"]
-    ops = proposal["ops"]
+    async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
+        text, affected_shift_ids = await _apply_edit_ops(
+            conn, company_id=proposal_row["company_id"], proposal_id=proposal_row["id"],
+            ops=proposal["ops"], confirmed_by=confirmed_by, edit_published=edit_published,
+            week_start=week_start, week_end=week_end,
+        )
+        await _mark_confirmed(conn, proposal_row["id"], affected_shift_ids, confirmed_by)
+    return text
 
+
+async def _apply_edit_ops(
+    conn, *, company_id: UUID, proposal_id: UUID, ops: list[dict], confirmed_by: UUID,
+    edit_published: bool, week_start: Optional[date], week_end: Optional[date],
+) -> tuple[str, list[UUID]]:
+    """The write half of `execute_edit_proposal`, minus claim/finalize — the
+    caller owns the transaction. Returns the result pill and the de-duplicated
+    shift ids the confirm touched (NOT created — the column is shared with
+    the create flow, where it does mean newly created shift ids)."""
     results: list[dict] = []
-    # For kind='edit' proposals this holds shifts TOUCHED by the confirm,
-    # not created ones — the column is shared with the create-flow, where
-    # it does mean newly created shift ids.
     affected_shift_ids: list[UUID] = []
-    _details = lambda: {"source": "huume_chat_edit", "proposal_id": str(proposal_row["id"])}  # noqa: E731
+    _details = lambda: {"source": "huume_chat_edit", "proposal_id": str(proposal_id)}  # noqa: E731
 
     def _in_editor_week(row) -> bool:
         return _date_in_week(row["starts_at"].date(), week_start, week_end)
@@ -2112,356 +2231,345 @@ async def execute_edit_proposal(
                 assigned_by=info["assignment_row"]["assigned_by"],
             )
 
-    async with conn.transaction():
-        await _claim_proposal_execution(conn, proposal_row["id"])
-        # Every edit proposal locks its complete shift set in one stable order
-        # before reading any roster or applying either half of a swap.  This
-        # prevents two overlapping proposals from deadlocking or validating a
-        # secondary shift against state that changes before the write.
-        shift_ids_to_lock = sorted({
-            UUID(raw_id)
-            for op in ops
-            for raw_id in (op.get("shift_id"), op.get("second_shift_id"))
-            if raw_id
-        })
-        if shift_ids_to_lock:
-            await conn.fetch(
-                """
-                SELECT id
-                FROM schedule_shifts
-                WHERE company_id = $1 AND id = ANY($2::uuid[])
-                ORDER BY id
-                FOR UPDATE
-                """,
-                company_id, shift_ids_to_lock,
-            )
-        explicit_employee_ids = {
-            UUID(raw_id)
-            for op in ops
-            for raw_id in (op.get("from_employee_id"), op.get("to_employee_id"))
-            if raw_id
-        }
-        roster_rows = await conn.fetch(
-            "SELECT employee_id FROM schedule_shift_assignments "
-            "WHERE shift_id = ANY($1::uuid[])",
-            shift_ids_to_lock,
-        ) if shift_ids_to_lock else []
-        await lock_scheduling_employees(
-            conn, company_id,
-            [*explicit_employee_ids, *(row["employee_id"] for row in roster_rows)],
+    # Every edit proposal locks its complete shift set in one stable order
+    # before reading any roster or applying either half of a swap.  This
+    # prevents two overlapping proposals from deadlocking or validating a
+    # secondary shift against state that changes before the write.
+    shift_ids_to_lock = sorted({
+        UUID(raw_id)
+        for op in ops
+        for raw_id in (op.get("shift_id"), op.get("second_shift_id"))
+        if raw_id
+    })
+    if shift_ids_to_lock:
+        await conn.fetch(
+            """
+            SELECT id
+            FROM schedule_shifts
+            WHERE company_id = $1 AND id = ANY($2::uuid[])
+            ORDER BY id
+            FOR UPDATE
+            """,
+            company_id, shift_ids_to_lock,
         )
-        removed: dict[int, dict] = {}
-        for idx, op in enumerate(ops):
-            if op["kind"] in ("reassign", "unassign") and op.get("from_employee_id"):
-                shift_id = UUID(op["shift_id"])
-                employee_id = UUID(op["from_employee_id"])
-                shift_row = await conn.fetchrow(
-                    "SELECT id, starts_at, ends_at, status, kind, location_id "
-                    "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
-                    shift_id, company_id,
-                )
-                if shift_row is None or shift_row["status"] == "cancelled":
-                    continue  # phase 2 reports the failure for this op
-                if not _in_editor_week(shift_row):
-                    continue  # phase 2 reports the out-of-scope operation
-                assignment_row = await conn.fetchrow(
-                    "SELECT * FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
-                    shift_id, employee_id,
-                )
-                deleted = await remove_assignment_core(
-                    conn, company_id, shift_id=shift_id,
-                    employee_id=employee_id, actor_user_id=confirmed_by,
-                    shift_row=shift_row, audit_details=_details(), write_audit=False,
-                )
-                removed[idx] = {
-                    "deleted": deleted, "shift_row": shift_row,
-                    "employee_id": employee_id, "assignment_row": assignment_row,
-                }
-
-        for idx, op in enumerate(ops):
+    explicit_employee_ids = {
+        UUID(raw_id)
+        for op in ops
+        for raw_id in (op.get("from_employee_id"), op.get("to_employee_id"))
+        if raw_id
+    }
+    roster_rows = await conn.fetch(
+        "SELECT employee_id FROM schedule_shift_assignments "
+        "WHERE shift_id = ANY($1::uuid[])",
+        shift_ids_to_lock,
+    ) if shift_ids_to_lock else []
+    await lock_scheduling_employees(
+        conn, company_id,
+        [*explicit_employee_ids, *(row["employee_id"] for row in roster_rows)],
+    )
+    removed: dict[int, dict] = {}
+    for idx, op in enumerate(ops):
+        if op["kind"] in ("reassign", "unassign") and op.get("from_employee_id"):
             shift_id = UUID(op["shift_id"])
+            employee_id = UUID(op["from_employee_id"])
             shift_row = await conn.fetchrow(
-                """
-                SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
-                       kind, training_requirement_id, published_at, required_staff
-                FROM schedule_shifts WHERE id = $1 AND company_id = $2
-                FOR UPDATE
-                """,
+                "SELECT id, starts_at, ends_at, status, kind, location_id "
+                "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                 shift_id, company_id,
             )
-            if shift_row is None:
-                await _restore_if_removed(idx)
-                results.append({
-                    **op, "ok": False, "shift_gone": True,
-                    "reason": "that shift no longer exists",
-                })
-                continue
+            if shift_row is None or shift_row["status"] == "cancelled":
+                continue  # phase 2 reports the failure for this op
             if not _in_editor_week(shift_row):
-                await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "that shift is outside the selected schedule week"})
-                continue
+                continue  # phase 2 reports the out-of-scope operation
+            assignment_row = await conn.fetchrow(
+                "SELECT * FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
+                shift_id, employee_id,
+            )
+            deleted = await remove_assignment_core(
+                conn, company_id, shift_id=shift_id,
+                employee_id=employee_id, actor_user_id=confirmed_by,
+                shift_row=shift_row, audit_details=_details(), write_audit=False,
+            )
+            removed[idx] = {
+                "deleted": deleted, "shift_row": shift_row,
+                "employee_id": employee_id, "assignment_row": assignment_row,
+            }
 
-            if op["kind"] == "cancel":
-                if shift_row["status"] == "cancelled":
-                    results.append({
-                        **op, "ok": False, "shift_gone": True, "reason": "already cancelled",
-                    })
-                    continue
-                await cancel_shift_core(
-                    conn, company_id, shift_id=shift_id, existing_row=shift_row,
-                    actor_user_id=confirmed_by, audit_details=_details(),
-                )
-                results.append({**op, "ok": True})
-                affected_shift_ids.append(shift_id)
-                continue
+    for idx, op in enumerate(ops):
+        shift_id = UUID(op["shift_id"])
+        shift_row = await conn.fetchrow(
+            """
+            SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
+                   kind, training_requirement_id, published_at, required_staff
+            FROM schedule_shifts WHERE id = $1 AND company_id = $2
+            FOR UPDATE
+            """,
+            shift_id, company_id,
+        )
+        if shift_row is None:
+            await _restore_if_removed(idx)
+            results.append({
+                **op, "ok": False, "shift_gone": True,
+                "reason": "that shift no longer exists",
+            })
+            continue
+        if not _in_editor_week(shift_row):
+            await _restore_if_removed(idx)
+            results.append({**op, "ok": False, "reason": "that shift is outside the selected schedule week"})
+            continue
 
-            if op["kind"] == "unassign":
-                info = removed.get(idx)
-                if info is None:
-                    results.append({
-                        **op, "ok": False, "shift_gone": True,
-                        "reason": "that shift was cancelled or no longer exists",
-                    })
-                    continue
-                if info["deleted"] == 0:
-                    results.append({**op, "ok": False, "reason": "they weren't on that shift"})
-                    continue
-                await log_audit(
-                    conn, company_id, "assignment", shift_id, confirmed_by, "assignment.delete",
-                    removal_audit_details(info["shift_row"], info["employee_id"], _details()),
-                )
-                results.append({**op, "ok": True})
-                affected_shift_ids.append(shift_id)
-                continue
-
-            if op["kind"] == "swap":
-                # Shift-level swap: exchange the two shifts' assignee sets.
-                # Self-contained (both removals + both additions here) rather
-                # than split across phases, because which people move is only
-                # known by reading BOTH shifts' current rosters live.
-                # Conflicts are checked BEFORE any write (neither side has
-                # been removed yet), so a refused swap costs zero writes —
-                # no remove-then-restore round trip padding the audit log.
-                other_row = await conn.fetchrow(
-                    """
-                    SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
-                           kind, training_requirement_id, published_at
-                    FROM schedule_shifts WHERE id = $1 AND company_id = $2
-                    """,
-                    UUID(op["second_shift_id"]), company_id,
-                )
-                if other_row is None or other_row["status"] == "cancelled":
-                    results.append({**op, "ok": False, "reason": "the other shift is gone or cancelled"})
-                    continue
-                if not _in_editor_week(other_row):
-                    results.append({**op, "ok": False, "reason": "the other shift is outside the selected schedule week"})
-                    continue
-                a_ids = [r["employee_id"] for r in await conn.fetch(
-                    "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)]
-                b_ids = [r["employee_id"] for r in await conn.fetch(
-                    "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", other_row["id"])]
-                if not a_ids and not b_ids:
-                    results.append({**op, "ok": False, "reason": "neither shift has anyone on it"})
-                    continue
-                # Neither side has been removed yet, so each person's OWN
-                # shift(s) must be excluded from their own conflict check —
-                # otherwise the shift they're about to leave reads as a
-                # double-booking against the one they're moving to.
-                own_shift_ids = {str(shift_id), str(other_row["id"])}
-                blocked: Optional[str] = None
-                moves = (
-                    [(eid, other_row, shift_id) for eid in a_ids]
-                    + [(eid, shift_row, other_row["id"]) for eid in b_ids]
-                )
-                for eid, dest, source_shift_id in moves:
-                    qualified_ids = await fetch_effective_job_employee_ids(
-                        conn, company_id=company_id, job_id=dest.get("job_id"),
-                        employee_ids=[eid], as_of=dest["starts_at"].date(),
-                    )
-                    if eid not in qualified_ids:
-                        blocked = "someone is not actively qualified for the destination job"
-                        break
-                    conflicts = await find_conflicts(
-                        conn, company_id, eid, dest["starts_at"], dest["ends_at"],
-                        exclude_shift_id=dest["id"])
-                    conflicts = [c for c in conflicts if c["shift_id"] not in own_shift_ids]
-                    if conflicts:
-                        blocked = "it would double-book someone"
-                        break
-                    violations = await check_shift_compliance(
-                        conn, company_id, location_id=dest["location_id"],
-                        job_id=dest.get("job_id"), starts_at=dest["starts_at"],
-                        ends_at=dest["ends_at"], break_minutes=dest["break_minutes"] or 0,
-                        employee_id=eid, exclude_shift_id=source_shift_id,
-                        fw_event="assign", fw_shift_published=dest["published_at"] is not None,
-                        shift_kind=dest["kind"],
-                        training_requirement_id=dest["training_requirement_id"],
-                    )
-                    block = next(
-                        (violation for violation in violations if violation.get("severity") == "block"),
-                        None,
-                    )
-                    if block:
-                        blocked = block["message"]
-                        break
-                if blocked:
-                    results.append({**op, "ok": False, "reason": blocked})
-                    continue
-                for eid in a_ids:
-                    await remove_assignment_core(
-                        conn, company_id, shift_id=shift_id, employee_id=eid,
-                        actor_user_id=confirmed_by, shift_row=shift_row, audit_details=_details())
-                for eid in b_ids:
-                    await remove_assignment_core(
-                        conn, company_id, shift_id=other_row["id"], employee_id=eid,
-                        actor_user_id=confirmed_by, shift_row=other_row, audit_details=_details())
-                for eid in a_ids:
-                    await apply_assignment_core(
-                        conn, company_id, shift_row=other_row, employee_id=eid,
-                        actor_user_id=confirmed_by, audit_details=_details())
-                for eid in b_ids:
-                    await apply_assignment_core(
-                        conn, company_id, shift_row=shift_row, employee_id=eid,
-                        actor_user_id=confirmed_by, audit_details=_details())
-                results.append({**op, "ok": True})
-                affected_shift_ids.extend([shift_id, other_row["id"]])
-                continue
-
+        if op["kind"] == "cancel":
             if shift_row["status"] == "cancelled":
-                await _restore_if_removed(idx)
                 results.append({
-                    **op, "ok": False, "shift_gone": True, "reason": "that shift was cancelled",
+                    **op, "ok": False, "shift_gone": True, "reason": "already cancelled",
                 })
                 continue
-
-            if shift_row["status"] == "published" and not edit_published:
-                await _restore_if_removed(idx)
-                results.append({
-                    **op, "ok": False,
-                    "reason": "that shift is published — enable Edit published",
-                })
-                continue
-
-            if op["kind"] == "retime":
-                new_starts_at = datetime.fromisoformat(op["new_starts_at"])
-                new_ends_at = datetime.fromisoformat(op["new_ends_at"])
-                if not _date_in_week(new_starts_at.date(), week_start, week_end) or not _date_in_week(
-                    new_ends_at.date(), week_start, week_end,
-                ):
-                    await _restore_if_removed(idx)
-                    results.append({**op, "ok": False, "reason": "that retime is outside the selected schedule week"})
-                    continue
-                assignee_rows = await conn.fetch(
-                    "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", shift_id,
-                )
-                blocked_reason: Optional[str] = None
-                for a in assignee_rows:
-                    eid = a["employee_id"]
-                    qualified_ids = await fetch_effective_job_employee_ids(
-                        conn, company_id=company_id, job_id=shift_row.get("job_id"),
-                        employee_ids=[eid], as_of=new_starts_at.date(),
-                    )
-                    if eid not in qualified_ids:
-                        blocked_reason = "someone is not actively qualified for this job on the new date"
-                        break
-                    conflicts = await find_conflicts(
-                        conn, company_id, eid, new_starts_at, new_ends_at, exclude_shift_id=shift_id)
-                    violations = await check_shift_compliance(
-                        conn, company_id, location_id=shift_row["location_id"], job_id=shift_row.get("job_id"),
-                        starts_at=new_starts_at, ends_at=new_ends_at,
-                        break_minutes=shift_row["break_minutes"] or 0, employee_id=eid,
-                        exclude_shift_id=shift_id, fw_event="retime",
-                        fw_shift_published=shift_row["published_at"] is not None,
-                        shift_kind=shift_row["kind"], training_requirement_id=shift_row["training_requirement_id"],
-                    )
-                    block = next((v for v in violations if v.get("severity") == "block"), None)
-                    if conflicts or block:
-                        blocked_reason = block["message"] if block else "it would double-book someone already on it"
-                        break
-                if blocked_reason:
-                    results.append({**op, "ok": False, "reason": blocked_reason})
-                    continue
-                await retime_shift_core(
-                    conn, company_id, shift_id=shift_id, existing_row=shift_row,
-                    new_starts_at=new_starts_at, new_ends_at=new_ends_at,
-                    actor_user_id=confirmed_by, audit_details=_details(),
-                )
-                results.append({**op, "ok": True})
-                affected_shift_ids.append(shift_id)
-                continue
-
-            # reassign / assign — add the new person, re-checked live. A
-            # refusal past this point must undo any phase-1 removal
-            # (reassign only — a plain `assign` never appears in `removed`)
-            # so the shift isn't left short a person over a failed swap.
-            to_id = UUID(op["to_employee_id"])
-            qualified_ids = await fetch_effective_job_employee_ids(
-                conn, company_id=company_id, job_id=shift_row.get("job_id"),
-                employee_ids=[to_id], as_of=shift_row["starts_at"].date(),
-            )
-            if to_id not in qualified_ids:
-                await _restore_if_removed(idx)
-                results.append({
-                    **op, "ok": False,
-                    "reason": "they are not actively qualified for this job on the shift date",
-                })
-                continue
-            conflicts = await find_conflicts(
-                conn, company_id, to_id, shift_row["starts_at"], shift_row["ends_at"],
-                exclude_shift_id=shift_id,
-            )
-            if conflicts:
-                await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "they picked up a conflicting shift in the meantime"})
-                continue
-            assignee_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)
-            if assignee_count >= (shift_row["required_staff"] or 1):
-                await _restore_if_removed(idx)
-                results.append({**op, "ok": False, "reason": "that shift is already fully staffed"})
-                continue
-            avail_map = await fetch_availability(conn, company_id, [to_id])
-            avail = availability_violations(avail_map.get(to_id, {}), shift_row["starts_at"], shift_row["ends_at"])
-            violations = await check_shift_compliance(
-                conn, company_id, location_id=shift_row["location_id"], job_id=shift_row.get("job_id"),
-                starts_at=shift_row["starts_at"], ends_at=shift_row["ends_at"],
-                break_minutes=shift_row["break_minutes"] or 0, employee_id=to_id,
-                exclude_shift_id=shift_id, fw_event="assign",
-                fw_shift_published=shift_row["published_at"] is not None,
-                shift_kind=shift_row["kind"], training_requirement_id=shift_row["training_requirement_id"],
-            )
-            block = next((v for v in violations if v.get("severity") == "block"), None)
-            if block or avail:
-                await _restore_if_removed(idx)
-                reason = block["message"] if block else "this is outside their logged availability"
-                results.append({**op, "ok": False, "reason": reason})
-                continue
-            info = removed.get(idx)
-            if info and info["deleted"]:
-                await log_audit(
-                    conn, company_id, "assignment", shift_id, confirmed_by, "assignment.delete",
-                    removal_audit_details(info["shift_row"], info["employee_id"], _details()),
-                )
-            await apply_assignment_core(
-                conn, company_id, shift_row=shift_row, employee_id=to_id,
+            await cancel_shift_core(
+                conn, company_id, shift_id=shift_id, existing_row=shift_row,
                 actor_user_id=confirmed_by, audit_details=_details(),
             )
             results.append({**op, "ok": True})
             affected_shift_ids.append(shift_id)
+            continue
 
-        await conn.execute(
-            """
-            UPDATE schedule_chat_proposals
-            SET status = 'confirmed', created_shift_ids = $1, confirmed_by = $2,
-                confirmed_at = NOW(), updated_at = NOW()
-            WHERE id = $3
-            """,
-            list(dict.fromkeys(affected_shift_ids)), confirmed_by, proposal_row["id"],
+        if op["kind"] == "unassign":
+            info = removed.get(idx)
+            if info is None:
+                results.append({
+                    **op, "ok": False, "shift_gone": True,
+                    "reason": "that shift was cancelled or no longer exists",
+                })
+                continue
+            if info["deleted"] == 0:
+                results.append({**op, "ok": False, "reason": "they weren't on that shift"})
+                continue
+            await log_audit(
+                conn, company_id, "assignment", shift_id, confirmed_by, "assignment.delete",
+                removal_audit_details(info["shift_row"], info["employee_id"], _details()),
+            )
+            results.append({**op, "ok": True})
+            affected_shift_ids.append(shift_id)
+            continue
+
+        if op["kind"] == "swap":
+            # Shift-level swap: exchange the two shifts' assignee sets.
+            # Self-contained (both removals + both additions here) rather
+            # than split across phases, because which people move is only
+            # known by reading BOTH shifts' current rosters live.
+            # Conflicts are checked BEFORE any write (neither side has
+            # been removed yet), so a refused swap costs zero writes —
+            # no remove-then-restore round trip padding the audit log.
+            other_row = await conn.fetchrow(
+                """
+                SELECT id, starts_at, ends_at, status, role, location_id, job_id, break_minutes,
+                       kind, training_requirement_id, published_at
+                FROM schedule_shifts WHERE id = $1 AND company_id = $2
+                """,
+                UUID(op["second_shift_id"]), company_id,
+            )
+            if other_row is None or other_row["status"] == "cancelled":
+                results.append({**op, "ok": False, "reason": "the other shift is gone or cancelled"})
+                continue
+            if not _in_editor_week(other_row):
+                results.append({**op, "ok": False, "reason": "the other shift is outside the selected schedule week"})
+                continue
+            a_ids = [r["employee_id"] for r in await conn.fetch(
+                "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)]
+            b_ids = [r["employee_id"] for r in await conn.fetch(
+                "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", other_row["id"])]
+            if not a_ids and not b_ids:
+                results.append({**op, "ok": False, "reason": "neither shift has anyone on it"})
+                continue
+            # Neither side has been removed yet, so each person's OWN
+            # shift(s) must be excluded from their own conflict check —
+            # otherwise the shift they're about to leave reads as a
+            # double-booking against the one they're moving to.
+            own_shift_ids = {str(shift_id), str(other_row["id"])}
+            blocked: Optional[str] = None
+            moves = (
+                [(eid, other_row, shift_id) for eid in a_ids]
+                + [(eid, shift_row, other_row["id"]) for eid in b_ids]
+            )
+            for eid, dest, source_shift_id in moves:
+                qualified_ids = await fetch_effective_job_employee_ids(
+                    conn, company_id=company_id, job_id=dest.get("job_id"),
+                    employee_ids=[eid], as_of=dest["starts_at"].date(),
+                )
+                if eid not in qualified_ids:
+                    blocked = "someone is not actively qualified for the destination job"
+                    break
+                conflicts = await find_conflicts(
+                    conn, company_id, eid, dest["starts_at"], dest["ends_at"],
+                    exclude_shift_id=dest["id"])
+                conflicts = [c for c in conflicts if c["shift_id"] not in own_shift_ids]
+                if conflicts:
+                    blocked = "it would double-book someone"
+                    break
+                violations = await check_shift_compliance(
+                    conn, company_id, location_id=dest["location_id"],
+                    job_id=dest.get("job_id"), starts_at=dest["starts_at"],
+                    ends_at=dest["ends_at"], break_minutes=dest["break_minutes"] or 0,
+                    employee_id=eid, exclude_shift_id=source_shift_id,
+                    fw_event="assign", fw_shift_published=dest["published_at"] is not None,
+                    shift_kind=dest["kind"],
+                    training_requirement_id=dest["training_requirement_id"],
+                )
+                block = next(
+                    (violation for violation in violations if violation.get("severity") == "block"),
+                    None,
+                )
+                if block:
+                    blocked = block["message"]
+                    break
+            if blocked:
+                results.append({**op, "ok": False, "reason": blocked})
+                continue
+            for eid in a_ids:
+                await remove_assignment_core(
+                    conn, company_id, shift_id=shift_id, employee_id=eid,
+                    actor_user_id=confirmed_by, shift_row=shift_row, audit_details=_details())
+            for eid in b_ids:
+                await remove_assignment_core(
+                    conn, company_id, shift_id=other_row["id"], employee_id=eid,
+                    actor_user_id=confirmed_by, shift_row=other_row, audit_details=_details())
+            for eid in a_ids:
+                await apply_assignment_core(
+                    conn, company_id, shift_row=other_row, employee_id=eid,
+                    actor_user_id=confirmed_by, audit_details=_details())
+            for eid in b_ids:
+                await apply_assignment_core(
+                    conn, company_id, shift_row=shift_row, employee_id=eid,
+                    actor_user_id=confirmed_by, audit_details=_details())
+            results.append({**op, "ok": True})
+            affected_shift_ids.extend([shift_id, other_row["id"]])
+            continue
+
+        if shift_row["status"] == "cancelled":
+            await _restore_if_removed(idx)
+            results.append({
+                **op, "ok": False, "shift_gone": True, "reason": "that shift was cancelled",
+            })
+            continue
+
+        if shift_row["status"] == "published" and not edit_published:
+            await _restore_if_removed(idx)
+            results.append({
+                **op, "ok": False,
+                "reason": "that shift is published — enable Edit published",
+            })
+            continue
+
+        if op["kind"] == "retime":
+            new_starts_at = datetime.fromisoformat(op["new_starts_at"])
+            new_ends_at = datetime.fromisoformat(op["new_ends_at"])
+            if not _date_in_week(new_starts_at.date(), week_start, week_end) or not _date_in_week(
+                new_ends_at.date(), week_start, week_end,
+            ):
+                await _restore_if_removed(idx)
+                results.append({**op, "ok": False, "reason": "that retime is outside the selected schedule week"})
+                continue
+            assignee_rows = await conn.fetch(
+                "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", shift_id,
+            )
+            blocked_reason: Optional[str] = None
+            for a in assignee_rows:
+                eid = a["employee_id"]
+                qualified_ids = await fetch_effective_job_employee_ids(
+                    conn, company_id=company_id, job_id=shift_row.get("job_id"),
+                    employee_ids=[eid], as_of=new_starts_at.date(),
+                )
+                if eid not in qualified_ids:
+                    blocked_reason = "someone is not actively qualified for this job on the new date"
+                    break
+                conflicts = await find_conflicts(
+                    conn, company_id, eid, new_starts_at, new_ends_at, exclude_shift_id=shift_id)
+                violations = await check_shift_compliance(
+                    conn, company_id, location_id=shift_row["location_id"], job_id=shift_row.get("job_id"),
+                    starts_at=new_starts_at, ends_at=new_ends_at,
+                    break_minutes=shift_row["break_minutes"] or 0, employee_id=eid,
+                    exclude_shift_id=shift_id, fw_event="retime",
+                    fw_shift_published=shift_row["published_at"] is not None,
+                    shift_kind=shift_row["kind"], training_requirement_id=shift_row["training_requirement_id"],
+                )
+                block = next((v for v in violations if v.get("severity") == "block"), None)
+                if conflicts or block:
+                    blocked_reason = block["message"] if block else "it would double-book someone already on it"
+                    break
+            if blocked_reason:
+                results.append({**op, "ok": False, "reason": blocked_reason})
+                continue
+            await retime_shift_core(
+                conn, company_id, shift_id=shift_id, existing_row=shift_row,
+                new_starts_at=new_starts_at, new_ends_at=new_ends_at,
+                actor_user_id=confirmed_by, audit_details=_details(),
+            )
+            results.append({**op, "ok": True})
+            affected_shift_ids.append(shift_id)
+            continue
+
+        # reassign / assign — add the new person, re-checked live. A
+        # refusal past this point must undo any phase-1 removal
+        # (reassign only — a plain `assign` never appears in `removed`)
+        # so the shift isn't left short a person over a failed swap.
+        to_id = UUID(op["to_employee_id"])
+        qualified_ids = await fetch_effective_job_employee_ids(
+            conn, company_id=company_id, job_id=shift_row.get("job_id"),
+            employee_ids=[to_id], as_of=shift_row["starts_at"].date(),
         )
-        await log_audit(
-            conn, company_id, "shift", None, confirmed_by, "schedule_chat.edit_confirm",
-            {"proposal_id": str(proposal_row["id"]), "results": results},
+        if to_id not in qualified_ids:
+            await _restore_if_removed(idx)
+            results.append({
+                **op, "ok": False,
+                "reason": "they are not actively qualified for this job on the shift date",
+            })
+            continue
+        conflicts = await find_conflicts(
+            conn, company_id, to_id, shift_row["starts_at"], shift_row["ends_at"],
+            exclude_shift_id=shift_id,
         )
+        if conflicts:
+            await _restore_if_removed(idx)
+            results.append({**op, "ok": False, "reason": "they picked up a conflicting shift in the meantime"})
+            continue
+        assignee_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)
+        if assignee_count >= (shift_row["required_staff"] or 1):
+            await _restore_if_removed(idx)
+            results.append({**op, "ok": False, "reason": "that shift is already fully staffed"})
+            continue
+        avail_map = await fetch_availability(conn, company_id, [to_id])
+        avail = availability_violations(avail_map.get(to_id, {}), shift_row["starts_at"], shift_row["ends_at"])
+        violations = await check_shift_compliance(
+            conn, company_id, location_id=shift_row["location_id"], job_id=shift_row.get("job_id"),
+            starts_at=shift_row["starts_at"], ends_at=shift_row["ends_at"],
+            break_minutes=shift_row["break_minutes"] or 0, employee_id=to_id,
+            exclude_shift_id=shift_id, fw_event="assign",
+            fw_shift_published=shift_row["published_at"] is not None,
+            shift_kind=shift_row["kind"], training_requirement_id=shift_row["training_requirement_id"],
+        )
+        block = next((v for v in violations if v.get("severity") == "block"), None)
+        if block or avail:
+            await _restore_if_removed(idx)
+            reason = block["message"] if block else "this is outside their logged availability"
+            results.append({**op, "ok": False, "reason": reason})
+            continue
+        info = removed.get(idx)
+        if info and info["deleted"]:
+            await log_audit(
+                conn, company_id, "assignment", shift_id, confirmed_by, "assignment.delete",
+                removal_audit_details(info["shift_row"], info["employee_id"], _details()),
+            )
+        await apply_assignment_core(
+            conn, company_id, shift_row=shift_row, employee_id=to_id,
+            actor_user_id=confirmed_by, audit_details=_details(),
+        )
+        results.append({**op, "ok": True})
+        affected_shift_ids.append(shift_id)
+
+    await log_audit(
+        conn, company_id, "shift", None, confirmed_by, "schedule_chat.edit_confirm",
+        {"proposal_id": str(proposal_id), "results": results},
+    )
 
     text = edit_result_text(results)
     unique_ids = list(dict.fromkeys(affected_shift_ids))
@@ -2484,7 +2592,154 @@ async def execute_edit_proposal(
         strip = schedule_strip([dict(r) for r in strip_rows])
         if strip:
             text += "\n" + strip
-    return text
+    return text, unique_ids
+
+
+# ── Batch proposals: one correction, one confirmation ───────────────────
+#
+# A clarified correction ("scrap the Sunday drafts and put the real pattern
+# in") is cancellations PLUS the replacement shifts. Two rows would mean two
+# confirmations and a window between them where the store has no Sunday
+# coverage at all. A `kind='batch'` row carries both halves; confirm applies
+# edits first, then creates, in ONE transaction — a replacement is checked
+# for conflicts after the draft it replaces is already cancelled, and any
+# failure past the claim rolls the whole thing back.
+
+async def build_batch_proposal(
+    conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
+    created_by: UUID, edit_requests: list[dict], shift_requests: list[dict],
+    location_hint: Optional[str], ack: str, today: date, original_content: str,
+    surface: str = "channel", shift_statuses: tuple[str, ...] = ("published",),
+    editor_location_id: Optional[UUID] = None,
+    week_start: Optional[date] = None, week_end: Optional[date] = None,
+) -> ProposalBuild:
+    """Resolve edits and creates together, persist ONE `schedule_chat_proposals`
+    row with `proposal['kind'] == 'batch'`. Either half's clarify is returned
+    as-is — nothing half-resolved is ever persisted, so a batch can't be
+    confirmed with a create the manager never saw resolved. The create half
+    ignores the shifts the edit half cancels (see `_resolve_create_shifts`)."""
+    edit_ops: list[dict] = []
+    if edit_requests:
+        resolved = await _resolve_edit_ops(
+            conn, company_id=company_id, channel_id=channel_id,
+            parsed={"ack": ack, "action": "edit", "shift_requests": [], "edit_requests": edit_requests},
+            today=today, shift_statuses=shift_statuses, editor_location_id=editor_location_id,
+            editor_week_start=week_start, editor_week_end=week_end,
+        )
+        if isinstance(resolved, _Clarify):
+            return ProposalBuild(
+                kind="clarify", proposal_id=None,
+                pill_text=clarify_text(resolved.question, resolved.options),
+            )
+        edit_ops = resolved
+
+    create_doc: Optional[dict] = None
+    if shift_requests:
+        cancelled_ids = tuple(op["shift_id"] for op in edit_ops if op["kind"] == "cancel")
+        resolved = await _resolve_create_shifts(
+            conn, company_id=company_id, channel_id=channel_id,
+            parsed={"ack": ack, "action": "create", "location_hint": location_hint,
+                    "shift_requests": shift_requests, "edit_requests": []},
+            today=today, week_start=week_start, week_end=week_end,
+            ignore_shift_ids=cancelled_ids,
+        )
+        if isinstance(resolved, _Clarify):
+            return ProposalBuild(
+                kind="clarify", proposal_id=None,
+                pill_text=clarify_text(resolved.question, resolved.options),
+            )
+        create_doc = {"surface": surface, **resolved}
+
+    if not edit_ops and create_doc is None:
+        return ProposalBuild(
+            kind="clarify", proposal_id=None,
+            pill_text=clarify_text("I couldn't figure out what to change — can you be more specific?", []),
+        )
+
+    proposal_doc = {
+        "kind": "batch",
+        "surface": surface,
+        "original_content": original_content,
+        "ack": ack,
+        "clarify_question": None, "clarify_options": [], "clarify_history": [],
+        "edit": {"kind": "edit", "surface": surface, "ack": ack, "ops": edit_ops} if edit_ops else None,
+        "create": create_doc,
+        "operation_count": len(edit_ops) + len(create_doc["shifts"] if create_doc else []),
+    }
+    proposal_id = await _persist_proposal(
+        conn, None, company_id=company_id, channel_id=channel_id,
+        source_message_id=source_message_id, created_by=created_by,
+        status="proposed", proposal=proposal_doc,
+        parsed={"ack": ack, "action": "batch", "shift_requests": shift_requests,
+                "edit_requests": edit_requests},
+        clarify_rounds=0,
+    )
+    return ProposalBuild(
+        kind="proposal", proposal_id=proposal_id, pill_text=batch_proposal_text(proposal_doc),
+    )
+
+
+async def execute_batch_proposal(
+    conn, *, proposal_row: dict, confirmed_by: UUID, features: dict,
+    create_status: str = _CREATE_STATUS, edit_published: bool = True,
+    week_start: Optional[date] = None, week_end: Optional[date] = None,
+) -> str:
+    """One claim, one transaction: every edit op (cancels included) through
+    `_apply_edit_ops`, THEN every replacement through `_apply_create_shifts`.
+    Per-op refusals inside either half are reported, not raised (same
+    contract as the single-kind executors — the manager reviewed each op and
+    a stale one shouldn't veto the rest); anything that does raise (scope,
+    claim, an unexpected error) rolls back BOTH halves, so a batch is never
+    left with its drafts cancelled and its replacements missing."""
+    proposal = proposal_row["proposal"]
+    if isinstance(proposal, str):
+        proposal = json.loads(proposal)
+    company_id = proposal_row["company_id"]
+    edit_doc = proposal.get("edit") or {}
+    create_doc = proposal.get("create") or {}
+    if create_doc.get("shifts"):
+        scope_error = _create_scope_error(create_doc, week_start, week_end)
+        if scope_error:
+            raise ProposalScopeError(scope_error)
+
+    texts: list[str] = []
+    touched: list[UUID] = []
+    edited_count = 0
+    created_count = 0
+    async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
+        if edit_doc.get("ops"):
+            text, ids = await _apply_edit_ops(
+                conn, company_id=company_id, proposal_id=proposal_row["id"],
+                ops=edit_doc["ops"], confirmed_by=confirmed_by, edit_published=edit_published,
+                week_start=week_start, week_end=week_end,
+            )
+            texts.append(text)
+            touched.extend(ids)
+            edited_count = len(ids)
+        if create_doc.get("shifts"):
+            text, ids = await _apply_create_shifts(
+                conn, company_id=company_id, proposal_id=proposal_row["id"],
+                channel_id=proposal_row.get("channel_id"), proposal=create_doc,
+                confirmed_by=confirmed_by, features=features, create_status=create_status,
+                week_start=week_start, week_end=week_end,
+            )
+            texts.append(text)
+            touched.extend(ids)
+            created_count = len(ids)
+        unique_ids = list(dict.fromkeys(touched))
+        await _mark_confirmed(conn, proposal_row["id"], unique_ids, confirmed_by)
+        await log_audit(
+            conn, company_id, "shift", None, confirmed_by, "schedule_chat.batch_confirm",
+            {
+                "proposal_id": str(proposal_row["id"]),
+                "edit_ops": len(edit_doc.get("ops") or []),
+                "shifts_touched": edited_count,
+                "shifts_requested": len(create_doc.get("shifts") or []),
+                "shifts_created": created_count,
+            },
+        )
+    return "\n".join(texts)
 
 
 # ── Pill text ─────────────────────────────────────────────────────────────
@@ -2678,6 +2933,52 @@ def edit_proposal_text(proposal: dict) -> str:
             advisory_lines.append(f"{prefix}{v['message']}{statute}")
     lines.extend(advisory_lines)
     lines.append("Reply **confirm** and I'll make these changes, or **cancel**.")
+    return "\n".join(lines)
+
+
+def batch_proposal_text(proposal: dict) -> str:
+    """The review pill for a `kind='batch'` row: every edit op line from
+    `edit_proposal_text`, every replacement line from `proposal_text`, then a
+    per-day "what the schedule looks like after" summary, and ONE confirm
+    line. Each half's own lead/confirm lines are dropped so the manager reads
+    one proposal, not two stapled together — the advisory lines (verbatim
+    statute text) survive untouched."""
+    edit_doc = proposal.get("edit") or {}
+    create_doc = proposal.get("create") or {}
+    ops = edit_doc.get("ops") or []
+    shifts = create_doc.get("shifts") or []
+    lines = [f"\U0001F4C5 {proposal.get('ack') or ''} Here's the whole correction, applied together:".replace("  ", " ")]
+
+    if ops:
+        lines.append(f"**First, {len(ops)} change{'s' if len(ops) != 1 else ''} to existing shifts:**")
+        edit_lines = edit_proposal_text({**edit_doc, "ack": ""}).split("\n")
+        lines.extend(edit_lines[1:-1])  # drop the lead + confirm lines
+    if shifts:
+        loc_name = (create_doc.get("location") or {}).get("name") or "the"
+        lines.append(
+            f"**Then {len(shifts)} new shift{'s' if len(shifts) != 1 else ''} on the {loc_name} schedule:**"
+        )
+        state = (create_doc.get("location") or {}).get("state")
+        create_lines = proposal_text({**create_doc, "ack": ""}, state).split("\n")
+        lines.extend(create_lines[1:-1])
+
+    net = net_per_day(ops, shifts)
+    if net:
+        lines.append("**After this:**")
+        for day, cancelled, edited, created in net:
+            parts = []
+            if cancelled:
+                parts.append(f"{cancelled} cancelled")
+            if edited:
+                parts.append(f"{edited} edited")
+            if created:
+                parts.append(f"{created} new")
+            lines.append(f"{_fmt_date(datetime.combine(day, time.min))}: " + ", ".join(parts))
+
+    lines.append(
+        "Reply **confirm** and I'll apply all of it in one go — the cancellations and edits "
+        "first, then the new shifts — or **cancel**. Nothing changes until you do."
+    )
     return "\n".join(lines)
 
 
