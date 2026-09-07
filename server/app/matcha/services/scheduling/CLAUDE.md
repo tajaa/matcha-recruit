@@ -2,6 +2,53 @@
 
 Moved verbatim from root `CLAUDE.md`'s Feature Flags table. Root keeps a one-line summary + `→ full spec:` pointer here. Default column below matches `DEFAULT_COMPANY_FEATURES` in `server/app/core/feature_flags.py`.
 
+## Schedule Pilot workspace (2026-09-07) — replaces the full schedule editor
+
+`/ops/schedule/editor` is the same URL and the same `?week=&location=` contract, but the page behind it
+(`client/src/ops/pages/SchedulePilot.tsx`, replacing `ScheduleEditor.tsx`) is built around the review a
+change gets before it is real. The old page had one body slot and four mutually exclusive modes, so
+asking Huume anything hid the schedule, and the answer — who it staged, what it refused, who is now on
+50 hours — arrived as a wall of pill text in a floating panel.
+
+Four regions, all live at once: an **inputs rail** (each person's hours this week drawn against the
+policy tick with their own cap marked, availability state, time away, qualified jobs, the open seats by
+day, the POLICY constants beside the jurisdiction sentence, week-setup status), a **Board / Review**
+toggle in the center, the **Huume thread** mounted as a column, and a **scenarios strip** on top. Jobs
+and Week setup are drawers OVER the board rather than modes that replace it. Mobile collapses the
+regions to tabs.
+
+- **`ReviewPane` is pure over a `ScheduleReview`**, so one component renders a Huume-staged
+  `schedule_change`, a `schedule_week_draft` and a REST fill scenario: per-person load before→after on
+  the same bar the rail draws, Staged / Not staged (with the server's reason) / Unfilled (with the full
+  exclusion breakdown) / statutory advisories verbatim with their statute / findings, and the compliance
+  banner. **The banner's words are the server's** (`review.jurisdiction.message`) — the client never
+  writes its own sentence about legality. Every row can be shown on the board or handed to Huume as a
+  question. `reviewShape.ts` tightens the loose `work/`-tree shape (that tree must not import the Matcha
+  types) and defaults an absent `compliance_status` to `unmapped`, never `verified`.
+- **Scenarios are free simulations.** Each chip is one `POST …/fill-vacant/preview` — a
+  `schedule_chat_proposals` row, nothing written. Shift-click a second chip to diff which shifts are
+  staffed differently and how the hours move (`compareReviews`). From the selected chip: **Apply now**
+  (REST, `execute_edit_proposal`) or **Stage in thread**. Leaving the week discards the untouched rows
+  (`DELETE …/fill-vacant/{id}`); a staged one is left alone because the thread owns it now.
+- **`POST /assistant/sessions/{session_id}/adopt-proposal`** is how a scenario becomes the thread's
+  staged action (`schedule_assistant_session.adopt_editor_proposal`). It writes the proposal into
+  `mw_threads.current_state.huume_action` as a `schedule_change` staged dict with a freshly minted
+  `confirm_id`, so the confirm turn is the SAME `evaluate_huume_action` → `schedule_skill.execute` →
+  `execute_edit_proposal` path a Huume-staged change takes — one confirmation mechanism, one audit
+  trail. Guards: the session must be this manager's live (non-archived) schedule chat, the proposal
+  must be theirs, `status='proposed'`, `surface='editor'`, `kind='edit'`, and its `parse` must name the
+  same location and week as the session (409 otherwise, so a scenario cannot be adopted into a chat
+  scoped elsewhere). A displaced staged proposal or generation run is CANCELLED rather than left
+  applicable.
+- **`useScheduleHuumeThread`** holds the session/stream logic lifted out of `ScheduleHuumePanel`, so the
+  page owns `currentState` and the panel is presentational. `setCurrentState` is what the adopt call
+  writes back through. `usePlanningInputs` and `useScheduleScenarios` are the rail's and the strip's
+  state; both are last-request-wins and reload after any applied write.
+- Retired: `ScheduleEditor.tsx` (+ its test), `RosterPanel` (the rail's people list replaces it — same
+  drag, same qualification preview, now with load), `ScheduleEditorToolbar` (→ `SchedulePilotToolbar`).
+  The board, `ShiftInspector`, drag wiring, publish and edit-published semantics are unchanged;
+  `WeekTimeGrid` gains only a `dimmed` state so a selected person's week reads at a glance.
+
 ## Schedule assistant surface (2026-08-21)
 
 `routes/employee_schedule/assistant.py` owns the durable session endpoint and

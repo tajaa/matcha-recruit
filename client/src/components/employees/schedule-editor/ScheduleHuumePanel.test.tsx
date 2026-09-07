@@ -1,226 +1,242 @@
 import { MemoryRouter } from 'react-router-dom'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import ScheduleHuumePanel, { SETUP_KICKOFF_PROMPT } from './ScheduleHuumePanel'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import ScheduleHuumePanel from './ScheduleHuumePanel'
+import { SETUP_KICKOFF_PROMPT } from '../../../hooks/employees/useScheduleHuumeThread'
+import type { ScheduleHuumeThread } from '../../../hooks/employees/useScheduleHuumeThread'
 
-const { getScheduleHuumeSessionMock, listSessionsMock, archiveSessionMock, sendMessageStreamMock } = vi.hoisted(() => ({
-  getScheduleHuumeSessionMock: vi.fn(),
-  listSessionsMock: vi.fn(),
-  archiveSessionMock: vi.fn(),
-  sendMessageStreamMock: vi.fn((_threadId: string, _content: string, _callbacks: unknown) => new AbortController()),
-}))
-
-vi.mock('../../../api/employees/scheduleAssistant', () => ({
-  getScheduleHuumeSession: getScheduleHuumeSessionMock,
-  listScheduleHuumeSessions: listSessionsMock,
-  archiveScheduleHuumeSession: archiveSessionMock,
-  transcribeScheduleVoice: vi.fn(),
-}))
-vi.mock('../../../work/api/matchaWork/messaging', () => ({ sendMessageStream: sendMessageStreamMock }))
-
-function session(currentState: Record<string, unknown>, sessionId = 'session-1') {
+/** The panel is presentational now — every piece of state comes from
+ *  `useScheduleHuumeThread`, which has its own tests. These cover what the
+ *  panel does with that state. */
+function fakeThread(overrides: Partial<ScheduleHuumeThread> = {}): ScheduleHuumeThread {
   return {
-    session_id: sessionId, thread_id: `thread-${sessionId}`, location_id: 'loc1',
-    week_start: '2026-08-09', week_end: '2026-08-16', title: 'New chat', messages: [],
-    current_state: currentState, version: 1,
+    threadId: 'thread-1',
+    sessionId: 'session-1',
+    sessions: [],
+    historyOpen: false,
+    setHistoryOpen: vi.fn(),
+    refreshSessions: vi.fn(),
+    messages: [],
+    currentState: {},
+    setCurrentState: vi.fn(),
+    action: undefined,
+    choice: undefined,
+    input: '',
+    setInput: vi.fn(),
+    status: '',
+    sessionError: null,
+    retry: vi.fn(),
+    steps: [],
+    busy: false,
+    composerDisabled: false,
+    send: vi.fn().mockResolvedValue(undefined),
+    openChat: vi.fn(),
+    archiveChat: vi.fn().mockResolvedValue(undefined),
+    voice: {
+      enabled: false, starting: false, transcribing: false, recording: false, error: null,
+      begin: vi.fn().mockResolvedValue(undefined), finish: vi.fn().mockResolvedValue(undefined),
+    },
+    ...overrides,
   }
 }
 
-function summary(sessionId: string, title: string) {
-  return {
-    session_id: sessionId, thread_id: `thread-${sessionId}`, title, message_count: 4,
-    created_at: '2026-08-09T10:00:00Z', last_activity_at: '2026-08-09T10:05:00Z',
-  }
-}
-
-function renderPanel() {
+function renderPanel(thread: ScheduleHuumeThread, props: Record<string, unknown> = {}) {
   return render(
     <MemoryRouter>
       <ScheduleHuumePanel
-        firstName="Jamie" weekStart="2026-08-09" locationId="loc1" locationName="Wilshire"
-        selectedShifts={[]} onClearSelectedShifts={() => {}} onApplied={() => {}}
-        onAutomaticActionSettled={() => {}} onClose={() => {}}
+        thread={thread}
+        firstName="Jamie"
+        weekStart="2026-08-09"
+        locationId="loc1"
+        locationName="Wilshire"
+        selectedShifts={[]}
+        onClearSelectedShifts={() => {}}
+        {...props}
       />
     </MemoryRouter>,
   )
 }
 
 describe('ScheduleHuumePanel choice chips', () => {
-  beforeEach(() => {
-    sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
-    getScheduleHuumeSessionMock.mockReset()
-    listSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
-    archiveSessionMock.mockReset().mockResolvedValue({ session_id: 'session-1', archived: true })
-  })
+  const choice = {
+    question: 'Which week template should I use?',
+    options: [
+      { label: 'Downtown default week', send: 'Use the week template named Downtown default week' },
+      { label: 'Holiday week' },
+    ],
+    kind: 'single' as const,
+  }
 
-  it('renders the staged question as tappable options', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({
-      huume_choice: {
-        question: 'Which week template should I use?',
-        options: [
-          { label: 'Downtown default week', send: 'Use the week template named Downtown default week' },
-          { label: 'Holiday week' },
-        ],
-        kind: 'single',
-      },
-    }))
+  it('renders the staged question as tappable options', () => {
+    renderPanel(fakeThread({ choice }))
 
-    renderPanel()
-
-    expect(await screen.findByText('Which week template should I use?')).toBeInTheDocument()
+    expect(screen.getByText('Which week template should I use?')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Downtown default week' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Holiday week' })).toBeInTheDocument()
   })
 
-  it('sends the option’s send text as an ordinary user turn', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({
-      huume_choice: {
-        question: 'Which week template should I use?',
-        options: [{ label: 'Downtown default week', send: 'Use the week template named Downtown default week' }, { label: 'Holiday week' }],
-        kind: 'single',
-      },
-    }))
+  it('sends the option’s send text as an ordinary user turn', () => {
+    const thread = fakeThread({ choice })
+    renderPanel(thread)
 
-    renderPanel()
-    fireEvent.click(await screen.findByRole('button', { name: 'Downtown default week' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Downtown default week' }))
 
     // Same path Confirm/Cancel use — a chip can never satisfy the server's
     // explicit-confirmation gate, it just saves typing.
-    await waitFor(() => expect(sendMessageStreamMock).toHaveBeenCalledTimes(1))
-    expect(sendMessageStreamMock.mock.calls[0][1]).toBe('Use the week template named Downtown default week')
+    expect(thread.send).toHaveBeenCalledWith('Use the week template named Downtown default week')
   })
 
-  it('falls back to the label when an option carries no send text', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({
-      huume_choice: {
-        question: 'Which job did you mean?',
-        options: [{ label: 'Barista' }, { label: 'Shift Lead' }],
-        kind: 'single',
-      },
-    }))
+  it('falls back to the label when an option carries no send text', () => {
+    const thread = fakeThread({ choice })
+    renderPanel(thread)
 
-    renderPanel()
-    fireEvent.click(await screen.findByRole('button', { name: 'Shift Lead' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Holiday week' }))
 
-    await waitFor(() => expect(sendMessageStreamMock).toHaveBeenCalledTimes(1))
-    expect(sendMessageStreamMock.mock.calls[0][1]).toBe('Shift Lead')
+    expect(thread.send).toHaveBeenCalledWith('Holiday week')
   })
 
-  it('hides the chips while a turn is streaming', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({
-      huume_choice: {
-        question: 'Which job did you mean?',
-        options: [{ label: 'Barista' }, { label: 'Shift Lead' }],
-        kind: 'single',
-      },
-    }))
+  it('hides the chips while a turn is streaming', () => {
+    // The answer is already on its way and the question may be about to be replaced.
+    renderPanel(fakeThread({ choice, busy: true }))
 
-    renderPanel()
-    fireEvent.click(await screen.findByRole('button', { name: 'Barista' }))
-
-    // The mocked stream never completes, so the panel stays busy — the answer
-    // is already on its way and the question may be about to be replaced.
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Shift Lead' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Holiday week' })).not.toBeInTheDocument()
   })
 
-  it('shows no chips when the turn left none staged', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({}))
+  it('shows no chips when the turn left none staged', () => {
+    renderPanel(fakeThread())
 
-    renderPanel()
-
-    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalled())
     expect(screen.queryByRole('group')).not.toBeInTheDocument()
   })
 })
 
-describe('ScheduleHuumePanel thread management', () => {
-  beforeEach(() => {
-    sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
-    getScheduleHuumeSessionMock.mockReset().mockResolvedValue(session({}))
-    listSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
-    archiveSessionMock.mockReset().mockResolvedValue({ session_id: 'session-1', archived: true })
+describe('ScheduleHuumePanel setup gate', () => {
+  it('offers the interview instead of a build that would be refused', () => {
+    const thread = fakeThread()
+    renderPanel(thread, { weekRulesEstablished: false })
+
+    expect(screen.queryByRole('button', { name: /Build my week/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Set up this location/ }))
+
+    expect(thread.send).toHaveBeenCalledWith(SETUP_KICKOFF_PROMPT)
   })
 
-  it('opens a fresh chat rather than resuming one', async () => {
-    renderPanel()
+  it('offers the build and the server-side fill once the rules are established', () => {
+    const thread = fakeThread()
+    renderPanel(thread, { weekRulesEstablished: true })
 
-    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalled())
-    expect(getScheduleHuumeSessionMock.mock.calls[0][2]).toBeNull()
+    expect(screen.getByRole('button', { name: /Build my week/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set up this location/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Fill the open shifts/ }))
+    expect(thread.send).toHaveBeenCalledWith('Fill the open shifts this week.')
   })
 
-  it('reopens the chat picked out of history', async () => {
-    listSessionsMock.mockResolvedValue({ sessions: [summary('session-2', 'Cover Friday close')] })
-
-    renderPanel()
-    fireEvent.click(await screen.findByRole('button', { name: 'Previous chats' }))
-    fireEvent.click(await screen.findByRole('button', { name: /^Cover Friday close/ }))
-
-    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
-    expect(getScheduleHuumeSessionMock.mock.calls[1][2]).toBe('session-2')
-  })
-
-  it('starts a new chat from the header without resuming the last one', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({}, 'session-2'))
-    listSessionsMock.mockResolvedValue({ sessions: [summary('session-2', 'Cover Friday close')] })
-
-    renderPanel()
-    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
-
-    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
-    expect(getScheduleHuumeSessionMock.mock.calls[1][2]).toBeNull()
-  })
-
-  it('removes a chat from history and reopens a fresh one when it was open', async () => {
-    getScheduleHuumeSessionMock.mockResolvedValue(session({}, 'session-1'))
-    listSessionsMock.mockResolvedValue({ sessions: [summary('session-1', 'Rebuild the week')] })
-
-    renderPanel()
-    fireEvent.click(await screen.findByRole('button', { name: 'Previous chats' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove chat: Rebuild the week' }))
-
-    await waitFor(() => expect(archiveSessionMock).toHaveBeenCalledWith('session-1'))
-    await waitFor(() => expect(getScheduleHuumeSessionMock).toHaveBeenCalledTimes(2))
+  it('greets the manager by name only while the chat is empty', () => {
+    renderPanel(fakeThread())
+    expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument()
   })
 })
 
+describe('ScheduleHuumePanel chrome', () => {
+  it('mounts as a workspace column when embedded, and as a dialog otherwise', () => {
+    const { unmount } = renderPanel(fakeThread(), { embedded: true })
+    expect(screen.getByRole('region', { name: 'Huume schedule assistant' })).toBeInTheDocument()
+    unmount()
 
-describe('ScheduleHuumePanel setup gate', () => {
-  beforeEach(() => {
-    sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
-    getScheduleHuumeSessionMock.mockReset().mockResolvedValue(session({}))
-    listSessionsMock.mockReset().mockResolvedValue({ sessions: [] })
-    archiveSessionMock.mockReset().mockResolvedValue({ session_id: 'session-1', archived: true })
+    renderPanel(fakeThread(), { onClose: vi.fn() })
+    expect(screen.getByRole('dialog', { name: 'Huume schedule assistant' })).toBeInTheDocument()
   })
 
-  function renderWithRules(established: boolean) {
-    return render(
-      <MemoryRouter>
-        <ScheduleHuumePanel
-          firstName="Jamie" weekStart="2026-08-09" locationId="loc1" locationName="Wilshire"
-          selectedShifts={[]} weekRulesEstablished={established}
-          onClearSelectedShifts={() => {}} onApplied={() => {}}
-          onAutomaticActionSettled={() => {}} onClose={() => {}}
-        />
-      </MemoryRouter>,
-    )
+  it('only offers a close control when the caller can act on it', () => {
+    const { unmount } = renderPanel(fakeThread(), { embedded: true })
+    expect(screen.queryByRole('button', { name: 'Close schedule assistant' })).not.toBeInTheDocument()
+    unmount()
+
+    const onClose = vi.fn()
+    renderPanel(fakeThread(), { onClose })
+    fireEvent.click(screen.getByRole('button', { name: 'Close schedule assistant' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('lists previous chats and removes one from history', () => {
+    const summary = {
+      session_id: 'session-2', thread_id: 'thread-2', title: 'Cover Friday close', message_count: 4,
+      created_at: '2026-08-09T10:00:00Z', last_activity_at: '2026-08-09T10:05:00Z',
+    }
+    const thread = fakeThread({ historyOpen: true, sessions: [summary] })
+    renderPanel(thread)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Cover Friday close/ }))
+    expect(thread.openChat).toHaveBeenCalledWith('session-2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove chat: Cover Friday close' }))
+    expect(thread.archiveChat).toHaveBeenCalledWith(summary)
+  })
+
+  it('shows a session error with a retry rather than a silent dead composer', () => {
+    const thread = fakeThread({ sessionError: 'Session unavailable', composerDisabled: true })
+    renderPanel(thread)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Session unavailable')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(thread.retry).toHaveBeenCalled()
+  })
+
+  it('sends what the manager typed and reports the selected-block context', () => {
+    const thread = fakeThread({ input: 'Add an opener Monday' })
+    renderPanel(thread, {
+      selectedShifts: [{ id: 's1' }],
+      onClearSelectedShifts: vi.fn(),
+    })
+
+    expect(screen.getByText('Using 1 selected shift as context')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+    expect(thread.send).toHaveBeenCalled()
+  })
+})
+
+describe('ScheduleHuumePanel staged action', () => {
+  const stagedChange = {
+    type: 'schedule_change' as const,
+    status: 'proposed' as const,
+    confirm_id: 'ab12cd34',
+    proposal_id: 'proposal-1',
+    kind: 'assign',
+    operation_count: 2,
+    review: { kind: 'edit' as const, compliance_status: 'verified' as const, assignments: [], rejected: [], unfilled: [], employees: [] },
   }
 
-  it('offers the interview instead of a build that would be refused', async () => {
-    renderWithRules(false)
+  it('offers the review pane for a staged change that carries a review', () => {
+    const onOpenReview = vi.fn()
+    renderPanel(fakeThread({ action: stagedChange }), { onOpenReview })
 
-    const setup = await screen.findByRole('button', { name: /Set up this location/ })
-    expect(screen.queryByRole('button', { name: /Build my week/ })).not.toBeInTheDocument()
-
-    fireEvent.click(setup)
-    await waitFor(() => expect(sendMessageStreamMock).toHaveBeenCalledTimes(1))
-    expect(sendMessageStreamMock.mock.calls[0][1]).toBe(SETUP_KICKOFF_PROMPT)
+    fireEvent.click(screen.getByRole('button', { name: /Open the review pane/ }))
+    expect(onOpenReview).toHaveBeenCalled()
   })
 
-  it('offers the build once the rules are established', async () => {
-    renderWithRules(true)
+  it('offers no review pane for an action with nothing to review', () => {
+    const onOpenReview = vi.fn()
+    renderPanel(fakeThread({ action: { ...stagedChange, review: undefined } }), { onOpenReview })
 
-    expect(await screen.findByRole('button', { name: /Build my week/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Set up this location/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Open the review pane/ })).not.toBeInTheDocument()
+  })
+
+  it('offers no review pane once the action has been applied', () => {
+    renderPanel(fakeThread({ action: { ...stagedChange, status: 'applied' as const } }), { onOpenReview: vi.fn() })
+
+    expect(screen.queryByRole('button', { name: /Open the review pane/ })).not.toBeInTheDocument()
+  })
+
+  it('says an automatically prepared week was not asked for', () => {
+    renderPanel(fakeThread({
+      action: {
+        type: 'schedule_week_draft', status: 'proposed', confirm_id: 'auto1234',
+        generation_run_id: 'generation-1', location_id: 'loc1', week_start: '2026-08-09',
+        source_mode: 'template', auto_generated: true,
+      } as never,
+    }))
+
+    expect(screen.getByText(/Huume prepared this suggestion automatically/)).toBeInTheDocument()
+    expect(screen.queryByText(/Hi, Jamie/)).not.toBeInTheDocument()
   })
 })

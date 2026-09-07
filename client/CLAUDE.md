@@ -239,6 +239,15 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Bulk upload modal (frontend) → `client/src/components/employees/BulkUploadModal.tsx`
 - Multi-batch add modal (frontend) → `client/src/components/employees/MultiBatchModal.tsx`
 
+### Scheduling (Schedule Pilot)
+
+- Workspace page (`/ops/schedule/editor`) → `client/src/ops/pages/SchedulePilot.tsx` (replaced `ScheduleEditor.tsx` 2026-09-07)
+- Its regions → `client/src/components/employees/schedule-pilot/`: `InputsRail` (who is loaded/free/away, open seats, policy vs. law), `BoardPane` (week grid + inspector), `ReviewPane` (pure over a `ScheduleReview`), `ScenariosStrip` (fill simulations), `SchedulePilotToolbar`, `LoadLedger` (the hours bar both the rail and the review draw)
+- Thread state → `hooks/employees/useScheduleHuumeThread.ts`; the panel (`components/employees/schedule-editor/ScheduleHuumePanel.tsx`) is presentational
+- Rail + strip state → `hooks/employees/usePlanningInputs.ts`, `hooks/employees/useScheduleScenarios.ts`
+- Loose staged-action review → typed `ScheduleReview` → `components/employees/schedule-pilot/reviewShape.ts` (`asScheduleReview`, `compareReviews`)
+- The board's own write hook is unchanged → `hooks/employees/useScheduleEditor.ts`
+
 ### Matcha-work (collaborative AI workspace)
 
 - Web surface → `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`

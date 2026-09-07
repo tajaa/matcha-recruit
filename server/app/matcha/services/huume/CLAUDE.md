@@ -199,6 +199,18 @@ the prompt tells the model to read it before naming anyone in an explicit edit �
 on the schedule surface sees draft shifts and tags candidates with `also_suggested_for`. Full mechanics:
 `services/scheduling/CLAUDE.md` §"Fill vacant shifts".
 
+**Adopting a scenario into the thread (2026-09-07).** The Schedule Pilot workspace can run fill
+scenarios over REST without Huume. "Stage this" then hands one to the thread:
+`POST /employee-schedule/assistant/sessions/{session_id}/adopt-proposal` writes that
+`schedule_chat_proposals` row into `mw_threads.current_state.huume_action` as a `schedule_change`
+staged dict — same shape `schedule_skill.propose` produces, `confirm_id` minted the same way — so the
+manager confirms it in chat and the confirm turn runs the unchanged
+`evaluate_huume_action` → `schedule_skill.execute` → `execute_edit_proposal` path. One confirmation
+mechanism for both origins, and a displaced staged proposal or generation run is cancelled instead of
+being left applicable. The route is gated on `huume` + `matcha_work` like the session endpoint, and
+refuses a proposal that is not the caller's own live editor scenario for that session's location and
+week. Full mechanics: `services/scheduling/CLAUDE.md` §"Schedule Pilot workspace".
+
 **Week builder hardening (2026-09-07).** `build_week_schedule`'s staged dict now carries the same
 `ScheduleReview` a schedule_change does (`review`, kind `week_draft`: who goes where, per-person load
 before/after, statutory advisories verbatim, the planner's open seats with reasons, findings,
