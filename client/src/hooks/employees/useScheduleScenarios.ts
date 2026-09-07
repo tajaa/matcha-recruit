@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { applyFillVacant, cancelFillVacant, previewFillVacant } from '../../api/employees/employeeSchedule'
 import type { FillVacantPreviewRequest, ScheduleReview } from '../../types/employeeSchedule'
 import { errorMessage } from '../../types/employeeSchedule'
+import { ApiError } from '../../api/client'
 
 export type ScenarioStatus = 'ready' | 'applying' | 'applied' | 'staged'
 
@@ -50,6 +51,8 @@ export function useScheduleScenarios(locationId: string, weekStart: string) {
   const [notice, setNotice] = useState<ScenarioNotice | null>(null)
   const scenariosRef = useRef<Scenario[]>([])
   scenariosRef.current = scenarios
+  const selectedIdsRef = useRef<string[]>([])
+  selectedIdsRef.current = selectedIds
   const counter = useRef(0)
 
   useEffect(() => () => {
@@ -104,7 +107,13 @@ export function useScheduleScenarios(locationId: string, weekStart: string) {
         : item))
       return result
     } catch (error) {
-      setScenarios((current) => current.map((item) => item.proposal_id === proposalId ? { ...item, status: 'ready' } : item))
+      // 409 means the row is no longer `proposed` (already applied or
+      // discarded server-side): re-offering Apply on it would only 409 again.
+      const spent = error instanceof ApiError && error.status === 409
+      setScenarios((current) => spent
+        ? current.filter((item) => item.proposal_id !== proposalId)
+        : current.map((item) => item.proposal_id === proposalId ? { ...item, status: 'ready' } : item))
+      if (spent) setSelectedIds((current) => current.filter((id) => id !== proposalId))
       throw error
     }
   }, [])
@@ -117,19 +126,29 @@ export function useScheduleScenarios(locationId: string, weekStart: string) {
   }, [])
 
   /** After the thread adopted this scenario as its staged action. The row is
-   *  now the thread's to confirm or cancel, so it is no longer discarded here. */
+   *  now the thread's to confirm or cancel, so it is no longer discarded here.
+   *  The thread holds one staged action, so a scenario staged earlier was
+   *  cancelled by the server on adoption — its chip goes with it. */
   const markStaged = useCallback((proposalId: string) => {
-    setScenarios((current) => current.map((item) => item.proposal_id === proposalId ? { ...item, status: 'staged' } : item))
+    setScenarios((current) => current
+      .filter((item) => item.proposal_id === proposalId || item.status !== 'staged')
+      .map((item) => item.proposal_id === proposalId ? { ...item, status: 'staged' } : item))
+    setSelectedIds((current) => current.filter((id) => id === proposalId
+      || scenariosRef.current.find((item) => item.proposal_id === id)?.status !== 'staged'))
   }, [])
 
   /** Plain click selects one; a compare click keeps the current one and adds
-   *  this as the second (at most two). */
-  const select = useCallback((proposalId: string, options: { compare?: boolean } = {}) => {
-    setSelectedIds((current) => {
-      if (!options.compare) return current.length === 1 && current[0] === proposalId ? [] : [proposalId]
-      if (current.includes(proposalId)) return current.filter((id) => id !== proposalId)
-      return [...current.slice(-1), proposalId]
-    })
+   *  this as the second (at most two). Returns the resulting selection so the
+   *  caller can point the review at what is actually selected. */
+  const select = useCallback((proposalId: string, options: { compare?: boolean } = {}): string[] => {
+    const current = selectedIdsRef.current
+    let next: string[]
+    if (!options.compare) next = current.length === 1 && current[0] === proposalId ? [] : [proposalId]
+    else if (current.includes(proposalId)) next = current.filter((id) => id !== proposalId)
+    else next = [...current.slice(-1), proposalId]
+    selectedIdsRef.current = next
+    setSelectedIds(next)
+    return next
   }, [])
 
   return {

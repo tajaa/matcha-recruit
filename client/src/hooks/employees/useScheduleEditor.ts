@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   assignEmployee, createShift, deleteShift, fetchWeek, moveAssignment,
   publishRange, unassignEmployee, updateShift,
@@ -242,9 +242,15 @@ export function useScheduleEditor(weekStart: string, locationId: string, options
     }
   }, [toast, weekStart, locationId])
 
-  return {
+  // One object per change, not per render: the Schedule Pilot passes this
+  // whole to memoized panes, and the page re-renders on every composer keystroke.
+  return useMemo(() => ({
     shifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
     reload, createDraft, updateShiftDraft, moveShift, resizeShift, assignToShift,
     moveEmployee, unassignFromShift, removeShift, publishWeek,
-  }
+  }), [
+    shifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
+    reload, createDraft, updateShiftDraft, moveShift, resizeShift, assignToShift,
+    moveEmployee, unassignFromShift, removeShift, publishWeek,
+  ])
 }

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { useScheduleEditor } from '../../../hooks/employees/useScheduleEditor'
 import type { ScheduleJob, Shift } from '../../../types/employeeSchedule'
@@ -27,7 +28,7 @@ export interface BoardPaneProps {
 /** The week grid and the shift inspector — the old editor's body, verbatim in
  *  behaviour. The people list moved to the inputs rail; the DnD context
  *  wraps the whole workspace so drags still land here. */
-export default function BoardPane({
+function BoardPane({
   days, editor, editPublished, selectedEmployeeId, huumeSelectedShiftIds, inspectorShift, newDefaults,
   locationId, locationName, jobs, trainingEnabled, canMutate, onOpenNew, onOpenShift, onCloseInspector, onCreated,
   onToggleHuumeSelection,
@@ -73,3 +74,7 @@ export default function BoardPane({
     </div>
   )
 }
+
+// Memoized: the page re-renders on every Huume composer keystroke and stream
+// event, and this subtree is a droppable/draggable pair per shift.
+export default memo(BoardPane)

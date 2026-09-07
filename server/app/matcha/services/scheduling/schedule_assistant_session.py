@@ -49,6 +49,9 @@ def _automatic_action(row) -> dict:
     proposal = _coerce_jsonb(row["proposal"])
     metrics = _coerce_jsonb(row["metrics"])
     review = _coerce_jsonb(proposal.get("review"))
+    # The per-person load / advisories / jurisdiction review the workspace's
+    # review pane renders — same shape `build_week_schedule` stages.
+    schedule_review = _coerce_jsonb(proposal.get("schedule_review"))
     return {
         "type": "schedule_week_draft",
         "status": "proposed",
@@ -71,6 +74,9 @@ def _automatic_action(row) -> dict:
         "findings": (proposal.get("findings") or [])[:20],
         "schedule_preview": review.get("schedule_preview") or [],
         "preview_truncated": bool(review.get("preview_truncated")),
+        "review": schedule_review or None,
+        "compliance_status": schedule_review.get("compliance_status"),
+        "jurisdiction": schedule_review.get("jurisdiction"),
     }
 
 
@@ -424,7 +430,9 @@ async def adopt_editor_proposal(
                 "confirm_id": uuid4().hex[:8],
                 "kind": "assign",
                 "proposal_id": str(proposal_id),
-                "pill_text": edit_proposal_text({**proposal, "ack": proposal.get("ack") or "Here's the fill plan."}),
+                # The scenario came from the strip, not a chat ask — say so
+                # rather than echoing the preview route's "Got it.".
+                "pill_text": edit_proposal_text({**proposal, "ack": "Staged from the scenarios strip."}),
                 "operation_count": len(staged_ops),
                 "operation_summary": summarize_operations([{"kind": item.get("op")} for item in staged_ops], []),
                 "review": review,

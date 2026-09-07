@@ -8,7 +8,6 @@ import ActionDocViewer from '../../../work/components/panels/HuumePanel/ActionDo
 import HuumeStepTimeline from '../../../work/components/panels/HuumeStepTimeline'
 import type { Shift } from '../../../types/employeeSchedule'
 
-export { SETUP_KICKOFF_PROMPT, relativeChatTime, selectedShiftContext } from '../../../hooks/employees/useScheduleHuumeThread'
 import { SETUP_KICKOFF_PROMPT, relativeChatTime } from '../../../hooks/employees/useScheduleHuumeThread'
 
 interface ScheduleHuumePanelProps {

@@ -76,8 +76,13 @@ function NewScenarioForm({ jobs, people, selectedShiftIds, previewing, onPreview
   const [allowSplit, setAllowSplit] = useState(false)
   const excluded = people.filter((person) => excludeIds.includes(person.id))
 
+  // "Selected" with nothing selected would post `shift_ids: []`, which the
+  // server reads as no filter — every open shift in the week.
+  const selectedEmpty = scope === 'selected' && selectedShiftIds.length === 0
+
   function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (selectedEmpty) return
     onPreview({
       label: label.trim() || null,
       job_id: scope === 'job' && jobId ? jobId : null,
@@ -152,7 +157,7 @@ function NewScenarioForm({ jobs, people, selectedShiftIds, previewing, onPreview
       </label>
       <div className="ml-auto flex items-center gap-2 pb-0.5">
         <button type="button" onClick={onClose} className="rounded-md px-2 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-200">Cancel</button>
-        <button type="submit" disabled={previewing || (scope === 'job' && !jobId)} className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-[11px] font-medium text-zinc-950 disabled:opacity-40">
+        <button type="submit" disabled={previewing || (scope === 'job' && !jobId) || selectedEmpty} className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-[11px] font-medium text-zinc-950 disabled:opacity-40">
           {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />} Preview
         </button>
       </div>
@@ -186,7 +191,7 @@ export default function ScenariosStrip({
         )}
         {scenarios.map((scenario) => {
           const active = selectedIds.includes(scenario.proposal_id)
-          const stagedCount = scenario.review.assignments.length
+          const stagedCount = scenario.review.assignments.filter((item) => item.verdict !== 'blocked').length
           return (
             <Chip
               key={scenario.proposal_id}
@@ -231,7 +236,8 @@ export default function ScenariosStrip({
             <button
               type="button"
               onClick={() => onDiscard(primary.proposal_id)}
-              disabled={primary.status === 'applying'}
+              disabled={primary.status === 'applying' || primary.status === 'staged'}
+              title={primary.status === 'staged' ? 'Staged in the Huume thread — cancel it there' : undefined}
               aria-label={`Discard ${primary.label}`}
               className="rounded-md border border-white/[0.08] p-1.5 text-zinc-500 hover:text-red-300 disabled:opacity-40"
             ><Trash2 className="h-3.5 w-3.5" /></button>

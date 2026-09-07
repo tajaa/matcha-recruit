@@ -1694,10 +1694,15 @@ async def build_edit_proposal(
     editor_location_id: Optional[UUID] = None,
     editor_week_start: Optional[date] = None,
     editor_week_end: Optional[date] = None,
+    unfilled: Optional[list[dict]] = None,
 ) -> ProposalBuild:
     """Persists `_resolve_edit_ops`' result to the same `schedule_chat_proposals`
     table `build_proposal` uses — `proposal['kind'] == 'edit'` is what
-    `_bg_schedule_reply` dispatches on at confirm."""
+    `_bg_schedule_reply` dispatches on at confirm.
+
+    `unfilled` is the planner's open seats for a fill preview; it is persisted
+    on the doc so anything that rebuilds the review later (`adopt_editor_proposal`)
+    still reports them."""
     clarify_history = clarify_history or []
     base_doc = {
         "kind": "edit",
@@ -1705,6 +1710,8 @@ async def build_edit_proposal(
         "original_content": original_content,
         "ack": parsed.get("ack") or "",
     }
+    if unfilled:
+        base_doc["unfilled"] = list(unfilled)
     resolved = await _resolve_edit_ops(
         conn, company_id=company_id, channel_id=channel_id, parsed=parsed, today=today,
         shift_statuses=shift_statuses, editor_location_id=editor_location_id,

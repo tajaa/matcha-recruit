@@ -99,6 +99,7 @@ export default function SchedulePilot() {
     setNewDefaults(null)
     setInspectorShiftId(shift.id)
     setCenterView('board')
+    setMobileTab('board')
     toast(`Add planned break minutes, save the shift, then assign again. ${message}`, 'info')
   }, [toast])
   const editor = useScheduleEditor(weekStart, locationId, { onMealBreakRequired: openBreakPlanner })
@@ -109,7 +110,7 @@ export default function SchedulePilot() {
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
     useSensor(KeyboardSensor),
   )
-  const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
+  const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart])
   const inspectorShift = inspectorShiftId ? editor.shifts.find((shift) => shift.id === inspectorShiftId) ?? null : null
   const currentLocation = locations.find((l) => l.id === locationId)
   const currentLocationName = currentLocation ? locationLabel(currentLocation) : ''
@@ -235,44 +236,62 @@ export default function SchedulePilot() {
     }, { replace: true })
   }, [setSearchParams])
 
-  function openNew(defaults: NewShiftDefaults) {
+  // Stable handlers: BoardPane and InputsRail are memoized so the composer's
+  // keystrokes and stream events do not re-render the grid and the rail.
+  const openNew = useCallback((defaults: NewShiftDefaults) => {
     setInspectorShiftId(null)
     setNewDefaults(defaults)
-  }
+  }, [])
 
-  function openShift(shift: Shift) {
+  const openShift = useCallback((shift: Shift) => {
     setNewDefaults(null)
     setInspectorShiftId(shift.id)
-  }
+  }, [])
 
-  function canMutate(shift: Shift | undefined): boolean {
+  const canMutate = useCallback((shift: Shift | undefined): boolean => {
     if (!shift || shift.status === 'cancelled') return false
     return shift.status === 'draft' || editPublished
-  }
+  }, [editPublished])
+
+  const closeInspector = useCallback(() => { setInspectorShiftId(null); setNewDefaults(null) }, [])
+  const onCreated = useCallback((id: string) => { setNewDefaults(null); setInspectorShiftId(id) }, [])
+  const toggleHuumeSelection = useCallback((shift: Shift) => setHuumeSelectedShiftIds((current) => {
+    const next = new Set(current)
+    if (next.has(shift.id)) next.delete(shift.id); else next.add(shift.id)
+    return next
+  }), [])
+  const openWeekSetup = useCallback(() => setDrawer('weekSetup'), [])
+  const openJobs = useCallback(() => setDrawer('jobs'), [])
 
   function closeGuide() {
     try { window.localStorage.setItem(GUIDE_STORAGE_KEY, 'seen') } catch { /* best effort */ }
     setGuideOpen(false)
   }
 
-  function showShift(shiftId: string) {
+  // Navigation only: it must not touch the Huume context selection, which is
+  // appended to every turn as authoritative — that stays the ✨ toggle's job.
+  const showShift = useCallback((shiftId: string) => {
     const shift = editor.shifts.find((item) => item.id === shiftId)
     setCenterView('board')
     setMobileTab('board')
-    setHuumeSelectedShiftIds((current) => new Set([...current, shiftId]))
     if (shift) openShift(shift)
-  }
+  }, [editor.shifts, openShift])
 
-  function askHuume(text: string) {
-    thread.setInput(text)
+  const setThreadInput = thread.setInput
+  const askHuume = useCallback((text: string) => {
+    setThreadInput(text)
     setThreadOpen(true)
     setMobileTab('huume')
     window.setTimeout(() => document.getElementById('schedule-huume-input')?.focus(), 0)
-  }
+  }, [setThreadInput])
 
   function selectScenario(id: string, options?: { compare?: boolean }) {
-    scenarios.select(id, options)
-    setReviewSource({ kind: 'scenario', id })
+    // A compare click on an already-selected chip drops it, so the pane must
+    // follow what is still selected — otherwise Apply acts on a scenario the
+    // manager is not looking at.
+    const next = scenarios.select(id, options)
+    const focus = next.includes(id) ? id : next[0]
+    setReviewSource(focus ? { kind: 'scenario', id: focus } : { kind: 'staged' })
     setCenterView('review')
     setMobileTab('review')
   }
@@ -282,6 +301,7 @@ export default function SchedulePilot() {
       toast('Open the Huume thread first — staging puts the scenario there to confirm.', 'info')
       return
     }
+    const displaced = thread.action?.status === 'proposed'
     try {
       const result = await adoptScheduleProposal(thread.sessionId, id)
       thread.setCurrentState(result.current_state)
@@ -289,7 +309,9 @@ export default function SchedulePilot() {
       setReviewSource({ kind: 'staged' })
       setCenterView('review')
       setThreadOpen(true)
-      toast('Staged in the thread — reply confirm there to apply it.', 'success')
+      toast(displaced
+        ? 'Staged in the thread, replacing the change that was staged before — reply confirm there to apply it.'
+        : 'Staged in the thread — reply confirm there to apply it.', 'success')
     } catch (error) {
       toast(errorMessage(error), 'error')
     }
@@ -312,27 +334,30 @@ export default function SchedulePilot() {
     const action = active ? resolveScheduleDrop(active, over ?? null) : null
     if (!action) return
 
+    // Only a drop that wrote something changes the planning inputs.
+    let wrote = false
     if (action.kind === 'assign') {
       const target = editor.shifts.find((shift) => shift.id === action.toShiftId)
-      if (canMutate(target)) await editor.assignToShift(target!, action.employeeId)
+      if (canMutate(target)) { await editor.assignToShift(target!, action.employeeId); wrote = true }
       else toast('This shift is locked. Enable Edit published to change it.', 'info')
     } else if (action.kind === 'move-assignment') {
       const target = editor.shifts.find((shift) => shift.id === action.toShiftId)
       if (canMutate(target) && canMutate(editor.shifts.find((shift) => shift.id === action.fromShiftId))) {
         await editor.moveEmployee(action.employeeId, action.fromShiftId, action.toShiftId)
+        wrote = true
       } else toast('Both shifts must be editable before moving an assignment.', 'info')
     } else if (action.kind === 'unassign') {
       const source = editor.shifts.find((shift) => shift.id === action.fromShiftId)
-      if (canMutate(source)) await editor.unassignFromShift(source!, action.employeeId)
+      if (canMutate(source)) { await editor.unassignFromShift(source!, action.employeeId); wrote = true }
       else toast('This shift is locked. Enable Edit published to unassign someone.', 'info')
     } else if (action.kind === 'move-shift') {
       const shift = editor.shifts.find((item) => item.id === action.shiftId)
-      if (canMutate(shift)) await editor.moveShift(shift!, action.date, action.minute)
+      if (canMutate(shift)) { await editor.moveShift(shift!, action.date, action.minute); wrote = true }
       else toast('This shift is locked. Enable Edit published to move it.', 'info')
     } else if (action.kind === 'create-with-employee') {
       openNew({ date: action.date, minute: action.minute, employeeIds: [action.employeeId] })
     }
-    planning.reload()
+    if (wrote) planning.reload()
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -385,9 +410,9 @@ export default function SchedulePilot() {
       canMutate={canMutate}
       onOpenNew={openNew}
       onOpenShift={openShift}
-      onCloseInspector={() => { setInspectorShiftId(null); setNewDefaults(null) }}
-      onCreated={(id) => { setNewDefaults(null); setInspectorShiftId(id) }}
-      onToggleHuumeSelection={(shift) => setHuumeSelectedShiftIds((current) => { const next = new Set(current); if (next.has(shift.id)) next.delete(shift.id); else next.add(shift.id); return next })}
+      onCloseInspector={closeInspector}
+      onCreated={onCreated}
+      onToggleHuumeSelection={toggleHuumeSelection}
     />
   )
 
@@ -404,8 +429,8 @@ export default function SchedulePilot() {
       weekRules={weekRules}
       locationName={currentLocationName}
       credentialsEnabled={credentialTemplatesEnabled}
-      onOpenWeekSetup={() => setDrawer('weekSetup')}
-      onOpenJobs={() => setDrawer('jobs')}
+      onOpenWeekSetup={openWeekSetup}
+      onOpenJobs={openJobs}
       onAskHuume={askHuume}
       onShowShift={showShift}
     />

@@ -129,10 +129,14 @@ export function compareReviews(left: ScheduleReview, right: ScheduleReview): Rev
     if (entry) entry.right = afterMinutes(employee)
     else people.set(employee.employee_id, { employee_id: employee.employee_id, name: employee.name, left: 0, right: afterMinutes(employee) })
   }
-  // Someone in only one scenario still has their pre-existing hours in the other — the review's `before`.
+  // Someone in only one scenario still has their pre-existing hours in the
+  // other — the review's `before`. Presence, not a zero, is the test: a
+  // scenario that leaves a person at 0h after is a real outcome to show.
+  const inLeft = new Set(left.employees.map((e) => e.employee_id))
+  const inRight = new Set(right.employees.map((e) => e.employee_id))
   for (const [id, entry] of people) {
-    if (entry.left === 0) entry.left = right.employees.find((e) => e.employee_id === id)?.before.minutes ?? 0
-    if (entry.right === 0) entry.right = left.employees.find((e) => e.employee_id === id)?.before.minutes ?? 0
+    if (!inLeft.has(id)) entry.left = right.employees.find((e) => e.employee_id === id)?.before.minutes ?? 0
+    if (!inRight.has(id)) entry.right = left.employees.find((e) => e.employee_id === id)?.before.minutes ?? 0
   }
   const employees = [...people.values()].sort((x, y) => Math.abs(y.left - y.right) - Math.abs(x.left - x.right) || x.name.localeCompare(y.name))
   return {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { AlertTriangle, BriefcaseBusiness, CalendarCog, Search, Sparkles, UserRound, X } from 'lucide-react'
 import { LABEL } from '../../ui'
@@ -135,7 +135,7 @@ function Section({ label, count, children, action }: { label: string; count?: nu
  *  open seats, the house policy next to whether the state's law is on file,
  *  and the week-setup status. Everything a good scheduler has in their head;
  *  now also what Huume reads (`get_schedule_overview.roster_load`). */
-export default function InputsRail({
+function InputsRail({
   inputs, loading, roster, rosterFlags, selectedEmployeeId, onSelectEmployee, requiredJobId, requiredJobDate,
   weekRules, locationName, credentialsEnabled, onOpenWeekSetup, onOpenJobs, onAskHuume, onShowShift,
 }: InputsRailProps) {
@@ -274,3 +274,6 @@ export default function InputsRail({
     </aside>
   )
 }
+
+// Memoized for the same reason as BoardPane: one draggable per person.
+export default memo(InputsRail)

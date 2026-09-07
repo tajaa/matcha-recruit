@@ -71,7 +71,9 @@ def _proposal_row(*, created_by=USER, status="proposed", surface="editor", kind=
     return {
         "id": uuid4(), "created_by": created_by, "status": status,
         "proposal": json.dumps({"kind": kind, "surface": surface, "ack": "Got it.", "ops": [_op(0), _op(1)],
-                                "rejected": [], "jurisdiction": {"state": "CA", "status": "curated"}}),
+                                "rejected": [], "jurisdiction": {"state": "CA", "status": "curated"},
+                                "unfilled": [{"shift_id": "s9", "role": "barista", "reason": "unavailable",
+                                              "exclusions": {"unavailable": 3}}]}),
         "parse": {"editor_location_id": location, "editor_week_start": week, "label": "Spread the leads"},
     }
 
@@ -104,9 +106,12 @@ def test_the_scenario_becomes_a_confirmable_schedule_change_in_the_thread():
     assert staged["operation_count"] == 2 and staged["operation_summary"] == {"assign": 2}
     assert staged["review"]["kind"] == "edit" and staged["review"]["proposal_id"] == str(proposal["id"])
     assert staged["compliance_status"] == "verified" and staged["rejected_count"] == 0
+    # The seats the planner could not fill survive the round trip through the
+    # persisted doc — the review pane and Huume's state block both read them.
+    assert staged["unfilled_count"] == 1 and staged["review"]["unfilled"][0]["shift_id"] == "s9"
     assert staged["location_id"] == str(LOCATION) and staged["label"] == "Spread the leads"
     assert staged["adopted_from"] == "editor_scenario"
-    assert staged["pill_text"].startswith("\U0001F4C5 Got it. Here's what I'd change:")
+    assert staged["pill_text"].startswith("\U0001F4C5 Staged from the scenarios strip. Here's what I'd change:")
     # A pending question no longer applies; everything else in the state survives.
     assert "huume_choice" not in result["current_state"] and result["current_state"]["huume_plans"] == {}
     assert result["version"] == 5
