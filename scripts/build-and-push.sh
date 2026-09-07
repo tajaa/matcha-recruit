@@ -455,16 +455,27 @@ ecr_latest_sha() {
 # 0 = the given pathspecs changed (committed since $1, or uncommitted now);
 # 1 = untouched. Unknown/unreachable base SHA counts as changed — never skip a
 # build on a guess.
+#
+# Every git call runs with -C "$REPO_ROOT": pathspecs are resolved relative to
+# the process CWD, so running this script from scripts/ used to make "server"
+# mean "scripts/server", match nothing, and silently report "nothing changed"
+# — a skipped deploy with a success exit code.
 paths_changed_since() {
     local base=$1
     shift
-    if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+    if [ -z "$base" ] || ! git -C "$REPO_ROOT" cat-file -e "${base}^{commit}" 2>/dev/null; then
         return 0
     fi
-    if ! git diff --quiet "$base" HEAD -- "$@" 2>/dev/null; then
+    # Fail open if a pathspec matches nothing tracked — a typo'd or renamed
+    # path must not read as "unchanged".
+    if [ -z "$(git -C "$REPO_ROOT" ls-files -- "$@" 2>/dev/null | head -1)" ]; then
+        log_warning "Pathspec matched no tracked files: $* — treating as changed"
         return 0
     fi
-    if [ -n "$(git status --porcelain -- "$@" 2>/dev/null)" ]; then
+    if ! git -C "$REPO_ROOT" diff --quiet "$base" HEAD -- "$@" 2>/dev/null; then
+        return 0
+    fi
+    if [ -n "$(git -C "$REPO_ROOT" status --porcelain -- "$@" 2>/dev/null)" ]; then
         return 0
     fi
     return 1
