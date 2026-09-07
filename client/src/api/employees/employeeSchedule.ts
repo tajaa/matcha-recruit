@@ -10,6 +10,7 @@ import type {
   ScheduleAutomationRule, ScheduleAutomationPayload, WeekTemplateReplacePayload,
   ScheduleAuditFilters, ScheduleAuditResponse,
   ShiftBreakStagger, PlannedBreak,
+  PlanningInputs, FillVacantPreviewRequest, FillVacantPreviewResponse, FillVacantApplyResponse,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -412,4 +413,27 @@ export function fetchMyAvailability() {
 
 export function saveMyAvailability(windows: AvailabilityWindow[]) {
   return api.put<{ saved: number }>('/v1/portal/me/schedule/availability', { windows })
+}
+
+// ---- Planning: inputs + server-side fill (Schedule Pilot backbone) ----
+// Preview never writes a shift: it plans, persists ONE reviewable proposal
+// row for the caller, and returns the ScheduleReview. Apply runs the same
+// confirm-time rechecks Huume's confirm turn runs. No `force` on purpose.
+
+export function fetchPlanningInputs(locationId: string, weekStart: string) {
+  return api.get<PlanningInputs>(
+    `/employee-schedule/locations/${locationId}/planning-inputs?week_start=${encodeURIComponent(weekStart)}`,
+  )
+}
+
+export function previewFillVacant(locationId: string, payload: FillVacantPreviewRequest) {
+  return api.post<FillVacantPreviewResponse>(`/employee-schedule/locations/${locationId}/fill-vacant/preview`, payload)
+}
+
+export function applyFillVacant(proposalId: string) {
+  return api.post<FillVacantApplyResponse>(`/employee-schedule/fill-vacant/${proposalId}/apply`, {})
+}
+
+export function cancelFillVacant(proposalId: string) {
+  return api.delete<void>(`/employee-schedule/fill-vacant/${proposalId}`)
 }

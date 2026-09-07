@@ -287,3 +287,87 @@ async def test_eligibility_case_query_resolves_the_canonical_blocking_authority(
     # The WHERE-clause expression is being SELECTed, so its NULLs have to be
     # folded to false in SQL as well as read as false in Python.
     assert "COALESCE((" in source
+
+
+# ── planning inputs on the overview (2026-09-07) ─────────────────────────────
+
+_LOCATION_ROW = {"id": None, "name": "Wilshire", "address": None, "city": "LA", "state": "CA", "zipcode": None}
+
+
+def _inputs(calls):
+    async def fake_inputs(conn, *, company_id, location_id, week_start):
+        calls.append((company_id, location_id, week_start))
+        return {
+            "week_start": "2026-08-23", "week_end": "2026-08-29",
+            "roster": [{
+                "employee_id": "e1", "name": "Dana Reyes", "job_title": "Barista", "jobs": ["Shift Lead"],
+                "availability_state": "windows", "windows": {"0": ["06:00–14:00"]},
+                "time_away": [], "caps": {"max_weekly_minutes": 2400, "target_weekly_minutes": None,
+                                          "min_weekly_minutes": None, "allow_overtime": False,
+                                          "max_consecutive_days": None, "prefer_extra_hours": False},
+                "load": {"minutes": 960, "shifts": 2, "days": ["2026-08-24", "2026-08-25"]},
+            }],
+            "roster_truncated": False,
+            "open_slots": [{"shift_id": "s1", "role": "Shift Lead", "job_id": None, "starts_at": "2026-08-26T06:00:00+00:00",
+                            "ends_at": "2026-08-26T14:00:00+00:00", "required_staff": 1, "open": 1}],
+            "policy": {"min_rest_hours": 8.0}, "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"},
+            "week_rules": {"established": True, "missing": []}, "profile": {},
+        }
+    return fake_inputs
+
+
+@pytest.mark.asyncio
+async def test_overview_carries_the_model_facing_roster_load_even_for_an_empty_week(monkeypatch):
+    location_id, company_id = uuid4(), uuid4()
+    conn = _Conn({**_LOCATION_ROW, "id": location_id}, [])
+    calls = []
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(context, "build_planning_inputs", _inputs(calls))
+
+    result = await context.get_schedule_overview(company_id=company_id, location_id=location_id, week_start=date(2026, 8, 23))
+
+    assert result["shifts"] == [] and result["shift_count"] == 0
+    assert calls == [(company_id, location_id, date(2026, 8, 23))]
+    assert result["roster_load"] == [{
+        "employee_id": "e1", "name": "Dana Reyes", "jobs": ["Shift Lead"], "availability_state": "windows",
+        "scheduled_minutes": 960, "shift_count": 2, "days": ["2026-08-24", "2026-08-25"], "time_away": [],
+        "max_weekly_minutes": 2400, "allow_overtime": False,
+    }]
+    assert result["roster_truncated"] is False
+    assert result["open_slots"][0]["shift_id"] == "s1"
+    assert result["policy"] == {"min_rest_hours": 8.0}
+    assert result["jurisdiction"]["status"] == "curated"
+    assert result["week_rules"] == {"established": True, "missing": []}
+    assert "profile" not in result and "roster" not in result   # the full shape is the REST route's
+
+
+@pytest.mark.asyncio
+async def test_planning_inputs_are_built_once_not_once_per_shift_row(monkeypatch):
+    location_id, company_id = uuid4(), uuid4()
+    rows = [{
+        "id": uuid4(), "role": "opener", "department": None,
+        "starts_at": datetime(2026, 8, 24 + i, 8, tzinfo=timezone.utc), "ends_at": datetime(2026, 8, 24 + i, 16, tzinfo=timezone.utc),
+        "required_staff": 1, "status": "draft", "kind": "regular", "notes": None, "total_shift_count": 3, "assignments": "[]",
+    } for i in range(3)]
+    conn = _Conn({**_LOCATION_ROW, "id": location_id}, rows)
+    calls = []
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(context, "build_planning_inputs", _inputs(calls))
+
+    result = await context.get_schedule_overview(company_id=company_id, location_id=location_id, week_start=date(2026, 8, 23))
+
+    assert result["shift_count"] == 3 and len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failing_planning_builder_never_fails_the_overview(monkeypatch):
+    location_id, company_id = uuid4(), uuid4()
+    conn = _Conn({**_LOCATION_ROW, "id": location_id}, [])
+    monkeypatch.setattr(context, "get_connection", lambda: _ConnectionContext(conn))
+
+    async def boom(conn, **_kwargs):
+        raise RuntimeError("roster query exploded")
+
+    monkeypatch.setattr(context, "build_planning_inputs", boom)
+    result = await context.get_schedule_overview(company_id=company_id, location_id=location_id, week_start=date(2026, 8, 23))
+    assert result["status"] == "ok" and "roster_load" not in result

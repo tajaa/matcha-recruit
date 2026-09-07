@@ -571,6 +571,120 @@ export function addDays(iso: string, n: number): string {
  * The day comes from the location's scheduling profile (`week_start_weekday`).
  * It defaults to Sunday, which is what every caller assumed before stores
  * could pick their own. */
+// ---- Planning: the ScheduleReview contract + planning inputs ----
+// Server: services/scheduling/schedule_review.py (review) and
+// services/scheduling/planning_inputs.py (inputs). One shape for "what this
+// schedule write will do", rendered by the Huume pill/banner today and the
+// Schedule Pilot review pane next.
+
+export type ScheduleComplianceStatus = 'verified' | 'advisory' | 'unmapped' | 'unavailable'
+
+export type ScheduleReviewReason = { code: string; message: string; policy: boolean }
+
+export type ScheduleReviewAssignment = {
+  shift_id: string | null
+  role: string
+  starts_at: string | null
+  ends_at: string | null
+  employee_id: string | null
+  employee_name: string | null
+  op: string
+  verdict: 'ok' | 'warn' | 'blocked'
+  reasons: ScheduleReviewReason[]
+}
+
+export type ScheduleReviewRejected = Omit<ScheduleReviewAssignment, 'verdict'>
+
+export type ScheduleReviewUnfilled = {
+  shift_id: string
+  role: string | null
+  starts_at: string | null
+  ends_at: string | null
+  reason: string
+  exclusions: Record<string, number>
+}
+
+export type ScheduleReviewLoad = { minutes?: number; shifts?: number; days?: number }
+
+export type ScheduleReviewEmployee = {
+  employee_id: string
+  name: string
+  before: ScheduleReviewLoad
+  after: ScheduleReviewLoad
+  warnings: string[]
+}
+
+export type ScheduleJurisdiction = { state: string | null; status: string; message: string }
+
+export type ScheduleReview = {
+  proposal_id: string | null
+  kind: 'edit' | 'create' | 'batch' | 'week_draft'
+  compliance_status: ScheduleComplianceStatus
+  assignments: ScheduleReviewAssignment[]
+  rejected: ScheduleReviewRejected[]
+  unfilled: ScheduleReviewUnfilled[]
+  employees: ScheduleReviewEmployee[]
+  advisories: Array<{ message: string; statute: string | null; employee_name: string | null; shift_id: string | null }>
+  findings: Array<Record<string, unknown>>
+  jurisdiction: ScheduleJurisdiction
+}
+
+export type PlanningRosterPerson = {
+  employee_id: string
+  name: string
+  job_title: string | null
+  jobs: string[]
+  availability_state: AvailabilityState | null
+  windows: Record<string, string[]>
+  time_away: Array<{ start: string; end: string }>
+  caps: {
+    max_weekly_minutes: number | null
+    target_weekly_minutes: number | null
+    min_weekly_minutes: number | null
+    allow_overtime: boolean
+    max_consecutive_days: number | null
+    prefer_extra_hours: boolean
+  }
+  load: { minutes: number; shifts: number; days: string[] }
+}
+
+export type PlanningInputs = {
+  week_start: string
+  week_end: string
+  roster: PlanningRosterPerson[]
+  roster_truncated: boolean
+  open_slots: Array<{
+    shift_id: string; role: string | null; job_id: string | null
+    starts_at: string; ends_at: string; required_staff: number; open: number
+  }>
+  policy: {
+    min_rest_hours: number
+    max_shifts_per_day: number
+    max_consecutive_days: number
+    default_weekly_cap_minutes: number
+  }
+  jurisdiction: ScheduleJurisdiction
+  week_rules: { established: boolean; missing: string[] }
+  profile: { operating_hours: Record<string, unknown>; leader_required: boolean | null; leader_job_names: string[] }
+}
+
+export type FillVacantPreviewRequest = {
+  week_start: string
+  job_id?: string | null
+  role_hint?: string | null
+  shift_ids?: string[] | null
+  employee_id?: string | null
+  exclude_employee_ids?: string[] | null
+  allow_split_shift?: boolean
+  label?: string | null
+}
+
+export type FillVacantPreviewResponse =
+  | { status: 'ready'; proposal_id: string; pill_text: string; review: ScheduleReview; label: string | null }
+  | { status: 'empty' | 'clarify' | 'refused'; message: string; unfilled: ScheduleReviewUnfilled[]; jurisdiction?: ScheduleJurisdiction }
+
+export type FillVacantApplyResponse = { status: 'applied'; message: string; touched_shift_ids: string[] }
+
 export function startOfWeek(d: Date, weekStartWeekday = 0): Date {
   const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
   c.setUTCDate(c.getUTCDate() - ((c.getUTCDay() - weekStartWeekday + 7) % 7))

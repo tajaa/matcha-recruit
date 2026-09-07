@@ -643,3 +643,17 @@ class ScheduleAutomationRuleUpsert(BaseModel):
             # day, which this payload does not carry — the route re-checks
             # alignment against the location's scheduling profile.
         return self
+
+
+class FillVacantPreviewRequest(BaseModel):
+    """`POST /employee-schedule/locations/{location_id}/fill-vacant/preview` —
+    one server-side fill scenario (services/scheduling/week_builder.plan_vacant_fill).
+    Nothing here forces past a check; agent/planner paths never do."""
+    week_start: date
+    job_id: Optional[UUID] = None
+    role_hint: Optional[str] = Field(None, max_length=100)
+    shift_ids: Optional[List[UUID]] = Field(None, max_length=200)
+    employee_id: Optional[UUID] = None
+    exclude_employee_ids: Optional[List[UUID]] = Field(None, max_length=300)
+    allow_split_shift: bool = False
+    label: Optional[str] = Field(None, max_length=60)

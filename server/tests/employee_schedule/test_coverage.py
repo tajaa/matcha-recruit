@@ -273,3 +273,65 @@ class TestLapseFlags:
             location_id=None, role_hint=None, features={"credential_templates": True},
         ))
         assert result["shifts"][0]["candidates"][0]["flags"] == []
+
+
+# ── statuses + cross-shift annotation (2026-09-07) ───────────────────────────
+
+class _StatusConn(FakeConn):
+    """Also answers the `status = ANY(...)` shape the schedule editor asks for,
+    and remembers what it was bound with."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.status_args = None
+
+    async def fetch(self, query, *args):
+        q = " ".join(query.split())
+        if "FROM schedule_shifts" in q and "status = ANY(" in q:
+            self.status_args = args
+            return self.shifts
+        return await super().fetch(query, *args)
+
+
+class TestStatusesAndCrossShiftAnnotation:
+    def test_the_channel_default_is_still_published_only(self):
+        conn = _StatusConn(shifts=[_shift_row(uuid4())], roster=[_emp(uuid4(), "Dana", "Whitfield")])
+        result = _run(coverage.find_coverage_candidates(
+            conn, company_id="c1", target_date=date(2026, 8, 5), location_id=None, role_hint=None, features={},
+        ))
+        assert conn.status_args is None               # routed through the historical SQL
+        assert len(result["shifts"]) == 1
+
+    def test_the_editor_asks_for_drafts_too_and_the_query_binds_them(self):
+        conn = _StatusConn(shifts=[_shift_row(uuid4())], roster=[_emp(uuid4(), "Dana", "Whitfield")])
+        result = _run(coverage.find_coverage_candidates(
+            conn, company_id="c1", target_date=date(2026, 8, 5), location_id=None, role_hint=None, features={},
+            statuses=("draft", "published"),
+        ))
+        assert conn.status_args[-1] == ["draft", "published"]
+        assert len(result["shifts"]) == 1
+
+    def test_the_role_hint_shape_binds_statuses_as_well(self):
+        conn = _StatusConn(shifts=[_shift_row(uuid4(), role="Opener")], roster=[])
+        _run(coverage.find_coverage_candidates(
+            conn, company_id="c1", target_date=date(2026, 8, 5), location_id=None, role_hint="open", features={},
+            statuses=("draft", "published"),
+        ))
+        assert "open" in conn.status_args and conn.status_args[-1] == ["draft", "published"]
+
+    def test_the_same_free_person_is_flagged_on_every_shift_they_were_suggested_for(self):
+        opener, closer = uuid4(), uuid4()
+        dana, kai = uuid4(), uuid4()
+        conn = FakeConn(
+            shifts=[_shift_row(opener, role="Opener", starts=(2026, 8, 5, 6, 0), ends=(2026, 8, 5, 14, 0)),
+                    _shift_row(closer, role="Closer", starts=(2026, 8, 5, 14, 0), ends=(2026, 8, 5, 22, 0))],
+            roster=[_emp(dana, "Dana", "Whitfield"), _emp(kai, "Kai", "Vega")],
+            # Kai already closes: free for the opener, excluded from the closer.
+            assignees=[{"shift_id": closer, "employee_id": kai, "first_name": "Kai", "last_name": "Vega"}],
+        )
+        result = _run(coverage.find_coverage_candidates(
+            conn, company_id="c1", target_date=date(2026, 8, 5), location_id=None, role_hint=None, features={},
+        ))
+        by_role = {shift["role"]: {c["name"]: c["also_suggested_for"] for c in shift["candidates"]} for shift in result["shifts"]}
+        assert by_role["Opener"] == {"Dana Whitfield": [closer], "Kai Vega": []}   # Kai isn't suggested for the closer
+        assert by_role["Closer"] == {"Dana Whitfield": [opener]}

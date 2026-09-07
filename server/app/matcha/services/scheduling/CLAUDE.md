@@ -85,6 +85,76 @@ blamed drift. Every adult statutory check is `advisory`; the only hard stops wer
   `jurisdiction_rule_status` in `test_shift_compliance.py`, and the all-vacant/state-block cases in
   `tests/huume/`.
 
+### Fill vacant shifts (`week_builder.plan_vacant_fill`, 2026-09-07) — the server picks people
+
+Why: after the guard (above) the assign path was SAFE but still not SMART — "fill the open lead shifts"
+still meant the model naming a person per shift with no view of anyone's hours, and the guard then
+refusing most of it. The fix is the design rule the week builder already followed: **the server picks
+people; the model relays.** Nothing new is invented — `plan_vacant_fill` is `build_plan` + the compliance
+preflight/replan loop pointed at the week's OPEN seats, and the result lands as an ordinary `edit`
+proposal so the guard, the pill, the confirm turn and the audit row are the ones every other path uses.
+
+- **`build_plan` policy guardrails + fairness** (shared with the whole-week builder): a second shift the
+  same day (`policy: second shift that day`, relaxed by `allow_split_shift=True` — which also stops the
+  rest rule from firing between the two halves of that split day, never between days), under
+  `POLICY_MIN_REST_HOURS` rest against adjacent windows (`policy: less than 8h rest`), and
+  `POLICY_MAX_CONSECUTIVE_DAYS` when the profile has no `max_consecutive_days`. They are HARD skips here
+  (a planner that stacks the only lead onto every lead block is the failure this exists to stop), with
+  the `policy:` prefix in `unfilled.exclusions` so law/eligibility and operational defaults stay
+  distinguishable. `candidate_score` puts `shift_count` before `minutes`, so with equal target status the
+  person with fewer shifts wins — two leads split seven blocks 4/3 instead of 7/0.
+- **`_load_vacant_demand`** — same row shape as `_load_existing_demand`, but `status IN (draft,
+  published)` (an assignment onto a published shift is a routine edit; `_apply_edit_ops` does it today),
+  `HAVING COUNT(assignees) < required_staff`, optional `job_id = ANY`, `id = ANY`, `role ILIKE`. Current
+  assignees ride as `fixed_employee_ids`. **No `_week_rules_gate`** on this path — the demand is the
+  shifts that already exist; store hours/pattern are irrelevant (pinned by `test_fill_vacant.py`).
+- **`plan_vacant_fill(conn, company_id, location_id, week_start, week_end?, job_ids?, role_hint?,
+  shift_ids?, only_employee_ids?, exclude_employee_ids?, allow_split_shift)`** → `{status ready|clarify|
+  refused, assignments[{shift_id, role, starts_at, ends_at, employee_id, employee_name, reason}],
+  unfilled[{shift_id, role, starts_at, ends_at, reason, exclusions}], hours_by_employee, metrics,
+  roster_size, demand_size, jurisdiction}`. `role_hint` resolves through `resolve_job_by_name` first and
+  falls back to an ILIKE on the free-text role. `only_employee_ids` is the old "put Dana on all of them"
+  semantics done right: the planner refuses per slot with a reason instead of the model multiplying one
+  name. Nothing is persisted here — that is what makes a REST preview a free simulation.
+- **Huume tool mode** — `propose_schedule_change(fill_vacant_shifts=true, fill_job_name?, fill_shift_ids?,
+  to_employee_name? [only that person], exclude_employee_names?, allow_split_shift?)`.
+  `schedule_skill._fill_vacant_requests` plans, turns `assignments` into plain `assign` edit requests and
+  the SAME `build_edit_proposal` stages them; `unfilled` is merged into the `ScheduleReview`, echoed on
+  the stage turn (`unfilled_count`), and rendered as an "Unfilled:" line in the state block. Zero
+  assignments ⇒ a clarify that names the top reasons per seat. The prompt's "Staffing rules" paragraph
+  routes every "fill / staff / cover the open shifts" ask here and forbids the model choosing names for
+  a fill. `all_vacant_shifts` stays as the literal "one named person on every open shift" path.
+- **The model can see load** — `planning_inputs.build_planning_inputs` is ONE builder behind two readers:
+  `get_schedule_overview` gains `roster_load` (`compact_roster_load`: per person jobs, availability
+  state, scheduled minutes/shift count/days this week, time away, weekly cap, `allow_overtime`),
+  `roster_truncated`, `open_slots`, `policy`, `jurisdiction`, `week_rules` (built once per overview, never
+  fails it); the REST `planning-inputs` route returns the full shape (adds per-weekday `windows`, all
+  caps, `profile` with operating hours + leader job names). `find_coverage_candidates(statuses=…)` lets the
+  schedule surface see drafts (channel default stays published-only, SQL byte-identical) and every
+  candidate carries `also_suggested_for` (the other shifts that day the same free person was suggested
+  for), so taking both suggestions is a choice, not a surprise double.
+- **REST backbone** (`routes/employee_schedule/planning.py`, mounted under `/employee-schedule`, feature
+  `employee_schedule`, location authz `assert_manager_location`): `GET /locations/{id}/planning-inputs
+  ?week_start=`; `POST /locations/{id}/fill-vacant/preview` (`FillVacantPreviewRequest`) → plan →
+  `build_edit_proposal(surface="editor", channel_id=None, shift_statuses=(draft, published))` persists
+  ONE `schedule_chat_proposals` row for the CALLER whose `parse` carries `editor_location_id` /
+  `editor_week_start` / `label` (the doc itself has no location or week; apply reads them back) →
+  `{status ready|empty|clarify|refused, proposal_id, pill_text, review(+unfilled), label}`;
+  `POST /fill-vacant/{proposal_id}/apply` — creator-only (403), `status='proposed'` (409),
+  editor/edit only (400), `execute_edit_proposal` with the week bound from the parse, claim error → 409,
+  scope error → 422, returns `touched_shift_ids`; **no `force`** (agent/planner paths never force);
+  `DELETE /fill-vacant/{proposal_id}` → 204 (409 once spent). Each preview is one scenario and the
+  proposal row is its handle — the Schedule Pilot workspace (PR4) builds its scenarios strip on exactly
+  this. Client: `api/employees/employeeSchedule.ts` (`fetchPlanningInputs`, `previewFillVacant`,
+  `applyFillVacant`, `cancelFillVacant`) + `types/employeeSchedule.ts` (`ScheduleReview`,
+  `PlanningInputs`, `FillVacant*`) only — no UI in this PR.
+- Tests: `test_week_builder.py` (policy refusals, split-shift relaxation, rest, consecutive default,
+  4/3 fairness, shift-count-before-minutes, single lead ≤1/day), `test_fill_vacant.py` (narrowing,
+  exclusions, replan on a compliance block, role-hint resolution, no rules gate, demand SQL),
+  `test_planning_inputs.py`, `test_planning_routes.py`, `test_coverage.py` (statuses,
+  `also_suggested_for`), `test_schedule_assistant_context.py` (`roster_load`, built once, never fails
+  the overview), and the `fill_vacant_shifts` cases in `tests/huume/`.
+
 ### Batched schedule corrections (`schedule_chat_proposals.proposal.kind='batch'`, 2026-09-06)
 
 One clarified correction is one confirmation. `propose_schedule_change`'s

@@ -264,6 +264,88 @@ async def _all_vacant_shift_requests(
     ], None
 
 
+async def _fill_vacant_requests(
+    conn, *, company_id: UUID, location_id: Optional[UUID],
+    week_start: Optional[_date], week_end: Optional[_date],
+    args: dict[str, Any], schedule_chat,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], Optional[str]]:
+    """Server-side fill: `week_builder.plan_vacant_fill` picks the people;
+    the result becomes plain `assign` edit requests so the SAME
+    `build_edit_proposal` (guard, pill, confirm) stages them. Returns
+    ``(edit_requests, unfilled, error)``."""
+    from app.matcha.services.scheduling.week_builder import plan_vacant_fill
+
+    if location_id is None or week_start is None:
+        return [], [], "Filling open shifts requires a scoped schedule workspace."
+
+    async def _resolve(name_hint: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        matched = await schedule_chat._match_single_employee(conn, company_id, name_hint, location_id)
+        if "none" in matched:
+            return None, matched["none"]
+        if "ambiguous" in matched:
+            return None, f"Which {name_hint} did you mean? " + ", ".join(matched["ambiguous"])
+        return matched["employee"], None
+
+    only_ids: list[UUID] = []
+    if str(args.get("to_employee_name") or "").strip():
+        employee, error = await _resolve(str(args["to_employee_name"]).strip())
+        if error:
+            return [], [], error
+        only_ids.append(employee["id"])
+    exclude_ids: list[UUID] = []
+    for name in args.get("exclude_employee_names") or []:
+        if not str(name or "").strip():
+            continue
+        employee, error = await _resolve(str(name).strip())
+        if error:
+            return [], [], error
+        exclude_ids.append(employee["id"])
+    shift_ids: list[UUID] = []
+    for raw in args.get("fill_shift_ids") or []:
+        try:
+            shift_ids.append(UUID(str(raw)))
+        except (TypeError, ValueError):
+            return [], [], "One of those shift ids isn't one I recognise — use ids from get_schedule_overview."
+
+    plan = await plan_vacant_fill(
+        conn, company_id=company_id, location_id=location_id, week_start=week_start,
+        week_end=week_end, role_hint=(args.get("fill_job_name") or "").strip() or None,
+        shift_ids=shift_ids or None, only_employee_ids=only_ids or None,
+        exclude_employee_ids=exclude_ids or None,
+        allow_split_shift=args.get("allow_split_shift") is True,
+    )
+    unfilled = [
+        {**item, "starts_at": _iso(item.get("starts_at")), "ends_at": _iso(item.get("ends_at"))}
+        for item in plan.get("unfilled") or []
+    ]
+    if plan.get("status") != "ready":
+        return [], unfilled, str(plan.get("message") or "I couldn't plan those shifts.")
+    if not plan["assignments"]:
+        reasons = _unfilled_summary(unfilled)
+        return [], unfilled, (
+            "I couldn't fill any of those shifts: " + reasons
+            + " Loosen the request (another job, allow a split shift, or exclude nobody) or assign by hand."
+        )
+    edit_requests = [
+        {"kind": "assign", "target_shift_id": str(item["shift_id"]), "to_employee_name": item["employee_name"]}
+        for item in plan["assignments"]
+    ]
+    return edit_requests, unfilled, None
+
+
+def _iso(value: Any) -> Any:
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _unfilled_summary(unfilled: list[dict[str, Any]], limit: int = 5) -> str:
+    parts = []
+    for item in unfilled[:limit]:
+        when = str(item.get("starts_at") or "")[:16].replace("T", " ")
+        parts.append(f"{(item.get('role') or 'shift')} {when} — {item.get('reason') or 'no eligible employees'}")
+    more = f"; …and {len(unfilled) - limit} more" if len(unfilled) > limit else ""
+    return "; ".join(parts) + more + "."
+
+
 async def find_coverage(
     *, company_id: UUID, role: Optional[str], features: dict[str, Any],
     date_str: str, role_hint: Optional[str], location_id: Optional[UUID] = None,
@@ -342,7 +424,14 @@ async def propose(
             operation_summary = {"create": 1}
         else:
             shift_requests: list[dict[str, Any]] = []
-            if args.get("all_vacant_shifts") is True:
+            unfilled: list[dict[str, Any]] = []
+            if args.get("fill_vacant_shifts") is True:
+                edit_requests, unfilled, error = await _fill_vacant_requests(
+                    conn, company_id=company_id, location_id=location_id,
+                    week_start=week_start, week_end=week_end, args=args,
+                    schedule_chat=schedule_chat,
+                )
+            elif args.get("all_vacant_shifts") is True:
                 edit_requests, error = await _all_vacant_shift_requests(
                     conn, company_id=company_id, location_id=location_id,
                     week_start=week_start, week_end=week_end,
@@ -389,6 +478,8 @@ async def propose(
     except Exception:
         logger.exception("schedule_skill.propose failed for company %s", company_id)
         return {"status": "refused", "message": "That failed just now — try the Schedule page instead."}
+    if kind == "create" and args.get("changes") in (None, []):
+        unfilled = []
 
     if build.kind == "clarify":
         # No threaded clarify round-trip (v1 scope cut) — ask the admin to
@@ -411,6 +502,11 @@ async def propose(
             "staffed or unstaffed shift."
         )}
     review = build.review or {}
+    if unfilled:
+        # Seats the planner could not fill are part of what the manager
+        # reviews — on the pill via the review, on the state block, and in the
+        # model's same-turn echo.
+        review = {**review, "unfilled": unfilled}
     if review:
         # Count what was actually STAGED: the guard may have rejected some of
         # the requested ops, and the model must not describe those as done.
@@ -428,6 +524,7 @@ async def propose(
         "operation_summary": operation_summary,
         "review": review,
         "rejected_count": len(review.get("rejected") or []),
+        "unfilled_count": len(review.get("unfilled") or []),
         "compliance_status": review.get("compliance_status") or "unmapped",
     }
 
