@@ -325,8 +325,12 @@ jobs:
           # come from two different reads of the board history.
           AUTOPR_DIRECTIVE_POLICY_FILE: ${{ runner.temp }}/runtime-policy.json
           AUTOPR_INVESTIGATION_EXIT_FILE: ${{ runner.temp }}/investigation-exit-code
+          # Where a browsing research run leaves the screenshots the trusted
+          # bridge admitted. Empty on every other kind of run.
+          AUTOPR_ARTIFACTS_OUTPUT_DIR: ${{ runner.temp }}/research-artifacts
         run: |
           date +%s > "$RUNNER_TEMP/investigation-started-at"
+          rm -rf "$RUNNER_TEMP/research-artifacts"
           "$AUTOPR_CONTROL_ROOT/kanban-autopr/investigate.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json"
 
       - name: Checkpoint interrupted investigation
@@ -450,6 +454,7 @@ jobs:
           # the server's task-update path notifies collaborators from there.
           "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh" \
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
+            "$RUNNER_TEMP/research-artifacts" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup

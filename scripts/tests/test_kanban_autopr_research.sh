@@ -229,6 +229,77 @@ check "a research pass that changes a repository file is discarded before it rea
       && echo 0 || echo 1)
 
 ################################################################################
+# Screenshots: the bridge admits a bounded, image-only set from one directory.
+mkdir -p "$TMP_DIR/shot-bin"
+cat > "$TMP_DIR/shot-bin/codex" <<'EOF'
+#!/usr/bin/env bash
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | sed -n 's/^REPORT=//p')"
+decision_path="$(printf '%s\n' "$prompt" | sed -n 's/^DECISION=//p')"
+mkdir -p "$(dirname "$report_path")" "$(dirname "$report_path")/artifacts"
+printf '### Summary\nstub\n' > "$report_path"
+printf '{"schema_version":1}\n' > "$decision_path"
+shots="$(dirname "$report_path")/artifacts"
+printf 'PNG' > "$shots/01-pricing.png"
+printf 'PNG' > "$shots/02-docs.jpg"
+# Everything below must be refused by the trusted side.
+printf 'secret' > "$shots/notes.txt"
+printf 'PNG' > "$shots/.hidden.png"
+head -c 5000000 /dev/zero > "$shots/03-huge.png"
+EOF
+chmod +x "$TMP_DIR/shot-bin/codex"
+
+PATH="$TMP_DIR/shot-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_CODEX_COLLECT_ARTIFACTS=1 \
+AUTOPR_SANDBOX_ARTIFACTS_DIR="$TMP_DIR/collected-shots" \
+AUTOPR_SANDBOX_MAX_ARTIFACT_BYTES=4194304 \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/shot-report.md" "$TMP_DIR/shot-decision.json" \
+  -f "$TMP_DIR/context.json" > "$TMP_DIR/shots.log" 2>&1
+shots_rc=$?
+check "the bridge collects screenshots and refuses non-images, dotfiles, and oversized captures" \
+    $([ "$shots_rc" = 0 ] \
+      && [ -f "$TMP_DIR/collected-shots/01-pricing.png" ] \
+      && [ -f "$TMP_DIR/collected-shots/02-docs.jpg" ] \
+      && [ ! -e "$TMP_DIR/collected-shots/notes.txt" ] \
+      && [ ! -e "$TMP_DIR/collected-shots/.hidden.png" ] \
+      && [ ! -e "$TMP_DIR/collected-shots/03-huge.png" ] \
+      && grep -q 'ignoring non-image artifact notes.txt' "$TMP_DIR/shots.log" \
+      && grep -q 'is 5000000 bytes' "$TMP_DIR/shots.log" \
+      && echo 0 || echo 1)
+
+rm -rf "$TMP_DIR/collected-shots"
+PATH="$TMP_DIR/shot-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+AUTOPR_SANDBOX_ARTIFACTS_DIR="$TMP_DIR/collected-shots" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/shot-report-off.md" "$TMP_DIR/shot-decision-off.json" \
+  -f "$TMP_DIR/context.json" > "$TMP_DIR/shots-off.log" 2>&1
+shots_off_rc=$?
+check "a run without the browse grant brings back no screenshots at all" \
+    $([ "$shots_off_rc" = 0 ] && [ ! -e "$TMP_DIR/collected-shots" ] && echo 0 || echo 1)
+
+# The capture helper's own refusals — the model never reaches an internal
+# address even through a hostname that resolves to one.
+capture_py="$AUTOPR_DIR/browse-capture.py"
+check "the capture helper refuses non-http, credentialed, and internal URLs" \
+    $(python3 "$capture_py" --url "file:///etc/passwd" --label x >/dev/null 2>&1; [ "$?" = 2 ] \
+      && { python3 "$capture_py" --url "https://user:pw@example.com" --label x >/dev/null 2>&1; [ "$?" = 2 ]; } \
+      && { python3 "$capture_py" --url "http://localhost:8001/admin" --label x >/dev/null 2>&1; [ "$?" = 2 ]; } \
+      && { python3 "$capture_py" --url "http://127.0.0.1/" --label x >/dev/null 2>&1; [ "$?" = 2 ]; } \
+      && { python3 "$capture_py" --url "http://host.docker.internal:5432/" --label x >/dev/null 2>&1; [ "$?" = 2 ]; } \
+      && echo 0 || echo 1)
+
+check "the research prompt points the model at the one bounded capture command" \
+    $(grep -qF 'browse-capture.py' "$AUTOPR_DIR/_prompt_research.txt" \
+      && grep -q 'Do not try to drive a browser any other way' "$AUTOPR_DIR/_prompt_research.txt" \
+      && grep -q 'operator setting on this machine, not a research failure' "$AUTOPR_DIR/_prompt_research.txt" \
+      && echo 0 || echo 1)
+
+################################################################################
 # decision.sh normalize-research
 cat > "$TMP_DIR/research-raw.json" <<'EOF'
 {"schema_version":1,"outcome":"research_report","card_note":"Lambda fits the worker tier; keep the API on containers.","summary":"Lambda suits bursty, stateless jobs. Matcha's Celery worker tier is the candidate; the FastAPI app is not.","sources":[{"title":"AWS Lambda pricing","url":"https://aws.example.com/lambda/pricing"},{"title":"Lambda cold starts","url":"https://aws.example.com/lambda/cold-starts"}],"confidence":{"score":82,"reason":"primary vendor docs plus the worker code"},"questions":[],"staged_actions":[{"kind":"email","to":"AWS account team","subject":"Lambda pricing for a small workload","body":"Hi — we run ~2k jobs/day…","why":"Confirms the committed-use discount before we plan the move."}]}
@@ -296,9 +367,11 @@ case "$url" in
   */files)
     if [ "$method" = POST ]; then
       src="${form#file=@}"; src="${src%%;*}"
-      cp "$src" "$RESEARCH_TEST_UPLOADED"
-      printf '%s\n' "$(basename "$src")" > "$RESEARCH_TEST_UPLOADED_NAME"
-      respond '{"id":"file-new-1","filename":"uploaded.md"}'
+      name="$(basename "$src")"
+      case "$name" in
+        *.md) cp "$src" "$RESEARCH_TEST_UPLOADED"; printf '%s\n' "$name" > "$RESEARCH_TEST_UPLOADED_NAME" ;;
+      esac
+      respond "{\"id\":\"file-$name\",\"filename\":\"$name\"}"
     else
       respond "${RESEARCH_TEST_EXISTING_FILES:-[]}"
     fi ;;
@@ -367,6 +440,7 @@ check "the report is uploaded to the task as the next numbered round" \
     $([ "$publish_rc" = 0 ] \
       && grep -q 'POST https://example.invalid/api/matcha-work/projects/8b924347-d6e4-4000-8e7d-ca8f46f76fba/tasks/aaaa0000-0000-4000-8000-000000000001/files' "$RESEARCH_TEST_CURL_LOG" \
       && [ "$(cat "$RESEARCH_TEST_UPLOADED_NAME")" = research-report-aaaa0000-r2.md ] \
+      && jq -e '.attachment_ids == ["file-research-report-aaaa0000-r2.md"]' "$RESEARCH_TEST_ACTIVITY" >/dev/null \
       && echo 0 || echo 1)
 check "the uploaded file carries a trusted provenance header, the model report, and the unsent staged actions" \
     $(head -1 "$RESEARCH_TEST_UPLOADED" | grep -q '^_AutoPR research · .* · model gpt-5.6-luna · round 2 · 2 source(s)_' \
@@ -376,7 +450,7 @@ check "the uploaded file carries a trusted provenance header, the model report, 
       && grep -q '\[email\] to: AWS account team' "$RESEARCH_TEST_UPLOADED" \
       && echo 0 || echo 1)
 check "a summary note is posted with the report attached and threaded under the additional-context event" \
-    $(jq -e '.kind == "note" and .attachment_ids == ["file-new-1"]
+    $(jq -e '.kind == "note" and .attachment_ids == ["file-research-report-aaaa0000-r2.md"]
              and (.body | startswith("Lambda suits bursty"))
              and (.body | contains("Report attached: research-report-aaaa0000-r2.md"))
              and (.body | contains("NOT sent"))
@@ -399,6 +473,31 @@ check "an outreach-granted board gets the proposals posted for approval, with no
            and .actions[0].to == "AWS account team"
            and (.actions[0].body | length > 0)' "$RESEARCH_TEST_STAGED" >/dev/null \
     && grep -q 'POST https://example.invalid/api/matcha-work/projects/8b924347-d6e4-4000-8e7d-ca8f46f76fba/tasks/aaaa0000-0000-4000-8000-000000000001/autopr/staged-actions' "$RESEARCH_TEST_CURL_LOG" \
+    && echo 0 || echo 1)
+
+# Screenshots attach to the same ticket and the same note as the report, so the
+# evidence sits beside the claim it supports.
+mkdir -p "$TMP_DIR/publish-shots"
+printf 'PNG' > "$TMP_DIR/publish-shots/01-pricing.png"
+printf 'PNG' > "$TMP_DIR/publish-shots/02-docs.png"
+run_publisher_with_shots() {
+    : > "$RESEARCH_TEST_CURL_LOG"
+    rm -f "$RESEARCH_TEST_ACTIVITY" "$RESEARCH_TEST_CARD_PATCH"
+    PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR/runner" \
+        "$AUTOPR_DIR/publish-research.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" \
+        "$TMP_DIR/research-decision.json" "$TMP_DIR/publish-shots"
+}
+run_publisher_with_shots > "$TMP_DIR/publish-shots.log" 2>&1
+shots_publish_rc=$?
+check "screenshots are attached to the same note as the report" \
+  $([ "$shots_publish_rc" = 0 ] \
+    && [ "$(grep -c 'POST https://example.invalid/api/matcha-work/projects/.*/files' "$RESEARCH_TEST_CURL_LOG")" = 3 ] \
+    && jq -e '(.attachment_ids | length) == 3
+              and (.attachment_ids | unique | length) == 3
+              and (.attachment_ids[0] | startswith("file-research-report-"))
+              and ([.attachment_ids[] | select(endswith(".png"))] | length) == 2
+              and (.body | contains("Screenshots attached: 2"))' \
+        "$RESEARCH_TEST_ACTIVITY" >/dev/null \
     && echo 0 || echo 1)
 
 check "the research publisher never calls gh" \

@@ -78,6 +78,16 @@ KIND_EFFORT="$(autopr_kind_field "$MODE" effort)"
 KIND_SANDBOX_ENV="$(autopr_kind_field "$MODE" sandbox)"
 KIND_HEADINGS="$(autopr_kind_field "$MODE" headings)"
 KIND_DECISION="$(autopr_kind_field "$MODE" decision)"
+# `browse` is an extra grant on top of the kind's own capability: a research
+# run on a board without it still reads the web through search, it just cannot
+# drive a browser or bring screenshots back.
+BOARD_CAPABILITIES="$(jq -r '(.autopr_capabilities // [])[]' "$CARD_FILE" 2>/dev/null || true)"
+BROWSE_GRANTED=false
+if [ "$KIND_OUTCOME" = artifact ]; then
+    printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF browse && BROWSE_GRANTED=true
+fi
+ARTIFACTS_DIR="$WORK_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
@@ -362,6 +372,16 @@ run_codex() {
     for kind_switch in $KIND_SANDBOX_ENV; do
         runner_env+=("$kind_switch")
     done
+    if [ "$BROWSE_GRANTED" = true ]; then
+        runner_env+=(
+            AUTOPR_CODEX_COLLECT_ARTIFACTS=1
+            AUTOPR_SANDBOX_ARTIFACTS_DIR="$ARTIFACTS_DIR"
+            # The image only carries Chromium when it was built with it. The
+            # helper says so plainly and the prompt tells the model to fall
+            # back to search rather than treating it as a research failure.
+            INSTALL_PLAYWRIGHT_BROWSERS=true
+        )
+    fi
     [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
     "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
         "${ATTACH_ARGS[@]}"
@@ -516,4 +536,14 @@ jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
 mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
 mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+# Screenshots ride to the publisher through a stable directory rather than the
+# decision JSON: the model names them, but only files the trusted bridge
+# actually admitted are here.
+if [ "$BROWSE_GRANTED" = true ] && [ -n "${AUTOPR_ARTIFACTS_OUTPUT_DIR:-}" ]; then
+    mkdir -p "$AUTOPR_ARTIFACTS_OUTPUT_DIR"
+    find "$ARTIFACTS_DIR" -maxdepth 1 -type f -exec cp {} "$AUTOPR_ARTIFACTS_OUTPUT_DIR/" \; 2>/dev/null || true
+    collected="$(find "$AUTOPR_ARTIFACTS_OUTPUT_DIR" -maxdepth 1 -type f | wc -l | tr -d '[:space:]')"
+    printf 'kanban-autopr: %s screenshot(s) ready for publication\n' "$collected" >&2
+fi
+
 "$SCRIPT_DIR/checkpoint.sh" consume "$CARD_FILE"

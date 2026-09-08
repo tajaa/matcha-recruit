@@ -20,6 +20,25 @@ What you may use:
   must be backed by a URL you actually visited, listed under `### Sources`.
 - The card's image attachments, which the harness passed to you as native
   image inputs. Refer to them by attachment filename.
+- A real browser, but ONLY through this one command:
+
+      server/venv/bin/python scripts/kanban-autopr/browse-capture.py \
+          --url https://example.com/pricing --label pricing-page
+
+  It opens the page, saves a screenshot the harness will attach to the
+  ticket, and prints the page's title and visible text for you to read. Add
+  `--full-page` when what matters is below the fold. Use it when a claim is
+  better shown than described — a pricing table, a competitor's UI, a
+  dashboard — and name each screenshot in the report by the filename it
+  prints, so a reader can match image to claim.
+
+  It refuses non-http(s) URLs and internal addresses, and caps how many
+  captures one run may take. Do not try to drive a browser any other way: no
+  other automation is collected, and the attempt only spends your time.
+
+  If it reports that Chromium or Playwright is unavailable, that is an
+  operator setting on this machine, not a research failure. Say so in one
+  line under `### Findings` and finish the report using web search alone.
 - `production`, `changes_since_production`, and `production_recent_errors`
   as bounded, redacted evidence of what is actually live.
 

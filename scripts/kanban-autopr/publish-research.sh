@@ -18,9 +18,12 @@ source "$SCRIPT_DIR/lib.sh"
 # shellcheck source=./decision.sh
 source "$SCRIPT_DIR/decision.sh"
 
-CARD_FILE="${1:?usage: publish-research.sh card.json report.md decision.json}"
-REPORT_FILE="${2:?usage: publish-research.sh card.json report.md decision.json}"
-DECISION_FILE="${3:?usage: publish-research.sh card.json report.md decision.json}"
+CARD_FILE="${1:?usage: publish-research.sh card.json report.md decision.json [artifacts-dir]}"
+REPORT_FILE="${2:?usage: publish-research.sh card.json report.md decision.json [artifacts-dir]}"
+DECISION_FILE="${3:?usage: publish-research.sh card.json report.md decision.json [artifacts-dir]}"
+# Screenshots the trusted bridge admitted from a browsing run. Optional: a
+# research run without the browse grant produces none.
+ARTIFACTS_DIR="${4:-}"
 
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
 PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
@@ -172,15 +175,42 @@ upload="$(mw_api_upload "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files"
 FILE_ID="$(printf '%s' "$upload" | jq -r '.id // empty')"
 [ -n "$FILE_ID" ] || die "report upload returned no file id: $upload"
 
+# Screenshots attach to the same ticket and to the same note, so the evidence
+# sits beside the claim it supports. A failed image upload is reported and
+# skipped: the report is the deliverable and must not be lost to one bad file.
+ATTACHMENT_IDS="[\"$FILE_ID\"]"
+SHOT_COUNT=0
+if [ -n "$ARTIFACTS_DIR" ] && [ -d "$ARTIFACTS_DIR" ]; then
+    while IFS= read -r shot; do
+        [ -n "$shot" ] || continue
+        shot_name="$(basename "$shot")"
+        staged_shot="$STAGE_DIR/research-$ID8-r$ROUND-$shot_name"
+        cp "$shot" "$staged_shot"
+        if shot_upload="$(mw_api_upload \
+            "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" "$staged_shot" 2>/dev/null)"; then
+            shot_id="$(printf '%s' "$shot_upload" | jq -r '.id // empty')"
+            if [ -n "$shot_id" ]; then
+                ATTACHMENT_IDS="$(printf '%s' "$ATTACHMENT_IDS" \
+                    | jq -c --arg id "$shot_id" '. + [$id]')"
+                SHOT_COUNT=$((SHOT_COUNT + 1))
+                continue
+            fi
+        fi
+        printf 'kanban-autopr: warning: could not attach screenshot %s\n' "$shot_name" >&2
+    done < <(find "$ARTIFACTS_DIR" -maxdepth 1 -type f | sort)
+fi
+
 note_body="$SUMMARY
 
 Report attached: $FILENAME"
+[ "$SHOT_COUNT" -eq 0 ] || note_body="$note_body
+Screenshots attached: $SHOT_COUNT"
 [ -z "$STAGED_BLOCK" ] || note_body="$note_body
 
 $STAGED_BLOCK"
-activity_payload="$(jq -n --arg body "$note_body" --arg file "$FILE_ID" \
+activity_payload="$(jq -n --arg body "$note_body" --argjson files "$ATTACHMENT_IDS" \
     --arg reply "$RECONSIDERATION_EVENT_ID" \
-    '{kind:"note", body:$body, attachment_ids:[$file]}
+    '{kind:"note", body:$body, attachment_ids:$files}
      + (if $reply == "" then {} else {reply_to:$reply} end)')"
 mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" "$activity_payload" >/dev/null
 
@@ -197,7 +227,7 @@ post_reconsideration_result "$origin_note" \
     "AutoPR reviewed this additional context and attached research report round $ROUND. $CARD_NOTE"
 
 if [ "$STAGED_COUNT" -gt 0 ]; then
-    echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources, $STAGED_COUNT proposed actions awaiting human approval — none sent)"
+    echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources, $SHOT_COUNT screenshots, $STAGED_COUNT proposed actions awaiting human approval — none sent)"
 else
-    echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources)"
+    echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources, $SHOT_COUNT screenshots)"
 fi

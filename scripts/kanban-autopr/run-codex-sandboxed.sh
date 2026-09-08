@@ -37,6 +37,13 @@ RESUME_PATCH="${AUTOPR_RESUME_PATCH:-}"
 # opaque files. Both default off: the PR lanes behave exactly as before.
 WEB_SEARCH="${AUTOPR_CODEX_WEB_SEARCH:-0}"
 IMAGE_INPUTS="${AUTOPR_CODEX_IMAGE_INPUTS:-0}"
+# Screenshots the model captured with browse-capture.py. They come back the
+# same way report.md does — through one directory the trusted side empties and
+# bounds — so a browsing run cannot widen what crosses the boundary.
+COLLECT_ARTIFACTS="${AUTOPR_CODEX_COLLECT_ARTIFACTS:-0}"
+ARTIFACTS_DIR="${AUTOPR_SANDBOX_ARTIFACTS_DIR:-}"
+MAX_ARTIFACTS="${AUTOPR_SANDBOX_MAX_ARTIFACTS:-12}"
+MAX_ARTIFACT_BYTES="${AUTOPR_SANDBOX_MAX_ARTIFACT_BYTES:-4194304}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
@@ -114,7 +121,7 @@ git -C "$SANDBOX_WORKSPACE" branch --force main "$MAIN_SHA" >/dev/null
 git -C "$SANDBOX_WORKSPACE" remote remove origin
 git -C "$SANDBOX_WORKSPACE" config core.hooksPath /dev/null
 
-mkdir -p "$IO_DIR/input" "$IO_DIR/output"
+mkdir -p "$IO_DIR/input" "$IO_DIR/output" "$IO_DIR/output/artifacts"
 printf '%s\n' "$MODEL_BASE_SHA" > "$IO_DIR/model-base-sha"
 # Bind this clone to the card it was made for. The runtime root survives
 # between runs and is only wiped here, so a checkpoint taken by a run that died
@@ -255,6 +262,45 @@ HOST_DECISION="$IO_DIR/output/decision.json"
     || die "Codex decision exceeds $MAX_DECISION_BYTES bytes"
 cp "$HOST_REPORT" "$REPORT_FILE"
 cp "$HOST_DECISION" "$DECISION_FILE"
+
+# Screenshots, if this run was allowed to take any. Every one of them is about
+# to be uploaded to a real ticket, so the filter is an allowlist of image
+# extensions on a flat directory — never a copy of whatever the model left
+# behind. A file that fails any check is skipped and named on stderr rather
+# than silently dropped.
+if [ "$COLLECT_ARTIFACTS" = 1 ] && [ -n "$ARTIFACTS_DIR" ]; then
+    mkdir -p "$ARTIFACTS_DIR"
+    artifact_count=0
+    while IFS= read -r -d '' artifact; do
+        artifact_name="$(basename "$artifact")"
+        case "$(printf '%s' "$artifact_name" | tr '[:upper:]' '[:lower:]')" in
+            *.png|*.jpg|*.jpeg|*.webp) ;;
+            *)
+                printf 'kanban-autopr sandbox: ignoring non-image artifact %s\n' "$artifact_name" >&2
+                continue ;;
+        esac
+        # Reject a name that could escape the destination or hide as a dotfile.
+        case "$artifact_name" in
+            .*|*/*|*..*)
+                printf 'kanban-autopr sandbox: ignoring unsafe artifact name %s\n' "$artifact_name" >&2
+                continue ;;
+        esac
+        if [ "$artifact_count" -ge "$MAX_ARTIFACTS" ]; then
+            printf 'kanban-autopr sandbox: artifact cap reached (%s); ignoring %s\n' \
+                "$MAX_ARTIFACTS" "$artifact_name" >&2
+            continue
+        fi
+        artifact_bytes="$(wc -c < "$artifact" | tr -d '[:space:]')"
+        if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+            printf 'kanban-autopr sandbox: artifact %s is %s bytes (max %s); ignoring\n' \
+                "$artifact_name" "$artifact_bytes" "$MAX_ARTIFACT_BYTES" >&2
+            continue
+        fi
+        cp "$artifact" "$ARTIFACTS_DIR/$artifact_name"
+        artifact_count=$((artifact_count + 1))
+    done < <(find "$IO_DIR/output/artifacts" -maxdepth 1 -type f -print0 2>/dev/null | sort -z)
+    printf 'Collected %s screenshot(s) from the sandbox\n' "$artifact_count"
+fi
 
 # Include new files with intent-to-add, then compare against the immutable
 # pre-model commit. This still captures edits if a model ignored the prompt
