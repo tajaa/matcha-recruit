@@ -151,6 +151,10 @@ rm -f "$TMP_DIR/dispatches"
 recent_kanban="[{\"databaseId\":9,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]"
 stale="$(date -u -v-30M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
 stale_kanban="[{\"databaseId\":9,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$stale\",\"updatedAt\":\"$stale\",\"url\":\"x\"}]"
+# Ten minutes: past the workflow's five-minute hot-redispatch floor, inside the
+# scheduler's twenty-minute window — exactly the gap a queued card must jump.
+mid="$(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+mid_kanban="[{\"databaseId\":9,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$mid\",\"updatedAt\":\"$mid\",\"url\":\"x\"}]"
 recent_error="[{\"databaseId\":6,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]"
 recent_audit="[{\"databaseId\":8,\"status\":\"completed\",\"event\":\"workflow_dispatch\",\"createdAt\":\"$recent\",\"updatedAt\":\"$recent\",\"url\":\"x\"}]"
 
@@ -202,16 +206,28 @@ check "an unreachable board never forces a run" \
   $([ ! -e "$TMP_DIR/dispatches" ] \
     && grep -q 'run-request-probe-failed' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
+# The workflow itself refuses a run whose predecessor completed inside the
+# last five minutes (hot-redispatch-guard.sh), so dispatching into that window
+# would burn the request set for a run that never touches the card.
 rm -f "$TMP_DIR/dispatches"
+rm -rf "$TMP_DIR/state"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
+check "a queued card inside the workflow's five-minute floor waits without burning the request" \
+  $([ ! -e "$TMP_DIR/dispatches" ] \
+    && grep -q 'kanban-hot-redispatch-floor' "$TMP_DIR/log.jsonl" \
+    && [ ! -f "$TMP_DIR/state/last-forced-request-set" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
 check "a queued card jumps the twenty-minute wait and the other lanes" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
     && grep -q 'kanban-run-request' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
-  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
+  AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
 check "a card that cannot be picked up cannot spin the runner every minute" \
   $([ ! -e "$TMP_DIR/dispatches" ] && [ -f "$TMP_DIR/state/last-forced-kanban" ] && echo 0 || echo 1)
 
