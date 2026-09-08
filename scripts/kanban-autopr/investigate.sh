@@ -278,7 +278,20 @@ while IFS= read -r file; do
         --arg path "$local_path" '$rows + [(($file | del(.storage_url)) + {local_path: $path})]')"
     ATTACH_ARGS+=(-f "$local_path")
 done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
-    '((map(select((.round_index // 1) == $round)) | sort_by(.created_at // "") | reverse)
+    --arg id8 "$ID8" --arg outcome "$KIND_OUTCOME" '
+    # An artifact run must not spend its attachment budget re-reading its own
+    # earlier output: after round 1 the card carries the report the bot wrote plus up
+    # to a dozen of its screenshots, which would crowd out files people attached
+    # and be re-fed as image inputs. Keep only the newest prior report (the
+    # revision prompt treats it as version 1) and drop the rest of what the
+    # publisher uploaded, recognised by its own naming.
+    def mine: ((.filename // "") | test("^research-(report-)?" + $id8 + "-r[0-9]+"));
+    def prior_report: ((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"));
+    (if $outcome == "artifact" then
+        ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
+        | map(select((mine | not) or (. == $keep)))
+     else . end)
+    | ((map(select((.round_index // 1) == $round)) | sort_by(.created_at // "") | reverse)
       + (map(select((.round_index // 1) != $round)) | sort_by(.created_at // "") | reverse))[]')
 
 CONTEXT_FILE="$WORK_DIR/context.json"

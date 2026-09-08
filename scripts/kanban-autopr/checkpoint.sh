@@ -513,6 +513,11 @@ save_checkpoint() {
     [[ "$project_id" =~ ^[0-9a-fA-F-]{36}$ ]] || die "invalid checkpoint project id"
     [[ "$started_at" =~ ^[0-9]+$ ]] || die "invalid investigation start time"
     [[ "$timeout_minutes" =~ ^(10|20)$ ]] || die "invalid investigation timeout"
+    # An artifact kind (research) never has a patch; its pause note must talk
+    # about the report, not about code it was never going to write.
+    local kind_outcome
+    kind_outcome="$(autopr_kind_field "$(jq -r '.mode // "investigate"' "$card_file")" outcome 2>/dev/null \
+        || printf 'pull_request')"
 
     root="$(task_root "$card_file")"
     run_key="${GITHUB_RUN_ID:-local}-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -638,14 +643,20 @@ save_checkpoint() {
             extra_file_count=$((changed_file_count - 6))
             changed_files_summary="$changed_files_summary, plus $extra_file_count more"
         fi
-        if [ "$patch_saved" = true ]; then
+        if [ "$kind_outcome" = artifact ]; then
+            if [ "$report_saved" = true ]; then
+                done="Saved the partial report; the continuation picks up from it."
+            else
+                done="No report was ready when the run stopped."
+            fi
+        elif [ "$patch_saved" = true ]; then
             done="Saved a partial patch touching $file_label: $changed_files_summary."
         elif [ "$changed_file_count" -gt 0 ]; then
             done="AutoPR touched $file_label, but the patch exceeded the checkpoint size limit and was not saved: $changed_files_summary."
         else
             done="No code patch was ready when the run stopped."
         fi
-        [ "$report_saved" != true ] || saved_outputs="partial report"
+        [ "$report_saved" != true ] || [ "$kind_outcome" = artifact ] || saved_outputs="partial report"
         if [ "$decision_saved" = true ]; then
             [ -z "$saved_outputs" ] || saved_outputs="$saved_outputs, "
             saved_outputs="${saved_outputs}decision draft"

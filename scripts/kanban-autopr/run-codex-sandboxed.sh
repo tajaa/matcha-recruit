@@ -42,6 +42,17 @@ IMAGE_INPUTS="${AUTOPR_CODEX_IMAGE_INPUTS:-0}"
 # bounds — so a browsing run cannot widen what crosses the boundary.
 COLLECT_ARTIFACTS="${AUTOPR_CODEX_COLLECT_ARTIFACTS:-0}"
 ARTIFACTS_DIR="${AUTOPR_SANDBOX_ARTIFACTS_DIR:-}"
+# The prompt is the same template for every research run, but the browser
+# paragraph is only true where the bridge will actually collect screenshots.
+# Nothing else reaches the container to say so, and a model told it has a
+# browser on a board without the grant takes screenshots that are silently
+# dropped and cites images that never attach. So the paragraph itself is
+# switched here: the fragment when artifacts are collected, a one-line
+# refusal otherwise. `BROWSE_TOOL_SECTION` in a template marks the spot.
+BROWSE_SECTION_FILE=""
+if [ "$COLLECT_ARTIFACTS" = 1 ] && [ -f "$(dirname "$PROMPT_TEMPLATE")/_prompt_research_browse.txt" ]; then
+    BROWSE_SECTION_FILE="$(dirname "$PROMPT_TEMPLATE")/_prompt_research_browse.txt"
+fi
 MAX_ARTIFACTS="${AUTOPR_SANDBOX_MAX_ARTIFACTS:-12}"
 MAX_ARTIFACT_BYTES="${AUTOPR_SANDBOX_MAX_ARTIFACT_BYTES:-4194304}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
@@ -197,7 +208,14 @@ AUTOPR_INPUTS_BEGIN${MODEL_INPUT_LIST}
 AUTOPR_INPUTS_END
 
 $(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
-    -e "s#DECISION_PATH#$MODEL_DECISION#g" "$PROMPT_TEMPLATE")"
+    -e "s#DECISION_PATH#$MODEL_DECISION#g" "$PROMPT_TEMPLATE" \
+    | awk -v section_file="$BROWSE_SECTION_FILE" '
+        /^BROWSE_TOOL_SECTION$/ {
+            if (section_file != "") { while ((getline line < section_file) > 0) print line }
+            else print "- No browser. This board is not granted browsing: `browse-capture.py` is\n  not available to you, no screenshot would be collected, and the attempt\n  only spends your time. Use web search alone."
+            next
+        }
+        { print }')"
 
 CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --ephemeral
     --ignore-user-config --model "$CODEX_MODEL"

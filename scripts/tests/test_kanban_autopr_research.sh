@@ -301,10 +301,40 @@ check "the capture helper refuses non-http, credentialed, and internal URLs" \
       && { python3 "$capture_py" --url "http://host.docker.internal:5432/" --label x >/dev/null 2>&1; [ "$?" = 2 ]; } \
       && echo 0 || echo 1)
 
-check "the research prompt points the model at the one bounded capture command" \
-    $(grep -qF 'browse-capture.py' "$AUTOPR_DIR/_prompt_research.txt" \
-      && grep -q 'Do not try to drive a browser any other way' "$AUTOPR_DIR/_prompt_research.txt" \
-      && grep -q 'operator setting on this machine, not a research failure' "$AUTOPR_DIR/_prompt_research.txt" \
+check "the browser paragraph lives in its own fragment, keyed into the prompt by a placeholder" \
+    $(grep -qF 'browse-capture.py' "$AUTOPR_DIR/_prompt_research_browse.txt" \
+      && grep -q 'Do not try to drive a browser any other way' "$AUTOPR_DIR/_prompt_research_browse.txt" \
+      && grep -q 'operator setting on this machine, not a research failure' "$AUTOPR_DIR/_prompt_research_browse.txt" \
+      && grep -qx 'BROWSE_TOOL_SECTION' "$AUTOPR_DIR/_prompt_research.txt" \
+      && ! grep -qF 'browse-capture.py' "$AUTOPR_DIR/_prompt_research.txt" \
+      && echo 0 || echo 1)
+
+# The same template serves every research run and nothing else reaches the
+# container to say whether screenshots will be collected — so the prompt itself
+# must tell the truth about the browser per run.
+printf '%s\n' 'REPORT=REPORT_PATH' 'DECISION=DECISION_PATH' 'BROWSE_TOOL_SECTION' 'tail' > "$TMP_DIR/browse-prompt.txt"
+cp "$AUTOPR_DIR/_prompt_research_browse.txt" "$TMP_DIR/_prompt_research_browse.txt"
+run_browse_prompt() {
+    PATH="$TMP_DIR/bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+    AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/backoff.json" \
+    RESEARCH_TEST_CODEX_ARGS="$TMP_DIR/codex-args" \
+    "$@" "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/browse-prompt.txt" \
+        "$TMP_DIR/bridge-report.md" "$TMP_DIR/bridge-decision.json" -f "$TMP_DIR/context.json"
+}
+run_browse_prompt env AUTOPR_CODEX_COLLECT_ARTIFACTS=1 AUTOPR_SANDBOX_ARTIFACTS_DIR="$TMP_DIR/prompt-shots" \
+    > "$TMP_DIR/browse-prompt-on.log" 2>&1
+check "with the browse grant the model is told about the capture command" \
+    $(grep -q 'browse-capture.py' "$TMP_DIR/codex-args" \
+      && ! grep -q 'BROWSE_TOOL_SECTION' "$TMP_DIR/codex-args" \
+      && grep -qx 'tail' "$TMP_DIR/codex-args" \
+      && echo 0 || echo 1)
+run_browse_prompt env > "$TMP_DIR/browse-prompt-off.log" 2>&1
+check "without the browse grant the model is told there is no browser, not handed a tool whose output is dropped" \
+    $(! grep -q 'server/venv/bin/python scripts/kanban-autopr/browse-capture.py' "$TMP_DIR/codex-args" \
+      && grep -q 'This board is not granted browsing' "$TMP_DIR/codex-args" \
+      && ! grep -q 'BROWSE_TOOL_SECTION' "$TMP_DIR/codex-args" \
       && echo 0 || echo 1)
 
 ################################################################################
