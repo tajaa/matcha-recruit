@@ -27,9 +27,10 @@ unrelated one cannot shift every later row by one.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Self
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -166,7 +167,7 @@ class QueryConn:
     async def execute(self, sql: str, *args: Any) -> Any:
         return self._dispatch("execute", sql, args)
 
-    def set(self, kind: str, needle: str, value: Any) -> "QueryConn":
+    def set(self, kind: str, needle: str, value: Any) -> QueryConn:
         """Register or replace one answer after construction. Returns self so a
         shared fixture can be adjusted inline for a single test."""
         self._tables[kind][needle] = value
@@ -187,10 +188,10 @@ class QueryConn:
     # asyncpg connections are used as `async with get_connection() as conn`
     # in most of this codebase; support being the context manager itself so a
     # test can patch get_connection with `lambda: conn`.
-    async def __aenter__(self) -> "QueryConn":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *_exc: Any) -> bool:
+    async def __aexit__(self, *_exc: object) -> bool:
         return False
 
 
@@ -205,3 +206,36 @@ def connection_patch(monkeypatch: Any, module: Any, conn: QueryConn) -> Iterator
     """
     monkeypatch.setattr(module, "get_connection", lambda *a, **k: conn)
     yield conn
+
+
+def iter_api_routes(router: Any):
+    """Every real API route reachable from `router`, paths already resolved.
+
+    `router.routes` stopped being a flat list of `APIRoute`s. Since FastAPI
+    0.141 (`requirements.txt` floor; Starlette 1.6), `include_router` appends an
+    `_IncludedRouter` wrapper instead of copying the child's routes up, so a
+    test that walks `router.routes` and reads `.path`/`.dependant` hits
+    `AttributeError: '_IncludedRouter' object has no attribute 'path'` — six of
+    them did, in CI only, because local venvs still had 0.136.
+
+    The wrapper's `effective_candidates()` resolves one level: direct children
+    come back as `_EffectiveRouteContext` with the full prefixed `path` and a
+    `dependant` that already merges the include-level dependencies, while a
+    nested include stays an `_IncludedRouter`. Hence the recursion.
+
+    Works on both versions: on the old one every entry already has `.path` and
+    is yielded as-is.
+    """
+    for entry in getattr(router, "routes", []):
+        yield from _expand_route(entry)
+
+
+def _expand_route(entry: Any):
+    if hasattr(entry, "path"):
+        yield entry
+        return
+    candidates = getattr(entry, "effective_candidates", None)
+    if candidates is None:
+        return
+    for candidate in (candidates() if callable(candidates) else candidates):
+        yield from _expand_route(candidate)

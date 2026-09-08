@@ -5,7 +5,7 @@ table and the lazy cross-import contract with
 routes/matcha_work/workspace.py:468 must survive untouched.
 """
 from app.matcha.routes import dashboard
-
+from tests._helpers.routes import iter_api_routes
 
 _EXPECTED_ROUTES = {
     ("/credential-expirations", ("GET",)),
@@ -32,9 +32,10 @@ _EXPECTED_ROUTES = {
 
 
 def test_route_table_matches_pre_split_snapshot():
-    routes = {(r.path, tuple(sorted(r.methods))) for r in dashboard.router.routes}
+    api_routes = list(iter_api_routes(dashboard.router))
+    routes = {(r.path, tuple(sorted(r.methods))) for r in api_routes}
     assert routes == _EXPECTED_ROUTES
-    assert len(dashboard.router.routes) == 20
+    assert len(api_routes) == 20
 
 
 def test_workspace_lazy_import_contract():
@@ -42,9 +43,9 @@ def test_workspace_lazy_import_contract():
     function body — it must keep resolving without a workspace.py edit."""
     from app.matcha.routes.dashboard import (
         _UPCOMING_SOURCES,
+        UpcomingItem,
         _apply_company_filter,
         _severity_from_days,
-        UpcomingItem,
     )
 
     assert isinstance(_UPCOMING_SOURCES, list) and len(_UPCOMING_SOURCES) > 0

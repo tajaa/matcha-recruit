@@ -13,22 +13,23 @@ Read-only — no rows are inserted or modified — so safe against live DB.
 
 Run manually:
     cd server
-    DATABASE_URL=postgresql://matcha:matcha_dev@localhost:5432/matcha \
-        python3 -m pytest tests/matcha_work/test_progress_note_realdb.py -v
+    RUN_DB_TESTS=1 DATABASE_URL=postgresql://matcha:matcha_dev@localhost:5432/matcha \
+        ./venv/bin/python -m pytest tests/matcha_work/test_progress_note_realdb.py -v
 """
 
-import os
 import uuid
 
 import pytest
 import pytest_asyncio
 
+from tests._helpers.db import real_database_url, requires_real_db
+
 asyncpg = pytest.importorskip("asyncpg")
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = real_database_url()
 
 pytestmark = [
-    pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),
+    requires_real_db(),
     pytest.mark.asyncio(loop_scope="module"),
 ]
 

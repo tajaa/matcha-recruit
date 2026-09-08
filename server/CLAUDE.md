@@ -82,6 +82,43 @@ cd server && ./venv/bin/python run.py     # :8001
 cd server && ./venv/bin/python -m pytest tests/<domain>/ -q
 ```
 
+**After applying fixes — from `/code-review --fix`, `/simplify`, or by hand —
+run the WHOLE server suite before reporting, not just the file you touched:**
+
+```bash
+cd server && ./venv/bin/python -m pytest tests -q
+```
+
+~8,900 tests in about 25 seconds (nearer two minutes under `--cov`), and no
+database required — nothing in the default run opens a connection. Running only the
+touched file is the tempting shortcut and the wrong one here: much of this
+suite is cross-cutting registry and contract assertions, so a fix in one
+module routinely trips an assertion in another package. That is how the
+`waste_*` staged-action gaps surfaced — a Huume prompt change was caught by
+`tests/huume/test_huume_assets.py`, which the edit never touched. A failure is
+a blocking finding, reported with its name and output, never a footnote.
+
+CI additionally gates **diff coverage at 80% of the lines a PR changes**
+(`diff-cover`, `.github/workflows/ci.yml`). A fix that adds a branch needs a
+test in the same change or CI fails — write the test with the fix, not after.
+
+Nothing in that run touches a database — the tests that need one are opt-in
+(table below).
+
+**Walking a route table? Use `tests._helpers.routes.iter_api_routes(router)`,
+not `router.routes`.** Since FastAPI 0.141 (the `requirements.txt` floor)
+`include_router` appends an `_IncludedRouter` wrapper instead of copying the
+child's routes up, so reading `.path`/`.dependant` off `router.routes` raises
+`AttributeError: '_IncludedRouter' object has no attribute 'path'`. Six tests
+did exactly that and failed in CI only — a stale local `venv/` still had 0.136,
+which is its own warning: `./venv/bin/python -m pip install -r requirements.txt`
+if a test passes locally and fails in CI for a library reason.
+
+If the same pass touches `client/`, add
+`cd client && npx tsc -p tsconfig.app.json --noEmit`. The bare
+`npx tsc --noEmit` checks NOTHING (root tsconfig is `files: []` + project
+references, so it always exits 0).
+
 **The suite runs in CI now, and it did not before.** Until 2026-09-08 the
 `server-tests` job ran `alembic upgrade heads` against an empty database, hit
 the root revision's `REFERENCES companies(id)` (a table `init_db()` creates, not
@@ -122,6 +159,18 @@ of `server/.env` is always present on a dev laptop and is therefore not a guard:
 |---|---|---|
 | `tests/scope_registry/test_gap_surfaces_integration.py` | `RUN_DB_GAP_TESTS=1` | read-only |
 | `tests/employees/test_employees_google_workspace_api_integration.py` | `RUN_DB_WRITE_TESTS=1` | INSERTs, and `close_pool()`s the process-global pool |
+| `tests/{matcha_work/test_progress_note_realdb,matcha_work/test_project_task_toggle_realdb,channels_ws/test_invitable_users_realdb,employees/test_employee_incidents,infrastructure/test_rls_isolation}.py` | `RUN_DB_TESTS=1` | open a real connection; two of the five write |
+
+Those five used to gate on `DATABASE_URL` being non-empty, which reads correctly
+and is not: ~40 modules
+`os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")`
+at import so `app.config` can load, so in a full-suite run the variable is
+ALWAYS set. They skipped when run alone and dialled a nonexistent database when
+run together — 29 errors locally, and on the 2026-09-08 CI run `FATAL: password
+authentication failed for user "test"`, because there a Postgres really is
+listening on 5432. Use `tests._helpers.db.requires_real_db()` and
+`real_database_url()` instead; `tests/_helpers/test_db_guard.py` fails any
+module that goes back to reading the variable directly.
 
 Don't fix unrelated failures as part of other work — but don't trust a stale list either. Re-measure before citing one.
 

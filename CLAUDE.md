@@ -406,6 +406,7 @@ cd server && python3 -m pytest tests/ -v
 - **When a new analytics/risk engine lands under `services/`, the same PR wires its records into whichever grounded pilots ground on that domain** (Legal / Broker / Handbook / HR / Analysis). Three of the four gaps the 2026-07-20 pilot-grounding review found were exactly this omission: a service computed something real and the pilot that should cite it never learned it existed. A corpus record is part of shipping the engine, not a follow-up.
 - If a task involves data fetching, database schemas, or global state, you are required to load the entire schema and all relevant model files into your context *before* proposing or executing changes.
 - When a Feature Flags row or Key Modules bullet carries a "→ full spec" pointer, read that file before working on the feature — its invariants live there now.
+- **After applying fixes from a review (`/code-review --fix`, `/simplify`, or by hand), run `cd server && ./venv/bin/python -m pytest tests -q` before reporting** — the whole suite, not just the file you touched (~8,900 tests, ~25s, no DB). A failure is a blocking finding, not a footnote. CI also gates diff coverage at 80% of changed lines, so a fix that adds a branch ships with its test. Client equivalent and the reasoning: `server/CLAUDE.md` §Tests.
 
 ## Session cost hygiene
 

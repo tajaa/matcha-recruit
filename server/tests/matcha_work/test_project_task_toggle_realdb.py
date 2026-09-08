@@ -15,21 +15,23 @@ rows are inserted or modified — so they are safe to run against the live DB.
 
 Run manually:
     cd server
-    DATABASE_URL=... python3 -m pytest tests/matcha_work/test_project_task_toggle_realdb.py -v
+    RUN_DB_TESTS=1 DATABASE_URL=postgresql://matcha:matcha_dev@localhost:5432/matcha \
+        ./venv/bin/python -m pytest tests/matcha_work/test_project_task_toggle_realdb.py -v
 """
 
-import os
 import uuid
 
 import pytest
 import pytest_asyncio
 
+from tests._helpers.db import real_database_url, requires_real_db
+
 asyncpg = pytest.importorskip("asyncpg")
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = real_database_url()
 
 pytestmark = [
-    pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),
+    requires_real_db(),
     pytest.mark.asyncio(loop_scope="module"),
 ]
 
@@ -82,7 +84,7 @@ async def test_update_sql_executes_against_nonexistent_row_is_noop(pool):
     None. Asserts that the SQL is well-typed end-to-end (not just at
     prepare) and that all 13 params can be bound with realistic Python
     values without further coercion errors. No rows are modified."""
-    from datetime import date, datetime, timezone
+    from datetime import datetime, timezone
 
     async with pool.acquire() as conn:
         # Wrap in a transaction we always rollback — belt and suspenders;
