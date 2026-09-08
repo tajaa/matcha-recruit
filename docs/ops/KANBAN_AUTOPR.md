@@ -541,10 +541,23 @@ kind is a registry row plus a publisher, not another branch in the PR path.
 
    **Re-entrant.** Artifact kinds have no GitHub ledger, and the move to Review is the
    last write, so a publication that dies after the upload would otherwise rerun and
-   attach everything twice. Given `AUTOPR_RUN_STARTED_AT` (the workflow passes the
-   investigation start file), the publisher reuses a report or screenshot this run
-   already uploaded, skips the note if its `Report attached: <file>` marker is already on
-   the card, and the server returns the existing staged rows for a `run_key` it has seen. `update_project_task` then emails and
+   attach a second report, a second note, and a second set of Send rows. The retry is
+   always the **next scheduled pass** — a new workflow run on a new runner — so the key
+   for "already done" cannot come from the run itself. It keyed on `AUTOPR_RUN_STARTED_AT`
+   until 2026-09-08, which the investigate step re-stamps every job, so it never matched
+   and the duplicate it described still happened; the env var is gone.
+
+   The key is the card. A finished publication moved it to Review, so a card still in
+   **Todo** carrying a `research-report-<id8>-rN.md` means the pass that uploaded it did
+   not finish: that report is an orphan and this run continues it, reusing its file id
+   (so the server's `run_key` short-circuit matches and the Send rows are not restaged),
+   its round number, and any screenshot already uploaded under that round's name. From
+   **Changes Requested** the reading flips — a human read a finished report and sent it
+   back — so there the newest report is an orphan only while its own `Report attached:`
+   line is missing from the discussion. That discussion read is fatal if it fails: without
+   it the publisher cannot tell a crashed pass from a finished one, and either guess
+   duplicates or loses a round. Known residual: a revision pass dying between its note and
+   the card move still produces one extra round. `update_project_task` then emails and
    bells every collaborator ("Ready for review") and broadcasts to Espresso — there is
    no extra notification code. `needs_clarification` instead writes
    `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · … · [autopr:no-spec <ts>]

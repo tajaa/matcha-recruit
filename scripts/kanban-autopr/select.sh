@@ -53,6 +53,9 @@ BOT_PRS_FILE="${AUTOPR_BOT_PRS_FILE:-}"
 # `$(...)`, `die` would only end the subshell and the cap check would run
 # against an empty string — the exact silent-cap failure this once had.
 open_implementation_prs=""
+# Set when a card was passed over because a GitHub read failed rather than
+# because it was genuinely ineligible. Checked once the loop finds nothing.
+github_unavailable=false
 ensure_open_implementation_pr_count() {
     if [ -z "$open_implementation_prs" ]; then
         if [ -n "$BOT_PRS_FILE" ] && [ -s "$BOT_PRS_FILE" ]; then
@@ -298,7 +301,7 @@ already_handled() {
     if [[ "$progress_note" == "🤖 AUTO SETUP · ALREADY SCOPED"* ]] && [[ "$pr_number" =~ ^[0-9]+$ ]]; then
         local linked_pr linked_state
         if ! linked_pr="$(gh pr view "$pr_number" --repo "$REPO" --json state)"; then
-            echo skip
+            echo skip_github_unavailable
             return
         fi
         linked_state="$(printf '%s' "$linked_pr" | jq -r '.state // empty')"
@@ -334,7 +337,7 @@ already_handled() {
         # `[ -gt ]` as silent no-ops, which read as "no PR exists yet" and
         # proceeded to `investigate`, risking a duplicate PR the failed call
         # simply couldn't see.
-        echo skip
+        echo skip_github_unavailable
         return
     fi
     n="$(printf '%s' "$prs" | jq 'length' 2>/dev/null)" || n=0
@@ -365,7 +368,7 @@ already_handled() {
                 if ! snapshot="$(feedback_snapshot "$pr_number")"; then
                     # If GitHub feedback cannot be read, do not treat the
                     # waiting card as eligible; a blind rework would spin.
-                    echo skip
+                    echo skip_github_unavailable
                 elif awaiting_input_has_new_feedback "$body" "$snapshot"; then
                     echo rework
                 else
@@ -434,6 +437,15 @@ for ((i = 0; i < n; i++)); do
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
         "$capabilities")"
+    if [ "$decision" = skip_github_unavailable ]; then
+        # Per card this is still a fail-closed skip: a read we could not make
+        # is never evidence that no PR exists. But a pass where EVERY card
+        # skipped for that reason is a GitHub outage, not an empty queue, and
+        # must not exit NOTHING_TO_DO — the workflow reports that as a green
+        # "Nothing to build this run." and the whole lane stalls silently.
+        github_unavailable=true
+        decision=skip
+    fi
     if [ "$decision" = skip_ungranted ]; then
         # Leave a hint for the tmux dashboard, which runs this selector
         # read-only and otherwise cannot tell "held: needs a grant" from
@@ -482,5 +494,15 @@ for ((i = 0; i < n; i++)); do
         exit 0
     fi
 done
+
+# Nothing was selected. Say WHY: if any card was passed over because GitHub
+# could not be read, this pass proves nothing about the queue, and reporting
+# NOTHING_TO_DO would render a `gh` outage or an expired token as a green
+# "Nothing to build this run." every minute, indefinitely, with nothing red
+# anywhere. Fail loudly instead — the eager PR-count read used to do this, and
+# making it lazy (so an artifact-only pass needs no GitHub at all) silently
+# took the signal with it.
+[ "$github_unavailable" != true ] \
+    || die "could not read GitHub for any eligible card; not reporting an empty queue"
 
 exit "$NOTHING_TO_DO"

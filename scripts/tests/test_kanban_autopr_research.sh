@@ -191,8 +191,19 @@ AUTOPR_CACHE_DIR="$TMP_DIR/cache" AUTOPR_SELECT_READ_ONLY=true \
     "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards-eng.json" > "$TMP_DIR/select-ghdown-eng.json" 2>"$TMP_DIR/select-ghdown-eng.err"
 ghdown_eng_rc=$?
 check "a PR-kind card still consults GitHub and is passed over, not drafted blind, when it is unreadable" \
-    $([ "$ghdown_eng_rc" = 3 ] \
+    $([ "$ghdown_eng_rc" != 0 ] \
+      && [ -z "$(cat "$TMP_DIR/select-ghdown-eng.json")" ] \
       && grep -q 'pr list' "$RESEARCH_TEST_GH_LOG" \
+      && echo 0 || echo 1)
+# ...but passing it over must not read as an empty queue. The eager PR-count
+# read used to die here; making it lazy (so the research pass above needs no
+# GitHub at all) took the outage signal with it, and the workflow reports
+# NOTHING_TO_DO as a green "Nothing to build this run." -- so a `gh` outage or
+# an expired token stalled the whole lane silently, every minute, with nothing
+# red anywhere.
+check "an unreadable GitHub fails the pass instead of reporting an empty queue" \
+    $([ "$ghdown_eng_rc" != 3 ] \
+      && grep -q 'could not read GitHub' "$TMP_DIR/select-ghdown-eng.err" \
       && echo 0 || echo 1)
 
 
@@ -371,6 +382,35 @@ check "without the browse grant the model is told there is no browser, not hande
       && ! grep -q 'BROWSE_TOOL_SECTION' "$TMP_DIR/codex-args" \
       && echo 0 || echo 1)
 
+# A revision round keeps the newest prior report but drops the publisher's own
+# screenshots, so the attachment budget goes to human files and to this round's
+# evidence. That report names each screenshot by filename and treats the images
+# as the evidence for its claims -- so the ones held back have to be named, or
+# the model revises prose citing pictures it cannot see and cannot know were
+# withheld rather than simply absent.
+cat > "$TMP_DIR/withheld-files.json" <<'EOF'
+[{"filename":"research-report-aaaa0000-r1.md","created_at":"2026-09-01T00:00:00Z"},
+ {"filename":"research-aaaa0000-r1-01-pricing.png","created_at":"2026-09-01T00:00:01Z"},
+ {"filename":"research-report-aaaa0000-r2.md","created_at":"2026-09-02T00:00:00Z"},
+ {"filename":"research-aaaa0000-r2-01-latency.png","created_at":"2026-09-02T00:00:01Z"},
+ {"filename":"customer-spreadsheet.xlsx","created_at":"2026-09-03T00:00:00Z"}]
+EOF
+withheld="$(jq -c --arg id8 aaaa0000 '
+    def mine: ((.filename // "") | test("^research-(report-)?" + $id8 + "-r[0-9]+"));
+    def prior_report: ((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"));
+    ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
+    | [.[] | select(mine and (. != $keep)) | (.filename // empty)]' \
+    "$TMP_DIR/withheld-files.json")"
+check "the screenshots a revision round holds back are named for the model" \
+    $(printf '%s' "$withheld" | jq -e '
+        (index("research-aaaa0000-r2-01-latency.png") != null)
+        and (index("research-aaaa0000-r1-01-pricing.png") != null)
+        and (index("research-report-aaaa0000-r2.md") == null)
+        and (index("customer-spreadsheet.xlsx") == null)' >/dev/null \
+      && grep -qF 'withheld_attachments' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'withheld_attachments' "$AUTOPR_DIR/_prompt_research.txt" \
+      && echo 0 || echo 1)
+
 ################################################################################
 # decision.sh normalize-research
 cat > "$TMP_DIR/research-raw.json" <<'EOF'
@@ -480,7 +520,13 @@ case "$url" in
   */activity) printf '%s' "$payload" > "$RESEARCH_TEST_ACTIVITY"; respond '{"ok":true}' ;;
   */autopr/context-request) printf '%s' "$payload" > "$RESEARCH_TEST_CONTEXT_REQUEST"; respond '{"ok":true}' ;;
   */autopr/result-notification) printf '%s' "$payload" > "$RESEARCH_TEST_RESULT_NOTIFICATION"; respond '{"ok":true}' ;;
-  */history) respond "${RESEARCH_TEST_EXISTING_HISTORY:-[]}" ;;
+  */history)
+    if [ "${RESEARCH_TEST_HISTORY_STATUS:-200}" != 200 ]; then
+      [ -z "$output_file" ] || printf '{"detail":"boom"}' > "$output_file"
+      printf '%s' "${RESEARCH_TEST_HISTORY_STATUS}"
+      exit 0
+    fi
+    respond "${RESEARCH_TEST_EXISTING_HISTORY:-[]}" ;;
   */tasks/*) printf '%s' "$payload" > "$RESEARCH_TEST_CARD_PATCH"; respond '{"ok":true}' ;;
   *) respond '{"ok":true}' ;;
 esac
@@ -631,21 +677,22 @@ check "a staging refusal is reported on the card note and never discards a compl
     && jq -e '.board_column == "review"' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
     && echo 0 || echo 1)
 
-# A publication that died after the upload is retried by the same run. The
-# card leaving Todo is the only thing that stops a rerun, and it is the last
-# write, so the publisher must recognise its own report, screenshots, and note
-# rather than attaching each of them twice.
+# A publication that died after the upload is retried by the NEXT scheduled
+# pass -- a fresh workflow run on a fresh runner, which is the only retry path
+# that exists. Nothing derived from a run (its start time, its RUNNER_TEMP)
+# survives that, so the key is the card: still in Todo carrying a report means
+# the pass that uploaded it never finished. No AUTOPR_RUN_STARTED_AT is set
+# here, deliberately -- that is what the previous key needed and could not have.
 export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md","created_at":"2026-09-01T00:00:00+00:00"},{"id":"file-mine","filename":"research-report-aaaa0000-r2.md","created_at":"2026-09-08T10:00:05.123456+00:00"},{"id":"file-shot-mine","filename":"research-aaaa0000-r2-01-pricing.png","created_at":"2026-09-08T10:00:06+00:00"}]'
 export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h1","event_type":"activity","metadata":{"kind":"note","body":"Lambda suits bursty…\n\nReport attached: research-report-aaaa0000-r2.md"}}]'
 : > "$RESEARCH_TEST_CURL_LOG"
 rm -f "$RESEARCH_TEST_ACTIVITY" "$RESEARCH_TEST_CARD_PATCH" "$RESEARCH_TEST_UPLOADED" "$RESEARCH_TEST_STAGED"
 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR/runner" \
-AUTOPR_RUN_STARTED_AT="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' '2026-09-08T10:00:00Z' +%s 2>/dev/null || date -u -d '2026-09-08T10:00:00Z' +%s)" \
     "$AUTOPR_DIR/publish-research.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" \
     "$TMP_DIR/research-decision.json" "$TMP_DIR/publish-shots" > "$TMP_DIR/publish-retry.log" 2>&1
 retry_rc=$?
 [ "$retry_rc" = 0 ] || sed -n '1,40p' "$TMP_DIR/publish-retry.log"
-check "a retried publication reuses its own report and screenshot, uploads only what is missing, and posts no second note" \
+check "a later pass reuses the orphaned report and screenshot, uploads only what is missing, and posts no second note" \
   $([ "$retry_rc" = 0 ] \
     && [ ! -e "$RESEARCH_TEST_UPLOADED" ] \
     && [ "$(grep -c 'POST https://example.invalid/api/matcha-work/projects/.*/files' "$RESEARCH_TEST_CURL_LOG")" = 1 ] \
@@ -654,6 +701,38 @@ check "a retried publication reuses its own report and screenshot, uploads only 
     && jq -e '.board_column == "review"' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
     && grep -q 'reusing it' "$TMP_DIR/publish-retry.log" \
     && echo 0 || echo 1)
+
+# The mirror image: a human read a finished report and sent the card back, so
+# the newest report is a completed round, not an orphan. Reusing it there would
+# silently overwrite the round the reviewer just commented on.
+jq '.board_column = "changes_requested" | .review_note = "Compare cold-start cost too"' \
+    "$TMP_DIR/card.json" > "$TMP_DIR/card-revision.json"
+export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md","created_at":"2026-09-01T00:00:00+00:00"}]'
+export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h1","event_type":"activity","metadata":{"kind":"note","body":"Report attached: research-report-aaaa0000-r1.md"}}]'
+run_publisher "$TMP_DIR/card-revision.json" "$TMP_DIR/research-decision.json" \
+    > "$TMP_DIR/publish-revision.log" 2>&1
+revision_rc=$?
+check "a send-back starts the next round instead of reusing the report it is revising" \
+  $([ "$revision_rc" = 0 ] \
+    && [ "$(cat "$RESEARCH_TEST_UPLOADED_NAME" 2>/dev/null)" = "research-report-aaaa0000-r2.md" ] \
+    && jq -e '.body | contains("Report attached: research-report-aaaa0000-r2.md")' \
+        "$RESEARCH_TEST_ACTIVITY" >/dev/null \
+    && echo 0 || echo 1)
+
+# The discussion is the key now, so publishing without it would mean guessing
+# between a crashed pass and a finished one -- a duplicate report either way.
+export RESEARCH_TEST_EXISTING_FILES='[]'
+unset RESEARCH_TEST_EXISTING_HISTORY
+RESEARCH_TEST_HISTORY_STATUS=500 run_publisher "$TMP_DIR/card.json" "$TMP_DIR/research-decision.json" \
+    > "$TMP_DIR/publish-nohistory.log" 2>&1
+nohistory_rc=$?
+check "an unreadable discussion stops the publication instead of guessing" \
+  $([ "$nohistory_rc" != 0 ] \
+    && [ ! -e "$RESEARCH_TEST_UPLOADED" ] \
+    && [ ! -e "$RESEARCH_TEST_CARD_PATCH" ] \
+    && grep -q 'not publishing blind' "$TMP_DIR/publish-nohistory.log" \
+    && echo 0 || echo 1)
+
 unset RESEARCH_TEST_EXISTING_HISTORY
 
 # A report does not depend on which build is live. Missing production context
@@ -739,7 +818,7 @@ check "workflow publishes research from the trusted control root without a GitHu
     $(grep -qF 'name: Publish research report' "$workflow" \
       && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh"' "$workflow" \
       && grep -qF "steps.investigate.outcome == 'success' && steps.select.outputs.outcome == 'artifact'" "$workflow" \
-      && grep -qF 'AUTOPR_RUN_STARTED_AT: ${{ runner.temp }}/investigation-started-at' "$workflow" \
+      && ! grep -qF 'AUTOPR_RUN_STARTED_AT' "$workflow" \
       && ! awk '/name: Publish research report/,/name: Cleanup/' "$workflow" | grep -qE '^[[:space:]]*GH_TOKEN:' \
       && echo 0 || echo 1)
 check "ci syntax-checks the research publisher and the self-audit runs this suite" \

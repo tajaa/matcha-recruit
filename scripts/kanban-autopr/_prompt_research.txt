@@ -41,6 +41,13 @@ request. Produce the next full report — not a diff of the old one — that
 addresses the note, keeps what was accepted, and says at the top of
 `### Summary` what changed since the previous round.
 
+That earlier report names its screenshots by filename, and those images are
+listed in `withheld_attachments`: they are still on the card but were NOT
+re-attached to you, so the attachment budget goes to the human-supplied files
+and to the evidence you gather this round. You cannot see them. Do not restate
+a visual claim as if you had re-checked it — either carry it forward
+attributed to the previous round, or capture the view again yourself.
+
 Vague subjects: if the card cannot be researched without a product decision
 (what "benefit" means, which system, which market, which budget), do not
 guess. Write a short report explaining what is ambiguous and return

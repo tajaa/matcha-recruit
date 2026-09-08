@@ -28,6 +28,7 @@ ARTIFACTS_DIR="${4:-}"
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
 PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
 ID8="$(jq -r '.id8' "$CARD_FILE")"
+BOARD_COLUMN="$(jq -r '.board_column // "todo"' "$CARD_FILE")"
 MODE="$(jq -r '.mode' "$CARD_FILE")"
 PROD_BUILD_NUMBER="$(jq -r '.production.build_number // empty' "$CARD_FILE")"
 PROD_BACKEND_SHA="$(jq -r '.production.containers.backend.git_sha // empty' "$CARD_FILE")"
@@ -176,45 +177,60 @@ fi
 # ---- report: attach it, note it, move the card to Review -------------------
 # Re-entrant on purpose. Artifact kinds have no GitHub ledger: the card leaving
 # Todo is the only thing that stops a rerun, and that move is the LAST write
-# here. A publication that died after the upload used to rerun the whole pass
-# and attach a second report, a second note, and a second set of Send rows.
-# So every write below first asks whether this run already made it, keyed on
-# the run's start time (`AUTOPR_RUN_STARTED_AT`, epoch seconds or a file
-# holding them). Without it, nothing is reused and the writes happen once.
-run_started_epoch=""
-if [ -n "${AUTOPR_RUN_STARTED_AT:-}" ]; then
-    if [ -f "$AUTOPR_RUN_STARTED_AT" ]; then
-        run_started_epoch="$(tr -d '[:space:]' < "$AUTOPR_RUN_STARTED_AT")"
-    else
-        run_started_epoch="$AUTOPR_RUN_STARTED_AT"
-    fi
-    [[ "$run_started_epoch" =~ ^[0-9]+$ ]] || run_started_epoch=""
-fi
-
+# here. A publication that dies after the upload otherwise reruns the whole
+# pass and attaches a second report, a second note, and a second set of Send
+# rows.
+#
+# The key for "already done" has to survive the retry, and the retry is a NEW
+# workflow run on a fresh runner — so anything derived from this run (its start
+# time, its RUNNER_TEMP) is regenerated before the comparison and can never
+# match. The durable key is the card itself.
+#
+# A publication that finished moved the card to Review, so a card still in Todo
+# carrying a report means the pass that uploaded it did not finish: that report
+# is an orphan and this run continues it rather than starting a round on top.
+# From Changes Requested the reading flips — a human read a finished report and
+# sent it back — so there the report is an orphan only while its own summary
+# note is missing, i.e. the crash happened before the announcement.
+#
+# Residual gap, stated rather than papered over: a revision pass that dies in
+# the window between posting its note and moving the card still produces one
+# extra round on the retry. Closing that needs a publication marker written to
+# the card before the upload, which is a bigger change than this fix.
 STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
 existing_files="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files")"
-# Files this run already uploaded: created at or after the run started.
-# ISO timestamps from the server carry fractional seconds and an offset, so
-# compare as epochs rather than as strings.
-this_run_files='[]'
-if [ -n "$run_started_epoch" ]; then
-    this_run_files="$(printf '%s' "$existing_files" | jq -c --argjson since "$run_started_epoch" '
-        def epoch: (sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | sub("Z?$"; "Z")
-                    | try fromdateiso8601 catch 0);
-        [.[] | select(((.created_at // "") | epoch) >= $since)]' 2>/dev/null || printf '[]')"
-fi
-prior_report="$(printf '%s' "$this_run_files" | jq -c --arg id8 "$ID8" '
-    [.[] | select((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"))]
-    | sort_by(.created_at) | last // empty')"
+# Fetched once and reused for the note dedup below. A failure here is fatal
+# rather than fail-open: without the discussion we cannot tell a crashed pass
+# from a finished one, and guessing means either a duplicate report or a lost
+# round. Failing is safe now — the next pass re-reads and reuses the orphan.
+history_json="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/history")" \
+    || die "could not read the card's discussion; not publishing blind"
+announced_reports="$(printf '%s' "$history_json" | jq -c '
+    [.[]? | select(.event_type == "activity") | (.metadata.body // "")
+          | scan("Report attached: (research-report-\\S+\\.md)")]
+    | flatten' 2>/dev/null || printf 'null')"
+[ "$announced_reports" != null ] || die "could not read prior report announcements"
 
-if [ -n "$prior_report" ]; then
-    FILE_ID="$(printf '%s' "$prior_report" | jq -r '.id')"
-    FILENAME="$(printf '%s' "$prior_report" | jq -r '.filename')"
+# Only the NEWEST report can be a crashed pass's orphan — a crash leaves its
+# upload as the latest attachment. An older one is a finished round, and
+# reusing it would overwrite work a human has already read.
+orphan_report="$(printf '%s' "$existing_files" \
+    | jq -c --arg id8 "$ID8" --arg column "$BOARD_COLUMN" \
+        --argjson announced "$announced_reports" '
+    ([.[] | select((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"))]
+     | sort_by(.created_at) | last) as $newest
+    | if $newest == null then empty
+      elif $column == "changes_requested" and ($newest.filename | IN($announced[])) then empty
+      else $newest end')"
+
+if [ -n "$orphan_report" ]; then
+    FILE_ID="$(printf '%s' "$orphan_report" | jq -r '.id')"
+    FILENAME="$(printf '%s' "$orphan_report" | jq -r '.filename')"
     ROUND="$(printf '%s' "$FILENAME" | sed -E 's/^.*-r([0-9]+)\.md$/\1/')"
     [[ "$ROUND" =~ ^[0-9]+$ ]] || die "could not read the round from $FILENAME"
-    printf 'kanban-autopr: report %s was already uploaded by this run; reusing it\n' "$FILENAME" >&2
+    printf 'kanban-autopr: report %s was uploaded by an earlier pass that did not finish; reusing it\n' "$FILENAME" >&2
 else
     # Round = how many reports this card already carries, plus one. The
     # filename is what the next revision run finds among the attachments as
@@ -245,8 +261,9 @@ fi
 # Screenshots attach to the same ticket and to the same note, so the evidence
 # sits beside the claim it supports. A failed image upload is reported and
 # skipped: the report is the deliverable and must not be lost to one bad file.
-# One this run already uploaded (same round prefix, created after the run
-# started) is reused rather than uploaded twice.
+# The staged name carries the round, and the round is stable across a retry
+# (it comes from the reused orphan report), so the filename is a natural key:
+# one an earlier pass already uploaded is reused rather than uploaded twice.
 ATTACHMENT_IDS="[\"$FILE_ID\"]"
 SHOT_COUNT=0
 if [ -n "$ARTIFACTS_DIR" ] && [ -d "$ARTIFACTS_DIR" ]; then
@@ -254,7 +271,7 @@ if [ -n "$ARTIFACTS_DIR" ] && [ -d "$ARTIFACTS_DIR" ]; then
         [ -n "$shot" ] || continue
         shot_name="$(basename "$shot")"
         staged_name="research-$ID8-r$ROUND-$shot_name"
-        shot_id="$(printf '%s' "$this_run_files" \
+        shot_id="$(printf '%s' "$existing_files" \
             | jq -r --arg name "$staged_name" '[.[] | select(.filename == $name)] | first | .id // empty')"
         if [ -z "$shot_id" ]; then
             staged_shot="$STAGE_DIR/$staged_name"
@@ -291,18 +308,14 @@ $STAGED_BLOCK"
 [ -z "$STAGING_RESULT" ] || note_body="$note_body
 $STAGING_RESULT"
 
-# The note is the one write with no natural key, so look for our own marker
-# line among this task's discussion before posting it again.
-note_marker="Report attached: $FILENAME"
+# The note names its report file, which is what makes the report announced —
+# so the announcement list read above is also this write's natural key. No
+# clock, and no fail-open: a discussion we could not read already killed the
+# run further up.
 note_already_posted=false
-if [ -n "$run_started_epoch" ]; then
-    history_json="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/history" 2>/dev/null || printf '[]')"
-    if printf '%s' "$history_json" | jq -e --arg marker "$note_marker" '
-        any(.[]?; .event_type == "activity" and ((.metadata.body // "") | contains($marker)))' \
-        >/dev/null 2>&1; then
-        note_already_posted=true
-        printf 'kanban-autopr: summary note for %s is already on the card; not posting again\n' "$FILENAME" >&2
-    fi
+if printf '%s' "$announced_reports" | jq -e --arg f "$FILENAME" 'any(.[]?; . == $f)' >/dev/null; then
+    note_already_posted=true
+    printf 'kanban-autopr: summary note for %s is already on the card; not posting again\n' "$FILENAME" >&2
 fi
 if [ "$note_already_posted" != true ]; then
     activity_payload="$(jq -n --arg body "$note_body" --argjson files "$ATTACHMENT_IDS" \

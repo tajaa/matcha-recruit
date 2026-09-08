@@ -452,10 +452,6 @@ jobs:
       - name: Publish research report
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.select.outputs.outcome == 'artifact'
         timeout-minutes: 5
-        env:
-          # Lets a retried publication recognise the report, screenshots, and
-          # note this same run already wrote instead of attaching them twice.
-          AUTOPR_RUN_STARTED_AT: ${{ runner.temp }}/investigation-started-at
         run: |
           # The default shell here is `bash -e`, not `bash -eo pipefail`: piping
           # the publisher into tee would otherwise report tee's exit status, so

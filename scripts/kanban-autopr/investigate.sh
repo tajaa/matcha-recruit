@@ -294,6 +294,20 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
     | ((map(select((.round_index // 1) == $round)) | sort_by(.created_at // "") | reverse)
       + (map(select((.round_index // 1) != $round)) | sort_by(.created_at // "") | reverse))[]')
 
+# The publisher's own earlier output that the filter above deliberately did
+# NOT re-attach. It matters that the model is told: the report it is revising
+# names each screenshot by filename and treats those images as the evidence
+# for its claims, so without this it reads round-1 prose citing pictures it
+# cannot see and has no way to know they were withheld rather than missing.
+withheld_attachments='[]'
+if [ "$KIND_OUTCOME" = artifact ]; then
+    withheld_attachments="$(printf '%s' "$files" | jq -c --arg id8 "$ID8" '
+        def mine: ((.filename // "") | test("^research-(report-)?" + $id8 + "-r[0-9]+"));
+        def prior_report: ((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"));
+        ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
+        | [.[] | select(mine and (. != $keep)) | (.filename // empty)]' 2>/dev/null || printf '[]')"
+fi
+
 CONTEXT_FILE="$WORK_DIR/context.json"
 # The model's copy of the history omits the lane's bookkeeping rows; the raw
 # file above keeps them for the directive resolver and the round derivation.
@@ -310,7 +324,8 @@ jq -n \
     --slurpfile prior_checkpoint "$PRIOR_CHECKPOINT_FILE" \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
-    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded}' \
+    --argjson withheld "$withheld_attachments" \
+    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded, withheld_attachments: $withheld}' \
     > "$CONTEXT_FILE"
 
 if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
