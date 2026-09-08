@@ -228,7 +228,8 @@ else
 fi
 ################################################################################
 # Case 10 — a script the kanban lane runs from the trusted control-plane
-# snapshot may not derive its repo root from its own location.
+# snapshot may not derive its repo root from its own location, and everything
+# it references must actually be in the snapshot.
 #
 # `Snapshot trusted AutoPR control plane` extracts `git archive main` into
 # $RUNNER_TEMP/autopr-control, which has no .git. bf74d0a moved
@@ -236,32 +237,91 @@ fi
 # REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)", so every kanban run died at
 # "Check whether an open PR already covers this task" with `fatal: not a git
 # repository` — after the model had already been paid for. The lane opened no
-# PR between 2026-09-06 and the fix. Guard the class, not the instance: any
-# control-root script that resolves a repo root must take it from the
-# environment the workflow sets (AUTOPR_WORKSPACE_ROOT / AUTOPR_SANDBOX_REPO_ROOT).
+# PR between 2026-09-06 and the fix. The same step's own comment records the
+# earlier shape of the bug: the scope checker and the migration-graph helper
+# were referenced from the control root before they were added to the archive.
+#
+# Guard the class, not the instance:
+#   a. Follow $SCRIPT_DIR references transitively — "runs from the control
+#      root" is inherited from the caller, not stated per script.
+#   b. Any location-relative root ($SCRIPT_DIR/..), under whatever variable
+#      name, must come from the environment the workflow sets
+#      (AUTOPR_WORKSPACE_ROOT / AUTOPR_SANDBOX_REPO_ROOT).
+#   c. Every referenced script must be inside a path the archive extracts.
 KANBAN_WORKFLOW="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
-control_root_offenders=""
+
+# The hand-maintained extract list, read from the workflow rather than trusted.
+archived_paths="$(awk '
+    /git archive main/ { collect = 1 }
+    collect { print; if ($0 !~ /\\[[:space:]]*$/) collect = 0 }
+' "$KANBAN_WORKFLOW" | grep -oE 'scripts/[A-Za-z0-9_./-]+' | sort -u)"
+
+control_queue=()
 while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
+    [ -n "$rel" ] && control_queue+=("$rel")
+done < <(grep -oE '\$\{?AUTOPR_CONTROL_ROOT\}?/[A-Za-z0-9_./-]+\.sh' "$KANBAN_WORKFLOW" \
+    | sed -E 's#^\$\{?AUTOPR_CONTROL_ROOT\}?/##' | sort -u)
+
+control_root_offenders=""
+control_unarchived=""
+control_seen=""
+control_index=0
+while [ "$control_index" -lt "${#control_queue[@]}" ]; do
+    rel="${control_queue[$control_index]}"
+    control_index=$((control_index + 1))
+    case " $control_seen " in *" $rel "*) continue ;; esac
+    control_seen="$control_seen $rel"
+
+    rel_dir="${rel%/*}"
+    [ "$rel_dir" = "$rel" ] && rel_dir=""
+    top="scripts/${rel%%/*}"
+    if ! printf '%s\n' "$archived_paths" | grep -qxF "$top" \
+        && ! printf '%s\n' "$archived_paths" | grep -qxF "scripts/$rel"; then
+        control_unarchived="$control_unarchived $rel"
+    fi
+
     script="$REPO_ROOT/scripts/$rel"
     if [ ! -f "$script" ]; then
         control_root_offenders="$control_root_offenders $rel(missing)"
         continue
     fi
-    # Only location-relative resolution is the bug. `git rev-parse
-    # --show-toplevel` resolves from the working directory, which the workflow
-    # leaves at $GITHUB_WORKSPACE, so leave-task-checkout.sh stays correct.
-    grep -q '^REPO_ROOT=.*SCRIPT_DIR' "$script" || continue
-    grep -qE '^REPO_ROOT="\$\{(AUTOPR_WORKSPACE_ROOT|AUTOPR_SANDBOX_REPO_ROOT):-' "$script" \
-        || control_root_offenders="$control_root_offenders $rel"
-done < <(grep -oE '\$AUTOPR_CONTROL_ROOT/[A-Za-z0-9_./-]+\.sh' "$KANBAN_WORKFLOW" \
-    | sed 's#^\$AUTOPR_CONTROL_ROOT/##' | sort -u)
+
+    # `git rev-parse --show-toplevel` resolves from the working directory,
+    # which the workflow leaves at $GITHUB_WORKSPACE (it declares no
+    # working-directory anywhere), so leave-task-checkout.sh stays correct and
+    # is not matched here. Only $SCRIPT_DIR-relative roots are the bug.
+    offending=0
+    while IFS= read -r line; do
+        case "$line" in *'$SCRIPT_DIR/..'*|*'${SCRIPT_DIR}/..'*) ;; *) continue ;; esac
+        printf '%s\n' "$line" \
+            | grep -qE '\$\{(AUTOPR_WORKSPACE_ROOT|AUTOPR_SANDBOX_REPO_ROOT):-' \
+            || offending=1
+    done < "$script"
+    [ "$offending" -eq 0 ] || control_root_offenders="$control_root_offenders $rel"
+
+    while IFS= read -r child; do
+        [ -n "$child" ] || continue
+        if [ -n "$rel_dir" ]; then
+            control_queue+=("$rel_dir/$child")
+        else
+            control_queue+=("$child")
+        fi
+    done < <(grep -oE '\$\{?SCRIPT_DIR\}?/[A-Za-z0-9_.-]+\.sh' "$script" \
+        | sed -E 's#^\$\{?SCRIPT_DIR\}?/##' | sort -u)
+done
 
 if [ -n "$control_root_offenders" ]; then
     echo "  offending control-root scripts:$control_root_offenders"
     check "control-root scripts take their repo root from the environment" 1
 else
     check "control-root scripts take their repo root from the environment" 0
+fi
+
+if [ -n "$control_unarchived" ]; then
+    echo "  control-root scripts missing from the git archive list:$control_unarchived"
+    check "every control-root script is inside an archived path" 1
+else
+    check "every control-root script is inside an archived path" 0
 fi
 
 echo

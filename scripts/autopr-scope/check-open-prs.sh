@@ -61,6 +61,16 @@ if [ "$MODE" = off ]; then
     exit 0
 fi
 
+# Every path below reads $REPO_ROOT with git: the proposal capture, and the
+# `branch --show-current` that keeps this lane's own PR out of the candidate
+# set. That second call sits in an argument position, so a `fatal: not a git
+# repository` there does not trip errexit -- it just yields an empty branch
+# name, stops excluding our own PR, and can let the lane declare itself
+# already covered by itself. Validate the root once, for both paths, before
+# any of it runs. Deliberately after the `off` short-circuit above: the kill
+# switch must never be the thing that fails.
+autopr_scope_require_repo "$REPO_ROOT"
+
 proposal="$WORK_DIR/proposal.diff"
 if [ -n "$PROPOSAL_DIFF" ]; then
     [ -s "$PROPOSAL_DIFF" ] || autopr_scope_die "--proposal-diff must be a nonempty file"

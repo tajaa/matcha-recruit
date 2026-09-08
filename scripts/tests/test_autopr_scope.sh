@@ -115,3 +115,50 @@ set -e
 printf '%s' "$control_err" | grep -qF 'repo root is not a git repository'
 printf '%s' "$control_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT'
 printf 'PASS: a non-repo root names its own cause instead of a generic capture failure\n'
+
+# The --proposal-diff path (reconcile.sh) never reaches the capture helper, but
+# it still reads the root at `git -C "$REPO_ROOT" branch --show-current`. That
+# call sits in an argument position, so its failure does not trip errexit: the
+# branch name came back empty, the lane's own PR stopped being filtered out of
+# the candidate set, and an exact patch-id match against itself reported
+# `covered` with exit 0. The root check must run for this path too.
+set +e
+proposal_err="$(PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
+  AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane error --identity draft-334 --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --proposal-diff "$TMP_DIR/exact.diff" \
+  --output "$TMP_DIR/proposal-unset.json" 2>&1)"
+proposal_status=$?
+set -e
+[ "$proposal_status" -ne 0 ]
+printf '%s' "$proposal_err" | grep -qF 'repo root is not a git repository'
+[ ! -s "$TMP_DIR/proposal-unset.json" ]
+printf 'PASS: --proposal-diff refuses a non-repo root instead of matching itself\n'
+
+# `rev-parse --git-dir` alone would accept any directory *inside* a repository
+# and then read that parent's tree. $RUNNER_TEMP is outside the checkout today,
+# but the failure would be silent and wrong rather than loud, so require the
+# root to be the top level itself.
+mkdir -p "$TEST_REPO/nested/dir"
+set +e
+nested_err="$(PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
+  AUTOPR_WORKSPACE_ROOT="$TEST_REPO/nested/dir" \
+  AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane kanban --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --output "$TMP_DIR/nested.json" 2>&1)"
+nested_status=$?
+set -e
+[ "$nested_status" -ne 0 ]
+printf '%s' "$nested_err" | grep -qF 'sits inside'
+printf 'PASS: a root nested inside a repository is rejected, not silently promoted\n'
+
+# The kill switch must never be the thing that fails: `off` short-circuits
+# before the root is ever validated.
+AUTOPR_SCOPE_DEDUPE_MODE=off PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane kanban --identity task-id --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --output "$TMP_DIR/off-control.json"
+jq -e '.decision == "no_match" and .mode == "off"' "$TMP_DIR/off-control.json" >/dev/null
+printf 'PASS: off mode still bypasses the root check from a non-repo control root\n'
