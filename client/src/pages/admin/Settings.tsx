@@ -8,6 +8,7 @@ import {
   type TokenQuota,
   type TokenUsage,
   type BetaInvitation,
+  type AutoPRBoardCapabilities,
 } from '../../api/admin/platformSettings'
 
 // Mirrors the backend's fallback when platform_settings has no row yet.
@@ -21,6 +22,24 @@ const RESEARCH_MODELS = [
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+// What each AutoPR board grant actually permits. Written as blast radius, not
+// as a feature name: an admin ticking "outreach" is authorizing drafted email
+// to leave the building once a human approves each one.
+const AUTOPR_CAPABILITY_COPY: Record<string, { label: string; description: string }> = {
+  research: {
+    label: 'Research',
+    description: 'Research cards run: live web search + the repo, report attached to the ticket. No PR, no code change.',
+  },
+  outreach: {
+    label: 'Outreach',
+    description: 'A run may STAGE email and contact requests on a card. Nothing sends until a person approves that exact item, and it sends from their own mailbox.',
+  },
+  browse: {
+    label: 'Browse',
+    description: 'A run may drive a real browser and attach screenshots of what it saw.',
+  },
+}
+
 export default function Settings() {
   const [pendingMode, setPendingMode] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -30,6 +49,11 @@ export default function Settings() {
   const [showAddQuota, setShowAddQuota] = useState(false)
   const [newQuota, setNewQuota] = useState({ user_email: '', token_limit: '100000', window_hours: '12' })
   const [quotaError, setQuotaError] = useState('')
+
+  // AutoPR per-board capability grants
+  const [pendingBoards, setPendingBoards] = useState<Record<string, string[]> | null>(null)
+  const [boardsSaving, setBoardsSaving] = useState(false)
+  const [boardsError, setBoardsError] = useState<string | null>(null)
 
   // Beta invitations
   const [betaEmails, setBetaEmails] = useState('')
@@ -67,6 +91,51 @@ export default function Settings() {
   const quotaLoading = quotaState.loading
 
   const beta = useAsync<BetaInvitation[]>(() => adminSettingsApi.listBetaInvitations(), [], [])
+
+  const boards = useAsync<AutoPRBoardCapabilities | null>(
+    () => adminSettingsApi.getAutoPRBoardCapabilities(),
+    [],
+    null,
+  )
+  // Same two-nulls rule as the research mode above: only seed the editable
+  // copy once a real payload has arrived, so a failed load renders as an
+  // error rather than as "every board is granted nothing".
+  useEffect(() => {
+    if (boards.data && pendingBoards === null) setPendingBoards(boards.data.capabilities ?? {})
+  }, [boards.data, pendingBoards])
+
+  const toggleBoardCapability = (projectId: string, capability: string) => {
+    setPendingBoards((prev) => {
+      const base = prev ?? {}
+      const current = base[projectId] ?? []
+      const next = current.includes(capability)
+        ? current.filter((c) => c !== capability)
+        : [...current, capability]
+      return { ...base, [projectId]: next }
+    })
+  }
+
+  const boardsDirty =
+    pendingBoards !== null &&
+    boards.data !== null &&
+    JSON.stringify(pendingBoards) !== JSON.stringify(boards.data.capabilities ?? {})
+
+  const handleSaveBoards = async () => {
+    if (!pendingBoards) return
+    setBoardsSaving(true)
+    setBoardsError(null)
+    try {
+      const saved = await adminSettingsApi.setAutoPRBoardCapabilities(pendingBoards)
+      // Adopt the server's normalized map, not the local draft: it deduped and
+      // ordered the grants, and the dirty check compares against it.
+      boards.setData({ ...(boards.data as AutoPRBoardCapabilities), capabilities: saved.capabilities })
+      setPendingBoards(saved.capabilities)
+    } catch (e) {
+      setBoardsError(errText(e))
+    } finally {
+      setBoardsSaving(false)
+    }
+  }
   const betaInvites = beta.data
   const betaLoading = beta.loading
 
@@ -222,6 +291,69 @@ export default function Settings() {
           </Button>
           {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
         </div>
+      </div>
+
+      {/* ── AutoPR board capabilities ── */}
+      <div className="mt-12 max-w-2xl">
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">AutoPR board capabilities</h2>
+        <p className="text-xs text-zinc-500 mb-3">
+          What the AutoPR bot may do on each Espresso board it watches. Every grant is off by
+          default, and drafting code pull requests needs none of them. Only the four boards the
+          harness polls can be granted anything.
+        </p>
+        {boards.loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading board grants...
+          </div>
+        ) : boards.error ? (
+          <p className="py-4 text-sm text-red-400">{boards.error}</p>
+        ) : !boards.data || boards.data.watched_project_ids.length === 0 ? (
+          <p className="py-4 text-sm text-zinc-500">AutoPR is not watching any board.</p>
+        ) : (
+          <div className="space-y-3">
+            {boards.data.watched_project_ids.map((projectId) => {
+              const granted = pendingBoards?.[projectId] ?? []
+              return (
+                <Card key={projectId} className="p-4">
+                  <p className="font-mono text-xs text-zinc-400 mb-3 break-all">{projectId}</p>
+                  <div className="space-y-2">
+                    {(boards.data?.known_capabilities ?? []).map((cap) => {
+                      const copy = AUTOPR_CAPABILITY_COPY[cap]
+                      const on = granted.includes(cap)
+                      return (
+                        <label
+                          key={cap}
+                          className="flex items-start gap-3 cursor-pointer rounded p-2 -m-2 hover:bg-zinc-900/60"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 shrink-0"
+                            checked={on}
+                            onChange={() => toggleBoardCapability(projectId, cap)}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm text-zinc-100">{copy?.label ?? cap}</span>
+                            <span className="block text-xs text-zinc-500">
+                              {copy?.description ?? 'No description for this capability.'}
+                            </span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        )}
+        {boards.data && (
+          <div className="mt-4">
+            <Button onClick={handleSaveBoards} disabled={!boardsDirty || boardsSaving}>
+              {boardsSaving ? 'Saving...' : boardsDirty ? 'Save grants' : 'Saved'}
+            </Button>
+            {boardsError && <p className="mt-2 text-xs text-red-400">{boardsError}</p>}
+          </div>
+        )}
       </div>
 
       {/* ── Token Quotas ── */}

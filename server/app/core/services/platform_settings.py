@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from typing import Sequence
+from uuid import UUID
 
 # connection_or_direct, not get_connection: these settings are read on the way to
 # EVERY Gemini call (get_jurisdiction_research_model_mode picks the model), so a
@@ -43,6 +44,19 @@ VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 # re-researched. Hidden, not deleted, is what makes this reversible.
 DEFAULT_TENANT_CODIFIED_ONLY = True
 
+# Per-board AutoPR capability grants: {project_id: [capability, ...]}.
+#
+# The hardcoded KANBAN_AUTOPR_PROJECT_IDS allowlist in project_task_service.py
+# stays the outer boundary — a board absent from it has no harness polling it
+# and can never be granted anything here. This map is the INNER gate, and it is
+# what makes the lane safe to extend beyond code review: "research" reads the
+# world and writes a report, "outreach" lets a human approve and send an email
+# the model drafted, "browse" lets a run drive a real browser and attach
+# screenshots. Each is a different blast radius, so each is granted separately
+# and every one of them defaults OFF.
+AUTOPR_BOARD_CAPABILITIES = ("research", "outreach", "browse")
+DEFAULT_AUTOPR_BOARD_CAPABILITIES: dict[str, list[str]] = {}
+
 _visible_features_cache: list[str] | None = None
 _visible_features_cached_at: float = 0.0
 
@@ -57,6 +71,9 @@ _er_similarity_weights_cached_at: float = 0.0
 
 _tenant_codified_only_cache: bool | None = None
 _tenant_codified_only_cached_at: float = 0.0
+
+_autopr_board_capabilities_cache: dict[str, list[str]] | None = None
+_autopr_board_capabilities_cached_at: float = 0.0
 
 DEFAULT_ER_SIMILARITY_WEIGHTS = {
     "category": 0.30,
@@ -355,3 +372,93 @@ async def get_er_similarity_weights(*, conn=None) -> dict[str, float]:
     _er_similarity_weights_cache = weights
     _er_similarity_weights_cached_at = now
     return dict(weights)
+
+
+def _normalize_autopr_board_capabilities(parsed: object) -> dict[str, list[str]] | None:
+    """Shape check for the stored map. Returns None when it is unusable, so
+    every caller falls back to "no board has any capability" rather than to a
+    half-parsed grant."""
+    if not isinstance(parsed, dict):
+        return None
+    normalized: dict[str, list[str]] = {}
+    for raw_project_id, raw_caps in parsed.items():
+        if not isinstance(raw_project_id, str) or not isinstance(raw_caps, list):
+            return None
+        try:
+            project_id = str(UUID(raw_project_id))
+        except (ValueError, AttributeError, TypeError):
+            return None
+        caps: list[str] = []
+        for cap in raw_caps:
+            if not isinstance(cap, str) or cap not in AUTOPR_BOARD_CAPABILITIES:
+                return None
+            if cap not in caps:
+                caps.append(cap)
+        normalized[project_id] = caps
+    return normalized
+
+
+def prime_autopr_board_capabilities_cache(value: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Seed the cache straight after an admin write, so the next read does not
+    serve the previous grant for up to the cache TTL."""
+    global _autopr_board_capabilities_cache, _autopr_board_capabilities_cached_at
+    normalized = _normalize_autopr_board_capabilities(value) or {}
+    _autopr_board_capabilities_cache = normalized
+    _autopr_board_capabilities_cached_at = time.monotonic()
+    return {k: list(v) for k, v in normalized.items()}
+
+
+async def get_autopr_board_capabilities(*, conn=None) -> dict[str, list[str]]:
+    """Which AutoPR capabilities each Espresso board has been granted.
+
+    Fail-closed in every direction: an absent row, an unparseable value, an
+    unknown capability name, or a non-UUID key all resolve to the empty map.
+    A board with no entry has no capability — the lane still opens code PRs
+    there, which is the behavior that predates this setting.
+    """
+    global _autopr_board_capabilities_cache, _autopr_board_capabilities_cached_at
+
+    now = time.monotonic()
+    if (
+        _autopr_board_capabilities_cache is not None
+        and now - _autopr_board_capabilities_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
+    ):
+        return {k: list(v) for k, v in _autopr_board_capabilities_cache.items()}
+
+    if conn is None:
+        async with get_connection() as managed_conn:
+            raw = await managed_conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = 'autopr_board_capabilities'"
+            )
+    else:
+        raw = await conn.fetchval(
+            "SELECT value FROM platform_settings WHERE key = 'autopr_board_capabilities'"
+        )
+
+    if raw is None:
+        return dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES)
+
+    parsed = raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Invalid autopr_board_capabilities payload; granting nothing")
+            return dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES)
+
+    normalized = _normalize_autopr_board_capabilities(parsed)
+    if normalized is None:
+        logger.warning("Malformed autopr_board_capabilities payload; granting nothing")
+        return dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES)
+
+    _autopr_board_capabilities_cache = normalized
+    _autopr_board_capabilities_cached_at = now
+    return {k: list(v) for k, v in normalized.items()}
+
+
+async def board_has_autopr_capability(project_id, capability: str, *, conn=None) -> bool:
+    """One board, one capability. The single read every gate should use."""
+    if capability not in AUTOPR_BOARD_CAPABILITIES:
+        return False
+    grants = await get_autopr_board_capabilities(conn=conn)
+    return capability in grants.get(str(project_id), [])

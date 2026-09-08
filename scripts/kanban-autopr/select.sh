@@ -122,7 +122,8 @@ consume_run_request() {
 already_handled() {
     local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
-    local run_requested_at="${8:-}" category="${9:-}" branch="bot/task-$id8"
+    local run_requested_at="${8:-}" category="${9:-}" capabilities="${10:-}"
+    local branch="bot/task-$id8"
     # An explicit "run now" from the card is the same class of authorization as
     # decision-bound context: it overrides the cooldown, the durable no-spec
     # ledger, and (in Todo) the historical PR ledger.
@@ -202,6 +203,17 @@ already_handled() {
     local kind_mode
     kind_mode="$(autopr_kind_for_category "$category")"
     if [ "$(autopr_kind_field "$kind_mode" outcome)" = artifact ]; then
+        # An artifact kind runs only on a board granted the matching
+        # capability. Ungranted, the card is left alone rather than downgraded
+        # to a code run: a Research card is not a request for a PR, and
+        # silently drafting one would be a worse answer than doing nothing.
+        local required_capability
+        required_capability="$(autopr_kind_field "$kind_mode" capability)"
+        if [ -n "$required_capability" ] \
+            && ! printf '%s\n' "$capabilities" | grep -qxF "$required_capability"; then
+            echo skip
+            return
+        fi
         if [ "$paused" = true ]; then
             echo skip
         else
@@ -345,9 +357,13 @@ for ((i = 0; i < n; i++)); do
     reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
     run_requested_at="$(printf '%s' "$card" | jq -r '.autopr_run_requested_at // empty')"
     category="$(printf '%s' "$card" | jq -r '.category // "manual"')"
+    # One capability per line so already_handled can grep -qx for an exact
+    # match instead of substring-matching "browse" inside a longer name.
+    capabilities="$(printf '%s' "$card" | jq -r '(.autopr_capabilities // [])[]' 2>/dev/null || true)"
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
-        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category")"
+        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
+        "$capabilities")"
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and

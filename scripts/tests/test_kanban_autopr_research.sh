@@ -74,7 +74,7 @@ run_select() {
 export RESEARCH_TEST_GH_LOG="$TMP_DIR/gh.log"
 
 cat > "$TMP_DIR/cards-todo.json" <<'EOF'
-[{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","board_column":"todo","category":"research","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-01T00:00:00Z"}]
+[{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","board_column":"todo","category":"research","autopr_capabilities":["research"],"created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-01T00:00:00Z"}]
 EOF
 run_select "$TMP_DIR/cards-todo.json" "$TMP_DIR/select-todo.json"
 check "a research card in Todo selects as mode research without any gh pr list call" \
@@ -83,7 +83,7 @@ check "a research card in Todo selects as mode research without any gh pr list c
       && echo 0 || echo 1)
 
 cat > "$TMP_DIR/cards-cr.json" <<'EOF'
-[{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","board_column":"changes_requested","review_note":"Compare cold-start cost too","category":"research","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-02T00:00:00Z","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 900 · prod abc1234 · 🟡 C80 · note: Lambda fits the worker tier"}]
+[{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","board_column":"changes_requested","review_note":"Compare cold-start cost too","category":"research","autopr_capabilities":["research"],"created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-02T00:00:00Z","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 900 · prod abc1234 · 🟡 C80 · note: Lambda fits the worker tier"}]
 EOF
 run_select "$TMP_DIR/cards-cr.json" "$TMP_DIR/select-cr.json"
 check "a research card sent back with a review note reruns as research (next report round)" \
@@ -92,7 +92,7 @@ check "a research card sent back with a review note reruns as research (next rep
       && echo 0 || echo 1)
 
 cat > "$TMP_DIR/cards-nospec.json" <<'EOF'
-[{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research stuff","board_column":"changes_requested","category":"research","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-07T00:00:00Z","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 900 · prod abc1234 · 🟡 C20 · [autopr:no-spec 2026-09-08T01:00:00Z] needs_clarification · note: subject too broad\n\nAnswers needed — reply below with the numbered choices:\n1. Which system?"}]
+[{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research stuff","board_column":"changes_requested","category":"research","autopr_capabilities":["research"],"created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-07T00:00:00Z","progress_note":"🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 900 · prod abc1234 · 🟡 C20 · [autopr:no-spec 2026-09-08T01:00:00Z] needs_clarification · note: subject too broad\n\nAnswers needed — reply below with the numbered choices:\n1. Which system?"}]
 EOF
 run_select "$TMP_DIR/cards-nospec.json" "$TMP_DIR/select-nospec.json"
 nospec_rc=$?
@@ -116,6 +116,34 @@ jq -n '[range(10) | {number: (100 + .), labels: ["autopr"]}]' > "$TMP_DIR/bot-pr
 SELECT_BOT_PRS_FILE="$TMP_DIR/bot-prs-full.json" run_select "$TMP_DIR/cards-todo.json" "$TMP_DIR/select-capped.json"
 check "the open-PR cap does not block a research card" \
     $([ "$(jq -r '.mode' "$TMP_DIR/select-capped.json" 2>/dev/null)" = research ] && echo 0 || echo 1)
+
+# Capability grants are per board and default to none. An ungranted board must
+# leave the card alone rather than fall back to drafting a PR: a Research card
+# is not a request for code.
+jq '.[0].autopr_capabilities = []' "$TMP_DIR/cards-todo.json" > "$TMP_DIR/cards-ungranted.json"
+run_select "$TMP_DIR/cards-ungranted.json" "$TMP_DIR/select-ungranted.json"
+ungranted_rc=$?
+check "a research card on a board without the research grant is skipped, not downgraded to a PR" \
+  $([ "$ungranted_rc" = 3 ] && echo 0 || echo 1)
+
+jq '.[0].autopr_capabilities = ["outreach","browse"]' "$TMP_DIR/cards-todo.json" > "$TMP_DIR/cards-othercaps.json"
+run_select "$TMP_DIR/cards-othercaps.json" "$TMP_DIR/select-othercaps.json"
+othercaps_rc=$?
+check "another board's grants do not stand in for the research grant" \
+  $([ "$othercaps_rc" = 3 ] && echo 0 || echo 1)
+
+# The stamp is absent entirely when the capabilities endpoint could not be read.
+jq 'map(del(.autopr_capabilities))' "$TMP_DIR/cards-todo.json" > "$TMP_DIR/cards-nocaps.json"
+run_select "$TMP_DIR/cards-nocaps.json" "$TMP_DIR/select-nocaps.json"
+nocaps_rc=$?
+check "an unreadable capability stamp fails closed" \
+  $([ "$nocaps_rc" = 3 ] && echo 0 || echo 1)
+
+check "the kind registry names the grant each artifact kind needs" \
+    $([ "$(autopr_kind_field research capability)" = research ] \
+      && [ -z "$(autopr_kind_field investigate capability)" ] \
+      && [ -z "$(autopr_kind_field rework capability)" ] \
+      && echo 0 || echo 1)
 
 cat > "$TMP_DIR/cards-eng.json" <<'EOF'
 [{"task_id":"bbbb0000-0000-4000-8000-000000000002","id8":"bbbb0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Add a route","board_column":"todo","category":"engineering","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-01T00:00:00Z"}]
@@ -305,7 +333,7 @@ Pilot one periodic task.
 high — a cost model against real job counts would raise it further.
 EOF
 cat > "$TMP_DIR/card.json" <<'EOF'
-{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","category":"research","mode":"research","autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 800 · prod 1111111 · 🟡 C50 · note: earlier round\nkeep this human line","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
+{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","category":"research","autopr_capabilities":["research"],"mode":"research","autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 800 · prod 1111111 · 🟡 C50 · note: earlier round\nkeep this human line","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 
 run_publisher() {

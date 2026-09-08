@@ -340,6 +340,7 @@ autopr_post_context_request() {
 #   decision   decision.sh subcommand that validates the model's JSON
 #   publisher  script that turns the validated result into board/GitHub state
 #   outcome    pull_request | artifact (artifact kinds own no branch, no PR)
+#   capability the per-board grant this kind needs, or empty for "always on"
 autopr_kind_field() {
     local mode="$1" field="$2"
     case "$mode" in
@@ -353,6 +354,9 @@ autopr_kind_field() {
                 decision) printf 'normalize' ;;
                 publisher) printf 'publish.sh' ;;
                 outcome) printf 'pull_request' ;;
+                # Drafting code PRs is what this lane has always done on every
+                # board it watches; it is not behind a grant.
+                capability) printf '' ;;
                 *) return 1 ;;
             esac ;;
         research)
@@ -368,6 +372,7 @@ autopr_kind_field() {
                 decision) printf 'normalize-research' ;;
                 publisher) printf 'publish-research.sh' ;;
                 outcome) printf 'artifact' ;;
+                capability) printf 'research' ;;
                 *) return 1 ;;
             esac ;;
         *) return 1 ;;

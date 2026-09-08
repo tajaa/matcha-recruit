@@ -350,6 +350,34 @@ async def list_autopr_run_requests_endpoint(
     return {"requests": await pt_svc.list_autopr_run_requests(parsed)}
 
 
+@router.get("/autopr/board-capabilities")
+async def list_autopr_board_capabilities_endpoint(
+    project_ids: str = Query(..., description="Comma-separated project ids"),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Which AutoPR capabilities each named board has been granted.
+
+    The harness reads this once per pass and refuses to run a capability the
+    board was not granted. That refusal is a spend guard, not the security
+    boundary: the acts these capabilities describe — sending an email, driving
+    a browser — are each re-checked server-side at the moment they happen, so
+    a stale or tampered harness copy cannot widen its own reach.
+    """
+    from app.core.services.platform_settings import get_autopr_board_capabilities
+
+    raw = [p.strip() for p in (project_ids or "").split(",") if p.strip()]
+    if not raw or len(raw) > 20:
+        raise HTTPException(status_code=400, detail="project_ids must name 1-20 projects")
+    try:
+        parsed = [UUID(p) for p in raw]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="project_ids must be UUIDs")
+    for project_id in parsed:
+        await _verify_project_access(project_id, current_user)
+    grants = await get_autopr_board_capabilities()
+    return {"capabilities": {str(p): grants.get(str(p), []) for p in parsed}}
+
+
 @router.post(
     "/projects/{project_id}/tasks/{task_id}/autopr/context-request",
     status_code=201,

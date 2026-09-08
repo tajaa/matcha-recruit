@@ -40,6 +40,15 @@ export type PlatformSettings = {
   jurisdiction_research_model_mode?: string | null
 }
 
+/** Per-board AutoPR grants. `capabilities` is keyed by Espresso project id;
+ *  `watched_project_ids` is the harness's own fixed allowlist, so a board
+ *  outside it cannot be granted anything and the UI can say why. */
+export type AutoPRBoardCapabilities = {
+  capabilities: Record<string, string[]>
+  known_capabilities: string[]
+  watched_project_ids: string[]
+}
+
 export type BetaInviteResult = {
   sent: number
   skipped?: string[]
@@ -50,6 +59,16 @@ export const adminSettingsApi = {
 
   setResearchModelMode: (mode: string) =>
     api.put<void>('/admin/platform-settings/jurisdiction-research-model-mode', { mode }),
+
+  getAutoPRBoardCapabilities: () =>
+    api.get<AutoPRBoardCapabilities>('/admin/platform-settings/autopr-board-capabilities'),
+
+  /** Replaces the WHOLE map — a board omitted here loses its grants. */
+  setAutoPRBoardCapabilities: (capabilities: Record<string, string[]>) =>
+    api.put<{ capabilities: Record<string, string[]> }>(
+      '/admin/platform-settings/autopr-board-capabilities',
+      { capabilities },
+    ),
 
   listQuotas: () => api.get<TokenQuota[]>('/admin/token-quotas'),
   listUsage: () => api.get<TokenUsage[]>('/admin/token-usage'),
