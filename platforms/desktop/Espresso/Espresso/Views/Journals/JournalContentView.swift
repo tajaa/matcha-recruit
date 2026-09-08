@@ -223,6 +223,14 @@ enum JournalBlockParser {
                     fenceBuffer.removeAll()
                     inFence = false
                 } else {
+                    // The table branch below relies on `flushTable()` being
+                    // reached by every non-table line, and this branch
+                    // `continue`s before it. Without this, a fence opened
+                    // straight after a pipe table emits its code block while
+                    // the table is still buffered, so the table renders BELOW
+                    // the code that follows it — and `table / fence / table`
+                    // merges both tables into one block after the code.
+                    flushTable()
                     flushParagraph()
                     numberedRun = 0
                     inFence = true

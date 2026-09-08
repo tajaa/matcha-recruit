@@ -322,7 +322,10 @@ class APIClient {
                 }
                 throw APIError.serviceUnavailable(httpResponse.statusCode)
             }
-            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            // Same unwrapping as `requestData`. Using the raw body here handed
+            // callers `{"detail":"Connect your Gmail…"}` verbatim, so every
+            // banner that shows an httpError message printed JSON at the user.
+            let message = _extractErrorMessage(from: data) ?? "Unknown error"
             throw APIError.httpError(httpResponse.statusCode, message)
         }
 

@@ -208,6 +208,14 @@ extension TaskViewerSheet {
         return error.localizedDescription
     }
 
+    /// Only the server's own "your mailbox is not connected" verdict, which it
+    /// raises as a 400 before contacting Gmail at all. A failure that came back
+    /// FROM Gmail says nothing about whether the mailbox is connected.
+    static func isGmailNotConnected(_ error: Error) -> Bool {
+        guard case APIError.httpError(400, let message) = error else { return false }
+        return message.localizedCaseInsensitiveContains("connect your gmail")
+    }
+
     /// `keepingError` is how a failed send survives the reload that follows it:
     /// a successful list call clears the banner, which would otherwise wipe the
     /// only place the send's own failure was reported.
@@ -275,8 +283,13 @@ extension TaskViewerSheet {
             stagedActionSentTo = result.to ?? action.to
         } catch {
             sendError = Self.outreachErrorText(error)
-            // The server's own verdict on the mailbox wins over a cached one.
-            if sendError?.localizedCaseInsensitiveContains("gmail") == true { gmailConnected = false }
+            // The server's own verdict on the mailbox wins over a cached one —
+            // but only when that is what it actually said. Every Gmail API
+            // error carries `gmail.googleapis.com` in its text, so testing for
+            // the word matched a quota error or a transient Google 5xx on a
+            // perfectly connected mailbox and swapped Retry send for Connect
+            // Gmail, which never self-corrects for the life of the sheet.
+            if Self.isGmailNotConnected(error) { gmailConnected = false }
         }
         // Reload either way: the server owns the outcome, and after a failed
         // send it has already written the `failed` row this will show.

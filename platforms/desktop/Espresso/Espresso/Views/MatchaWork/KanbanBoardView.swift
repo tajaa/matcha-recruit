@@ -185,11 +185,23 @@ struct KanbanBoardView: View {
         lastSeenStore(pid).record(taskId: taskId, column: column)
     }
 
-    /// Open a ticket's viewer when chat asked us to (a ticket chip click /
-    /// "Go to ticket"). Waits until the task is loaded, then clears the request.
-    private func openPendingTaskIfPossible() {
-        guard let tid = appState.pendingOpenTaskId,
-              let task = viewModel.tasks.first(where: { $0.id == tid }) else { return }
+    /// Open a ticket's viewer when something asked us to (a ticket chip click,
+    /// "Go to ticket", or a task notification). Waits until the task is loaded,
+    /// then clears the request.
+    ///
+    /// `discardIfMissing` is passed once the board has finished loading — cards
+    /// included — and means "this request cannot be satisfied here". Without it
+    /// the id was cleared only on a successful open, so a notification naming a
+    /// card outside the loaded set (a Done card beyond the week scope, a board
+    /// the user navigated away from) left it armed indefinitely, and the next
+    /// board to finish loading popped that viewer unprompted and silently
+    /// acknowledged the card's unviewed-updates chip.
+    private func openPendingTaskIfPossible(discardIfMissing: Bool = false) {
+        guard let tid = appState.pendingOpenTaskId else { return }
+        guard let task = viewModel.tasks.first(where: { $0.id == tid }) else {
+            if discardIfMissing { appState.pendingOpenTaskId = nil }
+            return
+        }
         acknowledge(tid)
         viewingTask = task
         appState.pendingOpenTaskId = nil
@@ -267,6 +279,10 @@ struct KanbanBoardView: View {
             if !doneWeeklyReset && !isPipeline {
                 await viewModel.loadAllDoneTasks()
             }
+            // Every card this board will hold is now loaded, so a pending
+            // request still unmatched names a card that is not here. Drop it
+            // rather than leaving it armed for whichever board loads next.
+            openPendingTaskIfPossible(discardIfMissing: true)
             // Always reload suggestions from the server: the push webhook
             // scans server-side on merge, so suggestions can exist even when
             // the auto-scan below short-circuits on its cooldown. Without this

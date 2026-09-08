@@ -25,6 +25,10 @@ struct TaskComposeContent: View {
     /// research; nil when the board is not watched or the call failed.
     @State private var autoPRBotUserId: String?
     @State private var researchGranted: Bool?
+    /// nil until the capabilities call answers; false means AutoPR does not
+    /// watch this board at all, which is the one case where the card provably
+    /// can never run.
+    @State private var boardWatchedByAutoPR: Bool?
 
     init(column: String, template: KanbanTemplate, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
         self.column = column
@@ -37,6 +41,13 @@ struct TaskComposeContent: View {
     /// Nothing else on the sheet says that a Research card sits in Todo
     /// forever unless the bot owns it.
     private var researchAssignmentHint: String? {
+        // Said first, and without needing the bot's identity: an unwatched
+        // board never resolves one, so gating the whole hint on it left the
+        // one unfixable case as the only one that explained nothing, while a
+        // merely-ungranted board got told.
+        if boardWatchedByAutoPR == false {
+            return "AutoPR does not watch this board, so a Research card here will not run automatically."
+        }
         guard let bot = autoPRBotUserId else { return nil }
         let botIsCollaborator = viewModel.collaborators.contains { $0.userId == bot }
         if !botIsCollaborator {
@@ -55,13 +66,24 @@ struct TaskComposeContent: View {
     /// harness only picks up cards assigned to that account.
     private func loadResearchDefaults() async {
         guard template == .research, let pid = viewModel.project?.id else { return }
-        guard let caps = try? await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid),
-              caps.isWatched(pid), let bot = caps.autoprBotUserId else { return }
+        guard let caps = try? await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid)
+        else { return }
+        boardWatchedByAutoPR = caps.isWatched(pid)
+        guard caps.isWatched(pid), let bot = caps.autoprBotUserId else { return }
         autoPRBotUserId = bot
         researchGranted = caps.has("research", on: pid)
-        if assignedTo == nil, viewModel.collaborators.contains(where: { $0.userId == bot }) {
-            assignedTo = bot
-        }
+        preselectAutoPRIfPossible()
+    }
+
+    /// `collaborators` is published and loads asynchronously, so on a cold
+    /// project open this check can run before the list arrives. Missing it
+    /// creates the card unassigned, and the harness only picks up cards the
+    /// bot owns — the card then sits in Todo forever, which is precisely what
+    /// preselecting exists to prevent. Re-run when the list changes.
+    private func preselectAutoPRIfPossible() {
+        guard template == .research, assignedTo == nil, let bot = autoPRBotUserId,
+              viewModel.collaborators.contains(where: { $0.userId == bot }) else { return }
+        assignedTo = bot
     }
 
     private func fieldBinding(_ key: String) -> Binding<String> {
@@ -170,6 +192,7 @@ struct TaskComposeContent: View {
         .padding(16)
         .frame(width: 420)
         .task { await loadResearchDefaults() }
+        .onChange(of: viewModel.collaborators.count) { _, _ in preselectAutoPRIfPossible() }
         .glassPanel(cornerRadius: 0, material: .hudWindow, blending: .behindWindow,
                     tint: Color.appBackground, tintOpacity: 0.62, shadow: false)
     }
