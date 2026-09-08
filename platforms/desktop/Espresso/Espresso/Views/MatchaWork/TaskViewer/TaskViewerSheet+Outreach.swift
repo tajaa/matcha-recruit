@@ -18,7 +18,11 @@ extension TaskViewerSheet {
 
     @ViewBuilder
     var outreachSection: some View {
-        if !stagedActions.isEmpty {
+        // The error belongs to the section, so the section has to survive an
+        // empty list: with `!stagedActions.isEmpty` alone a failed load hid the
+        // very message that says the load failed, and "this ticket has no
+        // proposals" and "we could not find out" looked identical.
+        if !stagedActions.isEmpty || stagedActionError != nil {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "paperplane")
@@ -74,7 +78,10 @@ extension TaskViewerSheet {
                 if !action.isPending {
                     Text(Self.outreachStateLabel(action))
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(action.state == "failed" ? .red : .secondary)
+                        .foregroundColor(
+                            action.state == "failed" || action.state == "sending"
+                                ? .red : .secondary
+                        )
                 }
             }
             Text(action.subject)
@@ -151,6 +158,9 @@ extension TaskViewerSheet {
     static func outreachStateLabel(_ action: MWStagedAction) -> String {
         let who = action.resolvedByName.map { " · \($0)" } ?? ""
         switch action.state {
+        // A claim with no outcome row. The send either never returned or the
+        // process died holding it — either way this system must not say "Sent".
+        case "sending": return "Send interrupted — check your mailbox"
         case "sent": return "Sent\(who)"
         case "handled": return "Handled\(who)"
         case "dismissed": return "Dismissed\(who)"
@@ -161,17 +171,20 @@ extension TaskViewerSheet {
 
     // MARK: - Actions
 
-    func loadStagedActions() async {
+    /// `keepingError` is how a failed send survives the reload that follows it:
+    /// a successful list call clears the banner, which would otherwise wipe the
+    /// only place the send's own failure was reported.
+    func loadStagedActions(keepingError: String? = nil) async {
         guard let pid = viewModel.project?.id else { return }
         do {
             stagedActions = try await MatchaWorkService.shared.listStagedActions(
                 projectId: pid, taskId: task.id
             )
-            stagedActionError = nil
+            stagedActionError = keepingError
         } catch {
             // A ticket with no proposals is the common case and 404s nothing;
             // a real failure should not blank the section silently.
-            stagedActionError = error.localizedDescription
+            stagedActionError = keepingError ?? error.localizedDescription
         }
     }
 
@@ -180,16 +193,17 @@ extension TaskViewerSheet {
         resolvingActionId = action.id
         stagedActionError = nil
         defer { resolvingActionId = nil }
+        var sendError: String?
         do {
             _ = try await MatchaWorkService.shared.sendStagedAction(
                 projectId: pid, taskId: task.id, actionId: action.id
             )
         } catch {
-            stagedActionError = error.localizedDescription
+            sendError = error.localizedDescription
         }
         // Reload either way: the server owns the outcome, and after a failed
-        // send the row may already be resolved on its side.
-        await loadStagedActions()
+        // send it has already written the `failed` row this will show.
+        await loadStagedActions(keepingError: sendError)
     }
 
     func resolveStagedAction(_ action: MWStagedAction, state: String) async {
@@ -197,13 +211,14 @@ extension TaskViewerSheet {
         resolvingActionId = action.id
         stagedActionError = nil
         defer { resolvingActionId = nil }
+        var resolveError: String?
         do {
             _ = try await MatchaWorkService.shared.resolveStagedAction(
                 projectId: pid, taskId: task.id, actionId: action.id, state: state
             )
         } catch {
-            stagedActionError = error.localizedDescription
+            resolveError = error.localizedDescription
         }
-        await loadStagedActions()
+        await loadStagedActions(keepingError: resolveError)
     }
 }

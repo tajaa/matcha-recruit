@@ -74,7 +74,9 @@ struct MWStagedAction: Codable, Identifiable, Hashable {
     let body: String
     /// What approving this unblocks — the model's own justification.
     let why: String
-    /// pending | sent | handled | dismissed | failed.
+    /// pending | sending | sent | handled | dismissed | failed. `sending` is
+    /// the claim the server writes before handing mail to Gmail; seeing it
+    /// means no outcome row followed, so the send was interrupted.
     let state: String
     let detail: String?
     let resolvedAt: String?
@@ -82,6 +84,9 @@ struct MWStagedAction: Codable, Identifiable, Hashable {
     let createdAt: String
 
     var isPending: Bool { state == "pending" }
+    /// Claimed but unresolved. Not pending (the buttons are gone — a second
+    /// approval is refused server-side) and emphatically not sent.
+    var isInterrupted: Bool { state == "sending" }
     /// `sent` is reserved for mail this system actually delivered; `handled`
     /// means a person did it themselves. Keeping them apart is the point.
     var isSendable: Bool { kind == "email" }

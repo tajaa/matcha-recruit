@@ -385,9 +385,11 @@ async def stage_autopr_actions_endpoint(
 ):
     """Record what a run proposed. Posted by the harness; sends nothing.
 
-    The board must hold the `outreach` grant. That check lives here rather than
-    only in the harness because this endpoint is what actually puts a
-    one-click-sendable draft in front of a human.
+    Two checks, both in the service so they cannot be bypassed: the poster must
+    be the AutoPR service account, and the board must hold the `outreach`
+    grant. Project membership alone is not enough — this endpoint is what puts
+    a one-click-sendable draft, labelled as the bot's work, in front of a
+    colleague who will send it from their own mailbox.
     """
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
@@ -403,6 +405,8 @@ async def stage_autopr_actions_endpoint(
             actor_user_id=current_user.id,
             actions=actions,
         )
+    except pt_svc.AutoPRActorNotPermitted as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except pt_svc.AutoPRReconsiderationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     if result is None:
@@ -429,10 +433,13 @@ async def send_autopr_staged_action_endpoint(
     * a per-approver hourly ceiling, because gmail_service's own limiter is
       per-instance and every request builds a fresh one.
 
-    The outcome row is written BEFORE the send. A crash after delivery would
-    otherwise leave a sent email with no record, and re-approval would send it
-    twice; this way the worst case is a row saying `sent` for mail that did not
-    go out, which a person can see and re-send deliberately.
+    A `sending` claim is written BEFORE the send and the real outcome (`sent`
+    or `failed`) is appended after it. The claim is what makes a second
+    approval impossible while the first is in flight; writing `sent` up front
+    instead — as this route once did — meant a send that threw was recorded as
+    delivered forever, with `failed` unreachable and the mail never sent.
+    A claim left with no outcome means the process died mid-send, which the
+    card shows as interrupted rather than as delivered.
     """
     from app.core.services.platform_settings import board_has_autopr_capability
     from app.matcha.services.matcha_work import project_task_service as pt_svc
@@ -476,17 +483,17 @@ async def send_autopr_staged_action_endpoint(
         )
 
     try:
-        recorded = await pt_svc.resolve_autopr_staged_action(
+        claimed = await pt_svc.resolve_autopr_staged_action(
             project_id=project_id,
             task_id=task_id,
             action_id=action_id,
             actor_user_id=current_user.id,
-            state="sent",
+            state="sending",
             detail=f"to {action['to']}",
         )
     except pt_svc.AutoPRReconsiderationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    if recorded is None:
+    if claimed is None:
         raise HTTPException(status_code=404, detail="Staged action not found")
 
     try:
@@ -494,18 +501,39 @@ async def send_autopr_staged_action_endpoint(
             to=action["to"], subject=action["subject"], body=action["body"]
         )
     except Exception as exc:
-        # The claim row already exists and is immutable, so record the failure
-        # as its own row rather than pretending the approval never happened.
+        # The claim is immutable, so the failure is its own row on top of it.
+        # Recording it is what keeps the card honest; if even that write fails
+        # the claim stands alone and reads as an interrupted send, which is
+        # still true and still not a claim that mail went out.
         logger.warning("Staged action %s failed to send: %s", action_id, exc, exc_info=True)
+        try:
+            await pt_svc.record_autopr_staged_send_outcome(
+                project_id=project_id,
+                task_id=task_id,
+                action_id=action_id,
+                actor_user_id=current_user.id,
+                state="failed",
+                detail=str(exc),
+            )
+        except Exception:
+            logger.exception("Could not record the failed send for staged action %s", action_id)
         raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
 
+    recorded = await pt_svc.record_autopr_staged_send_outcome(
+        project_id=project_id,
+        task_id=task_id,
+        action_id=action_id,
+        actor_user_id=current_user.id,
+        state="sent",
+        detail=f"to {action['to']}",
+    )
     return {
         "ok": True,
         "staged_action_id": str(action_id),
         "state": "sent",
         "message_id": result.get("id"),
         "to": action["to"],
-        "resolved_at": recorded["resolved_at"],
+        "resolved_at": (recorded or claimed)["resolved_at"],
     }
 
 
