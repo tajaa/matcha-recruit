@@ -78,6 +78,37 @@ async def test_a_board_with_no_entry_has_no_capabilities():
     assert await ps.board_has_autopr_capability(BOARD, "research") is False
 
 
+class _FakeConn:
+    """Counts reads and answers with whatever the row would hold."""
+
+    def __init__(self, value):
+        self.value = value
+        self.reads = 0
+
+    async def fetchval(self, *args, **kwargs):
+        self.reads += 1
+        return self.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "row",
+    [None, "{not json", '{"nope": ["research"]}'],
+    ids=["absent", "unparseable", "malformed"],
+)
+async def test_every_fallback_is_cached_too(row):
+    """No row at all is the documented default, so leaving it uncached made the
+    steady state the one that hit Postgres on every capability check — and
+    re-logged the malformed-payload warning on every request."""
+    ps._autopr_board_capabilities_cache = None
+    conn = _FakeConn(row)
+    assert await ps.get_autopr_board_capabilities(conn=conn) == {}
+    assert conn.reads == 1
+    for _ in range(5):
+        assert await ps.board_has_autopr_capability(BOARD, "outreach") is False
+    assert conn.reads == 1
+
+
 @pytest.mark.asyncio
 async def test_returned_grants_are_copies_a_caller_cannot_mutate():
     """The cache is process-wide and read on every gate; handing out the live

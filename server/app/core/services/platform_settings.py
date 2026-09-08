@@ -415,6 +415,11 @@ async def get_autopr_board_capabilities(*, conn=None) -> dict[str, list[str]]:
     unknown capability name, or a non-UUID key all resolve to the empty map.
     A board with no entry has no capability — the lane still opens code PRs
     there, which is the behavior that predates this setting.
+
+    Every resolution is cached, the fallbacks included. No row at all is the
+    documented default, so leaving that case uncached made the steady state the
+    one that queried Postgres on every capability check — and re-logged the
+    malformed-payload warning on every request, with no backoff.
     """
     global _autopr_board_capabilities_cache, _autopr_board_capabilities_cached_at
 
@@ -435,8 +440,14 @@ async def get_autopr_board_capabilities(*, conn=None) -> dict[str, list[str]]:
             "SELECT value FROM platform_settings WHERE key = 'autopr_board_capabilities'"
         )
 
+    def _cache(value: dict[str, list[str]]) -> dict[str, list[str]]:
+        global _autopr_board_capabilities_cache, _autopr_board_capabilities_cached_at
+        _autopr_board_capabilities_cache = value
+        _autopr_board_capabilities_cached_at = now
+        return {k: list(v) for k, v in value.items()}
+
     if raw is None:
-        return dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES)
+        return _cache(dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES))
 
     parsed = raw
     if isinstance(raw, str):
@@ -444,16 +455,14 @@ async def get_autopr_board_capabilities(*, conn=None) -> dict[str, list[str]]:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             logger.warning("Invalid autopr_board_capabilities payload; granting nothing")
-            return dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES)
+            return _cache(dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES))
 
     normalized = _normalize_autopr_board_capabilities(parsed)
     if normalized is None:
         logger.warning("Malformed autopr_board_capabilities payload; granting nothing")
-        return dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES)
+        return _cache(dict(DEFAULT_AUTOPR_BOARD_CAPABILITIES))
 
-    _autopr_board_capabilities_cache = normalized
-    _autopr_board_capabilities_cached_at = now
-    return {k: list(v) for k, v in normalized.items()}
+    return _cache(normalized)
 
 
 async def board_has_autopr_capability(project_id, capability: str, *, conn=None) -> bool:

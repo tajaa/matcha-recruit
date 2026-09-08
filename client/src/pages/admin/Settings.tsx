@@ -115,10 +115,21 @@ export default function Settings() {
     })
   }
 
+  // Grants are a set per board, so the comparison has to be one too: with a
+  // raw JSON.stringify, ticking a box and unticking it left `{ id: [] }`
+  // against the server's `{}` and the form stayed dirty forever, and granting
+  // two capabilities in the other order did the same.
+  const boardGrantsKey = (map: Record<string, string[]>) =>
+    JSON.stringify(
+      Object.entries(map)
+        .map(([id, caps]) => [id, [...caps].sort()] as const)
+        .filter(([, caps]) => caps.length > 0)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    )
   const boardsDirty =
     pendingBoards !== null &&
     boards.data !== null &&
-    JSON.stringify(pendingBoards) !== JSON.stringify(boards.data.capabilities ?? {})
+    boardGrantsKey(pendingBoards) !== boardGrantsKey(boards.data.capabilities ?? {})
 
   const handleSaveBoards = async () => {
     if (!pendingBoards) return

@@ -565,6 +565,12 @@ spend guard, not the security boundary** — sending an email and driving a brow
 each re-checked server-side where they happen, so a stale harness copy cannot widen its
 own reach.
 
+An ungranted board is the one skip a human can fix, so it is not silent. When someone
+presses **Run research now** there, `select.sh` still consumes the request (an unconsumed
+one re-dispatches every minute forever) but posts a note on the card naming the missing
+grant and where to turn it on. Espresso's run button does not know about grants, so
+without that note the operator sees only the button come back and can press it forever.
+
 ### Staged outreach — approving a send
 
 A research decision may carry `staged_actions` (≤10, each `email` | `contact` |
@@ -576,20 +582,33 @@ report says so.
 
 A person's decision is a second, **unique** `autopr_staged_action_result` row naming the
 action — so "approved twice", and therefore "sent twice", is not representable rather
-than merely guarded. Four outcomes, and the distinction is load-bearing:
+than merely guarded. Five states, and the distinctions are load-bearing:
 
+- `sending` — claimed, not yet resolved. Written *before* the mail call; a row left in
+  this state means the process died mid-send, and the card says "Send interrupted".
 - `sent` — this system delivered it. Only `POST …/staged-actions/{id}/send` may write it.
 - `handled` — a person did it themselves.
 - `dismissed` — it will not be done.
 - `failed` — the send was attempted and the provider refused.
+
+Only the AutoPR service account may POST `staged-actions`. Board membership is not
+enough: the row renders as "Drafted by AutoPR" with a one-click Send beside it, and
+without an identity check any collaborator could put words in the bot's mouth for a
+colleague to send from their own mailbox, past every other guard.
 
 The send route is the single point where model-drafted text leaves the building, and it
 re-checks all of: the board's `outreach` grant, that the action is still unresolved, that
 the action is an `email` (a contact or review request is something a person does), that
 the **approver's own Gmail** is connected — mail never goes out from a system account —
 and a per-approver ceiling of 20 sends/hour, because `gmail_service`'s own limiter lives
-on the instance and every request builds a fresh one. The outcome row is written *before*
-the send: a crash after delivery leaves a visible record rather than mail nobody logged.
+on the instance and every request builds a fresh one. `to` must already be a deliverable
+address by then: the validator and the cleaner both refuse a name or a role on an
+`email`, because that only fails at send time, after a human has approved it.
+
+The `sending` claim is what makes a second approval impossible while the first is in
+flight; the real outcome is appended on top of it. Writing `sent` up front instead — as
+this route did until 2026-09-08 — recorded mail that never left as delivered, made
+`failed` unreachable, and charged the approver's hourly ceiling for it.
 
 Espresso renders these under **PROPOSED OUTREACH** in the ticket, each showing the full
 body — approving is agreeing to send that exact text. There is deliberately no
@@ -604,10 +623,18 @@ model may call exactly one command inside the sandbox:
 server/venv/bin/python scripts/kanban-autopr/browse-capture.py     --url https://example.com/pricing --label pricing-page [--full-page]
 ```
 
-It prints the page's title and visible text and saves a screenshot. It refuses non-http(s)
+It prints the page's title, its **final** URL (after redirects — that is what the model
+cites as its source), and the visible text, and saves a screenshot. It refuses non-http(s)
 URLs, credentials in a URL, and loopback/link-local/private addresses — checking **every**
-address a hostname resolves to, and re-checking after redirects, since a redirect into
-`host.docker.internal` is how an outside fetch becomes an internal one. Exit 3 means the
+address a hostname resolves to, since a redirect into `host.docker.internal` is how an
+outside fetch becomes an internal one.
+
+Two mechanisms, because resolving a name twice is not the same as resolving it once: the
+address this process validated is **pinned into Chromium** (`--host-resolver-rules`), and
+every request the page issues — the document, each redirect hop, and every sub-resource —
+is checked and aborted at the routing layer *before* it goes out. Checking only after
+`page.goto` returns meant the internal page had already been fetched, and a short-TTL
+record could answer differently for Chromium than it did for the pre-flight. Exit 3 means the
 image was built without Chromium (`msandbox build --playwright`); the prompt tells the
 model to say so in one line and finish on web search alone rather than failing.
 
@@ -618,6 +645,10 @@ report.
 
 Staged actions are the batch-C2 contract: the harness renders them on the card and in
 the report and **never sends one**. Approving and sending happens in Espresso, per item.
+
+The browse grant does not install anything: `INSTALL_PLAYWRIGHT_BROWSERS` is a Docker
+**build** arg, so the image either carries Chromium (`msandbox build --playwright`) or
+every capture exits 3.
 
 Espresso opens `.md` attachments rendered through `JournalContentView` with a
 Rendered | Source toggle (tables stay plain text; the parser has no table case).
