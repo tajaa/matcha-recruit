@@ -244,6 +244,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
     case general
     case feat   // promoted from a "Prop" feature draft
     case fix    // promoted from a "Prop" fix draft
+    case research   // AutoPR attaches a report to the card instead of opening a PR
 
     var id: String { rawValue }
 
@@ -256,6 +257,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .feat: return "Feature"
         case .fix: return "Fix"
+        case .research: return "Research"
         }
     }
 
@@ -268,6 +270,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .general: return "doc.text"
         case .feat: return "sparkles"
         case .fix: return "wrench.and.screwdriver"
+        case .research: return "magnifyingglass"
         }
     }
 
@@ -280,6 +283,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .general: return .secondary
         case .feat: return .teal
         case .fix: return .orange
+        case .research: return .indigo
         }
     }
 
@@ -407,6 +411,17 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
             ## Steps
             - [ ]
             """
+        case .research:
+            return """
+            ## Subject
+            _What to research, in one line._
+
+            ## Questions to answer
+            -
+
+            ## Why it matters to us
+            _The decision this informs._
+            """
         }
     }
 
@@ -482,6 +497,17 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
                 .init(key: "problem", label: "Problem", placeholder: "What's broken.", kind: .multiLine),
                 .init(key: "rootcause", label: "Root cause", placeholder: "Where in the code.", kind: .multiLine),
                 .init(key: "steps", label: "Steps", placeholder: "- ", kind: .multiLine),
+            ]
+        case .research:
+            // Assigned to the AutoPR bot, this runs the research lane: web
+            // search + the repo clone + attached screenshots, and the report
+            // lands under the card's attachments (see docs/ops/KANBAN_AUTOPR.md).
+            return [
+                .init(key: "subject", label: "Subject", placeholder: "One line: what to research.", kind: .singleLine),
+                .init(key: "questions", label: "Questions to answer", placeholder: "- ", kind: .multiLine),
+                .init(key: "why", label: "Why it matters to us", placeholder: "The decision this informs.", kind: .multiLine),
+                .init(key: "constraints", label: "Constraints / scope", placeholder: "Budget, timeline, what to leave out.", kind: .multiLine),
+                .init(key: "sources", label: "Preferred sources", placeholder: "Vendor docs, a competitor, a paper — or leave blank.", kind: .singleLine),
             ]
         }
     }
