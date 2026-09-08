@@ -17,6 +17,9 @@ export interface KanbanTemplate {
   colorClass: string
   defaultPriority: TaskPriority
   fields: TemplateField[]
+  /** One line shown under the form — what has to be true for the card to do
+   *  anything (e.g. a Research card only runs once AutoPR owns it). */
+  hint?: string
 }
 
 /** Built-in ticket starting points — port of the desktop `KanbanTemplate` enum.
@@ -124,6 +127,7 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
     icon: Search,
     colorClass: 'text-indigo-400',
     defaultPriority: 'medium',
+    hint: 'Assign the card to AutoPR on a board granted research; the report lands under its attachments and the card moves to Review.',
     fields: [
       { key: 'subject', label: 'Subject', placeholder: 'One line: what to research.', kind: 'single' },
       { key: 'questions', label: 'Questions to answer', placeholder: '- ', kind: 'multi' },

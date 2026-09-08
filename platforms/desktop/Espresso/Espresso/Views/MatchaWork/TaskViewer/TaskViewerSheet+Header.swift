@@ -124,7 +124,9 @@ extension TaskViewerSheet {
         guard let note = autoSetupProgressNote else { return false }
         let liveTask = liveAutoPRTask
         let isNoSafeAction = note.contains("[autopr:no-spec ")
-            && ["already_fixed", "migration_required", "policy_blocked", "external_dependency"]
+            // Mirror of the server's _AUTOPR_NO_SPEC_RE alternation.
+            && ["already_fixed", "acceptance_criteria_met", "migration_required",
+                "policy_blocked", "external_dependency", "needs_clarification"]
                 .contains(where: note.contains)
         return liveTask.status != "cancelled"
             && ["todo", "changes_requested"].contains(liveTask.boardColumn)
@@ -158,10 +160,45 @@ extension TaskViewerSheet {
         didRequestAutoPRRun || liveAutoPRTask.autoprRunRequestedAt != nil
     }
 
+    /// "HTTP 409: AutoPR does not watch this board…" — the sentence after
+    /// the colon is the part a person can act on.
+    static func stripHTTPPrefix(_ message: String) -> String {
+        guard message.hasPrefix("HTTP "), let colon = message.firstIndex(of: ":") else { return message }
+        return message[message.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+    }
+
     /// Same endpoint and same queue; a research card just produces a report
     /// under the attachments instead of a draft PR, so say so on the button.
     var autoPRRunNowLabel: String {
         liveAutoPRTask.category == "research" ? "Run research now" : "Run AutoPR now"
+    }
+
+    /// Why the run button is disabled, when it is. Only a Research card on a
+    /// board that is not granted `research` (or not watched at all) — the one
+    /// unrunnable state a person can fix, so name the fix.
+    var autoPRRunBlockedReason: String? {
+        guard liveAutoPRTask.category == "research" else { return nil }
+        if boardWatchedByAutoPR == false {
+            return "AutoPR does not watch this board, so this card cannot run."
+        }
+        if researchGranted == false {
+            return "This board is not granted research. An admin can grant it under Admin → Settings → AutoPR board capabilities."
+        }
+        return nil
+    }
+
+    func loadResearchGrant() async {
+        guard let pid = viewModel.project?.id else { return }
+        do {
+            let caps = try await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid)
+            researchGranted = caps.has("research", on: pid)
+            boardWatchedByAutoPR = caps.isWatched(pid)
+        } catch {
+            // Unknown stays unknown: the button works as before and the
+            // server / harness give the definitive answer.
+            researchGranted = nil
+            boardWatchedByAutoPR = nil
+        }
     }
 
     @ViewBuilder
@@ -172,6 +209,15 @@ extension TaskViewerSheet {
                     Label("Queued for AutoPR", systemImage: "bolt.horizontal.circle.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.mwInkStrong)
+                } else if let reason = autoPRRunBlockedReason {
+                    Label(autoPRRunNowLabel, systemImage: "bolt.slash")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .help(reason)
+                    Text(reason)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
                 } else {
                     Button {
                         Task { await requestAutoPRRun() }
@@ -188,7 +234,7 @@ extension TaskViewerSheet {
                     .help("Queue this ticket for the next AutoPR tick instead of the twenty-minute sweep")
                 }
                 if let error = autoPRRunError {
-                    Text(error)
+                    Text(Self.stripHTTPPrefix(error))
                         .font(.system(size: 10))
                         .foregroundColor(.red)
                         .lineLimit(2)

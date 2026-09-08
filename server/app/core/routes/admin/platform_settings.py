@@ -513,10 +513,30 @@ async def get_autopr_board_capabilities_endpoint():
         KANBAN_AUTOPR_PROJECT_IDS,
     )
 
+    grants = await get_autopr_board_capabilities()
+    watched_ids = sorted(KANBAN_AUTOPR_PROJECT_IDS)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id, title FROM mw_projects WHERE id = ANY($1::uuid[])",
+            [UUID(p) for p in watched_ids],
+        )
+    titles = {str(r["id"]): r["title"] for r in rows}
     return {
-        "capabilities": await get_autopr_board_capabilities(),
+        "capabilities": grants,
         "known_capabilities": list(AUTOPR_BOARD_CAPABILITIES),
-        "watched_project_ids": sorted(KANBAN_AUTOPR_PROJECT_IDS),
+        "watched_project_ids": watched_ids,
+        # Names for the UI: a bare UUID tells an admin nothing about which
+        # board they are about to let send email. A watched id with no row is
+        # a deleted board, and says so.
+        "watched_projects": [
+            {"id": pid, "title": titles.get(pid)} for pid in watched_ids
+        ],
+        # Grants stored for boards the harness no longer watches. The PUT
+        # refuses them, so the UI must know to drop them on save rather than
+        # resubmitting an invisible key forever.
+        "orphaned_project_ids": sorted(
+            pid for pid in grants if pid not in KANBAN_AUTOPR_PROJECT_IDS
+        ),
     }
 
 

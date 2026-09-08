@@ -20,6 +20,11 @@ struct TaskComposeContent: View {
     @State private var selectedElementId: String?
     @State private var isAddingElement = false
     @State private var newElementName = ""
+    /// Research cards run only when assigned to the AutoPR service account.
+    /// Resolved from the board-capabilities endpoint when the template is
+    /// research; nil when the board is not watched or the call failed.
+    @State private var autoPRBotUserId: String?
+    @State private var researchGranted: Bool?
 
     init(column: String, template: KanbanTemplate, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
         self.column = column
@@ -27,6 +32,36 @@ struct TaskComposeContent: View {
         self.viewModel = viewModel
         self.onClose = onClose
         _priority = State(initialValue: template.defaultPriority)
+    }
+
+    /// Nothing else on the sheet says that a Research card sits in Todo
+    /// forever unless the bot owns it.
+    private var researchAssignmentHint: String? {
+        guard let bot = autoPRBotUserId else { return nil }
+        let botIsCollaborator = viewModel.collaborators.contains { $0.userId == bot }
+        if !botIsCollaborator {
+            return "AutoPR is not a collaborator on this board, so this card will not run automatically."
+        }
+        if researchGranted == false {
+            return "This board is not granted research (Admin → Settings → AutoPR board capabilities); the card will wait until it is."
+        }
+        if assignedTo == bot {
+            return "Assigned to AutoPR — runs on the next pass, or press Run research now on the ticket."
+        }
+        return "Assign to AutoPR to have the research run automatically."
+    }
+
+    /// For a Research card, learn who the bot is and preselect it: the
+    /// harness only picks up cards assigned to that account.
+    private func loadResearchDefaults() async {
+        guard template == .research, let pid = viewModel.project?.id else { return }
+        guard let caps = try? await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid),
+              caps.isWatched(pid), let bot = caps.autoprBotUserId else { return }
+        autoPRBotUserId = bot
+        researchGranted = caps.has("research", on: pid)
+        if assignedTo == nil, viewModel.collaborators.contains(where: { $0.userId == bot }) {
+            assignedTo = bot
+        }
     }
 
     private func fieldBinding(_ key: String) -> Binding<String> {
@@ -98,6 +133,12 @@ struct TaskComposeContent: View {
                     Spacer()
                 }
             }
+            if template == .research, let hint = researchAssignmentHint {
+                Text(hint)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack {
                 Button("Cancel") { onClose() }
@@ -128,6 +169,7 @@ struct TaskComposeContent: View {
         }
         .padding(16)
         .frame(width: 420)
+        .task { await loadResearchDefaults() }
         .glassPanel(cornerRadius: 0, material: .hudWindow, blending: .behindWindow,
                     tint: Color.appBackground, tintOpacity: 0.62, shadow: false)
     }

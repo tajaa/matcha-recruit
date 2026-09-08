@@ -299,6 +299,33 @@ extension MatchaWorkService {
         )
     }
 
+    // MARK: - AutoPR board capabilities
+
+    /// What the AutoPR harness may do on a board, as granted in Admin →
+    /// Settings. `watched` says whether the harness polls the board at all.
+    struct AutoPRBoardCapabilities: Decodable {
+        let capabilities: [String: [String]]
+        let autoprBotUserId: String?
+        let watched: [String: Bool]?
+
+        enum CodingKeys: String, CodingKey {
+            case capabilities, watched
+            case autoprBotUserId = "autopr_bot_user_id"
+        }
+
+        func has(_ capability: String, on projectId: String) -> Bool {
+            (capabilities[projectId] ?? []).contains(capability)
+        }
+        func isWatched(_ projectId: String) -> Bool { watched?[projectId] ?? false }
+    }
+
+    func autoprBoardCapabilities(projectId: String) async throws -> AutoPRBoardCapabilities {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/autopr/board-capabilities?project_ids=\(projectId)"
+        )
+    }
+
     // MARK: - Staged outreach
 
     struct StagedActionsResponse: Decodable { let actions: [MWStagedAction] }

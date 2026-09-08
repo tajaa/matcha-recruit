@@ -338,8 +338,11 @@ extension AppState {
             selectedJournalId = nil
             selectedChannelId = nil
             selectedProjectId = project
-            // A task notification should land on the kanban board, not chat.
+            // A task notification should land on the kanban board, not chat —
+            // and on the card itself: "Ready for review" with a report attached
+            // is one click from the attachment only if the viewer opens.
             pendingProjectPanel = task != nil ? .kanban : nil
+            pendingOpenTaskId = task
         } else if let thread {
             clearSurfaces()
             selectedProjectId = nil

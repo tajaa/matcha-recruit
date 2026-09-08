@@ -70,6 +70,11 @@ struct TaskViewerSheet: View {
     /// open; false swaps the Send button for Connect Gmail.
     @State var gmailConnected: Bool?
     @State var connectingGmail = false
+    /// For a Research card: is this board granted `research`? nil = unknown
+    /// (not asked, or the call failed) — the button stays enabled and the
+    /// server / harness answer as before. false disables it with the reason.
+    @State var researchGranted: Bool?
+    @State var boardWatchedByAutoPR: Bool?
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -457,6 +462,10 @@ struct TaskViewerSheet: View {
             // ask on every ticket: the answer is an empty list and the section
             // renders nothing.
             await loadStagedActions()
+            // A Research card can only run on a board granted `research`;
+            // find out now rather than letting the user press a button whose
+            // answer arrives as a comment several minutes later.
+            if task.category == "research" { await loadResearchGrant() }
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)

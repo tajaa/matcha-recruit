@@ -105,6 +105,8 @@ export default function TemplateComposeModal({
             </label>
           ))}
 
+          {template.hint && <p className="text-[11px] text-w-dim">{template.hint}</p>}
+
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className="mb-1 block text-[11px] text-w-dim">Priority</span>

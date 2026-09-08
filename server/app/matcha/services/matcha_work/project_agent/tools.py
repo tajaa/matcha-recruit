@@ -77,7 +77,11 @@ def task_draft_declarations() -> list[types.FunctionDeclaration]:
                 "title": string("Short imperative title, at most 80 characters"),
                 "description": string("Concise Markdown that explains scope and acceptance criteria"),
                 "priority": string("critical, high, medium, or low"),
-                "category": string("engineering, bug, product, sales, general, manual, feat, or fix"),
+                "category": string(
+                    "engineering, bug, product, sales, general, research, manual, feat, or fix. "
+                    "Use research when the ask is to look into, evaluate, compare, or find out "
+                    "whether something, with a written report as the deliverable and no code change."
+                ),
                 "board_column": string("todo, in_progress, review, or done; normally todo"),
                 "assignee_name": string("Exact collaborator name, or an empty string"),
                 "element_name": string("Exact project element name, or an empty string"),

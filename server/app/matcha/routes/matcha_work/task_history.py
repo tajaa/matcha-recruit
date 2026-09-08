@@ -620,6 +620,7 @@ async def list_autopr_board_capabilities_endpoint(
     a stale or tampered harness copy cannot widen its own reach.
     """
     from app.core.services.platform_settings import get_autopr_board_capabilities
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     raw = [p.strip() for p in (project_ids or "").split(",") if p.strip()]
     if not raw or len(raw) > 20:
@@ -631,7 +632,13 @@ async def list_autopr_board_capabilities_endpoint(
     for project_id in parsed:
         await _verify_project_access(project_id, current_user)
     grants = await get_autopr_board_capabilities()
-    return {"capabilities": {str(p): grants.get(str(p), []) for p in parsed}}
+    return {
+        "capabilities": {str(p): grants.get(str(p), []) for p in parsed},
+        # A Research card only runs when it is assigned to this account;
+        # the compose sheet uses it to preselect the assignee.
+        "autopr_bot_user_id": pt_svc.KANBAN_AUTOPR_BOT_USER_ID,
+        "watched": {str(p): str(p) in pt_svc.KANBAN_AUTOPR_PROJECT_IDS for p in parsed},
+    }
 
 
 @router.post(
