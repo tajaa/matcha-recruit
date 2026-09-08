@@ -108,8 +108,8 @@ async def send_message_stream(
     # Resolved HERE, before quota/rate-limit consumption and before the SSE
     # stream starts, so a de-authorized manager (or a stale link into someone
     # else's session) gets a real 403/404 response rather than headers already
-    # sent and the failure swallowed into a generic mid-stream error by
-    # event_stream()'s except BaseException below.
+    # sent and the failure converted into a generic mid-stream error by
+    # event_stream() below.
     schedule_scope = None
     if is_schedule_thread:
         schedule_scope = await resolve_schedule_assistant_scope(
@@ -271,7 +271,7 @@ async def send_message_stream(
             # Trigger compaction in the background if needed
             _track_background_task(asyncio.create_task(_maybe_compact(thread_id, tc.ai_provider, tc.summary_at_count)))
             _dispatch_autotitle()
-        except BaseException as e:
+        except Exception as e:
             logger.error("Matcha Work stream failed for thread %s: %s (%s)", thread_id, e, type(e).__name__, exc_info=True)
             try:
                 yield _sse_data(
@@ -282,9 +282,6 @@ async def send_message_stream(
                 )
             except Exception:
                 pass
-            if not isinstance(e, Exception):
-                raise
-        finally:
-            yield "data: [DONE]\n\n"
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
