@@ -361,3 +361,126 @@ def test_the_send_ceiling_counts_claims_not_only_completed_sends():
     # Bounded to the watched boards so the (project_id, created_at) index
     # carries the query — there is no index on actor_user_id.
     assert "project_id = ANY($2::uuid[])" in src
+
+
+# ---------------------------------------------------------------------------
+# What a person may still do with an action, by its newest outcome row.
+# ---------------------------------------------------------------------------
+def test_affordances_pending_and_failed_may_send_or_close():
+    """A transient provider error must not brick a proposal: `failed` keeps
+    every option `pending` had."""
+    assert pt._staged_action_affordances(None, None) == (True, True)
+    assert pt._staged_action_affordances("failed", None) == (True, True)
+
+
+def test_affordances_a_stale_claim_may_be_closed_but_never_resent():
+    """A `sending` claim with no outcome means the process died holding it. It
+    may have delivered, so it is never re-sent; once a person has checked
+    their mailbox they may close it either way."""
+    from datetime import datetime, timedelta, timezone
+
+    fresh = datetime.now(timezone.utc) - timedelta(seconds=30)
+    stale = datetime.now(timezone.utc) - pt._STAGED_SEND_STALE_AFTER - timedelta(seconds=1)
+    assert pt._staged_action_affordances("sending", fresh) == (False, False)
+    assert pt._staged_action_affordances("sending", stale) == (False, True)
+
+
+@pytest.mark.parametrize("state", ["sent", "handled", "dismissed"])
+def test_affordances_settled_states_offer_nothing(state):
+    from datetime import datetime, timezone
+
+    assert pt._staged_action_affordances(state, datetime.now(timezone.utc)) == (False, False)
+
+
+class _ResolveConn:
+    """The three statements resolve_autopr_staged_action makes, with the
+    action present and one prior outcome row of the given age."""
+
+    def __init__(self, existing_state, existing_age):
+        from datetime import datetime, timezone
+
+        self.existing_state = existing_state
+        self.existing_at = (
+            None if existing_age is None else datetime.now(timezone.utc) - existing_age
+        )
+        self.inserted = []
+
+    def transaction(self):
+        return _Tx()
+
+    async def fetchrow(self, sql, *args):
+        import json
+
+        if "FOR UPDATE" in sql:
+            return {"id": args[0], "metadata": "{}"}
+        if "autopr_staged_action_result" in sql and "SELECT" in sql:
+            if self.existing_state is None:
+                return None
+            return {"state": self.existing_state, "created_at": self.existing_at}
+        assert "INSERT INTO mw_task_history" in sql
+        self.inserted.append(json.loads(args[4]))
+        from datetime import datetime, timezone
+
+        return {"id": "r1", "created_at": datetime.now(timezone.utc)}
+
+
+async def _resolve_with(monkeypatch, existing_state, existing_age, new_state):
+    from uuid import uuid4
+
+    conn = _ResolveConn(existing_state, existing_age)
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(conn))
+    result = await pt.resolve_autopr_staged_action(
+        project_id=uuid4(), task_id=uuid4(), action_id=uuid4(),
+        actor_user_id=uuid4(), state=new_state,
+    )
+    return conn, result
+
+
+@pytest.mark.asyncio
+async def test_a_failed_send_may_be_retried_or_closed(monkeypatch):
+    for new_state in ("sending", "handled", "dismissed"):
+        conn, result = await _resolve_with(monkeypatch, "failed", None, new_state)
+        assert result["state"] == new_state
+        assert conn.inserted[-1]["state"] == new_state
+
+
+@pytest.mark.asyncio
+async def test_a_stale_claim_may_be_closed_but_not_resent(monkeypatch):
+    from datetime import timedelta
+
+    stale = pt._STAGED_SEND_STALE_AFTER + timedelta(minutes=1)
+    with pytest.raises(pt.AutoPRReconsiderationConflict, match="already sending"):
+        await _resolve_with(monkeypatch, "sending", stale, "sending")
+    conn, result = await _resolve_with(monkeypatch, "sending", stale, "handled")
+    assert result["state"] == "handled"
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_claim_blocks_everything(monkeypatch):
+    """This is the row that makes a concurrent second approval impossible."""
+    from datetime import timedelta
+
+    for new_state in ("sending", "handled", "dismissed"):
+        with pytest.raises(pt.AutoPRReconsiderationConflict, match="already sending"):
+            await _resolve_with(monkeypatch, "sending", timedelta(seconds=5), new_state)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settled", ["sent", "handled", "dismissed"])
+async def test_a_settled_action_refuses_every_transition(monkeypatch, settled):
+    from datetime import timedelta
+
+    for new_state in ("sending", "handled", "dismissed"):
+        with pytest.raises(pt.AutoPRReconsiderationConflict, match=f"already {settled}"):
+            await _resolve_with(monkeypatch, settled, timedelta(minutes=30), new_state)
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["vendor@example.com", "x@acme.test", "ops@matcha.invalid", "a@b.localhost"],
+)
+def test_reserved_test_domains_are_never_handed_to_gmail(address):
+    """The proposal may be staged (it is only text), but the send path applies
+    the same guard the transactional mailer does."""
+    assert pt.staged_recipient_is_reserved_test_domain(address)
+    assert not pt.staged_recipient_is_reserved_test_domain("vendor@vendor-domain.co")

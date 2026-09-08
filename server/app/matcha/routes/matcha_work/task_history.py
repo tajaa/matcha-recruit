@@ -14,6 +14,7 @@ from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_company_member
 from app.matcha.routes.matcha_work._shared import (
+    _can_edit_project,
     _parse_task_attachment_ids,
     _verify_project_access,
     _verify_task_belongs_to_project,
@@ -449,7 +450,11 @@ async def send_autopr_staged_action_endpoint(
     from app.matcha.services.matcha_work import project_task_service as pt_svc
     from app.matcha.services.matcha_work.gmail_service import GmailService
 
-    await _verify_project_access(project_id, current_user)
+    _, role = await _verify_project_access(project_id, current_user)
+    # Approving is an outward act with the approver's own name on it; a
+    # read-only collaborator may see the proposal but not send it.
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="Viewers cannot approve outreach")
     await _verify_task_belongs_to_project(project_id, task_id)
 
     if not await board_has_autopr_capability(project_id, "outreach"):
@@ -463,12 +468,18 @@ async def send_autopr_staged_action_endpoint(
     )
     if action is None:
         raise HTTPException(status_code=404, detail="Staged action not found")
-    if action["state"] != "pending":
+    # `pending` and `failed` may send; a failed attempt is not a settled one.
+    if not action["retryable"]:
         raise HTTPException(status_code=409, detail=f"This action was already {action['state']}")
     if action["kind"] not in pt_svc._SENDABLE_STAGED_ACTION_KINDS:
         raise HTTPException(
             status_code=400,
             detail=f"A {action['kind']} action is done by a person; mark it handled instead",
+        )
+    if pt_svc.staged_recipient_is_reserved_test_domain(action["to"]):
+        raise HTTPException(
+            status_code=400,
+            detail="That address is on a reserved test domain; nothing was sent",
         )
 
     recent = await pt_svc.count_recent_staged_sends(actor_user_id=current_user.id)
@@ -530,7 +541,21 @@ async def send_autopr_staged_action_endpoint(
         actor_user_id=current_user.id,
         state="sent",
         detail=f"to {action['to']}",
+        message_id=result.get("id"),
     )
+    # A real note on the timeline, in the approver's name: the outcome row is
+    # bookkeeping and renders nowhere, so without this nobody watching the
+    # ticket's discussion ever sees that mail went out.
+    try:
+        await pt_svc.log_task_activity(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            kind="email",
+            body=f"Sent to {action['to']} — {action['subject']}",
+        )
+    except Exception:
+        logger.exception("Could not post the sent note for staged action %s", action_id)
     return {
         "ok": True,
         "staged_action_id": str(action_id),
@@ -557,7 +582,9 @@ async def resolve_autopr_staged_action_endpoint(
     """
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
-    await _verify_project_access(project_id, current_user)
+    _, role = await _verify_project_access(project_id, current_user)
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="Viewers cannot close outreach")
     await _verify_task_belongs_to_project(project_id, task_id)
 
     state = str(body.get("state") or "").strip().lower()

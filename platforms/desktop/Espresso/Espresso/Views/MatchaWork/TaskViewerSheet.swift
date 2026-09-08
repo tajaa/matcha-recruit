@@ -63,6 +63,13 @@ struct TaskViewerSheet: View {
     /// double tap cannot fire two sends before the first returns.
     @State var resolvingActionId: String?
     @State var stagedActionError: String?
+    /// Who the last approved send went to — the confirmation line under the
+    /// section, cleared by the next action.
+    @State var stagedActionSentTo: String?
+    /// nil = not asked yet / unknown. Asked only when a sendable proposal is
+    /// open; false swaps the Send button for Connect Gmail.
+    @State var gmailConnected: Bool?
+    @State var connectingGmail = false
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.

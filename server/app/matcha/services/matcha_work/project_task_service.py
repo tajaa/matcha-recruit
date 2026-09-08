@@ -639,6 +639,37 @@ def _looks_like_email_address(value: str) -> bool:
     return bool(_EMAIL_ADDRESS_RE.match(value.strip()))
 
 
+# A `sending` claim with no outcome after this long means the process died
+# holding it. It may still have delivered, so it is never re-sent from here;
+# a person may close it as handled or dismissed once they have checked.
+_STAGED_SEND_STALE_AFTER = timedelta(minutes=10)
+
+
+def _staged_action_affordances(state: Optional[str], state_at) -> tuple[bool, bool]:
+    """(retryable, closable) for the newest outcome row of a staged action.
+
+    pending → send / handle / dismiss.  failed → the same three: a transient
+    provider error must not brick the proposal.  A stale `sending` claim →
+    handle / dismiss only.  Everything else is settled.
+    """
+    if state is None or state == "pending" or state == "failed":
+        return True, True
+    if state == "sending" and state_at is not None:
+        now = datetime.now(timezone.utc)
+        at = state_at if state_at.tzinfo else state_at.replace(tzinfo=timezone.utc)
+        if now - at >= _STAGED_SEND_STALE_AFTER:
+            return False, True
+    return False, False
+
+
+def staged_recipient_is_reserved_test_domain(to: str) -> bool:
+    """Same guard the transactional mailer applies: an RFC 2606 / 6761 address
+    is never handed to Gmail, even after a human approved it."""
+    from app.core.services.email._shared import _is_reserved_test_domain
+
+    return _is_reserved_test_domain(to or "")
+
+
 def _clean_staged_action(raw: object) -> Optional[dict]:
     """Shape one proposed action, or None if it cannot be trusted to render.
 
@@ -827,6 +858,9 @@ async def list_autopr_staged_actions(
             except json.JSONDecodeError:
                 result_meta = None
         state = (result_meta or {}).get("state") if isinstance(result_meta, dict) else None
+        retryable, closable = _staged_action_affordances(
+            state if state in _STAGED_ACTION_STATES else None, r["resolved_at"]
+        )
         out.append({
             "id": str(r["id"]),
             "kind": meta.get("action_kind"),
@@ -836,6 +870,9 @@ async def list_autopr_staged_actions(
             "why": meta.get("why"),
             "state": state if state in _STAGED_ACTION_STATES else "pending",
             "detail": (result_meta or {}).get("detail") if isinstance(result_meta, dict) else None,
+            "message_id": (result_meta or {}).get("message_id") if isinstance(result_meta, dict) else None,
+            "retryable": retryable,
+            "closable": closable,
             "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
             "resolved_by_name": r["resolved_by_name"],
             "created_at": r["created_at"].isoformat(),
@@ -881,9 +918,10 @@ async def resolve_autopr_staged_action(
             )
             if not action:
                 return None
-            existing = await conn.fetchval(
+            existing = await conn.fetchrow(
                 """
-                SELECT r.metadata->>'state' FROM mw_task_history r
+                SELECT r.metadata->>'state' AS state, r.created_at
+                FROM mw_task_history r
                 WHERE r.task_id = $1
                   AND r.event_type = 'activity'
                   AND r.metadata->>'kind' = 'autopr_staged_action_result'
@@ -897,9 +935,21 @@ async def resolve_autopr_staged_action(
                 task_id, str(action_id),
             )
             if existing is not None:
-                raise AutoPRReconsiderationConflict(
-                    f"This action was already {existing}"
+                # Not "any row exists → refuse": a failed send may be retried
+                # or closed, and a claim the process died holding may be
+                # closed by a person who has checked their mailbox. Every
+                # other prior state is settled. The FOR UPDATE above is what
+                # makes this read-then-write safe against a concurrent one.
+                retryable, closable = _staged_action_affordances(
+                    existing["state"], existing["created_at"]
                 )
+                allowed = (state == "sending" and retryable) or (
+                    state in ("handled", "dismissed") and closable
+                )
+                if not allowed:
+                    raise AutoPRReconsiderationConflict(
+                        f"This action was already {existing['state']}"
+                    )
             metadata = {
                 "kind": "autopr_staged_action_result",
                 "staged_action_id": str(action_id),
@@ -963,6 +1013,7 @@ async def record_autopr_staged_send_outcome(
     actor_user_id: UUID,
     state: str,
     detail: Optional[str] = None,
+    message_id: Optional[str] = None,
 ) -> Optional[dict]:
     """Append what actually happened to a send this request already claimed.
 
@@ -996,6 +1047,10 @@ async def record_autopr_staged_send_outcome(
         }
         if detail:
             metadata["detail"] = str(detail)[:600]
+        if message_id:
+            # The provider's id for what actually left — the one fact that
+            # ties this append-only trail to a real message in a real mailbox.
+            metadata["message_id"] = str(message_id)[:200]
         row = await conn.fetchrow(
             """
             INSERT INTO mw_task_history
@@ -1030,15 +1085,18 @@ async def get_autopr_staged_action(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT h.id, h.metadata,
-                   (SELECT r.metadata->>'state' FROM mw_task_history r
-                     WHERE r.task_id = h.task_id
-                       AND r.event_type = 'activity'
-                       AND r.metadata->>'kind' = 'autopr_staged_action_result'
-                       AND r.metadata->>'staged_action_id' = h.id::text
-                     ORDER BY r.created_at DESC
-                     LIMIT 1) AS state
+            SELECT h.id, h.metadata, result.state, result.state_at
             FROM mw_task_history h
+            LEFT JOIN LATERAL (
+                SELECT r.metadata->>'state' AS state, r.created_at AS state_at
+                FROM mw_task_history r
+                WHERE r.task_id = h.task_id
+                  AND r.event_type = 'activity'
+                  AND r.metadata->>'kind' = 'autopr_staged_action_result'
+                  AND r.metadata->>'staged_action_id' = h.id::text
+                ORDER BY r.created_at DESC
+                LIMIT 1
+            ) result ON TRUE
             WHERE h.id = $1 AND h.task_id = $2 AND h.project_id = $3
               AND h.event_type = 'activity'
               AND h.metadata->>'kind' = 'autopr_staged_action'
@@ -1053,7 +1111,8 @@ async def get_autopr_staged_action(
             meta = json.loads(meta)
         except json.JSONDecodeError:
             return None
-    state = row["state"]
+    state = row["state"] if row["state"] in _STAGED_ACTION_STATES else None
+    retryable, closable = _staged_action_affordances(state, row["state_at"])
     return {
         "id": str(row["id"]),
         "kind": meta.get("action_kind"),
@@ -1061,7 +1120,9 @@ async def get_autopr_staged_action(
         "subject": meta.get("subject"),
         "body": meta.get("action_body"),
         "why": meta.get("why"),
-        "state": state if state in _STAGED_ACTION_STATES else "pending",
+        "state": state or "pending",
+        "retryable": retryable,
+        "closable": closable,
     }
 
 
