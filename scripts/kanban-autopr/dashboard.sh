@@ -395,7 +395,10 @@ render_dashboard() {
         printf ' · EXACT SELECTOR RESULT\n'
         printf '%s' "$selected" | jq -r '
           "  " + (.project_title // "?") + " · " + .title,
-          "  " + (if .board_column == "changes_requested" then "rework" else "new work" end) + " · task " + .id8
+          "  " + (if .mode == "research" then
+                    (if .board_column == "changes_requested" then "research revision" else "research report" end)
+                  elif .board_column == "changes_requested" then "rework" else "new work" end)
+               + " · task " + .id8
         '
     elif [ "$selected_rc" -eq 3 ]; then
         printf ' · NONE ELIGIBLE AFTER CURRENT WORK\n'
@@ -404,6 +407,16 @@ render_dashboard() {
         printf ' · UNKNOWN\n'
         printf '  Selector failed (exit %s); this does not mean the queue is empty.\n' "$selected_rc"
     fi
+    # Cards the selector passed over because their board lacks a grant. The
+    # selector leaves this hint on every pass (read-only ones included); it is
+    # the one "held" a person can fix, so name it rather than folding it into
+    # "waiting, held, or cooling down".
+    ungranted_hints="$(cat "${AUTOPR_CACHE_DIR:-$USER_HOME/.cache/matcha-autopr}/ungranted.json" 2>/dev/null || printf '[]')"
+    printf '%s' "$ungranted_hints" | jq -r --arg cutoff "$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" '
+      if type == "array" then
+        [.[] | select((.ts // "") >= $cutoff)][:4][]
+        | "  held: task " + .id8 + " needs the `" + .capability + "` board grant (Admin → Settings → AutoPR board capabilities)"
+      else empty end' 2>/dev/null || true
 
     queue_counts="$(printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" '
       def pending: (.autopr_reconsideration_pending // false);

@@ -46,15 +46,26 @@ count="$(jq 'length' "$CARDS_FILE")"
 # left this empty, `[ "" -ge 10 ]` errored (exit 2, no match), and the cap
 # never fired.
 BOT_PRS_FILE="${AUTOPR_BOT_PRS_FILE:-}"
-if [ -n "$BOT_PRS_FILE" ] && [ -s "$BOT_PRS_FILE" ]; then
-    open_implementation_prs="$(jq '[.[] | select((.labels | index("autopr")) and ((.labels | index("autopr-awaiting-input")) | not))] | length' "$BOT_PRS_FILE")" \
-        || die "could not read the open implementation PR count from $BOT_PRS_FILE"
-else
-    open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')" \
-        || die "could not read the open implementation PR count"
-fi
-[[ "$open_implementation_prs" =~ ^[0-9]+$ ]] \
-    || die "open implementation PR count is not a number: $open_implementation_prs"
+# Resolved lazily, the first time a card would open a NEW PR: a pass whose
+# only eligible cards are artifact kinds (research) touches no GitHub resource,
+# so a gh outage or rate limit must not block it. Still fails CLOSED once it is
+# actually needed. Sets the global rather than printing it: called inside
+# `$(...)`, `die` would only end the subshell and the cap check would run
+# against an empty string — the exact silent-cap failure this once had.
+open_implementation_prs=""
+ensure_open_implementation_pr_count() {
+    if [ -z "$open_implementation_prs" ]; then
+        if [ -n "$BOT_PRS_FILE" ] && [ -s "$BOT_PRS_FILE" ]; then
+            open_implementation_prs="$(jq '[.[] | select((.labels | index("autopr")) and ((.labels | index("autopr-awaiting-input")) | not))] | length' "$BOT_PRS_FILE")" \
+                || die "could not read the open implementation PR count from $BOT_PRS_FILE"
+        else
+            open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')" \
+                || die "could not read the open implementation PR count"
+        fi
+        [[ "$open_implementation_prs" =~ ^[0-9]+$ ]] \
+            || die "open implementation PR count is not a number: $open_implementation_prs"
+    fi
+}
 
 feedback_snapshot() {
     local pr_number="$1"
@@ -129,6 +140,21 @@ note_ungranted_capability() {
         "$(jq -n --arg body "$body" '{kind:"note", body:$body}')" ) >/dev/null 2>&1 \
         || printf 'kanban-autopr: warning: could not post the ungranted-capability note for %s\n' \
             "$task_id" >&2
+}
+
+# note_ungranted_hint ID8 CAPABILITY
+# Append {id8, capability, ts} to $CACHE_DIR/ungranted.json (bounded to the
+# last 50) so dashboard.sh can name the cards a grant would unblock.
+note_ungranted_hint() {
+    local id8="$1" capability="$2" hint_file="$CACHE_DIR/ungranted.json" existing
+    [ -n "$capability" ] || return 0
+    mkdir -p "$CACHE_DIR" 2>/dev/null || return 0
+    existing="$(cat "$hint_file" 2>/dev/null || printf '[]')"
+    printf '%s' "$existing" | jq -e 'type == "array"' >/dev/null 2>&1 || existing='[]'
+    printf '%s' "$existing" | jq -c --arg id8 "$id8" --arg cap "$capability" \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        map(select(.id8 != $id8)) + [{id8: $id8, capability: $cap, ts: $ts}] | .[-50:]' \
+        > "$hint_file.tmp" 2>/dev/null && mv "$hint_file.tmp" "$hint_file" || rm -f "$hint_file.tmp"
 }
 
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
@@ -387,6 +413,12 @@ for ((i = 0; i < n; i++)); do
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
         "$capabilities")"
     if [ "$decision" = skip_ungranted ]; then
+        # Leave a hint for the tmux dashboard, which runs this selector
+        # read-only and otherwise cannot tell "held: needs a grant" from
+        # "cooling down". A hint file, not a cooldown marker: written on the
+        # read-only path too, and never consulted by selection.
+        note_ungranted_hint "$id8" \
+            "$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
         # Still consume the request — an unconsumed one re-dispatches every
         # minute forever — but never silently: without the note the operator
         # sees the button come back and no reason anywhere, and can loop on it
@@ -398,6 +430,7 @@ for ((i = 0; i < n; i++)); do
         fi
         continue
     fi
+    [ "$decision" != investigate ] || ensure_open_implementation_pr_count
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and

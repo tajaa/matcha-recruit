@@ -147,6 +147,10 @@ nocaps_rc=$?
 check "an unreadable capability stamp fails closed" \
   $([ "$nocaps_rc" = 3 ] && echo 0 || echo 1)
 
+check "an ungranted skip leaves a hint the dashboard can name, even on a read-only pass" \
+  $(jq -e --arg id8 aaaa0000 'type == "array" and any(.[]; .id8 == $id8 and .capability == "research")' \
+        "$TMP_DIR/cache/ungranted.json" >/dev/null 2>&1 && echo 0 || echo 1)
+
 check "the kind registry names the grant each artifact kind needs" \
     $([ "$(autopr_kind_field research capability)" = research ] \
       && [ -z "$(autopr_kind_field investigate capability)" ] \
@@ -161,6 +165,36 @@ check "a PR-kind card still goes through the GitHub ledger and selects investiga
     $([ "$(jq -r '.mode' "$TMP_DIR/select-eng.json" 2>/dev/null)" = investigate ] \
       && grep -q 'pr list' "$RESEARCH_TEST_GH_LOG" \
       && echo 0 || echo 1)
+
+# A pass whose only eligible card is an artifact kind touches no GitHub
+# resource, so a gh outage must not block it. The open-PR count is resolved
+# lazily, the first time a card would actually open a new PR.
+mkdir -p "$TMP_DIR/gh-down"
+cat > "$TMP_DIR/gh-down/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RESEARCH_TEST_GH_LOG"
+exit 1
+EOF
+chmod +x "$TMP_DIR/gh-down/gh"
+: > "$RESEARCH_TEST_GH_LOG"
+PATH="$TMP_DIR/gh-down:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+AUTOPR_BOT_PRS_FILE="$TMP_DIR/no-such-file.json" \
+AUTOPR_CACHE_DIR="$TMP_DIR/cache" AUTOPR_SELECT_READ_ONLY=true \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards-todo.json" > "$TMP_DIR/select-ghdown.json" 2>"$TMP_DIR/select-ghdown.err"
+check "a research-only pass still selects when GitHub is unreadable" \
+    $([ "$(jq -r '.mode' "$TMP_DIR/select-ghdown.json" 2>/dev/null)" = research ] \
+      && ! grep -q 'pr list' "$RESEARCH_TEST_GH_LOG" \
+      && echo 0 || echo 1)
+PATH="$TMP_DIR/gh-down:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+AUTOPR_BOT_PRS_FILE="$TMP_DIR/no-such-file.json" \
+AUTOPR_CACHE_DIR="$TMP_DIR/cache" AUTOPR_SELECT_READ_ONLY=true \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards-eng.json" > "$TMP_DIR/select-ghdown-eng.json" 2>"$TMP_DIR/select-ghdown-eng.err"
+ghdown_eng_rc=$?
+check "a PR-kind card still consults GitHub and is passed over, not drafted blind, when it is unreadable" \
+    $([ "$ghdown_eng_rc" = 3 ] \
+      && grep -q 'pr list' "$RESEARCH_TEST_GH_LOG" \
+      && echo 0 || echo 1)
+
 
 ################################################################################
 # run-codex-sandboxed.sh: the two research switches, default off.
