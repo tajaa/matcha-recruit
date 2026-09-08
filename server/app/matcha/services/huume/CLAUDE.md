@@ -170,6 +170,25 @@ still means the model gets one attempt per turn. The flat single-edit and
 flat single-create paths are byte-for-byte the old ones. Full mechanics:
 `services/scheduling/CLAUDE.md` §"Batched schedule corrections".
 
+**The flat `kind` is noise next to `changes`, never a refusal (2026-09-08).**
+Sending both is a shape the model reaches for on its own (the tool schema
+declares the legacy flat fields beside `changes`, and the prompt names
+`kind: create` three times). Every flat `kind` except `create` had always been
+ignored on the batch path; `create` was a hard refusal — *"Put the new shift
+inside `changes` as a `kind: create` item…"* — which fired even when the create
+was already in `changes`, i.e. it told the model to do what it had just done.
+A schedule clarify/refusal is TERMINAL (`_TERMINAL_SCHEDULE_TOOLS`), so that
+tool-schema prose became the manager's reply and the whole correction died with
+nothing staged. `_coerce_tool_batch` now absorbs a flat create into the batch
+(deduped against the `changes` items by date + times + role/label, weighed
+BEFORE the cap so it can't smuggle a 41st operation past it) and ignores a bare
+`kind='create'` carrying no new shift. Absorb rather than drop: when `changes`
+is non-empty every other flat arg is discarded, so dropping it would silently
+lose a shift the manager asked for — the real risk the old check was guarding.
+Every string this path returns reaches the manager verbatim, so it names shifts
+and times the way `schedule_batch.split_plan_message` does and never a tool
+field; `test_no_coercion_message_names_a_tool_field` holds that line.
+
 **Assignment guard + review echo (2026-09-07).** Every `propose_schedule_change` stage now returns a
 `ScheduleReview` (`services/scheduling/schedule_review.py`) alongside `proposal_id`/`pill_text`:
 `rejected` (what the server REFUSED — overlap with an existing shift or with an earlier op in the same

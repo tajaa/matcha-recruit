@@ -99,6 +99,38 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
     }
 
 
+# Top-level fields that only ever describe a NEW shift. None of them is an
+# edit field (`_SCHEDULE_EDIT_PROPERTIES` in tools.py), so their presence is
+# what separates a real flat create from a bare `kind='create'` the model
+# filled in as an intent summary next to a `changes` batch.
+_FLAT_CREATE_FIELDS = ("label", "date", "start_time", "end_time", "count", "employee_names")
+
+
+def _create_identity(change: dict[str, Any]) -> tuple[str, ...]:
+    """What makes two create requests the same shift, for de-duping a flat
+    create against the `changes` array that already carries it."""
+    def _norm(value: Any) -> str:
+        return str(value or "").strip().lower().replace(" ", "")
+
+    return (
+        _norm(change.get("date") or change.get("target_date")),
+        _norm(change.get("start_time")), _norm(change.get("end_time")),
+        _norm(change.get("label") or change.get("role")),
+    )
+
+
+def _flat_create_change(args: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """The top-level create fields as a `changes` item, or None when flat
+    `kind='create'` came with no new shift attached."""
+    if not any(args.get(field) not in (None, "", [], {}) for field in _FLAT_CREATE_FIELDS):
+        return None
+    change: dict[str, Any] = {
+        "kind": "create", "role": args.get("role"), "target_date": args.get("target_date"),
+    }
+    change.update({field: args.get(field) for field in _FLAT_CREATE_FIELDS})
+    return change
+
+
 def _is_named_people_swap(change: dict[str, Any]) -> bool:
     return (
         str(change.get("kind") or "").strip().lower() == "swap"
@@ -117,7 +149,10 @@ def _coerce_tool_batch(
     proposal and, since the batch row exists, ``shift_requests`` right after
     them in the same transaction — so a correction's cancellations and its
     replacement `kind='create'` items ride one confirmation. A named-person
-    swap expands to two reassignments and weighs two operations. The cap is
+    swap expands to two reassignments and weighs two operations. A flat
+    top-level `kind='create'` sent ALONGSIDE the batch is absorbed into it
+    (or dropped when `changes` already carries that shift, or when it is a
+    bare enum with no new shift attached) rather than refused. The cap is
     checked BEFORE anything resolves: an over-cap request gets the smallest
     day-contiguous split plan back, never a silently staged prefix (the pill
     would then differ from the ask). The whole batch is rejected if any item
@@ -131,14 +166,33 @@ def _coerce_tool_batch(
     # single-edit validation below.
     is_batch = isinstance(raw_changes, list) and bool(raw_changes)
     if raw_changes is not None and not isinstance(raw_changes, list):
-        return [], [], "Give me schedule changes as a list."
+        return [], [], (
+            "I couldn't read that schedule change — tell me the shift and what "
+            "should happen to it."
+        )
     if is_batch:
+        changes = list(raw_changes)
+        # The flat `kind` is the legacy SINGLE-operation field; next to a
+        # `changes` batch it is noise the model filled in as an intent
+        # summary, and every value except `create` has always been ignored
+        # here. `create` used to be a hard refusal telling the model to move
+        # the new shift into `changes` — where, in the reported dead-end, it
+        # already was. That refusal is terminal (`_TERMINAL_SCHEDULE_TOOLS`
+        # in agent.py), so the manager read tool-schema prose and the whole
+        # correction died with nothing staged. Absorb a real flat create
+        # instead: dropping it silently would lose a shift they asked for,
+        # which is the loss the old check was really guarding against.
         if str(args.get("kind") or "").strip().lower() == "create":
-            return [], [], (
-                "Put the new shift inside `changes` as a `kind: create` item so it "
-                "rides the same confirmation as the other changes."
-            )
-        changes = raw_changes
+            flat_create = _flat_create_change(args)
+            if flat_create is not None and not any(
+                isinstance(change, dict)
+                and str(change.get("kind") or "").strip().lower() == "create"
+                and _create_identity(change) == _create_identity(flat_create)
+                for change in changes
+            ):
+                # Appended BEFORE the cap is weighed below, so an absorbed
+                # create counts toward MAX_BATCH_OPERATIONS like any other.
+                changes.append(flat_create)
     else:
         changes = [args]
 
@@ -155,14 +209,16 @@ def _coerce_tool_batch(
     shift_requests: list[dict[str, Any]] = []
     for index, change in enumerate(changes, start=1):
         kind = str(change.get("kind") or "").strip().lower()
+        # Every string returned from here is relayed to the manager verbatim
+        # (agent.py breaks the tool loop on a schedule clarify/refusal), so it
+        # names shifts and times the way `split_plan_message` does — never a
+        # tool field or a `kind` value.
+        prefix = f"Schedule change {index} " if is_batch else "That schedule change "
         if kind == "create":
-            if not is_batch:
-                return [], [], "New shifts and edits need separate schedule proposals."
             request = _coerce_tool_shift_request(change)
             if not (request["date"] and request["start_time"] and request["end_time"]):
                 return [], [], (
-                    f"Schedule change {index} needs a date, start time, and end time "
-                    "before I can create that shift."
+                    prefix + "needs a date, start time, and end time before I can create that shift."
                 )
             shift_requests.append(request)
             continue
@@ -194,7 +250,6 @@ def _coerce_tool_batch(
             normalized = [request] if request is not None else []
 
         if not normalized:
-            prefix = f"Schedule change {index} " if is_batch else "That schedule change "
             return [], [], prefix + "needs an employee and a specific shift before I can stage it."
         edit_requests.extend(normalized)
 

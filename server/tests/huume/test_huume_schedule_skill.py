@@ -628,6 +628,162 @@ class TestSevenDayCorrectionBatch(unittest.TestCase):
         assert result["operation_summary"] == {"reassign": 1}
 
 
+class _FakeScheduleChat:
+    """Just enough of `schedule_chat` for the pure coercion tests: every edit
+    resolves, so what's asserted is the coercion itself."""
+
+    @staticmethod
+    def coerce_edit_request(request):
+        return dict(request)
+
+
+class TestFlatCreateKindAlongsideABatch(unittest.TestCase):
+    """The reported full-shift-editor dead end: the model sent a `changes`
+    batch AND the legacy flat `kind='create'`, and the coercion refused with
+    "Put the new shift inside `changes` as a `kind: create` item…" — text
+    written for the model, relayed to the manager verbatim (a schedule
+    clarify/refusal is terminal for the turn), telling it to do what it had
+    already done. A stray flat `kind` is now absorbed or ignored, never a
+    refusal, and no message on this path names a tool field."""
+
+    def test_flat_create_next_to_the_same_create_stages_one_batch(self):
+        build = schedule_chat.ProposalBuild(
+            kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill",
+        )
+        captured = {}
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        with mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    # The flat fields echo the create that is already in the
+                    # batch — one shift was asked for, one must be staged.
+                    "kind": "create", "label": "barista", "date": "2026-08-23",
+                    "start_time": "07:00", "end_time": "15:00", "count": 2,
+                    "changes": [
+                        {"kind": "cancel", "target_date": "2026-08-23", "target_time_hint": "06:00"},
+                        {"kind": "create", "label": "barista", "date": "2026-08-23",
+                         "start_time": "07:00", "end_time": "15:00", "count": 2},
+                    ],
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 2
+        assert result["operation_summary"] == {"cancel": 1, "create": 1}
+        assert len(captured["edit_requests"]) == 1
+        assert len(captured["shift_requests"]) == 1
+
+    def test_stray_flat_create_over_pure_edits_stages_the_edits(self):
+        """No new shift anywhere in the request — the flat `kind` is a bare
+        enum the model filled in, and the reassign must still stage."""
+        build = schedule_chat.ProposalBuild(
+            kind="edit", proposal_id=PROPOSAL_ID, pill_text="pill",
+        )
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            return build
+
+        async def should_not_batch(*args, **kwargs):
+            raise AssertionError("a pure edit batch must not become a create")
+
+        with (
+            mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal),
+            mock.patch.object(schedule_chat, "build_batch_proposal", should_not_batch),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "create", "changes": [
+                    {"kind": "reassign", "target_employee_name": "Aisha Kim",
+                     "to_employee_name": "Elena Iyer", "target_date": "2026-08-24"},
+                ]},
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 1
+        assert result["operation_summary"] == {"reassign": 1}
+
+    def test_a_flat_create_the_batch_does_not_carry_is_absorbed_not_dropped(self):
+        """When `changes` is populated the flat args are otherwise discarded,
+        so a create that lives only there has to ride the batch — dropping it
+        would silently lose a shift the manager asked for."""
+        build = schedule_chat.ProposalBuild(
+            kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill",
+        )
+        captured = {}
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        with mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    "kind": "create", "label": "closer", "date": "2026-08-24",
+                    "start_time": "15:00", "end_time": "23:00",
+                    "changes": [
+                        {"kind": "cancel", "target_date": "2026-08-24", "target_time_hint": "14:00"},
+                    ],
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_summary"] == {"cancel": 1, "create": 1}
+        assert len(captured["shift_requests"]) == 1
+        assert captured["shift_requests"][0]["date"] == "2026-08-24"
+        assert captured["shift_requests"][0]["start_time"] == "15:00"
+        assert captured["shift_requests"][0]["label"] == "closer"
+
+    def test_an_absorbed_create_counts_toward_the_cap(self):
+        """Absorption happens before the batch is weighed, so it can't smuggle
+        a 41st operation past the reviewability cap."""
+        async def should_not_build(*args, **kwargs):
+            raise AssertionError("an over-cap batch must not persist a proposal")
+
+        changes = [
+            {"kind": "cancel", "target_date": f"2026-08-{23 + index // 8:02d}",
+             "target_time_hint": f"{8 + index % 8:02d}:00"}
+            for index in range(MAX_BATCH_OPERATIONS)
+        ]
+        with (
+            mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build),
+            mock.patch.object(schedule_chat, "build_batch_proposal", should_not_build),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "create", "label": "barista", "date": "2026-08-29",
+                      "start_time": "07:00", "end_time": "15:00", "changes": changes},
+            ))
+
+        assert result["status"] == "clarify"
+        assert f"{MAX_BATCH_OPERATIONS + 1} schedule operations" in result["message"]
+
+    def test_no_coercion_message_names_a_tool_field(self):
+        """Every string this returns is relayed to the manager verbatim. The
+        old refusal quoted the tool schema at them; nothing here may."""
+        cases = [
+            {"kind": "create", "changes": {"kind": "cancel"}},
+            {"kind": "create", "changes": [{"kind": "create", "label": "barista"}]},
+            {"changes": [{"kind": "create", "date": "2026-08-23"}]},
+            {"changes": ["not a change"]},
+        ]
+        # An edit the resolver can't pin to a shift takes the last copy path.
+        unresolvable = mock.Mock(coerce_edit_request=mock.Mock(return_value=None))
+        cases_with_chat = [(_FakeScheduleChat(), args) for args in cases]
+        cases_with_chat.append((unresolvable, {"changes": [{"kind": "reassign"}]}))
+        for chat, args in cases_with_chat:
+            _, _, error = schedule_skill._coerce_tool_batch(chat, args)
+            assert error, args
+            assert "`" not in error, error
+            assert "kind: create" not in error, error
+            assert "Put the new shift inside" not in error, error
+
+
 class _ConnCtx:
     def __init__(self, conn):
         self.conn = conn

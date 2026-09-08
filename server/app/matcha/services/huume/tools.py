@@ -1065,6 +1065,9 @@ TOOLS: tuple[HuumeTool, ...] = (
             "kind": types.Schema(
                 type=types.Type.STRING,
                 enum=["create", "reassign", "assign", "unassign", "retime", "cancel", "swap"],
+                description="Legacy single-operation field, with the flat fields below. "
+                            "Leave it out entirely whenever you send `changes` — every "
+                            "operation's kind belongs on its own item there.",
             ),
             "changes": types.Schema(
                 type=types.Type.ARRAY,
