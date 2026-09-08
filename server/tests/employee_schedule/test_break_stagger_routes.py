@@ -13,12 +13,14 @@ import pytest
 from fastapi import HTTPException
 
 from app.matcha.models.scheduling.employee_schedule import (
-    AssignmentBreakPlanUpdate, PlannedBreak,
+    AssignmentBreakPlanUpdate,
+    PlannedBreak,
 )
 from app.matcha.routes.employee_schedule import assignments as assignments_route
 from app.matcha.routes.employee_schedule import shifts as shifts_route
 from app.matcha.services.scheduling import schedule_guidance
 from app.matcha.services.scheduling.schedule_breaks import BreakPlan, BreakRequirement
+from tests._helpers.routes import iter_api_routes
 
 
 def _run(coro):
@@ -716,7 +718,7 @@ def test_new_routes_are_mounted_behind_the_unchanged_feature_gate():
     import app.matcha.routes as routes_init
     from app.matcha.routes.employee_schedule import router as schedule_router
 
-    paths = {route.path for route in schedule_router.routes}
+    paths = {route.path for route in iter_api_routes(schedule_router)}
     assert "/shifts/{shift_id}/break-stagger" in paths
     assert "/shifts/{shift_id}/assignments/{employee_id}/break-plan" in paths
 

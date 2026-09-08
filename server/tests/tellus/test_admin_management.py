@@ -5,6 +5,7 @@ model validation). No DB, no HTTP — see TELLUS_ADMIN_MGMT_PLAN.md Part 6/2c/3f
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from app.tellus.models.admin import (
     ACCOUNT_STATUSES,
@@ -22,6 +23,7 @@ from app.tellus.services.points_service import (
     compute_adjustment,
     level_for_points,
 )
+from tests._helpers.routes import iter_api_routes
 
 
 class _NullTxn:
@@ -166,11 +168,11 @@ class TestSerializeDetail:
 
     def test_uuid_and_datetime_round_trip_as_strings(self):
         import json
-        from datetime import datetime
+        from datetime import datetime, timezone
         from uuid import uuid4
 
         u = uuid4()
-        d = datetime(2026, 8, 6, 12, 0, 0)
+        d = datetime(2026, 8, 6, 12, 0, 0, tzinfo=timezone.utc)
         raw = serialize_detail({"id": u, "when": d, "n": 3})
         decoded = json.loads(raw)
         assert decoded == {"id": str(u), "when": str(d), "n": 3}
@@ -216,15 +218,15 @@ class TestAccountFilterSql:
 
 class TestAdminModels:
     def test_points_adjust_rejects_zero_delta(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusAdminPointsAdjust(delta=0, description="test adj")
 
     def test_points_adjust_rejects_out_of_range(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusAdminPointsAdjust(delta=100_001, description="test adj")
 
     def test_points_adjust_rejects_short_description(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusAdminPointsAdjust(delta=10, description="ab")
 
     def test_points_adjust_accepts_valid_clawback(self):
@@ -232,15 +234,15 @@ class TestAdminModels:
         assert m.delta == -50 and m.clamp is True
 
     def test_plan_action_rejects_unknown_literal(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusAdminPlanAction(action="pending")
 
     def test_password_reset_confirm_rejects_short_password(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusPasswordResetConfirm(token="a" * 20, new_password="short12")
 
     def test_password_reset_confirm_rejects_short_token(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusPasswordResetConfirm(token="short", new_password="longenoughpw")
 
     def test_earning_rule_update_distinguishes_absent_vs_null(self):
@@ -258,7 +260,7 @@ class TestAdminModels:
         assert action.duration_days is None
 
     def test_tier_action_rejects_duration_on_revoke(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TellusAdminTierAction(action="revoke", duration_days=30)
 
 
@@ -275,7 +277,8 @@ class TestAdminGateSweep:
         from app.tellus.dependencies import require_tellus_admin
         from app.tellus.routes.admin import router
 
-        assert len(router.routes) > 0
-        for route in router.routes:
+        routes = list(iter_api_routes(router))
+        assert len(routes) > 0
+        for route in routes:
             deps = [d.call for d in route.dependant.dependencies]
             assert require_tellus_admin in deps, f"{route.path} is not admin-gated"

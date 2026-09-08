@@ -105,6 +105,15 @@ test in the same change or CI fails — write the test with the fix, not after.
 Nothing in that run touches a database — the tests that need one are opt-in
 (table below).
 
+**Walking a route table? Use `tests._helpers.routes.iter_api_routes(router)`,
+not `router.routes`.** Since FastAPI 0.141 (the `requirements.txt` floor)
+`include_router` appends an `_IncludedRouter` wrapper instead of copying the
+child's routes up, so reading `.path`/`.dependant` off `router.routes` raises
+`AttributeError: '_IncludedRouter' object has no attribute 'path'`. Six tests
+did exactly that and failed in CI only — a stale local `venv/` still had 0.136,
+which is its own warning: `./venv/bin/python -m pip install -r requirements.txt`
+if a test passes locally and fails in CI for a library reason.
+
 If the same pass touches `client/`, add
 `cd client && npx tsc -p tsconfig.app.json --noEmit`. The bare
 `npx tsc --noEmit` checks NOTHING (root tsconfig is `files: []` + project

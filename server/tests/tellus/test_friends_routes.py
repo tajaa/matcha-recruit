@@ -2,13 +2,16 @@
 
 import inspect
 
+from tests._helpers.routes import iter_api_routes
+
 
 def test_every_friends_route_requires_verified_consumer():
     from app.tellus.dependencies import require_verified_consumer
     from app.tellus.routes.friends import router
 
-    assert len(router.routes) > 0
-    for route in router.routes:
+    routes = list(iter_api_routes(router))
+    assert len(routes) > 0
+    for route in routes:
         dependencies = [dependency.call for dependency in route.dependant.dependencies]
         assert require_verified_consumer in dependencies, f"{route.path} is not consumer-gated"
 
@@ -16,7 +19,7 @@ def test_every_friends_route_requires_verified_consumer():
 def test_friends_router_is_registered():
     from app.tellus.routes import tellus_router
 
-    paths = {route.path for route in tellus_router.routes}
+    paths = {route.path for route in iter_api_routes(tellus_router)}
     assert "/friends/handle-available" in paths
     assert "/me/handle" in paths
     assert "/people/{account_id}/reviews" in paths
@@ -25,7 +28,7 @@ def test_friends_router_is_registered():
 def test_friends_leaderboard_is_registered():
     from app.tellus.routes import tellus_router
 
-    assert "/leaderboard/friends" in {route.path for route in tellus_router.routes}
+    assert "/leaderboard/friends" in {route.path for route in iter_api_routes(tellus_router)}
 
 
 def test_friend_notification_kinds_are_push_allowlisted():

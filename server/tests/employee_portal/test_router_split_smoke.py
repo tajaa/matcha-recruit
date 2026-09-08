@@ -4,11 +4,10 @@ Guards the 2026-07 split of routes/employee_portal.py into a package: the
 route table, Depends-list identity, and back-compat attribute surface must
 survive untouched.
 """
-import pytest
 
 from app.matcha.routes import employee_portal
 from app.matcha.routes.employee_portal import _shared
-
+from tests._helpers.routes import iter_api_routes
 
 _EXPECTED_ROUTES = {
     ("/me", ("GET",)),
@@ -54,9 +53,10 @@ _EXPECTED_ROUTES = {
 
 
 def test_route_table_matches_pre_split_snapshot():
-    routes = {(r.path, tuple(sorted(r.methods))) for r in employee_portal.router.routes}
+    api_routes = list(iter_api_routes(employee_portal.router))
+    routes = {(r.path, tuple(sorted(r.methods))) for r in api_routes}
     assert routes == _EXPECTED_ROUTES
-    assert len(employee_portal.router.routes) == 39
+    assert len(api_routes) == 39
 
 
 def test_dep_lists_are_shared_singletons():
