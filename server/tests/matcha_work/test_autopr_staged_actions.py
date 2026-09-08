@@ -350,17 +350,138 @@ async def test_staging_twice_under_the_same_run_key_returns_the_first_rows(monke
         ps.prime_autopr_board_capabilities_cache({})
 
 
-def test_the_send_ceiling_counts_claims_not_only_completed_sends():
-    """The ceiling is read before the claim is written, so counting only
-    finished sends let N parallel approvals all pass. The query text is the
-    contract here; the fake-free assertion pins the two states it must count."""
+def test_the_send_ceiling_counts_one_row_per_attempt():
+    """A completed send writes BOTH a `sending` claim and a `sent` outcome by
+    the same actor, so counting the pair charged every send twice and halved a
+    documented ceiling of 20 to a real one of 10. The claim alone is one row
+    per attempt: a failure still costs the hour, a success is billed once."""
     import inspect
 
     src = inspect.getsource(pt.count_recent_staged_sends)
-    assert "IN ('sending', 'sent')" in src
+    assert "metadata->>'state' = 'sending'" in src
+    assert "'sent'" not in src
     # Bounded to the watched boards so the (project_id, created_at) index
     # carries the query — there is no index on actor_user_id.
     assert "project_id = ANY($2::uuid[])" in src
+
+
+@pytest.mark.asyncio
+async def test_the_ceiling_covers_the_board_being_sent_from(monkeypatch):
+    """The send gate is the stored `outreach` grant, which outlives a board's
+    membership in the watched set. Counting only the watched boards let such a
+    board match zero rows, so its ceiling never fired at all."""
+    from uuid import UUID, uuid4
+
+    seen: dict = {}
+
+    class _CountConn:
+        async def fetchval(self, sql, *args):
+            seen["ids"] = args[1]
+            return 0
+
+    orphan = uuid4()
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_CountConn()))
+    await pt.count_recent_staged_sends(actor_user_id=uuid4(), project_id=orphan)
+    assert orphan in seen["ids"]
+    for watched in pt.KANBAN_AUTOPR_PROJECT_IDS:
+        assert UUID(watched) in seen["ids"]
+
+
+class _CeilingConn:
+    """resolve_autopr_staged_action's connection when a ceiling is supplied."""
+
+    def __init__(self, recent):
+        self.recent = recent
+        self.executed: list[str] = []
+        self.inserted: list = []
+
+    def transaction(self):
+        return _Tx()
+
+    async def execute(self, sql, *args):
+        self.executed.append(sql)
+
+    async def fetchval(self, sql, *args):
+        return self.recent
+
+    async def fetchrow(self, sql, *args):
+        import json
+        from datetime import datetime, timezone
+
+        if "FOR UPDATE" in sql:
+            return {"id": args[0], "metadata": "{}"}
+        if "autopr_staged_action_result" in sql and "SELECT" in sql:
+            return None
+        assert "INSERT INTO mw_task_history" in sql
+        self.inserted.append(json.loads(args[4]))
+        return {"id": "r1", "created_at": datetime.now(timezone.utc)}
+
+
+@pytest.mark.asyncio
+async def test_the_ceiling_is_counted_inside_the_claim_transaction(monkeypatch):
+    """Read in its own transaction beforehand, the ceiling bounded nothing: the
+    per-action FOR UPDATE serializes two approvals of the SAME action and
+    nothing about two approvals of different ones, so N concurrent requests all
+    saw the same pre-claim number and all passed. The count has to happen under
+    a per-approver lock in the transaction that writes the claim."""
+    from uuid import uuid4
+
+    conn = _CeilingConn(recent=pt._STAGED_SEND_MAX_PER_HOUR)
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(conn))
+    with pytest.raises(pt.AutoPRSendCeilingReached, match="Hourly limit"):
+        await pt.resolve_autopr_staged_action(
+            project_id=uuid4(), task_id=uuid4(), action_id=uuid4(),
+            actor_user_id=uuid4(), state="sending",
+            max_recent_sends=pt._STAGED_SEND_MAX_PER_HOUR,
+        )
+    assert any("pg_advisory_xact_lock" in s for s in conn.executed)
+    # Refused before the claim row, not after it.
+    assert conn.inserted == []
+
+
+@pytest.mark.asyncio
+async def test_a_close_under_the_ceiling_claims_normally(monkeypatch):
+    from uuid import uuid4
+
+    conn = _CeilingConn(recent=pt._STAGED_SEND_MAX_PER_HOUR - 1)
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(conn))
+    result = await pt.resolve_autopr_staged_action(
+        project_id=uuid4(), task_id=uuid4(), action_id=uuid4(),
+        actor_user_id=uuid4(), state="sending",
+        max_recent_sends=pt._STAGED_SEND_MAX_PER_HOUR,
+    )
+    assert result["state"] == "sending"
+    assert conn.inserted[-1]["state"] == "sending"
+
+
+@pytest.mark.asyncio
+async def test_a_non_send_transition_is_never_charged_to_the_ceiling(monkeypatch):
+    """Marking something handled or dismissed sends no mail."""
+    from uuid import uuid4
+
+    for state in ("handled", "dismissed"):
+        conn = _CeilingConn(recent=pt._STAGED_SEND_MAX_PER_HOUR + 5)
+        monkeypatch.setattr(pt, "get_connection", lambda c=conn: _Ctx(c))
+        result = await pt.resolve_autopr_staged_action(
+            project_id=uuid4(), task_id=uuid4(), action_id=uuid4(),
+            actor_user_id=uuid4(), state=state,
+            max_recent_sends=pt._STAGED_SEND_MAX_PER_HOUR,
+        )
+        assert result["state"] == state
+        assert conn.executed == []
+
+
+def test_a_send_outcome_is_written_under_the_same_lock_as_a_close():
+    """"The newest row wins" only holds if every writer of a result row queues
+    behind the same lock. Without it, a person dismissing a claim that had gone
+    stale can commit AFTER a slow send finally returns, and that later
+    `dismissed` outranks the `sent` row carrying the provider's message id —
+    the card then denies a delivery that actually happened."""
+    import inspect
+
+    src = inspect.getsource(pt.record_autopr_staged_send_outcome)
+    assert "conn.transaction()" in src
+    assert "FOR UPDATE" in src
 
 
 # ---------------------------------------------------------------------------
@@ -483,4 +604,146 @@ def test_reserved_test_domains_are_never_handed_to_gmail(address):
     """The proposal may be staged (it is only text), but the send path applies
     the same guard the transactional mailer does."""
     assert pt.staged_recipient_is_reserved_test_domain(address)
-    assert not pt.staged_recipient_is_reserved_test_domain("vendor@vendor-domain.co")
+    # Deliberately not a registrable name: the negative case needs an address
+    # the guard does NOT catch, and `.notatld` is absent from the DNS root, so
+    # nothing here can ever resolve or bounce if it escapes into a fixture.
+    assert not pt.staged_recipient_is_reserved_test_domain("vendor@vendor.notatld")
+
+
+# ---------------------------------------------------------------------------
+# Reading a staged action back: the two readers the client and the send path use.
+# ---------------------------------------------------------------------------
+class _ListConn:
+    def __init__(self, metadata):
+        self.metadata = metadata
+
+    async def fetch(self, sql, *args):
+        from datetime import datetime, timezone
+
+        return [{
+            "id": "a1", "metadata": self.metadata,
+            "created_at": datetime.now(timezone.utc),
+            "result_metadata": None, "resolved_at": None,
+            "resolved_by_name": None,
+        }]
+
+
+class _GetConn:
+    def __init__(self, metadata):
+        self.metadata = metadata
+
+    async def fetchrow(self, sql, *args):
+        return {"id": "a1", "metadata": self.metadata, "state": None, "state_at": None}
+
+
+_LEGACY_ROW = {
+    "kind": "autopr_staged_action", "action_kind": "email",
+    "to": "vendor@vendor.notatld", "subject": "Quote",
+    "body": "the draft as it was stored before the rename", "why": "w",
+}
+
+
+@pytest.mark.asyncio
+async def test_a_row_staged_before_the_rename_still_reads_back(monkeypatch):
+    """The draft key moved from `body` to `action_body` with no backfill, so
+    rows written by the previous release carry only `body`. Reading just the
+    new key returned null for them — and `MWStagedAction.body` is non-optional
+    in Espresso, so one such row failed the decode of the WHOLE list and
+    blanked the outreach section, taking every newer proposal with it."""
+    from uuid import uuid4
+
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_ListConn(_LEGACY_ROW)))
+    listed = await pt.list_autopr_staged_actions(project_id=uuid4(), task_id=uuid4())
+    assert listed[0]["body"] == _LEGACY_ROW["body"]
+
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_GetConn(_LEGACY_ROW)))
+    got = await pt.get_autopr_staged_action(
+        project_id=uuid4(), task_id=uuid4(), action_id=uuid4()
+    )
+    assert got["body"] == _LEGACY_ROW["body"]
+
+
+@pytest.mark.asyncio
+async def test_the_current_key_wins_over_a_stray_legacy_one(monkeypatch):
+    """The fallback must not let a `body` key resurrect an older draft."""
+    from uuid import uuid4
+
+    row = {**_LEGACY_ROW, "action_body": "the current draft"}
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_ListConn(row)))
+    listed = await pt.list_autopr_staged_actions(project_id=uuid4(), task_id=uuid4())
+    assert listed[0]["body"] == "the current draft"
+
+
+@pytest.mark.asyncio
+async def test_an_undeliverable_recipient_is_not_offered_a_send_button(monkeypatch):
+    """The send route refuses a reserved test domain, so a card that still
+    reported the row as retryable kept a Send button that 400s identically
+    forever — neither sendable nor settled. It stays closable: a person can
+    read what was proposed and mark it handled or dismissed."""
+    from uuid import uuid4
+
+    row = {**_LEGACY_ROW, "to": "vendor@example.com", "action_body": "hi"}
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_ListConn(row)))
+    listed = await pt.list_autopr_staged_actions(project_id=uuid4(), task_id=uuid4())
+    assert listed[0]["retryable"] is False
+    assert listed[0]["closable"] is True
+
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_GetConn(row)))
+    got = await pt.get_autopr_staged_action(
+        project_id=uuid4(), task_id=uuid4(), action_id=uuid4()
+    )
+    assert got["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_deliverable_recipient_keeps_its_send_button(monkeypatch):
+    from uuid import uuid4
+
+    row = {**_LEGACY_ROW, "action_body": "hi"}
+    monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(_ListConn(row)))
+    listed = await pt.list_autopr_staged_actions(project_id=uuid4(), task_id=uuid4())
+    assert listed[0]["retryable"] is True
+
+
+@pytest.mark.parametrize("kind", ["contact", "review_request"])
+def test_only_an_email_can_be_undeliverable(kind):
+    """Nothing hands a contact or review request to a mail server, so the
+    recipient there is a person's name and no address guard applies."""
+    assert not pt._staged_action_is_undeliverable(kind, "vendor@example.com")
+    assert pt._staged_action_is_undeliverable("email", "vendor@example.com")
+
+
+# ---------------------------------------------------------------------------
+# The send route's failure handling.
+# ---------------------------------------------------------------------------
+def test_a_lost_reply_does_not_become_a_retryable_failure():
+    """`send_email` runs against Gmail with a 30s timeout. A TransportError
+    means the request went out and the reply was lost — the mail may well have
+    been accepted. Recording `failed` there marks the row retryable and puts a
+    Retry button on a delivered email, mailing the recipient twice from the
+    approver's own mailbox. The claim is left standing instead, which is the
+    existing "interrupted send" state: never re-sent, closable by a person who
+    has checked their Sent folder."""
+    import inspect
+
+    from app.matcha.routes.matcha_work import task_history as th
+
+    src = inspect.getsource(th.send_autopr_staged_action_endpoint)
+    assert "httpx.TransportError" in src
+    assert "if not delivery_unknown:" in src
+    # The ceiling moved into the claim's own transaction; a separate read
+    # beforehand is the race this route used to have.
+    assert "max_recent_sends=" in src
+    assert "count_recent_staged_sends" not in src
+
+
+def test_an_undeliverable_recipient_is_reported_before_the_retryable_check():
+    """Reporting such a row as not-retryable is what removes the dead Send
+    button, but it also means the generic "already <state>" branch would fire
+    first and hide the real reason from anyone calling the API directly."""
+    import inspect
+
+    from app.matcha.routes.matcha_work import task_history as th
+
+    src = inspect.getsource(th.send_autopr_staged_action_endpoint)
+    assert src.index("reserved test domain") < src.index('action["retryable"]')

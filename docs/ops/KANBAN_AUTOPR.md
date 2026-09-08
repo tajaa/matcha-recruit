@@ -621,7 +621,11 @@ than merely guarded. Five states, and the distinctions are load-bearing:
 Transitions, not "any row exists → refuse": `pending` and `failed` may be sent, handled,
 or dismissed (a transient Gmail error must not brick a proposal); a `sending` claim older
 than ten minutes may be handled or dismissed but never re-sent (it may have delivered);
-everything else is settled. The server reports `retryable` / `closable` per action and
+everything else is settled. `failed` is only written for a failure the provider actually
+reported — a transport error (timeout, connection drop) leaves the claim standing instead,
+because the request reached Gmail and only the reply was lost, so the mail may well have
+gone out. Writing `failed` there would put a Retry button on a delivered email and mail
+the recipient twice. The server reports `retryable` / `closable` per action and
 Espresso draws its buttons from those, shows the provider's error under a failed row, and
 offers **Retry send**. A `sent` row carries Gmail's `message_id`, and the route posts an
 `email` activity in the approver's name so the ticket's discussion shows that mail went
@@ -630,7 +634,10 @@ out — the outcome rows themselves are bookkeeping and render nowhere.
 Staged rows store the draft under `action_body`, never `body`: `body` is what every reader
 of activity rows treats as a comment (Espresso's thread and review delta, the AI ticket
 brief, the project overview feed, the harness's own context), and a draft nobody approved
-must never read as something a person said. Both staged kinds are in
+must never read as something a person said. The key moved on 2026-09-08 and rows written
+before that carry `body`, so both readers fall back to it — Espresso's `MWStagedAction.body`
+is non-optional, and one un-fallen-back row would fail the whole list decode and blank the
+outreach section rather than degrade. Both staged kinds are in
 `_AUTOPR_BOOKKEEPING_KINDS` and in Espresso's mirror `GraphGeom.bookkeepingKinds`.
 
 Only the AutoPR service account may POST `staged-actions`. Board membership is not
@@ -644,11 +651,22 @@ re-checks all of: the board's `outreach` grant, that the caller may edit the pro
 `email` (a contact or review request is something a person does), that the address is not
 on a reserved test domain (same guard as the transactional mailer), that the
 **approver's own Gmail** is connected — mail never goes out from a system account — and a
-per-approver ceiling of 20 sends/hour that counts `sending` claims as well as `sent`
-(read before the claim, it would otherwise let N parallel approvals all pass), because
-`gmail_service`'s own limiter lives on the instance and every request builds a fresh one. `to` must already be a deliverable
+per-approver ceiling of 20 sends/hour, because `gmail_service`'s own limiter lives on the
+instance and every request builds a fresh one. `to` must already be a deliverable
 address by then: the validator and the cleaner both refuse a name or a role on an
-`email`, because that only fails at send time, after a human has approved it.
+`email`, because that only fails at send time, after a human has approved it. A recipient
+that can never be delivered to — a reserved test domain — is reported `retryable: false`
+so the card stops offering Send at all, rather than leaving a button that 400s forever.
+
+The ceiling counts the `sending` claim and nothing else: one claim is one attempt, so a
+failed attempt still costs the hour while a successful one is not billed twice by its own
+`sent` row (counting both halved the real ceiling to ten). It is evaluated **inside** the
+transaction that writes the claim, under `pg_advisory_xact_lock` on the approver. Read
+beforehand in its own transaction it bounded nothing — the per-action `FOR UPDATE`
+serializes two approvals of the same action but nothing about two approvals of different
+ones, so N concurrent requests all saw the same pre-claim count and all passed. The count
+is scoped to the watched boards **plus the board being sent from**, since the send gate is
+the stored `outreach` grant and a grant outlives its board's membership in the watched set.
 
 The `sending` claim is what makes a second approval impossible while the first is in
 flight; the real outcome is appended on top of it. Writing `sent` up front instead — as

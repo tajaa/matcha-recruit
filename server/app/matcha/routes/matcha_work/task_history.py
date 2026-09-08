@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.core.models.auth import CurrentUser
@@ -468,26 +469,22 @@ async def send_autopr_staged_action_endpoint(
     )
     if action is None:
         raise HTTPException(status_code=404, detail="Staged action not found")
-    # `pending` and `failed` may send; a failed attempt is not a settled one.
-    if not action["retryable"]:
-        raise HTTPException(status_code=409, detail=f"This action was already {action['state']}")
     if action["kind"] not in pt_svc._SENDABLE_STAGED_ACTION_KINDS:
         raise HTTPException(
             status_code=400,
             detail=f"A {action['kind']} action is done by a person; mark it handled instead",
         )
+    # Ahead of the retryable check: an undeliverable recipient is reported as
+    # not-retryable so the card stops offering Send, and the generic
+    # "already <state>" message would then hide the actual reason.
     if pt_svc.staged_recipient_is_reserved_test_domain(action["to"]):
         raise HTTPException(
             status_code=400,
             detail="That address is on a reserved test domain; nothing was sent",
         )
-
-    recent = await pt_svc.count_recent_staged_sends(actor_user_id=current_user.id)
-    if recent >= pt_svc._STAGED_SEND_MAX_PER_HOUR:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Hourly limit reached ({pt_svc._STAGED_SEND_MAX_PER_HOUR} approved sends per person)",
-        )
+    # `pending` and `failed` may send; a failed attempt is not a settled one.
+    if not action["retryable"]:
+        raise HTTPException(status_code=409, detail=f"This action was already {action['state']}")
 
     gmail = GmailService(current_user.id)
     await gmail.load_token()
@@ -498,6 +495,10 @@ async def send_autopr_staged_action_endpoint(
         )
 
     try:
+        # The hourly ceiling is enforced inside this call's transaction, under a
+        # per-approver lock. Read separately beforehand it bounded nothing:
+        # concurrent approvals of different actions share no lock, so they all
+        # saw the same pre-claim count.
         claimed = await pt_svc.resolve_autopr_staged_action(
             project_id=project_id,
             task_id=task_id,
@@ -505,7 +506,10 @@ async def send_autopr_staged_action_endpoint(
             actor_user_id=current_user.id,
             state="sending",
             detail=f"to {action['to']}",
+            max_recent_sends=pt_svc._STAGED_SEND_MAX_PER_HOUR,
         )
+    except pt_svc.AutoPRSendCeilingReached as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except pt_svc.AutoPRReconsiderationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     if claimed is None:
@@ -516,23 +520,35 @@ async def send_autopr_staged_action_endpoint(
             to=action["to"], subject=action["subject"], body=action["body"]
         )
     except Exception as exc:
-        # The claim is immutable, so the failure is its own row on top of it.
-        # Recording it is what keeps the card honest; if even that write fails
-        # the claim stands alone and reads as an interrupted send, which is
-        # still true and still not a claim that mail went out.
         logger.warning("Staged action %s failed to send: %s", action_id, exc, exc_info=True)
-        try:
-            await pt_svc.record_autopr_staged_send_outcome(
-                project_id=project_id,
-                task_id=task_id,
-                action_id=action_id,
-                actor_user_id=current_user.id,
-                state="failed",
-                detail=str(exc),
-            )
-        except Exception:
-            logger.exception("Could not record the failed send for staged action %s", action_id)
-        raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+        # A transport error is not evidence that nothing was sent. The request
+        # reached Gmail and the reply was lost, so the message may well have
+        # gone out; writing `failed` here would put a Retry button on a
+        # delivered email and mail the recipient twice from the approver's own
+        # mailbox. Leave the claim standing instead — that is exactly the
+        # "interrupted send" state, never one-click re-sent, closable by a
+        # person once they have checked their Sent folder.
+        delivery_unknown = isinstance(exc, httpx.TransportError)
+        if not delivery_unknown:
+            try:
+                await pt_svc.record_autopr_staged_send_outcome(
+                    project_id=project_id,
+                    task_id=task_id,
+                    action_id=action_id,
+                    actor_user_id=current_user.id,
+                    state="failed",
+                    detail=str(exc),
+                )
+            except Exception:
+                logger.exception("Could not record the failed send for staged action %s", action_id)
+            raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The mail server stopped responding mid-send, so it is unknown whether "
+                "this went out. Check your Sent folder, then mark it handled or dismissed."
+            ),
+        )
 
     recorded = await pt_svc.record_autopr_staged_send_outcome(
         project_id=project_id,
