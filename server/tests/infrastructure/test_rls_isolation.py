@@ -8,25 +8,27 @@ to simulate a non-superuser application role. They require:
 
 Run manually:
     cd server
-    DATABASE_URL=... python3 -m pytest tests/test_rls_isolation.py -v
+    RUN_DB_TESTS=1 DATABASE_URL=postgresql://matcha:matcha_dev@localhost:5432/matcha \
+        ./venv/bin/python -m pytest tests/infrastructure/test_rls_isolation.py -v
 
 These tests are READ-ONLY against existing tables — they use
 SET ROLE / RESET ROLE to test RLS enforcement without creating
 any tables, roles, or modifying schema.
 """
 
-import os
 import uuid
 
 import pytest
 import pytest_asyncio
 
+from tests._helpers.db import real_database_url, requires_real_db
+
 asyncpg = pytest.importorskip("asyncpg")
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = real_database_url()
 
 pytestmark = [
-    pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),
+    requires_real_db(),
     pytest.mark.asyncio(loop_scope="module"),
 ]
 

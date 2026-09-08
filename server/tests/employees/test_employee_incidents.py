@@ -9,22 +9,24 @@ rolled-back transaction so production data is unaffected.
 
 Run manually:
     cd server
-    python3 -m pytest tests/test_employee_incidents.py -v
+    RUN_DB_TESTS=1 DATABASE_URL=postgresql://matcha:matcha_dev@localhost:5432/matcha \
+        ./venv/bin/python -m pytest tests/employees/test_employee_incidents.py -v
 """
 
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
 
+from tests._helpers.db import real_database_url, requires_real_db
+
 asyncpg = pytest.importorskip("asyncpg")
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = real_database_url()
 
 pytestmark = [
-    pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),
+    requires_real_db(),
     pytest.mark.asyncio,
 ]
 
@@ -348,5 +350,5 @@ async def test_fk_takes_priority_over_email(conn):
         COMPANY_ID, EMP_ALICE, ["alice@testco.com"], "Alice Smith",
     )
     role_map = {1: "involved", 2: "reporter"}
-    fk_incident = [r for r in rows if r["id"] == INCIDENT_FK][0]
+    fk_incident = next(r for r in rows if r["id"] == INCIDENT_FK)
     assert role_map[fk_incident["role_priority"]] == "involved"
