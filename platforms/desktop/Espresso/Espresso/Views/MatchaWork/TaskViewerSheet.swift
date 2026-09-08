@@ -56,6 +56,13 @@ struct TaskViewerSheet: View {
     @State var didRequestAutoPRRun = false
     @State var requestingAutoPRRun = false
     @State var autoPRRunError: String?
+    /// Outreach a research run proposed. Empty on every ticket that never ran
+    /// one, so the section simply does not render.
+    @State var stagedActions: [MWStagedAction] = []
+    /// The action currently being approved or closed — one at a time, so a
+    /// double tap cannot fire two sends before the first returns.
+    @State var resolvingActionId: String?
+    @State var stagedActionError: String?
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -331,6 +338,11 @@ struct TaskViewerSheet: View {
                 // behind a toggle.
                 discussionSection
 
+                // Proposed outreach sits directly under the discussion: it is
+                // the one thing on the ticket that asks the reader for a
+                // decision with an outside effect.
+                outreachSection
+
                 if !attachments.isEmpty {
                     attachmentsSection
                 }
@@ -430,6 +442,10 @@ struct TaskViewerSheet: View {
             // Discussion is always shown, so load history once on open to
             // populate the notes thread (and the collapsed rounds feed).
             if !historyLoaded { await loadHistory() }
+            // Research cards are the only ones that carry proposals today, but
+            // ask on every ticket: the answer is an empty list and the section
+            // renders nothing.
+            await loadStagedActions()
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
