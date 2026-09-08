@@ -109,9 +109,11 @@ _ALLOWED_OUTCOMES = {"open", "won", "lost"}
 # Sales follow-up activity kinds, logged onto the task history timeline.
 _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
+# Reason set mirrors scripts/kanban-autopr/decision.sh; migration_required is
+# retired for new decisions but old cards still carry it, so parsers keep it.
 _AUTOPR_NO_SPEC_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
-    r"(already_fixed|migration_required|policy_blocked|external_dependency)(?:\s|$)"
+    r"(already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency)(?:\s|$)"
 )
 _AUTOPR_TEST_ROUTE_RE = re.compile(
     r"(?:test[-_ ]route|reproduce(?:[-_ ]route)?)\s*(?:=|:)\s*(/[^\s]+)",
@@ -172,10 +174,9 @@ def _is_autopr_waiting_for_answers_note(note: str) -> bool:
 
 def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
     normalized = (note or "").strip()
-    return (
-        normalized.startswith("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
-        or normalized.startswith("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
-    )
+    # checkpoint.sh writes exactly one pause header. Keep in lock-step with
+    # scripts/kanban-autopr/select.sh and the Espresso card/header views.
+    return normalized.startswith("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
 
 
 def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:

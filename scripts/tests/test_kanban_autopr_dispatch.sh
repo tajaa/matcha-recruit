@@ -260,6 +260,111 @@ check "installer ships the probe and both LaunchAgents" \
     && grep -q 'WATCH_PLIST_DESTINATION' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" \
     && grep -q 'kanban-autopr-request-watch' "$REPO_ROOT/scripts/agent-sandbox.sh" && echo 0 || echo 1)
 
+# ── one Codex login for every lane: a usage-limit exit holds all of them ──
+rm -f "$TMP_DIR/dispatches"
+mkdir -p "$TMP_DIR/state"
+printf 'ERROR: You have hit your usage limit. Try again at 5:31 AM.\n' > "$TMP_DIR/codex.log"
+AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
+  "$REPO_ROOT/scripts/kanban-autopr/codex-backoff.sh" record "$TMP_DIR/codex.log" 2>/dev/null || true
+check "a usage-limit transcript writes the lane-wide backoff marker" \
+  $(jq -e '.resume_at > now' "$TMP_DIR/state/codex-usage-limit.json" >/dev/null && echo 0 || echo 1)
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "an active Codex backoff skips every lane" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'codex-usage-limit-backoff' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "a queued card does not override an active Codex backoff" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+jq '.resume_at = (now | floor) - 1' "$TMP_DIR/state/codex-usage-limit.json" > "$TMP_DIR/state/expired.json"
+mv "$TMP_DIR/state/expired.json" "$TMP_DIR/state/codex-usage-limit.json"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "an expired backoff marker no longer blocks dispatch" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "silent-error-autofix.yml" ] && echo 0 || echo 1)
+printf 'plain crash, no quota message\n' > "$TMP_DIR/codex-crash.log"
+rm -f "$TMP_DIR/state/codex-usage-limit.json"
+AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/state" \
+  "$REPO_ROOT/scripts/kanban-autopr/codex-backoff.sh" record "$TMP_DIR/codex-crash.log" 2>/dev/null || true
+check "an ordinary Codex crash writes no backoff marker" \
+  $([ ! -e "$TMP_DIR/state/codex-usage-limit.json" ] && echo 0 || echo 1)
+
+# ── one button press costs at most one forced run, even when the run dies
+#    before it can claim the request ──
+cat > "$TMP_DIR/run-request-probe" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${AUTOPR_TEST_PROBE_CALLS:-}" ] || printf 'probe\n' >> "$AUTOPR_TEST_PROBE_CALLS"
+[ "${AUTOPR_TEST_PROBE_EXIT:-3}" = 0 ] || exit "${AUTOPR_TEST_PROBE_EXIT:-3}"
+requests="${AUTOPR_TEST_PROBE_REQUESTS:-}"
+[ -n "$requests" ] || requests='[{"task_id":"t1","project_id":"p","requested_at":"2026-09-07T10:00:00Z"}]'
+printf '%s\n' "$requests"
+EOF
+chmod +x "$TMP_DIR/run-request-probe"
+rm -f "$TMP_DIR/dispatches"; rm -rf "$TMP_DIR/state"
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "a pending request is dispatched once and its request set is remembered" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && grep -q 't1@2026-09-07T10:00:00Z' "$TMP_DIR/state/last-forced-request-set" && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "the same unclaimed request set is not re-dispatched after the five-minute floor" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"t1","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"t2","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
+  AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
+  AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "a new button press (different request set) dispatches again" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_FORCED_REQUEST_TTL_SECONDS=0 AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 \
+  AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"t1","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"t2","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
+  AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
+check "once the request TTL passes the same set may be forced again" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+
+# ── the dispatch log rotates instead of growing forever ──
+head -c 600 /dev/zero | tr '\0' 'x' > "$TMP_DIR/log.jsonl"
+AUTOPR_DISPATCH_LOG_MAX_BYTES=500 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
+  AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher
+check "an oversized dispatch log is rotated once before the next event" \
+  $([ -s "$TMP_DIR/log.jsonl.1" ] && [ "$(wc -c < "$TMP_DIR/log.jsonl" | tr -d ' ')" -lt 500 ] && echo 0 || echo 1)
+
+# ── GitHub-side floor: the workflow refuses a hot re-dispatch on its own ──
+GUARD="$REPO_ROOT/scripts/kanban-autopr/hot-redispatch-guard.sh"
+cat > "$TMP_DIR/gh-guard" <<'EOF'
+#!/usr/bin/env bash
+[ "${AUTOPR_TEST_GUARD_FAIL:-0}" = 0 ] || exit 1
+printf '%s\n' "${AUTOPR_TEST_GUARD_RUNS:-[]}"
+EOF
+chmod +x "$TMP_DIR/gh-guard"
+just_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x GITHUB_RUN_ID=999 \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$just_now\",\"createdAt\":\"$just_now\"}]" \
+  "$GUARD" >/dev/null 2>&1 && guard_hot_rc=0 || guard_hot_rc=$?
+check "a Kanban run completed seconds ago makes the guard skip this pass" \
+  $([ "$guard_hot_rc" = 3 ] && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x GITHUB_RUN_ID=1 \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$just_now\",\"createdAt\":\"$just_now\"}]" \
+  "$GUARD" >/dev/null 2>&1 && guard_self_rc=0 || guard_self_rc=$?
+check "the guard ignores the current run's own row" \
+  $([ "$guard_self_rc" = 0 ] && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$stale\",\"createdAt\":\"$stale\"}]" \
+  "$GUARD" >/dev/null 2>&1 && guard_cold_rc=0 || guard_cold_rc=$?
+check "a run older than the floor proceeds" $([ "$guard_cold_rc" = 0 ] && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x AUTOPR_TEST_GUARD_FAIL=1 \
+  "$GUARD" >/dev/null 2>&1 && guard_api_rc=0 || guard_api_rc=$?
+check "a GitHub API failure fails open (spend guard, not a safety boundary)" \
+  $([ "$guard_api_rc" = 0 ] && echo 0 || echo 1)
+check "the Kanban workflow runs the guard before any board or production read" \
+  $([ "$(grep -n 'hot-redispatch-guard.sh' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" | head -1 | cut -d: -f1)" -lt \
+      "$(grep -n 'collect.sh > ' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" | head -1 | cut -d: -f1)" ] \
+    && grep -q "if: steps.guard.outputs.proceed == 'true'" "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \
+    && echo 0 || echo 1)
+check "installer ships the backoff helper next to the dispatcher" \
+  $(grep -q 'codex-backoff.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

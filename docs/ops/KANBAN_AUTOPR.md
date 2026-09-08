@@ -584,7 +584,8 @@ a webhook replay can never drag a card backwards:
 | `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
 | `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | write the visible `🤖 AUTO SETUP · MERGED: READY FOR REVIEW · build … · prod … · PR #…` note; reconstruct production plus current criticality/confidence from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
 | `closed` with `merged == true` | `review` | `review` | add/recover the same origin/build note and PR link; never move the card backwards |
-| `closed` with `merged == false` | — | — | no move |
+| `closed` with `merged == false`, head `bot/task-<id8>` | `in_progress`, `changes_requested` | `todo` | write `🤖 AUTO SETUP · PR CLOSED: NOT MERGED · PR #…`; the card does **not** auto-rerun (the branch's PR history still gates a fresh investigation until the owner presses Run AutoPR or replies with context). `reconcile-merged-cards.sh` mirrors this on every pass. |
+| `closed` with `merged == false`, any other head (error-bot draft closed as superseded/duplicate, human PR) | — | — | no move |
 | anything else | — | — | ignore |
 
 `review → done` stays manual through `POST /tasks/{id}/approve` — a merge is not an
@@ -597,3 +598,34 @@ after publication. It refuses to erase dirty state. Human/agent work may likewis
 use temporary worktrees for isolation, but the exact temporary worktree is removed
 immediately after its PR is submitted; submitted PR branches are never left checked
 out in a worktree.
+
+## Spend guards and known limitations
+
+The full 2026-09 review of this system — measurements, ranked findings, what
+batch A fixed, and the structural backlog (batch B) — lives in
+`docs/ops/AUTOMATION_REVIEW_2026-09.md`. The guards that exist now:
+
+- **`hot-redispatch-guard.sh`** runs first in the workflow and skips the pass when the
+  previous completed Kanban run ended less than five minutes ago. It is a
+  GitHub-side floor that survives a broken or stale local dispatcher (the installed
+  LaunchAgent copy lagged the repo for a week and re-fired a no-op run every 66 s).
+  API failure proceeds — it is a spend guard, not a safety boundary.
+- **The dispatcher remembers the request set it last forced** (`last-forced-request-set`):
+  one "Run AutoPR now" press costs at most one forced run per request TTL even when
+  the run dies before `select.sh`/`investigate.sh` can claim it.
+- **`codex-backoff.sh`** holds every lane after a Codex usage-limit exit.
+- **The prelude is cheap when nothing is eligible:** labels are created only when
+  missing, the production SSH/ECR/bundle resolution runs only after a card is
+  selected, and `collect-pr-context.sh`'s snapshot (`AUTOPR_BOT_PRS_FILE`) feeds the
+  reconciler and the selector's cap instead of repeat GitHub calls.
+- **`autopr-self-audit/audit.sh` reports a stale installed dispatcher** (files under
+  `~/.local/share/matcha-kanban-autopr` differing from the repo, a scheduler
+  `StartInterval` other than 300, or a missing request-watch agent) as an operator
+  action: `./scripts/kanban-autopr/install-launch-agent.sh`.
+
+Still open (see the review doc for detail): the lanes rebuild the sandbox clone two to
+three times per card; the three lanes duplicate confidence banding, fingerprinting,
+redaction, and date parsing; `reconcile.sh` re-asks Codex the same equivalence
+question every 10 minutes; error-lane selection is an uncached N+1 capped at 100; the
+dispatch lock is TTL-shaped; one Mac/one login/one runner slot with no staleness alarm;
+Espresso's AutoPR state machine is string-prefix parsing of `progress_note`.

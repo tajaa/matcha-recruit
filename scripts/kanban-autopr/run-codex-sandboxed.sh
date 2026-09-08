@@ -35,6 +35,15 @@ MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
 MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
+# Paths the model's patch may never touch, enforced HERE — at the moment the
+# patch reaches the trusted checkout — not only in the publisher. Between this
+# bridge and publish.sh the workflow still executes scripts out of that
+# checkout (scope check, coverage recording, the sandbox controller itself),
+# so a patch that rewrote one of them used to run as the runner user before
+# any guard looked at it. The self-audit lane, whose job is repairing the
+# harness, narrows this to CI/deploy/secrets via AUTOPR_SANDBOX_PATH_DENY_RE.
+PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
+CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
 
 die() {
     printf 'kanban-autopr sandbox: %s\n' "$1" >&2
@@ -175,18 +184,40 @@ CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --ephemeral
     -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\""
     -C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
 
-if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
-    codex "${CODEX_ARGS[@]}"
-else
-    env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
-        -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
-        AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
-        AGENT_SANDBOX_AUTOPR=1 \
-        SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
-        SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
-        SANDBOX_CODEX_AUTH_FILE="$SANDBOX_CODEX_AUTH_FILE" \
-        "$MSANDBOX_BIN" exec \
-        codex "${CODEX_ARGS[@]}"
+# Keep one copy of the transcript on the trusted side. A non-zero exit that
+# names an exhausted usage limit is a lane-wide condition, not a per-card one:
+# record it so the dispatcher stops launching runs until the quota returns.
+CODEX_TRANSCRIPT="$RUNTIME_ROOT/codex-last-run.log"
+# Called with errexit OFF (see below): `set` inside a function is global, so
+# toggling it here would re-arm errexit before the non-zero return reached
+# the caller and the script would die without recording anything.
+run_codex_cli() {
+    if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
+        codex "${CODEX_ARGS[@]}" 2>&1 | tee "$CODEX_TRANSCRIPT"
+    else
+        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+            -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
+            AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+            AGENT_SANDBOX_AUTOPR=1 \
+            SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
+            SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
+            SANDBOX_CODEX_AUTH_FILE="$SANDBOX_CODEX_AUTH_FILE" \
+            "$MSANDBOX_BIN" exec \
+            codex "${CODEX_ARGS[@]}" 2>&1 | tee "$CODEX_TRANSCRIPT"
+    fi
+    return "${PIPESTATUS[0]}"
+}
+set +e
+run_codex_cli
+codex_rc=$?
+set -e
+if [ "$codex_rc" -ne 0 ]; then
+    if [ -x "$CODEX_BACKOFF" ]; then
+        "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT" || true
+    fi
+    # Preserve Codex's own status: the callers log and act on it.
+    printf 'kanban-autopr sandbox: Codex exited %s inside msandbox\n' "$codex_rc" >&2
+    exit "$codex_rc"
 fi
 
 HOST_REPORT="$IO_DIR/output/report.md"
@@ -231,6 +262,16 @@ PATCH_BYTES="$(wc -c < "$PATCH_FILE" | tr -d '[:space:]')"
     || die "sandbox patch touches $CHANGED_FILE_COUNT files (max $MAX_CHANGED_FILES)"
 [ "$PATCH_BYTES" -le "$MAX_PATCH_BYTES" ] \
     || die "sandbox patch is $PATCH_BYTES bytes (max $MAX_PATCH_BYTES)"
+
+# Harness, CI, container, deploy, and agent-config paths never reach the
+# trusted checkout from a model patch (see PATH_DENY_RE above). Deletions and
+# renames count too: the list comes from the same diff that becomes the patch.
+denied_paths="$(git -C "$SANDBOX_WORKSPACE" diff --name-only "$MODEL_BASE_SHA" -- . \
+    | grep -E "$PATH_DENY_RE" || true)"
+if [ -n "$denied_paths" ]; then
+    printf 'kanban-autopr sandbox: refusing model changes to protected paths:\n%s\n' "$denied_paths" >&2
+    die "sandbox patch touches a protected path"
+fi
 
 # A symlink or gitlink can make an apparently allowed source path point
 # elsewhere or smuggle repository topology into the patch. AutoPR has no

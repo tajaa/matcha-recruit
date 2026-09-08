@@ -33,8 +33,21 @@ Pipeline (`scripts/error-autofix/`):
    Falls back to `scripts/collect-silent-error-evidence.sh` if the DB path fails.
 3. **`select.sh`** — picks one incident GitHub hasn't already handled. Checks
    `gh pr list --head bot/err-<key> --state all`: open → skip; merged → skip unless a
-   genuine recurrence is seen well after a deploy-grace window; closed-unmerged → skip
-   for a 7-day cooldown, not forever. Also caps total open `autofix`-labeled PRs.
+   genuine recurrence is seen well after a deploy-grace window **and** — when the
+   workflow resolved the deployed build from `https://hey-matcha.com/version.json`
+   (`AUTOFIX_DEPLOYED_SHA`) — the merge commit is an ancestor of it (deploys are
+   manual, so "merged" is not "live"; an undeployed fix used to be re-investigated
+   every two hours until the next rollout and open a duplicate PR); closed-unmerged →
+   skip for a 7-day cooldown, not forever. An open `autofix-nofix` issue suppresses its
+   incident only until the issue has sat untouched for 7 days (a re-investigation
+   refreshes the issue body, restarting the clock). Also caps total open
+   `autofix`-labeled PRs; a failed count read is fatal, never "no cap". Attempt
+   markers older than 7 days are pruned on every pass.
+3b. **`verify-deployed-fixes.sh`** — right after collection, for every merged `autofix`
+   PR whose merge commit is in the deployed build and whose 6-hour grace window has
+   passed: fingerprint silent → `production-verified`; fingerprint recurred →
+   `production-verification-failed` (and `select.sh` re-opens it). This is the only
+   place that ever confirms a production error actually stopped.
 4. **`investigate.sh`** — one sandboxed `codex exec` with
    `gpt-5.6-sol` and medium reasoning in a disposable tracked-files-only clone,
    with evidence copied into the clone and enumerated in a bounded prompt. It must produce
@@ -98,6 +111,26 @@ It never deploys or auto-merges. A human reads the PR body and decides.
    pytest-asyncio`.
 
 ## Guardrails
+
+- **Client `request_id` is attacker-controlled.** A browser incident's id comes from
+  the free-form `context` dict of the unauthenticated `POST /api/client-errors`
+  endpoint, and `fetch-correlated-log.sh` interpolates it into a shell command that
+  runs on the production host. `_query.py` drops any id outside `[A-Za-z0-9-]{4,64}`
+  and the fetch script refuses one again before `ssh` — never quote around it instead.
+- **Model patches never reach `scripts/`, `.github/`, `deploy/`, `docker/`, compose
+  files, Dockerfiles, `.env*`, `.claude/`, `.codex/`, or `secrets/`.** The sandbox
+  bridge (`kanban-autopr/run-codex-sandboxed.sh`) rejects them at apply time, before
+  any later workflow step executes a script out of the checkout. `publish.sh`'s
+  denylist is the second gate, not the first.
+- **Review-ready mail is sent only for markers the automation wrote.** `--reconcile`
+  reads the `<!-- matcha-autofix-notify-review: … -->` marker from bot-authored PR
+  bodies and `[bot]`/`matcha-*` comments only; a human pasting the marker cannot make
+  the harness exec into the production container. The in-container snippet calls
+  `load_settings()` first — without it every send died with `Settings not initialized`.
+- **One Codex login, one backoff.** A `usage limit` exit inside any lane writes
+  `~/Library/Caches/matcha-autopr-dashboard/dispatch/codex-usage-limit.json`
+  (`kanban-autopr/codex-backoff.sh`); the Mac dispatcher launches no lane until the
+  quoted "try again at" time (capped at 24 h, default 1 h when unparseable).
 
 - The model receives redacted evidence only, attached as a file — never interpolated
   into the prompt string — and only the traceback frames under this app's own source

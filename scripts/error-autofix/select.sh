@@ -16,6 +16,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 INCIDENTS_FILE="${1:?usage: select.sh incidents.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
+REPO_ROOT="${AUTOFIX_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CACHE_DIR="${AUTOFIX_CACHE_DIR:-$HOME/.cache/matcha-autofix}"
 ATTEMPTS_DIR="$CACHE_DIR/attempts"
 mkdir -p "$ATTEMPTS_DIR"
@@ -25,6 +26,37 @@ MAX_OPEN_AUTOFIX_PRS=3
 CLOSED_COOLDOWN_DAYS=7
 DEPLOY_GRACE_HOURS=6
 ATTEMPT_COOLDOWN_HOURS=2
+# An open no-fix issue used to suppress its incident forever. Now it only
+# suppresses until the issue has sat untouched this long; a re-investigation
+# refreshes the issue body (publish.sh edits it in place), which restarts the
+# clock, so a genuinely unfixable incident costs one model run a week.
+NOFIX_COOLDOWN_DAYS="${AUTOFIX_NOFIX_COOLDOWN_DAYS:-7}"
+ATTEMPTS_RETENTION_DAYS="${AUTOFIX_ATTEMPTS_RETENTION_DAYS:-7}"
+
+# Attempt markers only matter for ATTEMPT_COOLDOWN_HOURS; nothing ever pruned
+# them, so the directory grew by one file per investigated fingerprint forever.
+find "$ATTEMPTS_DIR" -type f -mtime +"$ATTEMPTS_RETENTION_DAYS" -delete 2>/dev/null || true
+
+# Deploys are manual here, so "merged" is not "live". When the workflow can
+# tell us what is actually deployed (the frontend's public version.json; both
+# images normally share one SHA), a merged fix whose commit is not yet in that
+# build is simply undeployed — re-investigating it every two hours until the
+# next deploy only produced a duplicate PR. Unknown/unresolvable ⇒ no gate.
+DEPLOYED_SHA=""
+if [ -n "${AUTOFIX_DEPLOYED_SHA:-}" ]; then
+    DEPLOYED_SHA="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${AUTOFIX_DEPLOYED_SHA}^{commit}" 2>/dev/null || true)"
+fi
+
+# merge_is_deployed MERGE_SHA → 0 deployed, 1 known undeployed, 2 unknown
+merge_is_deployed() {
+    local merge_sha="$1"
+    [ -n "$DEPLOYED_SHA" ] && [ -n "$merge_sha" ] || return 2
+    git -C "$REPO_ROOT" rev-parse --verify --quiet "${merge_sha}^{commit}" >/dev/null 2>&1 || return 2
+    if git -C "$REPO_ROOT" merge-base --is-ancestor "$merge_sha" "$DEPLOYED_SHA" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
 
 count="$(jq 'length' "$INCIDENTS_FILE")"
 [ "$count" -gt 0 ] || exit "$NOTHING_TO_DO"
@@ -37,7 +69,7 @@ COVERAGE_LEDGER="$(mktemp "${RUNNER_TEMP:-/tmp}/autofix-coverage-ledger-XXXXXX")
 trap 'rm -f "$COVERAGE_LEDGER"' EXIT
 printf '[]\n' > "$COVERAGE_LEDGER"
 if ! coverage_prs="$(gh pr list --repo "$REPO" --state all --label covers-prod-error --limit 100 \
-    --json number,state,mergedAt,closedAt,createdAt)"; then
+    --json number,state,mergedAt,closedAt,createdAt,mergeCommit)"; then
     die "could not read covering PR ledger"
 fi
 printf '%s' "$coverage_prs" | jq -e 'type == "array"' >/dev/null 2>&1 \
@@ -95,6 +127,11 @@ already_handled() {
                 echo skip
                 return ;;
             MERGED)
+                merge_is_deployed "$(printf '%s' "$association" | jq -r '.mergeCommit.oid // empty')"
+                if [ "$?" -eq 1 ]; then
+                    echo skip
+                    return
+                fi
                 association_time="$(printf '%s' "$association" | jq -r '.mergedAt // empty')"
                 if [ -n "$association_time" ]; then
                     association_grace="$(_iso_plus_hours "$association_time" "$DEPLOY_GRACE_HOURS")"
@@ -129,20 +166,21 @@ already_handled() {
     # reliable matching — GitHub's body/comment search index is not
     # reliable enough to dedup on (see publish.sh).
     [[ "$key" =~ ^[0-9a-f]{12}$ ]] || die "stable_key has unexpected shape: $key"
-    local open_issue_hit
-    open_issue_hit="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
-        --json title,body --jq "map(select(
-            (.title | contains(\"[$key]\")) and
-            ((.body // \"\") | contains(\"Investigation failed or produced no report.\") | not)
-        )) | length")"
-    if [ "${open_issue_hit:-0}" -gt 0 ]; then
-        echo skip
-        return
+    local nofix_updated nofix_cooldown_end now
+    nofix_updated="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
+        --json title,updatedAt --jq "[.[] | select(.title | contains(\"[$key]\")) | .updatedAt] | max // empty")"
+    if [ -n "$nofix_updated" ]; then
+        nofix_cooldown_end="$(_iso_plus_hours "$nofix_updated" $((NOFIX_COOLDOWN_DAYS * 24)))"
+        now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        if [[ "$now" < "$nofix_cooldown_end" ]]; then
+            echo skip
+            return
+        fi
     fi
 
     local prs
     prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 100 \
-        --json state,mergedAt,closedAt,createdAt,body --jq 'sort_by(.createdAt) | reverse')"
+        --json state,mergedAt,closedAt,createdAt,body,mergeCommit --jq 'sort_by(.createdAt) | reverse')"
 
     local n
     n="$(printf '%s' "$prs" | jq 'length')"
@@ -151,11 +189,12 @@ already_handled() {
     # Most recent PR for this branch decides. Sorted explicitly rather than
     # trusting gh's default ordering — .[0] on an unsorted list is only
     # "probably" the right one.
-    local state merged_at closed_at body
+    local state merged_at closed_at body merge_sha
     state="$(printf '%s' "$prs" | jq -r '.[0].state')"
     merged_at="$(printf '%s' "$prs" | jq -r '.[0].mergedAt')"
     closed_at="$(printf '%s' "$prs" | jq -r '.[0].closedAt')"
     body="$(printf '%s' "$prs" | jq -r '.[0].body // ""')"
+    merge_sha="$(printf '%s' "$prs" | jq -r '.[0].mergeCommit.oid // empty')"
 
     # gh reports state as OPEN, CLOSED, or MERGED — three distinct values,
     # not "CLOSED with mergedAt set" for a merged PR.
@@ -171,6 +210,14 @@ already_handled() {
             # aggregated incident's first_seen is nearly always "recent"
             # even for a bug fixed weeks ago, which would otherwise reopen
             # forever.
+            #
+            # And when the deployed build is known, a merge that is not in it
+            # yet is undeployed, full stop — no recurrence can be genuine.
+            merge_is_deployed "$merge_sha"
+            if [ "$?" -eq 1 ]; then
+                echo skip
+                return
+            fi
             local grace
             grace="$(_iso_plus_hours "$merged_at" "$DEPLOY_GRACE_HOURS")"
             if [[ "$last_seen" > "$grace" ]]; then

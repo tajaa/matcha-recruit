@@ -43,7 +43,6 @@ extension TaskViewerSheet {
     var autoPRNeedsRuntimeApproval: Bool {
         guard let note = autoSetupProgressNote else { return false }
         return note.hasPrefix("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
-            || note.hasPrefix("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
     }
 
     /// A short, human-readable state for the ticket detail banner. The full

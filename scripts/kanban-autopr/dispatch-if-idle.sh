@@ -38,10 +38,24 @@ RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
 RUN_REQUEST_PROBE="${AUTOPR_RUN_REQUEST_PROBE:-$SCRIPT_DIR/has-run-request.sh}"
 STATE_DIR="${AUTOPR_DISPATCH_STATE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard/dispatch}"
 FORCED_MARKER="$STATE_DIR/last-forced-kanban"
+# One button press costs at most one forced run: the set of pending requests
+# the last forced dispatch was made for. While that set is unchanged and the
+# request TTL has not passed, a run that died before claiming them (stale
+# main gate, rate limit, master switch off) must not be re-fired every tick.
+FORCED_REQUEST_SET="$STATE_DIR/last-forced-request-set"
+FORCED_REQUEST_TTL_SECONDS="${AUTOPR_FORCED_REQUEST_TTL_SECONDS:-1800}"
+CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
+LOG_MAX_BYTES="${AUTOPR_DISPATCH_LOG_MAX_BYTES:-5242880}"
 
 log_event() {
-    local action="$1" reason="$2" runs="${3:-[]}"
+    local action="$1" reason="$2" runs="${3:-[]}" size
     mkdir -p "$(dirname "$LOG_FILE")"
+    # Nothing rotated this file; it reached 7 MB after one week. Keep one
+    # generation so the dashboard's tail still has history after a rotation.
+    size="$(stat -f '%z' "$LOG_FILE" 2>/dev/null || stat -c '%s' "$LOG_FILE" 2>/dev/null || echo 0)"
+    if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -gt "$LOG_MAX_BYTES" ]; then
+        mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null || true
+    fi
     jq -cn --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg action "$action" \
         --arg reason "$reason" --argjson runs "$runs" \
         '{timestamp:$ts,action:$action,reason:$reason,runs:$runs}' >> "$LOG_FILE"
@@ -124,17 +138,39 @@ touch_watch_heartbeat() {
 }
 
 # Exit status only: 0 = a card is waiting, 1 = nothing to force (queue empty or
-# the board could not be asked). A probe failure must never force a run.
+# the board could not be asked). A probe failure must never force a run. On
+# success PENDING_REQUEST_SET holds a stable fingerprint of the queue.
+PENDING_REQUEST_SET=""
 run_request_pending() {
     [ -x "$RUN_REQUEST_PROBE" ] || return 1
-    local rc
-    "$RUN_REQUEST_PROBE" >/dev/null 2>&1
+    local rc requests
+    requests="$("$RUN_REQUEST_PROBE" 2>/dev/null)"
     rc=$?
     case "$rc" in
-        0) return 0 ;;
+        0)
+            PENDING_REQUEST_SET="$(printf '%s' "$requests" \
+                | jq -r '[.[] | "\(.task_id // "")@\(.requested_at // "")"] | sort | join(",")' 2>/dev/null \
+                || printf 'unparseable-%s' "$(date +%s)")"
+            return 0 ;;
         3) return 1 ;;
         *) log_event error run-request-probe-failed; return 1 ;;
     esac
+}
+
+# The forced lane already dispatched for exactly these requests and none of
+# them has been claimed or expired since: the button was honored once.
+forced_request_set_already_dispatched() {
+    [ -n "$PENDING_REQUEST_SET" ] || return 1
+    [ -f "$FORCED_REQUEST_SET" ] || return 1
+    [ "$(marker_age_seconds "$FORCED_REQUEST_SET")" -lt "$FORCED_REQUEST_TTL_SECONDS" ] || return 1
+    [ "$(cat "$FORCED_REQUEST_SET" 2>/dev/null)" = "$PENDING_REQUEST_SET" ]
+}
+
+# Every lane shares one Codex login. After a usage-limit exit, a dispatched
+# run pays its whole prelude and then dies in seconds; hold all lanes instead.
+codex_backoff_active() {
+    [ -x "$CODEX_BACKOFF" ] || return 1
+    AUTOPR_DISPATCH_STATE_DIR="$STATE_DIR" "$CODEX_BACKOFF" active >/dev/null 2>&1
 }
 
 main() {
@@ -146,6 +182,10 @@ main() {
     # reboot/crash, so also require its primary workspace container to be live.
     if ! autopr_master_ready; then
         log_event skip msandbox-off
+        exit 0
+    fi
+    if codex_backoff_active; then
+        [ "$requested_mode" = true ] || log_event skip codex-usage-limit-backoff
         exit 0
     fi
     # The watcher lane asks the board first and gives up before doing anything
@@ -162,6 +202,10 @@ main() {
             # Silent on the common path: an idle tick every minute would
             # otherwise bury the scheduler's own signal in the shared log the
             # dashboard reads, and grow the file five times as fast.
+            touch_watch_heartbeat
+            exit 0
+        fi
+        if forced_request_set_already_dispatched; then
             touch_watch_heartbeat
             exit 0
         fi
@@ -218,7 +262,8 @@ main() {
         exit 1
     fi
     if [ "$requested_mode" = true ] \
-        && ! { mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER"; }; then
+        && ! { mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER" \
+               && printf '%s' "$PENDING_REQUEST_SET" > "$FORCED_REQUEST_SET"; }; then
         # Without the marker the floor between two forced dispatches is gone,
         # so this is worth a log line rather than an `set -e` exit that leaves
         # no trace of why the watcher stopped behaving.

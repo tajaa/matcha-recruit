@@ -385,3 +385,124 @@ async def test_merged_autopr_redelivery_is_a_true_noop(monkeypatch):
     })
 
     assert updates == []
+
+
+@pytest.mark.asyncio
+async def test_closed_unmerged_bot_draft_hands_card_back_to_todo(monkeypatch):
+    task_id, project_id = uuid4(), uuid4()
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "🤖 AUTO SETUP · READY FOR REVIEW · build 900 · prod abc1234 · PR #48 · 🟡 C80 · note: drafted",
+        "pr_url": "https://github.com/tajaa/matcha-recruit/pull/48",
+        "pr_number": 48,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return [task]
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    result = await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {
+            "merged": False,
+            "html_url": "https://github.com/tajaa/matcha-recruit/pull/48",
+            "number": 48,
+            "head": {"ref": "bot/task-aaaaaaaa"},
+        },
+    })
+
+    assert result == {"ok": True, "task": str(task_id), "merged": False}
+    assert updates == [(
+        project_id,
+        task_id,
+        {
+            "board_column": "todo",
+            "progress_note": "🤖 AUTO SETUP · PR CLOSED: NOT MERGED · PR #48 · note: drafted",
+        },
+    )]
+
+
+@pytest.mark.asyncio
+async def test_closed_unmerged_cross_lane_pr_leaves_card_alone(monkeypatch):
+    """An error-bot draft closed as superseded/duplicate is not a rejection."""
+    task_id, project_id = uuid4(), uuid4()
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "🤖 AUTO SETUP · ALREADY SCOPED · PR #334",
+        "pr_url": "https://github.com/tajaa/matcha-recruit/pull/334",
+        "pr_number": 334,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return [task]
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    result = await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {
+            "merged": False,
+            "number": 334,
+            "head": {"ref": "bot/err-5cf9ce1fea8b"},
+        },
+    })
+
+    assert result == {"ok": True, "task": str(task_id), "merged": False}
+    assert updates == []
+
+
+@pytest.mark.asyncio
+async def test_closed_unmerged_redelivery_is_a_noop_once_card_is_in_todo(monkeypatch):
+    task_id, project_id = uuid4(), uuid4()
+    task = {
+        "id": task_id,
+        "project_id": project_id,
+        "board_column": "todo",
+        "progress_note": "🤖 AUTO SETUP · PR CLOSED: NOT MERGED · PR #48",
+        "pr_url": None,
+        "pr_number": 48,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return [task]
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {"merged": False, "number": 48, "head": {"ref": "bot/task-aaaaaaaa"}},
+    })
+
+    assert updates == []
+
+
+def test_no_spec_regexes_accept_every_reason_the_harness_writes():
+    """publish.sh writes acceptance_criteria_met; the server-side note parsers
+    must recognize it or the marker is treated as free text."""
+    note = (
+        "🤖 AUTO SETUP · NO PR: CARD ALREADY SATISFIED · build 900 · prod abc1234 · 🟡 C80 · "
+        "[autopr:no-spec 2026-09-02T01:00:00Z] acceptance_criteria_met · note: all met"
+    )
+    m = github._AUTOPR_STRUCTURED_NOTE_RE.match(note)
+    assert m and m.group(0).endswith("acceptance_criteria_met")
+    assert project_task_service._AUTOPR_NO_SPEC_RE.search(note)

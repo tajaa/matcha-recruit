@@ -124,14 +124,21 @@ CLIENT_TESTS=($(printf '%s\n' "${CLIENT_TESTS[@]+"${CLIENT_TESTS[@]}"}" | sort -
 # venv resolves site-packages from its own prefix regardless of cwd, so
 # pointing it at the workspace's server/ tree (rather than this dev clone)
 # picks up the branch's code, not the dev clone's.
+# Candidates, in order: the tree under verification (if it carries a venv,
+# e.g. a developer running this by hand), then the dev clone's venv on the Mac
+# runner (the Actions workspace deliberately has none), then the cached one.
 DEV_VENV_PY="${AUTOFIX_DEV_VENV_PY:-$HOME/Documents/github/matcha/server/venv/bin/python}"
 VENV_PY=""
 BOOTSTRAP_OK=false
 
-if [ -x "$DEV_VENV_PY" ] && "$DEV_VENV_PY" -c "import pytest, pytest_asyncio" >/dev/null 2>&1; then
-    VENV_PY="$DEV_VENV_PY"
-    BOOTSTRAP_OK=true
-else
+for candidate_py in "$REPO_ROOT/server/venv/bin/python" "$DEV_VENV_PY"; do
+    if [ -x "$candidate_py" ] && "$candidate_py" -c "import pytest, pytest_asyncio" >/dev/null 2>&1; then
+        VENV_PY="$candidate_py"
+        BOOTSTRAP_OK=true
+        break
+    fi
+done
+if [ "$BOOTSTRAP_OK" != true ]; then
     # Fallback: a cached, manually-provisioned venv. NOT built on the fly —
     # a `pip install` that then fails on a native extension (xmlsec,
     # pymupdf) can eat the whole job's timeout for nothing. If it's missing
@@ -164,22 +171,38 @@ To provision the cached venv once by hand:
 $CACHE_DIR/venv-py312-<hash>/bin/pip install -r server/requirements.txt pytest pytest-asyncio
 \`\`\`
 EOF
-    echo "AUTOFIX_NEW_FAILURES=0" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
+    # Unverified is not "0 new failures": the publisher labels needs-work
+    # off this value, and the tail of this script says 1 for the same case.
+    echo "AUTOFIX_NEW_FAILURES=1" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
     exit 0
 fi
 
 # ---- run one suite in one tree, emit sorted failing node ids -----------
+# pytest exit codes: 0 all passed, 1 some failed, 5 nothing collected — those
+# are results. 2 (interrupted / internal error), 3, 4 (usage) mean the suite
+# did not run; grepping "^FAILED" alone rendered those as "0 failed".
+# `^ERROR ` lines (collection errors under --continue-on-collection-errors)
+# count as failing ids too, so a module the branch broke at import shows up.
+PYTEST_CRASHED=false
 run_suite() {
-    local tree="$1" outfile="$2"
+    local tree="$1" outfile="$2" raw rc
     [ "$PYTHON_UNAVAILABLE" = true ] && { : > "$outfile"; return; }
     if [ "${#TEST_DIRS[@]}" -eq 0 ]; then
         : > "$outfile"
         return
     fi
+    raw="$(mktemp)"
     (
         cd "$tree" && "$VENV_PY" -m pytest "${TEST_DIRS[@]}" \
-            -q --tb=no -rf -p no:cacheprovider --continue-on-collection-errors
-    ) 2>/dev/null | grep '^FAILED ' | sed 's/^FAILED //' | cut -d' ' -f1 | sort > "$outfile"
+            -q --tb=no -rfE -p no:cacheprovider --continue-on-collection-errors
+    ) > "$raw" 2>/dev/null
+    rc=$?
+    case "$rc" in
+        0|1|5) ;;
+        *) PYTEST_CRASHED=true ;;
+    esac
+    grep -E '^(FAILED|ERROR) ' "$raw" | sed -E 's/^(FAILED|ERROR) //' | cut -d' ' -f1 | sort -u > "$outfile"
+    rm -f "$raw"
 }
 
 compileall_check() {
@@ -273,6 +296,8 @@ if [ "$PYTHON_UNAVAILABLE" = true ]; then
     # empty result files and this branch would otherwise print a false
     # "0 failed | 0 failed" green row instead of surfacing the outage.
     echo "| pytest | **unavailable** — no usable Python interpreter found | **unavailable** |"
+elif [ "$PYTEST_CRASHED" = true ]; then
+    echo "| pytest ${TEST_DIRS[*]} | **unavailable** — pytest did not complete (interpreter crash, usage error, or interrupted collection) | **unavailable** |"
 elif [ "${#TEST_DIRS[@]}" -eq 0 ]; then
     echo "| pytest | — | **no matching test directory found** |"
 else
@@ -326,7 +351,8 @@ if [ -n "$CLIENT_TYPE_REGRESSIONS" ] || [ -n "$CLIENT_TEST_REGRESSIONS" ]; then
     echo '```'
 fi
 
-if [ "$PYTHON_UNAVAILABLE" = true ] || { [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; }; then
+if [ "$PYTHON_UNAVAILABLE" = true ] || [ "$PYTEST_CRASHED" = true ] \
+    || { [ "$CLIENT_CHANGED" = true ] && [ "$CLIENT_DEPS_READY" != true ]; }; then
     echo "AUTOFIX_NEW_FAILURES=1" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true
 else
     echo "AUTOFIX_NEW_FAILURES=$((NEW_FAILURES + CLIENT_NEW_FAILURES))" >> "${GITHUB_ENV:-/dev/null}" 2>/dev/null || true

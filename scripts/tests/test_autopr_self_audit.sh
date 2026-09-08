@@ -88,3 +88,36 @@ forbidden_rc=$?
 set -e
 [ "$forbidden_rc" -ne 0 ]
 printf 'PASS: publisher rejects workflow and sealed-capsule changes\n'
+
+# The audit is cheap; the repair is a Sol run. The same failing check set is
+# handed to Codex once, not every six hours (15/15 failed runs, 2026-08-31 →
+# 2026-09-07, all rejected by verify.sh for the same asyncpg import).
+LEDGER_SH="$AUDIT_DIR/repair-ledger.sh"
+export AUTOPR_SELF_AUDIT_LEDGER="$TMP_DIR/ledger.json"
+printf '{"fingerprint":"aaaaaaaaaaaa","checks":[{"id":"contract_tests","status":"fail","repairability":"repo"}]}\n' > "$TMP_DIR/audit-a.json"
+"$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json"
+"$LEDGER_SH" record "$TMP_DIR/audit-a.json" attempted
+"$LEDGER_SH" record "$TMP_DIR/audit-a.json" rejected
+set +e
+"$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json" 2>/dev/null; same_rc=$?
+set -e
+[ "$same_rc" -eq 3 ]
+printf '{"fingerprint":"bbbbbbbbbbbb","checks":[]}\n' > "$TMP_DIR/audit-b.json"
+"$LEDGER_SH" should-repair "$TMP_DIR/audit-b.json"
+AUTOPR_LEDGER_NOW=$(( $(date +%s) + 700000 )) "$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json"
+"$LEDGER_SH" record "$TMP_DIR/audit-a.json" published
+"$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json"
+jq -e '.failing_checks == ["contract_tests"] and .outcome == "published"' "$TMP_DIR/ledger.json" >/dev/null
+grep -qF 'repair-ledger.sh should-repair' "$WORKFLOW"
+grep -qF "if: steps.ledger.outputs.repair == 'true'" "$WORKFLOW"
+grep -qF 'repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" rejected' "$WORKFLOW"
+unset AUTOPR_SELF_AUDIT_LEDGER
+printf 'PASS: a rejected repair is not retried for the same failing checks until the ledger window elapses\n'
+
+# The repair lane may touch the harness, so the bridge's default apply-time
+# denylist is narrowed here — but never to CI, deploy, secrets, or the
+# sealed capsule itself.
+grep -qF "AUTOPR_SANDBOX_PATH_DENY_RE='^(\\.github/|deploy/|secrets/|\\.githooks/|(.*/)?\\.env[^/]*$|scripts/autopr-self-audit/)'" "$AUDIT_DIR/investigate.sh"
+grep -qF 'check_installed_dispatcher' "$AUDIT_DIR/audit.sh"
+grep -qF 'git reset --hard HEAD' "$WORKFLOW"
+printf 'PASS: repair lane keeps CI/deploy/secrets/capsule out of reach and audits the installed dispatcher\n'

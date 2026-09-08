@@ -302,7 +302,7 @@ preserved_note_parts() {
     directives_marker="$(printf '%s' "$header" \
         | grep -o '\[autopr:directives [^]]*\]' | head -1 || true)"
     no_spec_marker="$(printf '%s' "$header" | sed -nE \
-        's/.*(\[autopr:no-spec [^]]*\] (already_fixed|migration_required|policy_blocked|external_dependency)).*/\1/p' \
+        's/.*(\[autopr:no-spec [^]]*\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency)).*/\1/p' \
         | head -1 || true)"
     [ -z "$directives_marker" ] || extras=" · $directives_marker"
     [ -z "$no_spec_marker" ] || extras="$extras · $no_spec_marker"
