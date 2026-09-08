@@ -17,6 +17,19 @@ Moved from root `CLAUDE.md`'s Deploying section. Read root `CLAUDE.md` first for
 
 Unknown/unreachable base SHA ⇒ treated as changed (never skip on a guess). Both unchanged ⇒ exit 0, no build. `--remote` runs the same detection to choose `target=` for `deploy.yml`, so a backend-only edit dispatches `backend` rather than rebuilding + swapping both. Explicit flags (`--full`, `--backend-only`, `--frontend-only`, `--all`, gummfit/agent) disable detection; so does `CI=true` (deploy.yml always passes an explicit target and its shallow checkout can't diff anyway). The script ends by printing the `update-ec2.sh` flag that matches what it built.
 
+**Every detection git call runs with `-C "$REPO_ROOT"`.** Git resolves pathspecs against the process CWD, so running the script from `scripts/` made `server`/`client` mean `scripts/server`/`scripts/client`, match nothing, and report "nothing changed" — a silently skipped deploy that still exited 0. A pathspec matching no tracked file now fails open (builds anyway).
+
+## Image push and cache export are sequential (2026-09-07)
+
+`build_image` runs **two** `docker buildx build` passes on the CI registry-cache path, never one:
+
+1. **Image** — `--push --provenance=false --sbom=false` with `--cache-from …:buildcache`, no `--cache-to`. Retried **once** on failure (a re-solve hits the builder's local cache and only re-sends blobs ECR still lacks, so the retry costs seconds).
+2. **Cache** — same args, `--output type=cacheonly --cache-to …:buildcache,mode=max,…`. **Non-fatal**: the image is already in ECR by then, and a cold cache next build beats a failed deploy.
+
+Why: both exporters upload the *same* layer digests to the *same* ECR repository, and ECR keeps one upload session per digest. Running them concurrently meant the cache exporter could finalize a blob mid-push, ECR dropped the image exporter's still-open session for that digest, and the push died after minutes with `unknown: The upload with id '…' in the repository with name 'matcha-frontend' … does not exist`. That killed deploy run `34167912548` (frontend only; backend had already pushed). It was always a race — same script, same flags — so re-running "fixed" it; sequential passes remove it.
+
+The per-branch `--cache-from …:buildcache-<branch>` read was dropped at the same time: no such tag has ever existed in these repos, so it only ever logged `failed to configure registry cache importer` into every build log.
+
 ## Pending-migration guard (2026-09-07)
 
 `update-ec2.sh` calls `check_pending_migrations` before `ecr_login` on any backend deploy (including `--hotfix`). It reads prod's `alembic_version` via `scripts/ops-health/prod-query.sh alembic` — `docker exec` into the live backend container on the app host, the same read-only path the ops-health workflows use, reachable from GitHub runners — and diffs it against the checkout with `scripts/alembic_graph.py pending <revs...>` (stdlib-only; parses `revision`/`down_revision` with `ast`, verified to match `alembic_pending.py` output).

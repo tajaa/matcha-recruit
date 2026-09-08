@@ -597,13 +597,50 @@ build_image() {
     # Build the image
     log_info "Starting Docker build..."
 
-    local build_args=(
+    # Everything both passes share. BUILD_DATE is evaluated ONCE here so the
+    # cache-export pass below solves to the same key as the image pass.
+    local common_args=(
         --platform "$PLATFORM"
-        "${tag_args[@]}"
         --build-arg "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
         --build-arg "GIT_SHA=${git_sha}"
         -f "$dockerfile_path"
     )
+
+    if [ ${#extra_build_args[@]} -gt 0 ]; then
+        common_args+=("${extra_build_args[@]}")
+    fi
+
+    # Set only on the CI registry-cache path; drives the second pass below.
+    local cache_to=""
+
+    # Add cache flags unless --no-cache is set
+    if [ "$NO_CACHE" = true ]; then
+        common_args+=("--no-cache")
+        log_info "Building with --no-cache"
+    elif [ "$REGISTRY_CACHE" != true ]; then
+        # Default local path: rely on Docker Desktop's own BuildKit cache
+        # (already warm on repeat builds on the same machine). Skipping the
+        # ECR round-trip here is what makes local builds fast — mode=max
+        # cache-to was uploading the full dependencies-stage layer (~1GB+
+        # for the backend) to ECR on every single local run.
+        log_info "Local BuildKit cache only (pass --registry-cache to also read/write ECR :buildcache)"
+    elif [ "$PUSH_TO_ECR" = true ]; then
+        # The shared base cache every branch reads for a warm start. The old
+        # per-branch `buildcache-<branch>` read was dropped 2026-09-07: no such
+        # tag has ever existed in these repos, so it only ever logged
+        # "failed to configure registry cache importer" into every build.
+        common_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
+        log_info "Cache read: buildcache"
+
+        # Written by the SEPARATE pass after the image push (see below), never
+        # concurrently with it. zstd compresses the mode=max upload faster
+        # than the default gzip.
+        cache_to="type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd,compression-level=3"
+    else
+        log_info "Local build - using default Docker cache"
+    fi
+
+    local build_args=("${common_args[@]}" "${tag_args[@]}")
 
     if [ "$PUSH_TO_ECR" = true ]; then
         # Stream layers straight to ECR. `--load` would first import the full
@@ -617,59 +654,43 @@ build_image() {
         build_args+=(--load)
     fi
 
-    if [ ${#extra_build_args[@]} -gt 0 ]; then
-        build_args+=("${extra_build_args[@]}")
-    fi
+    # One retry: a push can die on a transient ECR/network fault after minutes
+    # of uploading. The retry re-solves from the builder's local cache and
+    # only re-sends blobs the registry still lacks, so it costs seconds.
+    local attempt
+    for attempt in 1 2; do
+        if docker buildx build "${build_args[@]}" "$context_dir"; then
+            log_success "$name image built successfully"
+            break
+        fi
+        if [ "$attempt" -eq 2 ]; then
+            log_error "Failed to build $name image"
+            exit 1
+        fi
+        log_warning "$name build failed (attempt ${attempt}/2) — retrying once..."
+        sleep 5
+    done
 
-    # Add cache flags unless --no-cache is set
-    if [ "$NO_CACHE" = true ]; then
-        build_args+=("--no-cache")
-        log_info "Building with --no-cache"
-    elif [ "$REGISTRY_CACHE" != true ]; then
-        # Default local path: rely on Docker Desktop's own BuildKit cache
-        # (already warm on repeat builds on the same machine). Skipping the
-        # ECR round-trip here is what makes local builds fast — mode=max
-        # cache-to was uploading the full dependencies-stage layer (~1GB+
-        # for the backend) to ECR on every single local run.
-        log_info "Local BuildKit cache only (pass --registry-cache to also read/write ECR :buildcache)"
-    elif [ "$PUSH_TO_ECR" = true ]; then
-        local current_branch
-        current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-        # Sanitize branch name for Docker tag (slashes, etc → '-').
-        # printf, not echo: echo appends a newline that `tr -c` would turn
-        # into a trailing '-' (e.g. buildcache-mybranch-).
-        local branch_tag
-        branch_tag=$(printf '%s' "$current_branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-')
-
-        # Read the shared base cache first (every branch's warm start) plus
-        # the legacy branch-scoped tag (back-compat for tags already in ECR;
-        # cheap parallel read).
-        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
-        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache-${branch_tag}")
-        log_info "Cache reads: buildcache, buildcache-${branch_tag}"
-
-        # Write the shared :buildcache that EVERY branch reads as its base
-        # on first build. This used to be gated to main/master, but the
-        # workflow rarely builds main, so the shared tag never existed and
-        # every fresh branch cold-started (full pip install / npm ci).
-        # Writing it on every build keeps it warm with the latest layers —
-        # the ideal base for the next branch cut. zstd compresses the
-        # mode=max upload faster than the default gzip. One cache-to target
-        # = same upload count as the old single branch target, not double.
-        local cache_to="type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd,compression-level=3"
-        build_args+=(--cache-to "$cache_to")
-        log_info "Cache write: buildcache (shared, zstd mode=max)"
-    else
-        log_info "Local build - using default Docker cache"
-    fi
-
-    if docker buildx build \
-        "${build_args[@]}" \
-        "$context_dir"; then
-        log_success "$name image built successfully"
-    else
-        log_error "Failed to build $name image"
-        exit 1
+    # Cache export runs AFTER the image push, never alongside it. Both
+    # exporters upload the same layer digests to the same ECR repository, and
+    # ECR keeps one upload session per digest: when the cache exporter
+    # finalized a blob mid-push, the image exporter's open session for that
+    # digest was dropped and the push died with
+    #   "The upload with id '…' in the repository … does not exist"
+    # (deploy run 34167912548). Sequential passes cannot collide.
+    #
+    # Non-fatal on purpose: at this point the image is already in ECR, and a
+    # cold cache next build is cheaper than a failed deploy.
+    if [ -n "$cache_to" ]; then
+        log_info "Exporting build cache → ${image_uri}:buildcache (after push, zstd mode=max)"
+        if docker buildx build "${common_args[@]}" \
+            --output type=cacheonly \
+            --cache-to "$cache_to" \
+            "$context_dir"; then
+            log_success "$name build cache exported"
+        else
+            log_warning "$name cache export failed — image is already pushed, continuing"
+        fi
     fi
 }
 
