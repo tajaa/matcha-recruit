@@ -143,19 +143,41 @@ note_ungranted_capability() {
 }
 
 # note_ungranted_hint ID8 CAPABILITY
-# Append {id8, capability, ts} to $CACHE_DIR/ungranted.json (bounded to the
-# last 50) so dashboard.sh can name the cards a grant would unblock.
+# Queue {id8, capability} for $CACHE_DIR/ungranted.json. Queue, not write: a
+# pass visits every held card, and writing per card spent five process spawns
+# (cat, two jq, date, mv) on each one — every minute, forever, on any board
+# whose capability is ungranted, which is the default state. Tab-separated
+# because a capability is a registry identifier and never contains one.
+ungranted_pending=""
 note_ungranted_hint() {
-    local id8="$1" capability="$2" hint_file="$CACHE_DIR/ungranted.json" existing
+    local id8="$1" capability="$2"
     [ -n "$capability" ] || return 0
+    ungranted_pending+="$id8"$'\t'"$capability"$'\n'
+}
+
+# flush_ungranted_hints
+# The single read-modify-write for everything this pass queued, still bounded
+# to the last 50 so dashboard.sh can name the cards a grant would unblock.
+# Runs from an EXIT trap, not after the loop: the loop `exit 0`s the moment it
+# finds a runnable card, and a flush below it would be skipped on exactly that
+# path. Every hint of this pass shares one timestamp; the dashboard reads `ts`
+# only through a one-hour cutoff, so per-card precision buys nothing.
+flush_ungranted_hints() {
+    [ -n "$ungranted_pending" ] || return 0
+    local hint_file="$CACHE_DIR/ungranted.json" existing
     mkdir -p "$CACHE_DIR" 2>/dev/null || return 0
     existing="$(cat "$hint_file" 2>/dev/null || printf '[]')"
     printf '%s' "$existing" | jq -e 'type == "array"' >/dev/null 2>&1 || existing='[]'
-    printf '%s' "$existing" | jq -c --arg id8 "$id8" --arg cap "$capability" \
+    printf '%s' "$existing" | jq -c --arg pending "$ungranted_pending" \
         --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-        map(select(.id8 != $id8)) + [{id8: $id8, capability: $cap, ts: $ts}] | .[-50:]' \
+        ($pending | rtrimstr("\n") | split("\n")
+            | map(split("\t") | {id8: .[0], capability: .[1], ts: $ts})) as $new
+        | ($new | map(.id8)) as $ids
+        | map(select(.id8 as $i | ($ids | index($i)) == null)) + $new
+        | .[-50:]' \
         > "$hint_file.tmp" 2>/dev/null && mv "$hint_file.tmp" "$hint_file" || rm -f "$hint_file.tmp"
 }
+trap flush_ungranted_hints EXIT
 
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
@@ -417,15 +439,14 @@ for ((i = 0; i < n; i++)); do
         # read-only and otherwise cannot tell "held: needs a grant" from
         # "cooling down". A hint file, not a cooldown marker: written on the
         # read-only path too, and never consulted by selection.
-        note_ungranted_hint "$id8" \
-            "$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+        ungranted_capability="$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+        note_ungranted_hint "$id8" "$ungranted_capability"
         # Still consume the request — an unconsumed one re-dispatches every
         # minute forever — but never silently: without the note the operator
         # sees the button come back and no reason anywhere, and can loop on it
         # indefinitely (Espresso's run button does not know about grants).
         if [ -n "$run_requested_at" ]; then
-            note_ungranted_capability "$card" \
-                "$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+            note_ungranted_capability "$card" "$ungranted_capability"
             consume_run_request "$card"
         fi
         continue

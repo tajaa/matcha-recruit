@@ -324,6 +324,11 @@ enum JournalBlockParser {
     private static func parseHeading(_ trimmed: String) -> (Int, String)? {
         // `####`–`######` render at the smallest heading size rather than as
         // literal hashes; reports from the research lane use them freely.
+        // Bail before the loop on the common case: this is called for every
+        // non-fence line of the document on every reparse, and reparse fires
+        // on each keystroke, so a plain paragraph line must not pay for six
+        // prefix strings it can never match.
+        guard trimmed.hasPrefix("#") else { return nil }
         for level in stride(from: 6, through: 1, by: -1) {
             let prefix = String(repeating: "#", count: level) + " "
             if trimmed.hasPrefix(prefix) { return (min(level, 3), String(trimmed.dropFirst(prefix.count))) }
