@@ -614,10 +614,12 @@ async def list_autopr_board_capabilities_endpoint(
     """Which AutoPR capabilities each named board has been granted.
 
     The harness reads this once per pass and refuses to run a capability the
-    board was not granted. That refusal is a spend guard, not the security
-    boundary: the acts these capabilities describe — sending an email, driving
-    a browser — are each re-checked server-side at the moment they happen, so
-    a stale or tampered harness copy cannot widen its own reach.
+    board was not granted. For `outreach` that refusal is a spend guard, not
+    the security boundary: sending is re-checked server-side at the moment it
+    happens, so a stale or tampered harness copy cannot widen its own reach.
+    `research` and `browse` happen inside the sandbox and have no server-side
+    moment to re-check; there the harness's stamp plus what the bridge admits
+    back (an image allowlist with count and size caps) is the whole gate.
     """
     from app.core.services.platform_settings import get_autopr_board_capabilities
     from app.matcha.services.matcha_work import project_task_service as pt_svc
