@@ -540,8 +540,84 @@ kind is a registry row plus a publisher, not another branch in the PR path.
    previous report is among the attachments the model receives and is told to treat as
    version 1).
 
+### Board capabilities
+
+Drafting code PRs is what this lane has always done on every board it watches, and it
+needs no grant. The three things that reach past the repository are granted per board
+and default off — `platform_settings` key `autopr_board_capabilities`, edited at
+**Admin → Settings → AutoPR board capabilities**:
+
+| Grant | What it permits |
+|---|---|
+| `research` | Research cards run at all: live web search + the repo clone, report attached to the ticket. |
+| `outreach` | A run may **stage** email/contact/review requests on a card. Nothing sends until a person approves that exact item. |
+| `browse` | A run may drive Chromium through `browse-capture.py` and attach screenshots. |
+
+Fail-closed in every direction: an absent row, unparseable JSON, an unknown capability
+name, or a non-UUID key all resolve to "this board may do nothing extra". The admin PUT
+replaces the whole map (an omitted board is revoked, deliberately) and refuses a board
+outside `KANBAN_AUTOPR_PROJECT_IDS`, so a grant cannot be written into a void.
+
+`collect.sh` reads the grants once per pass from `GET /matcha-work/autopr/board-capabilities`
+and stamps each card; `select.sh` refuses an artifact kind the board was not granted and
+leaves the card alone rather than downgrading a Research card to a PR. **That check is a
+spend guard, not the security boundary** — sending an email and driving a browser are
+each re-checked server-side where they happen, so a stale harness copy cannot widen its
+own reach.
+
+### Staged outreach — approving a send
+
+A research decision may carry `staged_actions` (≤10, each `email` | `contact` |
+`review_request`). The harness never sends one. On a board holding `outreach`,
+`publish-research.sh` posts them to
+`POST …/tasks/{t}/autopr/staged-actions`, where each becomes an immutable
+`autopr_staged_action` history row. Without the grant they stay report-only and the
+report says so.
+
+A person's decision is a second, **unique** `autopr_staged_action_result` row naming the
+action — so "approved twice", and therefore "sent twice", is not representable rather
+than merely guarded. Four outcomes, and the distinction is load-bearing:
+
+- `sent` — this system delivered it. Only `POST …/staged-actions/{id}/send` may write it.
+- `handled` — a person did it themselves.
+- `dismissed` — it will not be done.
+- `failed` — the send was attempted and the provider refused.
+
+The send route is the single point where model-drafted text leaves the building, and it
+re-checks all of: the board's `outreach` grant, that the action is still unresolved, that
+the action is an `email` (a contact or review request is something a person does), that
+the **approver's own Gmail** is connected — mail never goes out from a system account —
+and a per-approver ceiling of 20 sends/hour, because `gmail_service`'s own limiter lives
+on the instance and every request builds a fresh one. The outcome row is written *before*
+the send: a crash after delivery leaves a visible record rather than mail nobody logged.
+
+Espresso renders these under **PROPOSED OUTREACH** in the ticket, each showing the full
+body — approving is agreeing to send that exact text. There is deliberately no
+"approve all" control, and `Send` appears only on an email.
+
+### Browsing and screenshots
+
+With the `browse` grant, `investigate.sh` sets `AUTOPR_CODEX_COLLECT_ARTIFACTS=1` and the
+model may call exactly one command inside the sandbox:
+
+```bash
+server/venv/bin/python scripts/kanban-autopr/browse-capture.py     --url https://example.com/pricing --label pricing-page [--full-page]
+```
+
+It prints the page's title and visible text and saves a screenshot. It refuses non-http(s)
+URLs, credentials in a URL, and loopback/link-local/private addresses — checking **every**
+address a hostname resolves to, and re-checking after redirects, since a redirect into
+`host.docker.internal` is how an outside fetch becomes an internal one. Exit 3 means the
+image was built without Chromium (`msandbox build --playwright`); the prompt tells the
+model to say so in one line and finish on web search alone rather than failing.
+
+Screenshots cross back the same way `report.md` does — one directory the bridge empties
+under an image-extension allowlist, a 12-file cap, and a 4 MB per-file cap, naming
+anything it skips on stderr. `publish-research.sh` attaches them to the same note as the
+report.
+
 Staged actions are the batch-C2 contract: the harness renders them on the card and in
-the report and **never sends one**. Approving and sending from Espresso is a follow-up.
+the report and **never sends one**. Approving and sending happens in Espresso, per item.
 
 Espresso opens `.md` attachments rendered through `JournalContentView` with a
 Rendered | Source toggle (tables stay plain text; the parser has no table case).
