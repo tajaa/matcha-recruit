@@ -52,10 +52,55 @@ class TestSpecCoverage:
         # Drift guard: a new staged type added to _HUUME_ACTION_REQUIRED_FEATURE
         # must pick a side here — mapped (gets an asset row) or explicitly
         # excluded with a documented reason, never silently forgotten.
+        #
+        # This guard caught real drift the moment the suite was actually run
+        # in CI: seven staged types had been added since the registry was last
+        # touched and picked neither side — waste_movement, waste_par_change,
+        # waste_recipe_correction, schedule_note, meal_break_waiver,
+        # work_permit, eligibility_case_decision. Six returned status="created"
+        # WITH a record_id, so they reached assets.record_asset, hit its
+        # `spec is None -> return` no-op, and the durable row they created never
+        # landed in the thread's asset panel. waste_movement was the sharpest
+        # case: the SAME executor and the same inventory_movements row DID get
+        # an asset when the type was "inventory_movement". All seven are now
+        # mapped (waste_par_change is in _NO_ASSET_TYPES — its executor returns
+        # no record_id at all).
         for action_type in _HUUME_ACTION_REQUIRED_FEATURE:
             assert action_type in assets.ASSET_SPECS or action_type in assets._NO_ASSET_TYPES, (
                 f"{action_type} is in neither ASSET_SPECS nor _NO_ASSET_TYPES"
             )
+
+    def test_every_ref_table_has_a_status_query_or_a_documented_reason(self):
+        # The other half of the drift guard above. Mapping an action type into
+        # ASSET_SPECS is only half of shipping it: `hydrate_statuses` skips any
+        # ref_table missing from _STATUS_SQL and `list_assets` then hands the
+        # panel status=None, so the row renders with a blank chip next to
+        # siblings that show a live one. Five of the six ref_tables added in
+        # the same change as this test had exactly that gap.
+        ref_tables = {spec.ref_table for spec in assets.ASSET_SPECS.values()}
+        unresolved = sorted(
+            t for t in ref_tables
+            if t not in assets._STATUS_SQL and t not in assets._NO_STATUS_TABLES
+        )
+        assert not unresolved, (
+            f"{unresolved} produce assets but have no _STATUS_SQL entry — either add "
+            f"one or record the table in _NO_STATUS_TABLES with a reason"
+        )
+
+    def test_no_status_tables_are_real_ref_tables(self):
+        # A waiver for a table nothing maps to is dead scaffolding that hides
+        # the next real gap.
+        ref_tables = {spec.ref_table for spec in assets.ASSET_SPECS.values()}
+        stale = sorted(assets._NO_STATUS_TABLES - ref_tables)
+        assert not stale, f"_NO_STATUS_TABLES names tables no spec produces: {stale}"
+
+    def test_status_queries_are_company_scoped(self):
+        # Every asset listing is tenant-scoped; a status query that forgot its
+        # company predicate would hydrate another tenant's row by raw id.
+        for ref_table, sql in assets._STATUS_SQL.items():
+            assert "$1" in sql and "$2" in sql, f"{ref_table} status SQL is not parameterized"
+            assert "ref_id" in sql, f"{ref_table} status SQL must alias its id as ref_id"
+            assert "= $1" in sql, f"{ref_table} status SQL is not scoped to a company"
 
     def test_legal_record_labels_are_name_free(self):
         # discipline/ir/er are legal-record types — same rule as

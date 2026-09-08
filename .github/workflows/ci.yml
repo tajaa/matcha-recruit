@@ -22,6 +22,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          # scripts/tests/test_error_autofix.sh:411 resolves `HEAD~1` against
+          # this checkout. On the default shallow clone it does not exist,
+          # which failed its cases on every PR — the tests were right, the
+          # clone was too thin. The lint and native-builds jobs already fetch
+          # full history for the same reason. (Note what this does NOT fix: on
+          # a pull_request checkout there is no local `refs/heads/main` at any
+          # depth, only `origin/main`, so a bare `main` never resolves. Scripts
+          # must say `origin/main` — verify.sh does, and its CI cases pass
+          # AUTOFIX_BASE_SHA explicitly rather than relying on either.)
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
@@ -123,90 +133,98 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
+        # Only the Oceanlab step needs this. Its conftest hardcodes
+        # postgresql+psycopg://matcha:matcha_dev@127.0.0.1:5432/oceanlab_test
+        # and runs its own migrations, so the service must match that exactly
+        # — the previous matcha/matcha_test/matcha_test config could never
+        # have satisfied it. The matcha suite itself needs no database.
         image: postgres:16-alpine
         env:
           POSTGRES_USER: matcha
-          POSTGRES_PASSWORD: matcha_test
-          POSTGRES_DB: matcha_test
+          POSTGRES_PASSWORD: matcha_dev
+          POSTGRES_DB: oceanlab_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U matcha -d matcha_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "pg_isready -U matcha -d oceanlab_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      DATABASE_URL: postgresql://matcha:matcha_test@127.0.0.1:5432/matcha_test
-      REDIS_URL: redis://127.0.0.1:6379/0
+      # No REDIS_URL: the redis service container is gone and config.py already
+      # defaults to the same redis://localhost:6379/0, so setting it bought
+      # nothing and only implied a service that is not running. Nothing in the
+      # matcha suite opens a redis client — init_redis_cache() runs in the app
+      # lifespan, which these unit tests never enter.
       OPENSSL_armcap: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          # Full history: diff coverage needs the merge commit's first parent.
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: server/requirements.txt
       - name: Install server test environment
-        run: python -m pip install -r requirements.txt pytest pytest-asyncio
-        working-directory: server
-      - name: Apply isolated test migrations
-        id: migrations
-        # Fresh-database migration ordering is red on main. Accept only the
-        # exact known revision/relation failure; drift or a new failure is red.
-        run: |
-          set +e
-          python -m alembic upgrade heads >"$RUNNER_TEMP/migrations.log" 2>&1
-          rc=$?
-          set -e
-          cat "$RUNNER_TEMP/migrations.log"
-          if [ "$rc" -eq 0 ]; then
-            echo 'schema_ready=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          grep -q '7c1de748641e' "$RUNNER_TEMP/migrations.log"
-          grep -q 'relation "companies" does not exist' "$RUNNER_TEMP/migrations.log"
-          echo 'schema_ready=false' >> "$GITHUB_OUTPUT"
-          echo "Accepted the exact main-branch fresh-migration baseline failure."
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
         working-directory: server
       - name: Server test suite
-        # The known migration failure leaves an incomplete schema. Until it is
-        # repaired, still collect all other 7k+ tests to catch import errors;
-        # once migrations pass, execute them normally.
+        # This job used to run `alembic upgrade heads` against an empty
+        # database, watch it fail on the root revision's REFERENCES
+        # companies(id) (a table init_db creates, not a migration), accept
+        # that as a pinned baseline, and fall back to `pytest --collect-only`
+        # — so ~8,700 tests were imported and NEVER EXECUTED, for months. The
+        # schema step was never needed: this suite is unit-level and passes
+        # with no database at all. There is no --collect-only fallback now;
+        # if tests fail, this job goes red.
         run: |
-          args=(-q tests app/oceanlab/tests --ignore=tests/employees/test_internal_mobility_routes.py)
-          if [ '${{ steps.migrations.outputs.schema_ready }}' = true ]; then
-            python -m pytest "${args[@]}"
-          else
-            python -m pytest --collect-only "${args[@]}"
-          fi
+          python -m pytest -q tests \
+            --cov=app --cov-report=xml --cov-report=term-missing:skip-covered
         working-directory: server
-      - name: Internal mobility test baseline
-        # Run this file separately. If its stale import is repaired, its tests
-        # execute normally; otherwise accept only the exact main failure.
+      - name: Oceanlab test suite
+        # Separate process on purpose: run in the same one as the matcha suite,
+        # these fail on a closed event loop. They own their schema (their
+        # conftest applies the oceanlab_app_* migrations to the test engine).
         run: |
-          set +e
-          python -m pytest -q tests/employees/test_internal_mobility_routes.py \
-            >"$RUNNER_TEMP/pytest-internal-mobility.log" 2>&1
-          rc=$?
-          set -e
-          cat "$RUNNER_TEMP/pytest-internal-mobility.log"
-          if [ "$rc" -eq 0 ]; then exit 0; fi
-          test "$(grep -c '^ERROR tests/employees/test_internal_mobility_routes.py$' "$RUNNER_TEMP/pytest-internal-mobility.log")" -eq 1
-          grep -q "cannot import name 'internal_mobility' from 'app.matcha.routes'" "$RUNNER_TEMP/pytest-internal-mobility.log"
-          grep -q 'Interrupted: 1 error during collection' "$RUNNER_TEMP/pytest-internal-mobility.log"
-          echo "Accepted the exact main-branch server collection baseline failure."
+          python -m pytest -q app/oceanlab/tests \
+            --cov=app --cov-append --cov-report=xml
         working-directory: server
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Server coverage'
+            echo '```'
+            python -m coverage report --skip-covered --sort=miss | tail -40
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY" || true
+        working-directory: server
+      - name: Diff coverage
+        # Incremental on purpose, mirroring the lint job below: lines this PR
+        # adds or changes must be covered; the untested backlog stays as it is
+        # rather than blocking every PR forever.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Same base derivation as the lint job: HEAD is the PR merge commit,
+          # so ^1 is the main tip it was built on. The event's base.sha goes
+          # stale once main moves and would score main's own lines as "changed".
+          if git rev-parse -q --verify HEAD^2 >/dev/null; then base="$(git rev-parse HEAD^1)"; else base="$BASE_SHA"; fi
+          diff-cover coverage.xml --compare-branch="$base" --fail-under=80 \
+            --html-report "$RUNNER_TEMP/diff-coverage.html"
+        working-directory: server
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: server-coverage
+          path: |
+            server/coverage.xml
+            ${{ runner.temp }}/diff-coverage.html
+          if-no-files-found: ignore
 
   native-builds:
     runs-on: macos-15

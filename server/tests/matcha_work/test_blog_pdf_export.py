@@ -109,13 +109,35 @@ class TestRenderInlineMd:
 # _render_project_pdf — full HTML composition + WeasyPrint round-trip
 # ============================================================
 
+def _bind_real_inlining(storage):
+    """Give a MagicMock storage the REAL image-inlining behaviour.
+
+    `_render_project_pdf` now delegates to `StorageService.inline_storage_images`
+    (the inline pass used to be duplicated in pdf_export). Leaving it as a bare
+    MagicMock makes it non-awaitable; stubbing it out would delete the very
+    behaviour these tests pin. So bind the real, unbound methods to the mock and
+    keep only the leaf I/O (`download_file`) and the path predicate faked.
+    """
+    from app.core.services.storage import StorageService
+
+    async def _inline_storage_images(html):
+        return await StorageService.inline_storage_images(storage, html)
+
+    async def _inline_image_data_uri(src):
+        return await StorageService.inline_image_data_uri(storage, src)
+
+    storage.inline_storage_images = _inline_storage_images
+    storage.inline_image_data_uri = _inline_image_data_uri
+    return storage
+
+
 @pytest.fixture
 def mock_storage():
     """Storage stub so _inline_images doesn't try a real S3 download."""
     storage = MagicMock()
     storage.is_supported_storage_path = MagicMock(return_value=False)
     storage.download_file = AsyncMock(return_value=b"")
-    return storage
+    return _bind_real_inlining(storage)
 
 
 class TestRenderProjectPdf:
@@ -228,6 +250,7 @@ class TestRenderProjectPdf:
             b"\x00\x00\x00\x02\x00\x01\xe5'\xde\xfc\x00\x00\x00\x00IEND\xaeB`\x82"
         )
         storage.download_file = AsyncMock(return_value=png_bytes)
+        _bind_real_inlining(storage)
 
         with patch.object(mw, "get_storage", return_value=storage):
             project = {
@@ -264,6 +287,7 @@ class TestRenderProjectPdf:
             b"\x00\x00\x00\x02\x00\x01\xe5'\xde\xfc\x00\x00\x00\x00IEND\xaeB`\x82"
         )
         storage.download_file = AsyncMock(return_value=png_bytes)
+        _bind_real_inlining(storage)
 
         with patch.object(mw, "get_storage", return_value=storage):
             project = {

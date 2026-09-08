@@ -1,3 +1,20 @@
+"""MANUAL, DB-MUTATING integration check for Google Workspace auto-provisioning.
+
+Skipped by default. It INSERTS users/companies/clients/integration_connections
+into whatever `DATABASE_URL` resolves to and calls `close_pool()` on the way
+out, so it must never run as part of a plain `pytest tests/` — root CLAUDE.md:
+"write them to be run manually by the user ... never auto-run DB-mutating
+tests". Until 2026-09-08 the opt-in was missing and the only thing stopping it
+was a broken dependency override that raised before the first INSERT; repairing
+that override turned it into a test that writes to the dev database on every
+laptop run.
+
+Run it deliberately, against dev only:
+
+    RUN_DB_WRITE_TESTS=1 ./venv/bin/python -m pytest \
+        tests/employees/test_employees_google_workspace_api_integration.py -q
+"""
+
 import asyncio
 import json
 import os
@@ -9,9 +26,16 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.config import load_settings
 from app.core.models.auth import CurrentUser
 from app.database import close_pool, get_connection, init_pool
+from app.matcha.dependencies import require_admin_or_client
 from app.matcha.routes import employees as employees_routes
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_DB_WRITE_TESTS") != "1",
+    reason="manual DB-mutating integration test — set RUN_DB_WRITE_TESTS=1 to run",
+)
 
 
 def _get_database_url() -> str:
@@ -31,14 +55,17 @@ def test_api_create_employee_triggers_google_workspace_onboarding_run():
 
 
 async def _run_api_employee_onboarding_test(database_url: str) -> None:
+    # The provisioning background task constructs the email service, which
+    # requires initialized settings.
+    load_settings()
     await init_pool(database_url)
 
     company_id = uuid4()
     user_id = uuid4()
     email_suffix = uuid4().hex[:8]
-    user_email = f"hr-admin-{email_suffix}@itsmatcha.net"
-    employee_email = f"new-hire-{email_suffix}@itsmatcha.net"
-    personal_email = f"new-hire-personal-{email_suffix}@gmail.com"
+    user_email = f"hr-admin-{email_suffix}@example.com"
+    employee_email = f"new-hire-{email_suffix}@example.com"
+    personal_email = f"new-hire-personal-{email_suffix}@example.com"
 
     app = FastAPI()
     app.include_router(employees_routes.router, prefix="/api/employees")
@@ -48,7 +75,9 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
     async def _override_require_admin_or_client():
         return current_user
 
-    app.dependency_overrides[employees_routes.require_admin_or_client] = _override_require_admin_or_client
+    # Override the dependency object itself, imported from where it is DEFINED —
+    # the employees package facade does not re-export it.
+    app.dependency_overrides[require_admin_or_client] = _override_require_admin_or_client
 
     async with get_connection() as conn:
         required_tables_present = await conn.fetchval(
@@ -114,7 +143,7 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
                 json.dumps(
                     {
                         "mode": "mock",
-                        "domain": "itsmatcha.net",
+                        "domain": "example.com",
                         "auto_provision_on_employee_create": True,
                     }
                 ),

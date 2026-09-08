@@ -11,8 +11,12 @@ from app.core.services.compliance_service import _filter_by_jurisdiction_priorit
 
 # Path to the route source file (avoids importing the full app dependency chain)
 _ROUTE_SRC_PATH = os.path.join(
+    # ../.. — this file lives in tests/infrastructure/, so one `..` lands in
+    # tests/, not server/. That off-by-one silently turned all 25 assertions
+    # below into a FileNotFoundError the moment this file moved into a
+    # subdirectory; server/CLAUDE.md flags exactly this hard-coded-path form.
     os.path.dirname(__file__),
-    "..", "app", "core", "routes", "chat", "ai.py",
+    "..", "..", "app", "core", "routes", "chat", "ai.py",
 )
 
 

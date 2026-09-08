@@ -15,10 +15,20 @@ from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 
 
 class TestSingleSourceOfTruth:
-    def test_huume_routing_aliases_catalog(self):
+    def test_huume_routing_pins_one_canonical_model(self):
+        """Huume moved off the Gemini fleet onto OpenAI Luna, so it no longer
+        aliases the Gemini catalog (it has no entry there). The same
+        single-source-of-truth rule still applies within the module: every
+        tier must read `routing.LUNA` rather than re-literal a model id, since
+        `agent.py:_MODEL` aliases it for the whole turn."""
         from app.matcha.services.huume import routing
-        assert routing.FLASH == GEMINI_FLASH
-        assert routing.FLASH_LITE == GEMINI_FLASH_LITE
+        from app.matcha.services.huume import agent
+
+        assert agent._MODEL == routing.LUNA
+        assert routing.TIERS, "expected at least one Huume tier"
+        for name, tier in routing.TIERS.items():
+            assert tier.planner_model == routing.LUNA, f"tier {name} planner re-literals a model id"
+            assert tier.executor_model == routing.LUNA, f"tier {name} executor re-literals a model id"
 
     def test_matcha_work_models_alias_catalog(self):
         from app.matcha.services.matcha_work.matcha_work_ai import _models

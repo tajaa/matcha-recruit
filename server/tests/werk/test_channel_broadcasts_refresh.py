@@ -38,8 +38,25 @@ def _conn_ctx(conn):
     return MagicMock(return_value=cm)
 
 
-def _user(email="guest@example.com"):
-    return SimpleNamespace(id=uuid4(), email=email)
+def _user(email="guest@example.com", role="client"):
+    # load_channel_access reads .role for the platform-admin bypass.
+    return SimpleNamespace(id=uuid4(), email=email, role=role)
+
+
+def _access_row(*, scope="community"):
+    """Row read by _assert_call_access -> load_channel_access, which now runs
+    before _active_broadcast in every broadcast handler — so it is the FIRST
+    fetchrow each test's queue must serve. `community` scope allows CALL
+    without any company feature flag."""
+    return {
+        "id": uuid4(),
+        "company_id": uuid4(),
+        "channel_scope": scope,
+        "enabled_features": {},
+        "signup_source": "bespoke",
+        "member_role": "member",
+        "is_member": True,
+    }
 
 
 def _broadcast_row(started_by, *, started_minutes_ago=2):
@@ -58,7 +75,7 @@ async def test_promoted_guest_keeps_publish_on_refresh():
     guest = _user()
     bc = _broadcast_row(starter_id)
     conn = AsyncMock()
-    conn.fetchrow.return_value = bc
+    conn.fetchrow.side_effect = [_access_row(), bc]  # access, then _active_broadcast
 
     with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
          patch(f"{MOD}._assert_member", AsyncMock()), \
@@ -79,7 +96,7 @@ async def test_non_promoted_member_gets_viewer_token():
     viewer = _user("viewer@example.com")
     bc = _broadcast_row(starter_id)
     conn = AsyncMock()
-    conn.fetchrow.return_value = bc
+    conn.fetchrow.side_effect = [_access_row(), bc]  # access, then _active_broadcast
 
     with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
          patch(f"{MOD}._assert_member", AsyncMock()), \
@@ -99,7 +116,7 @@ async def test_starter_always_keeps_publish_even_if_livekit_lookup_fails():
     starter = _user("starter@example.com")
     bc = _broadcast_row(starter.id)
     conn = AsyncMock()
-    conn.fetchrow.return_value = bc
+    conn.fetchrow.side_effect = [_access_row(), bc]  # access, then _active_broadcast
 
     with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
          patch(f"{MOD}._assert_member", AsyncMock()), \
@@ -122,7 +139,7 @@ async def test_promoted_guest_falls_back_to_viewer_when_livekit_lookup_fails():
     guest = _user()
     bc = _broadcast_row(starter_id)
     conn = AsyncMock()
-    conn.fetchrow.return_value = bc
+    conn.fetchrow.side_effect = [_access_row(), bc]  # access, then _active_broadcast
 
     with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
          patch(f"{MOD}._assert_member", AsyncMock()), \

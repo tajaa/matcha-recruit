@@ -15,7 +15,8 @@ one-off guard in `matcha/services/benefits_eligibility.py`.
 
 import asyncio
 
-from weasyprint import HTML, default_url_fetcher
+from weasyprint import HTML
+from weasyprint.urls import default_url_fetcher
 
 
 def safe_url_fetcher(url: str):

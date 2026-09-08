@@ -322,9 +322,11 @@ class _FakeConn:
         self._doc_rows = doc_rows
         self._involved_employees_rows = involved_employees_rows
         self.fetch_calls = []
+        self.fetch_args = []
 
     async def fetch(self, query, *args):
         self.fetch_calls.append(query)
+        self.fetch_args.append(args)
         if "er_case_documents" in query:
             return self._doc_rows
         if "FROM employees" in query:
@@ -350,7 +352,9 @@ def test_load_guidance_context_filters_one_query_into_three_views():
     conn = _FakeConn(doc_rows=doc_rows, involved_employees_rows=[])
     case_row = {"involved_employees": []}
 
-    ctx = asyncio.run(_load_guidance_context(conn, uuid.uuid4(), case_row))
+    # company_id is a required tenant scope, threaded down into
+    # resolve_involved_parties' employees lookup.
+    ctx = asyncio.run(_load_guidance_context(conn, uuid.uuid4(), case_row, uuid.uuid4()))
 
     # evidence_rows excludes policy docs.
     assert [r["id"] for r in ctx["evidence_rows"]] == ["d2", "d3", "d4"]
@@ -380,6 +384,16 @@ def test_resolve_involved_parties_skips_malformed_entries():
         ],
     )
 
-    result = asyncio.run(_resolve_involved_parties(conn, involved))
+    company_id = uuid.uuid4()
+    result = asyncio.run(_resolve_involved_parties(conn, involved, company_id))
 
     assert result == [{"name": "Jane Doe", "role": "respondent"}]
+
+    # Tenant isolation: the employees lookup must be scoped to the caller's
+    # company, otherwise an involved_employees entry carrying another tenant's
+    # employee id would resolve that tenant's real name into this case.
+    emp_query, emp_args = next(
+        (q, a) for q, a in zip(conn.fetch_calls, conn.fetch_args) if "FROM employees" in q
+    )
+    assert "org_id" in emp_query
+    assert str(company_id) in [str(a) for a in emp_args]

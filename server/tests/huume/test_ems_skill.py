@@ -10,6 +10,16 @@ not ems_skill's own namespace, since a lazy `from x import y` re-binds the
 name fresh each call and a patch on ems_skill.y would be silently ignored.
 get_connection IS a module-level import in ems_skill.py, so it's patched
 directly on ems_skill itself.
+
+Promote authorization is no longer a bare `role in {client, admin}` check:
+execute_promote resolves Ops access (`services/ops/permissions.
+resolve_ops_access`) and `evaluate_promote` asks for
+`OpsCapability.EVENT_PROMOTE`. `_FakeConn` therefore answers the resolver's
+four lookups (companies.owner_id / ops_permissions.level / clients.company_id
+/ employees.org_id) rather than stubbing the verdict, so the role -> level ->
+capability chain the real call makes is the one under test: a `client` user
+resolves to `operator` (has EVENT_PROMOTE) and an `employee` to `member`
+(does not).
 """
 
 from unittest.mock import AsyncMock
@@ -35,17 +45,37 @@ class _NullTxn:
 
 
 class _FakeConn:
-    def __init__(self, *, actor_row, event_row):
+    def __init__(self, *, actor_row, event_row, ops_level=None):
         self._actor_row = actor_row
         self._event_row = event_row
+        # No explicit ops_permissions grant by default — access falls through
+        # to the role default, which is what these tests are about.
+        self._ops_level = ops_level
+
+    @property
+    def _role(self):
+        return (self._actor_row or {}).get("role")
 
     async def fetchrow(self, query, *args):
         q = " ".join(query.split())
-        if "SELECT role, email FROM users" in q:
+        if "FROM users WHERE id" in q:
             return self._actor_row
         if "FROM ems_events" in q:
             return self._event_row
         raise AssertionError(f"unexpected fetchrow: {q}")
+
+    async def fetchval(self, query, *args):
+        # resolve_ops_access's lookups, in the order it makes them.
+        q = " ".join(query.split())
+        if "SELECT owner_id FROM companies" in q:
+            return None                       # actor is not the company owner
+        if "FROM ops_permissions" in q:
+            return self._ops_level
+        if "FROM clients WHERE user_id" in q:
+            return COMPANY_ID if self._role == "client" else None
+        if "FROM employees WHERE user_id" in q:
+            return COMPANY_ID if self._role == "employee" else None
+        raise AssertionError(f"unexpected fetchval: {q}")
 
     def transaction(self):
         return _NullTxn()
@@ -71,11 +101,17 @@ def _event_row(status="logged"):
     }
 
 
+def _actor_row(role="client", email="admin@example.com"):
+    # execute_promote selects id as well as role/email — it hands the whole
+    # row to CurrentUser for the Ops-access resolve.
+    return {"id": ACTOR_ID, "role": role, "email": email}
+
+
 _UNSET = object()
 
 
 def _patch_conn(monkeypatch, *, actor_row=None, event_row=_UNSET):
-    actor_row = actor_row if actor_row is not None else {"role": "client", "email": "admin@example.com"}
+    actor_row = actor_row if actor_row is not None else _actor_row()
     event_row = _event_row() if event_row is _UNSET else event_row
     conn = _FakeConn(actor_row=actor_row, event_row=event_row)
     monkeypatch.setattr(ems_skill, "get_connection", lambda: _ConnCtx(conn))
@@ -121,7 +157,7 @@ class TestExecutePromote:
 
     @pytest.mark.asyncio
     async def test_refuses_wrong_role(self, monkeypatch):
-        _patch_conn(monkeypatch, actor_row={"role": "employee", "email": "e@example.com"})
+        _patch_conn(monkeypatch, actor_row=_actor_row("employee", "e@example.com"))
         _patch_features(monkeypatch, {"ems": True, "incidents": True})
         result = await ems_skill.execute_promote(
             company_id=COMPANY_ID, actor_user_id=ACTOR_ID, action={"event_id": str(EVENT_ID)},

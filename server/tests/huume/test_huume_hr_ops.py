@@ -106,10 +106,24 @@ class TestStageAndAuthz:
             assert flag in verdict.message
 
     def test_employee_role_refused(self):
+        # Authorization is a Work CAPABILITY check now, not a role literal:
+        # an `employee` resolves to no ACTION_PROPOSE/ACTION_EXECUTE, so the
+        # refusal names the Work Operator level rather than "business admin".
+        # Both turns must refuse — drafting AND confirming.
         for staged, flag in self.CASES:
-            verdict = _evaluate(staged, _features(**{flag: True}), role="employee", staged_new=True)
-            assert verdict.kind == "refuse", staged["type"]
-            assert "business admin" in verdict.message
+            stage_turn = _evaluate(
+                staged, _features(**{flag: True}), role="employee", staged_new=True,
+            )
+            assert stage_turn.kind == "refuse", staged["type"]
+            assert "Work Operator" in stage_turn.message, staged["type"]
+            # Not a feature-flag refusal in disguise — the flag IS on here.
+            assert flag not in stage_turn.message, staged["type"]
+
+            confirm_turn = _evaluate(
+                staged, _features(**{flag: True}), role="employee", staged_new=False,
+            )
+            assert confirm_turn.kind == "refuse", staged["type"]
+            assert "Work Operator" in confirm_turn.message, staged["type"]
 
     def test_non_proposed_status_refused(self):
         for staged, flag in self.CASES:

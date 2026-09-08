@@ -1,0 +1,17 @@
+# Test/coverage tooling. Deliberately NOT in requirements.txt: the production
+# image installs that file, and pytest has no business in it.
+#
+#   venv/bin/python -m pip install -r requirements-dev.txt
+#
+# Bounded on purpose. An unbounded `weasyprint>=69.0` in requirements.txt is
+# what let WeasyPrint 70.0 remove a symbol app/core/services/pdf.py imports and
+# take 74 test modules out at collection with no code change on our side.
+pytest>=8.0,<9
+# <2 is the bound, not <1: pytest-asyncio 1.x is what installs today and the
+# suite is green on it (nothing here defines the `event_loop` fixture 1.0
+# removed, and all ~155 async modules mark themselves explicitly). What 1.0 DID
+# change is the default fixture loop scope, so the behaviour that matters is
+# pinned in pytest.ini rather than left to the resolver.
+pytest-asyncio>=0.23,<2
+pytest-cov>=5.0,<8
+diff-cover>=9.0,<11

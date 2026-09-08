@@ -124,12 +124,14 @@ def _collect_keys(obj, acc):
             _collect_keys(v, acc)
 
 
+# `_anonymize_context` lost its `behavioral=` parameter when behavioral-friction
+# alerting was retired (2026-06-08) — see
+# test_broker_risk_alerts.test_behavioral_friction_is_retired_and_never_fires.
+# The "AI-shielded" guarantee it enforces is unchanged, so these tests still
+# assert it, minus that one input.
 def test_anonymize_context_has_no_pii_keys():
     ctx = _anonymize_context(
         wc_metrics=_metrics(),
-        behavioral={"current_count": 4, "prior_count": 1, "delta_pct": 300.0, "window_days": 90,
-                    "attendance_count": 2, "insubordination_count": 2,
-                    "hot_location": {"name": "Jane Doe Plant", "count": 3}},
         renewal_risk={"risk_band": "elevated", "turnover_pct": 18.0, "turnover_delta_pct": 5.0,
                       "lost_workdays": 12, "near_misses": 3, "behavioral_incidents": 4,
                       "triggers": ["18% turnover in last 60d"]},
@@ -141,21 +143,30 @@ def test_anonymize_context_has_no_pii_keys():
     assert not leaked, f"PII keys leaked into outreach context: {leaked}"
 
 
-def test_anonymize_context_drops_location_name():
-    # The free-text hot-location name must never reach the model; only a boolean.
+def test_anonymize_context_copies_only_allowlisted_metric_keys():
+    # The guarantee is structural: ctx is BUILT from a fixed key list, so a
+    # free-text name riding along on wc_metrics (a hot location, a site label,
+    # an employee) can never reach the model — whatever upstream adds later.
+    # This replaces the old behavioral hot_location test, whose input path was
+    # removed with the behavioral block.
     ctx = _anonymize_context(
-        wc_metrics=_metrics(),
-        behavioral={"current_count": 4, "prior_count": 1, "delta_pct": 300.0, "window_days": 90,
-                    "hot_location": {"name": "Jane Doe Plant", "count": 3}},
+        wc_metrics=_metrics(
+            hot_location={"name": "Jane Doe Plant", "count": 3},
+            location_name="Jane Doe Plant",
+            employee_name="Jane Doe",
+            narrative="Jane Doe slipped on the ramp.",
+        ),
         renewal_risk=None, milestones=None,
     )
     blob = json.dumps(ctx)
-    assert "Jane Doe Plant" not in blob
-    assert ctx["behavioral"]["has_location_concentration"] is True
+    assert "Jane Doe" not in blob
+    keys = set()
+    _collect_keys(ctx, keys)
+    assert not keys & set(PII_DENYLIST)
 
 
 def test_anonymize_context_keeps_aggregate_trends():
-    ctx = _anonymize_context(wc_metrics=_metrics(trir=3.3), behavioral=None, renewal_risk=None, milestones=None)
+    ctx = _anonymize_context(wc_metrics=_metrics(trir=3.3), renewal_risk=None, milestones=None)
     assert ctx["trir"] == 3.3
     assert ctx["benchmark_trir"] == 4.0
     assert isinstance(ctx["quarterly"], list)

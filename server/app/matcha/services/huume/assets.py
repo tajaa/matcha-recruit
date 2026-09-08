@@ -113,6 +113,34 @@ ASSET_SPECS: dict[str, AssetSpec] = {
         "inventory_item", "inventory_items",
         lambda a, r: _label(r, "Inventory item"),
     ),
+    "schedule_note": AssetSpec(
+        # update_assignment_note_core returns record_id=str(shift_id), so the
+        # asset points at the shift the note is attached to.
+        "schedule_shift", "schedule_shifts",
+        lambda a, r: _label(r, "Shift note"),
+    ),
+    "meal_break_waiver": AssetSpec(
+        "compliance_attestation", "employee_compliance_attestations",
+        lambda a, r: _label(r, "Meal-break waiver"),
+    ),
+    "work_permit": AssetSpec(
+        "work_permit", "employee_work_permits",
+        lambda a, r: _label(r, "Work permit"),
+    ),
+    "eligibility_case_decision": AssetSpec(
+        "eligibility_case", "schedule_eligibility_cases",
+        lambda a, r: f"Eligibility case ({a.get('decision') or 'decision'})",
+    ),
+    "waste_movement": AssetSpec(
+        # Executes through the same _execute_movement as inventory_movement,
+        # so it lands in inventory_movements with that row's id.
+        "inventory_movement", "inventory_movements",
+        lambda a, r: _label(r, "Waste"),
+    ),
+    "waste_recipe_correction": AssetSpec(
+        "inventory_sales_mapping", "inventory_sales_mappings",
+        lambda a, r: f"Recipe mapping ({a.get('sold_name') or 'sold item'})",
+    ),
     "schedule_change": AssetSpec(
         # record_id is the schedule_chat_proposals id (schedule_skill.execute
         # returns record_id=proposal_id), not a schedule_shifts row.
@@ -131,8 +159,13 @@ ASSET_SPECS: dict[str, AssetSpec] = {
 # schedule_location_profile: writes the location's own setup row. There is no
 # artifact to hand back — the thing it produces is configuration the whole
 # editor reads, not a document this thread owns.
+# waste_par_change: its executor returns status/message/bg_tasks and NO
+# record_id (it applies a recommendation to inventory_items in place), so
+# record_asset has nothing to link — same shape as amend_handbook above.
 # Listed here so the drift-guard test has a documented reason, not a gap.
-_NO_ASSET_TYPES: frozenset[str] = frozenset({"amend_handbook", "schedule_location_profile"})
+_NO_ASSET_TYPES: frozenset[str] = frozenset(
+    {"amend_handbook", "schedule_location_profile", "waste_par_change"}
+)
 
 
 async def record_asset(
@@ -192,8 +225,10 @@ async def record_offer_draft_asset(
         logger.exception("[Huume] asset registry draft write failed (non-fatal)")
 
 
-# One status query per ref_table actually present in a listing — bounded by
-# len(ASSET_SPECS) (currently 14 distinct ref_tables), never per-row.
+# One status query per ref_table actually present in a listing — bounded by the
+# number of distinct ref_tables in ASSET_SPECS, never per-row. Don't hardcode a
+# count here: the old "(currently 14)" was already wrong when it was written and
+# went further out of date every time a spec landed.
 _STATUS_SQL: dict[str, str] = {
     "offer_letters": "SELECT id::text AS ref_id, status FROM offer_letters WHERE company_id = $1 AND id = ANY($2::uuid[])",
     "progressive_discipline": "SELECT id::text AS ref_id, approval_status AS status FROM progressive_discipline WHERE company_id = $1 AND id = ANY($2::uuid[])",
@@ -215,7 +250,33 @@ _STATUS_SQL: dict[str, str] = {
     ),
     "schedule_chat_proposals": "SELECT id::text AS ref_id, status FROM schedule_chat_proposals WHERE company_id = $1 AND id = ANY($2::uuid[])",
     "schedule_generation_runs": "SELECT id::text AS ref_id, status FROM schedule_generation_runs WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    "schedule_shifts": "SELECT id::text AS ref_id, status FROM schedule_shifts WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    "schedule_eligibility_cases": "SELECT id::text AS ref_id, status FROM schedule_eligibility_cases WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    # No status column: a permit's whole point is its expiry, so that IS its
+    # lifecycle. Compared as a DATE (the column is DATE), not a timestamp.
+    "employee_work_permits": (
+        "SELECT id::text AS ref_id, (CASE WHEN expires_at < CURRENT_DATE THEN 'expired' ELSE 'active' END) AS status "
+        "FROM employee_work_permits WHERE company_id = $1 AND id = ANY($2::uuid[])"
+    ),
+    # Attestations are append-only rows whose `value` boolean IS the state —
+    # a later row with value=false is how a waiver is withdrawn.
+    "employee_compliance_attestations": (
+        "SELECT id::text AS ref_id, (CASE WHEN value THEN 'on_file' ELSE 'withdrawn' END) AS status "
+        "FROM employee_compliance_attestations WHERE company_id = $1 AND id = ANY($2::uuid[])"
+    ),
 }
+
+# ref_tables that deliberately have no status, so the drift guard in
+# tests/huume/test_huume_assets.py can tell "decided" from "forgotten" — the
+# same two-sided contract ASSET_SPECS/_NO_ASSET_TYPES already uses.
+#
+# inventory_movements: an append-only ledger row. It happened; there is no
+#   later state for it to be in.
+# inventory_sales_mappings: a mapping definition (`kind` is direct/recipe/
+#   ignore — a category, not a lifecycle). Rows are edited in place.
+_NO_STATUS_TABLES: frozenset[str] = frozenset(
+    {"inventory_movements", "inventory_sales_mappings"}
+)
 
 
 def _as_uuid(ref_id: str) -> Optional[UUID]:

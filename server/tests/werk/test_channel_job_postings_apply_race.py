@@ -57,9 +57,19 @@ async def test_concurrent_apply_race_returns_409_not_500():
     }
     resume_row = {"parsed_data": json.dumps({"name": "A. Pplicant"})}
 
+    # _get_member_role() now opens with load_channel_access(), whose single
+    # fetchrow leads the queue; `community` scope permits MANAGE with no
+    # company feature flag.
+    access_row = {
+        "id": channel_id, "company_id": uuid4(), "channel_scope": "community",
+        "enabled_features": {}, "signup_source": "bespoke",
+        "member_role": "member", "is_member": True,
+    }
+
     conn = AsyncMock()
     conn.fetchval.side_effect = ["member", None, None]  # role, invitation, existing (pre-check clean)
     conn.fetchrow.side_effect = [
+        access_row,
         posting_row,
         resume_row,
         asyncpg.UniqueViolationError(),  # INSERT races another request
