@@ -61,8 +61,23 @@ while IFS= read -r card; do
             # until the owner presses Run AutoPR or replies with context.
             # Cross-lane links (error-bot drafts closed as superseded or
             # duplicate) are not a rejection, so they are left alone.
-            mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
-                "$(jq -n '{board_column: "todo"}')" >/dev/null
+            # Move AND rewrite the note through the server, which owns the
+            # structured-note parser the webhook uses. A bare column PATCH left
+            # the card in Todo still reading "READY FOR REVIEW". During a
+            # rolling deploy the endpoint can lag this script: fall back to the
+            # column move alone rather than leaving the card stuck.
+            if ! closed_error="$(mw_api POST \
+                "/matcha-work/projects/$project_id/tasks/$task_id/autopr/pr-closed" \
+                "$(jq -n --argjson pr "$pr_number" '{pr_number: $pr}')" \
+                2>&1 >/dev/null)"; then
+                if [[ "$closed_error" == *"HTTP 404:"* ]]; then
+                    mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
+                        "$(jq -n '{board_column: "todo"}')" >/dev/null
+                else
+                    printf '%s\n' "$closed_error" >&2
+                    exit 1
+                fi
+            fi
             printf 'Reconciled closed-unmerged AutoPR #%s: card %s -> todo\n' "$pr_number" "$task_id" >&2
             reconciled=true
         fi

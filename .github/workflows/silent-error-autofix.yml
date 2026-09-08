@@ -22,6 +22,12 @@ jobs:
   investigate:
     runs-on: [self-hosted, macOS, opencode]
     timeout-minutes: 55
+    env:
+      # One source of truth for the incident window. collect.sh reads these,
+      # and verify-deployed-fixes.sh bounds its "has not recurred" claim to the
+      # same window it was actually shown — the two must never drift apart.
+      AUTOFIX_HOURS: '24'
+      AUTOFIX_LIMIT: '25'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,7 +70,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          existing="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name' 2>/dev/null || true)"
+          # Read color and description too: `gh label create --force` is the
+          # only thing that UPDATES an existing label, so a name-only skip
+          # meant an edited description or color could never reach the repo.
+          existing="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 200 \
+            --json name,color,description \
+            --jq '.[] | "\(.name)|\(.color | ascii_downcase)|\(.description // "")"' 2>/dev/null || true)"
           for l in "autofix|1D76DB|Opened by the silent-error autofix bot" \
                    "autofix-superseded|6B7280|Draft superseded by a merged human PR" \
                    "autofix-duplicate|6B7280|Duplicate of an older open pull request" \
@@ -82,7 +93,8 @@ jobs:
                    "confidence:low|D93F0B|Autofix confidence 0-44" \
                    "sev:high|B60205|" "sev:med|D4C5F9|" "sev:low|0E8A16|"; do
             IFS='|' read -r name color desc <<< "$l"
-            printf '%s\n' "$existing" | grep -qxF "$name" && continue
+            printf '%s\n' "$existing" \
+              | grep -qxF "$name|$(printf '%s' "$color" | tr 'A-Z' 'a-z')|$desc" && continue
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
           done
 
@@ -114,11 +126,11 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
-          # 24 hours is the lookback, not the cadence. The Mac dispatcher
+          # AUTOFIX_HOURS is the lookback, not the cadence. The Mac dispatcher
           # gives this lane a slot once its last pass is ten minutes old; the
           # wider window prevents runner downtime or a long investigation
           # from making an unresolved incident disappear.
-          if ./scripts/error-autofix/collect.sh --hours 24 --limit 25 > "$RUNNER_TEMP/incidents.json"; then
+          if ./scripts/error-autofix/collect.sh > "$RUNNER_TEMP/incidents.json"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "DB collection failed; falling back to log-grep evidence" >> "$GITHUB_STEP_SUMMARY"

@@ -572,9 +572,19 @@ async def _handle_pull_request_event(payload: dict) -> dict:
             # a card linked to a human PR is not the bot's to move. The card
             # does not auto-rerun — select.sh still sees the branch's PR
             # history — it just stops sitting in In Progress forever.
-            if not _TASK_BRANCH_RE.match(head_ref):
+            branch_match = _TASK_BRANCH_RE.match(head_ref)
+            if not branch_match:
                 return result(merged=False)
+            branch_id8 = branch_match.group(1)
             for task in tasks:
+                # Only the card that owns this branch is being rejected. A
+                # cross-lane card shares the PR *number* but not the branch;
+                # moving it would strip its ALREADY SCOPED marker, and the next
+                # select.sh pass would re-investigate it as fresh work.
+                # reconcile-merged-cards.sh makes the same own_draft
+                # distinction — the webhook has to agree with it.
+                if str(task["id"]).replace("-", "")[:8] != branch_id8:
+                    continue
                 if task["board_column"] not in ("in_progress", "changes_requested"):
                     continue
                 patch = {"board_column": "todo"}

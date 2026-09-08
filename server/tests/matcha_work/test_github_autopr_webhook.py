@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -389,7 +389,8 @@ async def test_merged_autopr_redelivery_is_a_true_noop(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_closed_unmerged_bot_draft_hands_card_back_to_todo(monkeypatch):
-    task_id, project_id = uuid4(), uuid4()
+    # The head ref names the card that owns it: bot/task-<first 8 hex of id>.
+    task_id, project_id = UUID("aaaaaaaa-0000-4000-8000-000000000001"), uuid4()
     task = {
         "id": task_id,
         "project_id": project_id,
@@ -428,6 +429,56 @@ async def test_closed_unmerged_bot_draft_hands_card_back_to_todo(monkeypatch):
             "progress_note": "🤖 AUTO SETUP · PR CLOSED: NOT MERGED · PR #48 · note: drafted",
         },
     )]
+
+
+@pytest.mark.asyncio
+async def test_closed_unmerged_moves_only_the_card_that_owns_the_branch(monkeypatch):
+    """A cross-lane card shares the PR number but not the branch.
+
+    Moving it too would strip its ALREADY SCOPED marker, and select.sh would
+    then re-investigate it as fresh work — a duplicate of the same ticket.
+    """
+    owner_id = UUID("aaaaaaaa-0000-4000-8000-000000000001")
+    linked_id = UUID("bbbbbbbb-0000-4000-8000-000000000002")
+    project_id = uuid4()
+    owner = {
+        "id": owner_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "🤖 AUTO SETUP · READY FOR REVIEW · PR #48",
+        "pr_url": None,
+        "pr_number": 48,
+    }
+    linked = {
+        "id": linked_id,
+        "project_id": project_id,
+        "board_column": "in_progress",
+        "progress_note": "🤖 AUTO SETUP · ALREADY SCOPED · PR #48",
+        "pr_url": None,
+        "pr_number": 48,
+    }
+    updates = []
+
+    async def resolve(_payload):
+        return [owner, linked]
+
+    async def update(project, task, patch):
+        updates.append((project, task, patch))
+
+    monkeypatch.setattr(github, "_resolve_pull_request_tasks", resolve)
+    monkeypatch.setattr(project_task_service, "update_project_task", update)
+
+    await github._handle_pull_request_event({
+        "action": "closed",
+        "pull_request": {
+            "merged": False,
+            "number": 48,
+            "head": {"ref": "bot/task-aaaaaaaa"},
+        },
+    })
+
+    assert [task for _project, task, _patch in updates] == [owner_id]
+    assert updates[0][2]["board_column"] == "todo"
 
 
 @pytest.mark.asyncio

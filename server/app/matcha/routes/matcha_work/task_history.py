@@ -445,6 +445,53 @@ async def post_autopr_result_notification_endpoint(
     return {"ok": True}
 
 
+@router.post(
+    "/projects/{project_id}/tasks/{task_id}/autopr/pr-closed",
+    status_code=200,
+)
+async def post_autopr_pr_closed_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Hand a card back to Todo after its own AutoPR draft was closed unmerged.
+
+    The GitHub webhook already does exactly this; reconcile-merged-cards.sh is
+    the catch-up path for a delivery the webhook missed. Both go through the
+    same note rewrite here so a reconciled card cannot sit in Todo still
+    claiming READY FOR REVIEW — a bash reimplementation of the structured-note
+    parser would drift from the webhook the first time either changed.
+    """
+    from app.matcha.routes.matcha_work.github import _with_autopr_closed_note
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    raw_pr_number = body.get("pr_number")
+    if not isinstance(raw_pr_number, int) or isinstance(raw_pr_number, bool) \
+            or raw_pr_number <= 0:
+        raise HTTPException(status_code=400, detail="pr_number must be a positive integer")
+    async with get_connection() as conn:
+        task = await conn.fetchrow(
+            """SELECT id, project_id, board_column, progress_note
+                 FROM mw_tasks WHERE id = $1 AND project_id = $2""",
+            task_id,
+            project_id,
+        )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["board_column"] not in ("in_progress", "changes_requested"):
+        return {"ok": True, "moved": False}
+    patch = {"board_column": "todo"}
+    closed_note = _with_autopr_closed_note(
+        task["progress_note"], pr_number=raw_pr_number,
+    )
+    if closed_note != task["progress_note"]:
+        patch["progress_note"] = closed_note
+    await pt_svc.update_project_task(project_id, task_id, patch)
+    return {"ok": True, "moved": True}
+
+
 def _serialize_activity_row(r) -> dict:
     d = dict(r)
     if d.get("actor_user_id") is not None:

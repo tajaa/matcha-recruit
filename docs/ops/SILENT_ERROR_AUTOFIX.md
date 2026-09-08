@@ -39,8 +39,10 @@ Pipeline (`scripts/error-autofix/`):
    manual, so "merged" is not "live"; an undeployed fix used to be re-investigated
    every two hours until the next rollout and open a duplicate PR); closed-unmerged →
    skip for a 7-day cooldown, not forever. An open `autofix-nofix` issue suppresses its
-   incident only until the issue has sat untouched for 7 days (a re-investigation
-   refreshes the issue body, restarting the clock). Also caps total open
+   incident for 7 days after the bot last concluded "no safe fix" — the timestamp
+   `publish.sh` stamps into the issue body, which it rewrites on every
+   re-investigation. Deliberately not the issue's `updatedAt`: a human commenting
+   "still broken" would otherwise extend the suppression another full week. Also caps total open
    `autofix`-labeled PRs; a failed count read is fatal, never "no cap". Attempt
    markers older than 7 days are pruned on every pass.
 3b. **`verify-deployed-fixes.sh`** — right after collection, for every merged `autofix`
@@ -48,6 +50,15 @@ Pipeline (`scripts/error-autofix/`):
    passed: fingerprint silent → `production-verified`; fingerprint recurred →
    `production-verification-failed` (and `select.sh` re-opens it). This is the only
    place that ever confirms a production error actually stopped.
+   The grace window opens at the **deploy**, not the merge. `version.json` names
+   the live SHA but not when it shipped, and deploys are manual, so the lane keeps
+   a small ledger (`~/.cache/matcha-autofix/deployed-sha-first-seen.json`) of when
+   it first saw each build live and scores from the earliest observed deploy that
+   contained the merge. Without it a fix merged weeks before its rollout was failed
+   by occurrences that all predate the deploy — and the label is permanent.
+   Verdicts are also bounded by the evidence: the incident snapshot only covers
+   `AUTOFIX_HOURS` (job-level env, shared with `collect.sh`), so the comment states
+   the window and limit the "has not recurred" claim actually rests on.
 4. **`investigate.sh`** — one sandboxed `codex exec` with
    `gpt-5.6-sol` and medium reasoning in a disposable tracked-files-only clone,
    with evidence copied into the clone and enumerated in a bounded prompt. It must produce

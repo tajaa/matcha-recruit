@@ -172,11 +172,21 @@ def _is_autopr_waiting_for_answers_note(note: str) -> bool:
     )
 
 
+# checkpoint.sh wrote this header before the APPROVE-10-MORE-MINUTES rename.
+# Cards paused in that window still carry it, and dropping it would un-pause
+# them: select.sh would pick them up and start a Codex run for work a human
+# parked. Recognizing the old text costs nothing and needs no data migration.
+_AUTOPR_RUNTIME_APPROVAL_PREFIXES = (
+    "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES",
+    "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED",
+)
+
+
 def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
     normalized = (note or "").strip()
-    # checkpoint.sh writes exactly one pause header. Keep in lock-step with
-    # scripts/kanban-autopr/select.sh and the Espresso card/header views.
-    return normalized.startswith("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+    # Keep in lock-step with scripts/kanban-autopr/select.sh and the Espresso
+    # card/header views.
+    return normalized.startswith(_AUTOPR_RUNTIME_APPROVAL_PREFIXES)
 
 
 def _parse_autopr_directives(text: str) -> tuple[list[str], Optional[str]]:

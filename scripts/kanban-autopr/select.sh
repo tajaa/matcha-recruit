@@ -148,8 +148,12 @@ already_handled() {
     # or new feedback on the draft PR it already opened. That PR reply is a
     # documented answer path, so the skip cannot short-circuit the
     # changes_requested branch below before the feedback check has run.
+    # The RUNTIME APPROVAL REQUIRED spelling is the pre-rename header
+    # checkpoint.sh wrote; cards paused then still carry it and must stay
+    # parked rather than being picked up as fresh work.
     local paused=false
-    if [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES"* ]] \
+    if { [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES"* ]] \
+        || [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"* ]]; } \
         && [ "$reconsideration_pending" != true ] \
         && [ "$run_requested" != true ]; then
         paused=true

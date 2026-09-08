@@ -155,8 +155,11 @@ notify_pr_key() {
 # and comments are public input: a human (or any collaborator) pasting the
 # marker into a comment must not be able to make the harness exec into the
 # production container and send mail.
+# `gh pr list --json author` reports a GitHub App as `app/<slug>`, while the
+# comments API reports the same identity as `<slug>[bot]`. Accept both spellings
+# or every real automation PR body is discarded and --reconcile is a no-op.
 is_bot_login() {
-    [[ "$1" == *'[bot]' ]] || [[ "$1" == matcha-* ]]
+    [[ "$1" == *'[bot]' ]] || [[ "$1" == app/* ]] || [[ "$1" == matcha-* ]]
 }
 
 reconcile() {

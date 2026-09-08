@@ -45,6 +45,9 @@ FORCED_MARKER="$STATE_DIR/last-forced-kanban"
 FORCED_REQUEST_SET="$STATE_DIR/last-forced-request-set"
 FORCED_REQUEST_TTL_SECONDS="${AUTOPR_FORCED_REQUEST_TTL_SECONDS:-1800}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
+# Must match hot-redispatch-guard.sh's floor: the workflow skips every step of
+# a run whose predecessor completed less recently than this.
+HOT_REDISPATCH_FLOOR_SECONDS="${AUTOPR_HOT_REDISPATCH_FLOOR_SECONDS:-300}"
 LOG_MAX_BYTES="${AUTOPR_DISPATCH_LOG_MAX_BYTES:-5242880}"
 
 log_event() {
@@ -166,6 +169,16 @@ forced_request_set_already_dispatched() {
     [ "$(cat "$FORCED_REQUEST_SET" 2>/dev/null)" = "$PENDING_REQUEST_SET" ]
 }
 
+# The Kanban workflow runs hot-redispatch-guard.sh first and skips every step
+# — including claiming the card — when its predecessor completed inside the
+# floor. Dispatching into that window still burns FORCED_REQUEST_SET, so one
+# button press would be swallowed for the whole request TTL while the card was
+# never touched. The two floors are measured from different events (last forced
+# dispatch here, last completed run there), so check both before forcing.
+kanban_inside_hot_redispatch_floor() {
+    ! workflow_pass_due "$1" "$HOT_REDISPATCH_FLOOR_SECONDS"
+}
+
 # Every lane shares one Codex login. After a usage-limit exit, a dispatched
 # run pays its whole prelude and then dies in seconds; hold all lanes instead.
 codex_backoff_active() {
@@ -238,6 +251,12 @@ main() {
     fi
 
     if [ "$requested_mode" = true ]; then
+        if kanban_inside_hot_redispatch_floor "$kanban_runs"; then
+            # Retry on a later tick with FORCED_REQUEST_SET untouched, so the
+            # press is honored once the workflow will actually act on it.
+            log_event skip kanban-hot-redispatch-floor
+            exit 0
+        fi
         # An explicit card request outranks the other lanes' schedules: the
         # human is waiting on this specific ticket. The cooldown marker is
         # burned after the dispatch actually lands, not here — a failed

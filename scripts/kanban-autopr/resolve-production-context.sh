@@ -99,7 +99,11 @@ fi
 # local `main`: that ref lags whatever was last checked out there, and a merge
 # deployed before it advanced failed every run with "not an ancestor of main"
 # (2026-09-06, c7cce8c). The fetch is best-effort — offline, fall back to
-# whichever ref exists.
+# whichever ref exists. The workflow fast-forwards the clone's local `main` to
+# origin/main before this step, so the ref gated here is the same one
+# `git archive main` and `git switch -C "$branch" main` use; gating against a
+# ref the draft is not actually based on would assert an invariant that does
+# not hold.
 main_ref=""
 if [ "${AUTOPR_SKIP_MAIN_FETCH:-0}" != 1 ]; then
     git -C "$REPO_ROOT" fetch --quiet origin main >/dev/null 2>&1 || true

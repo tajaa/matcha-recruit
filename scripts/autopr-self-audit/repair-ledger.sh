@@ -11,14 +11,20 @@
 #
 #   repair-ledger.sh should-repair AUDIT_JSON   # 0 = dispatch the repair;
 #                                               # 3 = same failing checks as the
-#                                               #     last attempt and that
-#                                               #     attempt did not publish
+#                                               #     last attempt, inside the
+#                                               #     retry window
 #   repair-ledger.sh record AUDIT_JSON OUTCOME  # attempted|rejected|failed|published
 #
 # A different set of failing check ids (fingerprint) always repairs. The same
 # set repairs again only after AUTOPR_AUDIT_REPAIR_RETRY_SECONDS (default 7 d)
 # — a merged fix changes the fingerprint anyway, and the audit keeps running
 # every six hours regardless, so a fix is noticed the moment it lands.
+#
+# `published` is deliberately NOT exempt. An open, unmerged repair PR leaves the
+# failing checks failing, so the fingerprint is unchanged and exempting it would
+# rerun a 15-minute Sol run every six hours until a human merges — the loop this
+# ledger exists to stop. The merge itself changes the fingerprint and unblocks
+# the next real repair.
 set -uo pipefail
 
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
@@ -41,7 +47,6 @@ should_repair() {
     last_outcome="$(jq -r '.outcome // empty' "$LEDGER" 2>/dev/null)"
     last_at="$(jq -r '.recorded_at // 0' "$LEDGER" 2>/dev/null)"
     [ "$last_fp" = "$fp" ] || exit 0
-    [ "$last_outcome" != published ] || exit 0
     [[ "$last_at" =~ ^[0-9]+$ ]] || exit 0
     if [ $((NOW - last_at)) -ge "$RETRY_SECONDS" ]; then
         exit 0

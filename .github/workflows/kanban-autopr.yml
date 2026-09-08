@@ -88,6 +88,21 @@ jobs:
           if [[ "$current" == bot/task-* ]]; then
             git switch main
           fi
+          # Everything downstream reads the LOCAL main: `git archive main`
+          # builds the control plane, `git switch -C "$branch" main` bases the
+          # draft, and resolve-production-context.sh gates the deployed SHA
+          # against origin/main. This persistent clone's main lags whatever was
+          # last checked out here, so without the fast-forward a commit that is
+          # deployed and in origin/main can be absent from the branch the bot
+          # drafts on — the gate passes while the invariant it protects does
+          # not hold. The clone is disposable; a diverged local main is
+          # leftover bot state, not work to preserve.
+          git fetch --quiet origin main
+          if [ "$(git branch --show-current)" = main ]; then
+            git merge --ff-only origin/main || git reset --hard origin/main
+          else
+            git fetch --quiet --force origin main:main
+          fi
 
       - name: Configure GitHub CLI
         env:
@@ -99,8 +114,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # One list call instead of twelve creates on every no-op pass.
-          existing="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name' 2>/dev/null || true)"
+          # One list call instead of twelve creates on every no-op pass. Read
+          # color and description too: `gh label create --force` is the only
+          # thing that UPDATES an existing label, so a name-only skip meant an
+          # edited description or color here could never reach the repo.
+          existing="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 200 \
+            --json name,color,description \
+            --jq '.[] | "\(.name)|\(.color | ascii_downcase)|\(.description // "")"' 2>/dev/null || true)"
           for l in "autopr|1D76DB|Opened by the kanban-autopr bot" \
                    "autopr-rework|8250DF|Pushed to address review feedback on an existing autopr PR" \
                    "autopr-awaiting-input|5319E7|Draft needs a human answer before automation can continue" \
@@ -114,7 +134,8 @@ jobs:
                    "possible-duplicate|FBCA04|May overlap another open pull request" \
                    "needs-work|D93F0B|Verification found a new failure, or could not run"; do
             IFS='|' read -r name color desc <<< "$l"
-            printf '%s\n' "$existing" | grep -qxF "$name" && continue
+            printf '%s\n' "$existing" \
+              | grep -qxF "$name|$(printf '%s' "$color" | tr 'A-Z' 'a-z')|$desc" && continue
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
           done
 

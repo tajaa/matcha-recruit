@@ -204,8 +204,11 @@ of `write-publication-copy.sh`; `_prompt_todo.txt`/`_prompt_rework.txt` share
 123 lines and have diverged. Consolidate into `scripts/autopr-common/`.
 
 **F16 (A partial, B). `progress_note` grammar parsed in three languages,
-drifted.** *Fixed:* the dead `PAUSED: RUNTIME APPROVAL REQUIRED` marker (read in
-four places, never written) is gone; `acceptance_criteria_met` is now accepted by
+drifted.** *Fixed:* the `PAUSED: RUNTIME APPROVAL REQUIRED` marker is no longer
+written (`checkpoint.sh` writes `PAUSED: APPROVE 10 MORE MINUTES` since 67f3b9c),
+but the four readers still recognize it: it *was* written between 4a74cfd and
+67f3b9c, and cards paused in that window would otherwise silently un-pause and be
+picked up as fresh work — cheaper than a data migration; `acceptance_criteria_met` is now accepted by
 every no-spec parser (`github.py`, `project_task_service.py`, `checkpoint.sh`;
 `migration_required` stays as legacy because old cards carry it); the
 `🤖 AUTO SETUP` structured-note regex in `github.py` matched only the status
@@ -221,8 +224,9 @@ SHAs).
 **F18 (B).** Error-bot selection is an uncached GitHub N+1 capped at 100.
 
 **F19 (A).** Dead no-fix escape hatch (sentinel never written) replaced by a
-7-day cooldown on the issue's `updatedAt`; attempt markers pruned after 7 days;
-dispatch log rotated.
+7-day cooldown measured from the confirmation timestamp `publish.sh` stamps into
+the issue body — not `updatedAt`, which any human comment bumps; attempt markers
+pruned after 7 days; dispatch log rotated.
 
 **F20 (B).** Overlap guard is TTL-shaped (60 s snapshot, `rmdir`+`mkdir`
 reclaim). Lifetime dispatch lock.

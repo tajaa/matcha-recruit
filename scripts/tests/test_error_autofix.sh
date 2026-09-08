@@ -213,7 +213,7 @@ cat > "$TMP_DIR/bin/gh" <<'EOF'
 case "$1 $2" in
     "pr list")
         if [[ "$*" == *"--label autofix"* ]]; then
-            echo '[{"number":42,"state":"OPEN","title":"🟡 [C70] fix: AttributeError","url":"https://github.test/pr/42","author":{"login":"'"${NOTIFY_STUB_AUTHOR:-github-actions[bot]}"'"},"body":"<!-- matcha-autofix-notify-review: abc123abc123 -->\n<!-- matcha-autopr-criticality: yellow -->\n<!-- matcha-autopr-confidence-score: 70 -->"}]'
+            echo '[{"number":42,"state":"OPEN","title":"🟡 [C70] fix: AttributeError","url":"https://github.test/pr/42","author":{"login":"'"${NOTIFY_STUB_AUTHOR:-app/github-actions}"'"},"body":"<!-- matcha-autofix-notify-review: abc123abc123 -->\n<!-- matcha-autopr-criticality: yellow -->\n<!-- matcha-autopr-confidence-score: 70 -->"}]'
         else
             echo '[]'
         fi
@@ -295,9 +295,15 @@ cat > "$TMP_DIR/bin/gh" <<EOF
 #!/usr/bin/env bash
 case "\$1 \$2" in
     "issue list")
-        # No open no-fix issue tracking this incident, unless a test overrides
-        # it with the issue's updatedAt (the cooldown clock).
-        echo "\${GH_STUB_ISSUE_UPDATED:-}"
+        # Emulate gh's own --jq so select.sh's real filter is exercised: the
+        # cooldown clock comes from a marker in the issue BODY, and a stub that
+        # echoed a pre-computed timestamp would never test that.
+        jq_expr=""; want_jq=false
+        for a in "\$@"; do
+            if [ "\$want_jq" = true ]; then jq_expr="\$a"; want_jq=false; fi
+            [ "\$a" != --jq ] || want_jq=true
+        done
+        printf '%s' "\${GH_STUB_ISSUES:-[]}" | jq -r "\$jq_expr"
         ;;
     "pr list")
         if [[ "\$*" == *"--label autofix"* ]]; then
@@ -365,15 +371,34 @@ check "select.sh emits an incident with no prior PR at all" $([ -n "$out" ] && e
 ################################################################################
 # open no-fix issue must not starve the queue: skip, don't re-investigate
 ################################################################################
-GH_STUB_ISSUE_UPDATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" run_select "$incident_file" > /dev/null 2>&1
+nofix_issue() {
+    # $1 = the confirmation marker publish.sh stamps into the body, $2 = createdAt
+    jq -cn --arg confirmed "$1" --arg created "$2" \
+        '[{title: "error: Boom in /x [ddd444444444]",
+           body: ("no safe fix\n<!-- matcha-autofix-nofix-confirmed: " + $confirmed + " -->"),
+           createdAt: $created}]'
+}
+now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+GH_STUB_ISSUES="$(nofix_issue "$now_iso" "$now_iso")" run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips (exit 3) when an open no-fix issue already tracks this key" $([ "$?" = "3" ] && echo 0 || echo 1)
 
-# …but not forever: an issue nobody has touched in a week is re-investigated
-# (publish.sh then refreshes its body, which restarts the clock).
-out="$(GH_STUB_ISSUE_UPDATED="2026-01-01T00:00:00Z" run_select "$incident_file")"
+# …but not forever: once the bot's own last no-fix confirmation is a week old
+# the incident is re-investigated (publish.sh then restamps the body).
+out="$(GH_STUB_ISSUES="$(nofix_issue "2026-01-01T00:00:00Z" "2026-01-01T00:00:00Z")" run_select "$incident_file")"
 check "select.sh re-investigates a no-fix issue after its cooldown" $([ -n "$out" ] && echo 0 || echo 1)
 
-unset GH_STUB_ISSUE_UPDATED
+# A human commenting "still broken" bumps the issue's updatedAt. Keying the
+# cooldown off that would extend the suppression another full week — the exact
+# opposite of what the comment means.
+out="$(GH_STUB_ISSUES="$(nofix_issue "2026-01-01T00:00:00Z" "$now_iso")" run_select "$incident_file")"
+check "a human touching the no-fix issue does not extend its cooldown" $([ -n "$out" ] && echo 0 || echo 1)
+
+# An issue predating the marker falls back to createdAt rather than never expiring.
+out="$(jq -cn '[{title:"error: Boom in /x [ddd444444444]",body:"legacy body",createdAt:"2026-01-01T00:00:00Z"}]' > "$TMP_DIR/legacy-issue.json"; \
+    GH_STUB_ISSUES="$(cat "$TMP_DIR/legacy-issue.json")" run_select "$incident_file")"
+check "a pre-marker no-fix issue falls back to createdAt" $([ -n "$out" ] && echo 0 || echo 1)
+
+unset GH_STUB_ISSUES
 out="$(run_select "$incident_file")"
 check "select.sh still investigates once the no-fix issue is gone" $([ -n "$out" ] && echo 0 || echo 1)
 
@@ -417,9 +442,16 @@ EOF
 chmod +x "$TMP_DIR/bin/gh"
 jq -n --arg sha "$parent_sha" '[{number:77,mergedAt:"2026-01-01T00:00:00Z",mergeCommit:{oid:$sha},labels:[{name:"autofix"}],url:"x",body:"<!-- autofix-key: aaa111111111 -->"}]' > "$TMP_DIR/merged-prs.json"
 printf '[]\n' > "$TMP_DIR/quiet-incidents.json"
+# Deploys are manual, so the verifier scores from when this lane FIRST saw the
+# build live, not from mergedAt. Seed that observation an hour ago: on a real
+# first sighting every PR is "waiting" until the grace window elapses.
+deploy_ledger="$TMP_DIR/deploy-ledger.json"
+seen_ago="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)"
+jq -n --arg sha "$head_sha" --arg seen "$seen_ago" '{($sha): $seen}' > "$deploy_ledger"
 : > "$TMP_DIR/verify-calls"
 PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
   GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$head_sha" \
+  AUTOFIX_DEPLOY_LEDGER="$deploy_ledger" AUTOFIX_DEPLOY_GRACE_HOURS=0 \
   "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/quiet-incidents.json" >/dev/null 2>&1
 check "a deployed fix whose fingerprint went quiet is marked production-verified" \
   $(grep -q -- '--add-label production-verified' "$TMP_DIR/verify-calls" && grep -q '^pr comment 77 ' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
@@ -427,12 +459,24 @@ make_incident "aaa111111111" "2026-08-19T00:00:00Z" "$(date -u +%Y-%m-%dT%H:%M:%
 : > "$TMP_DIR/verify-calls"
 PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
   GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$head_sha" \
+  AUTOFIX_DEPLOY_LEDGER="$deploy_ledger" AUTOFIX_DEPLOY_GRACE_HOURS=0 \
   "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/loud-incidents.json" >/dev/null 2>&1
 check "a deployed fix whose fingerprint recurs is marked production-verification-failed" \
   $(grep -q -- '--add-label production-verification-failed' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
+# A merge that only just went live is not scored at all: every occurrence in the
+# snapshot predates the deploy, so failing it would libel a working fix.
+jq -n --arg sha "$head_sha" --arg seen "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{($sha): $seen}' > "$TMP_DIR/fresh-ledger.json"
+: > "$TMP_DIR/verify-calls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
+  GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$head_sha" \
+  AUTOFIX_DEPLOY_LEDGER="$TMP_DIR/fresh-ledger.json" \
+  "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/loud-incidents.json" >/dev/null 2>&1
+check "a just-deployed merge is not failed by pre-deploy occurrences" \
+  $([ ! -s "$TMP_DIR/verify-calls" ] || ! grep -q -- '--add-label' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
 : > "$TMP_DIR/verify-calls"
 PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
   GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$parent_sha~1" \
+  AUTOFIX_DEPLOY_LEDGER="$deploy_ledger" \
   "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/quiet-incidents.json" >/dev/null 2>&1
 check "an undeployed merge is neither verified nor failed" \
   $(! grep -q -- '--add-label' "$TMP_DIR/verify-calls" && echo 0 || echo 1)

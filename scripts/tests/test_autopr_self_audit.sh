@@ -106,13 +106,19 @@ printf '{"fingerprint":"bbbbbbbbbbbb","checks":[]}\n' > "$TMP_DIR/audit-b.json"
 "$LEDGER_SH" should-repair "$TMP_DIR/audit-b.json"
 AUTOPR_LEDGER_NOW=$(( $(date +%s) + 700000 )) "$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json"
 "$LEDGER_SH" record "$TMP_DIR/audit-a.json" published
-"$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json"
+# A published-but-unmerged repair leaves the same checks failing: re-dispatching
+# would burn a Sol run every six hours until a human merges.
+set +e
+"$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json" 2>/dev/null; published_rc=$?
+set -e
+[ "$published_rc" -eq 3 ]
+AUTOPR_LEDGER_NOW=$(( $(date +%s) + 700000 )) "$LEDGER_SH" should-repair "$TMP_DIR/audit-a.json"
 jq -e '.failing_checks == ["contract_tests"] and .outcome == "published"' "$TMP_DIR/ledger.json" >/dev/null
 grep -qF 'repair-ledger.sh should-repair' "$WORKFLOW"
 grep -qF "if: steps.ledger.outputs.repair == 'true'" "$WORKFLOW"
 grep -qF 'repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" rejected' "$WORKFLOW"
 unset AUTOPR_SELF_AUDIT_LEDGER
-printf 'PASS: a rejected repair is not retried for the same failing checks until the ledger window elapses\n'
+printf 'PASS: a repair is not retried for the same failing checks until the ledger window elapses\n'
 
 # The repair lane may touch the harness, so the bridge's default apply-time
 # denylist is narrowed here — but never to CI, deploy, secrets, or the

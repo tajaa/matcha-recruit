@@ -219,6 +219,12 @@ if [ "$codex_rc" -ne 0 ]; then
     printf 'kanban-autopr sandbox: Codex exited %s inside msandbox\n' "$codex_rc" >&2
     exit "$codex_rc"
 fi
+# A completed Codex call proves the quota is back. Nothing else clears the
+# marker, so without this one usage-limit hit holds every lane until resume_at
+# (up to 24 h) even after the account has recovered.
+if [ -x "$CODEX_BACKOFF" ]; then
+    "$CODEX_BACKOFF" clear || true
+fi
 
 HOST_REPORT="$IO_DIR/output/report.md"
 HOST_DECISION="$IO_DIR/output/decision.json"
@@ -236,6 +242,16 @@ cp "$HOST_DECISION" "$DECISION_FILE"
 # and committed locally; the disposable clone's history is never trusted.
 git -C "$SANDBOX_WORKSPACE" add --intent-to-add --all -- .
 
+# Rename detection collapses a rename pair into the destination path only, so a
+# model could move a protected file onto an allowed path and have the deletion
+# applied to the trusted checkout without the path guard ever seeing the source.
+# Every read of the sandbox diff goes through this helper with renames off, so a
+# rename is always recorded as delete + add and both paths reach the guard, the
+# changed-file cap, and the patch itself.
+sandbox_diff() {
+    git -C "$SANDBOX_WORKSPACE" -c diff.renames=false diff "$@"
+}
+
 # Repository instruction files are operator-owned context, not product output.
 # A model may occasionally append implementation notes to one despite the
 # prompt. Restore tracked instruction files mechanically before constructing
@@ -251,11 +267,11 @@ while IFS= read -r -d '' changed_path; do
             fi
             ;;
     esac
-done < <(git -C "$SANDBOX_WORKSPACE" diff --name-only -z "$MODEL_BASE_SHA" -- .)
+done < <(sandbox_diff --name-only -z "$MODEL_BASE_SHA" -- .)
 
 PATCH_FILE="$RUNTIME_ROOT/model.patch"
-git -C "$SANDBOX_WORKSPACE" diff --binary --full-index "$MODEL_BASE_SHA" -- . > "$PATCH_FILE"
-CHANGED_FILE_COUNT="$(git -C "$SANDBOX_WORKSPACE" diff --name-only "$MODEL_BASE_SHA" -- . \
+sandbox_diff --binary --full-index "$MODEL_BASE_SHA" -- . > "$PATCH_FILE"
+CHANGED_FILE_COUNT="$(sandbox_diff --name-only "$MODEL_BASE_SHA" -- . \
     | wc -l | tr -d '[:space:]')"
 PATCH_BYTES="$(wc -c < "$PATCH_FILE" | tr -d '[:space:]')"
 [ "$CHANGED_FILE_COUNT" -le "$MAX_CHANGED_FILES" ] \
@@ -265,8 +281,9 @@ PATCH_BYTES="$(wc -c < "$PATCH_FILE" | tr -d '[:space:]')"
 
 # Harness, CI, container, deploy, and agent-config paths never reach the
 # trusted checkout from a model patch (see PATH_DENY_RE above). Deletions and
-# renames count too: the list comes from the same diff that becomes the patch.
-denied_paths="$(git -C "$SANDBOX_WORKSPACE" diff --name-only "$MODEL_BASE_SHA" -- . \
+# renames count too: the list comes from the same rename-free diff that becomes
+# the patch, so a rename out of a protected path still shows the source path.
+denied_paths="$(sandbox_diff --name-only "$MODEL_BASE_SHA" -- . \
     | grep -E "$PATH_DENY_RE" || true)"
 if [ -n "$denied_paths" ]; then
     printf 'kanban-autopr sandbox: refusing model changes to protected paths:\n%s\n' "$denied_paths" >&2
@@ -276,7 +293,7 @@ fi
 # A symlink or gitlink can make an apparently allowed source path point
 # elsewhere or smuggle repository topology into the patch. AutoPR has no
 # legitimate need to create/change either, so reject those modes mechanically.
-if git -C "$SANDBOX_WORKSPACE" diff --raw "$MODEL_BASE_SHA" -- . \
+if sandbox_diff --raw "$MODEL_BASE_SHA" -- . \
     | awk '$1 ~ /^:(120000|160000)$/ || $2 ~ /^(120000|160000)$/ {found=1} END {exit !found}'; then
     die "sandbox patch contains a symlink or submodule change"
 fi

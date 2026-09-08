@@ -60,8 +60,11 @@ struct KanbanCardView: View {
     }
 
     private var autoPRRuntimeDetails: String? {
+        // The RUNTIME APPROVAL REQUIRED spelling is the pre-rename header;
+        // cards paused before the rename still carry it.
         guard let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
               note.hasPrefix("🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES")
+                || note.hasPrefix("🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED")
         else { return nil }
         let lines = note.split(separator: "\n", omittingEmptySubsequences: true)
         guard lines.count > 1 else {

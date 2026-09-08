@@ -27,9 +27,9 @@ CLOSED_COOLDOWN_DAYS=7
 DEPLOY_GRACE_HOURS=6
 ATTEMPT_COOLDOWN_HOURS=2
 # An open no-fix issue used to suppress its incident forever. Now it only
-# suppresses until the issue has sat untouched this long; a re-investigation
-# refreshes the issue body (publish.sh edits it in place), which restarts the
-# clock, so a genuinely unfixable incident costs one model run a week.
+# suppresses for this long after the bot last confirmed "no safe fix" — the
+# timestamp publish.sh stamps into the issue body, which it rewrites on every
+# re-investigation. A genuinely unfixable incident costs one model run a week.
 NOFIX_COOLDOWN_DAYS="${AUTOFIX_NOFIX_COOLDOWN_DAYS:-7}"
 ATTEMPTS_RETENTION_DAYS="${AUTOFIX_ATTEMPTS_RETENTION_DAYS:-7}"
 
@@ -166,11 +166,20 @@ already_handled() {
     # reliable matching — GitHub's body/comment search index is not
     # reliable enough to dedup on (see publish.sh).
     [[ "$key" =~ ^[0-9a-f]{12}$ ]] || die "stable_key has unexpected shape: $key"
-    local nofix_updated nofix_cooldown_end now
-    nofix_updated="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
-        --json title,updatedAt --jq "[.[] | select(.title | contains(\"[$key]\")) | .updatedAt] | max // empty")"
-    if [ -n "$nofix_updated" ]; then
-        nofix_cooldown_end="$(_iso_plus_hours "$nofix_updated" $((NOFIX_COOLDOWN_DAYS * 24)))"
+    #
+    # The cooldown runs from the timestamp publish.sh stamps into the issue
+    # BODY, not from the issue's updatedAt: a human commenting "still broken"
+    # bumps updatedAt and would silently extend the suppression by another full
+    # window — the opposite of what that comment means. Issues written before
+    # the marker existed fall back to createdAt.
+    local nofix_confirmed nofix_cooldown_end now
+    nofix_confirmed="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
+        --json title,body,createdAt --jq "[.[] | select(.title | contains(\"[$key]\"))
+            | (((.body // \"\")
+                | capture(\"<!-- matcha-autofix-nofix-confirmed: (?<t>[0-9TZ:-]+) -->\").t)? // .createdAt)]
+            | max // empty")"
+    if [ -n "$nofix_confirmed" ]; then
+        nofix_cooldown_end="$(_iso_plus_hours "$nofix_confirmed" $((NOFIX_COOLDOWN_DAYS * 24)))"
         now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         if [[ "$now" < "$nofix_cooldown_end" ]]; then
             echo skip
@@ -261,12 +270,6 @@ already_handled() {
 }
 
 # GNU/BSD date compatible ISO-8601 arithmetic (runner is macOS/BSD date).
-_iso_plus_hours() {
-    local iso="$1" hours="$2"
-    date -u -j -v"+${hours}H" -f "%Y-%m-%dT%H:%M:%SZ" "$iso" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || date -u -d "$iso + ${hours} hours" +%Y-%m-%dT%H:%M:%SZ
-}
-
 for ((i = 0; i < count; i++)); do
     incident="$(jq -c ".[$i]" "$INCIDENTS_FILE")"
     key="$(printf '%s' "$incident" | jq -r '.stable_key')"

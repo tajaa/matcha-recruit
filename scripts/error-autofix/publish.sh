@@ -141,7 +141,9 @@ $(cat "$REPORT_FILE" 2>/dev/null || echo '_(no report file)_')
 \`\`\`
 $TRACEBACK
 \`\`\`
-</details>"
+</details>
+
+<!-- matcha-autofix-nofix-confirmed: $(date -u +%Y-%m-%dT%H:%M:%SZ) -->"
 
     existing="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
         --json number,title --jq "map(select(.title | contains(\"[$KEY]\"))) | .[0].number // empty")"
