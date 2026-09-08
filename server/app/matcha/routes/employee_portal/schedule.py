@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from app.matcha.models.scheduling.employee_schedule import (
-    AvailabilityReplace, CounterpartyAccept, ScheduleRequestCreate,
+    AvailabilityChangeRequestCreate, CounterpartyAccept, ScheduleRequestCreate,
 )
 from app.matcha.dependencies import require_employee_record
 from app.matcha.services.scheduling.time_off_guard import (
-    PUBLISHED_WEEK_TIME_OFF_DETAIL, has_published_schedule_week,
+    PUBLISHED_WEEK_AVAILABILITY_DETAIL, PUBLISHED_WEEK_TIME_OFF_DETAIL,
+    has_published_schedule_week,
 )
 
 from ._shared import _schedule_dep
@@ -388,6 +389,13 @@ async def withdraw_schedule_request(
 
 @router.get("/me/schedule/availability", dependencies=_schedule_dep)
 async def get_my_availability(employee: dict = Depends(require_employee_record)):
+    """Current availability plus the change the employee is waiting on.
+
+    There is no PUT counterpart: an employee's own availability edit is a
+    request a manager approves (see the POST below), so this response has to
+    carry the pending proposal or the portal cannot show what was asked for.
+    """
+    from app.matcha.routes.employee_schedule._shared import REQUEST_SELECT, serialize_request
     from app.matcha.services.scheduling.schedule_profiles import (
         fetch_availability_windows, fetch_schedule_profile,
     )
@@ -398,26 +406,100 @@ async def get_my_availability(employee: dict = Depends(require_employee_record))
         profile = await fetch_schedule_profile(
             conn, company_id=employee["org_id"], employee_id=employee["id"],
         )
-    return {"availability_state": profile.availability_state, "windows": windows}
+        pending = await conn.fetchrow(
+            f"{REQUEST_SELECT} WHERE r.employee_id = $1 AND r.company_id = $2 "
+            "AND r.request_type = 'availability' "
+            "AND r.status IN ('pending', 'awaiting_manager') "
+            "ORDER BY r.created_at DESC LIMIT 1",
+            employee["id"], employee["org_id"],
+        )
+    return {
+        "availability_state": profile.availability_state,
+        "windows": windows,
+        "pending_request": serialize_request(dict(pending)) if pending else None,
+    }
 
 
-@router.put("/me/schedule/availability", dependencies=_schedule_dep)
-async def replace_my_availability(
-    body: AvailabilityReplace,
+@router.post("/me/schedule/availability-requests", dependencies=_schedule_dep)
+async def request_my_availability_change(
+    body: AvailabilityChangeRequestCreate,
     employee: dict = Depends(require_employee_record),
 ):
-    """Full replacement; omitted state preserves legacy empty=always behavior."""
-    from app.matcha.services.scheduling.schedule_profiles import replace_availability_core
+    """Submit an availability change for manager approval.
+
+    Nothing about the employee's live availability changes here — the proposal
+    is stored on the request and only written through on approval, on or after
+    ``effective_on`` (services/scheduling/availability_requests.py).
+    """
+    from app.matcha.routes.employee_schedule._shared import (
+        REQUEST_SELECT, log_audit, serialize_request,
+    )
+    from app.matcha.services.scheduling.availability_requests import (
+        serialize_proposed_availability,
+    )
+    from app.matcha.services.scheduling.schedule_profiles import (
+        effective_availability_state,
+    )
 
     company_id = employee["org_id"]
+    resolved_state = effective_availability_state(
+        body.availability.availability_state, body.availability.windows,
+    )
     async with get_connection() as conn:
-        async with conn.transaction():
-            result = await replace_availability_core(
-                conn, company_id=company_id, employee_id=employee["id"],
-                availability_state=body.availability_state, windows=body.windows,
-                actor_user_id=employee.get("user_id"), actor_kind="employee",
+        # CURRENT_DATE, not the server process's clock: every other date rule on
+        # this surface (the published-week guard, promotion) is decided by the
+        # database, and two clocks would disagree at the day boundary.
+        today = await conn.fetchval("SELECT CURRENT_DATE")
+        if body.effective_on < today:
+            raise HTTPException(
+                status_code=422,
+                detail="Availability changes can only start today or later.",
             )
-    return {"saved": result["saved"], "availability_state": result["state"]}
+        if await has_published_schedule_week(
+            conn, company_id, body.effective_on, body.effective_on,
+        ):
+            raise HTTPException(
+                status_code=409, detail=PUBLISHED_WEEK_AVAILABILITY_DETAIL,
+            )
+        async with conn.transaction():
+            existing = await conn.fetchval(
+                """SELECT 1 FROM schedule_requests
+                    WHERE employee_id = $1 AND company_id = $2
+                      AND request_type = 'availability'
+                      AND status IN ('pending', 'awaiting_manager')
+                    FOR UPDATE""",
+                employee["id"], company_id,
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "You already have an availability change awaiting review. "
+                        "Withdraw it before submitting another."
+                    ),
+                )
+            request_id = await conn.fetchval(
+                """
+                INSERT INTO schedule_requests
+                    (company_id, employee_id, request_type, reason, status,
+                     proposed_availability, availability_effective_on)
+                VALUES ($1,$2,'availability',$3,'awaiting_manager',$4::jsonb,$5)
+                RETURNING id
+                """,
+                company_id, employee["id"], body.reason,
+                serialize_proposed_availability(resolved_state, body.availability.windows),
+                body.effective_on,
+            )
+            await log_audit(
+                conn, company_id, "request", request_id, employee.get("user_id"),
+                "request.create",
+                {"request_type": "availability",
+                 "availability_state": resolved_state,
+                 "windows": len(body.availability.windows),
+                 "effective_on": body.effective_on.isoformat()},
+            )
+        row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1", request_id)
+    return serialize_request(dict(row))
 
 
 @router.delete("/me/schedule/requests/{request_id}", dependencies=_schedule_dep)

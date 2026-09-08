@@ -3,7 +3,7 @@
 export type ShiftStatus = 'draft' | 'published' | 'cancelled'
 export type ShiftKind = 'work' | 'training'
 export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
-export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable'
+export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable' | 'availability'
 export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
 export type AvailabilityState = 'unconfirmed' | 'always_available' | 'windows'
 export type QualificationStatus = 'active' | 'training' | 'suspended'
@@ -492,6 +492,11 @@ export interface ScheduleAutomationPayload {
   target_week_start: string | null
 }
 
+export interface ProposedAvailability {
+  availability_state: AvailabilityState | null
+  windows: { weekday: number; start_time: string; end_time: string }[]
+}
+
 export interface ScheduleRequest {
   id: string
   employee_id: string
@@ -512,6 +517,11 @@ export interface ScheduleRequest {
   counter_shift_department?: string | null
   unavailable_start: string | null
   unavailable_end: string | null
+  // Availability requests only. `availability_applied_at` stays null on an
+  // approved future-dated change until its start date arrives.
+  proposed_availability: ProposedAvailability | null
+  availability_effective_on: string | null
+  availability_applied_at: string | null
   reason: string | null
   status: RequestStatus
   can_withdraw?: boolean
@@ -522,6 +532,18 @@ export interface ScheduleRequest {
 
 // 0 = Sunday .. 6 = Saturday (matches the backend weekday mask).
 export const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/** One line describing a proposed availability set, for the portal's pending
+ *  banner and the manager's review queue — both must read it the same way. */
+export function describeProposedAvailability(proposal: ProposedAvailability | null | undefined): string {
+  if (!proposal) return '—'
+  if (proposal.availability_state === 'always_available' || proposal.windows.length === 0) {
+    return 'Available anytime'
+  }
+  return proposal.windows
+    .map((w) => `${WEEKDAY_LABELS[w.weekday] ?? w.weekday} ${w.start_time}–${w.end_time}`)
+    .join(' · ')
+}
 
 export const STATUS_TONE: Record<ShiftStatus, string> = {
   draft: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',

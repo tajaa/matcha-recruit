@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../components/ui'
-import { toISODate, type ScheduleRequest, type Shift } from '../../types/employeeSchedule'
+import { addDays, toISODate, type ScheduleRequest, type Shift } from '../../types/employeeSchedule'
 import PortalSchedule from './PortalSchedule'
 
 const {
   acceptMyRequestMock,
+  fetchMyAvailabilityMock,
+  submitMyAvailabilityRequestMock,
   fetchMyCoworkersMock,
   fetchMyOffersMock,
   fetchMyRequestsMock,
@@ -13,6 +15,8 @@ const {
   fetchMyTeamScheduleMock,
 } = vi.hoisted(() => ({
   acceptMyRequestMock: vi.fn(),
+  fetchMyAvailabilityMock: vi.fn(),
+  submitMyAvailabilityRequestMock: vi.fn(),
   fetchMyCoworkersMock: vi.fn(),
   fetchMyOffersMock: vi.fn(),
   fetchMyRequestsMock: vi.fn(),
@@ -24,13 +28,13 @@ vi.mock('../../api/employees/employeeSchedule', () => ({
   acceptMyRequest: acceptMyRequestMock,
   cancelMyRequest: vi.fn(),
   createMyRequest: vi.fn(),
-  fetchMyAvailability: vi.fn(),
+  fetchMyAvailability: fetchMyAvailabilityMock,
   fetchMyCoworkers: fetchMyCoworkersMock,
   fetchMyOffers: fetchMyOffersMock,
   fetchMyRequests: fetchMyRequestsMock,
   fetchMySchedule: fetchMyScheduleMock,
   fetchMyTeamSchedule: fetchMyTeamScheduleMock,
-  saveMyAvailability: vi.fn(),
+  submitMyAvailabilityRequest: submitMyAvailabilityRequestMock,
   withdrawMyRequest: vi.fn(),
 }))
 
@@ -54,6 +58,9 @@ const selectedSwap: ScheduleRequest = {
   counter_shift_department: null,
   unavailable_start: null,
   unavailable_end: null,
+  proposed_availability: null,
+  availability_effective_on: null,
+  availability_applied_at: null,
   reason: null,
   status: 'awaiting_counterparty',
   review_notes: null,
@@ -98,6 +105,12 @@ beforeEach(() => {
   fetchMyOffersMock.mockResolvedValue({ offers: [selectedSwap] })
   fetchMyCoworkersMock.mockResolvedValue({ employees: [] })
   acceptMyRequestMock.mockResolvedValue({ ...selectedSwap, status: 'awaiting_manager' })
+  fetchMyAvailabilityMock.mockResolvedValue({
+    availability_state: 'always_available', windows: [], pending_request: null,
+  })
+  submitMyAvailabilityRequestMock.mockResolvedValue({
+    ...selectedSwap, request_type: 'availability', status: 'awaiting_manager',
+  })
 })
 
 describe('PortalSchedule swap acceptance', () => {
@@ -174,5 +187,72 @@ describe('PortalSchedule time-off requests', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Time-off requests cannot be submitted for a week with published shifts.')
     expect(screen.getByRole('button', { name: 'Submit request' })).toBeDisabled()
+  })
+})
+
+describe('PortalSchedule availability changes', () => {
+  const availabilityRequest: ScheduleRequest = {
+    ...selectedSwap,
+    id: 'availability-1',
+    request_type: 'availability',
+    shift_id: null,
+    shift_starts_at: null,
+    shift_ends_at: null,
+    target_employee_id: null,
+    counter_shift_id: null,
+    counter_shift_starts_at: null,
+    counter_shift_ends_at: null,
+    status: 'awaiting_manager',
+    availability_effective_on: '2099-10-05',
+    proposed_availability: {
+      availability_state: 'windows',
+      windows: [{ weekday: 1, start_time: '09:00', end_time: '17:00' }],
+    },
+  }
+
+  it('submits a change for approval instead of saving it', async () => {
+    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: /my weekly availability/i }))
+    await waitFor(() => expect(fetchMyAvailabilityMock).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: /send for approval/i }))
+
+    await waitFor(() => expect(submitMyAvailabilityRequestMock).toHaveBeenCalled())
+    const payload = submitMyAvailabilityRequestMock.mock.calls[0][0]
+    expect(payload.availability).toEqual({ availability_state: 'always_available', windows: [] })
+    expect(payload.effective_on).toBe(addDays(toISODate(new Date()), 14))
+  })
+
+  it('shows a pending change and blocks a second one', async () => {
+    fetchMyAvailabilityMock.mockResolvedValue({
+      availability_state: 'windows',
+      windows: [{ weekday: 1, start_time: '09:00', end_time: '17:00' }],
+      pending_request: availabilityRequest,
+    })
+
+    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: /my weekly availability/i }))
+
+    expect(await screen.findByText('Awaiting manager approval')).toBeInTheDocument()
+    expect(screen.getByText(/Starts 2099-10-05 · Mon 09:00–17:00/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /send for approval/i })).toBeDisabled()
+    expect(submitMyAvailabilityRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('warns when the start date falls in a published week', async () => {
+    const start = new Date()
+    start.setUTCDate(start.getUTCDate() + 14)
+    const date = start.toISOString().slice(0, 10)
+    fetchMyTeamScheduleMock.mockResolvedValue({
+      shifts: [{ ...employeeAShift, starts_at: `${date}T09:00:00Z`, ends_at: `${date}T17:00:00Z` }],
+    })
+
+    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: /my weekly availability/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('That week is already published.')
+    expect(screen.getByRole('button', { name: /send for approval/i })).toBeDisabled()
   })
 })

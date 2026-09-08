@@ -1,4 +1,4 @@
-"""Shared published-week guard for employee time-off request paths."""
+"""Shared published-week guard for employee time-off and availability paths."""
 from datetime import date
 from uuid import UUID
 
@@ -6,6 +6,12 @@ from uuid import UUID
 PUBLISHED_WEEK_TIME_OFF_DETAIL = (
     "Time-off requests cannot be submitted for a week with published shifts. "
     "Choose a different week."
+)
+
+
+PUBLISHED_WEEK_AVAILABILITY_DETAIL = (
+    "Availability changes cannot start inside a week that already has published "
+    "shifts. Pick a start date in a week that has not been published yet."
 )
 
 

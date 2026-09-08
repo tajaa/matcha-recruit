@@ -14,6 +14,7 @@ from app.matcha.models.scheduling.employee_schedule import RequestReview
 from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
+from ...services.scheduling.availability_requests import apply_availability_request
 from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
 from ...services.scheduling.schedule_request_notifications import (
     mark_manager_ready_notifications_resolved,
@@ -110,8 +111,10 @@ async def review_request(request_id: UUID, body: RequestReview,
     async with get_connection() as conn:
         async with conn.transaction():
             req = await conn.fetchrow(
-                """SELECT id, request_type, shift_id, employee_id, target_employee_id,
-                          counter_shift_id, counterparty_confirmed_at, status
+                """SELECT id, company_id, request_type, shift_id, employee_id,
+                          target_employee_id, counter_shift_id,
+                          counterparty_confirmed_at, status,
+                          proposed_availability, availability_effective_on
                    FROM schedule_requests WHERE id = $1 AND company_id = $2 FOR UPDATE""",
                 request_id, company_id,
             )
@@ -245,6 +248,20 @@ async def review_request(request_id: UUID, body: RequestReview,
                    WHERE id = $1 AND company_id = $2""",
                 request_id, company_id, new_status, body.review_notes, current_user.id,
             )
+            availability_applied = False
+            if new_status == "approved" and req["request_type"] == "availability":
+                # Only a change that has already reached its start date is
+                # written now. A future-dated one stays on the row and is
+                # promoted on the day it takes effect — writing it early would
+                # re-decide the weeks in between against a pattern nobody has
+                # agreed applies to them yet.
+                # The status UPDATE above runs first so the row this reads is
+                # already `approved`: promotion looks for exactly that.
+                if req["availability_effective_on"] <= await conn.fetchval("SELECT CURRENT_DATE"):
+                    await apply_availability_request(
+                        conn, req, actor_user_id=current_user.id,
+                    )
+                    availability_applied = True
             await mark_manager_ready_notifications_resolved(
                 conn, company_id=company_id, request_id=request_id,
             )
@@ -257,7 +274,10 @@ async def review_request(request_id: UUID, body: RequestReview,
                  "counter_shift_id": str(req["counter_shift_id"]) if req["counter_shift_id"] else None,
                  "employee_id": str(req["employee_id"]),
                  "target_employee_id": str(req["target_employee_id"]) if req["target_employee_id"] else None,
-                 "shift_starts_at": shift_start.isoformat() if shift_start else None},
+                 "shift_starts_at": shift_start.isoformat() if shift_start else None,
+                 **({"availability_effective_on": str(req["availability_effective_on"]),
+                     "availability_applied": availability_applied}
+                    if req["request_type"] == "availability" else {})},
             )
         if changed_shift_ids:
             await reconcile_warning_events(conn, company_id, changed_shift_ids)

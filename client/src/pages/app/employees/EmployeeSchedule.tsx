@@ -19,7 +19,7 @@ import type {
   Shift, RosterEmployee, ScheduleJob, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
-  STATUS_TONE, REQUEST_TONE, errorMessage,
+  STATUS_TONE, REQUEST_TONE, describeProposedAvailability, errorMessage,
   fmtTime, fmtDayLabel, toISODate, addDays, startOfWeek,
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
@@ -1005,9 +1005,16 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
               <div className="text-[11px] text-zinc-500">
                 {r.request_type === 'unavailable'
                   ? `${r.unavailable_start ?? ''} → ${r.unavailable_end ?? ''}`
-                  : r.shift_starts_at ? `${fmtDayLabel(r.shift_starts_at.slice(0, 10))} ${fmtTime(r.shift_starts_at)}${r.shift_ends_at ? `–${fmtTime(r.shift_ends_at)}` : ''}` : '—'}
+                  : r.request_type === 'availability'
+                    ? `Starts ${r.availability_effective_on ?? '—'} · ${describeProposedAvailability(r.proposed_availability)}`
+                    : r.shift_starts_at ? `${fmtDayLabel(r.shift_starts_at.slice(0, 10))} ${fmtTime(r.shift_starts_at)}${r.shift_ends_at ? `–${fmtTime(r.shift_ends_at)}` : ''}` : '—'}
                 {r.reason ? ` · “${r.reason}”` : ''}
               </div>
+              {r.request_type === 'availability' && (
+                <div className="text-[11px] text-zinc-500">
+                  Approving replaces {r.employee_name}’s weekly availability from that date.
+                </div>
+              )}
             </div>
             {r.status === 'awaiting_manager' && (
               <div className="flex items-center gap-1.5">

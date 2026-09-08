@@ -11,14 +11,14 @@ Employee-facing self-service portal. Split from a 1,727-line flat `employee_port
 | `profile.py` | `GET/PATCH /me`, `GET /me/tasks` | 3 |
 | `pto.py` | `/me/pto*` — balance summary, request, cancel (`time_off`) | 3 |
 | `leave.py` | `/me/leave*` + `LEAVE_TYPES` | 5 |
-| `schedule.py` | `/me/schedule*` — published shifts + swap/drop/unavailability + recurring weekly availability (`employee_schedule`) | 6 |
+| `schedule.py` | `/me/schedule*` — published shifts, swap/drop/pickup/unavailability + counterparty accept/withdraw, and the manager-reviewed availability-change request (`employee_schedule`) | 10 |
 | `documents.py` | `/me/documents*` incl. handbook content + e-sign | 4 |
 | `policies.py` | `/policies*` (`policies`) | 2 |
 | `onboarding.py` | `/onboarding*` + `OnboardingTaskResponse` / `OnboardingProgress` | 2 |
 | `priorities.py` | `/priorities*` — priority task list + completion | 2 |
 | `credential_documents.py` | `/me/credential-documents` upload + list | 2 |
 | `benefits.py` | `/me/benefits*` — elections + life events (`benefits_admin`) | 6 |
-| **Total** | | **35 routes** (33 at the 2026-07-26 split + 2 availability routes added 2026-08-02) |
+| **Total** | | **39 routes** (33 at the 2026-07-26 split, +2 availability 2026-08-02, +4 bilateral offers/accept/withdraw, −1 availability PUT +1 availability-request POST 2026-09-08) |
 
 ## Package router pattern
 
@@ -38,7 +38,7 @@ Therefore: import `_pto_dep` / `_policies_dep` / `_compliance_plus_dep` / `_sche
 
 ## Cross-package lazy imports
 
-`schedule.py` reuses the scheduling package's helpers (`INACTIVE_EMPLOYMENT_STATUSES`, `REQUEST_SELECT`, `fetch_shifts`, `log_audit`, `serialize_request`). These stay **lazy, in-body**, and are now **absolute**:
+`schedule.py` reuses the scheduling package's helpers (`INACTIVE_EMPLOYMENT_STATUSES`, `REQUEST_SELECT`, `fetch_shifts`, `log_audit`, `serialize_request`) and, for availability changes, `services/scheduling/availability_requests` + `schedule_profiles.effective_availability_state`. It must NOT call `replace_availability_core` itself — an employee's availability edit is a request a manager approves, and a test asserts the direct write path stays absent. These stay **lazy, in-body**, and are now **absolute**:
 
 ```python
 from app.matcha.routes.employee_schedule._shared import fetch_shifts

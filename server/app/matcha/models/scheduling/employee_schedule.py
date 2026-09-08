@@ -31,7 +31,7 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 ShiftStatus = Literal["draft", "published", "cancelled"]
 ShiftKind = Literal["work", "training"]
 AssignmentStatus = Literal["assigned", "confirmed", "declined"]
-RequestType = Literal["swap", "drop", "pickup", "unavailable"]
+RequestType = Literal["swap", "drop", "pickup", "unavailable", "availability"]
 RequestStatus = Literal[
     "pending", "awaiting_counterparty", "awaiting_manager", "approved", "denied", "cancelled"
 ]
@@ -507,6 +507,14 @@ class ScheduleRequestCreate(BaseModel):
                 raise ValueError("unavailable_start and unavailable_end are required")
             if self.unavailable_end < self.unavailable_start:
                 raise ValueError("unavailable_end must be on or after unavailable_start")
+        if self.request_type == "availability":
+            # An availability change carries a proposed window set this model
+            # has no field for. It is submitted through its own endpoint with
+            # AvailabilityChangeRequestCreate; accepting it here would write a
+            # request row the reviewer cannot act on.
+            raise ValueError(
+                "availability changes are submitted to /me/schedule/availability-requests"
+            )
         return self
 
 
@@ -563,6 +571,22 @@ class AvailabilityReplace(BaseModel):
                 if b.start_time < a.end_time:
                     raise ValueError(f"overlapping windows on weekday {day}")
         return self
+
+
+class AvailabilityChangeRequestCreate(BaseModel):
+    """An employee's proposed availability, for manager review.
+
+    ``availability`` reuses the same full-replacement payload the direct PUT
+    took, so the portal editor keeps one shape and the approved request is
+    applied through the same ``replace_availability_core`` an admin edit uses.
+    ``effective_on`` is required: an availability change with no start date is
+    what the immediate-write endpoint was, and the reviewer has nothing to
+    check the published-week rule against.
+    """
+
+    availability: AvailabilityReplace
+    effective_on: date
+    reason: Optional[str] = Field(None, max_length=2000)
 
 
 class EmployeeSchedulingDetailsUpdate(BaseModel):
