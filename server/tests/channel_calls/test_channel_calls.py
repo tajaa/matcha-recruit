@@ -8,7 +8,6 @@ Covers:
   LiveKit webhook; participants_changed payload shape
 """
 
-import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
@@ -55,6 +54,29 @@ def _user(email="owner@example.com", role="client"):
     # the admin bypass, so a role-less stand-in AttributeErrors before any
     # assertion in this file runs.
     return SimpleNamespace(id=uuid4(), email=email, role=role)
+
+
+class _SpawnRecorder:
+    """`spawn_bg` stand-in that KEEPS the coroutine instead of scheduling it.
+
+    The alternative — let the real spawn_bg create tasks and `await
+    asyncio.sleep(0)` before asserting — only advances each task to its first
+    suspension point. It happens to be enough while the fan-outs are AsyncMocks
+    that never suspend; it stops being enough the moment one of them awaits
+    anything before reaching the mock, and the symptom is an intermittent
+    failure in a job that blocks every PR. Draining explicitly removes the
+    event loop from the assertion entirely.
+    """
+
+    def __init__(self):
+        self.coros = []
+
+    def __call__(self, coro):
+        self.coros.append(coro)
+
+    async def drain(self):
+        while self.coros:
+            await self.coros.pop(0)
 
 
 def _access_row(channel_id, *, scope="community", features=None, company_id=None):
@@ -246,6 +268,7 @@ class TestStartCall:
             "notify_started": patch(f"{MOD}._notify_call_started", AsyncMock()),
             "display_name": patch(f"{MOD}.resolve_display_name", AsyncMock(return_value="Owner")),
             "auto_stop": patch(f"{MOD}._schedule_auto_stop"),
+            "spawn_bg": patch(f"{MOD}.spawn_bg", new_callable=_SpawnRecorder),
             "lk_config": patch(f"{LK}._get_lk_config", return_value=("ws://t", "k", "s")),
             "create_room": patch(f"{LK}.create_room", AsyncMock()),
             "mint_token": patch(f"{LK}.mint_token", return_value="jwt"),
@@ -305,9 +328,9 @@ class TestStartCall:
         with ExitStack() as stack:
             mocks = self._enter_all(stack, self._patches(conn))
             resp = await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
-        # The two notification fan-outs are spawn_bg() fire-and-forget tasks —
-        # yield once so they actually run before we assert on them.
-        await asyncio.sleep(0)
+        # The two notification fan-outs are spawn_bg() fire-and-forget; run them
+        # to completion before asserting they fired.
+        await mocks["spawn_bg"].drain()
 
         assert resp["call_id"] == str(call_id)
         assert resp["mode"] == "members"
@@ -347,6 +370,7 @@ class TestStartCall:
         with ExitStack() as stack:
             mocks = self._enter_all(stack, self._patches(conn))
             resp = await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
+        await mocks["spawn_bg"].drain()
 
         assert resp["call_id"] == str(new_call_id)
         push_calls = mocks["push"].await_args_list

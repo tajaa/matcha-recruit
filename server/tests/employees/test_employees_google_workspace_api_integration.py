@@ -1,3 +1,20 @@
+"""MANUAL, DB-MUTATING integration check for Google Workspace auto-provisioning.
+
+Skipped by default. It INSERTS users/companies/clients/integration_connections
+into whatever `DATABASE_URL` resolves to and calls `close_pool()` on the way
+out, so it must never run as part of a plain `pytest tests/` — root CLAUDE.md:
+"write them to be run manually by the user ... never auto-run DB-mutating
+tests". Until 2026-09-08 the opt-in was missing and the only thing stopping it
+was a broken dependency override that raised before the first INSERT; repairing
+that override turned it into a test that writes to the dev database on every
+laptop run.
+
+Run it deliberately, against dev only:
+
+    RUN_DB_WRITE_TESTS=1 ./venv/bin/python -m pytest \
+        tests/employees/test_employees_google_workspace_api_integration.py -q
+"""
+
 import asyncio
 import json
 import os
@@ -14,6 +31,11 @@ from app.core.models.auth import CurrentUser
 from app.database import close_pool, get_connection, init_pool
 from app.matcha.dependencies import require_admin_or_client
 from app.matcha.routes import employees as employees_routes
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_DB_WRITE_TESTS") != "1",
+    reason="manual DB-mutating integration test — set RUN_DB_WRITE_TESTS=1 to run",
+)
 
 
 def _get_database_url() -> str:

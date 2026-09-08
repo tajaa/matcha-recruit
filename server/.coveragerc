@@ -24,7 +24,12 @@ exclude_lines =
     if TYPE_CHECKING:
     raise NotImplementedError
     if __name__ == .__main__.:
-    \.\.\.
+    # ANCHORED on purpose. `exclude_lines` patterns are re.search'd against the
+    # line, so a bare `\.\.\.` matches any line CONTAINING an ellipsis — 1,905
+    # of them in app/, every `Field(...)`/`Query(...)`/`File(...)` included. Worse,
+    # 49 of those are `def` lines, and excluding a def excludes its whole body.
+    # That inflates the baseline and hands free credit to the diff-coverage gate.
+    ^\s*\.\.\.\s*$
 
 [xml]
 output = coverage.xml

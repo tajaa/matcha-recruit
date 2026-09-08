@@ -26,11 +26,30 @@ unrelated one cannot shift every later row by one.
 
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
+from functools import partial
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+
+def _as_provider(value: Any) -> Callable:
+    """A dependency-override provider for `value`.
+
+    NOT `callable(value)`: a `MagicMock`/`AsyncMock` is callable, and this
+    suite's dominant fake user is a Mock. Registering one directly makes
+    FastAPI *invoke* it — the endpoint gets `mock()` (a fresh auto-child whose
+    `.id` is another Mock) — and worse, FastAPI reads the Mock's `(*args,
+    **kwargs)` signature and turns those into two REQUIRED query parameters, so
+    every request 422s before the handler runs. Only a real
+    function/method/partial is taken at its word; anything else is a value to
+    hand back.
+    """
+    if inspect.isfunction(value) or inspect.ismethod(value) or isinstance(value, partial):
+        return value
+    return lambda v=value: v
 
 
 @contextmanager
@@ -44,13 +63,14 @@ def route_client(
 
     `overrides` maps a dependency callable to the value it should resolve to —
     usually the route module's own auth dependency to a fake user, e.g.
-    `{planning.require_company_member: user}`. A non-callable value is wrapped,
-    so `{dep: user}` and `{dep: lambda: user}` both work.
+    `{planning.require_company_member: user}`. `{dep: user}` and
+    `{dep: lambda: user}` both work; see `_as_provider` for why the test is not
+    a plain `callable()`.
     """
     app = FastAPI()
     app.include_router(router, prefix=prefix)
     for dependency, value in (overrides or {}).items():
-        app.dependency_overrides[dependency] = value if callable(value) else (lambda v=value: v)
+        app.dependency_overrides[dependency] = _as_provider(value)
     try:
         with TestClient(app) as client:
             yield client
@@ -60,6 +80,20 @@ def route_client(
 
 class UnexpectedQuery(AssertionError):
     """Raised when production issues a query the test never described."""
+
+
+class Queue(list):
+    """Marks a registered answer as successive results, popped one per call.
+
+    Explicit because the alternative — "any list is a queue" — collides with
+    `fetch`, whose natural answer IS a list of rows: `fetch={"FROM employees":
+    [row_a, row_b]}` would hand production a single dict, and `for r in rows:
+    r["id"]` then iterates that dict's KEYS and raises `TypeError: string
+    indices must be integers` several frames away from the cause.
+
+        conn = QueryConn(fetch={"FROM shifts": [row_a, row_b]})       # 2 rows
+        conn = QueryConn(fetch={"FROM shifts": Queue([[row_a], []])}) # 2 calls
+    """
 
 
 class QueryConn:
@@ -72,9 +106,10 @@ class QueryConn:
             "FROM users": {"id": user_id, "role": "client"},
         })
 
-    A value that is a list is consumed one call at a time (for a query the code
-    genuinely issues more than once with different results); anything else is
-    returned on every match. Unmatched queries raise `UnexpectedQuery` naming
+    A value wrapped in `Queue` is consumed one call at a time (for a query the
+    code genuinely issues more than once with different results); anything else
+    — a bare list included — is returned as-is on every match. Unmatched
+    queries raise `UnexpectedQuery` naming
     the SQL and every registered key — the failure tells you what production
     started asking for, instead of handing back the wrong row.
     """
@@ -84,6 +119,7 @@ class QueryConn:
         *,
         fetchrow: Mapping[str, Any] | None = None,
         fetchval: Mapping[str, Any] | None = None,
+        # Sequence[Any] is the ROW LIST for that query (or a Queue of them).
         fetch: Mapping[str, Sequence[Any]] | None = None,
         execute: Mapping[str, Any] | None = None,
         strict_execute: bool = False,
@@ -104,7 +140,7 @@ class QueryConn:
         table = self._tables[kind]
         for needle, value in table.items():
             if needle in sql:
-                if isinstance(value, list):
+                if isinstance(value, Queue):
                     if not value:
                         raise UnexpectedQuery(
                             f"{kind} matched {needle!r} but its queued results are exhausted"
@@ -113,11 +149,6 @@ class QueryConn:
                 return value
         if kind == "execute" and not self._strict_execute:
             return "OK"
-        if kind == "fetch":
-            registered = ", ".join(repr(k) for k in table) or "nothing"
-            raise UnexpectedQuery(
-                f"unexpected {kind}: {sql.strip()[:160]!r}\nregistered: {registered}"
-            )
         registered = ", ".join(repr(k) for k in table) or "nothing"
         raise UnexpectedQuery(
             f"unexpected {kind}: {sql.strip()[:160]!r}\nregistered: {registered}"

@@ -194,12 +194,30 @@ if grep -q 'continue-on-error:' "$CI_WORKFLOW"; then
 else
     check "PR CI has no blanket continue-on-error escape hatch" 0
 fi
-if grep -qF 'unexpected Vitest failures' "$CI_WORKFLOW" \
-    && grep -qF '7c1de748641e' "$CI_WORKFLOW" \
-    && grep -qF "cannot import name 'internal_mobility'" "$CI_WORKFLOW"; then
-    check "PR CI fingerprints each pre-existing main-branch failure" 0
+# The Vitest baseline is the one accepted failure left, and it is still matched
+# exactly rather than waved through.
+if grep -qF 'unexpected Vitest failures' "$CI_WORKFLOW"; then
+    check "PR CI still fingerprints the one accepted Vitest baseline failure" 0
 else
-    check "PR CI fingerprints each pre-existing main-branch failure" 1
+    check "PR CI still fingerprints the one accepted Vitest baseline failure" 1
+fi
+# The server suite's two fingerprints ('7c1de748641e', the fresh-migration
+# baseline, and "cannot import name 'internal_mobility'") are GONE on purpose:
+# the migration step they excused is deleted, the suite executes for real, and
+# internal_mobility's test file went with the feature. Asserting they are still
+# present is what this case used to do, and it went red the moment the suite was
+# actually turned on. The invariant that replaces it is stronger — the server
+# job must have no accepted-failure escape at all.
+# Comment lines are stripped first: the workflow explains the removed fallback
+# in prose right above the step that replaced it, and matching that prose would
+# make this assert the opposite of what it means.
+CI_WORKFLOW_CODE="$(grep -v '^[[:space:]]*#' "$CI_WORKFLOW")"
+if grep -qF -- '--collect-only' <<< "$CI_WORKFLOW_CODE" \
+    || grep -qF '7c1de748641e' <<< "$CI_WORKFLOW_CODE" \
+    || grep -qF 'schema_ready' <<< "$CI_WORKFLOW_CODE"; then
+    check "server test suite has no collect-only or pinned-failure escape hatch" 1
+else
+    check "server test suite has no collect-only or pinned-failure escape hatch" 0
 fi
 
 if ! grep -q 'cut -c1-1000' "$REPO_ROOT/.github/workflows/record-production-verification.yml" \

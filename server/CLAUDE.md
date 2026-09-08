@@ -113,6 +113,16 @@ with a hard-coded relative path — `tests/infrastructure/test_ai_chat.py` had o
 that was off by a directory and silently turned all 25 of its assertions into a
 `FileNotFoundError`. Avoid the form; import normally, or `inspect.getsource()`.
 
+**DB-touching tests are opt-in, and a plain `pytest tests/` must never write.**
+Root CLAUDE.md forbids auto-running DB-mutating tests; the enforcement is a
+module-level `skipif` on an explicit env var, because a `DATABASE_URL` read out
+of `server/.env` is always present on a dev laptop and is therefore not a guard:
+
+| File | Opt-in | Shape |
+|---|---|---|
+| `tests/scope_registry/test_gap_surfaces_integration.py` | `RUN_DB_GAP_TESTS=1` | read-only |
+| `tests/employees/test_employees_google_workspace_api_integration.py` | `RUN_DB_WRITE_TESTS=1` | INSERTs, and `close_pool()`s the process-global pool |
+
 Don't fix unrelated failures as part of other work — but don't trust a stale list either. Re-measure before citing one.
 
 **A test that patches a collaborator must patch the module that DEFINES the caller, not a facade that re-exports it.** `monkeypatch.setattr(pkg, "helper", fake)` is silently ignored when the function using `helper` lives in `pkg.submodule` — the call then reaches the real collaborator, often a live DB or Gemini client, and the test still looks like it ran. The 2026-07 service-package splits turned five such patches into no-ops; each is now pointed at its submodule with a comment saying why. Grep for `setattr(` / `patch("` against any module you are about to split.

@@ -225,8 +225,10 @@ async def record_offer_draft_asset(
         logger.exception("[Huume] asset registry draft write failed (non-fatal)")
 
 
-# One status query per ref_table actually present in a listing — bounded by
-# len(ASSET_SPECS) (currently 14 distinct ref_tables), never per-row.
+# One status query per ref_table actually present in a listing — bounded by the
+# number of distinct ref_tables in ASSET_SPECS, never per-row. Don't hardcode a
+# count here: the old "(currently 14)" was already wrong when it was written and
+# went further out of date every time a spec landed.
 _STATUS_SQL: dict[str, str] = {
     "offer_letters": "SELECT id::text AS ref_id, status FROM offer_letters WHERE company_id = $1 AND id = ANY($2::uuid[])",
     "progressive_discipline": "SELECT id::text AS ref_id, approval_status AS status FROM progressive_discipline WHERE company_id = $1 AND id = ANY($2::uuid[])",
@@ -248,7 +250,33 @@ _STATUS_SQL: dict[str, str] = {
     ),
     "schedule_chat_proposals": "SELECT id::text AS ref_id, status FROM schedule_chat_proposals WHERE company_id = $1 AND id = ANY($2::uuid[])",
     "schedule_generation_runs": "SELECT id::text AS ref_id, status FROM schedule_generation_runs WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    "schedule_shifts": "SELECT id::text AS ref_id, status FROM schedule_shifts WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    "schedule_eligibility_cases": "SELECT id::text AS ref_id, status FROM schedule_eligibility_cases WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    # No status column: a permit's whole point is its expiry, so that IS its
+    # lifecycle. Compared as a DATE (the column is DATE), not a timestamp.
+    "employee_work_permits": (
+        "SELECT id::text AS ref_id, (CASE WHEN expires_at < CURRENT_DATE THEN 'expired' ELSE 'active' END) AS status "
+        "FROM employee_work_permits WHERE company_id = $1 AND id = ANY($2::uuid[])"
+    ),
+    # Attestations are append-only rows whose `value` boolean IS the state —
+    # a later row with value=false is how a waiver is withdrawn.
+    "employee_compliance_attestations": (
+        "SELECT id::text AS ref_id, (CASE WHEN value THEN 'on_file' ELSE 'withdrawn' END) AS status "
+        "FROM employee_compliance_attestations WHERE company_id = $1 AND id = ANY($2::uuid[])"
+    ),
 }
+
+# ref_tables that deliberately have no status, so the drift guard in
+# tests/huume/test_huume_assets.py can tell "decided" from "forgotten" — the
+# same two-sided contract ASSET_SPECS/_NO_ASSET_TYPES already uses.
+#
+# inventory_movements: an append-only ledger row. It happened; there is no
+#   later state for it to be in.
+# inventory_sales_mappings: a mapping definition (`kind` is direct/recipe/
+#   ignore — a category, not a lifecycle). Rows are edited in place.
+_NO_STATUS_TABLES: frozenset[str] = frozenset(
+    {"inventory_movements", "inventory_sales_mappings"}
+)
 
 
 def _as_uuid(ref_id: str) -> Optional[UUID]:

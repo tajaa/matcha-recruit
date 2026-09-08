@@ -22,11 +22,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-          # scripts/tests/test_error_autofix.sh resolves `HEAD~1` and
-          # `merge-base HEAD main` against this checkout. On the default
-          # shallow clone neither exists, which failed 3 of its cases on every
-          # PR — the tests were right, the clone was too thin. The lint and
-          # native-builds jobs already fetch full history for the same reason.
+          # scripts/tests/test_error_autofix.sh:411 resolves `HEAD~1` against
+          # this checkout. On the default shallow clone it does not exist,
+          # which failed its cases on every PR — the tests were right, the
+          # clone was too thin. The lint and native-builds jobs already fetch
+          # full history for the same reason. (Note what this does NOT fix: on
+          # a pull_request checkout there is no local `refs/heads/main` at any
+          # depth, only `origin/main`, so a bare `main` never resolves. Scripts
+          # must say `origin/main` — verify.sh does, and its CI cases pass
+          # AUTOFIX_BASE_SHA explicitly rather than relying on either.)
           fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -147,7 +151,11 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      REDIS_URL: redis://127.0.0.1:6379/0
+      # No REDIS_URL: the redis service container is gone and config.py already
+      # defaults to the same redis://localhost:6379/0, so setting it bought
+      # nothing and only implied a service that is not running. Nothing in the
+      # matcha suite opens a redis client — init_redis_cache() runs in the app
+      # lifespan, which these unit tests never enter.
       OPENSSL_armcap: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

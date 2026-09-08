@@ -114,9 +114,23 @@ class TestStateBlockNamesTheConfirmId:
             {"huume_action": {"type": action_type, "status": "proposed", match_key: "ab12cd34"}},
             schedule_surface=True,
         )
-        # Something beyond the bare id, so the model can tell the admin what
-        # they are confirming rather than echoing an opaque token.
-        assert len(block.strip()) > len("ab12cd34") + 10
+        # NOT a length check. `len(block) > 18` was the original assertion and
+        # could never fail: the generic fallback line alone
+        # ("- STAGED ACTION awaiting the admin's confirmation: waste_movement.")
+        # is 61 characters, so the exact regression this file exists to catch
+        # sailed through it.
+        generic = f"- STAGED ACTION awaiting the admin's confirmation: {action_type}."
+        assert generic not in block, (
+            f"'{action_type}' falls through to build_state_block's generic branch, which "
+            f"names the TYPE and nothing else — no id to echo, no description of what the "
+            f"admin is confirming. Give it its own branch."
+        )
+        # Every type-specific branch tells the model which tool to re-call.
+        # Without it the model knows an action is pending but not how to finish it.
+        assert "Calling" in block, (
+            f"'{action_type}' renders no 'Calling <tool> again with EXACTLY this ...' "
+            f"instruction, so the model is told something is staged but not how to commit it"
+        )
 
     def test_nothing_staged_is_stated_explicitly(self):
         # Silence must never be ambiguous with "I forgot to check".

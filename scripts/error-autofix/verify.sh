@@ -20,7 +20,16 @@ mkdir -p "$CACHE_DIR"
 # runs (right after `git switch -C`), not re-derived here — by the time
 # verify.sh runs, "main" may have moved if something merged mid-run, and a
 # baseline that silently includes unrelated changes makes the table lie.
-BASE_SHA="${AUTOFIX_BASE_SHA:-$(git -C "$REPO_ROOT" merge-base HEAD main 2>/dev/null || git -C "$REPO_ROOT" rev-parse main)}"
+# The fallback tries origin/main BEFORE a bare main: an actions/checkout
+# workspace has only refs/remotes/origin/*, so `main` does not resolve there at
+# any fetch-depth and both halves of a `main`-only chain fail, leaving BASE_SHA
+# empty. A laptop clone has both, and prefers the same commit either way.
+BASE_SHA="${AUTOFIX_BASE_SHA:-$(
+    git -C "$REPO_ROOT" merge-base HEAD origin/main 2>/dev/null \
+    || git -C "$REPO_ROOT" merge-base HEAD main 2>/dev/null \
+    || git -C "$REPO_ROOT" rev-parse origin/main 2>/dev/null \
+    || git -C "$REPO_ROOT" rev-parse main
+)}"
 
 # ---- fake, harmless settings so app.config can load in a fresh checkout ---
 # There is no .env in a fresh actions/checkout workspace, and load_settings()
