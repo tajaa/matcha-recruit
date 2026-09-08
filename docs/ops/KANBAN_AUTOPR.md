@@ -275,7 +275,10 @@ second scheduler.
    A failed attempt otherwise cools down
    for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
-   `autopr` PRs (question-only drafts use their separate cap).
+   `autopr` PRs (question-only drafts use their separate cap). A `research` card (see
+   **Research cards** below) never consults GitHub at all: after the same cooldown,
+   pause, and no-spec checks it selects as `mode: research` in both `todo` and
+   `changes_requested`, and the open-PR cap does not apply because no PR is opened.
 6. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
    every checklist round, full task history/discussion, and task-file metadata. Up to 12
    attachments (25 MB total), prioritized to the current round, are downloaded by the
@@ -392,6 +395,16 @@ second scheduler.
    and external dependencies; migration work is drafted automatically. With one,
    `acceptance_criteria_met` remains available for a card whose every stated criterion
    is already satisfied, provided it cites verifiable evidence for each.
+   For `mode: research` the same context bundle goes to `gpt-5.6-luna` at high
+   reasoning with `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, `AUTOPR_CODEX_WEB_SEARCH=1`
+   (`-c 'web_search="live"'` on `codex exec`, which has no `--search` flag), and
+   `AUTOPR_CODEX_IMAGE_INPUTS=1` (`-i` per attached png/jpg/gif/webp at the container
+   path). Required headings are `### Summary` / `### Findings` /
+   `### How it applies to Matcha` / `### Recommendation` / `### Sources` /
+   `### Confidence`, the decision is validated by `decision.sh normalize-research`, and
+   the corrective-retry block is skipped (there is nothing to patch). All of that comes
+   from the kind registry in `lib.sh` (`autopr_kind_field MODE FIELD`).
+
 7. **Cross-lane scope check** — for a fresh implementation patch, the shared
    `scripts/autopr-scope/check-open-prs.sh` checks older open PRs before verification
    or publication. Only an exact stable patch-id match suppresses the new PR; broader
@@ -475,6 +488,71 @@ second scheduler.
    AutoPR decision and acknowledges the escalation in chat; attached screenshots are
    copied onto the ticket so the next sandbox run can inspect them. A stale reply cannot
    reopen a newer decision.
+
+## Research cards
+
+The first **artifact kind**: a card whose deliverable is a report attached to the
+ticket rather than a draft PR. Kind = the `research` ticket template
+(`mw_tasks.category = "research"`; badge + compose fields in Espresso and the web
+client; `_ALLOWED_CATEGORIES` and both draft agents accept it). Everything
+mode-specific lives in the kind registry in `lib.sh` — `autopr_kind_field MODE FIELD`
+returns the prompt, model, effort, sandbox switches, required headings, decision
+validator, publisher, and outcome (`pull_request` | `artifact`) — so another artifact
+kind is a registry row plus a publisher, not another branch in the PR path.
+
+1. A human creates a **Research** card (Subject, Questions to answer, Why it matters to
+   us, Constraints / scope, Preferred sources), assigns the bot, optionally drops
+   screenshots or PDFs on it, and optionally presses **Run research now** (same endpoint
+   and queue as Run AutoPR now).
+2. `select.sh` returns `mode: research` after the ordinary cooldown / pause / no-spec
+   checks. No `bot/task-*` branch, no `gh pr list`, no open-PR cap.
+3. The workflow skips branch creation, coverage, verify, publication copy, and
+   `publish.sh` (`steps.select.outputs.mode != 'research'`). `investigate.sh` builds the
+   usual `context.json` plus downloaded attachments and runs the sandbox bridge as
+   described in step 6 above (`_prompt_research.txt`). The model may read the clone to
+   cite `path:line` under *How it applies to Matcha*, search the web, and view images;
+   it may not edit a file, install anything, or send anything. Any repository diff
+   discards the run.
+4. `decision.sh normalize-research` validates the decision: `research_report` (≥ 1
+   source, no questions) or `needs_clarification` (≥ 1 question, no staged actions);
+   `card_note` 1–240 characters with no `·` or newline; `summary` ≤ 1200; optional
+   `staged_actions` (≤ 10, each `email` | `contact` | `review_request` with
+   `to` / `subject` / `body` / `why`). It emits `safe_changes_present: false`,
+   `awaiting_human`, and `confidence_score` so the generic workflow steps read it like
+   any other decision.
+5. `publish-research.sh` — no git, no `gh`, no labels — counts the card's existing
+   `research-report-*.md` files to get round N, writes `research-report-<id8>-rN.md`
+   (a trusted provenance line, the model's report, and a *Proposed actions (not sent)*
+   tail when staged actions exist), uploads it with `POST …/tasks/{t}/files`, posts a
+   `note` carrying the summary and `attachment_ids` (threaded under the
+   additional-context event when there is one), then PATCHes
+   `progress_note` to `🤖 AUTO SETUP · READY FOR REVIEW · build … · prod … · 🟡 C<score> ·
+   note: <card_note>` and `board_column: review`. `update_project_task` then emails and
+   bells every collaborator ("Ready for review") and broadcasts to Espresso — there is
+   no extra notification code. `needs_clarification` instead writes
+   `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · … · [autopr:no-spec <ts>]
+   needs_clarification · note: …` plus the numbered question form Espresso's answer UI
+   parses, moves the card to `changes_requested`, and posts the decision-bound context
+   request. The marker parks the card until the owner answers (**Add additional
+   context**), presses Run, or moves it.
+6. Review: **approve** → `done`; **reject** with a note → `changes_requested`, which
+   selects as `research` again and produces round N+1 addressing `review_note` (the
+   previous report is among the attachments the model receives and is told to treat as
+   version 1).
+
+Staged actions are the batch-C2 contract: the harness renders them on the card and in
+the report and **never sends one**. Approving and sending from Espresso is a follow-up.
+
+Espresso opens `.md` attachments rendered through `JournalContentView` with a
+Rendered | Source toggle (tables stay plain text; the parser has no table case).
+
+Contract tests: `scripts/tests/test_kanban_autopr_research.sh` (registry, selection,
+bridge switches, validator, publisher, workflow wiring). Manual proof on the runner:
+create a Research card on one of the four boards with a screenshot attached, press
+**Run research now**, and confirm the live log shows `gpt-5.6-luna`, a
+`research-report-<id8>-r1.md` appears under the ticket, the note and the "Ready for
+review" bell arrive, the card is in Review, and the `.md` opens rendered; reject with a
+note and a `-r2.md` lands on the next cycle.
 
 ## Work/merge plan and explicit release
 

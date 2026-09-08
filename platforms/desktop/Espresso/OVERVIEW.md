@@ -62,7 +62,7 @@ Documents can be exported as PDFs. Every AI reply creates a version, and you can
 
 Projects are workspaces for ongoing work. Six project types cover the most common team needs:
 
-**General** — Free-form workspace with editable sections, a kanban board, and task management. Tasks have titles, descriptions, priorities, due dates, assignees, progress notes, and attachments. The board supports category-based templates (Engineering, Sales, Product, Bug, General) with scaffolded columns.
+**General** — Free-form workspace with editable sections, a kanban board, and task management. Tasks have titles, descriptions, priorities, due dates, assignees, progress notes, and attachments. The board supports category-based templates (Engineering, Sales, Product, Bug, General, Research) with scaffolded columns; a Research card assigned to the AutoPR bot comes back with a report under its attachments instead of a PR.
 
 **Presentation** — Slide-oriented layout for building decks.
 
@@ -75,7 +75,7 @@ Projects are workspaces for ongoing work. Six project types cover the most commo
 **Discipline** — Structured workflow for employee disciplinary cases.
 
 All project types support:
-- File uploads with previews
+- File uploads with previews — images, PDFs, CSV tables, text; Markdown opens rendered with a Rendered | Source toggle
 - Adding and removing collaborators
 - Real-time presence (see who is active in the project)
 - Activity feed (task moves, file uploads, collaborator additions)
