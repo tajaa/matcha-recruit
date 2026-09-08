@@ -31,6 +31,12 @@ CODEX_MODEL="${AUTOPR_CODEX_MODEL:-gpt-5.6-sol}"
 CODEX_REASONING_EFFORT="${AUTOPR_CODEX_REASONING_EFFORT:-medium}"
 REQUIRE_EMPTY_PATCH="${AUTOPR_CODEX_REQUIRE_EMPTY_PATCH:-0}"
 RESUME_PATCH="${AUTOPR_RESUME_PATCH:-}"
+# Research runs only (see the kind registry in lib.sh). Live web search
+# executes on OpenAI's side, so the container's network posture is unchanged;
+# image inputs hand the card's screenshots to the model natively instead of as
+# opaque files. Both default off: the PR lanes behave exactly as before.
+WEB_SEARCH="${AUTOPR_CODEX_WEB_SEARCH:-0}"
+IMAGE_INPUTS="${AUTOPR_CODEX_IMAGE_INPUTS:-0}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
@@ -132,6 +138,7 @@ fi
 MODEL_INPUT_LIST=""
 PATH_MAP='{}'
 CONTEXT_COPY=""
+IMAGE_ARGS=()
 input_index=0
 while [ "$#" -gt 0 ]; do
     [ "$1" = -f ] || die "unexpected argument: $1"
@@ -150,6 +157,12 @@ while [ "$#" -gt 0 ]; do
 - $model_path"
     PATH_MAP="$(jq -c --arg old "$input_path" --arg new "$model_path" '. + {($old): $new}' <<< "$PATH_MAP")"
     [ -n "$CONTEXT_COPY" ] || CONTEXT_COPY="$copied_path"
+    # The container path, not the host one: codex opens the image where it runs.
+    if [ "$IMAGE_INPUTS" = 1 ]; then
+        case "$(printf '%s' "$safe_name" | tr '[:upper:]' '[:lower:]')" in
+            *.png|*.jpg|*.jpeg|*.gif|*.webp) IMAGE_ARGS+=(-i "$model_path") ;;
+        esac
+    fi
 done
 
 # Keep context.json's attachment paths truthful inside the container. The
@@ -181,8 +194,14 @@ $(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
 
 CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --ephemeral
     --ignore-user-config --model "$CODEX_MODEL"
-    -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\""
-    -C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
+    -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\"")
+# `codex exec` has no --search flag (the TUI does); the config key is the
+# documented route and --ignore-user-config leaves -c overrides in force.
+# Verified against codex-cli 0.153.4, the pinned sandbox version.
+[ "$WEB_SEARCH" != 1 ] || CODEX_ARGS+=(-c 'web_search="live"')
+# Bash 3.2 + set -u: an empty array expands as unbound without this guard.
+[ "$IMAGE_INPUTS" != 1 ] || CODEX_ARGS+=(${IMAGE_ARGS[@]+"${IMAGE_ARGS[@]}"})
+CODEX_ARGS+=(-C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
 
 # Keep one copy of the transcript on the trusted side. A non-zero exit that
 # names an exhausted usage limit is a lane-wide condition, not a per-card one:

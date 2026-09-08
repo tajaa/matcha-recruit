@@ -114,6 +114,39 @@ mw_api() {
     rm -f "$body_file"
 }
 
+_mw_api_upload_request() {
+    local path="$1" file="$2" token="$3" body_file="$4"
+    # No JSON content type: curl builds the multipart boundary itself. The
+    # basename becomes the stored filename, so callers name the file first.
+    curl -sS "${MW_CURL_TIMEOUTS[@]}" -o "$body_file" -w '%{http_code}' \
+        -X POST "$MATCHA_API_URL$path" \
+        -H "Authorization: Bearer $token" \
+        -F "file=@$file;type=text/markdown"
+}
+
+# mw_api_upload PATH FILE
+# Multipart upload as the bot (task/project file endpoints). Same login and
+# one-shot 401 retry as mw_api; emits the response body, non-2xx is fatal.
+mw_api_upload() {
+    local path="$1" file="$2"
+    local token status body_file
+    [ -f "$file" ] || die "upload source is missing: $file"
+    _kanban_autopr_load_env
+    _kanban_autopr_validate_ci_scope
+    token="$(mw_login)"
+    body_file="$(mktemp)"
+    status="$(_mw_api_upload_request "$path" "$file" "$token" "$body_file")"
+    if [ "$status" = "401" ]; then
+        token="$(mw_login --refresh)"
+        status="$(_mw_api_upload_request "$path" "$file" "$token" "$body_file")"
+    fi
+    if [[ "$status" != 2* ]]; then
+        die "POST $path (multipart) -> HTTP $status: $(cat "$body_file")"
+    fi
+    cat "$body_file"
+    rm -f "$body_file"
+}
+
 mw_move_card() {
     local project_id="$1" task_id="$2" column="$3"
     mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
@@ -205,4 +238,149 @@ autopr_migration_draft_errors() {
     [ -n "$errors" ] || return 0
     printf '%s' "$errors"
     return 1
+}
+
+# ---- shared publisher helpers ----------------------------------------------
+# Used by every publisher (publish.sh for PR kinds, publish-research.sh for
+# artifact kinds). They only shape text; the caller owns the board write.
+
+# progress_note_with_origin MARKER EXISTING_NOTE
+# Replace this system's prior structured prefix instead of nesting it every
+# round, and preserve any human-authored text after it.
+progress_note_with_origin() {
+    local marker="$1" existing="$2" header body preserved remainder
+    header="${existing%%$'\n'*}"
+    if [ "$header" = "$existing" ]; then
+        body=""
+    else
+        body="${existing#*$'\n'}"
+    fi
+    if [[ "$header" != "from auto setup"* ]] && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        # Entirely human-authored: nothing of it is this system's to rewrite.
+        header="$existing"
+        body=""
+    fi
+    # Drop only the machine-written blocks below the header: the pause report
+    # and the question form (always written last). Everything else on those
+    # lines is the operator's and survives the next cycle.
+    preserved="$(printf '%s\n' "$body" | awk '
+        /^Answers needed — reply below with the numbered choices:/ { exit }
+        /^(Why more time|Done so far|Latest progress|Next step):/ { next }
+        NF { seen = 1 }
+        seen { lines[n++] = $0 }
+        END {
+            while (n > 0 && lines[n-1] ~ /^[[:space:]]*$/) n--
+            for (i = 0; i < n; i++) print lines[i]
+        }
+    ')"
+    remainder="$(printf '%s' "$header" | sed -E \
+        's/^from auto setup( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+ · (awaiting answers|ready for review|no safe action))?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?( · note: [^·]+)?( · )?//')"
+    # New notes put the state first so the narrow card face shows the reason
+    # for a stall before build provenance. Keep accepting the legacy lowercase
+    # prefix above so an upgrade does not duplicate an existing human note.
+    # PAUSED belongs in this alternation: checkpoint.sh writes it, so without
+    # it every recovery run would re-append its own stale pause header here.
+    remainder="$(printf '%s' "$remainder" | sed -E \
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: AWAITING ANSWERS|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?( · note: [^·]+)?( · )?//')"
+    if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
+        printf '%s · %s' "$marker" "$remainder"
+    elif [ -n "$header" ] \
+        && [[ "$header" != "from auto setup"* ]] \
+        && [[ "$header" != "🤖 AUTO SETUP"* ]]; then
+        printf '%s · %s' "$marker" "$header"
+    else
+        printf '%s' "$marker"
+    fi
+    [ -z "$preserved" ] || printf '\n%s' "$preserved"
+}
+
+# autopr_report_summary REPORT_FILE
+# The `### Summary` section flattened to one line, capped at 1200 characters.
+autopr_report_summary() {
+    awk '
+      /^### Summary[[:space:]]*$/ { capture=1; next }
+      /^### / && capture { exit }
+      capture { print }
+    ' "$1" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' \
+        | jq -Rsr '.[0:1200]'
+}
+
+# autopr_post_context_request PROJECT_ID TASK_ID REASON EXPECTED_NOTE
+# Ask the card owner for a decision in project chat, bound to the exact note
+# just written. Non-fatal: the card state is authoritative; chat delivery
+# loss is surfaced without rolling back an otherwise complete publication.
+autopr_post_context_request() {
+    local project_id="$1" task_id="$2" reason="$3" expected_note="$4"
+    # Newlines survive: the acceptance-evidence block is the payload here, and
+    # flattening it to one line at 600 characters cut the proof off after about
+    # four criteria. The server sanitizes and bounds it again.
+    reason="$(printf '%s' "$reason" | tr -d '\r' | jq -Rsr '.[0:4000]')"
+    if ! (mw_api POST "/matcha-work/projects/$project_id/tasks/$task_id/autopr/context-request" \
+        "$(jq -n --arg reason "$reason" --arg note "$expected_note" \
+            '{reason:$reason,expected_progress_note:$note}')" >/dev/null); then
+        printf 'kanban-autopr: warning: could not post Espresso context request for task %s\n' \
+            "$task_id" >&2
+    fi
+}
+
+# ---- task-kind registry -----------------------------------------------------
+# One row per mode the Kanban lane knows how to run. select.sh maps a card to
+# a mode; everything downstream (prompt, model, sandbox switches, required
+# report headings, decision validator, publisher) is looked up here by mode
+# instead of being special-cased in each script. A kind whose deliverable is
+# not a PR — a report, a shortlist, staged outreach — is a row here plus a
+# publisher, not another branch in the PR path.
+#
+# autopr_kind_field MODE FIELD  → prints the value; exit 1 on an unknown pair.
+#   prompt     template under scripts/kanban-autopr/
+#   model      Codex model for the investigation pass
+#   effort     Codex reasoning effort
+#   sandbox    extra AUTOPR_CODEX_* switches for run-codex-sandboxed.sh
+#   headings   required `### …` headings in report.md, one per line
+#   decision   decision.sh subcommand that validates the model's JSON
+#   publisher  script that turns the validated result into board/GitHub state
+#   outcome    pull_request | artifact (artifact kinds own no branch, no PR)
+autopr_kind_field() {
+    local mode="$1" field="$2"
+    case "$mode" in
+        investigate|rework)
+            case "$field" in
+                prompt) [ "$mode" = rework ] && printf '_prompt_rework.txt' || printf '_prompt_todo.txt' ;;
+                model) printf 'gpt-5.6-sol' ;;
+                effort) printf 'medium' ;;
+                sandbox) printf '' ;;
+                headings) printf '### Summary\n### Changes\n### Blast radius\n### Confidence\n' ;;
+                decision) printf 'normalize' ;;
+                publisher) printf 'publish.sh' ;;
+                outcome) printf 'pull_request' ;;
+                *) return 1 ;;
+            esac ;;
+        research)
+            case "$field" in
+                prompt) printf '_prompt_research.txt' ;;
+                model) printf 'gpt-5.6-luna' ;;
+                effort) printf 'high' ;;
+                # Live web search runs on OpenAI's side; the card's screenshots
+                # go in as native image inputs; and the pass may not change a
+                # single repository file.
+                sandbox) printf 'AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1 AUTOPR_CODEX_WEB_SEARCH=1 AUTOPR_CODEX_IMAGE_INPUTS=1' ;;
+                headings) printf '### Summary\n### Findings\n### How it applies to Matcha\n### Recommendation\n### Sources\n### Confidence\n' ;;
+                decision) printf 'normalize-research' ;;
+                publisher) printf 'publish-research.sh' ;;
+                outcome) printf 'artifact' ;;
+                *) return 1 ;;
+            esac ;;
+        *) return 1 ;;
+    esac
+}
+
+# autopr_kind_for_category CATEGORY → the mode a fresh card of that kind runs
+# as. PR kinds still let select.sh choose investigate vs rework from the GitHub
+# ledger; artifact kinds have no ledger and rerun the same pass, so a research
+# card sent back with a review note simply produces the next report round.
+autopr_kind_for_category() {
+    case "${1:-}" in
+        research) printf 'research' ;;
+        *) printf 'investigate' ;;
+    esac
 }

@@ -115,12 +115,14 @@ consume_run_request() {
 
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
-# Echoes "skip", "investigate", or "rework" (rework = push to the existing
-# open PR rather than opening a new one).
+#                 CATEGORY
+# Echoes "skip", "investigate", "rework" (rework = push to the existing open
+# PR rather than opening a new one), or an artifact mode such as "research"
+# for a kind whose deliverable is attached to the card instead of a PR.
 already_handled() {
     local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
-    local run_requested_at="${8:-}" branch="bot/task-$id8"
+    local run_requested_at="${8:-}" category="${9:-}" branch="bot/task-$id8"
     # An explicit "run now" from the card is the same class of authorization as
     # decision-bound context: it overrides the cooldown, the durable no-spec
     # ledger, and (in Todo) the historical PR ledger.
@@ -189,6 +191,23 @@ already_handled() {
             echo skip
             return
         fi
+    fi
+
+    # Artifact kinds own no branch and no PR, so GitHub is not their ledger:
+    # the cooldown, pause, and no-spec checks above are the whole gate. Todo
+    # runs the first report; Changes Requested (a human rejected the report
+    # with a note) runs the next round against that note. Never consult
+    # `gh pr list` here — there is nothing on GitHub to find, and a "PR
+    # exists" skip would silently park every research card forever.
+    local kind_mode
+    kind_mode="$(autopr_kind_for_category "$category")"
+    if [ "$(autopr_kind_field "$kind_mode" outcome)" = artifact ]; then
+        if [ "$paused" = true ]; then
+            echo skip
+        else
+            echo "$kind_mode"
+        fi
+        return
     fi
 
     # A card may be owned by a PR from the other automation lane, so its head
@@ -325,9 +344,10 @@ for ((i = 0; i < n; i++)); do
     reconsideration_pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
     run_requested_at="$(printf '%s' "$card" | jq -r '.autopr_run_requested_at // empty')"
+    category="$(printf '%s' "$card" | jq -r '.category // "manual"')"
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
-        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at")"
+        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category")"
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and
@@ -343,7 +363,9 @@ for ((i = 0; i < n; i++)); do
     if [ "$decision" = skip ] && [ -n "$run_requested_at" ]; then
         consume_run_request "$card"
     fi
-    if [ "$decision" = investigate ] || [ "$decision" = rework ]; then
+    # The open-PR cap above applies to `investigate` only: rework pushes to a
+    # PR that is already open, and an artifact mode opens no PR at all.
+    if [ "$decision" != skip ]; then
         # The tmux dashboard asks the same selector what would run next. Its
         # read-only probe must never create a cooldown marker or consume work.
         [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || touch "$ATTEMPTS_DIR/$id8"

@@ -274,7 +274,9 @@ jobs:
 
       - name: Create or check out task branch
         id: branch
-        if: steps.select.outputs.skip == 'false'
+        # Artifact kinds (research) own no branch: the run stays on main and
+        # the report is attached to the card instead of a PR.
+        if: steps.select.outputs.skip == 'false' && steps.select.outputs.mode != 'research'
         env:
           MODE: ${{ steps.select.outputs.mode }}
           ID8: ${{ steps.select.outputs.id8 }}
@@ -373,7 +375,7 @@ jobs:
 
       - name: Check whether an open PR already covers this task
         id: coverage
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework' && steps.select.outputs.mode != 'research'
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
@@ -403,7 +405,7 @@ jobs:
 
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.mode != 'research'
         timeout-minutes: 8
         run: |
           "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
@@ -411,12 +413,12 @@ jobs:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
       - name: Record verification deferred for questions or no-safe-action
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.mode != 'research'
         run: |
           printf '%s\n' '## Verification' '' 'Not run: this result contains no product diff and is awaiting requirements or a human-only action.' > "$RUNNER_TEMP/verification.md"
 
       - name: Write commit subject and card note
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.mode != 'research'
         timeout-minutes: 5
         env:
           AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
@@ -428,7 +430,7 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Publish PR, question draft, or no-spec marker
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.mode != 'research'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
@@ -437,6 +439,18 @@ jobs:
             "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/decision.json" \
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/publication-copy.json"
+
+      - name: Publish research report
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.select.outputs.mode == 'research'
+        timeout-minutes: 5
+        run: |
+          # No GH_TOKEN here: a research card owns no branch and no PR. The
+          # publisher uploads the report to the card, posts the summary note,
+          # and moves the card to Review through the bot's REST identity;
+          # the server's task-update path notifies collaborators from there.
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh" \
+            "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup
         if: always() && steps.select.outputs.skip == 'false'

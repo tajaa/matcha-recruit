@@ -260,8 +260,9 @@ check "workflow forces Codex through the dedicated AutoPR msandbox" \
     $(grep -qF 'AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh' "$workflow" \
       && grep -qF 'AUTOPR_SANDBOX_PROJECT_NAME: matcha-kanban-autopr-sandbox' "$workflow" \
       && grep -qF 'run-codex-sandboxed.sh' "$AUTOPR_DIR/investigate.sh" \
-      && grep -qF 'AUTOPR_CODEX_MODEL=gpt-5.6-sol' "$AUTOPR_DIR/investigate.sh" \
-      && grep -qF 'AUTOPR_CODEX_REASONING_EFFORT=medium' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'AUTOPR_CODEX_MODEL="$KIND_MODEL"' "$AUTOPR_DIR/investigate.sh" \
+      && [ "$(bash -c "source '$AUTOPR_DIR/lib.sh'; autopr_kind_field investigate model")" = gpt-5.6-sol ] \
+      && [ "$(bash -c "source '$AUTOPR_DIR/lib.sh'; autopr_kind_field investigate effort")" = medium ] \
       && echo 0 || echo 1)
 
 check "rework uses current main and an immutable control-plane snapshot" \
