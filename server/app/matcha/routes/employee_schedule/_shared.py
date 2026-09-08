@@ -26,6 +26,7 @@ from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported 
     _iso, fetch_availability, find_conflicts, lock_scheduling_employees,
     log_audit, log_availability_override, shift_snapshot,
 )
+from ...services.scheduling.availability_requests import summarize_proposed_availability
 from ...services.scheduling.schedule_warning_events import reconcile_schedule_warning_events
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ REQUEST_SELECT = """
     SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
            r.counter_shift_id, r.counterparty_confirmed_at,
            r.unavailable_start, r.unavailable_end, r.reason, r.status,
+           r.proposed_availability, r.availability_effective_on,
+           r.availability_applied_at,
            r.review_notes, r.reviewed_at, r.created_at,
            e.first_name, e.last_name,
            te.first_name AS target_first_name, te.last_name AS target_last_name,
@@ -579,6 +582,9 @@ def serialize_request(r) -> dict:
         "counter_shift_department": r.get("counter_shift_department"),
         "unavailable_start": _iso(r["unavailable_start"]),
         "unavailable_end": _iso(r["unavailable_end"]),
+        "proposed_availability": summarize_proposed_availability(r.get("proposed_availability")),
+        "availability_effective_on": _iso(r.get("availability_effective_on")),
+        "availability_applied_at": _iso(r.get("availability_applied_at")),
         "reason": r["reason"],
         "status": r["status"],
         "review_notes": r["review_notes"],

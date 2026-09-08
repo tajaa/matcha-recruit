@@ -159,12 +159,18 @@ async def test_location_scoped_job_must_match_employee_location():
         )
 
 
-def test_admin_and_portal_routes_share_the_same_availability_core():
+def test_only_the_admin_route_writes_availability_directly():
+    """An employee's own edit is a request a manager approves, so the portal
+    reaches replace_availability_core only through that approval — never from
+    an endpoint of its own."""
     root = Path(__file__).parents[2] / "app/matcha/routes"
     admin = (root / "employee_schedule/availability.py").read_text()
     portal = (root / "employee_portal/schedule.py").read_text()
+    approval = (root / "employee_schedule/requests.py").read_text()
     assert "replace_availability_core(" in admin
-    assert "replace_availability_core(" in portal
+    assert "replace_availability_core(" not in portal
+    assert "@router.put(\"/me/schedule/availability\"" not in portal
+    assert "apply_availability_request(" in approval
 
 
 def test_job_centric_replace_preserves_retained_qualification_rows():

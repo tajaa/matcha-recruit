@@ -195,6 +195,13 @@ async def upsert_schedule_profile(
 async def fetch_availability_windows(
     conn, *, company_id: UUID, employee_id: UUID,
 ) -> list[dict]:
+    """The employee's CURRENT windows, with any due approved change promoted
+    first — see services/scheduling/availability_requests.py for why promotion
+    hangs off the read paths. Imported lazily: availability_requests writes
+    through replace_availability_core in this module."""
+    from .availability_requests import promote_due_availability_changes
+
+    await promote_due_availability_changes(conn, company_id, [employee_id])
     rows = await conn.fetch(
         """SELECT weekday, start_time, end_time
              FROM schedule_employee_availability
@@ -212,8 +219,13 @@ async def fetch_availability_windows(
 async def replace_availability_core(
     conn, *, company_id: UUID, employee_id: UUID,
     windows: Sequence[Any], availability_state: str | None,
-    actor_user_id: UUID | None, actor_kind: Literal["admin", "employee"],
+    actor_user_id: UUID | None,
+    actor_kind: Literal["admin", "employee", "employee_request"],
+    extra_details: Mapping[str, object] | None = None,
 ) -> dict:
+    """``employee_request`` is an employee's proposal a manager approved: the
+    actor on the audit row is the reviewer, not the person whose availability
+    it is, so the kind is what distinguishes it from an admin's own edit."""
     resolved_state = effective_availability_state(availability_state, windows)
     await conn.execute(
         "DELETE FROM schedule_employee_availability WHERE company_id=$1 AND employee_id=$2",
@@ -234,7 +246,8 @@ async def replace_availability_core(
     await log_audit(
         conn, company_id, "availability", employee_id, actor_user_id,
         "availability.update",
-        {"windows": len(windows), "availability_state": resolved_state, "actor": actor_kind},
+        {"windows": len(windows), "availability_state": resolved_state,
+         "actor": actor_kind, **(dict(extra_details) if extra_details else {})},
     )
     return {"saved": len(windows), "state": resolved_state, "profile": profile}
 

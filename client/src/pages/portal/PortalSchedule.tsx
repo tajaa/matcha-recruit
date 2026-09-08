@@ -4,11 +4,12 @@ import { useToast } from '../../components/ui'
 import {
   fetchMySchedule, fetchMyTeamSchedule, fetchMyRequests, fetchMyOffers, fetchMyCoworkers,
   createMyRequest, cancelMyRequest, acceptMyRequest, withdrawMyRequest,
-  fetchMyAvailability, saveMyAvailability, type AvailabilityWindow,
+  fetchMyAvailability, submitMyAvailabilityRequest, type AvailabilityWindow,
 } from '../../api/employees/employeeSchedule'
 import type { Shift, ScheduleRequest, ShiftAssignment } from '../../types/employeeSchedule'
 import {
-  REQUEST_TONE, errorMessage, fmtTime, fmtDayLabel as fmtDay, addDays, toISODate, WEEKDAY_LABELS,
+  REQUEST_TONE, describeProposedAvailability, errorMessage, fmtTime,
+  fmtDayLabel as fmtDay, addDays, toISODate, WEEKDAY_LABELS,
 } from '../../types/employeeSchedule'
 
 function todayISO(): string {
@@ -147,7 +148,7 @@ export default function PortalSchedule() {
 
       {requestError && <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">{requestError}</p>}
 
-      <AvailabilityEditor />
+      <AvailabilityEditor teamShifts={teamShifts} onSubmitted={load} />
 
       <UnavailableForm teamShifts={teamShifts} onDone={load} />
 
@@ -174,7 +175,9 @@ export default function PortalSchedule() {
                   <div className="text-[11px] text-zinc-500">
                     {r.request_type === 'unavailable'
                       ? `${r.unavailable_start ?? ''} → ${r.unavailable_end ?? ''}`
-                      : r.shift_starts_at ? `${fmtDay(r.shift_starts_at)} ${fmtTime(r.shift_starts_at)}` : '—'}
+                      : r.request_type === 'availability'
+                        ? `From ${r.availability_effective_on ?? '—'} · ${describeProposedAvailability(r.proposed_availability)}`
+                        : r.shift_starts_at ? `${fmtDay(r.shift_starts_at)} ${fmtTime(r.shift_starts_at)}` : '—'}
                     {r.reason ? ` · “${r.reason}”` : ''}
                   </div>
                 </div>
@@ -318,39 +321,65 @@ const DEFAULT_ROWS: AvailabilityRow[] = WEEKDAY_LABELS.map(() => ({
   enabled: false, start: '09:00', end: '17:00',
 }))
 
-function AvailabilityEditor() {
+function AvailabilityEditor({ teamShifts, onSubmitted }: { teamShifts: Shift[]; onSubmitted: () => void }) {
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [rows, setRows] = useState<AvailabilityRow[]>(DEFAULT_ROWS)
+  const [pending, setPending] = useState<ScheduleRequest | null>(null)
+  // Two weeks out by default: a start date inside an already published week is
+  // refused, and the published horizon is usually the next week or two.
+  const [effectiveOn, setEffectiveOn] = useState(() => addDays(todayISO(), 14))
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function ensureLoaded() {
     if (loaded) return
     try {
-      const { windows } = await fetchMyAvailability()
+      const { windows, pending_request } = await fetchMyAvailability()
       const next = DEFAULT_ROWS.map((r) => ({ ...r }))
       // v1 edits one window per day — a weekday with multiple stored windows
-      // shows only the first; saving overwrites the rest for that day.
+      // shows only the first; submitting replaces the rest for that day.
       for (const w of windows) {
         next[w.weekday] = { enabled: true, start: w.start_time, end: w.end_time }
       }
       setRows(next)
+      setPending(pending_request)
       setLoaded(true)
     } catch (err) {
       toast(errorMessage(err), 'error')
     }
   }
 
-  async function save() {
+  // Advisory only, same caveat as the time-off form: the server anchors each
+  // shift on its own location's week start, and the portal has no location
+  // profile in hand, so this pre-warning stays Sunday-anchored.
+  const startsInPublishedWeek = teamShifts.some((shift) => {
+    const shiftDate = shift.starts_at.slice(0, 10)
+    const shiftStart = new Date(`${shiftDate}T00:00:00Z`)
+    const weekStart = addDays(toISODate(shiftStart), -shiftStart.getUTCDay())
+    return weekStart <= effectiveOn && addDays(weekStart, 6) >= effectiveOn
+  })
+
+  async function submit() {
     setBusy(true)
     try {
       const windows: AvailabilityWindow[] = rows
         .map((r, weekday) => ({ ...r, weekday }))
         .filter((r) => r.enabled)
         .map((r) => ({ weekday: r.weekday, start_time: r.start, end_time: r.end }))
-      await saveMyAvailability(windows)
-      toast('Availability saved', 'success')
+      const request = await submitMyAvailabilityRequest({
+        availability: {
+          availability_state: windows.length ? 'windows' : 'always_available',
+          windows,
+        },
+        effective_on: effectiveOn,
+        reason: reason.trim() || null,
+      })
+      setPending(request)
+      setReason('')
+      toast('Availability change sent to your manager', 'success')
+      onSubmitted()
     } catch (err) {
       toast(errorMessage(err), 'error')
     } finally {
@@ -368,31 +397,66 @@ function AvailabilityEditor() {
       </button>
       {open && (
         <div className="mt-3 space-y-2">
-          <p className="text-[11px] text-zinc-500">No days checked = available anytime.</p>
+          {pending && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5 text-[11px] text-amber-200">
+              <div className="font-medium">Awaiting manager approval</div>
+              <div className="mt-0.5 text-amber-300/80">
+                Starts {pending.availability_effective_on ?? '—'} · {describeProposedAvailability(pending.proposed_availability)}
+              </div>
+              <div className="mt-0.5 text-amber-300/80">
+                Withdraw it under “My requests” below to propose something else.
+              </div>
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-500">
+            No days checked = available anytime. Your manager approves the change before it takes effect.
+          </p>
           {rows.map((row, i) => (
             <div key={i} className="flex items-center gap-2">
               <label className="flex items-center gap-1.5 w-14 shrink-0">
                 <input
-                  type="checkbox" checked={row.enabled}
+                  type="checkbox" checked={row.enabled} disabled={!!pending}
                   onChange={(e) => setRows((rs) => rs.map((r, j) => j === i ? { ...r, enabled: e.target.checked } : r))}
                 />
                 <span className="text-xs text-zinc-300">{WEEKDAY_LABELS[i]}</span>
               </label>
               <input
-                type="time" value={row.start} disabled={!row.enabled}
+                type="time" value={row.start} disabled={!row.enabled || !!pending}
                 onChange={(e) => setRows((rs) => rs.map((r, j) => j === i ? { ...r, start: e.target.value } : r))}
                 className={`${inputCls} disabled:opacity-40`}
               />
               <span className="text-zinc-600">–</span>
               <input
-                type="time" value={row.end} disabled={!row.enabled}
+                type="time" value={row.end} disabled={!row.enabled || !!pending}
                 onChange={(e) => setRows((rs) => rs.map((r, j) => j === i ? { ...r, end: e.target.value } : r))}
                 className={`${inputCls} disabled:opacity-40`}
               />
             </div>
           ))}
-          <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-3 py-1.5 disabled:opacity-50">
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
+          <label className="block max-w-[220px]">
+            <span className="text-[10px] text-zinc-500 uppercase">Starts on</span>
+            <input
+              type="date" value={effectiveOn} min={todayISO()} disabled={!!pending}
+              onChange={(e) => setEffectiveOn(e.target.value)}
+              className={`${inputCls} mt-1 disabled:opacity-40`}
+            />
+          </label>
+          {startsInPublishedWeek && (
+            <p role="alert" className="text-xs text-amber-300">
+              That week is already published. Pick a start date in a week that hasn’t been published yet.
+            </p>
+          )}
+          <textarea
+            value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+            placeholder="Reason (optional)" disabled={!!pending}
+            className={`${inputCls} disabled:opacity-40`}
+          />
+          <button
+            onClick={submit}
+            disabled={busy || !!pending || !effectiveOn || effectiveOn < todayISO() || startsInPublishedWeek}
+            className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-3 py-1.5 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Send for approval
           </button>
         </div>
       )}

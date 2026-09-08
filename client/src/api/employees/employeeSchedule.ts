@@ -408,11 +408,23 @@ export function cancelMyRequest(id: string) {
 }
 
 export function fetchMyAvailability() {
-  return api.get<{ windows: AvailabilityWindow[] }>('/v1/portal/me/schedule/availability')
+  return api.get<{
+    availability_state: AvailabilityState
+    windows: AvailabilityWindow[]
+    pending_request: ScheduleRequest | null
+  }>('/v1/portal/me/schedule/availability')
 }
 
-export function saveMyAvailability(windows: AvailabilityWindow[]) {
-  return api.put<{ saved: number }>('/v1/portal/me/schedule/availability', { windows })
+export interface MyAvailabilityRequestPayload {
+  availability: { availability_state: Exclude<AvailabilityState, 'unconfirmed'>; windows: AvailabilityWindow[] }
+  effective_on: string
+  reason?: string | null
+}
+
+/** An employee cannot write their own availability — there is no PUT. The
+ *  proposal waits for a manager and only lands on `effective_on`. */
+export function submitMyAvailabilityRequest(payload: MyAvailabilityRequestPayload) {
+  return api.post<ScheduleRequest>('/v1/portal/me/schedule/availability-requests', payload)
 }
 
 // ---- Planning: inputs + server-side fill (Schedule Pilot backbone) ----

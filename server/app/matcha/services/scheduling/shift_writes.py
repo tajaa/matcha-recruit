@@ -161,10 +161,19 @@ async def fetch_availability(
 ) -> dict:
     """{employee_id: {weekday: [(start_time, end_time), ...]}} — employees
     with no rows map to {} (= fully available per
-    schedule_rules.availability_violations)."""
+    schedule_rules.availability_violations).
+
+    Every scheduling availability decision comes through here, so an approved
+    availability change whose start date has arrived is promoted into the live
+    table first — see services/scheduling/availability_requests.py. The import
+    is lazy because that module writes through schedule_profiles, which imports
+    this one."""
     out: dict = {eid: {} for eid in employee_ids}
     if not employee_ids:
         return out
+    from .availability_requests import promote_due_availability_changes
+
+    await promote_due_availability_changes(conn, company_id, employee_ids)
     rows = await conn.fetch(
         """
         SELECT employee_id, weekday, start_time, end_time

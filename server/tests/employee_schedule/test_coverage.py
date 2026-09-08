@@ -39,6 +39,10 @@ class FakeConn:
 
     async def fetch(self, query, *args):
         q = " ".join(query.split())
+        # fetch_availability promotes any due approved availability change
+        # before reading; this fake has none.
+        if "request_type = 'availability'" in q:
+            return []
         if "FROM schedule_shifts s" in q and "SUM(EXTRACT" in q:
             return self.hours
         if "FROM schedule_shift_assignments a" in q and "JOIN employees e" in q:
