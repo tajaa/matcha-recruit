@@ -134,8 +134,8 @@ def test_create_employee_queues_google_onboarding_when_connected_and_enabled(mon
     _install_fakes(monkeypatch, conn, company_id)
 
     request = employees_crud.EmployeeCreateRequest(
-        work_email="new.hire@itsmatcha.net",
-        personal_email="new.hire@gmail.com",
+        work_email="new.hire@example.com",
+        personal_email="new.hire@example.net",
         first_name="New",
         last_name="Hire",
         work_state="CA",
@@ -143,16 +143,16 @@ def test_create_employee_queues_google_onboarding_when_connected_and_enabled(mon
         start_date="2026-02-17",
     )
     background_tasks = BackgroundTasks()
-    current_user = CurrentUser(id=hr_user_id, email="hr-admin@itsmatcha.net", role="client")
+    current_user = CurrentUser(id=hr_user_id, email="hr-admin@example.com", role="client")
 
     response = asyncio.run(
         employees_crud.create_employee(request, background_tasks, current_user)
     )
 
     assert response.id == conn.employee_id
-    assert response.email == "new.hire@itsmatcha.net"
-    assert response.work_email == "new.hire@itsmatcha.net"
-    assert response.personal_email == "new.hire@gmail.com"
+    assert response.email == "new.hire@example.com"
+    assert response.work_email == "new.hire@example.com"
+    assert response.personal_email == "new.hire@example.net"
 
     # Filter rather than count: create_employee also queues unrelated
     # best-effort work (jurisdiction drift, OIG screening).
@@ -164,8 +164,8 @@ def test_create_employee_queues_google_onboarding_when_connected_and_enabled(mon
     assert kwargs["company_id"] == company_id
     assert kwargs["employee_id"] == conn.employee_id
     assert kwargs["triggered_by"] == hr_user_id
-    assert kwargs["work_email"] == "new.hire@itsmatcha.net"
-    assert kwargs["personal_email"] == "new.hire@gmail.com"
+    assert kwargs["work_email"] == "new.hire@example.com"
+    assert kwargs["personal_email"] == "new.hire@example.net"
 
 
 def test_create_employee_does_not_queue_google_onboarding_when_auto_provision_disabled(monkeypatch):
@@ -174,13 +174,13 @@ def test_create_employee_does_not_queue_google_onboarding_when_auto_provision_di
     _install_fakes(monkeypatch, conn, company_id)
 
     request = employees_crud.EmployeeCreateRequest(
-        email="manual.only@itsmatcha.net",
+        email="manual.only@example.com",
         first_name="Manual",
         last_name="Only",
         start_date="2026-02-17",
     )
     background_tasks = BackgroundTasks()
-    current_user = CurrentUser(id=uuid4(), email="hr-admin@itsmatcha.net", role="client")
+    current_user = CurrentUser(id=uuid4(), email="hr-admin@example.com", role="client")
 
     response = asyncio.run(
         employees_crud.create_employee(request, background_tasks, current_user)

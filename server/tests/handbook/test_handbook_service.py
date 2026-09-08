@@ -479,8 +479,8 @@ def test_build_template_sections_hydrates_operational_hooks_from_guided_answers(
         industry_key="general",
         state_requirement_map={"CA": []},
         guided_answers={
-            "hr_contact_email": "hr@itsmatcha.net",
-            "leave_admin_email": "leave@itsmatcha.net",
+            "hr_contact_email": "hr@example.com",
+            "leave_admin_email": "leave@example.com",
             "harassment_hotline": "1-800-555-0123",
             "workweek_definition": "Sunday 12:00 AM PT",
             "payday_frequency": "biweekly",
@@ -490,8 +490,8 @@ def test_build_template_sections_hydrates_operational_hooks_from_guided_answers(
     )
 
     combined_content = "\n".join(section["content"] for section in sections)
-    assert "hr@itsmatcha.net" in combined_content
-    assert "leave@itsmatcha.net" in combined_content
+    assert "hr@example.com" in combined_content
+    assert "leave@example.com" in combined_content
     assert "1-800-555-0123" in combined_content
     assert "runs from Sunday at 12:00 AM (PT)" in combined_content
     assert "Paydays follow biweekly with payroll cutoff anchored to Friday." in combined_content
