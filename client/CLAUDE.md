@@ -248,6 +248,11 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Loose staged-action review → typed `ScheduleReview` → `components/employees/schedule-pilot/reviewShape.ts` (`asScheduleReview`, `compareReviews`)
 - The board's own write hook is unchanged → `hooks/employees/useScheduleEditor.ts`
 
+### Employee portal (the employee side of `employee_schedule`)
+
+- Portal schedule surface → `client/src/pages/portal/PortalSchedule.tsx` — shell only: one fetch of the four-week horizon, `?tab=schedule|availability|requests`
+- Its tabs → `client/src/pages/portal/schedule/`: `ScheduleTab` (week-at-a-time sections, `?week=0..3`), `AvailabilityTab` (manager-approved availability *request*, never a direct write), `RequestsTab` (offers + time-off form + request history), `ShiftCard`, `shared.ts` (horizon/window math + shared formatters)
+
 ### Matcha-work (collaborative AI workspace)
 
 - Web surface → `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`

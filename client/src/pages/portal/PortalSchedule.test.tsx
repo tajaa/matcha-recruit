@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../components/ui'
 import { addDays, toISODate, type ScheduleRequest, type Shift } from '../../types/employeeSchedule'
@@ -38,22 +39,37 @@ vi.mock('../../api/employees/employeeSchedule', () => ({
   withdrawMyRequest: vi.fn(),
 }))
 
+// Fixtures ride on today, not on fixed calendar dates: the schedule tab only
+// renders the four-week horizon it fetched, so a hardcoded August would fall
+// outside every week section and silently render nothing.
+const TODAY = toISODate(new Date())
+const TOMORROW = addDays(TODAY, 1)
+const WEEK_THREE_DAY = addDays(TODAY, 16)
+
+function renderPortal(entry = '/portal/schedule') {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <ToastProvider><PortalSchedule /></ToastProvider>
+    </MemoryRouter>,
+  )
+}
+
 const selectedSwap: ScheduleRequest = {
   id: 'request-1',
   employee_id: 'employee-a',
   employee_name: 'Employee A',
   request_type: 'swap',
   shift_id: 'shift-a',
-  shift_starts_at: '2026-08-28T09:00:00Z',
-  shift_ends_at: '2026-08-28T17:00:00Z',
+  shift_starts_at: `${TOMORROW}T09:00:00Z`,
+  shift_ends_at: `${TOMORROW}T17:00:00Z`,
   shift_role: 'Opening',
   shift_department: null,
   target_employee_id: 'employee-b',
   target_employee_name: 'Employee B',
   counter_shift_id: 'shift-b',
   counterparty_confirmed_at: null,
-  counter_shift_starts_at: '2026-08-29T12:00:00Z',
-  counter_shift_ends_at: '2026-08-29T20:00:00Z',
+  counter_shift_starts_at: `${addDays(TOMORROW, 1)}T12:00:00Z`,
+  counter_shift_ends_at: `${addDays(TOMORROW, 1)}T20:00:00Z`,
   counter_shift_role: 'Closing',
   counter_shift_department: null,
   unavailable_start: null,
@@ -65,7 +81,7 @@ const selectedSwap: ScheduleRequest = {
   status: 'awaiting_counterparty',
   review_notes: null,
   reviewed_at: null,
-  created_at: '2026-08-27T12:00:00Z',
+  created_at: `${TODAY}T12:00:00Z`,
 }
 
 const employeeAShift: Shift = {
@@ -75,8 +91,8 @@ const employeeAShift: Shift = {
   series_id: null,
   role: 'Opening',
   department: null,
-  starts_at: '2026-08-28T09:00:00Z',
-  ends_at: '2026-08-28T17:00:00Z',
+  starts_at: `${TOMORROW}T09:00:00Z`,
+  ends_at: `${TOMORROW}T17:00:00Z`,
   break_minutes: 0,
   required_staff: 1,
   color: null,
@@ -85,7 +101,7 @@ const employeeAShift: Shift = {
   kind: 'work',
   training_requirement_id: null,
   job_id: null,
-  published_at: '2026-08-27T12:00:00Z',
+  published_at: `${TODAY}T12:00:00Z`,
   assignments: [{ employee_id: 'employee-a', name: 'Employee A', job_title: null, status: 'assigned', availability_overridden: false, availability_override_at: null }],
 }
 
@@ -93,8 +109,8 @@ const employeeBSameDayShift: Shift = {
   ...employeeAShift,
   id: 'shift-b',
   role: 'Closing',
-  starts_at: '2026-08-28T17:00:00Z',
-  ends_at: '2026-08-28T21:00:00Z',
+  starts_at: `${TOMORROW}T17:00:00Z`,
+  ends_at: `${TOMORROW}T21:00:00Z`,
   assignments: [{ employee_id: 'employee-b', name: 'Employee B', job_title: null, status: 'assigned', availability_overridden: false, availability_override_at: null }],
 }
 
@@ -113,9 +129,71 @@ beforeEach(() => {
   })
 })
 
+describe('PortalSchedule tabs', () => {
+  it('opens on the schedule and keeps availability and requests off it', async () => {
+    fetchMyScheduleMock.mockResolvedValue({ shifts: [employeeAShift] })
+
+    renderPortal()
+
+    expect(await screen.findByRole('heading', { name: 'My shifts' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'My weekly availability' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'My requests' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /request time off/i })).not.toBeInTheDocument()
+  })
+
+  it('honours the tab named in the URL on a refresh or a back navigation', async () => {
+    renderPortal('/portal/schedule?tab=requests')
+
+    expect(await screen.findByRole('heading', { name: 'My requests' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'My shifts' })).not.toBeInTheDocument()
+  })
+
+  it('falls back to the schedule for an unknown tab', async () => {
+    renderPortal('/portal/schedule?tab=nonsense')
+
+    expect(await screen.findByRole('heading', { name: 'My shifts' })).toBeInTheDocument()
+  })
+
+  it('counts the offers waiting on the employee in the requests tab label', async () => {
+    renderPortal()
+
+    expect(await screen.findByRole('button', { name: 'My Requests (1)' })).toBeInTheDocument()
+  })
+})
+
+describe('PortalSchedule week sections', () => {
+  it('shows only the selected week and jumps to the first week with a shift', async () => {
+    const laterShift = { ...employeeAShift, id: 'shift-later', role: 'Closing', starts_at: `${WEEK_THREE_DAY}T09:00:00Z`, ends_at: `${WEEK_THREE_DAY}T17:00:00Z` }
+    fetchMyScheduleMock.mockResolvedValue({ shifts: [laterShift] })
+
+    renderPortal()
+
+    const section = (await screen.findByRole('heading', { name: 'My shifts' })).closest('section')!
+    expect(within(section).getByText('Closing')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous week' }))
+    expect(within(section).queryByText('Closing')).not.toBeInTheDocument()
+    expect(within(section).getByText(/No published shifts for/)).toBeInTheDocument()
+  })
+
+  it('marks today and tomorrow on the day headings', async () => {
+    fetchMyScheduleMock.mockResolvedValue({
+      shifts: [
+        { ...employeeAShift, id: 'shift-today', starts_at: `${TODAY}T09:00:00Z`, ends_at: `${TODAY}T17:00:00Z` },
+        employeeAShift,
+      ],
+    })
+
+    renderPortal()
+
+    expect(await screen.findByText(/· Today$/)).toBeInTheDocument()
+    expect(screen.getByText(/· Tomorrow$/)).toBeInTheDocument()
+  })
+})
+
 describe('PortalSchedule swap acceptance', () => {
   it('accepts the counter-shift selected by the requester', async () => {
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+    renderPortal('/portal/schedule?tab=requests')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Accept' }))
 
@@ -128,33 +206,30 @@ describe('PortalSchedule swap acceptance', () => {
     fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [employeeAShift, employeeBSameDayShift] })
     fetchMyCoworkersMock.mockResolvedValue({ employees: [{ id: 'employee-b', name: 'Employee B' }] })
 
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+    renderPortal()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Swap' }))
     fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'employee-b' } })
 
-    expect(await screen.findByRole('option', { name: /Fri 8\/28 5p.*9p.*Closing/ })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: /5p.*9p.*Closing/ })).toBeInTheDocument()
   })
 })
 
 describe('PortalSchedule notes', () => {
   it('renders trimmed notes in personal and full schedule cards', async () => {
-    const shiftWithNote = {
-      ...employeeAShift,
-      notes: '  Bring ID\nat 8am  ',
-    }
+    const shiftWithNote = { ...employeeAShift, notes: '  Bring ID\nat 8am  ' }
     fetchMyScheduleMock.mockResolvedValue({ shifts: [shiftWithNote] })
     fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [shiftWithNote] })
 
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+    renderPortal()
 
     const myShifts = (await screen.findByRole('heading', { name: 'My shifts' })).closest('section')!
-    const fullSchedule = screen.getByRole('heading', { name: 'Full schedule' }).closest('section')!
-    const myNote = within(myShifts).getByText(/Schedule note:/)
-    const teamNote = within(fullSchedule).getByText(/Schedule note:/)
+    expect(within(myShifts).getByText(/Schedule note:/).textContent).toBe('Schedule note: Bring ID\nat 8am')
 
-    expect(myNote.textContent).toBe('Schedule note: Bring ID\nat 8am')
-    expect(teamNote.textContent).toBe('Schedule note: Bring ID\nat 8am')
+    fireEvent.click(screen.getByRole('button', { name: 'Everyone' }))
+
+    const fullSchedule = screen.getByRole('heading', { name: 'Full schedule' }).closest('section')!
+    expect(within(fullSchedule).getByText(/Schedule note:/).textContent).toBe('Schedule note: Bring ID\nat 8am')
   })
 
   it('omits whitespace-only notes', async () => {
@@ -162,7 +237,7 @@ describe('PortalSchedule notes', () => {
     fetchMyScheduleMock.mockResolvedValue({ shifts: [shiftWithBlankNote] })
     fetchMyTeamScheduleMock.mockResolvedValue({ shifts: [shiftWithBlankNote] })
 
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+    renderPortal()
 
     await screen.findByRole('heading', { name: 'My shifts' })
     expect(screen.queryByText(/Schedule note:/)).not.toBeInTheDocument()
@@ -171,18 +246,15 @@ describe('PortalSchedule notes', () => {
 
 describe('PortalSchedule time-off requests', () => {
   it('warns and blocks time off for a visible week with published shifts', async () => {
-    const selectedDate = new Date()
-    selectedDate.setUTCDate(selectedDate.getUTCDate() + 1)
-    const date = selectedDate.toISOString().slice(0, 10)
     fetchMyTeamScheduleMock.mockResolvedValue({
-      shifts: [{ ...employeeAShift, starts_at: `${date}T09:00:00Z`, ends_at: `${date}T17:00:00Z` }],
+      shifts: [{ ...employeeAShift, starts_at: `${TOMORROW}T09:00:00Z`, ends_at: `${TOMORROW}T17:00:00Z` }],
     })
 
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+    renderPortal('/portal/schedule?tab=requests')
 
     fireEvent.click(await screen.findByRole('button', { name: /request time off/i }))
-    for (const input of screen.getAllByDisplayValue(toISODate(new Date()))) {
-      fireEvent.change(input, { target: { value: date } })
+    for (const input of screen.getAllByDisplayValue(TODAY)) {
+      fireEvent.change(input, { target: { value: TOMORROW } })
     }
 
     expect(screen.getByRole('alert')).toHaveTextContent('Time-off requests cannot be submitted for a week with published shifts.')
@@ -210,17 +282,22 @@ describe('PortalSchedule availability changes', () => {
     },
   }
 
-  it('submits a change for approval instead of saving it', async () => {
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
+  it('loads the availability tab without an extra disclosure click', async () => {
+    renderPortal('/portal/schedule?tab=availability')
 
-    fireEvent.click(await screen.findByRole('button', { name: /my weekly availability/i }))
+    expect(await screen.findByRole('heading', { name: 'My weekly availability' })).toBeInTheDocument()
     await waitFor(() => expect(fetchMyAvailabilityMock).toHaveBeenCalled())
+  })
+
+  it('submits a change for approval instead of saving it', async () => {
+    renderPortal('/portal/schedule?tab=availability')
+
     fireEvent.click(await screen.findByRole('button', { name: /send for approval/i }))
 
     await waitFor(() => expect(submitMyAvailabilityRequestMock).toHaveBeenCalled())
     const payload = submitMyAvailabilityRequestMock.mock.calls[0][0]
     expect(payload.availability).toEqual({ availability_state: 'always_available', windows: [] })
-    expect(payload.effective_on).toBe(addDays(toISODate(new Date()), 14))
+    expect(payload.effective_on).toBe(addDays(TODAY, 14))
   })
 
   it('shows a pending change and blocks a second one', async () => {
@@ -230,9 +307,7 @@ describe('PortalSchedule availability changes', () => {
       pending_request: availabilityRequest,
     })
 
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
-
-    fireEvent.click(await screen.findByRole('button', { name: /my weekly availability/i }))
+    renderPortal('/portal/schedule?tab=availability')
 
     expect(await screen.findByText('Awaiting manager approval')).toBeInTheDocument()
     expect(screen.getByText(/Starts 2099-10-05 · Mon 09:00–17:00/)).toBeInTheDocument()
@@ -241,16 +316,12 @@ describe('PortalSchedule availability changes', () => {
   })
 
   it('warns when the start date falls in a published week', async () => {
-    const start = new Date()
-    start.setUTCDate(start.getUTCDate() + 14)
-    const date = start.toISOString().slice(0, 10)
+    const date = addDays(TODAY, 14)
     fetchMyTeamScheduleMock.mockResolvedValue({
       shifts: [{ ...employeeAShift, starts_at: `${date}T09:00:00Z`, ends_at: `${date}T17:00:00Z` }],
     })
 
-    render(<ToastProvider><PortalSchedule /></ToastProvider>)
-
-    fireEvent.click(await screen.findByRole('button', { name: /my weekly availability/i }))
+    renderPortal('/portal/schedule?tab=availability')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('That week is already published.')
     expect(screen.getByRole('button', { name: /send for approval/i })).toBeDisabled()
