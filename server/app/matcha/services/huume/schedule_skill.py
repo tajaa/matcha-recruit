@@ -106,17 +106,83 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
 _FLAT_CREATE_FIELDS = ("label", "date", "start_time", "end_time", "count", "employee_names")
 
 
+# A flat create the model could not fill in is unstageable on its own. When
+# nothing in `changes` carries the shift either, the manager really did ask
+# for one we cannot build — worded for that shift, never indexed as a
+# "Schedule change N" the batch does not contain.
+_INCOMPLETE_FLAT_CREATE_MESSAGE = (
+    "The new shift needs a date, start time, and end time before I can create it."
+)
+
+
+def _norm_day(value: Any) -> str:
+    """`2026-8-23` and `2026-08-23` are one day to the schedule engine, so they
+    have to be one day to the de-dupe below."""
+    raw = str(value or "").strip()
+    parts = raw[:10].split("-")
+    if len(parts) == 3:
+        try:
+            return "%04d-%02d-%02d" % tuple(int(part) for part in parts)
+        except (TypeError, ValueError):
+            pass
+    return raw.lower().replace(" ", "")
+
+
+def _norm_clock(value: Any) -> str:
+    """`7:00`, `07:00` and `07:00:00` are one clock time. They used to compare
+    unequal, so the flat copy and the `changes` copy of the SAME shift both
+    staged — one confirmation, two identical shifts in one transaction."""
+    raw = str(value or "").strip()
+    parts = raw.split(":")
+    if len(parts) >= 2:
+        try:
+            return "%02d:%02d" % (int(parts[0]), int(parts[1]))
+        except (TypeError, ValueError):
+            pass
+    return raw.lower().replace(" ", "")
+
+
 def _create_identity(change: dict[str, Any]) -> tuple[str, ...]:
     """What makes two create requests the same shift, for de-duping a flat
-    create against the `changes` array that already carries it."""
+    create against the `changes` array that already carries it. The flat copy
+    and the `changes` copy are two independent model spellings of one shift,
+    so dates and times are normalized rather than compared raw."""
     def _norm(value: Any) -> str:
         return str(value or "").strip().lower().replace(" ", "")
 
     return (
-        _norm(change.get("date") or change.get("target_date")),
-        _norm(change.get("start_time")), _norm(change.get("end_time")),
+        _norm_day(change.get("date") or change.get("target_date")),
+        _norm_clock(change.get("start_time")), _norm_clock(change.get("end_time")),
         _norm(change.get("label") or change.get("role")),
     )
+
+
+def _is_complete_create(change: dict[str, Any]) -> bool:
+    """Whether a create carries enough to be staged at all — the same three
+    fields the coercion loop below requires before it will build a shift."""
+    request = _coerce_tool_shift_request(change)
+    return bool(request["date"] and request["start_time"] and request["end_time"])
+
+
+def _has_create(changes: list[Any]) -> bool:
+    return any(
+        isinstance(change, dict)
+        and str(change.get("kind") or "").strip().lower() == "create"
+        for change in changes
+    )
+
+
+def _merged_create(change: dict[str, Any], flat: dict[str, Any]) -> dict[str, Any]:
+    """One shift described twice — the `changes` item and the flat copy —
+    folded into a single request. The `changes` item wins every field it
+    filled in; the flat copy contributes the staffing detail it left out,
+    since discarding the flat copy wholesale silently lost a pinned employee
+    or a headcount the manager had asked for."""
+    merged = dict(change)
+    for field in ("count", "employee_names"):
+        if not merged.get(field) and flat.get(field):
+            merged[field] = flat[field]
+    return merged
 
 
 def _flat_create_change(args: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -124,10 +190,17 @@ def _flat_create_change(args: dict[str, Any]) -> Optional[dict[str, Any]]:
     `kind='create'` came with no new shift attached."""
     if not any(args.get(field) not in (None, "", [], {}) for field in _FLAT_CREATE_FIELDS):
         return None
-    change: dict[str, Any] = {
-        "kind": "create", "role": args.get("role"), "target_date": args.get("target_date"),
-    }
+    change: dict[str, Any] = {"kind": "create", "role": args.get("role")}
     change.update({field: args.get(field) for field in _FLAT_CREATE_FIELDS})
+    # ONE resolved date under BOTH keys. `_coerce_tool_shift_request` and
+    # `_create_identity` read `date or target_date`, while
+    # `schedule_batch.item_day` reads `target_date or date` — a stray
+    # top-level `target_date` next to a real `date` would otherwise bucket
+    # this create under a day its shift is not on in the split plan the
+    # manager reads back.
+    resolved_date = args.get("date") or args.get("target_date")
+    change["date"] = resolved_date
+    change["target_date"] = resolved_date
     return change
 
 
@@ -184,15 +257,32 @@ def _coerce_tool_batch(
         # which is the loss the old check was really guarding against.
         if str(args.get("kind") or "").strip().lower() == "create":
             flat_create = _flat_create_change(args)
-            if flat_create is not None and not any(
-                isinstance(change, dict)
-                and str(change.get("kind") or "").strip().lower() == "create"
-                and _create_identity(change) == _create_identity(flat_create)
-                for change in changes
-            ):
-                # Appended BEFORE the cap is weighed below, so an absorbed
-                # create counts toward MAX_BATCH_OPERATIONS like any other.
-                changes.append(flat_create)
+            if flat_create is not None:
+                flat_identity = _create_identity(flat_create)
+                match_index = next(
+                    (
+                        index for index, change in enumerate(changes)
+                        if isinstance(change, dict)
+                        and str(change.get("kind") or "").strip().lower() == "create"
+                        and _create_identity(change) == flat_identity
+                    ),
+                    None,
+                )
+                if match_index is not None:
+                    changes[match_index] = _merged_create(changes[match_index], flat_create)
+                elif _is_complete_create(flat_create):
+                    # Appended BEFORE the cap is weighed below, so an absorbed
+                    # create counts toward MAX_BATCH_OPERATIONS like any other.
+                    changes.append(flat_create)
+                elif not _has_create(changes):
+                    return [], [], _INCOMPLETE_FLAT_CREATE_MESSAGE
+                # An INCOMPLETE flat create next to a create in `changes` is
+                # the model summarizing the batch's own new shift in the
+                # legacy fields, not asking for a second one — it is missing
+                # exactly the fields that make the identity match miss. It can
+                # never stage, so appending it only re-creates the dead end
+                # this whole path exists to fix: one terminal refusal, the
+                # entire correction lost.
     else:
         changes = [args]
 

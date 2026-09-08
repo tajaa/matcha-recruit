@@ -13,6 +13,7 @@ a DB call).
 
 import asyncio
 import unittest
+from datetime import date as _date
 from unittest import mock
 
 from app.matcha.services.huume.actions import evaluate_huume_action
@@ -20,7 +21,7 @@ from app.matcha.services.huume.agent import _HR_OPS_TOOL_SPECS, _build_hr_ops_st
 from app.matcha.services.huume.tools import TOOLS_BY_NAME
 from app.matcha.services.huume import schedule_skill
 from app.matcha.services.scheduling import schedule_chat
-from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS
+from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS, item_day
 
 BASE_ON = {"huume": True, "matcha_work": True, "employee_schedule": True}
 PROPOSAL_ID = "3f6b1c22-2000-4000-8000-000000000001"
@@ -763,12 +764,154 @@ class TestFlatCreateKindAlongsideABatch(unittest.TestCase):
         assert result["status"] == "clarify"
         assert f"{MAX_BATCH_OPERATIONS + 1} schedule operations" in result["message"]
 
+    def test_a_partial_flat_create_beside_the_real_one_is_a_summary_not_a_shift(self):
+        """The flat fields are an intent SUMMARY, so they are usually partial:
+        `kind='create', label, count` with the date and times only inside
+        `changes`. The identity match then misses, and appending the partial
+        copy re-created the exact dead end this path exists to fix — one
+        terminal refusal, the whole correction lost with nothing staged."""
+        build = schedule_chat.ProposalBuild(
+            kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill",
+        )
+        captured = {}
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        with mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    "kind": "create", "label": "barista", "count": 2,
+                    "changes": [
+                        {"kind": "cancel", "target_date": "2026-08-23", "target_time_hint": "06:00"},
+                        {"kind": "create", "label": "barista", "date": "2026-08-23",
+                         "start_time": "07:00", "end_time": "15:00", "count": 2},
+                    ],
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert result["operation_count"] == 2
+        assert result["operation_summary"] == {"cancel": 1, "create": 1}
+        assert len(captured["shift_requests"]) == 1
+
+    def test_an_unbuildable_flat_create_with_no_create_anywhere_still_refuses(self):
+        """Ignoring a partial flat create is only safe because `changes`
+        carries the shift. With no create anywhere the manager really did ask
+        for one we cannot build, so the refusal stands — worded for the shift,
+        never indexed as a "Schedule change 2" the batch does not contain."""
+        async def should_not_build(*args, **kwargs):
+            raise AssertionError("an unbuildable create must not persist a proposal")
+
+        with (
+            mock.patch.object(schedule_chat, "build_edit_proposal", should_not_build),
+            mock.patch.object(schedule_chat, "build_batch_proposal", should_not_build),
+        ):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "create", "label": "barista", "count": 2, "changes": [
+                    {"kind": "cancel", "target_date": "2026-08-23", "target_time_hint": "06:00"},
+                ]},
+            ))
+
+        assert result["status"] == "clarify"
+        assert "Schedule change" not in result["message"]
+        assert "date" in result["message"] and "start time" in result["message"]
+
+    def test_a_formatting_near_miss_between_the_two_copies_stages_one_shift(self):
+        """The flat copy and the `changes` copy are two independent model
+        spellings of ONE shift. Compared raw, `7:00` vs `07:00` staged both —
+        the manager confirms once and gets two identical shifts out of one
+        transaction."""
+        near_misses = [
+            {"start_time": "7:00"}, {"start_time": "07:00:00"},
+            {"end_time": "15:00:00"}, {"date": "2026-8-23"},
+        ]
+        for spelling in near_misses:
+            with self.subTest(spelling=spelling):
+                build = schedule_chat.ProposalBuild(
+                    kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill",
+                )
+                captured = {}
+
+                async def fake_build_batch_proposal(conn, _c=captured, _b=build, **kwargs):
+                    _c.update(kwargs)
+                    return _b
+
+                flat = {"kind": "create", "label": "barista", "date": "2026-08-23",
+                        "start_time": "07:00", "end_time": "15:00", **spelling}
+                with mock.patch.object(
+                    schedule_chat, "build_batch_proposal", fake_build_batch_proposal,
+                ):
+                    result = _run(schedule_skill.propose(
+                        conn=None, company_id="c1", actor_user_id="u1",
+                        args={**flat, "changes": [
+                            {"kind": "cancel", "target_date": "2026-08-23",
+                             "target_time_hint": "06:00"},
+                            {"kind": "create", "label": "barista", "date": "2026-08-23",
+                             "start_time": "07:00", "end_time": "15:00"},
+                        ]},
+                    ))
+
+                assert result["status"] == "ready"
+                assert result["operation_summary"] == {"cancel": 1, "create": 1}
+                assert len(captured["shift_requests"]) == 1
+
+    def test_the_dropped_flat_copy_still_contributes_its_staffing_detail(self):
+        """De-duping keeps the `changes` item, so a pinned employee or a
+        headcount the model wrote only into the flat copy used to vanish —
+        the same silent loss absorption was added to prevent."""
+        build = schedule_chat.ProposalBuild(
+            kind="proposal", proposal_id=PROPOSAL_ID, pill_text="Batch pill",
+        )
+        captured = {}
+
+        async def fake_build_batch_proposal(conn, **kwargs):
+            captured.update(kwargs)
+            return build
+
+        with mock.patch.object(schedule_chat, "build_batch_proposal", fake_build_batch_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    "kind": "create", "label": "barista", "date": "2026-08-23",
+                    "start_time": "07:00", "end_time": "15:00", "count": 2,
+                    "employee_names": ["Aisha Kim"],
+                    "changes": [
+                        {"kind": "cancel", "target_date": "2026-08-23", "target_time_hint": "06:00"},
+                        {"kind": "create", "label": "barista", "date": "2026-08-23",
+                         "start_time": "07:00", "end_time": "15:00"},
+                    ],
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert len(captured["shift_requests"]) == 1
+        staged = captured["shift_requests"][0]
+        assert staged["count"] == 2
+        assert staged["employee_name_hints"] == ["Aisha Kim"]
+
+    def test_an_absorbed_create_buckets_under_the_day_its_shift_is_on(self):
+        """`_coerce_tool_shift_request` reads `date or target_date` while
+        `schedule_batch.item_day` reads `target_date or date`. A stray
+        top-level `target_date` made the two disagree, so the split plan the
+        manager reads back named a day the shift is not on."""
+        absorbed = schedule_skill._flat_create_change({
+            "kind": "create", "label": "barista", "date": "2026-08-23",
+            "target_date": "2026-08-30", "start_time": "07:00", "end_time": "15:00",
+        })
+        assert item_day(absorbed) == _date(2026, 8, 23)
+        assert schedule_skill._coerce_tool_shift_request(absorbed)["date"] == "2026-08-23"
+
     def test_no_coercion_message_names_a_tool_field(self):
         """Every string this returns is relayed to the manager verbatim. The
         old refusal quoted the tool schema at them; nothing here may."""
         cases = [
             {"kind": "create", "changes": {"kind": "cancel"}},
             {"kind": "create", "changes": [{"kind": "create", "label": "barista"}]},
+            {"kind": "create", "label": "barista", "changes": [{"kind": "cancel"}]},
             {"changes": [{"kind": "create", "date": "2026-08-23"}]},
             {"changes": ["not a change"]},
         ]

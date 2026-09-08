@@ -189,6 +189,36 @@ Every string this path returns reaches the manager verbatim, so it names shifts
 and times the way `schedule_batch.split_plan_message` does and never a tool
 field; `test_no_coercion_message_names_a_tool_field` holds that line.
 
+Four things the absorb has to get right, or it rebuilds the dead end it
+replaced (all four found by review 2026-09-08, before release):
+
+- **Only a COMPLETE flat create is absorbed** (`_is_complete_create`: date +
+  both times, the same three fields the coercion loop demands). A summary is
+  usually PARTIAL — `kind='create', label, count`, the date and times only
+  inside `changes` — which is exactly the shape whose identity match misses,
+  so appending it staged an unbuildable create and returned one terminal
+  refusal that killed the whole correction. A partial flat create is ignored
+  when `changes` carries a create at all; with no create anywhere the manager
+  did ask for a shift that cannot be built, so the refusal stands, worded for
+  that shift and never indexed as a "Schedule change N" the batch has no room
+  for.
+- **The identity normalizes dates and times** (`_norm_day`/`_norm_clock`).
+  The flat copy and the `changes` copy are two independent model spellings of
+  ONE shift: raw string equality made `7:00` vs `07:00` (or `07:00:00`, or
+  `2026-8-23`) a miss, and the miss staged the shift TWICE — one confirmation,
+  two identical shifts in one transaction. That is worse than the refusal it
+  replaced, because nothing warns.
+- **A de-duped flat copy still contributes `count`/`employee_names`**
+  (`_merged_create`, filling only what the `changes` item left empty). The
+  match keeps the `changes` item, so a pinned employee written only into the
+  flat copy used to vanish — the same silent loss absorption exists to prevent.
+
+`_flat_create_change` also writes ONE resolved date under both `date` and
+`target_date`: `_coerce_tool_shift_request`/`_create_identity` read
+`date or target_date` while `schedule_batch.item_day` reads `target_date or
+date`, and a stray top-level `target_date` made the split plan name a day the
+shift is not on.
+
 **Assignment guard + review echo (2026-09-07).** Every `propose_schedule_change` stage now returns a
 `ScheduleReview` (`services/scheduling/schedule_review.py`) alongside `proposal_id`/`pill_text`:
 `rejected` (what the server REFUSED — overlap with an existing shift or with an earlier op in the same
