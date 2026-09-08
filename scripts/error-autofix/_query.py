@@ -13,8 +13,6 @@ import re
 import sys
 from urllib.parse import urlsplit
 
-import asyncpg
-
 AUTOFIXABLE_KINDS = {"exception", "unhandled", "celery_task", "background_task", "http_error"}
 INFRA_EXCEPTION_TYPES = {
     "ConnectionDoesNotExistError",
@@ -38,6 +36,11 @@ _NORMALIZE = [
 _ASSET_HASH = re.compile(r"(-[0-9A-Za-z_-]{8,})(?=\.(?:js|mjs|css)(?:\?|:|$))")
 _LINE_COLUMN = re.compile(r":\d+(?::\d+)?(?=\)?$|\s|$)")
 _DYNAMIC_SEGMENT = re.compile(r"/(?:[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z0-9_-]{20,})(?=/|$)", re.I)
+# A request id is only ever interpolated into a remote shell command by
+# fetch-correlated-log.sh. Server ids are minted/validated by
+# app.core.request_context; client ids arrive in a free-form context dict on
+# an unauthenticated endpoint, so anything outside this shape is dropped.
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9-]{4,64}$")
 
 
 def _normalize(text):
@@ -107,6 +110,14 @@ def stable_client_key(kind, message, stack, api_endpoint, url, component_stack="
         )
     )
     return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def _safe_request_id(value):
+    """Return the request id only when it is shell-safe; otherwise None."""
+    if value is None:
+        return None
+    text = str(value)
+    return text if _REQUEST_ID_RE.match(text) else None
 
 
 def _context(value):
@@ -212,7 +223,7 @@ def _group_server(rows):
             skipped += 1
             continue
         key = stable_key(row["kind"], row["exception_type"], row["message"], row["traceback"])
-        request_id = context.get("request_id")
+        request_id = _safe_request_id(context.get("request_id"))
         group = grouped.get(key)
         if group is None:
             grouped[key] = {
@@ -246,11 +257,12 @@ def _group_client(rows, server_request_pairs):
             skipped += 1
             continue
         context = _context(row["context"])
-        request_id = context.get("request_id")
+        raw_request_id = context.get("request_id")
         endpoint = _path(row["api_endpoint"])
-        if row["kind"] == "api_error" and request_id and endpoint and (str(request_id), endpoint) in server_request_pairs:
+        if row["kind"] == "api_error" and raw_request_id and endpoint and (str(raw_request_id), endpoint) in server_request_pairs:
             correlated += 1
             continue
+        request_id = _safe_request_id(raw_request_id)
         component_stack = context.get("component_stack") if isinstance(context.get("component_stack"), str) else ""
         key = stable_client_key(row["kind"], row["message"], row["stack"], row["api_endpoint"], row["url"], component_stack)
         occurred = _ts(row["occurred_at"])
@@ -282,6 +294,11 @@ def _group_client(rows, server_request_pairs):
 
 
 async def main():
+    # Imported here, not at module scope: stable_key/stable_client_key are
+    # pure and are exercised by host-side tests whose interpreter has no
+    # asyncpg. Only the in-container collector needs the driver.
+    import asyncpg
+
     hours = int(os.environ.get("AUTOFIX_HOURS", "24"))
     limit = int(os.environ.get("AUTOFIX_LIMIT", "25"))
     conn = await asyncpg.connect(os.environ["DATABASE_URL"], server_settings={"default_transaction_read_only": "on"})

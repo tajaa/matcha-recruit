@@ -315,17 +315,22 @@ _AUTOPR_LEGACY_STRUCTURED_NOTE_RE = re.compile(
     r"(?: · PR #[0-9]+)?"
     r"(?: · [^·]+ C[0-9]+ · (?:awaiting answers|ready for review|no safe action))?"
     r"(?: · \[autopr:no-spec [^]]+\] "
-    r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
+    r"(?:already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?",
     re.IGNORECASE,
 )
+# The status segment is matched lazily up to the next " · " (or the end):
+# a greedy [^·]+ swallowed the trailing space before the separator, every
+# optional segment after it then failed to match, and the "structured" match
+# ended right after the status — so a rework note was rebuilt as
+# "… · PR #48 · · build 900 · …" with a duplicated separator.
 _AUTOPR_STRUCTURED_NOTE_RE = re.compile(
-    r"^🤖 AUTO SETUP · [^·]+"
+    r"^🤖 AUTO SETUP · [^·]+?(?= · |$)"
     r"(?: · build [0-9]+)?"
     r"(?: · prod (?:[0-9a-f]{7,40}|backend [0-9a-f]{7,40} / frontend [0-9a-f]{7,40}))?"
     r"(?: · PR #[0-9]+)?"
     r"(?: · [^·]+ C[0-9]+)?"
     r"(?: · \[autopr:no-spec [^]]+\] "
-    r"(?:already_fixed|migration_required|policy_blocked|external_dependency))?",
+    r"(?:already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?",
     re.IGNORECASE,
 )
 
@@ -430,6 +435,35 @@ def _with_autopr_progress_note(
     return f"{marker} · {current}"
 
 
+def _with_autopr_closed_note(existing: Optional[str], *, pr_number: Optional[int]) -> str:
+    """Replace this system's structured prefix with a closed-unmerged marker.
+
+    Human text after the marker survives, exactly as in the merge path.
+    """
+    marker = f"{_AUTOPR_PROGRESS_NOTE} · PR CLOSED: NOT MERGED"
+    if pr_number is not None:
+        marker += f" · PR #{pr_number}"
+    current = (existing or "").strip()
+    if not current:
+        return marker
+    if current.casefold().startswith(marker.casefold()):
+        return current
+    for prefix in (_AUTOPR_PROGRESS_NOTE, _AUTOPR_LEGACY_PROGRESS_NOTE):
+        if current.casefold() == prefix.casefold():
+            return marker
+        if current.casefold().startswith(f"{prefix} · ".casefold()):
+            structured = (
+                _AUTOPR_STRUCTURED_NOTE_RE.match(current)
+                or _AUTOPR_LEGACY_STRUCTURED_NOTE_RE.match(current)
+            )
+            if structured:
+                remainder = current[structured.end():].removeprefix(" · ")
+            else:
+                remainder = current[len(prefix):].removeprefix(" · ")
+            return f"{marker} · {remainder}" if remainder else marker
+    return f"{marker} · {current}"
+
+
 async def _resolve_pull_request_tasks(payload: dict) -> list[dict]:
     repo_full_name = (payload.get("repository") or {}).get("full_name") or ""
     if repo_full_name != _KANBAN_AUTOPR_REPO:
@@ -530,9 +564,40 @@ async def _handle_pull_request_event(payload: dict) -> dict:
 
     if action == "closed":
         merged = bool(pr.get("merged"))
+        head_ref = (pr.get("head") or {}).get("ref") or ""
+        if not merged:
+            # A human closed the PR without merging. Only this lane's own
+            # drafts (bot/task-<id8>) hand the card back to Todo: an error-bot
+            # draft closed as superseded/duplicate is a different signal, and
+            # a card linked to a human PR is not the bot's to move. The card
+            # does not auto-rerun — select.sh still sees the branch's PR
+            # history — it just stops sitting in In Progress forever.
+            branch_match = _TASK_BRANCH_RE.match(head_ref)
+            if not branch_match:
+                return result(merged=False)
+            branch_id8 = branch_match.group(1)
+            for task in tasks:
+                # Only the card that owns this branch is being rejected. A
+                # cross-lane card shares the PR *number* but not the branch;
+                # moving it would strip its ALREADY SCOPED marker, and the next
+                # select.sh pass would re-investigate it as fresh work.
+                # reconcile-merged-cards.sh makes the same own_draft
+                # distinction — the webhook has to agree with it.
+                if str(task["id"]).replace("-", "")[:8] != branch_id8:
+                    continue
+                if task["board_column"] not in ("in_progress", "changes_requested"):
+                    continue
+                patch = {"board_column": "todo"}
+                closed_note = _with_autopr_closed_note(
+                    task["progress_note"], pr_number=pr.get("number"),
+                )
+                if closed_note != task["progress_note"]:
+                    patch["progress_note"] = closed_note
+                await pt_svc.update_project_task(task["project_id"], task["id"], patch)
+            return result(merged=False)
         for task in tasks:
             column = task["board_column"]
-            if not merged or column == "done":
+            if column == "done":
                 continue
             patch = {}
             progress_note = _with_autopr_progress_note(

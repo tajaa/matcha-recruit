@@ -31,7 +31,11 @@ if mkdir -p "$(dirname "$LIVE_LOG")" 2>/dev/null; then
 fi
 
 run_model() {
+    # This lane exists to repair the harness, so the bridge's default
+    # apply-time denylist (scripts/, docker/, …) would reject every repair.
+    # Narrow it to what publish.sh's sealed allowlist can never accept anyway.
     env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        AUTOPR_SANDBOX_PATH_DENY_RE='^(\.github/|deploy/|secrets/|\.githooks/|(.*/)?\.env[^/]*$|scripts/autopr-self-audit/)' \
         AUTOPR_CODEX_MODEL=gpt-5.6-sol \
         AUTOPR_CODEX_REASONING_EFFORT=medium \
         "$SANDBOX_RUNNER" "$SCRIPT_DIR/_prompt.txt" "$REPORT_FILE" "$DECISION_FILE.raw" \

@@ -53,13 +53,55 @@ jobs:
             exit 1
           fi
 
-      - name: Reset any stray bot branch from a prior interrupted run
+      - name: Refuse a hot re-dispatch
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The Mac dispatcher is supposed to hold this lane to one pass per
+          # twenty minutes; a stale installed copy re-fired it every 66 s for
+          # hours. This floor lives on GitHub's side so no local clock bug can
+          # spin the runner again. API failure proceeds (spend guard only).
+          set +e
+          ./scripts/kanban-autopr/hot-redispatch-guard.sh
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "Previous Kanban run completed less than five minutes ago; skipping this pass." >> "$GITHUB_STEP_SUMMARY"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reset any stray bot branch or leftover model edits from a prior interrupted run
         run: |
           git worktree list --porcelain | awk '/^branch refs\/heads\/bot\/task-/{print}' || true
           git worktree prune
+          # `clean: false` keeps node_modules, so the checkout persists between
+          # runs — and so does anything a killed run left in the tree. Model
+          # edits that survived here were staged into the NEXT card's PR by
+          # publish.sh's `git add --all`. Tracked changes and untracked files
+          # go; ignored paths (node_modules, venv, .env) are untouched.
+          git reset --hard HEAD
+          git clean -fd
           current="$(git branch --show-current)"
           if [[ "$current" == bot/task-* ]]; then
             git switch main
+          fi
+          # Everything downstream reads the LOCAL main: `git archive main`
+          # builds the control plane, `git switch -C "$branch" main` bases the
+          # draft, and resolve-production-context.sh gates the deployed SHA
+          # against origin/main. This persistent clone's main lags whatever was
+          # last checked out here, so without the fast-forward a commit that is
+          # deployed and in origin/main can be absent from the branch the bot
+          # drafts on — the gate passes while the invariant it protects does
+          # not hold. The clone is disposable; a diverged local main is
+          # leftover bot state, not work to preserve.
+          git fetch --quiet origin main
+          if [ "$(git branch --show-current)" = main ]; then
+            git merge --ff-only origin/main || git reset --hard origin/main
+          else
+            git fetch --quiet --force origin main:main
           fi
 
       - name: Configure GitHub CLI
@@ -68,9 +110,17 @@ jobs:
         run: gh auth status
 
       - name: Ensure labels exist
+        if: steps.guard.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # One list call instead of twelve creates on every no-op pass. Read
+          # color and description too: `gh label create --force` is the only
+          # thing that UPDATES an existing label, so a name-only skip meant an
+          # edited description or color here could never reach the repo.
+          existing="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 200 \
+            --json name,color,description \
+            --jq '.[] | "\(.name)|\(.color | ascii_downcase)|\(.description // "")"' 2>/dev/null || true)"
           for l in "autopr|1D76DB|Opened by the kanban-autopr bot" \
                    "autopr-rework|8250DF|Pushed to address review feedback on an existing autopr PR" \
                    "autopr-awaiting-input|5319E7|Draft needs a human answer before automation can continue" \
@@ -82,35 +132,33 @@ jobs:
                    "confidence:low|D93F0B|Autopr confidence 0-44" \
                    "covers-kanban-task|0E8A16|Also covers a Matcha Work task" \
                    "possible-duplicate|FBCA04|May overlap another open pull request" \
-                   "needs-work|D93F0B|Verification found a new test failure"; do
+                   "needs-work|D93F0B|Verification found a new failure, or could not run"; do
             IFS='|' read -r name color desc <<< "$l"
+            printf '%s\n' "$existing" \
+              | grep -qxF "$name|$(printf '%s' "$color" | tr 'A-Z' 'a-z')|$desc" && continue
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
           done
 
-      - name: Write production SSH key
-        env:
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
-          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
-
-      - name: Resolve active production build and schema
-        timeout-minutes: 3
-        env:
-          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
-        run: |
-          ./scripts/kanban-autopr/resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"
-          {
-            echo '## Production baseline'
-            jq '{build_number, release_sha, containers: {backend: .containers.backend.git_sha, frontend: .containers.frontend.git_sha}, database}' "$RUNNER_TEMP/production-context.json"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Collect candidate cards
         id: collect
+        if: steps.guard.outputs.proceed == 'true'
         timeout-minutes: 2
         run: ./scripts/kanban-autopr/collect.sh > "$RUNNER_TEMP/cards.json"
 
-      - name: Reconcile merged PR cards missed by the webhook
+      - name: Collect open bot PR context
+        if: steps.guard.outputs.proceed == 'true'
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # One run-scoped snapshot of every open bot PR. The reconciler, the
+          # planner, and the selector all read this file instead of each
+          # re-querying GitHub for the same PRs.
+          ./scripts/kanban-autopr/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
+          echo "AUTOPR_BOT_PRS_FILE=$RUNNER_TEMP/bot-prs.json" >> "$GITHUB_ENV"
+
+      - name: Reconcile merged or closed PR cards missed by the webhook
+        if: steps.guard.outputs.proceed == 'true'
         timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
@@ -123,6 +171,7 @@ jobs:
           mv "$RUNNER_TEMP/reconciled-cards.json" "$RUNNER_TEMP/cards.json"
 
       - name: Build cross-card and bot-PR work plan
+        if: steps.guard.outputs.proceed == 'true'
         timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
@@ -131,7 +180,6 @@ jobs:
           # planning evidence. plan.py clusters related cards, excludes PRs
           # already marked ready for review, and assigns the proposed merge
           # order for the remaining drafts.
-          ./scripts/kanban-autopr/collect-pr-context.sh > "$RUNNER_TEMP/bot-prs.json"
           python3 ./scripts/kanban-autopr/plan.py \
             --cards "$RUNNER_TEMP/cards.json" \
             --prs "$RUNNER_TEMP/bot-prs.json" \
@@ -145,6 +193,7 @@ jobs:
 
       - name: Select one card
         id: select
+        if: steps.guard.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -161,18 +210,52 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "id8=$(jq -r '.id8' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
             echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
-            jq --slurpfile production "$RUNNER_TEMP/production-context.json" \
-              '. + {production: $production[0]}' "$RUNNER_TEMP/card.json" \
-              > "$RUNNER_TEMP/card-with-production.json"
-            mv "$RUNNER_TEMP/card-with-production.json" "$RUNNER_TEMP/card.json"
           fi
+
+      # Production resolution (SSH + two ECR lookups + a curl of the frontend
+      # bundle) is the most expensive prelude step and its result is only
+      # ever read once a card is selected. ≥96% of runs select nothing.
+      - name: Write production SSH key
+        if: steps.select.outputs.skip == 'false'
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Resolve active production build and schema
+        if: steps.select.outputs.skip == 'false'
+        timeout-minutes: 3
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ./scripts/kanban-autopr/resolve-production-context.sh > "$RUNNER_TEMP/production-context.json"
+          {
+            echo '## Production baseline'
+            jq '{build_number, release_sha, containers: {backend: .containers.backend.git_sha, frontend: .containers.frontend.git_sha}, database}' "$RUNNER_TEMP/production-context.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq --slurpfile production "$RUNNER_TEMP/production-context.json" \
+            '. + {production: $production[0]}' "$RUNNER_TEMP/card.json" \
+            > "$RUNNER_TEMP/card-with-production.json"
+          mv "$RUNNER_TEMP/card-with-production.json" "$RUNNER_TEMP/card.json"
 
       - name: Snapshot trusted AutoPR control plane
         if: steps.select.outputs.skip == 'false'
         run: |
+          # Everything that runs AFTER the model has touched the workspace
+          # executes from this copy of main, never from the checkout. The
+          # scope checker and lib.sh's migration-graph helper were missing
+          # from the archive (lib.sh resolves ../alembic_graph_snapshot.py
+          # relative to itself, so every migration draft failed its check
+          # from the control root). agent-sandbox.sh stays in the workspace:
+          # it resolves compose files and the msandbox package from its own
+          # location, and the bridge's apply-time denylist now guarantees a
+          # model patch cannot reach scripts/, docker/, or compose files.
           control_root="$RUNNER_TEMP/autopr-control"
+          rm -rf "$control_root"
           mkdir -p "$control_root"
-          git archive main scripts/kanban-autopr scripts/error-autofix \
+          git archive main scripts/kanban-autopr scripts/error-autofix scripts/autopr-scope \
+              scripts/alembic_graph_snapshot.py scripts/alembic_graph.py \
             | tar -x -C "$control_root"
           echo "AUTOPR_CONTROL_ROOT=$control_root/scripts" >> "$GITHUB_ENV"
           echo "AUTOPR_WORKSPACE_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
@@ -296,7 +379,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_SCOPE_DEDUPE_MODE: enforce
         run: |
-          ./scripts/autopr-scope/check-open-prs.sh \
+          "$AUTOPR_CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
             --lane kanban --identity "$(jq -r '.task_id' "$RUNNER_TEMP/card.json")" \
             --evidence "$RUNNER_TEMP/card.json" --report "$RUNNER_TEMP/report.md" \
             --output "$RUNNER_TEMP/coverage.json"
@@ -315,7 +398,8 @@ jobs:
         if: steps.coverage.outputs.covered == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/kanban-autopr/record-coverage.sh "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/coverage.json"
+        run: |
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/record-coverage.sh" "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/coverage.json"
 
       - name: Verify (baseline vs branch)
         id: verify

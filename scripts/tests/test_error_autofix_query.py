@@ -90,3 +90,39 @@ def test_incident_priority_is_newest_first():
     )
 
     assert incidents == [new_single, older_hot]
+
+
+def test_query_module_imports_without_the_database_driver():
+    """stable_key/stable_client_key are exercised by host-side tests whose
+    interpreter has no asyncpg; the driver is only imported inside main()."""
+    import sys
+
+    assert "asyncpg" not in getattr(query, "__dict__", {})
+    source = MODULE.read_text()
+    assert "\nimport asyncpg\n" not in source.split("async def main")[0]
+    assert "import asyncpg" in source.split("async def main")[1]
+    sys.modules.pop("asyncpg", None)
+
+
+def test_client_request_id_outside_the_safe_alphabet_is_dropped():
+    """A client incident's request_id is attacker-controlled (free-form context
+    on an unauthenticated endpoint) and is later interpolated into a remote
+    shell command. Only [A-Za-z0-9-]{4,64} may leave the collector."""
+    now = datetime(2026, 8, 26, 12, tzinfo=timezone.utc)
+    hostile = 'x"; touch /tmp/pwned; echo "'
+    row = {
+        "id": "client-9", "kind": "react_error", "message": "boom", "stack": "at render (src/App.tsx:12:3)",
+        "url": "https://hey-matcha.com/app", "api_endpoint": None, "api_status_code": None,
+        "context": '{"request_id":"%s"}' % hostile.replace('"', '\\"'), "occurred_at": now,
+    }
+    grouped, _, _ = query._group_client([row], set())
+    incident = next(iter(grouped.values()))
+    assert incident["request_id"] is None
+
+    safe = {**row, "context": '{"request_id":"req-abc-123"}'}
+    grouped, _, _ = query._group_client([safe], set())
+    assert next(iter(grouped.values()))["request_id"] == "req-abc-123"
+
+    assert query._safe_request_id("ab") is None
+    assert query._safe_request_id("a" * 65) is None
+    assert query._safe_request_id(None) is None

@@ -10,6 +10,15 @@ die() {
     exit 1
 }
 
+# ISO-8601 UTC timestamp plus N hours, BSD `date` first and GNU as fallback.
+# Lives here because select.sh and verify-deployed-fixes.sh both need it and a
+# second copy is exactly the kind of thing that gets fixed once and not twice.
+_iso_plus_hours() {
+    local iso="$1" hours="$2"
+    date -u -j -v"+${hours}H" -f "%Y-%m-%dT%H:%M:%SZ" "$iso" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "$iso + ${hours} hours" +%Y-%m-%dT%H:%M:%SZ
+}
+
 # Run a remote bash script (read from stdin) over SSH against the prod host.
 # Stubbed by scripts/tests/test_error_autofix.sh via a fake `ssh` on PATH.
 ssh_prod() {

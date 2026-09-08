@@ -43,7 +43,12 @@ import html
 import json
 import os
 
+from app.config import load_settings
 from app.core.services.email import get_email_service
+
+# `python -` inside the container is a fresh interpreter: nothing has run the
+# app's lifespan, so settings are not initialized until we do it here.
+load_settings()
 
 payload = json.loads(base64.b64decode(os.environ["MATCHA_AUTOFIX_EMAIL_PAYLOAD_B64"]))
 title = payload["title"]
@@ -146,23 +151,38 @@ notify_pr_key() {
     rm -f "$marker_file"
 }
 
+# Only text the automation itself wrote may carry a notify marker. PR bodies
+# and comments are public input: a human (or any collaborator) pasting the
+# marker into a comment must not be able to make the harness exec into the
+# production container and send mail.
+# `gh pr list --json author` reports a GitHub App as `app/<slug>`, while the
+# comments API reports the same identity as `<slug>[bot]`. Accept both spellings
+# or every real automation PR body is discarded and --reconcile is a no-op.
+is_bot_login() {
+    [[ "$1" == *'[bot]' ]] || [[ "$1" == app/* ]] || [[ "$1" == matcha-* ]]
+}
+
 reconcile() {
-    local prs pr pr_number body comments combined
+    local prs pr pr_number body author comments combined
     prs="$(
         {
             gh pr list --repo "$REPO" --state open --label autofix --limit 100 \
-                --json number,state,title,url,body
+                --json number,state,title,url,body,author
             gh pr list --repo "$REPO" --state open --label covers-prod-error --limit 100 \
-                --json number,state,title,url,body
+                --json number,state,title,url,body,author
         } | jq -s 'add | unique_by(.number)'
     )"
     while IFS= read -r pr; do
         [ -n "$pr" ] || continue
         pr_number="$(printf '%s' "$pr" | jq -r '.number')"
-        body="$(printf '%s' "$pr" | jq -r '.body // ""')"
+        author="$(printf '%s' "$pr" | jq -r '.author.login // ""')"
+        body=""
+        ! is_bot_login "$author" || body="$(printf '%s' "$pr" | jq -r '.body // ""')"
         comments="$(comments_for "$pr_number")"
         combined="$(printf '%s\n%s\n' "$body" \
-            "$(printf '%s' "$comments" | jq -r '.[].body // ""')")"
+            "$(printf '%s' "$comments" | jq -r '
+                .[] | select((.user.login // "") | (endswith("[bot]") or startswith("matcha-")))
+                | .body // ""')")"
         while IFS= read -r key; do
             [ -n "$key" ] || continue
             notify_pr_key "$pr_number" "$key"

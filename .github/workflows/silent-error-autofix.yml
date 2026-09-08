@@ -22,6 +22,12 @@ jobs:
   investigate:
     runs-on: [self-hosted, macOS, opencode]
     timeout-minutes: 55
+    env:
+      # One source of truth for the incident window. collect.sh reads these,
+      # and verify-deployed-fixes.sh bounds its "has not recurred" claim to the
+      # same window it was actually shown — the two must never drift apart.
+      AUTOFIX_HOURS: '24'
+      AUTOFIX_LIMIT: '25'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,10 +47,14 @@ jobs:
             exit 1
           fi
 
-      - name: Reset any stray bot branch from a prior interrupted run
+      - name: Reset any stray bot branch or leftover model edits from a prior interrupted run
         run: |
           git worktree list --porcelain | awk '/^branch refs\/heads\/bot\/err-/{print}' || true
           git worktree prune
+          # A killed run skips Cleanup; whatever the model left in this
+          # persistent checkout would be staged into the next fix's PR.
+          git reset --hard HEAD
+          git clean -fd
           current="$(git branch --show-current)"
           if [[ "$current" == bot/err-* ]]; then
             git switch main
@@ -60,13 +70,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Read color and description too: `gh label create --force` is the
+          # only thing that UPDATES an existing label, so a name-only skip
+          # meant an edited description or color could never reach the repo.
+          existing="$(gh label list --repo "$GITHUB_REPOSITORY" --limit 200 \
+            --json name,color,description \
+            --jq '.[] | "\(.name)|\(.color | ascii_downcase)|\(.description // "")"' 2>/dev/null || true)"
           for l in "autofix|1D76DB|Opened by the silent-error autofix bot" \
                    "autofix-superseded|6B7280|Draft superseded by a merged human PR" \
                    "autofix-duplicate|6B7280|Duplicate of an older open pull request" \
                    "covers-prod-error|0E8A16|Also covers a production error incident" \
                    "possible-duplicate|FBCA04|May overlap another open pull request" \
-                   "needs-work|D93F0B|Verification found a new test failure" \
+                   "needs-work|D93F0B|Verification found a new failure, or could not run" \
                    "autofix-nofix|CFD3D7|Investigated but no safe fix found" \
+                   "production-verified|0E8A16|Reviewed post-deploy production assertions passed" \
+                   "production-verification-failed|B60205|A reviewed post-deploy production assertion failed" \
                    "criticality:red|B60205|Production, safety, security, data, or compliance critical" \
                    "criticality:orange|D93F0B|Material regression or broad workflow impact" \
                    "criticality:yellow|FBCA04|Scoped or recoverable production behavior" \
@@ -75,6 +93,8 @@ jobs:
                    "confidence:low|D93F0B|Autofix confidence 0-44" \
                    "sev:high|B60205|" "sev:med|D4C5F9|" "sev:low|0E8A16|"; do
             IFS='|' read -r name color desc <<< "$l"
+            printf '%s\n' "$existing" \
+              | grep -qxF "$name|$(printf '%s' "$color" | tr 'A-Z' 'a-z')|$desc" && continue
             gh label create "$name" --color "$color" --description "$desc" --force >/dev/null 2>&1 || true
           done
 
@@ -106,15 +126,42 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
-          # 24 hours is the lookback, not the cadence. The workflow runs every
-          # 5 minutes; the wider window prevents runner downtime or a long
-          # investigation from making an unresolved incident disappear.
-          if ./scripts/error-autofix/collect.sh --hours 24 --limit 25 > "$RUNNER_TEMP/incidents.json"; then
+          # AUTOFIX_HOURS is the lookback, not the cadence. The Mac dispatcher
+          # gives this lane a slot once its last pass is ten minutes old; the
+          # wider window prevents runner downtime or a long investigation
+          # from making an unresolved incident disappear.
+          if ./scripts/error-autofix/collect.sh > "$RUNNER_TEMP/incidents.json"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "DB collection failed; falling back to log-grep evidence" >> "$GITHUB_STEP_SUMMARY"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Resolve the deployed build
+        continue-on-error: true
+        timeout-minutes: 1
+        run: |
+          # Deploys are manual, so "merged" is not "live". The frontend's
+          # public version.json names the deployed git SHA (both images share
+          # one SHA on a normal rollout). select.sh uses it to stop
+          # re-investigating a merged-but-undeployed fix every two hours, and
+          # verify-deployed-fixes.sh to confirm a deployed fix actually held.
+          sha="$(curl -fsS --max-time 15 -H 'Cache-Control: no-cache' \
+              "https://hey-matcha.com/version.json?check=$(date +%s)" | jq -r '.git_sha // empty')"
+          if [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "AUTOFIX_DEPLOYED_SHA=$sha" >> "$GITHUB_ENV"
+            echo "Deployed build: $sha" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Deployed build unknown; merged fixes are treated as possibly live." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verify deployed error fixes stopped recurring
+        if: steps.collect.outputs.ok == 'true'
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/error-autofix/verify-deployed-fixes.sh "$RUNNER_TEMP/incidents.json"
 
       - name: Fallback log-grep evidence
         if: steps.collect.outputs.ok != 'true'

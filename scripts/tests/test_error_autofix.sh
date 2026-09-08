@@ -209,11 +209,11 @@ EOF
 chmod +x "$TMP_DIR/bin/ssh"
 cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
-[ "$1" != api ] || { echo '[]'; exit 0; }
+[ "$1" != api ] || { echo "${NOTIFY_STUB_COMMENTS:-[]}"; exit 0; }
 case "$1 $2" in
     "pr list")
         if [[ "$*" == *"--label autofix"* ]]; then
-            echo '[{"number":42,"state":"OPEN","title":"🟡 [C70] fix: AttributeError","url":"https://github.test/pr/42","body":"<!-- matcha-autofix-notify-review: abc123abc123 -->\n<!-- matcha-autopr-criticality: yellow -->\n<!-- matcha-autopr-confidence-score: 70 -->"}]'
+            echo '[{"number":42,"state":"OPEN","title":"🟡 [C70] fix: AttributeError","url":"https://github.test/pr/42","author":{"login":"'"${NOTIFY_STUB_AUTHOR:-app/github-actions}"'"},"body":"<!-- matcha-autofix-notify-review: abc123abc123 -->\n<!-- matcha-autopr-criticality: yellow -->\n<!-- matcha-autopr-confidence-score: 70 -->"}]'
         else
             echo '[]'
         fi
@@ -250,6 +250,41 @@ PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" GH_TOKEN=x \
   "$AUTOFIX_DIR/notify-review-ready.sh" --reconcile >/dev/null 2>&1
 check "fix-ready email reconciliation retries an opted-in open PR" \
   $([ "$?" = 0 ] && grep -qF '<!-- matcha-autofix-review-email: abc123abc123 -->' "$TMP_DIR/notify.log" && echo 0 || echo 1)
+# The marker in a HUMAN-authored body or comment is public input, not an
+# instruction to exec into the production container and send mail.
+rm -f "$TMP_DIR/notify.log"
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" GH_TOKEN=x \
+  GITHUB_REPOSITORY=x/x NOTIFY_STUB_LOG="$TMP_DIR/notify.log" NOTIFY_STUB_AUTHOR=some-human \
+  NOTIFY_STUB_COMMENTS='[{"user":{"login":"some-human"},"body":"<!-- matcha-autofix-notify-review: abc123abc123 -->"}]' \
+  "$AUTOFIX_DIR/notify-review-ready.sh" --reconcile >/dev/null 2>&1
+check "reconciliation ignores notify markers written by humans" \
+  $([ "$?" = 0 ] && [ ! -s "$TMP_DIR/notify.log" ] && echo 0 || echo 1)
+check "the in-container mail snippet initializes settings first" \
+  $(grep -qF 'from app.config import load_settings' "$AUTOFIX_DIR/notify-review-ready.sh" \
+    && grep -qF 'load_settings()' "$AUTOFIX_DIR/notify-review-ready.sh" && echo 0 || echo 1)
+
+################################################################################
+# Correlated-log fetch — a client incident's request_id is attacker-controlled
+# and is interpolated into a remote shell command. Anything outside the safe
+# alphabet must never reach ssh.
+################################################################################
+cat > "$TMP_DIR/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+cat > "$SSH_STUB_CAPTURE"
+exit 0
+EOF
+chmod +x "$TMP_DIR/bin/ssh"
+printf '{"request_id":"x\"; touch /tmp/pwned; echo \"","stable_key":"abc123abc123"}\n' > "$TMP_DIR/hostile-incident.json"
+: > "$TMP_DIR/ssh-capture"
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" SSH_STUB_CAPTURE="$TMP_DIR/ssh-capture" \
+  "$AUTOFIX_DIR/fetch-correlated-log.sh" "$TMP_DIR/hostile-incident.json" > "$TMP_DIR/hostile-out" 2>/dev/null
+check "fetch-correlated-log.sh refuses a shell-hostile request_id before ssh" \
+  $([ "$?" = 0 ] && [ ! -s "$TMP_DIR/ssh-capture" ] && [ ! -s "$TMP_DIR/hostile-out" ] && echo 0 || echo 1)
+printf '{"request_id":"req-0123abcd","stable_key":"abc123abc123"}\n' > "$TMP_DIR/safe-incident.json"
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" SSH_STUB_CAPTURE="$TMP_DIR/ssh-capture" \
+  "$AUTOFIX_DIR/fetch-correlated-log.sh" "$TMP_DIR/safe-incident.json" >/dev/null 2>&1
+check "a well-formed request_id still reaches the remote grep" \
+  $(grep -qF -- 'grep -F -- "[rid=req-0123abcd]"' "$TMP_DIR/ssh-capture" && echo 0 || echo 1)
 
 ################################################################################
 # 6-9: select.sh dedup decisions, via a stubbed `gh` on PATH
@@ -260,8 +295,15 @@ cat > "$TMP_DIR/bin/gh" <<EOF
 #!/usr/bin/env bash
 case "\$1 \$2" in
     "issue list")
-        # No open no-fix issue tracking this incident, unless a test overrides it.
-        echo "\${GH_STUB_ISSUE_HITS:-0}"
+        # Emulate gh's own --jq so select.sh's real filter is exercised: the
+        # cooldown clock comes from a marker in the issue BODY, and a stub that
+        # echoed a pre-computed timestamp would never test that.
+        jq_expr=""; want_jq=false
+        for a in "\$@"; do
+            if [ "\$want_jq" = true ]; then jq_expr="\$a"; want_jq=false; fi
+            [ "\$a" != --jq ] || want_jq=true
+        done
+        printf '%s' "\${GH_STUB_ISSUES:-[]}" | jq -r "\$jq_expr"
         ;;
     "pr list")
         if [[ "\$*" == *"--label autofix"* ]]; then
@@ -329,12 +371,151 @@ check "select.sh emits an incident with no prior PR at all" $([ -n "$out" ] && e
 ################################################################################
 # open no-fix issue must not starve the queue: skip, don't re-investigate
 ################################################################################
-GH_STUB_ISSUE_HITS=1 run_select "$incident_file" > /dev/null 2>&1
+nofix_issue() {
+    # $1 = the confirmation marker publish.sh stamps into the body, $2 = createdAt
+    jq -cn --arg confirmed "$1" --arg created "$2" \
+        '[{title: "error: Boom in /x [ddd444444444]",
+           body: ("no safe fix\n<!-- matcha-autofix-nofix-confirmed: " + $confirmed + " -->"),
+           createdAt: $created}]'
+}
+now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+GH_STUB_ISSUES="$(nofix_issue "$now_iso" "$now_iso")" run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips (exit 3) when an open no-fix issue already tracks this key" $([ "$?" = "3" ] && echo 0 || echo 1)
 
-unset GH_STUB_ISSUE_HITS
+# …but not forever: once the bot's own last no-fix confirmation is a week old
+# the incident is re-investigated (publish.sh then restamps the body).
+out="$(GH_STUB_ISSUES="$(nofix_issue "2026-01-01T00:00:00Z" "2026-01-01T00:00:00Z")" run_select "$incident_file")"
+check "select.sh re-investigates a no-fix issue after its cooldown" $([ -n "$out" ] && echo 0 || echo 1)
+
+# A human commenting "still broken" bumps the issue's updatedAt. Keying the
+# cooldown off that would extend the suppression another full week — the exact
+# opposite of what the comment means.
+out="$(GH_STUB_ISSUES="$(nofix_issue "2026-01-01T00:00:00Z" "$now_iso")" run_select "$incident_file")"
+check "a human touching the no-fix issue does not extend its cooldown" $([ -n "$out" ] && echo 0 || echo 1)
+
+# An issue predating the marker falls back to createdAt rather than never expiring.
+out="$(jq -cn '[{title:"error: Boom in /x [ddd444444444]",body:"legacy body",createdAt:"2026-01-01T00:00:00Z"}]' > "$TMP_DIR/legacy-issue.json"; \
+    GH_STUB_ISSUES="$(cat "$TMP_DIR/legacy-issue.json")" run_select "$incident_file")"
+check "a pre-marker no-fix issue falls back to createdAt" $([ -n "$out" ] && echo 0 || echo 1)
+
+unset GH_STUB_ISSUES
 out="$(run_select "$incident_file")"
 check "select.sh still investigates once the no-fix issue is gone" $([ -n "$out" ] && echo 0 || echo 1)
+
+################################################################################
+# Merged is not deployed. With the deployed build known, a merged fix whose
+# commit is not in it yet is skipped instead of re-investigated every two
+# hours until the next manual deploy (which produced a duplicate PR).
+################################################################################
+head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+parent_sha="$(git -C "$REPO_ROOT" rev-parse HEAD~1)"
+make_incident "eee555555555" "2026-08-19T00:00:00Z" "2026-08-22T00:00:00Z" > "$incident_file"
+printf '[{"state":"MERGED","mergedAt":"2026-08-20T00:00:00Z","closedAt":"2026-08-20T00:00:00Z","mergeCommit":{"oid":"%s"}}]\n' "$head_sha" > "$GH_STUB_RESPONSE_FILE"
+AUTOFIX_DEPLOYED_SHA="$parent_sha" run_select "$incident_file" > /dev/null 2>&1
+check "select.sh skips a merged fix whose commit is not in the deployed build" $([ "$?" = "3" ] && echo 0 || echo 1)
+out="$(AUTOFIX_DEPLOYED_SHA="$head_sha" run_select "$incident_file")"
+check "select.sh re-opens a merged fix once it is deployed and still recurring" $([ -n "$out" ] && echo 0 || echo 1)
+out="$(AUTOFIX_DEPLOYED_SHA="not-a-commit" run_select "$incident_file")"
+check "an unresolvable deployed SHA falls back to the grace-window rule" $([ -n "$out" ] && echo 0 || echo 1)
+
+# The cap read fails CLOSED: with no readable count, the selector dies
+# instead of comparing an empty string and skipping the cap.
+old_dir="$TMP_DIR/old-attempts"; mkdir -p "$old_dir/attempts"
+touch -t 202601010000 "$old_dir/attempts/stalekey00001"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOFIX_CACHE_DIR="$old_dir" \
+    "$AUTOFIX_DIR/select.sh" "$incident_file" > /dev/null 2>&1 || true
+check "select.sh prunes attempt markers older than the retention window" \
+    $([ ! -e "$old_dir/attempts/stalekey00001" ] && echo 0 || echo 1)
+
+################################################################################
+# Deployed-fix verification: a merged autofix PR whose commit is live is
+# marked verified when its fingerprint is silent, failed when it recurs.
+################################################################################
+cat > "$TMP_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_STUB_CALLS"
+case "$1 $2" in
+    "pr list") cat "$GH_STUB_MERGED_PRS" ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$TMP_DIR/bin/gh"
+jq -n --arg sha "$parent_sha" '[{number:77,mergedAt:"2026-01-01T00:00:00Z",mergeCommit:{oid:$sha},labels:[{name:"autofix"}],url:"x",body:"<!-- autofix-key: aaa111111111 -->"}]' > "$TMP_DIR/merged-prs.json"
+printf '[]\n' > "$TMP_DIR/quiet-incidents.json"
+# Deploys are manual, so the verifier scores from when this lane FIRST saw the
+# build live, not from mergedAt. Seed that observation an hour ago: on a real
+# first sighting every PR is "waiting" until the grace window elapses.
+deploy_ledger="$TMP_DIR/deploy-ledger.json"
+seen_ago="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)"
+jq -n --arg sha "$head_sha" --arg seen "$seen_ago" '{($sha): $seen}' > "$deploy_ledger"
+: > "$TMP_DIR/verify-calls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
+  GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$head_sha" \
+  AUTOFIX_DEPLOY_LEDGER="$deploy_ledger" AUTOFIX_DEPLOY_GRACE_HOURS=0 \
+  "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/quiet-incidents.json" >/dev/null 2>&1
+check "a deployed fix whose fingerprint went quiet is marked production-verified" \
+  $(grep -q -- '--add-label production-verified' "$TMP_DIR/verify-calls" && grep -q '^pr comment 77 ' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
+make_incident "aaa111111111" "2026-08-19T00:00:00Z" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$TMP_DIR/loud-incidents.json"
+: > "$TMP_DIR/verify-calls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
+  GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$head_sha" \
+  AUTOFIX_DEPLOY_LEDGER="$deploy_ledger" AUTOFIX_DEPLOY_GRACE_HOURS=0 \
+  "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/loud-incidents.json" >/dev/null 2>&1
+check "a deployed fix whose fingerprint recurs is marked production-verification-failed" \
+  $(grep -q -- '--add-label production-verification-failed' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
+# A merge that only just went live is not scored at all: every occurrence in the
+# snapshot predates the deploy, so failing it would libel a working fix.
+jq -n --arg sha "$head_sha" --arg seen "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{($sha): $seen}' > "$TMP_DIR/fresh-ledger.json"
+: > "$TMP_DIR/verify-calls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
+  GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$head_sha" \
+  AUTOFIX_DEPLOY_LEDGER="$TMP_DIR/fresh-ledger.json" \
+  "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/loud-incidents.json" >/dev/null 2>&1
+check "a just-deployed merge is not failed by pre-deploy occurrences" \
+  $([ ! -s "$TMP_DIR/verify-calls" ] || ! grep -q -- '--add-label' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
+: > "$TMP_DIR/verify-calls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x GH_STUB_CALLS="$TMP_DIR/verify-calls" \
+  GH_STUB_MERGED_PRS="$TMP_DIR/merged-prs.json" AUTOFIX_DEPLOYED_SHA="$parent_sha~1" \
+  AUTOFIX_DEPLOY_LEDGER="$deploy_ledger" \
+  "$AUTOFIX_DIR/verify-deployed-fixes.sh" "$TMP_DIR/quiet-incidents.json" >/dev/null 2>&1
+check "an undeployed merge is neither verified nor failed" \
+  $(! grep -q -- '--add-label' "$TMP_DIR/verify-calls" && echo 0 || echo 1)
+
+################################################################################
+# verify.sh — a pytest that did not run (rc 2: internal error / interrupted)
+# renders "unavailable" and counts as unverified, never as "0 failed".
+################################################################################
+VERIFY_REPO="$TMP_DIR/verify-repo"
+mkdir -p "$VERIFY_REPO/server/app" "$VERIFY_REPO/server/tests/app"
+(
+    cd "$VERIFY_REPO" && git init -q && git config user.email t@example.com && git config user.name t \
+    && printf 'x = 1\n' > server/app/x.py && printf 'def test_x():\n    pass\n' > server/tests/app/test_x.py \
+    && printf 'a\n' > server/requirements.txt && git add -A && git commit -q -m base
+)
+printf 'x = 2\n' > "$VERIFY_REPO/server/app/x.py"
+cat > "$TMP_DIR/fake-python" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+    *"import pytest, pytest_asyncio"*) exit 0 ;;
+    *py_compile*) exit 0 ;;
+    *pytest*) echo "INTERNALERROR> boom"; exit "${FAKE_PYTEST_RC:-2}" ;;
+esac
+exit 0
+EOF
+chmod +x "$TMP_DIR/fake-python"
+verify_env="$TMP_DIR/verify-github-env"; : > "$verify_env"
+verify_out="$(AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_DEV_VENV_PY="$TMP_DIR/fake-python" AUTOFIX_CACHE_DIR="$TMP_DIR/verify-cache" \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" 2>/dev/null)"
+check "verify.sh renders a crashed pytest as unavailable, not 0 failed" \
+  $(grep -q 'unavailable' <<< "$verify_out" && ! grep -q '0 failed | 0 failed' <<< "$verify_out" \
+    && grep -q '^AUTOFIX_NEW_FAILURES=1$' "$verify_env" && echo 0 || echo 1)
+: > "$verify_env"
+AUTOPR_WORKSPACE_ROOT="$VERIFY_REPO" AUTOFIX_BASE_SHA="$(git -C "$VERIFY_REPO" rev-parse HEAD)" \
+    AUTOFIX_DEV_VENV_PY="$TMP_DIR/does-not-exist" AUTOFIX_CACHE_DIR="$TMP_DIR/verify-cache" \
+    RUNNER_TEMP="$TMP_DIR" GITHUB_ENV="$verify_env" "$AUTOFIX_DIR/verify.sh" >/dev/null 2>&1
+check "verify.sh with no interpreter reports unverified (AUTOFIX_NEW_FAILURES=1) on both paths" \
+  $(grep -q '^AUTOFIX_NEW_FAILURES=1$' "$verify_env" && echo 0 || echo 1)
 
 ################################################################################
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths

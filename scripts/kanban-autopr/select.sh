@@ -40,7 +40,21 @@ count="$(jq 'length' "$CARDS_FILE")"
 # Question drafts are intentionally excluded from this cap: unanswered work
 # should not prevent a well-specified card from being investigated. A fresh
 # implementation is still bounded to keep human review manageable.
-open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')"
+# The workflow already read every open bot PR once (collect-pr-context.sh →
+# bot-prs.json); reuse that run-scoped snapshot instead of a second REST call.
+# Either way the read must fail CLOSED: with `set -u` alone a failed `gh`
+# left this empty, `[ "" -ge 10 ]` errored (exit 2, no match), and the cap
+# never fired.
+BOT_PRS_FILE="${AUTOPR_BOT_PRS_FILE:-}"
+if [ -n "$BOT_PRS_FILE" ] && [ -s "$BOT_PRS_FILE" ]; then
+    open_implementation_prs="$(jq '[.[] | select((.labels | index("autopr")) and ((.labels | index("autopr-awaiting-input")) | not))] | length' "$BOT_PRS_FILE")" \
+        || die "could not read the open implementation PR count from $BOT_PRS_FILE"
+else
+    open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')" \
+        || die "could not read the open implementation PR count"
+fi
+[[ "$open_implementation_prs" =~ ^[0-9]+$ ]] \
+    || die "open implementation PR count is not a number: $open_implementation_prs"
 
 feedback_snapshot() {
     local pr_number="$1"
@@ -134,6 +148,9 @@ already_handled() {
     # or new feedback on the draft PR it already opened. That PR reply is a
     # documented answer path, so the skip cannot short-circuit the
     # changes_requested branch below before the feedback check has run.
+    # The RUNTIME APPROVAL REQUIRED spelling is the pre-rename header
+    # checkpoint.sh wrote; cards paused then still carry it and must stay
+    # parked rather than being picked up as fresh work.
     local paused=false
     if { [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES"* ]] \
         || [[ "$progress_note" == "🤖 AUTO SETUP · PAUSED: RUNTIME APPROVAL REQUIRED"* ]]; } \

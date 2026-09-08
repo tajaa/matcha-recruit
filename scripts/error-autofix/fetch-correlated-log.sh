@@ -19,7 +19,18 @@ if [ -z "$request_id" ] || [ -z "${SSH_KEY:-}" ]; then
     exit 0
 fi
 
+# The id is interpolated into a shell command that runs on the production
+# host. Server ids are minted by app.core.request_context; a CLIENT incident's
+# id comes from the free-form `context` dict of the unauthenticated
+# POST /api/client-errors endpoint, so it is attacker-controlled. _query.py
+# already drops non-conforming ids, and this is the last line of defense:
+# refuse anything outside the safe alphabet rather than quote around it.
+if ! [[ "$request_id" =~ ^[A-Za-z0-9-]{4,64}$ ]]; then
+    printf 'error-autofix: ignoring request_id with unsafe characters\n' >&2
+    exit 0
+fi
+
 ssh_prod <<REMOTE 2>/dev/null | redact_stream || true
 CONTAINER="\$($(resolve_backend_container_cmd))"
-[ -n "\$CONTAINER" ] && docker logs --since 2h "\$CONTAINER" 2>&1 | grep -F "[rid=$request_id]" | head -n 200
+[ -n "\$CONTAINER" ] && docker logs --since 2h "\$CONTAINER" 2>&1 | grep -F -- "[rid=$request_id]" | head -n 200
 REMOTE

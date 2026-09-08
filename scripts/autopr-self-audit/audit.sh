@@ -156,6 +156,47 @@ check_installed_controller() {
     msandbox --version
 }
 
+# The LaunchAgents run COPIES of the dispatcher under ~/.local/share, made by
+# install-launch-agent.sh. When those copies lag the repo, the clock on this
+# machine is not the clock the repo describes: on 2026-09-06 the installed
+# scheduler still ran every 60 s with no request watcher and re-fired a
+# no-op Kanban run every 66 s for hours. Nothing reported it. This is
+# operator-repairable only (`./scripts/kanban-autopr/install-launch-agent.sh`).
+check_installed_dispatcher() {
+    local install_root="${AUTOPR_DISPATCH_INSTALL_ROOT:-$HOME/.local/share/matcha-kanban-autopr}"
+    local agents_dir="${AUTOPR_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+    local name stale=() missing=()
+    [ -d "$install_root" ] || return 77
+    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh \
+                watch-pr.sh collect.sh select.sh run-snapshot.sh has-run-request.sh gh-cached.sh \
+                codex-backoff.sh lib.sh; do
+        if [ ! -f "$install_root/$name" ]; then
+            missing+=("$name")
+        elif ! cmp -s "$install_root/$name" "$REPO_ROOT/scripts/kanban-autopr/$name"; then
+            stale+=("$name")
+        fi
+    done
+    local plist interval problems=()
+    plist="$agents_dir/com.matcha.kanban-autopr-dispatch.plist"
+    if [ -f "$plist" ]; then
+        interval="$(plutil -extract StartInterval raw -o - "$plist" 2>/dev/null || true)"
+        [ "$interval" = 300 ] || problems+=("scheduler StartInterval is ${interval:-unset}, expected 300")
+    else
+        problems+=("scheduler LaunchAgent is not installed")
+    fi
+    [ -f "$agents_dir/com.matcha.kanban-autopr-request-watch.plist" ] \
+        || problems+=("request-watch LaunchAgent is not installed")
+    if [ "${#stale[@]}" -eq 0 ] && [ "${#missing[@]}" -eq 0 ] && [ "${#problems[@]}" -eq 0 ]; then
+        return 0
+    fi
+    [ "${#stale[@]}" -eq 0 ] || echo "Installed dispatcher files differ from the repo: ${stale[*]}"
+    [ "${#missing[@]}" -eq 0 ] || echo "Installed dispatcher files missing: ${missing[*]}"
+    local problem
+    for problem in "${problems[@]+"${problems[@]}"}"; do echo "$problem"; done
+    echo "Operator action: run ./scripts/kanban-autopr/install-launch-agent.sh (or msandbox install) to reinstall the scheduler and watcher from this checkout."
+    return 1
+}
+
 run_check() {
     local id="$1" title="$2" repairability="$3"
     shift 3
@@ -185,6 +226,7 @@ run_check local_schema "Local dev migration alignment" operator check_local_sche
 run_check control_plane "msandbox control-plane readiness" operator check_control_plane_state
 run_check built_toolchain "Built sandbox login-shell test toolchain" operator check_built_toolchain
 run_check installed_controller "Versioned msandbox installation" operator check_installed_controller
+run_check installed_dispatcher "Installed dispatcher and LaunchAgents match the repo" operator check_installed_dispatcher
 
 repairable_failures="$(jq '[.[] | select(.status == "fail" and .repairability == "repo")] | length' "$RESULTS_FILE")"
 operator_failures="$(jq '[.[] | select(.status == "fail" and .repairability == "operator")] | length' "$RESULTS_FILE")"

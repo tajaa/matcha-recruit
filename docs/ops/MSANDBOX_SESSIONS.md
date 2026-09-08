@@ -269,10 +269,13 @@ Sessions with identical inputs share image and dependency caches; different
 lockfiles or controller toolchains cannot race through a mutable `latest`
 image. Dependency volumes are initialized under a host lock and mounted
 read-only into sessions; only per-session tool cache mounts remain writable.
-The agent CLIs are deliberately pinned in the image. Codex startup checks and
-in-app updates are disabled through `/etc/codex/requirements.toml`; update the
-Dockerfile pin and rebuild/install the controller instead of accepting an
-interactive updater that cannot write to the read-only `/opt/node` toolchain.
+The agent CLIs are pinned *inside* the image: Codex startup checks and in-app
+updates are disabled through `/etc/codex/requirements.toml`, and an interactive
+updater cannot write to the read-only `/opt/node` toolchain. Which pin a
+container carries depends on its lineage — a session image bakes in the npm
+`latest` the host resolved at build time, while the AutoPR lanes' `:latest`
+image carries the Dockerfile defaults until it is rebuilt. See "Agent CLI
+updates" in `docs/ops/AGENT_SANDBOX.md`.
 
 Host fetch, verification, and publication rewrite GitHub SSH remotes to HTTPS
 for that command only. This works on networks that block SSH port 22 while

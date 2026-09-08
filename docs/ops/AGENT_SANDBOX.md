@@ -19,12 +19,26 @@ msandbox                # start sandbox + AutoPR together, then open the wizard
 
 ## Agent CLI updates
 
-Each host-side `msandbox` entry resolves the npm `latest` release of Codex and
-Claude Code before building or starting a workspace. Those exact versions are
-passed as Docker build arguments and become part of the image identity, so a
-new upstream release automatically creates a refreshed immutable image; a
-running workspace is recreated from it. The container itself remains
-read-only—never run a global npm update from inside it.
+Two image lineages, two update policies — keep them straight:
+
+- **Interactive sessions** (`msandbox`, `msandbox session`): each host-side
+  entry resolves the npm `latest` release of Codex and Claude Code before
+  building or starting a workspace. Those exact versions are passed as Docker
+  build arguments and become part of the content-addressed image identity, so
+  a new upstream release mints a refreshed immutable image (~5.75 GB, 15–25
+  min cold) and a running workspace is recreated from it.
+- **AutoPR lanes** (Kanban, production errors, self-audit) run the
+  non-content-addressed `matcha-agent-sandbox-workspace:latest`, built from
+  the `CODEX_VERSION` / `CLAUDE_CODE_VERSION` pins in
+  `docker/agent-sandbox/Dockerfile`. They do **not** pick up the host-side
+  `latest` resolution; they move only when that image is rebuilt (`msandbox
+  build` / `msandbox install`). The 2026-09-07 self-audit transcript showed
+  Codex 0.150.1 while the Dockerfile pinned 0.153.4 for exactly this reason.
+
+Inside every container the CLI is pinned: Codex startup checks and in-app
+updates are disabled through `/etc/codex/requirements.toml`, and the
+`/opt/node` toolchain is read-only — never run a global npm update from inside
+it (see `docs/ops/MSANDBOX_SESSIONS.md`).
 
 The Dockerfile defaults are the offline fallback. If npm cannot be reached,
 msandbox uses the last successfully resolved version (or those defaults) and

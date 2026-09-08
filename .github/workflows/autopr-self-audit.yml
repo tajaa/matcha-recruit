@@ -39,9 +39,11 @@ jobs:
           gh label create autopr-self-audit --color 5319E7 \
             --description "Drafted by the sealed AutoPR self-audit lane" --force >/dev/null 2>&1 || true
 
-      - name: Reset interrupted audit branches
+      - name: Reset interrupted audit branches and leftover model edits
         run: |
           git worktree prune
+          git reset --hard HEAD
+          git clean -fd
           current="$(git branch --show-current)"
           if [[ "$current" == bot/autopr-audit-* ]]; then git switch main; fi
           git branch --list 'bot/autopr-audit-*' | xargs -r -n1 git branch -D || true
@@ -56,15 +58,35 @@ jobs:
           echo "repairable=$(jq -r '.repairable_failures' "$RUNNER_TEMP/autopr-audit.json")" >> "$GITHUB_OUTPUT"
           echo "fingerprint=$(jq -r '.fingerprint' "$RUNNER_TEMP/autopr-audit.json")" >> "$GITHUB_OUTPUT"
 
-      - name: Create detached repair checkout
+      - name: Decide whether this failure set deserves another repair run
+        id: ledger
         if: steps.audit.outputs.repairable != '0'
+        run: |
+          # The audit is cheap; the repair is a Sol run against the shared
+          # ChatGPT quota. The same failing check set that Codex already
+          # attempted (and verify.sh rejected) is not retried every six
+          # hours — see repair-ledger.sh for the retry window.
+          set +e
+          ./scripts/autopr-self-audit/repair-ledger.sh should-repair "$RUNNER_TEMP/autopr-audit.json"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "Same repairable failure set as the last attempted repair; no new Codex run." >> "$GITHUB_STEP_SUMMARY"
+            echo "repair=false" >> "$GITHUB_OUTPUT"
+          else
+            ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" attempted
+            echo "repair=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create detached repair checkout
+        if: steps.ledger.outputs.repair == 'true'
         # Publication pushes detached HEAD explicitly. The runner checkout
         # never owns the PR branch and therefore cannot block later checkout.
         run: git switch --detach main
 
       - name: Investigate and repair inside msandbox
         id: investigate
-        if: steps.audit.outputs.repairable != '0'
+        if: steps.ledger.outputs.repair == 'true'
         timeout-minutes: 15
         continue-on-error: true
         env:
@@ -78,11 +100,12 @@ jobs:
             "$RUNNER_TEMP/autopr-audit-decision.json"
 
       - name: Fail incomplete repair investigation
-        if: steps.audit.outputs.repairable != '0' && steps.investigate.outcome != 'success'
+        if: steps.ledger.outputs.repair == 'true' && steps.investigate.outcome != 'success'
         run: |
           git reset --hard HEAD
           git clean -fd
-          echo "The repair model failed before producing a validated result; a later audit may retry." >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" failed
+          echo "The repair model failed before producing a validated result; the same failure set is not retried before the ledger window elapses." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
       - name: Read repair decision
@@ -95,11 +118,18 @@ jobs:
       - name: Verify repaired contracts
         if: steps.decision.outputs.safe == 'true'
         run: |
+          set +e
           ./scripts/autopr-self-audit/verify.sh \
             "$RUNNER_TEMP/autopr-audit.json" \
             "$RUNNER_TEMP/autopr-audit-after.json" \
             "$RUNNER_TEMP/autopr-audit-verification.md"
+          verify_rc=$?
+          set -e
           cat "$RUNNER_TEMP/autopr-audit-verification.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$verify_rc" -ne 0 ]; then
+            ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" rejected
+            exit "$verify_rc"
+          fi
 
       - name: Record operator-only conclusion
         if: steps.investigate.outcome == 'success' && steps.decision.outputs.safe != 'true'
@@ -136,6 +166,9 @@ jobs:
             "$RUNNER_TEMP/autopr-audit-report.md" \
             "$RUNNER_TEMP/autopr-audit-verification.md" \
             "$RUNNER_TEMP/autopr-audit-commit-subject.json"
+          if [ "${{ steps.decision.outputs.safe }}" = true ]; then
+            ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" published
+          fi
 
       - name: Cleanup
         if: always()

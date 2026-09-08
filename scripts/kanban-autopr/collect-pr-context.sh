@@ -10,9 +10,20 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 ROWS_FILE="$TMP_DIR/prs.jsonl"
 : > "$ROWS_FILE"
 
-open="$(gh pr list --repo "$REPO" --state open --limit 100 \
-    --json number,title,isDraft,headRefName,headRefOid,createdAt,updatedAt,labels,url \
-    --jq '[.[] | select([.labels[].name] | any(. == "autopr" or . == "autofix" or . == "autopr-self-audit"))]')"
+# Filter by label SERVER-side, one call per label (gh's --label is AND across
+# repeats, so an OR needs one list each). Listing 100 open PRs and filtering
+# client-side silently drops every bot PR past the hundredth most recent, and
+# select.sh derives its open-PR cap from this snapshot: the cap would read low
+# exactly when the repo is busiest — which is when it has to fire.
+open="$(
+    {
+        for label in autopr autofix autopr-self-audit; do
+            gh pr list --repo "$REPO" --state open --label "$label" --limit 100 \
+                --json number,title,isDraft,headRefName,headRefOid,createdAt,updatedAt,labels,url \
+                || exit 1
+        done
+    } | jq -s 'add | unique_by(.number)'
+)"
 
 while IFS= read -r number; do
     [ -n "$number" ] || continue
