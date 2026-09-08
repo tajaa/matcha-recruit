@@ -132,14 +132,37 @@ check_pending_migrations() {
     fi
 
     log_info "Checking prod alembic_version against server/alembic/versions..."
-    local prod_json prod_revs pending
-    if ! prod_json="$(SSH_KEY="$SSH_KEY" PROD_HOST="$EC2_HOST" PROD_USER="$EC2_USER" ./scripts/ops-health/prod-query.sh alembic 2>&1)"; then
+    local prod_json prod_revs pending err_file
+    # stderr goes to its own file, NOT into the captured payload: on a runner
+    # whose known_hosts is empty, ssh prints "Warning: Permanently added
+    # '<host>' … to the list of known hosts." and a 2>&1 capture prepended that
+    # to the JSON, so every CI deploy failed the parse (run 34173928036).
+    err_file="$(mktemp)"
+    if ! prod_json="$(SSH_KEY="$SSH_KEY" PROD_HOST="$EC2_HOST" PROD_USER="$EC2_USER" ./scripts/ops-health/prod-query.sh alembic 2>"$err_file")"; then
         log_error "Could not read prod alembic_version:"
-        echo "$prod_json" | tail -5
+        tail -5 "$err_file" >&2
+        rm -f "$err_file"
         log_error "Refusing to deploy blind. Fix SSH to the app host, or pass --allow-pending-migrations to skip."
         exit 1
     fi
-    prod_revs="$(printf '%s' "$prod_json" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["revisions"]))')" || {
+    rm -f "$err_file"
+    # Tolerate any banner the remote shell still manages to put on stdout by
+    # decoding the last line that parses as the expected object.
+    prod_revs="$(printf '%s' "$prod_json" | python3 -c '
+import json, sys
+for line in reversed(sys.stdin.read().splitlines()):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        revisions = json.loads(line)["revisions"]
+    except (ValueError, KeyError, TypeError):
+        continue
+    print(" ".join(revisions))
+    break
+else:
+    raise SystemExit(1)
+')" || {
         log_error "Unparseable alembic_version payload: $prod_json"
         exit 1
     }
