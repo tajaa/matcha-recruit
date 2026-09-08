@@ -446,7 +446,14 @@ _AUTOPR_RUN_REQUEST_TTL = "30 minutes"
 # they must not reach the unviewed-updates badge or the ticket activity graph.
 # They share event_type='activity' with real discussion notes and are told
 # apart by metadata kind.
-_AUTOPR_BOOKKEEPING_KINDS = ("autopr_run_request", "autopr_run_claim")
+_AUTOPR_BOOKKEEPING_KINDS = (
+    "autopr_run_request",
+    "autopr_run_claim",
+    # The result row for a staged action carries no body of its own — the
+    # action row above it is what a reader looks at — so it must not put an
+    # unviewed-updates chip on the card either.
+    "autopr_staged_action_result",
+)
 
 
 async def request_autopr_run(
@@ -557,6 +564,303 @@ async def claim_autopr_run(
             json.dumps({"kind": "autopr_run_claim"}),
         )
     return {"ok": True, "claimed_at": row["created_at"].isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Staged actions
+#
+# A research run may propose outreach: an email to send, a person to contact, a
+# teammate whose review is wanted. The harness NEVER performs one. It writes an
+# `autopr_staged_action` history row per proposal, and a human either approves
+# it (which sends from their own mailbox) or dismisses it. Both outcomes are a
+# second, immutable `autopr_staged_action_result` row naming the action — the
+# same append-only shape as run-request/run-claim, so there is no mutable
+# status column anywhere and the audit trail is the storage.
+# ---------------------------------------------------------------------------
+_STAGED_ACTION_KINDS = {"email", "contact", "review_request"}
+# `sent` means this system actually delivered it. `handled` means a person did
+# it themselves and is closing the loop — keeping those apart matters, because
+# "AutoPR sent 40 emails" and "a human sent 40 emails after reading them" are
+# different claims and this row is the only record of which happened.
+_STAGED_ACTION_STATES = {"sent", "handled", "dismissed", "failed"}
+# Only email has a delivery channel here. contact / review_request describe
+# something a person does, so they can be handled or dismissed, never "sent".
+_SENDABLE_STAGED_ACTION_KINDS = {"email"}
+# A per-approver ceiling on this path specifically. gmail_service's own limiter
+# lives on the instance and every request builds a fresh one, so it never fires
+# across requests — it cannot be the backstop for a stream of one-click
+# approvals of model-drafted mail.
+_STAGED_SEND_MAX_PER_HOUR = 20
+# Same ceiling decision.sh enforces on the model's side. Re-checked here
+# because this function is what actually writes to the board.
+_MAX_STAGED_ACTIONS_PER_RUN = 10
+_STAGED_ACTION_FIELD_LIMITS = {"to": 200, "subject": 200, "body": 4000, "why": 600}
+
+
+def _clean_staged_action(raw: object) -> Optional[dict]:
+    """Shape one proposed action, or None if it cannot be trusted to render.
+
+    Model output reaches this function. Anything unexpected is dropped rather
+    than stored: a half-formed action on a card is an action a human might
+    approve without being able to read what they are approving.
+    """
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind") or "").strip().lower()
+    if kind not in _STAGED_ACTION_KINDS:
+        return None
+    # `action_kind`, not `kind`: every history query filters rows on
+    # metadata->>'kind', which for this row must stay the marker
+    # 'autopr_staged_action'. Storing the email/contact/review_request kind
+    # under the same key would shadow the marker and make the action
+    # invisible to its own lookup.
+    cleaned = {"action_kind": kind}
+    for field, limit in _STAGED_ACTION_FIELD_LIMITS.items():
+        value = raw.get(field)
+        if not isinstance(value, str):
+            return None
+        # A newline in `to` or `subject` is header injection on the send path;
+        # gmail_service refuses it too, but a staged row should never carry it.
+        if field in ("to", "subject") and ("\r" in value or "\n" in value):
+            return None
+        value = value.strip()
+        if not value or len(value) > limit:
+            return None
+        cleaned[field] = value
+    return cleaned
+
+
+async def stage_autopr_actions(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: Optional[UUID],
+    actions: list[dict],
+) -> Optional[dict]:
+    """Record the actions a run proposed. Sends nothing.
+
+    Idempotent per run round is deliberately NOT attempted: a rerun produces a
+    new report and therefore new proposals, and an older round's staged rows
+    stay on the timeline as the record of what was proposed then.
+    """
+    if str(project_id) not in KANBAN_AUTOPR_PROJECT_IDS:
+        raise AutoPRReconsiderationConflict(
+            "AutoPR does not watch this board, so it cannot stage actions on it"
+        )
+    from app.core.services.platform_settings import board_has_autopr_capability
+
+    if not await board_has_autopr_capability(project_id, "outreach"):
+        raise AutoPRReconsiderationConflict(
+            "This board has not been granted the outreach capability"
+        )
+    cleaned = [a for a in (_clean_staged_action(x) for x in (actions or [])) if a]
+    if not cleaned:
+        return {"ok": True, "staged": 0, "action_ids": []}
+    cleaned = cleaned[:_MAX_STAGED_ACTIONS_PER_RUN]
+
+    action_ids: list[str] = []
+    async with get_connection() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+        if not exists:
+            return None
+        async with conn.transaction():
+            for action in cleaned:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO mw_task_history
+                        (task_id, task_id_text, project_id, actor_user_id,
+                         event_type, metadata)
+                    VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                    RETURNING id
+                    """,
+                    task_id, str(task_id), project_id, actor_user_id,
+                    json.dumps({"kind": "autopr_staged_action", **action}),
+                )
+                action_ids.append(str(row["id"]))
+    return {"ok": True, "staged": len(action_ids), "action_ids": action_ids}
+
+
+async def list_autopr_staged_actions(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+) -> list[dict]:
+    """Every action proposed on this card, newest last, each with its outcome.
+
+    Status is derived from the result row rather than stored on the action, so
+    "approved twice" is impossible to represent: the second approval sees the
+    first result and refuses.
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT h.id, h.metadata, h.created_at,
+                   result.metadata AS result_metadata,
+                   result.created_at AS resolved_at,
+                   COALESCE(rc.name, CONCAT(re.first_name, ' ', re.last_name),
+                            ra.name, ru.email) AS resolved_by_name
+            FROM mw_task_history h
+            LEFT JOIN LATERAL (
+                SELECT r.metadata, r.created_at, r.actor_user_id
+                FROM mw_task_history r
+                WHERE r.task_id = h.task_id
+                  AND r.event_type = 'activity'
+                  AND r.metadata->>'kind' = 'autopr_staged_action_result'
+                  AND r.metadata->>'staged_action_id' = h.id::text
+                ORDER BY r.created_at
+                LIMIT 1
+            ) result ON TRUE
+            LEFT JOIN users ru     ON ru.id      = result.actor_user_id
+            LEFT JOIN clients rc   ON rc.user_id = result.actor_user_id
+            LEFT JOIN employees re ON re.user_id = result.actor_user_id
+            LEFT JOIN admins ra    ON ra.user_id = result.actor_user_id
+            WHERE h.task_id = $1
+              AND h.project_id = $2
+              AND h.event_type = 'activity'
+              AND h.metadata->>'kind' = 'autopr_staged_action'
+            ORDER BY h.created_at
+            """,
+            task_id, project_id,
+        )
+    out: list[dict] = []
+    for r in rows:
+        meta = r["metadata"]
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except json.JSONDecodeError:
+                continue
+        result_meta = r["result_metadata"]
+        if isinstance(result_meta, str):
+            try:
+                result_meta = json.loads(result_meta)
+            except json.JSONDecodeError:
+                result_meta = None
+        state = (result_meta or {}).get("state") if isinstance(result_meta, dict) else None
+        out.append({
+            "id": str(r["id"]),
+            "kind": meta.get("action_kind"),
+            "to": meta.get("to"),
+            "subject": meta.get("subject"),
+            "body": meta.get("body"),
+            "why": meta.get("why"),
+            "state": state if state in _STAGED_ACTION_STATES else "pending",
+            "detail": (result_meta or {}).get("detail") if isinstance(result_meta, dict) else None,
+            "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
+            "resolved_by_name": r["resolved_by_name"],
+            "created_at": r["created_at"].isoformat(),
+        })
+    return out
+
+
+async def resolve_autopr_staged_action(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    action_id: UUID,
+    actor_user_id: UUID,
+    state: str,
+    detail: Optional[str] = None,
+) -> Optional[dict]:
+    """Write the one immutable outcome row for a staged action.
+
+    Returns None when the action does not belong to this card. Raises
+    AutoPRReconsiderationConflict when it already has an outcome — which is
+    what makes double-approval (and therefore a double send) unrepresentable.
+    The caller performs the send BEFORE calling this only for `failed`; for a
+    successful send the row is written first so a crash between the two can
+    never lose the record that mail went out.
+    """
+    if state not in _STAGED_ACTION_STATES:
+        raise ValueError(f"Invalid staged action state: {state}")
+    async with get_connection() as conn:
+        async with conn.transaction():
+            action = await conn.fetchrow(
+                """
+                SELECT h.id, h.metadata
+                FROM mw_task_history h
+                WHERE h.id = $1 AND h.task_id = $2 AND h.project_id = $3
+                  AND h.event_type = 'activity'
+                  AND h.metadata->>'kind' = 'autopr_staged_action'
+                FOR UPDATE
+                """,
+                action_id, task_id, project_id,
+            )
+            if not action:
+                return None
+            existing = await conn.fetchval(
+                """
+                SELECT r.metadata->>'state' FROM mw_task_history r
+                WHERE r.task_id = $1
+                  AND r.event_type = 'activity'
+                  AND r.metadata->>'kind' = 'autopr_staged_action_result'
+                  AND r.metadata->>'staged_action_id' = $2::text
+                LIMIT 1
+                """,
+                task_id, str(action_id),
+            )
+            if existing is not None:
+                raise AutoPRReconsiderationConflict(
+                    f"This action was already {existing}"
+                )
+            metadata = {
+                "kind": "autopr_staged_action_result",
+                "staged_action_id": str(action_id),
+                "state": state,
+            }
+            if detail:
+                metadata["detail"] = str(detail)[:600]
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                RETURNING id, created_at
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                json.dumps(metadata),
+            )
+    return {
+        "ok": True,
+        "staged_action_id": str(action_id),
+        "state": state,
+        "resolved_at": row["created_at"].isoformat(),
+    }
+
+
+async def count_recent_staged_sends(*, actor_user_id: UUID) -> int:
+    """How many staged actions this person has actually sent in the last hour,
+    across every board. Bounded by the same one-hour window it reports."""
+    async with get_connection() as conn:
+        return await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM mw_task_history
+            WHERE actor_user_id = $1
+              AND event_type = 'activity'
+              AND created_at > now() - interval '1 hour'
+              AND metadata->>'kind' = 'autopr_staged_action_result'
+              AND metadata->>'state' = 'sent'
+            """,
+            actor_user_id,
+        ) or 0
+
+
+async def get_autopr_staged_action(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    action_id: UUID,
+) -> Optional[dict]:
+    """One staged action's payload, for the send path to read before sending."""
+    actions = await list_autopr_staged_actions(project_id=project_id, task_id=task_id)
+    for action in actions:
+        if action["id"] == str(action_id):
+            return action
+    return None
 
 
 async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:

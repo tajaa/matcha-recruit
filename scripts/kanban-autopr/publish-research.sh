@@ -62,6 +62,36 @@ else
 fi
 
 STAGED_BLOCK="$(autopr_render_staged_actions "$DECISION_FILE")"
+# Proposals become approvable rows only on a board granted `outreach`. Without
+# the grant they stay what they already are — words in a report — and the
+# publisher says so rather than silently dropping them, so a reader is never
+# left wondering why a proposal has no button next to it.
+BOARD_CAPABILITIES="$(jq -r '(.autopr_capabilities // [])[]' "$CARD_FILE" 2>/dev/null || true)"
+OUTREACH_GRANTED=false
+printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF outreach && OUTREACH_GRANTED=true
+
+# stage_actions — POST the proposals so a human can approve each one.
+# Never fatal: the report is the deliverable, and losing the approve buttons
+# must not discard a completed run. A 409 is the expected answer when the
+# grant was revoked between selection and publication.
+stage_actions() {
+    local payload staging_error
+    [ "$STAGED_COUNT" -gt 0 ] || return 0
+    if [ "$OUTREACH_GRANTED" != true ]; then
+        printf 'kanban-autopr: board lacks the outreach grant; %s proposed action(s) stay report-only\n' \
+            "$STAGED_COUNT" >&2
+        return 0
+    fi
+    payload="$(jq -c '{actions: .staged_actions}' "$DECISION_FILE")"
+    if ! staging_error="$(mw_api POST \
+        "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/staged-actions" \
+        "$payload" 2>&1 >/dev/null)"; then
+        printf 'kanban-autopr: warning: could not stage %s proposed action(s) for task %s: %s\n' \
+            "$STAGED_COUNT" "$TASK_ID" "$staging_error" >&2
+        return 0
+    fi
+    printf 'Staged %s proposed action(s) for human approval\n' "$STAGED_COUNT"
+}
 
 # Tell the person who supplied additional context what became of it. Same
 # tolerant-404 shape as publish.sh: during a rolling deploy the workflow can
@@ -132,6 +162,9 @@ FINAL_REPORT="$STAGE_DIR/$FILENAME"
     cat "$REPORT_FILE"
     if [ -n "$STAGED_BLOCK" ]; then
         printf '\n\n### Proposed actions (not sent)\n\n%s\n' "$STAGED_BLOCK"
+        if [ "$OUTREACH_GRANTED" != true ]; then
+            printf '\n_This board is not granted outreach, so these are notes only — there is nothing to approve._\n'
+        fi
     fi
 } > "$FINAL_REPORT"
 
@@ -158,11 +191,13 @@ mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg note "$origin_note" \
         '{board_column: "review", progress_note: $note}')" >/dev/null
 
+stage_actions
+
 post_reconsideration_result "$origin_note" \
     "AutoPR reviewed this additional context and attached research report round $ROUND. $CARD_NOTE"
 
 if [ "$STAGED_COUNT" -gt 0 ]; then
-    echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources, $STAGED_COUNT proposed actions not sent)"
+    echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources, $STAGED_COUNT proposed actions awaiting human approval — none sent)"
 else
     echo "Published $FILENAME for task $TASK_ID ($MODE, round $ROUND, $SOURCE_COUNT sources)"
 fi

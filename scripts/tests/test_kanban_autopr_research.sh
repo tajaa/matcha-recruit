@@ -302,6 +302,14 @@ case "$url" in
     else
       respond "${RESEARCH_TEST_EXISTING_FILES:-[]}"
     fi ;;
+  */autopr/staged-actions)
+    printf '%s' "$payload" > "$RESEARCH_TEST_STAGED"
+    if [ "${RESEARCH_TEST_STAGE_STATUS:-201}" != 201 ]; then
+      [ -z "$output_file" ] || printf '{"detail":"board lacks outreach"}' > "$output_file"
+      printf '%s' "${RESEARCH_TEST_STAGE_STATUS}"
+      exit 0
+    fi
+    respond '{"ok":true,"staged":1,"action_ids":["act-1"]}' ;;
   */activity) printf '%s' "$payload" > "$RESEARCH_TEST_ACTIVITY"; respond '{"ok":true}' ;;
   */autopr/context-request) printf '%s' "$payload" > "$RESEARCH_TEST_CONTEXT_REQUEST"; respond '{"ok":true}' ;;
   */autopr/result-notification) printf '%s' "$payload" > "$RESEARCH_TEST_RESULT_NOTIFICATION"; respond '{"ok":true}' ;;
@@ -333,21 +341,23 @@ Pilot one periodic task.
 high — a cost model against real job counts would raise it further.
 EOF
 cat > "$TMP_DIR/card.json" <<'EOF'
-{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","category":"research","autopr_capabilities":["research"],"mode":"research","autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 800 · prod 1111111 · 🟡 C50 · note: earlier round\nkeep this human line","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
+{"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Research how AWS Lambda works","category":"research","autopr_capabilities":["research","outreach"],"mode":"research","autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 800 · prod 1111111 · 🟡 C50 · note: earlier round\nkeep this human line","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 
 run_publisher() {
     local card="$1" decision="$2"
     : > "$RESEARCH_TEST_CURL_LOG"
     rm -f "$RESEARCH_TEST_ACTIVITY" "$RESEARCH_TEST_CARD_PATCH" "$RESEARCH_TEST_CONTEXT_REQUEST" \
-        "$RESEARCH_TEST_RESULT_NOTIFICATION" "$RESEARCH_TEST_UPLOADED" "$RESEARCH_TEST_UPLOADED_NAME" "$RESEARCH_TEST_GH_LOG"
+        "$RESEARCH_TEST_RESULT_NOTIFICATION" "$RESEARCH_TEST_UPLOADED" "$RESEARCH_TEST_UPLOADED_NAME" \
+        "$RESEARCH_TEST_GH_LOG" "$RESEARCH_TEST_STAGED"
     PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR/runner" \
         "$AUTOPR_DIR/publish-research.sh" "$card" "$TMP_DIR/report.md" "$decision"
 }
 export RESEARCH_TEST_CURL_LOG="$TMP_DIR/curl.log" RESEARCH_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     RESEARCH_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" RESEARCH_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     RESEARCH_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
-    RESEARCH_TEST_UPLOADED="$TMP_DIR/uploaded.md" RESEARCH_TEST_UPLOADED_NAME="$TMP_DIR/uploaded-name"
+    RESEARCH_TEST_UPLOADED="$TMP_DIR/uploaded.md" RESEARCH_TEST_UPLOADED_NAME="$TMP_DIR/uploaded-name" \
+    RESEARCH_TEST_STAGED="$TMP_DIR/staged-actions.json"
 export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md"},{"id":"file-shot","filename":"shot.png"}]'
 
 run_publisher "$TMP_DIR/card.json" "$TMP_DIR/research-decision.json" > "$TMP_DIR/publish.log" 2>&1
@@ -383,10 +393,42 @@ check "the additional-context author gets a decision-bound result notification" 
              and (.message | contains("round 2"))
              and (.expected_progress_note | startswith("🤖 AUTO SETUP · READY FOR REVIEW"))' \
         "$RESEARCH_TEST_RESULT_NOTIFICATION" >/dev/null && echo 0 || echo 1)
+check "an outreach-granted board gets the proposals posted for approval, with nothing sent" \
+  $(jq -e '(.actions | length) == 1
+           and .actions[0].kind == "email"
+           and .actions[0].to == "AWS account team"
+           and (.actions[0].body | length > 0)' "$RESEARCH_TEST_STAGED" >/dev/null \
+    && grep -q 'POST https://example.invalid/api/matcha-work/projects/8b924347-d6e4-4000-8e7d-ca8f46f76fba/tasks/aaaa0000-0000-4000-8000-000000000001/autopr/staged-actions' "$RESEARCH_TEST_CURL_LOG" \
+    && echo 0 || echo 1)
+
 check "the research publisher never calls gh" \
     $([ ! -s "$RESEARCH_TEST_GH_LOG" ] && echo 0 || echo 1)
 check "no context request is posted for a delivered report" \
     $([ ! -e "$RESEARCH_TEST_CONTEXT_REQUEST" ] && echo 0 || echo 1)
+
+# Without the outreach grant the same proposals stay report-only: no POST, no
+# approve buttons, and the report says why rather than dropping them silently.
+jq '.autopr_capabilities = ["research"]' "$TMP_DIR/card.json" > "$TMP_DIR/card-noreach.json"
+run_publisher "$TMP_DIR/card-noreach.json" "$TMP_DIR/research-decision.json" > "$TMP_DIR/publish-noreach.log" 2>&1
+noreach_rc=$?
+check "a board without the outreach grant stages nothing and says so in the report" \
+  $([ "$noreach_rc" = 0 ] \
+    && [ ! -e "$RESEARCH_TEST_STAGED" ] \
+    && ! grep -q 'autopr/staged-actions' "$RESEARCH_TEST_CURL_LOG" \
+    && grep -q 'not granted outreach' "$RESEARCH_TEST_UPLOADED" \
+    && grep -q '\[email\] to: AWS account team' "$RESEARCH_TEST_UPLOADED" \
+    && echo 0 || echo 1)
+
+# A grant revoked between selection and publication answers 409. The report is
+# the deliverable; losing the approve buttons must not discard the run.
+RESEARCH_TEST_STAGE_STATUS=409 run_publisher "$TMP_DIR/card.json" "$TMP_DIR/research-decision.json" \
+  > "$TMP_DIR/publish-stage409.log" 2>&1
+stage409_rc=$?
+check "a staging refusal is reported but never discards a completed report" \
+  $([ "$stage409_rc" = 0 ] \
+    && grep -q 'could not stage' "$TMP_DIR/publish-stage409.log" \
+    && jq -e '.board_column == "review"' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
+    && echo 0 || echo 1)
 
 # First report on a fresh card, no staged actions, no reconsideration.
 export RESEARCH_TEST_EXISTING_FILES='[]'

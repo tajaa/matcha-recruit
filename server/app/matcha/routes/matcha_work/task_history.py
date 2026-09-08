@@ -3,6 +3,7 @@
 Split out of `tasks.py` (2026-07-19). Handlers moved verbatim -- no path,
 signature, or response-shape change.
 """
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
@@ -15,7 +16,10 @@ from app.matcha.dependencies import require_company_member
 from app.matcha.routes.matcha_work._shared import (
     _parse_task_attachment_ids,
     _verify_project_access,
+    _verify_task_belongs_to_project,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -348,6 +352,199 @@ async def list_autopr_run_requests_endpoint(
     for project_id in parsed:
         await _verify_project_access(project_id, current_user)
     return {"requests": await pt_svc.list_autopr_run_requests(parsed)}
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/autopr/staged-actions")
+async def list_autopr_staged_actions_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Outreach a run proposed on this card, with each item's outcome.
+
+    Nothing here has been sent. `state` is `pending` until a person approves or
+    dismisses that exact item.
+    """
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+    return {
+        "actions": await pt_svc.list_autopr_staged_actions(
+            project_id=project_id, task_id=task_id
+        )
+    }
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/autopr/staged-actions", status_code=201)
+async def stage_autopr_actions_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Record what a run proposed. Posted by the harness; sends nothing.
+
+    The board must hold the `outreach` grant. That check lives here rather than
+    only in the harness because this endpoint is what actually puts a
+    one-click-sendable draft in front of a human.
+    """
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+    actions = body.get("actions")
+    if not isinstance(actions, list):
+        raise HTTPException(status_code=400, detail="actions must be a list")
+    try:
+        result = await pt_svc.stage_autopr_actions(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            actions=actions,
+        )
+    except pt_svc.AutoPRReconsiderationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/autopr/staged-actions/{action_id}/send")
+async def send_autopr_staged_action_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    action_id: UUID,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Approve one staged email and send it, from the approver's own mailbox.
+
+    Every guard is re-checked here, because this is the single point where
+    model-drafted text leaves the building:
+
+    * the board must still hold the `outreach` grant;
+    * the action must still be unresolved (the outcome row is unique, so two
+      concurrent approvals cannot both send);
+    * the approver's Gmail must be connected — we never send as anyone else;
+    * a per-approver hourly ceiling, because gmail_service's own limiter is
+      per-instance and every request builds a fresh one.
+
+    The outcome row is written BEFORE the send. A crash after delivery would
+    otherwise leave a sent email with no record, and re-approval would send it
+    twice; this way the worst case is a row saying `sent` for mail that did not
+    go out, which a person can see and re-send deliberately.
+    """
+    from app.core.services.platform_settings import board_has_autopr_capability
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+    from app.matcha.services.matcha_work.gmail_service import GmailService
+
+    await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+
+    if not await board_has_autopr_capability(project_id, "outreach"):
+        raise HTTPException(
+            status_code=403,
+            detail="This board has not been granted the outreach capability",
+        )
+
+    action = await pt_svc.get_autopr_staged_action(
+        project_id=project_id, task_id=task_id, action_id=action_id
+    )
+    if action is None:
+        raise HTTPException(status_code=404, detail="Staged action not found")
+    if action["state"] != "pending":
+        raise HTTPException(status_code=409, detail=f"This action was already {action['state']}")
+    if action["kind"] not in pt_svc._SENDABLE_STAGED_ACTION_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A {action['kind']} action is done by a person; mark it handled instead",
+        )
+
+    recent = await pt_svc.count_recent_staged_sends(actor_user_id=current_user.id)
+    if recent >= pt_svc._STAGED_SEND_MAX_PER_HOUR:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Hourly limit reached ({pt_svc._STAGED_SEND_MAX_PER_HOUR} approved sends per person)",
+        )
+
+    gmail = GmailService(current_user.id)
+    await gmail.load_token()
+    if not gmail.is_configured:
+        raise HTTPException(
+            status_code=400,
+            detail="Connect your Gmail before approving a send — mail goes out from your own mailbox",
+        )
+
+    try:
+        recorded = await pt_svc.resolve_autopr_staged_action(
+            project_id=project_id,
+            task_id=task_id,
+            action_id=action_id,
+            actor_user_id=current_user.id,
+            state="sent",
+            detail=f"to {action['to']}",
+        )
+    except pt_svc.AutoPRReconsiderationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if recorded is None:
+        raise HTTPException(status_code=404, detail="Staged action not found")
+
+    try:
+        result = await gmail.send_email(
+            to=action["to"], subject=action["subject"], body=action["body"]
+        )
+    except Exception as exc:
+        # The claim row already exists and is immutable, so record the failure
+        # as its own row rather than pretending the approval never happened.
+        logger.warning("Staged action %s failed to send: %s", action_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+
+    return {
+        "ok": True,
+        "staged_action_id": str(action_id),
+        "state": "sent",
+        "message_id": result.get("id"),
+        "to": action["to"],
+        "resolved_at": recorded["resolved_at"],
+    }
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/autopr/staged-actions/{action_id}/resolve")
+async def resolve_autopr_staged_action_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    action_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Close a staged action without this system sending anything.
+
+    `handled` = a person did it themselves; `dismissed` = it will not be done.
+    `sent` is deliberately not accepted here: only the send route above may
+    claim that mail actually went out.
+    """
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+
+    state = str(body.get("state") or "").strip().lower()
+    if state not in ("handled", "dismissed"):
+        raise HTTPException(status_code=400, detail="state must be handled or dismissed")
+    try:
+        result = await pt_svc.resolve_autopr_staged_action(
+            project_id=project_id,
+            task_id=task_id,
+            action_id=action_id,
+            actor_user_id=current_user.id,
+            state=state,
+            detail=body.get("detail"),
+        )
+    except pt_svc.AutoPRReconsiderationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Staged action not found")
+    return result
 
 
 @router.get("/autopr/board-capabilities")
