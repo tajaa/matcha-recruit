@@ -14,6 +14,27 @@ import pytest
 
 from app.werk.routes import channels_ws
 
+# _bg_schedule_request / _bg_schedule_reply both UUID() the channel id before
+# anything else, so the placeholder ids these tests pass have to be real UUIDs.
+CHANNEL_ID = "aaaaaaaa-0000-4000-8000-000000000001"
+COMPANY_ID = "aaaaaaaa-0000-4000-8000-000000000002"
+
+# The channel row _bg_schedule_request reads directly, and the (narrower) row
+# channel_ops_automation_enabled reads before _bg_schedule_reply's claim. Both
+# gate on an Operations channel whose OWNING company still has matcha_ops plus
+# the automation's own flag — re-resolved at reply time, not trusted from the
+# staging turn.
+_OPS_FEATURES = {"matcha_ops": True, "employee_schedule": True, "ems": True}
+
+
+def _channel_row(**over):
+    row = {
+        "company_id": COMPANY_ID, "channel_scope": "operations", "is_personal": False,
+        "enabled_features": dict(_OPS_FEATURES), "signup_source": "bespoke",
+    }
+    row.update(over)
+    return row
+
 
 class TestScheduleClaimOrdering:
     @pytest.mark.asyncio
@@ -111,20 +132,19 @@ class TestScheduleIntentRouting:
 class TestScheduleRequestParseFallback:
     @pytest.mark.asyncio
     async def test_non_actionable_parse_falls_back_to_intake(self, monkeypatch):
-        from datetime import date as _date
-
         from app.matcha.services.scheduling import schedule_chat
-
-        async def _fake_gate(conn, channel_id_str):
-            return "company-1"
 
         parse_mock = AsyncMock(return_value=None)  # Gemini outage / non-actionable
         intake_mock = AsyncMock(return_value=None)
-        monkeypatch.setattr(channels_ws, "_ems_company_gate", _fake_gate)
         monkeypatch.setattr(schedule_chat, "parse_schedule_request", parse_mock)
         monkeypatch.setattr(channels_ws, "_bg_ems_intake", intake_mock)
 
         class _FakeConn:
+            # _bg_schedule_request resolves the channel + owning company itself
+            # now (scope/is_personal/matcha_ops) instead of _ems_company_gate.
+            async def fetchrow(self, query, *args):
+                return _channel_row()
+
             async def fetchval(self, query, *args):
                 return "admin"  # role lookup
 
@@ -148,11 +168,11 @@ class TestScheduleRequestParseFallback:
 
         user_id = "11111111-1111-1111-1111-111111111111"
         await channels_ws._bg_schedule_request(
-            "channel-1", "msg-1", user_id, "@huume schedule an opener friday",
+            CHANNEL_ID, "msg-1", user_id, "@huume schedule an opener friday",
         )
 
         parse_mock.assert_awaited_once()
-        intake_mock.assert_awaited_once_with("channel-1", "msg-1", user_id, "@huume schedule an opener friday")
+        intake_mock.assert_awaited_once_with(CHANNEL_ID, "msg-1", user_id, "@huume schedule an opener friday")
 
 
 class TestScheduleReplyRefusalRearms:
@@ -175,13 +195,21 @@ class TestScheduleReplyRefusalRearms:
         executed = []
 
         class _FakeConn:
+            def __init__(self):
+                self.claim_seen = False
+
             async def fetchrow(self, query, *args):
+                # channel_ops_automation_enabled re-resolves the channel scope +
+                # the owning company's flags before the claim now.
+                if "FROM channels ch" in query:
+                    return _channel_row()
                 assert "UPDATE schedule_chat_proposals" in query
                 assert "SET confirm_message_id = NULL" in query
+                self.claim_seen = True
                 return {
-                    "id": claim_id, "company_id": "company-1", "channel_id": "channel-1",
+                    "id": claim_id, "company_id": COMPANY_ID, "channel_id": CHANNEL_ID,
                     "source_message_id": "msg-1", "status": "proposed",
-                    "proposal": "{}", "clarify_rounds": 0, "created_by": sender_id,
+                    "proposal": "{}", "parse": None, "clarify_rounds": 0, "created_by": sender_id,
                 }
 
             async def fetchval(self, query, *args):
@@ -208,7 +236,7 @@ class TestScheduleReplyRefusalRearms:
         )
 
         result = await channels_ws._bg_schedule_reply(
-            "channel-1", str(reply_uuid), sender_id, "nice!",
+            CHANNEL_ID, str(reply_uuid), sender_id, "nice!",
         )
 
         assert result is True
@@ -235,6 +263,10 @@ class TestScheduleReplyLocationClarifyResume:
     def _claim_conn(claimed_row, role="admin"):
         class _FakeConn:
             async def fetchrow(self, query, *args):
+                # channel_ops_automation_enabled's scope/flag re-check runs
+                # before the claim in _bg_schedule_reply.
+                if "FROM channels ch" in query:
+                    return _channel_row()
                 assert "UPDATE schedule_chat_proposals" in query
                 return claimed_row
 
@@ -265,7 +297,7 @@ class TestScheduleReplyLocationClarifyResume:
             "Sunset Smile Dental — Downtown (Los Angeles)",
         ]
         claimed_row = {
-            "id": claim_id, "company_id": "company-1", "channel_id": "channel-1",
+            "id": claim_id, "company_id": COMPANY_ID, "channel_id": CHANNEL_ID,
             "source_message_id": "msg-1", "status": "clarifying",
             "proposal": {
                 "kind": "create", "clarify_question": schedule_chat.LOCATION_CLARIFY_QUESTION,
@@ -305,7 +337,7 @@ class TestScheduleReplyLocationClarifyResume:
 
         monkeypatch.setattr(schedule_chat, "build_proposal", fake_build_proposal)
 
-        result = await channels_ws._bg_schedule_reply("channel-1", reply_uuid, sender_id, reply_text)
+        result = await channels_ws._bg_schedule_reply(CHANNEL_ID, reply_uuid, sender_id, reply_text)
 
         assert result is True
         assert captured["parsed"]["location_hint"] == reply_text
@@ -318,7 +350,7 @@ class TestScheduleReplyLocationClarifyResume:
         claim_id = "55555555-5555-5555-5555-555555555555"
         sender_id = "11111111-1111-1111-1111-111111111111"
         claimed_row = {
-            "id": claim_id, "company_id": "company-1", "channel_id": "channel-1",
+            "id": claim_id, "company_id": COMPANY_ID, "channel_id": CHANNEL_ID,
             "source_message_id": "msg-1", "status": "clarifying",
             "proposal": {
                 "kind": "create", "clarify_question": "Which days should I schedule?",
@@ -348,7 +380,7 @@ class TestScheduleReplyLocationClarifyResume:
         monkeypatch.setattr(schedule_chat, "build_proposal", builder_mock)
         monkeypatch.setattr(schedule_chat, "build_edit_proposal", builder_mock)
 
-        result = await channels_ws._bg_schedule_reply("channel-1", reply_uuid, sender_id, "Friday")
+        result = await channels_ws._bg_schedule_reply(CHANNEL_ID, reply_uuid, sender_id, "Friday")
 
         assert result is True
         builder_mock.assert_not_called()  # no re-ask — cancelled with CLARIFY_BAIL_TEXT instead

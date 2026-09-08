@@ -93,15 +93,25 @@ class TestDispatchTablesAgree:
 
 
 class _FakeFetchConn:
-    def __init__(self, *, fetch_rows=(), fetchrow_result=None, fetchval_result=None):
+    """Single-row/single-list fake, with one query-shape exception: the
+    builders now resolve the panel link's shell prefix through
+    `record_view._work_base_path`, which fetchrows `companies`. Answering that
+    with the record row itself KeyErrors, so it gets its own answer — pass
+    `company_row` to exercise the /werk-lite branch."""
+
+    def __init__(self, *, fetch_rows=(), fetchrow_result=None, fetchval_result=None,
+                 company_row=None):
         self._fetch_rows = list(fetch_rows)
         self._fetchrow_result = fetchrow_result
         self._fetchval_result = fetchval_result
+        self._company_row = company_row or {"enabled_features": {}, "signup_source": None}
 
     async def fetch(self, query, *args):
         return self._fetch_rows
 
     async def fetchrow(self, query, *args):
+        if "FROM companies" in " ".join(query.split()):
+            return self._company_row
         return self._fetchrow_result
 
     async def fetchval(self, query, *args):
@@ -171,6 +181,28 @@ class TestBuildEmsEventView:
         assert view["title"] == "Autoclave failure"
         assert any(c["label"] == "Flagged for incident review" for c in view["chips"])
         assert any(s["label"] == "Narrative" for s in view["sections"])
+
+    @pytest.mark.asyncio
+    async def test_link_uses_werk_lite_shell_for_werk_lite_tenants(self):
+        # A werk-lite tenant has no /work shell — a /work link lands the admin
+        # on a 404 instead of the event. The prefix is resolved per company
+        # via _work_base_path, not hardcoded.
+        rid = uuid4()
+        row = {
+            "id": rid, "company_id": uuid4(), "channel_id": uuid4(), "channel_name": "safety",
+            "message_id": uuid4(), "reporter_user_id": uuid4(), "reporter_name": "Jane Doe",
+            "title": "Autoclave failure", "category": "equipment", "severity_hint": "high",
+            "doc": {}, "narrative": "It stopped mid-cycle.", "incident_recommendation": False,
+            "status": "logged", "incident_id": None, "awaiting_reply": False,
+            "clarification_rounds": 0,
+            "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc), "updated_at": None,
+        }
+        conn = _FakeFetchConn(
+            fetchrow_result=row,
+            company_row={"enabled_features": {"werk_lite": True}, "signup_source": None},
+        )
+        view = await _build_ems_event_view(conn, uuid4(), rid)
+        assert view["link"] == f"/werk-lite/events/{rid}"
 
     @pytest.mark.asyncio
     async def test_incident_meta_shows_number_not_raw_path(self):

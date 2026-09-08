@@ -19,12 +19,31 @@ from app.core.services.feature_provenance import (
 )
 
 
+class _FakeTransaction:
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        self._conn.transaction_calls += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class FakeConn:
     def __init__(self, fetch_results=None):
         self.executemany_calls = []
         self.execute_calls = []
+        self.transaction_calls = 0
         # Queue of results returned by successive conn.fetch(...) calls, in order.
         self._fetch_results = list(fetch_results or [])
+
+    def transaction(self):
+        # record_feature_changes wraps its insert in conn.transaction() so a
+        # failing audit insert becomes a SAVEPOINT rollback instead of
+        # aborting the caller's outer transaction.
+        return _FakeTransaction(self)
 
     async def execute(self, sql, *args):
         self.execute_calls.append((sql, args))
@@ -51,6 +70,8 @@ async def test_records_only_changed_keys():
         source="admin_toggle", actor_user_id="user-1",
     )
     assert len(conn.executemany_calls) == 1
+    # The insert must be savepoint-scoped, not bare on the caller's transaction.
+    assert conn.transaction_calls == 1
     _, rows = conn.executemany_calls[0]
     changed_features = {r[1] for r in rows}
     assert changed_features == {"training", "incidents"}

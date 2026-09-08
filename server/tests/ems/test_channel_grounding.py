@@ -9,8 +9,15 @@ never trusted past this module's re-check.
 """
 
 import asyncio
+import datetime
 
 from app.matcha.services.ems import channel_grounding
+
+# run_coverage_lookup only accepts a date inside [today - 1d, today + 60d], so
+# any literal date in a coverage test rots the moment that window slides past
+# it. Derive it from today instead.
+_IN_WINDOW = datetime.date.today() + datetime.timedelta(days=3)
+_IN_WINDOW_STR = _IN_WINDOW.isoformat()
 
 
 def _run(coro):
@@ -415,7 +422,7 @@ class TestRunCoverageLookup:
         )
         result = _run(channel_grounding.run_coverage_lookup(
             None, company_id="c1", features=_all_features_on(), is_admin=True,
-            location_id=None, date_str="2026-08-05",
+            location_id=None, date_str=_IN_WINDOW_STR,
         ))
         assert result["degraded"] is True
         assert "failed" in result["text"].lower()
@@ -429,22 +436,24 @@ class TestRunCoverageLookup:
         )
         result = _run(channel_grounding.run_coverage_lookup(
             None, company_id="c1", features=_all_features_on(), is_admin=True,
-            location_id=None, date_str="2026-08-05",
+            location_id=None, date_str=_IN_WINDOW_STR,
         ))
-        assert "No published shifts on 2026-08-05" in result["text"]
+        assert f"No published shifts on {_IN_WINDOW_STR}" in result["text"]
         assert result["degraded"] is False
         assert result["shift_links"] == []
 
     def test_success_returns_shift_links_for_the_client_deep_link_token(self, monkeypatch):
-        import datetime
         shift_id = "11111111-1111-1111-1111-111111111111"
+        _day = datetime.datetime.combine(
+            _IN_WINDOW, datetime.time(0, 0), tzinfo=datetime.timezone.utc,
+        )
 
         async def fake_find(conn, **kwargs):
             return {
                 "shifts": [{
                     "id": shift_id,
-                    "starts_at": datetime.datetime(2026, 8, 5, 8, 0, tzinfo=datetime.timezone.utc),
-                    "ends_at": datetime.datetime(2026, 8, 5, 16, 0, tzinfo=datetime.timezone.utc),
+                    "starts_at": _day + datetime.timedelta(hours=8),
+                    "ends_at": _day + datetime.timedelta(hours=16),
                     "role": "Front Desk", "required_staff": 1,
                     "assignees": [], "candidates": [],
                 }],
@@ -456,13 +465,13 @@ class TestRunCoverageLookup:
         )
         result = _run(channel_grounding.run_coverage_lookup(
             None, company_id="c1", features=_all_features_on(), is_admin=True,
-            location_id=None, date_str="2026-08-05",
+            location_id=None, date_str=_IN_WINDOW_STR,
         ))
-        assert result["shift_links"] == [{"id": shift_id, "date": "2026-08-05"}]
+        assert result["shift_links"] == [{"id": shift_id, "date": _IN_WINDOW_STR}]
 
     def test_refusal_paths_never_carry_shift_links(self):
         result = _run(channel_grounding.run_coverage_lookup(
             None, company_id="c1", features=_all_features_on(), is_admin=False,
-            location_id=None, date_str="2026-08-05",
+            location_id=None, date_str=_IN_WINDOW_STR,
         ))
         assert result["shift_links"] == []

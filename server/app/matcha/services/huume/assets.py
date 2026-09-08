@@ -113,6 +113,34 @@ ASSET_SPECS: dict[str, AssetSpec] = {
         "inventory_item", "inventory_items",
         lambda a, r: _label(r, "Inventory item"),
     ),
+    "schedule_note": AssetSpec(
+        # update_assignment_note_core returns record_id=str(shift_id), so the
+        # asset points at the shift the note is attached to.
+        "schedule_shift", "schedule_shifts",
+        lambda a, r: _label(r, "Shift note"),
+    ),
+    "meal_break_waiver": AssetSpec(
+        "compliance_attestation", "employee_compliance_attestations",
+        lambda a, r: _label(r, "Meal-break waiver"),
+    ),
+    "work_permit": AssetSpec(
+        "work_permit", "employee_work_permits",
+        lambda a, r: _label(r, "Work permit"),
+    ),
+    "eligibility_case_decision": AssetSpec(
+        "eligibility_case", "schedule_eligibility_cases",
+        lambda a, r: f"Eligibility case ({a.get('decision') or 'decision'})",
+    ),
+    "waste_movement": AssetSpec(
+        # Executes through the same _execute_movement as inventory_movement,
+        # so it lands in inventory_movements with that row's id.
+        "inventory_movement", "inventory_movements",
+        lambda a, r: _label(r, "Waste"),
+    ),
+    "waste_recipe_correction": AssetSpec(
+        "inventory_sales_mapping", "inventory_sales_mappings",
+        lambda a, r: f"Recipe mapping ({a.get('sold_name') or 'sold item'})",
+    ),
     "schedule_change": AssetSpec(
         # record_id is the schedule_chat_proposals id (schedule_skill.execute
         # returns record_id=proposal_id), not a schedule_shifts row.
@@ -131,8 +159,13 @@ ASSET_SPECS: dict[str, AssetSpec] = {
 # schedule_location_profile: writes the location's own setup row. There is no
 # artifact to hand back — the thing it produces is configuration the whole
 # editor reads, not a document this thread owns.
+# waste_par_change: its executor returns status/message/bg_tasks and NO
+# record_id (it applies a recommendation to inventory_items in place), so
+# record_asset has nothing to link — same shape as amend_handbook above.
 # Listed here so the drift-guard test has a documented reason, not a gap.
-_NO_ASSET_TYPES: frozenset[str] = frozenset({"amend_handbook", "schedule_location_profile"})
+_NO_ASSET_TYPES: frozenset[str] = frozenset(
+    {"amend_handbook", "schedule_location_profile", "waste_par_change"}
+)
 
 
 async def record_asset(

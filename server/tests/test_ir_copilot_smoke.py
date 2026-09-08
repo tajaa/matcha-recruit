@@ -128,6 +128,10 @@ def test_action_type_set_complete():
         # and frontend-rendered, kept a valid type even though the flow
         # resolver no longer emits it after the conversational-flow restore.
         "request_documents",
+        # assign_training: incident-triggered training assignment, built by
+        # `_shared.build_assign_training_card` and dispatched through
+        # employee_lifecycle/training.py:assign_training.
+        "assign_training",
     }
     assert IR_ACTION_TYPES == expected
 

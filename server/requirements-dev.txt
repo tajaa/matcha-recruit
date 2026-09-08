@@ -1,0 +1,12 @@
+# Test/coverage tooling. Deliberately NOT in requirements.txt: the production
+# image installs that file, and pytest has no business in it.
+#
+#   venv/bin/python -m pip install -r requirements-dev.txt
+#
+# Bounded on purpose. An unbounded `weasyprint>=69.0` in requirements.txt is
+# what let WeasyPrint 70.0 remove a symbol app/core/services/pdf.py imports and
+# take 74 test modules out at collection with no code change on our side.
+pytest>=8.0,<9
+pytest-asyncio>=0.23,<2
+pytest-cov>=5.0,<8
+diff-cover>=9.0,<11

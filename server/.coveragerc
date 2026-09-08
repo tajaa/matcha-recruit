@@ -1,0 +1,30 @@
+# Coverage config for the server suite.
+#
+# Deliberately a .coveragerc rather than a [tool.coverage] block in a new
+# pyproject.toml: adding a pyproject.toml to server/ would move pytest's
+# rootdir inference and give pip a project file to interpret, neither of which
+# this change needs.
+
+[run]
+source = app
+branch = true
+omit =
+    */tests/*
+    */__pycache__/*
+    venv/*
+    */alembic/versions/*
+    # Generated / vendored data tables, not logic.
+    app/matcha/services/insurance/bls_injury_rates_2024.py
+
+[report]
+skip_covered = true
+show_missing = true
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    \.\.\.
+
+[xml]
+output = coverage.xml

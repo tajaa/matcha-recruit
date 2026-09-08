@@ -67,6 +67,13 @@ class _Connection:
         # (server/app/matcha/routes/employees/credentials.py:_fetch_credential_documents)
         # rather than trusting the RETURNING row's stale default.
         self.calls.append(("fetch", query, args))
+        if "schedule_eligibility_cases" in query:
+            # Reclassify also resolves any open eligibility case for the
+            # credential (schedule_eligibility.py). Returning the document row
+            # for this query too raised KeyError: 'requirement_id' — a blind
+            # fake that answers every fetch identically breaks the moment
+            # production issues a second, differently-shaped one.
+            return []
         return [{**self.document, "is_current": self.document["review_status"] == "approved"}]
 
 

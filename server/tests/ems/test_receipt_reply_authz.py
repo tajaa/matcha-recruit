@@ -32,13 +32,23 @@ class _FakeConnCtx:
 
 
 class FakeConn:
-    def __init__(self, *, claimed_row):
+    def __init__(self, *, claimed_row, ops_features=None):
         self.claimed_row = claimed_row
         self.role = None
         self.executed = []
+        # What channel_ops_automation_enabled() reads off the CHANNEL's owning
+        # company before the claim: an Operations channel whose tenant still
+        # has matcha_ops + the automation's own flag.
+        self.ops_features = {"matcha_ops": True, "inventory": True} if ops_features is None else ops_features
 
     async def fetchrow(self, query, *args):
         q = " ".join(query.split())
+        if q.startswith("SELECT COALESCE(ch.channel_scope, 'operations') AS channel_scope"):
+            return {
+                "channel_scope": "operations",
+                "enabled_features": dict(self.ops_features),
+                "signup_source": "bespoke",
+            }
         if q.startswith("UPDATE inventory_receipt_drafts SET confirm_message_id = NULL"):
             return self.claimed_row
         if q.startswith("INSERT INTO channel_messages"):
@@ -88,7 +98,7 @@ def _install(monkeypatch, conn, *, features, role):
 
 async def _call(conn, *, content="confirm"):
     reply_id = str(uuid4())
-    channel_id = str(uuid4())
+    channel_id = str(uuid4())  # UUID()-parsed by the ops-automation gate
     sender_id = str(uuid4())
     return await channels_ws._bg_receipt_reply(channel_id, reply_id, sender_id, content)
 
@@ -115,15 +125,32 @@ class TestReplierAuthzReCheck:
 
     def test_inventory_disabled_between_stage_and_confirm_is_refused(self, monkeypatch):
         # An admin replies, but `inventory` was turned off in the meantime.
-        conn = FakeConn(claimed_row=_claimed_row())
+        # channel_ops_automation_enabled now re-resolves the channel's scope
+        # and the owning company's flags BEFORE the claim, so a since-revoked
+        # `inventory` short-circuits there: nothing is claimed, nothing is
+        # committed, and the pill keeps its confirm_message_id (it is never
+        # nulled) so it is not stranded.
+        conn = FakeConn(claimed_row=_claimed_row(),
+                        ops_features={"matcha_ops": True, "inventory": False})
         broadcasts = _install(monkeypatch, conn, features={"inventory": False}, role="admin")
 
         claimed = _run(_call(conn))
 
-        assert claimed is True
-        assert len(broadcasts) == 1
-        assert "inventory" in broadcasts[0]["content"].lower()
-        assert not any("status = 'committed'" in c[0] for c in conn.executed)
+        assert claimed is False
+        assert broadcasts == []
+        assert conn.executed == []
+
+    def test_ops_revoked_between_stage_and_confirm_is_refused(self, monkeypatch):
+        # Same gate, the other half of it: the tenant lost matcha_ops.
+        conn = FakeConn(claimed_row=_claimed_row(),
+                        ops_features={"matcha_ops": False, "inventory": True})
+        broadcasts = _install(monkeypatch, conn, features={"inventory": True}, role="admin")
+
+        claimed = _run(_call(conn))
+
+        assert claimed is False
+        assert broadcasts == []
+        assert conn.executed == []
 
     def test_admin_reply_with_inventory_on_still_commits(self, monkeypatch):
         # Regression guard: the authz re-check must not block the

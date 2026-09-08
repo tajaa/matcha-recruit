@@ -67,10 +67,11 @@ def test_matcha_lite_tier_forces_handbooks_on():
     assert features["handbooks"] is True
 
 
-def test_matcha_lite_tier_forces_training_on():
-    # Same overlay applies to training (added with SB 1343 module).
-    features = merge_company_features({"training": False}, "matcha_lite")
-    assert features["training"] is True
+def test_matcha_lite_tier_forces_training_off():
+    # Training moved UP to Matcha-X; the Lite overlay now force-asserts it OFF,
+    # so a stored True from a pre-move account is overridden at read time.
+    features = merge_company_features({"training": True}, "matcha_lite")
+    assert features["training"] is False
 
 
 def test_ir_only_self_serve_forces_full_ir_bundle_on():
@@ -93,10 +94,15 @@ def test_ir_only_self_serve_forces_full_ir_bundle_on():
     assert features["incidents"] is True
 
 
-def test_matcha_lite_keeps_employees_payment_gated():
-    # Stored false stays false — Stripe webhook flips it after payment.
-    features = merge_company_features({"employees": False, "discipline": False}, "matcha_lite")
-    assert features["employees"] is False
+def test_matcha_lite_grants_employees_and_leaves_incidents_payment_gated():
+    # `employees` is bundled into Lite via the overlay, so a stored False is
+    # flipped on at read time. `incidents` is the flag that stays payment-gated
+    # (Stripe webhook flips it); the overlay must not grant it.
+    features = merge_company_features(
+        {"employees": False, "discipline": False, "incidents": False}, "matcha_lite"
+    )
+    assert features["employees"] is True
+    assert features["incidents"] is False
     assert "discipline" not in features
 
 

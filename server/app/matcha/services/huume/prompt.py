@@ -332,7 +332,39 @@ def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool =
                 f"EXACTLY this target_handbook_id after the admin confirms applies it; a different "
                 f"target_handbook_id (or omitting it) stages a NEW proposal instead."
             )
+        elif action.get("type") == "waste_movement":
+            qty = action.get("quantity")
+            amount = f" {qty:g}" if isinstance(qty, (int, float)) else ""
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: waste{amount} of "
+                f"item_id={action.get('item_id')}, reason={action.get('waste_reason')}, "
+                f"confirm_id={action.get('confirm_id')}. Calling record_waste_movement again with "
+                f"EXACTLY this confirm_id after the admin confirms records it; a changed quantity "
+                f"or reason stages a NEW proposal instead."
+            )
+        elif action.get("type") == "waste_recipe_correction":
+            components = action.get("components") or []
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: recipe correction for "
+                f"{action.get('sold_name')} ({len(components)} component"
+                f"{'s' if len(components) != 1 else ''}), confirm_id={action.get('confirm_id')}. "
+                f"Calling correct_waste_recipe again with EXACTLY this confirm_id after the admin "
+                f"confirms saves it; changed components stage a NEW proposal instead."
+            )
+        elif action.get("type") == "waste_par_change":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: par change for "
+                f"item_id={action.get('item_id')} from run_id={action.get('run_id')}. Calling "
+                f"apply_waste_par_change again with EXACTLY this item_id after the admin confirms "
+                f"applies it; a different item_id stages a NEW proposal instead."
+            )
         else:
+            # Reached only by an action type with no branch above. It renders the
+            # TYPE and no id, which is not a formatting nit: the model reads this
+            # block for the id it must echo on the confirm turn, and with none
+            # present it has been observed to echo the type string itself, miss
+            # the match, silently re-stage, and still report success. Every
+            # staged type needs its own branch — tests/agent_contracts asserts it.
             lines.append(f"- STAGED ACTION awaiting the admin's confirmation: {action.get('type')}.")
 
     offer = current_state.get("huume_offer")

@@ -9,8 +9,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.config import load_settings
 from app.core.models.auth import CurrentUser
 from app.database import close_pool, get_connection, init_pool
+from app.matcha.dependencies import require_admin_or_client
 from app.matcha.routes import employees as employees_routes
 
 
@@ -31,14 +33,17 @@ def test_api_create_employee_triggers_google_workspace_onboarding_run():
 
 
 async def _run_api_employee_onboarding_test(database_url: str) -> None:
+    # The provisioning background task constructs the email service, which
+    # requires initialized settings.
+    load_settings()
     await init_pool(database_url)
 
     company_id = uuid4()
     user_id = uuid4()
     email_suffix = uuid4().hex[:8]
-    user_email = f"hr-admin-{email_suffix}@itsmatcha.net"
-    employee_email = f"new-hire-{email_suffix}@itsmatcha.net"
-    personal_email = f"new-hire-personal-{email_suffix}@gmail.com"
+    user_email = f"hr-admin-{email_suffix}@example.com"
+    employee_email = f"new-hire-{email_suffix}@example.com"
+    personal_email = f"new-hire-personal-{email_suffix}@example.com"
 
     app = FastAPI()
     app.include_router(employees_routes.router, prefix="/api/employees")
@@ -48,7 +53,9 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
     async def _override_require_admin_or_client():
         return current_user
 
-    app.dependency_overrides[employees_routes.require_admin_or_client] = _override_require_admin_or_client
+    # Override the dependency object itself, imported from where it is DEFINED —
+    # the employees package facade does not re-export it.
+    app.dependency_overrides[require_admin_or_client] = _override_require_admin_or_client
 
     async with get_connection() as conn:
         required_tables_present = await conn.fetchval(
@@ -114,7 +121,7 @@ async def _run_api_employee_onboarding_test(database_url: str) -> None:
                 json.dumps(
                     {
                         "mode": "mock",
-                        "domain": "itsmatcha.net",
+                        "domain": "example.com",
                         "auto_provision_on_employee_create": True,
                     }
                 ),

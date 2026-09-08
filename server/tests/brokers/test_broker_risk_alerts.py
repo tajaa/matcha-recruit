@@ -226,73 +226,22 @@ def test_unread_and_cooldown_elapsed_resends():
                 "is_read": False}
     assert decide_action(existing, _CAND, now=_NOW) == "send"
 
-
-# ── behavioral friction & retention risk ─────────────────────────────────────
-def _beh(current, prior, *, attendance=0, insubordination=0, location="Main Plant", window=90):
-    """Build a behavioral block; delta_pct mirrors the backend (_delta_pct)."""
-    delta = None if prior == 0 else round(((current - prior) / prior) * 100, 1)
-    return {
-        "window_days": window,
-        "current_count": current,
-        "prior_count": prior,
-        "delta_pct": delta,
-        "attendance_count": attendance,
-        "insubordination_count": insubordination,
-        "hot_location": {"name": location, "count": current} if current else None,
+# ── behavioral friction & retention risk: RETIRED ────────────────────────────
+# Removed from evaluate_trends on 2026-06-08 (EB-broker feature, deemed low
+# value) — see the note in broker_risk_alerts.py where the block used to sit.
+# The eight tests that exercised the spike / cold-start / escalation / hot-
+# location rules went with it; what is left is the one assertion that still
+# has teeth: a "behavioral" block on the metrics must not resurrect the alert.
+def test_behavioral_friction_is_retired_and_never_fires():
+    behavioral = {
+        "window_days": 90,
+        "current_count": 12, "prior_count": 4, "delta_pct": 200.0,
+        "attendance_count": 4, "insubordination_count": 2,
+        "hot_location": {"name": "North Clinic", "count": 12},
     }
-
-
-def test_behavioral_absent_block_no_alert():
-    # Baseline metrics carry no "behavioral" key — must not fire.
-    assert "behavioral_friction" not in _keys(evaluate_trends(_metrics()))
-
-
-def test_behavioral_spike_fires():
-    # 5 → 11 = +120%, abs rise 6 (>= 3). Fires.
-    m = _metrics(behavioral=_beh(11, 5, attendance=4, insubordination=2))
-    assert "behavioral_friction" in _keys(evaluate_trends(m))
-
-
-def test_behavioral_below_pct_threshold_suppressed():
-    # 10 → 14 = +40% (< 50% threshold), even though abs rise 4 >= 3.
-    m = _metrics(behavioral=_beh(14, 10))
+    # Numbers chosen to clear every retired threshold (delta 200% >= 50 * 2.0,
+    # abs rise 8 >= 3), so a reinstated rule would fire critical here.
+    m = _metrics(behavioral=behavioral)
     assert "behavioral_friction" not in _keys(evaluate_trends(m))
-
-
-def test_behavioral_big_pct_but_tiny_absolute_suppressed():
-    # 1 → 2 = +100% but abs rise only 1 (< 3). Small-base guard blocks it.
-    m = _metrics(behavioral=_beh(2, 1))
-    assert "behavioral_friction" not in _keys(evaluate_trends(m))
-
-
-def test_behavioral_cold_start_cluster_fires():
-    # No incidents prior window, fresh cluster of 4 (>= abs_min) this window.
-    m = _metrics(behavioral=_beh(4, 0))
-    cand = next(c for c in evaluate_trends(m) if c["metric_key"] == "behavioral_friction")
-    assert cand["severity"] == "warning"  # no delta → not critical
-    assert "none in the prior window" in cand["message"]
-
-
-def test_behavioral_escalates_to_critical():
-    # delta >= 50 * CRITICAL_MULTIPLIER (= 100). 4 → 12 = +200%.
-    m = _metrics(behavioral=_beh(12, 4))
-    cand = next(c for c in evaluate_trends(m) if c["metric_key"] == "behavioral_friction")
-    assert cand["severity"] == "critical"
-
-
-def test_behavioral_not_suppressed_by_thin_population():
-    # Rate metrics suppressed for thin population, but behavioral is count-based.
-    m = _metrics(
-        data_quality={"insufficient_population": True, "headcount_missing": False},
-        behavioral=_beh(10, 3),
-    )
-    assert "behavioral_friction" in _keys(evaluate_trends(m))
-
-
-def test_behavioral_message_names_location_and_subtypes():
-    m = _metrics(behavioral=_beh(11, 5, attendance=4, insubordination=2, location="North Clinic"))
-    cand = next(c for c in evaluate_trends(m) if c["metric_key"] == "behavioral_friction")
-    assert "North Clinic" in cand["message"]
-    assert "4 attendance" in cand["message"]
-    assert "2 insubordination" in cand["message"]
-    assert "120%" in cand["message"]
+    # ...and nothing else fires off the behavioral block either.
+    assert not any("behavioral" in str(c.get("metric_key")) for c in evaluate_trends(m))

@@ -20,13 +20,26 @@ from app.matcha.services.risk_analytics.risk_assessment_service import (
 
 
 class _ComplianceConn:
-    def __init__(self, row):
+    def __init__(self, row, industry="restaurant"):
         self.row = row
+        self.industry = industry
 
     async def fetchrow(self, query, *args):
         if "FROM compliance_alerts" in query:
             return self.row
         raise AssertionError(f"Unexpected fetchrow query: {query}")
+
+    async def fetchval(self, query, *args):
+        # compute_compliance_dimension resolves the company's canonical industry
+        # (healthcare gates the credential-expiry block) and the active headcount.
+        if "FROM companies" in query:
+            return self.industry
+        if "FROM employees" in query:
+            return 10
+        raise AssertionError(f"Unexpected fetchval query: {query}")
+
+    async def fetch(self, query, *args):
+        raise AssertionError(f"Unexpected fetch query: {query}")
 
 
 class _ERConn:

@@ -741,6 +741,10 @@ class TestGapAnalysisDossier:
             "covered": 1, "gaps": 1, "ambiguous": 1,
             "certifications": 1, "licenses": 1, "policies": 1, "credentials": 2,
             "suggestions": 1,
+            # Provenance is stamped into counts on purpose (see
+            # onboarding_dossier.py's docstring); "bank" is the default when no
+            # engine verdict exists, as here.
+            "coverage_source": "bank",
         }
         assert d["coverage"]["gaps"][0]["category_slug"] == "ca_aba_billing"
         assert d["ai_suggestions"]["summary"].startswith("Mostly")

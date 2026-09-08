@@ -94,10 +94,17 @@ class TestStageAndAuthz:
             assert "inventory" in verdict.message
 
     def test_employee_role_refused(self):
+        # Same capability-based authz as the HR-ops actions — see
+        # test_huume_hr_ops.TestStageAndAuthz.test_employee_role_refused.
         for staged in self.CASES:
-            verdict = _evaluate(staged, _features(), role="employee", staged_new=True)
-            assert verdict.kind == "refuse", staged["type"]
-            assert "business admin" in verdict.message
+            stage_turn = _evaluate(staged, _features(), role="employee", staged_new=True)
+            assert stage_turn.kind == "refuse", staged["type"]
+            assert "Work Operator" in stage_turn.message, staged["type"]
+            assert "inventory" not in stage_turn.message, staged["type"]
+
+            confirm_turn = _evaluate(staged, _features(), role="employee", staged_new=False)
+            assert confirm_turn.kind == "refuse", staged["type"]
+            assert "Work Operator" in confirm_turn.message, staged["type"]
 
     def test_non_proposed_status_refused(self):
         for staged in self.CASES:

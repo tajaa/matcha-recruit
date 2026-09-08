@@ -481,7 +481,13 @@ class TestInactivityWorkerExecution:
             return contexts[idx] if idx < len(contexts) else self._make_ctx(AsyncMock())
 
         with patch("app.werk.services.inactivity_worker.get_connection", side_effect=mock_get_connection):
-            with patch("app.werk.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock):
+            # resolve_channel_app_path opens its OWN pool connection (it is not
+            # handed the worker's conn), so it must be stubbed or the notify
+            # block's try/except swallows a "pool not initialized" and the
+            # notification silently never fires.
+            with patch("app.werk.services.inactivity_worker.resolve_channel_app_path",
+                       new_callable=AsyncMock, return_value="/work/channels/x"), \
+                 patch("app.werk.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock):
                 with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
                     from app.werk.services.inactivity_worker import run_inactivity_checks
                     await run_inactivity_checks()
@@ -520,7 +526,9 @@ class TestInactivityWorkerExecution:
             return contexts[idx] if idx < len(contexts) else self._make_ctx(AsyncMock())
 
         with patch("app.werk.services.inactivity_worker.get_connection", side_effect=mock_get_connection):
-            with patch("app.werk.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock) as mock_cancel:
+            with patch("app.werk.services.inactivity_worker.resolve_channel_app_path",
+                       new_callable=AsyncMock, return_value="/work/channels/x"), \
+                 patch("app.werk.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock) as mock_cancel:
                 with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
                     from app.werk.services.inactivity_worker import run_inactivity_checks
                     await run_inactivity_checks()
@@ -970,8 +978,15 @@ class TestPaymentFailedCycleDedupe:
     async def test_first_failure_in_cycle_logs_and_notifies(self):
         row = {"channel_id": uuid4(), "user_id": uuid4(), "company_id": uuid4()}
         mock_conn = AsyncMock()
-        # fetchrow → membership row
-        mock_conn.fetchrow = AsyncMock(return_value=row)
+        # fetchrow calls in order:
+        #   1. membership row
+        #   2. channel_app_path's scope lookup (shares this conn) — a row
+        #      without channel_scope raises inside the notify try/except and
+        #      the notification silently never fires.
+        mock_conn.fetchrow = AsyncMock(side_effect=[
+            row,
+            {"channel_scope": "community", "project_id": None},
+        ])
         # fetchval calls in order:
         #   1. last_success → None (never paid before)
         #   2. already_failed_this_cycle → False (first fail)
@@ -1083,7 +1098,22 @@ class TestActivationDoesNotIncrementInvite:
 class TestSuccessURLPrefix:
     """Client routing mounts channels at /work/channels/{id} (App.tsx).
     Stripe success_url must match — earlier code used /app/matcha/work/...
-    which 404s after Stripe redirects the paid customer back."""
+    which 404s after Stripe redirects the paid customer back.
+
+    Both URLs are now built by channel_links.resolve_channel_app_path, which
+    opens its own pool connection to read the channel's scope. These tests
+    stub only that connection (not the resolver) so the real path builder
+    still runs — a `community` channel must resolve to /work/channels/{id}.
+    """
+
+    @staticmethod
+    def _links_conn_ctx(scope="community"):
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(return_value={"channel_scope": scope, "project_id": None})
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return MagicMock(return_value=ctx)
 
     @pytest.mark.asyncio
     async def test_channel_subscription_url_uses_work_prefix(self):
@@ -1099,7 +1129,8 @@ class TestSuccessURLPrefix:
         fake_settings = MagicMock(app_base_url="https://app.matcha.test")
         mock_session = MagicMock()
         mock_session.create = fake_create
-        with patch.object(channel_payment_service, "_ensure_stripe"):
+        with patch("app.werk.services.channel_links.get_connection", self._links_conn_ctx()), \
+             patch.object(channel_payment_service, "_ensure_stripe"):
             with patch.object(channel_payment_service, "get_settings", return_value=fake_settings):
                 with patch.object(channel_payment_service, "stripe", MagicMock(checkout=MagicMock(Session=mock_session))):
                     await channel_payment_service.create_checkout_session(
@@ -1127,7 +1158,8 @@ class TestSuccessURLPrefix:
         fake_settings = MagicMock(app_base_url="https://app.matcha.test")
         mock_session = MagicMock()
         mock_session.create = fake_create
-        with patch.object(channel_job_posting_service, "_ensure_stripe"):
+        with patch("app.werk.services.channel_links.get_connection", self._links_conn_ctx()), \
+             patch.object(channel_job_posting_service, "_ensure_stripe"):
             with patch.object(channel_job_posting_service, "get_settings", return_value=fake_settings):
                 with patch.object(channel_job_posting_service, "stripe", MagicMock(checkout=MagicMock(Session=mock_session))):
                     await channel_job_posting_service.create_job_posting_checkout(

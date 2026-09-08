@@ -82,19 +82,36 @@ cd server && ./venv/bin/python run.py     # :8001
 cd server && ./venv/bin/python -m pytest tests/<domain>/ -q
 ```
 
-Some tests load a route module through `importlib.util.spec_from_file_location(...)` with a hard-coded relative path. That form breaks **silently** on any file move, so it is the pattern to avoid — import the module normally, or `inspect.getsource()` off the imported symbol if you need its text.
+**The suite runs in CI now, and it did not before.** Until 2026-09-08 the
+`server-tests` job ran `alembic upgrade heads` against an empty database, hit
+the root revision's `REFERENCES companies(id)` (a table `init_db()` creates, not
+a migration), accepted that as a pinned baseline, and fell back to
+`pytest --collect-only`. ~8,700 tests were imported and never executed, for
+months. The schema step was never needed — this suite is unit-level and passes
+with no database at all — so it is gone, along with the fallback. Oceanlab runs
+as its own step against the service container its conftest hardcodes.
 
-The old seven-file "known broken" list was re-measured on 2026-07-27 and was almost entirely stale. Actual state:
+Turning execution on surfaced 190 failures, all test rot from code that moved
+while nothing ran (stale fake-connection queues, `mock.patch` targets pointing
+at package facades, signatures that gained a `company_id`). Those are repaired.
+What remains is recorded as `xfail(strict=True)` with the reason in place, never
+as a fingerprint pinned in the workflow — a strict xfail goes red the moment the
+underlying issue is fixed, which forces the marker off instead of letting it rot:
 
-| File | Status |
+| Marked | Why |
 |---|---|
-| `tests/employees/test_internal_mobility_routes.py` | **still errors at collection** — the only real one left |
-| `tests/employees/test_employee_invites_and_compliance.py` | fixed (rewritten to normal imports, refactor round 2 stage 4); 2 pass + 1 `xfail(strict)` pinning a genuine `NameError` in `employees/crud.py` |
-| `tests/er_copilot/test_er_copilot_risk_refresh.py` | fixed the same way; 2 pass |
-| `tests/matcha_work/test_language_tutor.py` | passes (24) |
-| `tests/offers/test_offer_letters_plus_guidance.py` | passes (2) |
-| `tests/training/test_employee_create_supervisor.py` | passes (3) |
-| `tests/pre_termination/test_pre_termination.py` | **the file does not exist** |
+| `tests/workers/test_discipline_policy_sweep.py` (6) | `discipline` is in `RETIRED_COMPANY_FEATURES` (f37b8f3), so `discipline_policy_sweep_enabled` can never return True and every incident takes the `_stamp_ineligible` branch. The removal was partial — the router is unmounted but the worker, `services/discipline/`, and three Huume actions gated on `"discipline"` remain. |
+| `tests/compliance/test_compliance_schema_redesign.py` (1) | 24 category keys have no `CATEGORY_DOMAIN_MAP` entry. No runtime consumer (it seeds from migrations); the proposed mapping is in the test's comment. |
+| `tests/dependencies/test_feature_gate_wiring.py` (1) | `offer_letters_plus` is gated in a route but exists nowhere else in the codebase, so that endpoint 403s for every tenant. |
+
+`tests/employees/test_internal_mobility_routes.py` was deleted: the feature it
+covered was removed in `4020e58` and the file had been failing collection ever
+since.
+
+Some tests load a route module through `importlib.util.spec_from_file_location(...)`
+with a hard-coded relative path — `tests/infrastructure/test_ai_chat.py` had one
+that was off by a directory and silently turned all 25 of its assertions into a
+`FileNotFoundError`. Avoid the form; import normally, or `inspect.getsource()`.
 
 Don't fix unrelated failures as part of other work — but don't trust a stale list either. Re-measure before citing one.
 

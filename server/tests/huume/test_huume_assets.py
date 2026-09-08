@@ -52,6 +52,19 @@ class TestSpecCoverage:
         # Drift guard: a new staged type added to _HUUME_ACTION_REQUIRED_FEATURE
         # must pick a side here — mapped (gets an asset row) or explicitly
         # excluded with a documented reason, never silently forgotten.
+        #
+        # This guard caught real drift the moment the suite was actually run
+        # in CI: seven staged types had been added since the registry was last
+        # touched and picked neither side — waste_movement, waste_par_change,
+        # waste_recipe_correction, schedule_note, meal_break_waiver,
+        # work_permit, eligibility_case_decision. Six returned status="created"
+        # WITH a record_id, so they reached assets.record_asset, hit its
+        # `spec is None -> return` no-op, and the durable row they created never
+        # landed in the thread's asset panel. waste_movement was the sharpest
+        # case: the SAME executor and the same inventory_movements row DID get
+        # an asset when the type was "inventory_movement". All seven are now
+        # mapped (waste_par_change is in _NO_ASSET_TYPES — its executor returns
+        # no record_id at all).
         for action_type in _HUUME_ACTION_REQUIRED_FEATURE:
             assert action_type in assets.ASSET_SPECS or action_type in assets._NO_ASSET_TYPES, (
                 f"{action_type} is in neither ASSET_SPECS nor _NO_ASSET_TYPES"

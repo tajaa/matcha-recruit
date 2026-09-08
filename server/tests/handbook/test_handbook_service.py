@@ -164,14 +164,17 @@ def test_update_handbook_invalidates_cached_pdf_for_template_changes(monkeypatch
 def test_generate_handbook_pdf_bytes_escapes_html(monkeypatch):
     captured: dict[str, str] = {}
 
-    class DummyHTML:
-        def __init__(self, string):
-            captured["html"] = string
+    # Capture at the renderer boundary rather than stubbing the `weasyprint`
+    # module: `core.services.pdf` imports `weasyprint.urls.default_url_fetcher`
+    # (for the SSRF-safe fetcher), which a flat SimpleNamespace stub cannot
+    # satisfy — it makes the real package look like a non-package.
+    import app.core.services.pdf as pdf_module
 
-        def write_pdf(self):
-            return b"%PDF-test"
+    async def _fake_render_pdf_async(html_string, **kwargs):
+        captured["html"] = html_string
+        return b"%PDF-test"
 
-    monkeypatch.setitem(sys.modules, "weasyprint", types.SimpleNamespace(HTML=DummyHTML))
+    monkeypatch.setattr(pdf_module, "render_pdf_async", _fake_render_pdf_async)
 
     fake_handbook = SimpleNamespace(
         title="<script>alert(1)</script>",

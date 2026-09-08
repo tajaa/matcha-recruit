@@ -8,6 +8,7 @@ Covers:
   LiveKit webhook; participants_changed payload shape
 """
 
+import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
@@ -49,8 +50,32 @@ def _conn_ctx(conn):
     return MagicMock(return_value=cm)
 
 
-def _user(email="owner@example.com"):
-    return SimpleNamespace(id=uuid4(), email=email)
+def _user(email="owner@example.com", role="client"):
+    # `role` is not optional: load_channel_access reads current_user.role for
+    # the admin bypass, so a role-less stand-in AttributeErrors before any
+    # assertion in this file runs.
+    return SimpleNamespace(id=uuid4(), email=email, role=role)
+
+
+def _access_row(channel_id, *, scope="community", features=None, company_id=None):
+    """The single row load_channel_access() reads before any call handler runs.
+
+    Every call route now opens with _assert_call_access() -> load_channel_access(),
+    which joins channels+companies+channel_members in one fetchrow. Its result is
+    the FIRST fetchrow of every handler in this file, so each side_effect queue
+    below has to lead with it. `community` scope keeps these tests on the
+    personal/paid-channel path (Pro plan + owner gate) rather than the Matcha Ops
+    policy branch.
+    """
+    return {
+        "id": channel_id,
+        "company_id": company_id or uuid4(),
+        "channel_scope": scope,
+        "enabled_features": features or {},
+        "signup_source": "bespoke",
+        "member_role": "member",
+        "is_member": True,
+    }
 
 
 def _call_row(channel_id, *, mode="members", started_by=None, started_minutes_ago=5):
@@ -88,7 +113,8 @@ class TestBasics:
 class TestJoinPolicy:
     def _conn_for(self, call, *, invited):
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [call]          # _active_call
+        # load_channel_access, then _active_call
+        conn.fetchrow.side_effect = [_access_row(call["channel_id"]), call]
         conn.fetchval.return_value = 1 if invited else None
         return conn
 
@@ -115,7 +141,8 @@ class TestJoinPolicy:
         user = _user("invitee@example.com")
         call = _call_row(channel_id, mode="invite_only")
         conn = self._conn_for(call, invited=True)
-        conn.fetchrow.side_effect = [call, {"name": "Invitee"}]  # + _display_name
+        # access, _active_call, resolve_display_name
+        conn.fetchrow.side_effect = [_access_row(channel_id), call, {"name": "Invitee"}]
 
         with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
              patch(f"{MOD}._assert_member", AsyncMock()), \
@@ -126,7 +153,9 @@ class TestJoinPolicy:
 
         assert resp["token"] == "jwt"
         assert resp["mode"] == "invite_only"
-        assert mt.call_args.kwargs["can_publish_sources"] == ["microphone"]
+        # Widened to camera for group video in efb2eba; still an explicit
+        # allowlist, so screen_share/data remain ungranted.
+        assert mt.call_args.kwargs["can_publish_sources"] == ["microphone", "camera"]
 
     @pytest.mark.asyncio
     async def test_invite_only_owner_bypasses_invite_check(self):
@@ -135,7 +164,7 @@ class TestJoinPolicy:
         user = _user("owner@example.com")
         call = _call_row(channel_id, mode="invite_only", started_by=user.id)
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [call, {"name": "Owner"}]
+        conn.fetchrow.side_effect = [_access_row(channel_id), call, {"name": "Owner"}]
 
         with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
              patch(f"{MOD}._assert_member", AsyncMock()), \
@@ -160,7 +189,7 @@ class TestCapacity:
         user = _user("late@example.com")
         call = _call_row(channel_id, mode="members")
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [call, {"name": "Late"}]
+        conn.fetchrow.side_effect = [_access_row(channel_id), call, {"name": "Late"}]
 
         occupants = [str(uuid4()) for _ in range(4)]
         with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
@@ -179,7 +208,7 @@ class TestCapacity:
         user = _user("rejoiner@example.com")
         call = _call_row(channel_id, mode="members")
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [call, {"name": "Rejoiner"}]
+        conn.fetchrow.side_effect = [_access_row(channel_id), call, {"name": "Rejoiner"}]
 
         occupants = [str(user.id)] + [str(uuid4()) for _ in range(3)]  # full, incl. self
         with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
@@ -196,11 +225,16 @@ class TestCapacity:
 # ============================================================
 
 class TestStartCall:
-    # start_call fetches the channel's company + merged feature flags (werk-lite
-    # gating) before the mutual-exclusion checks below — every side_effect list
-    # in this class must lead with these two rows.
+    # start_call resolves channel access (load_channel_access), then — on the
+    # non-Operations path — the channel's company + merged feature flags
+    # (werk-lite gating), all before the mutual-exclusion checks below. Every
+    # side_effect list in this class must lead with those three rows.
     _CHAN_ROW = {"company_id": uuid4()}
     _FEATS_ROW = {"enabled_features": {}, "signup_source": "bespoke"}
+
+    @staticmethod
+    def _lead(channel_id):
+        return [_access_row(channel_id), TestStartCall._CHAN_ROW, TestStartCall._FEATS_ROW]
 
     def _patches(self, conn, active_call=None, active_broadcast=None):
         return {
@@ -229,7 +263,7 @@ class TestStartCall:
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [self._CHAN_ROW, self._FEATS_ROW, _call_row(channel_id)]  # _active_call -> fresh row
+        conn.fetchrow.side_effect = self._lead(channel_id) + [_call_row(channel_id)]  # _active_call -> fresh row
 
         with ExitStack() as stack:
             self._enter_all(stack, self._patches(conn))
@@ -245,7 +279,7 @@ class TestStartCall:
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [self._CHAN_ROW, self._FEATS_ROW, None]  # no active call
+        conn.fetchrow.side_effect = self._lead(channel_id) + [None]  # no active call
 
         with ExitStack() as stack:
             self._enter_all(stack, self._patches(conn, active_broadcast={"id": uuid4()}))
@@ -262,9 +296,7 @@ class TestStartCall:
         user = _user()
         call_id = uuid4()
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [
-            self._CHAN_ROW,
-            self._FEATS_ROW,
+        conn.fetchrow.side_effect = self._lead(channel_id) + [
             None,                                                       # _active_call
             {"id": call_id, "started_at": datetime.now(timezone.utc)},  # INSERT RETURNING
         ]
@@ -273,12 +305,15 @@ class TestStartCall:
         with ExitStack() as stack:
             mocks = self._enter_all(stack, self._patches(conn))
             resp = await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
+        # The two notification fan-outs are spawn_bg() fire-and-forget tasks —
+        # yield once so they actually run before we assert on them.
+        await asyncio.sleep(0)
 
         assert resp["call_id"] == str(call_id)
         assert resp["mode"] == "members"
         assert resp["max_participants"] == CALL_MAX_PARTICIPANTS
         assert mocks["create_room"].await_args.kwargs["max_participants"] == CALL_MAX_PARTICIPANTS
-        assert mocks["mint_token"].call_args.kwargs["can_publish_sources"] == ["microphone"]
+        assert mocks["mint_token"].call_args.kwargs["can_publish_sources"] == ["microphone", "camera"]
         # Collaborator bell/banner fan-out fires once with the starter's name
         mocks["notify_started"].assert_awaited_once()
         assert mocks["notify_started"].await_args.args[3] == "Owner"
@@ -303,9 +338,7 @@ class TestStartCall:
         )
         orphan["id"] = orphan_call_id
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [
-            self._CHAN_ROW,
-            self._FEATS_ROW,
+        conn.fetchrow.side_effect = self._lead(channel_id) + [
             orphan,                                                          # _active_call -> orphaned
             {"id": new_call_id, "started_at": datetime.now(timezone.utc)},   # INSERT RETURNING
         ]
@@ -336,7 +369,7 @@ class TestStopCall:
         call = _call_row(channel_id, started_by=user.id)
         call["id"] = call_id
         conn = AsyncMock()
-        conn.fetchrow.return_value = call          # _active_call
+        conn.fetchrow.side_effect = [_access_row(channel_id), call]  # access, _active_call
         conn.fetchval.return_value = call_id        # UPDATE ... RETURNING id (still active)
 
         with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
@@ -363,7 +396,8 @@ class TestStopCall:
         call = _call_row(channel_id, started_by=user.id)
         call["id"] = call_id
         conn = AsyncMock()
-        conn.fetchrow.return_value = call    # _active_call still reads the pre-race row
+        # access, then _active_call (still reads the pre-race row)
+        conn.fetchrow.side_effect = [_access_row(channel_id), call]
         conn.fetchval.return_value = None    # UPDATE ... WHERE ended_at IS NULL -> no row
 
         with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
