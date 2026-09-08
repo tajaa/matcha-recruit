@@ -18,6 +18,7 @@ from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
 
 from ....database import get_connection
+from .project_task_service import is_autopr_bookkeeping_row
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,11 @@ def _build_context(task, subtasks, history) -> str:
         md = _meta(h["metadata"])
         actor = h["actor"] or "someone"
         if et == "activity":
+            # The lane's own bookkeeping rows ride this event type; none of
+            # them is something a person said, and a staged email draft in
+            # particular must not reach the brief as "X noted: …".
+            if is_autopr_bookkeeping_row(md):
+                continue
             body = (md.get("body") or "").strip()
             if body:
                 trail.append(f"{actor} noted: {body}")

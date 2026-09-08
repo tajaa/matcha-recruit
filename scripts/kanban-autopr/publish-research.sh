@@ -63,13 +63,20 @@ MODEL_NAME="$(autopr_kind_field research model)"
     || die "research card note must be 1-240 characters"
 [ -s "$REPORT_FILE" ] || die "research produced no report at $REPORT_FILE"
 
-[ -n "$PROD_BUILD_NUMBER" ] || die "card context is missing the production build number"
-[ -n "$PROD_BACKEND_SHA" ] || die "card context is missing the production backend SHA"
-[ -n "$PROD_FRONTEND_SHA" ] || die "card context is missing the production frontend SHA"
-if [ "$PROD_BACKEND_SHA" = "$PROD_FRONTEND_SHA" ]; then
-    PROD_LABEL="prod $PROD_BACKEND_SHA"
+# Production provenance is context for a PR, not for a report: nothing in a
+# research result depends on which build is live. publish.sh refuses to run
+# without it; here a missing build (an SSH or ECR hiccup on the runner) must
+# not throw away a completed high-effort pass, so the segment is simply
+# omitted from the card note.
+PROVENANCE=""
+if [ -n "$PROD_BUILD_NUMBER" ] && [ -n "$PROD_BACKEND_SHA" ] && [ -n "$PROD_FRONTEND_SHA" ]; then
+    if [ "$PROD_BACKEND_SHA" = "$PROD_FRONTEND_SHA" ]; then
+        PROVENANCE="build $PROD_BUILD_NUMBER · prod $PROD_BACKEND_SHA · "
+    else
+        PROVENANCE="build $PROD_BUILD_NUMBER · prod backend $PROD_BACKEND_SHA / frontend $PROD_FRONTEND_SHA · "
+    fi
 else
-    PROD_LABEL="prod backend $PROD_BACKEND_SHA / frontend $PROD_FRONTEND_SHA"
+    printf 'kanban-autopr: warning: production context is incomplete; publishing the report without a build label\n' >&2
 fi
 
 STAGED_BLOCK="$(autopr_render_staged_actions "$DECISION_FILE")"
@@ -81,27 +88,40 @@ BOARD_CAPABILITIES="$(jq -r '(.autopr_capabilities // [])[]' "$CARD_FILE" 2>/dev
 OUTREACH_GRANTED=false
 printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF outreach && OUTREACH_GRANTED=true
 
-# stage_actions — POST the proposals so a human can approve each one.
+# stage_actions RUN_KEY — POST the proposals so a human can approve each one.
 # Never fatal: the report is the deliverable, and losing the approve buttons
 # must not discard a completed run. A 409 is the expected answer when the
-# grant was revoked between selection and publication.
+# grant was revoked between selection and publication. RUN_KEY is the report
+# file id: the server returns the existing rows for a key it has already seen,
+# so a retried publication never puts a second set of Send rows on the card.
+# Sets STAGING_RESULT to one line the summary note can quote.
+STAGING_RESULT=""
 stage_actions() {
-    local payload staging_error
+    local run_key="$1" payload staging_error response already
     [ "$STAGED_COUNT" -gt 0 ] || return 0
     if [ "$OUTREACH_GRANTED" != true ]; then
         printf 'kanban-autopr: board lacks the outreach grant; %s proposed action(s) stay report-only\n' \
             "$STAGED_COUNT" >&2
+        STAGING_RESULT="This board is not granted outreach, so the proposals above are notes only — there is nothing to approve."
         return 0
     fi
-    payload="$(jq -c '{actions: .staged_actions}' "$DECISION_FILE")"
-    if ! staging_error="$(mw_api POST \
+    payload="$(jq -c --arg key "$run_key" '{actions: .staged_actions, run_key: $key}' "$DECISION_FILE")"
+    if ! response="$(mw_api POST \
         "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/staged-actions" \
-        "$payload" 2>&1 >/dev/null)"; then
+        "$payload" 2>"$STAGE_DIR/staging.err")"; then
+        staging_error="$(tr -d '\r' < "$STAGE_DIR/staging.err" | tail -1 | cut -c1-300)"
         printf 'kanban-autopr: warning: could not stage %s proposed action(s) for task %s: %s\n' \
             "$STAGED_COUNT" "$TASK_ID" "$staging_error" >&2
+        STAGING_RESULT="The proposals above could not be staged for approval ($staging_error); they remain in the report only."
         return 0
     fi
-    printf 'Staged %s proposed action(s) for human approval\n' "$STAGED_COUNT"
+    already="$(printf '%s' "$response" | jq -r '.already_staged // false' 2>/dev/null || printf false)"
+    if [ "$already" = true ]; then
+        printf 'Proposals for this report were already staged; not staging again\n'
+    else
+        printf 'Staged %s proposed action(s) for human approval\n' "$STAGED_COUNT"
+    fi
+    STAGING_RESULT="$STAGED_COUNT proposed action(s) are waiting for your approval under Proposed Outreach — none sent."
 }
 
 # Tell the person who supplied additional context what became of it. Same
@@ -131,7 +151,7 @@ post_reconsideration_result() {
 if [ "$OUTCOME" = needs_clarification ]; then
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] needs_clarification"
     origin_note="$(progress_note_with_origin \
-        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CONFIDENCE_BADGE C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · $PROVENANCE$CONFIDENCE_BADGE C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
         "$EXISTING_PROGRESS_NOTE")"
     # Exactly the form Espresso's "Answer AutoPR questions" UI parses.
     card_questions="$(autopr_render_card_questions "$DECISION_FILE")"
@@ -154,59 +174,111 @@ fi
 [ "$OUTCOME" = research_report ] || die "unknown research outcome: $OUTCOME"
 
 # ---- report: attach it, note it, move the card to Review -------------------
-# Round = how many reports this card already carries, plus one. The filename
-# is what the next revision run finds among the attachments as "version 1".
-existing_files="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files")"
-prior_reports="$(printf '%s' "$existing_files" \
-    | jq '[.[] | select((.filename // "") | test("^research-report-.*\\.md$"))] | length')"
-[[ "$prior_reports" =~ ^[0-9]+$ ]] || die "could not count prior research reports"
-ROUND=$((prior_reports + 1))
-FILENAME="research-report-$ID8-r$ROUND.md"
+# Re-entrant on purpose. Artifact kinds have no GitHub ledger: the card leaving
+# Todo is the only thing that stops a rerun, and that move is the LAST write
+# here. A publication that died after the upload used to rerun the whole pass
+# and attach a second report, a second note, and a second set of Send rows.
+# So every write below first asks whether this run already made it, keyed on
+# the run's start time (`AUTOPR_RUN_STARTED_AT`, epoch seconds or a file
+# holding them). Without it, nothing is reused and the writes happen once.
+run_started_epoch=""
+if [ -n "${AUTOPR_RUN_STARTED_AT:-}" ]; then
+    if [ -f "$AUTOPR_RUN_STARTED_AT" ]; then
+        run_started_epoch="$(tr -d '[:space:]' < "$AUTOPR_RUN_STARTED_AT")"
+    else
+        run_started_epoch="$AUTOPR_RUN_STARTED_AT"
+    fi
+    [[ "$run_started_epoch" =~ ^[0-9]+$ ]] || run_started_epoch=""
+fi
 
 STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
-FINAL_REPORT="$STAGE_DIR/$FILENAME"
-{
-    # Trusted provenance header, written here rather than by the model.
-    printf '_AutoPR research · %s · model %s · round %s · %s source(s)_\n\n' \
-        "$(date -u +'%Y-%m-%d %H:%M UTC')" "$MODEL_NAME" "$ROUND" "$SOURCE_COUNT"
-    cat "$REPORT_FILE"
-    if [ -n "$STAGED_BLOCK" ]; then
-        printf '\n\n### Proposed actions (not sent)\n\n%s\n' "$STAGED_BLOCK"
-        if [ "$OUTREACH_GRANTED" != true ]; then
-            printf '\n_This board is not granted outreach, so these are notes only — there is nothing to approve._\n'
-        fi
-    fi
-} > "$FINAL_REPORT"
 
-upload="$(mw_api_upload "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" "$FINAL_REPORT")"
-FILE_ID="$(printf '%s' "$upload" | jq -r '.id // empty')"
-[ -n "$FILE_ID" ] || die "report upload returned no file id: $upload"
+existing_files="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files")"
+# Files this run already uploaded: created at or after the run started.
+# ISO timestamps from the server carry fractional seconds and an offset, so
+# compare as epochs rather than as strings.
+this_run_files='[]'
+if [ -n "$run_started_epoch" ]; then
+    this_run_files="$(printf '%s' "$existing_files" | jq -c --argjson since "$run_started_epoch" '
+        def epoch: (sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | sub("Z?$"; "Z")
+                    | try fromdateiso8601 catch 0);
+        [.[] | select(((.created_at // "") | epoch) >= $since)]' 2>/dev/null || printf '[]')"
+fi
+prior_report="$(printf '%s' "$this_run_files" | jq -c --arg id8 "$ID8" '
+    [.[] | select((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"))]
+    | sort_by(.created_at) | last // empty')"
+
+if [ -n "$prior_report" ]; then
+    FILE_ID="$(printf '%s' "$prior_report" | jq -r '.id')"
+    FILENAME="$(printf '%s' "$prior_report" | jq -r '.filename')"
+    ROUND="$(printf '%s' "$FILENAME" | sed -E 's/^.*-r([0-9]+)\.md$/\1/')"
+    [[ "$ROUND" =~ ^[0-9]+$ ]] || die "could not read the round from $FILENAME"
+    printf 'kanban-autopr: report %s was already uploaded by this run; reusing it\n' "$FILENAME" >&2
+else
+    # Round = how many reports this card already carries, plus one. The
+    # filename is what the next revision run finds among the attachments as
+    # "version 1".
+    prior_reports="$(printf '%s' "$existing_files" \
+        | jq '[.[] | select((.filename // "") | test("^research-report-.*\\.md$"))] | length')"
+    [[ "$prior_reports" =~ ^[0-9]+$ ]] || die "could not count prior research reports"
+    ROUND=$((prior_reports + 1))
+    FILENAME="research-report-$ID8-r$ROUND.md"
+    FINAL_REPORT="$STAGE_DIR/$FILENAME"
+    {
+        # Trusted provenance header, written here rather than by the model.
+        printf '_AutoPR research · %s · model %s · round %s · %s source(s)_\n\n' \
+            "$(date -u +'%Y-%m-%d %H:%M UTC')" "$MODEL_NAME" "$ROUND" "$SOURCE_COUNT"
+        cat "$REPORT_FILE"
+        if [ -n "$STAGED_BLOCK" ]; then
+            printf '\n\n### Proposed actions (not sent)\n\n%s\n' "$STAGED_BLOCK"
+            if [ "$OUTREACH_GRANTED" != true ]; then
+                printf '\n_This board is not granted outreach, so these are notes only — there is nothing to approve._\n'
+            fi
+        fi
+    } > "$FINAL_REPORT"
+    upload="$(mw_api_upload "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" "$FINAL_REPORT")"
+    FILE_ID="$(printf '%s' "$upload" | jq -r '.id // empty')"
+    [ -n "$FILE_ID" ] || die "report upload returned no file id: $upload"
+fi
 
 # Screenshots attach to the same ticket and to the same note, so the evidence
 # sits beside the claim it supports. A failed image upload is reported and
 # skipped: the report is the deliverable and must not be lost to one bad file.
+# One this run already uploaded (same round prefix, created after the run
+# started) is reused rather than uploaded twice.
 ATTACHMENT_IDS="[\"$FILE_ID\"]"
 SHOT_COUNT=0
 if [ -n "$ARTIFACTS_DIR" ] && [ -d "$ARTIFACTS_DIR" ]; then
     while IFS= read -r shot; do
         [ -n "$shot" ] || continue
         shot_name="$(basename "$shot")"
-        staged_shot="$STAGE_DIR/research-$ID8-r$ROUND-$shot_name"
-        cp "$shot" "$staged_shot"
-        if shot_upload="$(mw_api_upload \
-            "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" "$staged_shot" 2>/dev/null)"; then
-            shot_id="$(printf '%s' "$shot_upload" | jq -r '.id // empty')"
-            if [ -n "$shot_id" ]; then
-                ATTACHMENT_IDS="$(printf '%s' "$ATTACHMENT_IDS" \
-                    | jq -c --arg id "$shot_id" '. + [$id]')"
-                SHOT_COUNT=$((SHOT_COUNT + 1))
-                continue
+        staged_name="research-$ID8-r$ROUND-$shot_name"
+        shot_id="$(printf '%s' "$this_run_files" \
+            | jq -r --arg name "$staged_name" '[.[] | select(.filename == $name)] | first | .id // empty')"
+        if [ -z "$shot_id" ]; then
+            staged_shot="$STAGE_DIR/$staged_name"
+            cp "$shot" "$staged_shot"
+            if shot_upload="$(mw_api_upload \
+                "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" "$staged_shot" 2>/dev/null)"; then
+                shot_id="$(printf '%s' "$shot_upload" | jq -r '.id // empty')"
             fi
+        fi
+        if [ -n "$shot_id" ]; then
+            ATTACHMENT_IDS="$(printf '%s' "$ATTACHMENT_IDS" \
+                | jq -c --arg id "$shot_id" '. + [$id]')"
+            SHOT_COUNT=$((SHOT_COUNT + 1))
+            continue
         fi
         printf 'kanban-autopr: warning: could not attach screenshot %s\n' "$shot_name" >&2
     done < <(find "$ARTIFACTS_DIR" -maxdepth 1 -type f | sort)
 fi
+
+# Proposals become approvable rows BEFORE the note announces them, so a reader
+# who opens the ticket the moment the notification lands never sees "needs
+# your approval" above an empty Proposed Outreach section. Keyed on the report
+# id so a retry finds the rows it already made.
+stage_actions "$FILE_ID"
 
 note_body="$SUMMARY
 
@@ -216,20 +288,36 @@ Screenshots attached: $SHOT_COUNT"
 [ -z "$STAGED_BLOCK" ] || note_body="$note_body
 
 $STAGED_BLOCK"
-activity_payload="$(jq -n --arg body "$note_body" --argjson files "$ATTACHMENT_IDS" \
-    --arg reply "$RECONSIDERATION_EVENT_ID" \
-    '{kind:"note", body:$body, attachment_ids:$files}
-     + (if $reply == "" then {} else {reply_to:$reply} end)')"
-mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" "$activity_payload" >/dev/null
+[ -z "$STAGING_RESULT" ] || note_body="$note_body
+$STAGING_RESULT"
+
+# The note is the one write with no natural key, so look for our own marker
+# line among this task's discussion before posting it again.
+note_marker="Report attached: $FILENAME"
+note_already_posted=false
+if [ -n "$run_started_epoch" ]; then
+    history_json="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/history" 2>/dev/null || printf '[]')"
+    if printf '%s' "$history_json" | jq -e --arg marker "$note_marker" '
+        any(.[]?; .event_type == "activity" and ((.metadata.body // "") | contains($marker)))' \
+        >/dev/null 2>&1; then
+        note_already_posted=true
+        printf 'kanban-autopr: summary note for %s is already on the card; not posting again\n' "$FILENAME" >&2
+    fi
+fi
+if [ "$note_already_posted" != true ]; then
+    activity_payload="$(jq -n --arg body "$note_body" --argjson files "$ATTACHMENT_IDS" \
+        --arg reply "$RECONSIDERATION_EVENT_ID" \
+        '{kind:"note", body:$body, attachment_ids:$files}
+         + (if $reply == "" then {} else {reply_to:$reply} end)')"
+    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" "$activity_payload" >/dev/null
+fi
 
 origin_note="$(progress_note_with_origin \
-    "🤖 AUTO SETUP · READY FOR REVIEW · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CONFIDENCE_BADGE C$CONFIDENCE_SCORE · note: $CARD_NOTE" \
+    "🤖 AUTO SETUP · READY FOR REVIEW · $PROVENANCE$CONFIDENCE_BADGE C$CONFIDENCE_SCORE · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg note "$origin_note" \
         '{board_column: "review", progress_note: $note}')" >/dev/null
-
-stage_actions
 
 post_reconsideration_result "$origin_note" \
     "AutoPR reviewed this additional context and attached research report round $ROUND. $CARD_NOTE"

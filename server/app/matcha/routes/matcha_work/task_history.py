@@ -398,12 +398,16 @@ async def stage_autopr_actions_endpoint(
     actions = body.get("actions")
     if not isinstance(actions, list):
         raise HTTPException(status_code=400, detail="actions must be a list")
+    run_key = body.get("run_key")
+    if run_key is not None and not isinstance(run_key, str):
+        raise HTTPException(status_code=400, detail="run_key must be a string")
     try:
         result = await pt_svc.stage_autopr_actions(
             project_id=project_id,
             task_id=task_id,
             actor_user_id=current_user.id,
             actions=actions,
+            run_key=run_key,
         )
     except pt_svc.AutoPRActorNotPermitted as exc:
         raise HTTPException(status_code=403, detail=str(exc))
@@ -774,6 +778,8 @@ async def get_project_activity_endpoint(
 
     Newest-first, capped at `limit`.
     """
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
     await _verify_project_access(project_id, current_user)
     limit = max(1, min(int(limit), 100))
     async with get_connection() as conn:
@@ -791,6 +797,9 @@ async def get_project_activity_endpoint(
                 FROM mw_task_history h
                 LEFT JOIN mw_tasks t ON t.id = h.task_id
                 WHERE h.project_id = $1
+                  -- AutoPR's run-request / claim / staged-outreach rows are
+                  -- bookkeeping, not activity a person did.
+                  AND COALESCE(h.metadata->>'kind', '') <> ALL($3::text[])
 
                 UNION ALL
 
@@ -823,6 +832,6 @@ async def get_project_activity_endpoint(
             ORDER BY e.created_at DESC
             LIMIT $2
             """,
-            project_id, limit,
+            project_id, limit, list(pt_svc._AUTOPR_BOOKKEEPING_KINDS),
         )
     return [_serialize_activity_row(r) for r in rows]

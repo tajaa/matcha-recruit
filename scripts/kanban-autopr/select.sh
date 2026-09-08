@@ -419,7 +419,12 @@ for ((i = 0; i < n; i++)); do
         # The tmux dashboard asks the same selector what would run next. Its
         # read-only probe must never create a cooldown marker or consume work.
         [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || touch "$ATTEMPTS_DIR/$id8"
-        printf '%s' "$card" | jq -c --arg mode "$decision" '. + {mode: $mode}'
+        # `outcome` (pull_request | artifact) is what the workflow gates its
+        # PR-only steps on, so the registry stays the single place a kind's
+        # shape is declared.
+        printf '%s' "$card" | jq -c --arg mode "$decision" \
+            --arg outcome "$(autopr_kind_field "$decision" outcome)" \
+            '. + {mode: $mode, outcome: $outcome}'
         exit 0
     fi
 done

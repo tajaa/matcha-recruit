@@ -123,9 +123,13 @@ struct TaskViewerSheet: View {
     }
     var subtaskDoneCount: Int { subtasks.filter { $0.isDone }.count }
 
-    /// Free-form notes/comments — the `activity` rows from the task history.
+    /// Free-form notes/comments — the `activity` rows from the task history,
+    /// minus AutoPR's bookkeeping rows (run requests, claims, staged outreach
+    /// and its outcomes), which ride the same event type but are not
+    /// discussion. A staged email draft in particular must not appear here as
+    /// a bot comment: it is rendered, with its buttons, by `outreachSection`.
     var notes: [MWTaskHistoryEntry] {
-        history.filter { $0.eventType == "activity" }
+        history.filter { $0.eventType == "activity" && !GraphGeom.isBookkeeping($0) }
     }
 
     /// `round_started` timestamps, ascending. Anything created at/after the

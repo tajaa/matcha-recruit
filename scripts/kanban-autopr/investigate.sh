@@ -282,10 +282,13 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
       + (map(select((.round_index // 1) != $round)) | sort_by(.created_at // "") | reverse))[]')
 
 CONTEXT_FILE="$WORK_DIR/context.json"
+# The model's copy of the history omits the lane's bookkeeping rows; the raw
+# file above keeps them for the directive resolver and the round derivation.
+autopr_strip_bookkeeping_history "$history" > "$WORK_DIR/history-for-model.json"
 jq -n \
     --slurpfile card "$CARD_FILE" \
     --slurpfile subtasks "$WORK_DIR/subtasks.json" \
-    --slurpfile history "$WORK_DIR/history.json" \
+    --slurpfile history "$WORK_DIR/history-for-model.json" \
     --slurpfile files "$WORK_DIR/files.json" \
     --slurpfile directive_policy "$DIRECTIVE_FILE" \
     --slurpfile test_tenant_evidence "$TEST_TENANT_EVIDENCE_FILE" \

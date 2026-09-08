@@ -49,6 +49,14 @@ check "research sandbox switches enforce an empty patch and enable search + imag
 check "an unknown mode is refused by the registry" \
     $(! autopr_kind_field shortlist model >/dev/null 2>&1 && echo 0 || echo 1)
 
+check "the model's history copy drops the lane's bookkeeping rows and keeps discussion" \
+    $(stripped="$(autopr_strip_bookkeeping_history '[{"event_type":"activity","metadata":{"kind":"note","body":"real comment"}},{"event_type":"activity","metadata":{"kind":"autopr_staged_action","action_body":"draft email"}},{"event_type":"activity","metadata":{"kind":"autopr_run_claim"}},{"event_type":"activity","metadata":{"kind":"autopr_staged_action_result","state":"sent"}},{"event_type":"column_change"}]')"; \
+      [ "$(printf '%s' "$stripped" | jq 'length')" = 2 ] \
+      && printf '%s' "$stripped" | jq -e 'any(.[]; (.metadata.body // "") == "real comment")' >/dev/null \
+      && ! printf '%s' "$stripped" | grep -q 'draft email' \
+      && grep -q 'history-for-model.json' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
 ################################################################################
 # select.sh: a research card never consults the GitHub PR ledger.
 cat > "$TMP_DIR/bin/gh" <<'EOF'
@@ -408,6 +416,7 @@ case "$url" in
   */activity) printf '%s' "$payload" > "$RESEARCH_TEST_ACTIVITY"; respond '{"ok":true}' ;;
   */autopr/context-request) printf '%s' "$payload" > "$RESEARCH_TEST_CONTEXT_REQUEST"; respond '{"ok":true}' ;;
   */autopr/result-notification) printf '%s' "$payload" > "$RESEARCH_TEST_RESULT_NOTIFICATION"; respond '{"ok":true}' ;;
+  */history) respond "${RESEARCH_TEST_EXISTING_HISTORY:-[]}" ;;
   */tasks/*) printf '%s' "$payload" > "$RESEARCH_TEST_CARD_PATCH"; respond '{"ok":true}' ;;
   *) respond '{"ok":true}' ;;
 esac
@@ -489,11 +498,13 @@ check "the additional-context author gets a decision-bound result notification" 
              and (.message | contains("round 2"))
              and (.expected_progress_note | startswith("🤖 AUTO SETUP · READY FOR REVIEW"))' \
         "$RESEARCH_TEST_RESULT_NOTIFICATION" >/dev/null && echo 0 || echo 1)
-check "an outreach-granted board gets the proposals posted for approval, with nothing sent" \
+check "an outreach-granted board gets the proposals posted for approval, keyed on the report, with nothing sent" \
   $(jq -e '(.actions | length) == 1
            and .actions[0].kind == "email"
            and .actions[0].to == "account-team@aws.example.com"
-           and (.actions[0].body | length > 0)' "$RESEARCH_TEST_STAGED" >/dev/null \
+           and (.actions[0].body | length > 0)
+           and .run_key == "file-research-report-aaaa0000-r2.md"' "$RESEARCH_TEST_STAGED" >/dev/null \
+    && jq -e '.body | contains("waiting for your approval")' "$RESEARCH_TEST_ACTIVITY" >/dev/null \
     && grep -q 'POST https://example.invalid/api/matcha-work/projects/8b924347-d6e4-4000-8e7d-ca8f46f76fba/tasks/aaaa0000-0000-4000-8000-000000000001/autopr/staged-actions' "$RESEARCH_TEST_CURL_LOG" \
     && echo 0 || echo 1)
 
@@ -522,6 +533,10 @@ check "screenshots are attached to the same note as the report" \
         "$RESEARCH_TEST_ACTIVITY" >/dev/null \
     && echo 0 || echo 1)
 
+check "proposals are staged before the note announces them and before the card moves" \
+  $(awk '/autopr\/staged-actions/ {s=NR} /\/activity$/ {n=NR} /^PATCH .*\/tasks\/aaaa0000-0000-4000-8000-000000000001$/ {m=NR} END {exit !(s && n && m && s < n && n < m)}' \
+        "$RESEARCH_TEST_CURL_LOG" && echo 0 || echo 1)
+
 check "the research publisher never calls gh" \
     $([ ! -s "$RESEARCH_TEST_GH_LOG" ] && echo 0 || echo 1)
 check "no context request is posted for a delivered report" \
@@ -545,10 +560,50 @@ check "a board without the outreach grant stages nothing and says so in the repo
 RESEARCH_TEST_STAGE_STATUS=409 run_publisher "$TMP_DIR/card.json" "$TMP_DIR/research-decision.json" \
   > "$TMP_DIR/publish-stage409.log" 2>&1
 stage409_rc=$?
-check "a staging refusal is reported but never discards a completed report" \
+check "a staging refusal is reported on the card note and never discards a completed report" \
   $([ "$stage409_rc" = 0 ] \
     && grep -q 'could not stage' "$TMP_DIR/publish-stage409.log" \
+    && jq -e '.body | contains("could not be staged")' "$RESEARCH_TEST_ACTIVITY" >/dev/null \
     && jq -e '.board_column == "review"' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
+    && echo 0 || echo 1)
+
+# A publication that died after the upload is retried by the same run. The
+# card leaving Todo is the only thing that stops a rerun, and it is the last
+# write, so the publisher must recognise its own report, screenshots, and note
+# rather than attaching each of them twice.
+export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md","created_at":"2026-09-01T00:00:00+00:00"},{"id":"file-mine","filename":"research-report-aaaa0000-r2.md","created_at":"2026-09-08T10:00:05.123456+00:00"},{"id":"file-shot-mine","filename":"research-aaaa0000-r2-01-pricing.png","created_at":"2026-09-08T10:00:06+00:00"}]'
+export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h1","event_type":"activity","metadata":{"kind":"note","body":"Lambda suits bursty…\n\nReport attached: research-report-aaaa0000-r2.md"}}]'
+: > "$RESEARCH_TEST_CURL_LOG"
+rm -f "$RESEARCH_TEST_ACTIVITY" "$RESEARCH_TEST_CARD_PATCH" "$RESEARCH_TEST_UPLOADED" "$RESEARCH_TEST_STAGED"
+PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR/runner" \
+AUTOPR_RUN_STARTED_AT="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' '2026-09-08T10:00:00Z' +%s 2>/dev/null || date -u -d '2026-09-08T10:00:00Z' +%s)" \
+    "$AUTOPR_DIR/publish-research.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" \
+    "$TMP_DIR/research-decision.json" "$TMP_DIR/publish-shots" > "$TMP_DIR/publish-retry.log" 2>&1
+retry_rc=$?
+[ "$retry_rc" = 0 ] || sed -n '1,40p' "$TMP_DIR/publish-retry.log"
+check "a retried publication reuses its own report and screenshot, uploads only what is missing, and posts no second note" \
+  $([ "$retry_rc" = 0 ] \
+    && [ ! -e "$RESEARCH_TEST_UPLOADED" ] \
+    && [ "$(grep -c 'POST https://example.invalid/api/matcha-work/projects/.*/files' "$RESEARCH_TEST_CURL_LOG")" = 1 ] \
+    && [ ! -e "$RESEARCH_TEST_ACTIVITY" ] \
+    && jq -e '.run_key == "file-mine"' "$RESEARCH_TEST_STAGED" >/dev/null \
+    && jq -e '.board_column == "review"' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
+    && grep -q 'reusing it' "$TMP_DIR/publish-retry.log" \
+    && echo 0 || echo 1)
+unset RESEARCH_TEST_EXISTING_HISTORY
+
+# A report does not depend on which build is live. Missing production context
+# (an SSH or ECR hiccup on the runner) must not throw the run away.
+export RESEARCH_TEST_EXISTING_FILES='[]'
+jq 'del(.production)' "$TMP_DIR/card.json" > "$TMP_DIR/card-noprod.json"
+jq '.staged_actions = []' "$TMP_DIR/research-decision.json" > "$TMP_DIR/research-decision-plain.json"
+run_publisher "$TMP_DIR/card-noprod.json" "$TMP_DIR/research-decision-plain.json" > "$TMP_DIR/publish-noprod.log" 2>&1 \
+    || true
+check "missing production context publishes the report without a build label instead of dying" \
+  $(grep -q 'production context is incomplete' "$TMP_DIR/publish-noprod.log" \
+    && jq -e '.board_column == "review"
+              and (.progress_note | startswith("🤖 AUTO SETUP · READY FOR REVIEW · 🟢 C82 · note: "))' \
+        "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
     && echo 0 || echo 1)
 
 # First report on a fresh card, no staged actions, no reconsideration.
@@ -604,14 +659,23 @@ check "an unvalidated (raw) decision is refused before any board write" \
 ################################################################################
 # Workflow wiring: PR-only steps are gated off for research; the research
 # publisher runs from the control-plane snapshot.
-check "workflow skips branch creation, coverage, verify, publication copy, and publish.sh for research" \
-    $(grep -qF "if: steps.select.outputs.skip == 'false' && steps.select.outputs.mode != 'research'" "$workflow" \
-      && [ "$(grep -c "steps.select.outputs.mode != 'research'" "$workflow")" -ge 6 ] \
+# The workflow keys on the registry's `outcome`, never on a mode name: the next
+# artifact kind must not fall through into branch creation or publish.sh.
+check "workflow gates branch creation, coverage, verify, publication copy, and publish.sh on the registry outcome" \
+    $(grep -qF "if: steps.select.outputs.skip == 'false' && steps.select.outputs.outcome != 'artifact'" "$workflow" \
+      && [ "$(grep -c "steps.select.outputs.outcome != 'artifact'" "$workflow")" -ge 6 ] \
+      && ! grep -q "steps.select.outputs.mode [!=]= 'research'" "$workflow" \
+      && grep -qF 'echo "outcome=$(jq -r' "$workflow" \
+      && echo 0 || echo 1)
+check "select.sh stamps the registry outcome on the card it picks" \
+    $([ "$(jq -r '.outcome' "$TMP_DIR/select-todo.json" 2>/dev/null)" = artifact ] \
+      && [ "$(jq -r '.outcome' "$TMP_DIR/select-eng.json" 2>/dev/null)" = pull_request ] \
       && echo 0 || echo 1)
 check "workflow publishes research from the trusted control root without a GitHub token" \
     $(grep -qF 'name: Publish research report' "$workflow" \
       && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh"' "$workflow" \
-      && grep -qF "steps.investigate.outcome == 'success' && steps.select.outputs.mode == 'research'" "$workflow" \
+      && grep -qF "steps.investigate.outcome == 'success' && steps.select.outputs.outcome == 'artifact'" "$workflow" \
+      && grep -qF 'AUTOPR_RUN_STARTED_AT: ${{ runner.temp }}/investigation-started-at' "$workflow" \
       && ! awk '/name: Publish research report/,/name: Cleanup/' "$workflow" | grep -qE '^[[:space:]]*GH_TOKEN:' \
       && echo 0 || echo 1)
 check "ci syntax-checks the research publisher and the self-audit runs this suite" \

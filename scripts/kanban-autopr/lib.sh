@@ -343,6 +343,22 @@ autopr_post_context_request() {
     fi
 }
 
+# autopr_strip_bookkeeping_history HISTORY_JSON
+# The lane's own history rows (run requests, claims, staged outreach and its
+# outcomes) ride event_type='activity' but are not discussion. They stay in
+# the raw history the directive resolver reads; they must not reach the model
+# as "what people said" — a research run would otherwise read its own staged
+# email drafts back as a teammate's comment on the next round.
+autopr_strip_bookkeeping_history() {
+    printf '%s' "$1" | jq -c '
+      if type == "array" then
+        map(select(((.metadata // {}).kind // "")
+                   | IN("autopr_run_request", "autopr_run_claim",
+                        "autopr_staged_action", "autopr_staged_action_result")
+                   | not))
+      else . end'
+}
+
 # ---- task-kind registry -----------------------------------------------------
 # One row per mode the Kanban lane knows how to run. select.sh maps a card to
 # a mode; everything downstream (prompt, model, sandbox switches, required

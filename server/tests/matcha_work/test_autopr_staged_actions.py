@@ -21,9 +21,13 @@ def test_a_well_formed_action_keeps_the_marker_key_free():
     )
     assert cleaned == {
         "action_kind": "email", "to": "vendor@example.com",
-        "subject": "Quote", "body": "Hi", "why": "Confirms pricing",
+        "subject": "Quote", "action_body": "Hi", "why": "Confirms pricing",
     }
     assert "kind" not in cleaned
+    # `body` is what every discussion renderer reads off an activity row —
+    # the ticket thread, the AI brief, the harness's context. A draft nobody
+    # approved must never be readable as something a person said.
+    assert "body" not in cleaned
 
 
 @pytest.mark.parametrize(
@@ -242,7 +246,118 @@ async def test_only_the_autopr_account_may_stage_outreach(monkeypatch):
         ps.prime_autopr_board_capabilities_cache({})
 
 
-def test_result_rows_stay_out_of_the_unviewed_updates_badge():
-    """The outcome row carries no body of its own, so it must not put an
-    unread chip on a card that has nothing new to read."""
+def test_staged_rows_are_bookkeeping_not_discussion():
+    """Both rows ride event_type='activity' but neither is a comment: the
+    proposal is rendered by the outreach section (its text lives under
+    action_body) and the result row has no body at all. Every consumer of
+    activity rows — badge, discussion thread, AI brief, overview feed, the
+    model's own context — filters through this list."""
+    assert "autopr_staged_action" in pt._AUTOPR_BOOKKEEPING_KINDS
     assert "autopr_staged_action_result" in pt._AUTOPR_BOOKKEEPING_KINDS
+    assert pt.is_autopr_bookkeeping_row({"kind": "autopr_staged_action", "action_body": "x"})
+    assert pt.is_autopr_bookkeeping_row({"kind": "autopr_run_claim"})
+    assert not pt.is_autopr_bookkeeping_row({"kind": "note", "body": "hello"})
+    assert not pt.is_autopr_bookkeeping_row("not a dict")
+
+
+class _Tx:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _StagingConn:
+    """Enough of an asyncpg connection for stage_autopr_actions: the task
+    exists, and rows previously staged under a run key are remembered."""
+
+    def __init__(self, existing_by_key: dict[str, list[str]]):
+        self.existing_by_key = existing_by_key
+        self.inserted: list[dict] = []
+
+    def transaction(self):
+        return _Tx()
+
+    async def fetchval(self, sql, *args):
+        assert "FROM mw_tasks" in sql
+        return 1
+
+    async def execute(self, sql, *args):
+        assert "FOR UPDATE" in sql
+
+    async def fetch(self, sql, *args):
+        assert "metadata->>'run_key'" in sql
+        return [{"id": i} for i in self.existing_by_key.get(args[1], [])]
+
+    async def fetchrow(self, sql, *args):
+        import json
+
+        assert "INSERT INTO mw_task_history" in sql
+        meta = json.loads(args[4])
+        self.inserted.append(meta)
+        return {"id": f"new-{len(self.inserted)}"}
+
+
+class _Ctx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_staging_twice_under_the_same_run_key_returns_the_first_rows(monkeypatch):
+    """A publication that died after staging and is retried must not put a
+    second set of one-click Send rows on the card. The report file id is the
+    key; the retry gets the rows the first attempt made."""
+    from uuid import UUID, uuid4
+
+    from app.core.services import platform_settings as ps
+
+    board = UUID(sorted(pt.KANBAN_AUTOPR_PROJECT_IDS)[0])
+    ps.prime_autopr_board_capabilities_cache({str(board): ["outreach"]})
+    action = {"kind": "email", "to": "a@example.com", "subject": "s", "body": "b", "why": "w"}
+    try:
+        fresh = _StagingConn({})
+        monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(fresh))
+        first = await pt.stage_autopr_actions(
+            project_id=board, task_id=uuid4(),
+            actor_user_id=UUID(pt.KANBAN_AUTOPR_BOT_USER_ID),
+            actions=[action], run_key="file-report-1",
+        )
+        assert first["staged"] == 1 and first["action_ids"] == ["new-1"]
+        assert fresh.inserted[0]["run_key"] == "file-report-1"
+        assert fresh.inserted[0]["kind"] == "autopr_staged_action"
+
+        retry = _StagingConn({"file-report-1": ["old-1", "old-2"]})
+        monkeypatch.setattr(pt, "get_connection", lambda: _Ctx(retry))
+        second = await pt.stage_autopr_actions(
+            project_id=board, task_id=uuid4(),
+            actor_user_id=UUID(pt.KANBAN_AUTOPR_BOT_USER_ID),
+            actions=[action], run_key="file-report-1",
+        )
+        assert second == {
+            "ok": True, "staged": 0, "action_ids": ["old-1", "old-2"],
+            "already_staged": True,
+        }
+        assert retry.inserted == []
+    finally:
+        ps.prime_autopr_board_capabilities_cache({})
+
+
+def test_the_send_ceiling_counts_claims_not_only_completed_sends():
+    """The ceiling is read before the claim is written, so counting only
+    finished sends let N parallel approvals all pass. The query text is the
+    contract here; the fake-free assertion pins the two states it must count."""
+    import inspect
+
+    src = inspect.getsource(pt.count_recent_staged_sends)
+    assert "IN ('sending', 'sent')" in src
+    # Bounded to the watched boards so the (project_id, created_at) index
+    # carries the query — there is no index on actor_user_id.
+    assert "project_id = ANY($2::uuid[])" in src
