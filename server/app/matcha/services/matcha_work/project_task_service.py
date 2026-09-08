@@ -102,7 +102,7 @@ _ALLOWED_PIPELINE_COLUMNS = {"lead", "qualified", "proposal", "negotiation", "cl
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
 # Ticket-template kinds stored in mw_tasks.category. "manual" = no template
 # (blank task / legacy rows) and renders without a badge on the client.
-_ALLOWED_CATEGORIES = {"manual", "engineering", "sales", "product", "bug", "general", "feat", "fix"}
+_ALLOWED_CATEGORIES = {"manual", "engineering", "sales", "product", "bug", "general", "feat", "fix", "research"}
 # Sales-pipeline deal outcome. "open" = still in the funnel; won/lost are
 # terminal and independent of board_column (a deal can be lost from any stage).
 _ALLOWED_OUTCOMES = {"open", "won", "lost"}
@@ -113,7 +113,7 @@ _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 # retired for new decisions but old cards still carry it, so parsers keep it.
 _AUTOPR_NO_SPEC_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
-    r"(already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency)(?:\s|$)"
+    r"(already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification)(?:\s|$)"
 )
 _AUTOPR_TEST_ROUTE_RE = re.compile(
     r"(?:test[-_ ]route|reproduce(?:[-_ ]route)?)\s*(?:=|:)\s*(/[^\s]+)",
