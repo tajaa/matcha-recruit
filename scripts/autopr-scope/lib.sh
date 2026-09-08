@@ -16,6 +16,11 @@ autopr_scope_mode() {
 
 autopr_scope_capture_diff() {
     local repo_root="$1" output="$2" index_file
+    # A non-repo root used to surface only as git's own `fatal: not a git
+    # repository` plus the generic capture failure below, which costs a whole
+    # investigate run to trace back to a misresolved REPO_ROOT. Say the cause.
+    git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1 \
+        || autopr_scope_die "repo root is not a git repository: $repo_root (set AUTOPR_WORKSPACE_ROOT)"
     index_file="$(mktemp "${RUNNER_TEMP:-/tmp}/autopr-scope-index-XXXXXX")"
     rm -f "$index_file"
     if ! GIT_INDEX_FILE="$index_file" git -C "$repo_root" read-tree HEAD \

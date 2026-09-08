@@ -8,7 +8,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# The kanban lane runs this from the trusted control-plane snapshot
+# ($RUNNER_TEMP/autopr-control), which is a `git archive` extraction and not a
+# repository — deriving the root from SCRIPT_DIR there points every git call at
+# a directory with no .git and kills the run after the model has already spent
+# its budget. Same env override the other control-root scripts use; the
+# fallback keeps in-workspace callers (silent-error-autofix.yml,
+# error-autofix/reconcile.sh) unchanged.
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 

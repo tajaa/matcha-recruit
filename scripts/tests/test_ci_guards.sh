@@ -226,6 +226,44 @@ if ! grep -q 'cut -c1-1000' "$REPO_ROOT/.github/workflows/record-production-veri
 else
     check "manual production evidence truncation is Unicode-safe" 1
 fi
+################################################################################
+# Case 10 — a script the kanban lane runs from the trusted control-plane
+# snapshot may not derive its repo root from its own location.
+#
+# `Snapshot trusted AutoPR control plane` extracts `git archive main` into
+# $RUNNER_TEMP/autopr-control, which has no .git. bf74d0a moved
+# autopr-scope/check-open-prs.sh behind $AUTOPR_CONTROL_ROOT while it still did
+# REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)", so every kanban run died at
+# "Check whether an open PR already covers this task" with `fatal: not a git
+# repository` — after the model had already been paid for. The lane opened no
+# PR between 2026-09-06 and the fix. Guard the class, not the instance: any
+# control-root script that resolves a repo root must take it from the
+# environment the workflow sets (AUTOPR_WORKSPACE_ROOT / AUTOPR_SANDBOX_REPO_ROOT).
+KANBAN_WORKFLOW="$REPO_ROOT/.github/workflows/kanban-autopr.yml"
+control_root_offenders=""
+while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    script="$REPO_ROOT/scripts/$rel"
+    if [ ! -f "$script" ]; then
+        control_root_offenders="$control_root_offenders $rel(missing)"
+        continue
+    fi
+    # Only location-relative resolution is the bug. `git rev-parse
+    # --show-toplevel` resolves from the working directory, which the workflow
+    # leaves at $GITHUB_WORKSPACE, so leave-task-checkout.sh stays correct.
+    grep -q '^REPO_ROOT=.*SCRIPT_DIR' "$script" || continue
+    grep -qE '^REPO_ROOT="\$\{(AUTOPR_WORKSPACE_ROOT|AUTOPR_SANDBOX_REPO_ROOT):-' "$script" \
+        || control_root_offenders="$control_root_offenders $rel"
+done < <(grep -oE '\$AUTOPR_CONTROL_ROOT/[A-Za-z0-9_./-]+\.sh' "$KANBAN_WORKFLOW" \
+    | sed 's#^\$AUTOPR_CONTROL_ROOT/##' | sort -u)
+
+if [ -n "$control_root_offenders" ]; then
+    echo "  offending control-root scripts:$control_root_offenders"
+    check "control-root scripts take their repo root from the environment" 1
+else
+    check "control-root scripts take their repo root from the environment" 0
+fi
+
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"
