@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMUX_BIN="${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}"
 SESSION="${AUTOPR_TMUX_SESSION:-matcha-autopr}"
 LOCK_DIR="${AUTOPR_TMUX_LOCK_DIR:-${TMPDIR:-/tmp}/matcha-autopr-tmux.lock}"
+TMUX_WIDTH="${AUTOPR_TMUX_WIDTH:-133}"
+TMUX_HEIGHT="${AUTOPR_TMUX_HEIGHT:-45}"
 
 acquire_session_lock() {
     local attempt=0 lock_mtime=0 now=0
@@ -33,6 +35,10 @@ acquire_session_lock() {
 }
 
 [ -x "$TMUX_BIN" ] || { echo "tmux is not executable: $TMUX_BIN" >&2; exit 1; }
+[[ "$TMUX_WIDTH" =~ ^[0-9]+$ ]] && [ "$TMUX_WIDTH" -ge 80 ] \
+    || { echo "invalid dashboard width: $TMUX_WIDTH" >&2; exit 1; }
+[[ "$TMUX_HEIGHT" =~ ^[0-9]+$ ]] && [ "$TMUX_HEIGHT" -ge 24 ] \
+    || { echo "invalid dashboard height: $TMUX_HEIGHT" >&2; exit 1; }
 acquire_session_lock
 session_healthy() {
     local pane_states pane_count
@@ -60,25 +66,38 @@ printf -v work_cmd '%q' "$SCRIPT_DIR/watch-work.sh"
 printf -v health_cmd '%q' "$SCRIPT_DIR/watch-health.sh"
 printf -v pr_cmd '%q' "$SCRIPT_DIR/watch-pr.sh"
 
-"$TMUX_BIN" new-session -d -s "$SESSION" -n autopr "$dashboard_cmd"
+"$TMUX_BIN" new-session -d -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT" -s "$SESSION" -n autopr "$dashboard_cmd"
 "$TMUX_BIN" set-option -t "$SESSION" history-limit 100000 >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" mouse on >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status on >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-position bottom >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-style 'bg=#111827,fg=#94a3b8' >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-left-length 32 >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-left '#[fg=#a7f3d0,bold]  MATCHA#[fg=#2dd4bf] / AUTOPR  ' >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-right-length 48 >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-right '#[fg=#64748b]detach #[fg=#cbd5e1,bold]Ctrl-b d  #[fg=#334155]│  #[fg=#94a3b8]%a %b %d · %I:%M %p  ' >/dev/null
+"$TMUX_BIN" set-window-option -t "$SESSION:autopr" window-style 'bg=#0b1017' >/dev/null
+"$TMUX_BIN" set-window-option -t "$SESSION:autopr" window-active-style 'bg=#0b1017' >/dev/null
+"$TMUX_BIN" set-window-option -t "$SESSION:autopr" pane-border-style 'fg=#334155' >/dev/null
+"$TMUX_BIN" set-window-option -t "$SESSION:autopr" pane-active-border-style 'fg=#2dd4bf' >/dev/null
 main_pane="$("$TMUX_BIN" display-message -p -t "$SESSION:autopr" '#{pane_id}')"
 # The overview owns the full-height left side so it stays readable from across
 # a room. Raw model output, PR details, and health remain available as a
 # secondary right-hand stack instead of competing equally with the status
-# board. Split the bottom half of the right column once more to produce
-# work=50%, PR=25%, health=25% of the screen height.
-work_pane="$("$TMUX_BIN" split-window -h -p 42 -P -F '#{pane_id}' -t "$main_pane" "$work_cmd")"
-pr_pane="$("$TMUX_BIN" split-window -v -p 50 -P -F '#{pane_id}' -t "$work_pane" "$pr_cmd")"
-health_pane="$("$TMUX_BIN" split-window -v -p 50 -P -F '#{pane_id}' -t "$pr_pane" "$health_cmd")"
+# board. The detail rail gives roughly 40% to live work, 28% to the active PR,
+# and 32% to compact system health. At the common 133-column terminal size, a
+# 38% detail rail leaves the overview 82 columns wide so its queue rows do not
+# wrap.
+work_pane="$("$TMUX_BIN" split-window -h -p 38 -P -F '#{pane_id}' -t "$main_pane" "$work_cmd")"
+pr_pane="$("$TMUX_BIN" split-window -v -p 62 -P -F '#{pane_id}' -t "$work_pane" "$pr_cmd")"
+health_pane="$("$TMUX_BIN" split-window -v -p 54 -P -F '#{pane_id}' -t "$pr_pane" "$health_cmd")"
 "$TMUX_BIN" set-option -t "$SESSION" remain-on-exit on >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" pane-border-status top >/dev/null
-"$TMUX_BIN" set-option -t "$SESSION" pane-border-format '#{pane_title}' >/dev/null
-"$TMUX_BIN" select-pane -t "$main_pane" -T 'operations overview · Pacific time'
-"$TMUX_BIN" select-pane -t "$work_pane" -T 'live agent detail'
-"$TMUX_BIN" select-pane -t "$health_pane" -T 'automation health'
-"$TMUX_BIN" select-pane -t "$pr_pane" -T 'active PR detail'
+"$TMUX_BIN" set-option -t "$SESSION" pane-border-format '#[fg=#475569]─ #{?pane_active,#[fg=#a7f3d0]●,#[fg=#64748b]○} #[fg=#cbd5e1,bold]#{pane_title} #[fg=#475569]'
+"$TMUX_BIN" select-pane -t "$main_pane" -T 'CONTROL BOARD · PACIFIC'
+"$TMUX_BIN" select-pane -t "$work_pane" -T 'LIVE AGENT'
+"$TMUX_BIN" select-pane -t "$health_pane" -T 'SYSTEM HEALTH'
+"$TMUX_BIN" select-pane -t "$pr_pane" -T 'ACTIVE PR'
 "$TMUX_BIN" select-pane -t "$main_pane"
 
 session_healthy || {

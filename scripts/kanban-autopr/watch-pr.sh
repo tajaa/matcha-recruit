@@ -25,6 +25,26 @@ GH_CACHED="${AUTOPR_GH_CACHED:-$SCRIPT_DIR/gh-cached.sh}"
 PR_LIST_TTL_SECONDS="${AUTOPR_PR_LIST_TTL_SECONDS:-300}"
 PR_VIEW_TTL_SECONDS="${AUTOPR_PR_VIEW_TTL_SECONDS:-120}"
 
+TUI_COLOR=false
+case "${AUTOPR_DASHBOARD_COLOR:-auto}" in
+    1|always|true) TUI_COLOR=true ;;
+    0|never|false) TUI_COLOR=false ;;
+    *) [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && TUI_COLOR=true ;;
+esac
+[ -z "${NO_COLOR:-}" ] || TUI_COLOR=false
+if [ "$TUI_COLOR" = true ]; then
+    C_RESET=$'\033[0m' C_BRAND=$'\033[38;5;157m' C_ACCENT=$'\033[38;5;80m'
+    C_BLUE=$'\033[38;5;75m' C_WARN=$'\033[38;5;221m' C_MUTED=$'\033[38;5;245m'
+    C_RAIL=$'\033[38;5;239m' C_BOLD=$'\033[1m'
+else
+    C_RESET='' C_BRAND='' C_ACCENT='' C_BLUE='' C_WARN='' C_MUTED='' C_RAIL='' C_BOLD=''
+fi
+
+pr_header() {
+    printf '%b◆ ACTIVE / MOST RECENT KANBAN PR%b · %s\n' \
+        "$C_BRAND$C_BOLD" "$C_RESET" "$1"
+}
+
 workflow_is_active() {
     AUTOPR_REPO="$REPO" AUTOPR_GH_BIN="$GH_BIN" "$RUN_SNAPSHOT" 2>/dev/null \
         | jq -e 'any(.[]; .lane == "kanban" and (.status | IN("queued", "in_progress", "requested", "waiting", "pending")))' >/dev/null 2>&1
@@ -117,7 +137,7 @@ render_local_diff() {
     [ "$file_lines" -ge 2 ] || file_lines=2
     [ "$file_lines" -le 8 ] || file_lines=8
 
-    printf '\nCHANGED FILES · LIVE RUNNER WORKTREE\n'
+    printf '%b◆ CHANGED FILES%b · LIVE RUNNER WORKTREE\n' "$C_BRAND$C_BOLD" "$C_RESET"
     if [ -n "$short_stat" ]; then
         "$GIT_BIN" -C "$RUNNER_WORKTREE" diff --name-status "$base" -- 2>/dev/null \
             | sed -n "1,${file_lines}p"
@@ -131,7 +151,7 @@ render_local_diff() {
     # enlarge it can opt into a patch excerpt without pushing the PR identity
     # off-screen in the default layout.
     if [ "${AUTOPR_PR_SHOW_PATCH:-0}" = 1 ]; then
-        printf '\nLIVE DIFF · first %s lines\n' "$MAX_DIFF_LINES"
+        printf '%b◆ LIVE DIFF%b · first %s lines\n' "$C_BLUE$C_BOLD" "$C_RESET" "$MAX_DIFF_LINES"
         "$GIT_BIN" -C "$RUNNER_WORKTREE" diff --no-ext-diff --unified=1 "$base" -- 2>/dev/null \
             | sed -n "1,${MAX_DIFF_LINES}p"
     fi
@@ -139,7 +159,7 @@ render_local_diff() {
 
 render_remote_files() {
     local pr_json="$1"
-    printf '\nCHANGED FILES\n'
+    printf '%b◆ CHANGED FILES%b\n' "$C_BRAND$C_BOLD" "$C_RESET"
     printf '%s' "$pr_json" | jq -r --argjson limit "$MAX_FILE_LINES" '
       if (.files | length) == 0 then "  none reported" else
         (.files[:$limit][] | "  " + .path + "  +" + (.additions | tostring) + " -" + (.deletions | tostring)),
@@ -154,7 +174,7 @@ render_pr() {
     branch="$(current_task_branch "$workflow_active")"
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'ACTIVE / MOST RECENT KANBAN PR\nUpdated %s\n\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
+    pr_header "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
     if [ -z "$branch" ]; then
         printf 'No bot/task-* worktree or open Kanban AutoPR was found.\n'
         printf 'This pane will populate after the workflow selects a card.\n'
@@ -165,12 +185,12 @@ render_pr() {
         printf '%s' "$pr_json" | render_pr_metadata
     else
         if [ "$workflow_active" = true ]; then
-            printf 'DRAFTING · PR NOT PUBLISHED YET\n'
+            printf '%b● DRAFTING · PR NOT PUBLISHED YET%b\n' "$C_WARN$C_BOLD" "$C_RESET"
         else
-            printf 'LAST ATTEMPT · NO PR PUBLISHED\n'
+            printf '%b○ LAST ATTEMPT · NO PR PUBLISHED%b\n' "$C_MUTED$C_BOLD" "$C_RESET"
         fi
-        printf '  branch %s\n' "$branch"
-        printf '  task %s\n' "${branch#bot/task-}"
+        printf '  %bbranch%b %s\n' "$C_MUTED" "$C_RESET" "$branch"
+        printf '  %btask%b %s\n' "$C_MUTED" "$C_RESET" "${branch#bot/task-}"
         render_card_title "$branch"
         printf '  GitHub metadata appears after publish.\n'
     fi
