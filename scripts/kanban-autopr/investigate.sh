@@ -373,13 +373,15 @@ run_codex() {
         runner_env+=("$kind_switch")
     done
     if [ "$BROWSE_GRANTED" = true ]; then
+        # No INSTALL_PLAYWRIGHT_BROWSERS here: it is a Docker BUILD arg
+        # (docker/agent-sandbox/Dockerfile), read by `msandbox build
+        # --playwright`, and setting it at run time installs nothing. The image
+        # either carries Chromium or it does not; browse-capture.py exits 3 and
+        # says so, and the prompt tells the model to fall back to web search
+        # rather than treat that as a research failure.
         runner_env+=(
             AUTOPR_CODEX_COLLECT_ARTIFACTS=1
             AUTOPR_SANDBOX_ARTIFACTS_DIR="$ARTIFACTS_DIR"
-            # The image only carries Chromium when it was built with it. The
-            # helper says so plainly and the prompt tells the model to fall
-            # back to search rather than treating it as a research failure.
-            INSTALL_PLAYWRIGHT_BROWSERS=true
         )
     fi
     [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")

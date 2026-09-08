@@ -448,6 +448,11 @@ jobs:
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.select.outputs.mode == 'research'
         timeout-minutes: 5
         run: |
+          # The default shell here is `bash -e`, not `bash -eo pipefail`: piping
+          # the publisher into tee would otherwise report tee's exit status, so
+          # a failed publication (report upload 500, non-2xx card PATCH) went
+          # green with the card still sitting in Todo.
+          set -o pipefail
           # No GH_TOKEN here: a research card owns no branch and no PR. The
           # publisher uploads the report to the card, posts the summary note,
           # and moves the card to Review through the bot's REST identity;

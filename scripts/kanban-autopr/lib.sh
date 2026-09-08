@@ -114,14 +114,34 @@ mw_api() {
     rm -f "$body_file"
 }
 
+# The stored content_type is whatever this says, and the CDN serves the object
+# with it — a screenshot announced as text/markdown is a screenshot no consumer
+# can render. Derived from the extension rather than pinned, because this helper
+# uploads both the report and the browsing run's PNGs.
+_mw_upload_content_type() {
+    case "${1##*.}" in
+        md|markdown) printf 'text/markdown' ;;
+        png)         printf 'image/png' ;;
+        jpg|jpeg)    printf 'image/jpeg' ;;
+        webp)        printf 'image/webp' ;;
+        gif)         printf 'image/gif' ;;
+        pdf)         printf 'application/pdf' ;;
+        txt|log)     printf 'text/plain' ;;
+        json)        printf 'application/json' ;;
+        *)           printf 'application/octet-stream' ;;
+    esac
+}
+
 _mw_api_upload_request() {
     local path="$1" file="$2" token="$3" body_file="$4"
+    local content_type
+    content_type="$(_mw_upload_content_type "$file")"
     # No JSON content type: curl builds the multipart boundary itself. The
     # basename becomes the stored filename, so callers name the file first.
     curl -sS "${MW_CURL_TIMEOUTS[@]}" -o "$body_file" -w '%{http_code}' \
         -X POST "$MATCHA_API_URL$path" \
         -H "Authorization: Bearer $token" \
-        -F "file=@$file;type=text/markdown"
+        -F "file=@$file;type=$content_type"
 }
 
 # mw_api_upload PATH FILE

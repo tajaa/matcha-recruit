@@ -208,10 +208,24 @@ _autopr_research_decision_schema_ok() {
         type == "object"
         and (.kind | IN("email", "contact", "review_request"))
         and (.to | type == "string" and length > 0 and length <= 200)
+        # `to` on an email is the RFC 5322 To: header the send path uses
+        # verbatim, so it must be an address here. contact / review_request
+        # name someone for a human to approach and are never handed to a
+        # mail server, so a name or a role is fine there.
+        and (if .kind == "email"
+             then (.to | test("^[^@[:space:],;<>]+@[^@[:space:],;<>]+\\.[A-Za-z]{2,}$"))
+             else true end)
         and (.subject | type == "string" and length > 0 and length <= 200)
         and (.body | type == "string" and length > 0 and length <= 4000)
         and (.why | type == "string" and length > 0 and length <= 600);
       type == "object"
+      # Top-level keys are an allowlist, so the model cannot author `kind`.
+      # publish-research.sh refuses any decision whose kind is not "research",
+      # and that guard is only worth anything if the marker can be written
+      # solely by the normalizer below.
+      and ((keys_unsorted - ["schema_version", "outcome", "card_note", "summary",
+                             "sources", "confidence", "questions", "staged_actions"])
+           | length == 0)
       and .schema_version == 1
       and (.outcome | IN("research_report", "needs_clarification"))
       and (.card_note | type == "string" and length >= 1 and length <= 240
@@ -241,9 +255,18 @@ autopr_normalize_research_decision() {
     [ -s "$raw_file" ] || die "research produced no decision at $raw_file"
     _autopr_research_decision_schema_ok "$raw_file" \
         || die "research decision failed schema validation"
+    # Rebuilt field by field rather than `. + {...}`: the output is exactly the
+    # keys listed here, so nothing the model wrote can ride through into a file
+    # the trusted publisher treats as validated.
     jq '
-      . + {
+      {
         kind: "research",
+        schema_version: .schema_version,
+        outcome: .outcome,
+        card_note: .card_note,
+        summary: .summary,
+        sources: (.sources // []),
+        confidence: .confidence,
         questions: (.questions // []),
         staged_actions: (.staged_actions // []),
         safe_changes_present: false,

@@ -113,12 +113,31 @@ consume_run_request() {
             "$task_id" >&2
 }
 
+# Tell the operator why an explicit run did nothing. Only reachable from a
+# board that is missing the grant its card kind needs — the one unselectable
+# state a person can act on — and only on an explicit press, so a cron pass
+# over an ungranted card stays silent instead of posting the same note forever.
+note_ungranted_capability() {
+    local card="$1" capability="$2" project_id task_id body
+    [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] && return 0
+    [ -n "$capability" ] || return 0
+    project_id="$(printf '%s' "$card" | jq -r '.project_id // empty')"
+    task_id="$(printf '%s' "$card" | jq -r '.task_id // empty')"
+    [ -n "$project_id" ] && [ -n "$task_id" ] || return 0
+    body="AutoPR did not run this card: this board is not granted the \`$capability\` capability, so the harness has nothing it may do here. An admin can grant it in Admin → Settings → AutoPR board capabilities, then press Run again."
+    ( mw_api POST "/matcha-work/projects/$project_id/tasks/$task_id/activity" \
+        "$(jq -n --arg body "$body" '{kind:"note", body:$body}')" ) >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not post the ungranted-capability note for %s\n' \
+            "$task_id" >&2
+}
+
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
 #                 CATEGORY
-# Echoes "skip", "investigate", "rework" (rework = push to the existing open
-# PR rather than opening a new one), or an artifact mode such as "research"
-# for a kind whose deliverable is attached to the card instead of a PR.
+# Echoes "skip", "skip_ungranted" (skip whose only cause is a missing board
+# grant), "investigate", "rework" (rework = push to the existing open PR rather
+# than opening a new one), or an artifact mode such as "research" for a kind
+# whose deliverable is attached to the card instead of a PR.
 already_handled() {
     local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
@@ -207,11 +226,14 @@ already_handled() {
         # capability. Ungranted, the card is left alone rather than downgraded
         # to a code run: a Research card is not a request for a PR, and
         # silently drafting one would be a worse answer than doing nothing.
+        # Reported as its own decision, not a plain skip: an ungranted board is
+        # the one skip a human can fix, and the caller has to say so on the
+        # card instead of quietly eating their "Run research now" press.
         local required_capability
         required_capability="$(autopr_kind_field "$kind_mode" capability)"
         if [ -n "$required_capability" ] \
             && ! printf '%s\n' "$capabilities" | grep -qxF "$required_capability"; then
-            echo skip
+            echo skip_ungranted
             return
         fi
         if [ "$paused" = true ]; then
@@ -364,6 +386,18 @@ for ((i = 0; i < n; i++)); do
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
         "$capabilities")"
+    if [ "$decision" = skip_ungranted ]; then
+        # Still consume the request — an unconsumed one re-dispatches every
+        # minute forever — but never silently: without the note the operator
+        # sees the button come back and no reason anywhere, and can loop on it
+        # indefinitely (Espresso's run button does not know about grants).
+        if [ -n "$run_requested_at" ]; then
+            note_ungranted_capability "$card" \
+                "$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+            consume_run_request "$card"
+        fi
+        continue
+    fi
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and

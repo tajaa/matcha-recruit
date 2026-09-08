@@ -43,6 +43,14 @@ OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
 CARD_NOTE="$(jq -r '.card_note' "$DECISION_FILE")"
 SUMMARY="$(jq -r '.summary' "$DECISION_FILE")"
 CONFIDENCE_SCORE="$(jq -r '.confidence_score' "$DECISION_FILE")"
+# The band normalize-research already computed, shown rather than thrown away:
+# a card face that marks every report amber tells a reviewer nothing about
+# which ones the model itself flagged as thin.
+case "$(jq -r '.confidence_band // "medium"' "$DECISION_FILE")" in
+    high)   CONFIDENCE_BADGE="🟢" ;;
+    low)    CONFIDENCE_BADGE="🔴" ;;
+    *)      CONFIDENCE_BADGE="🟡" ;;
+esac
 SOURCE_COUNT="$(jq -r '.sources | length' "$DECISION_FILE")"
 STAGED_COUNT="$(jq -r '.staged_actions | length' "$DECISION_FILE")"
 MODEL_NAME="$(autopr_kind_field research model)"
@@ -123,7 +131,7 @@ post_reconsideration_result() {
 if [ "$OUTCOME" = needs_clarification ]; then
     no_spec="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] needs_clarification"
     origin_note="$(progress_note_with_origin \
-        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build $PROD_BUILD_NUMBER · $PROD_LABEL · 🟡 C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CONFIDENCE_BADGE C$CONFIDENCE_SCORE · $no_spec · note: $CARD_NOTE" \
         "$EXISTING_PROGRESS_NOTE")"
     # Exactly the form Espresso's "Answer AutoPR questions" UI parses.
     card_questions="$(autopr_render_card_questions "$DECISION_FILE")"
@@ -215,7 +223,7 @@ activity_payload="$(jq -n --arg body "$note_body" --argjson files "$ATTACHMENT_I
 mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/activity" "$activity_payload" >/dev/null
 
 origin_note="$(progress_note_with_origin \
-    "🤖 AUTO SETUP · READY FOR REVIEW · build $PROD_BUILD_NUMBER · $PROD_LABEL · 🟡 C$CONFIDENCE_SCORE · note: $CARD_NOTE" \
+    "🤖 AUTO SETUP · READY FOR REVIEW · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CONFIDENCE_BADGE C$CONFIDENCE_SCORE · note: $CARD_NOTE" \
     "$EXISTING_PROGRESS_NOTE")"
 mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
     "$(jq -n --arg note "$origin_note" \

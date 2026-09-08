@@ -125,6 +125,11 @@ Rules for the decision:
 - `staged_actions` is optional and capped at ten. Use it only when the
   research itself produces a concrete next contact — a vendor to ask for a
   quote, a candidate source to approach, a teammate whose review is needed.
-  `to` is a name, role, or address; `body` is the full text you would send;
-  `why` is one sentence on what it unblocks. Nothing here is sent by you.
+  For `kind: "email"`, `to` MUST be a single deliverable address
+  (`name@example.com`) — it becomes the To: header verbatim, and a name or a
+  role there is rejected. For `contact` and `review_request`, which a person
+  carries out, `to` may be a name or a role. `body` is the full text you would
+  send; `why` is one sentence on what it unblocks. Nothing here is sent by
+  you. If you do not know someone's address, propose a `contact` instead of
+  guessing one.
 - Do not emit JSON anywhere except DECISION_PATH.

@@ -14,8 +14,15 @@ What it refuses, and why:
 * Loopback, link-local, and private address literals. The container can reach
   the host's dev stack on host.docker.internal; a research run has no business
   there, and a redirect into it is the classic way an "outside" fetch turns
-  into an internal one. Redirects are re-checked after the fact for the same
-  reason.
+  into an internal one.
+
+  Resolving the name here and letting Chromium resolve it again is not enough
+  on its own — between the two lookups a short-TTL record can change answers,
+  and the page is then already loaded by the time anything is re-checked. So
+  the address this process validated is PINNED into Chromium
+  (--host-resolver-rules), and every request the page makes, redirects and
+  sub-resources included, is refused at the routing layer before it is issued
+  rather than examined afterwards.
 * More than a bounded number of captures per run, and any single image over a
   size cap. The publisher uploads these to a real ticket.
 
@@ -53,50 +60,69 @@ def safe_label(raw: str) -> str:
     return (label or "capture")[:60]
 
 
-def host_is_internal(hostname: str) -> bool:
-    """True when the name resolves anywhere we refuse to browse.
+def address_is_internal(address: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return (
+        parsed.is_private
+        or parsed.is_loopback
+        or parsed.is_link_local
+        or parsed.is_reserved
+        or parsed.is_multicast
+        or parsed.is_unspecified
+    )
+
+
+def resolve_public_address(hostname: str) -> str | None:
+    """The address to pin for this name, or None when it may not be browsed.
 
     Every resolved address is checked, not just the first: a name that returns
-    one public and one loopback address is exactly the shape this is for.
+    one public and one loopback address is exactly the shape this is for. The
+    address returned is the one Chromium is then pinned to, so the process that
+    made the decision and the process that opens the socket cannot disagree.
     """
     if not hostname:
-        return True
-    if hostname.lower().endswith((".localhost", ".internal", ".local")):
-        return True
-    if hostname.lower() in {"localhost", "host.docker.internal"}:
-        return True
+        return None
+    lowered = hostname.lower()
+    if lowered.endswith((".localhost", ".internal", ".local")):
+        return None
+    if lowered in {"localhost", "host.docker.internal"}:
+        return None
     try:
         infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
         # Unresolvable is not internal; let navigation fail with a real error.
-        return False
+        return "unresolved"
+    chosen = None
     for info in infos:
         address = info[4][0]
-        try:
-            parsed = ipaddress.ip_address(address)
-        except ValueError:
-            continue
-        if (
-            parsed.is_private
-            or parsed.is_loopback
-            or parsed.is_link_local
-            or parsed.is_reserved
-            or parsed.is_multicast
-            or parsed.is_unspecified
-        ):
-            return True
-    return False
+        if address_is_internal(address):
+            return None
+        if chosen is None:
+            chosen = address
+    return chosen
 
 
-def check_url(raw: str) -> str:
+def host_is_internal(hostname: str) -> bool:
+    """True when the name may not be browsed. Kept as the predicate the
+    per-request guard uses, so one rule covers the page and its sub-resources."""
+    return resolve_public_address(hostname) is None
+
+
+def check_url(raw: str) -> tuple[str, str, str | None]:
+    """Returns (url, hostname, pinned address). Refuses anything unbrowsable."""
     parsed = urlparse(raw)
     if parsed.scheme not in ("http", "https"):
         fail(2, f"only http(s) URLs may be opened (got {parsed.scheme or 'no scheme'})")
     if parsed.username or parsed.password:
         fail(2, "credentials in a URL are refused")
-    if host_is_internal(parsed.hostname or ""):
-        fail(2, f"refusing an internal address: {parsed.hostname}")
-    return raw
+    hostname = parsed.hostname or ""
+    address = resolve_public_address(hostname)
+    if address is None:
+        fail(2, f"refusing an internal address: {hostname}")
+    return raw, hostname, (None if address == "unresolved" else address)
 
 
 def main() -> None:
@@ -111,7 +137,7 @@ def main() -> None:
     parser.add_argument("--full-page", action="store_true", help="Capture past the fold")
     args = parser.parse_args()
 
-    url = check_url(args.url)
+    url, hostname, pinned_address = check_url(args.url)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -126,23 +152,56 @@ def main() -> None:
 
     destination = out_dir / f"{len(existing) + 1:02d}-{safe_label(args.label)}.png"
 
+    # Chromium resolves names itself, so without this it could reach an address
+    # this process never saw and never approved. Pinning the validated one
+    # closes the window between the two lookups for the page's own host.
+    launch_args = []
+    if pinned_address:
+        # Chromium's MAP rule wants an IPv6 literal bracketed.
+        literal = f"[{pinned_address}]" if ":" in pinned_address else pinned_address
+        launch_args.append(f"--host-resolver-rules=MAP {hostname} {literal}")
+
+    # One decision per host, so a page with fifty assets on one CDN costs one
+    # lookup. Refusals are recorded rather than raised: aborting a sub-resource
+    # is normal operation, and the run should still produce its screenshot.
+    host_verdicts: dict[str, bool] = {hostname.lower(): False}
+    refused_hosts: set[str] = set()
+
+    def guard(route) -> None:
+        target = urlparse(route.request.url)
+        host = (target.hostname or "").lower()
+        if target.scheme not in ("http", "https"):
+            refused_hosts.add(host or target.scheme)
+            route.abort()
+            return
+        if host not in host_verdicts:
+            host_verdicts[host] = host_is_internal(host)
+        if host_verdicts[host]:
+            refused_hosts.add(host)
+            route.abort()
+            return
+        route.continue_()
+
     try:
         with sync_playwright() as playwright:
             try:
-                browser = playwright.chromium.launch(headless=True)
+                browser = playwright.chromium.launch(headless=True, args=launch_args)
             except Exception as exc:  # noqa: BLE001 - reported, not swallowed
                 fail(3, f"no Chromium in this sandbox ({exc}); use web search instead")
             context = browser.new_context(viewport=VIEWPORT)
             page = context.new_page()
+            # Every request the page makes passes through here BEFORE it is
+            # issued — the document, each redirect hop, and every sub-resource.
+            # This is the check that matters; the post-navigation one below is
+            # a backstop, and by then the bytes have already arrived.
+            page.route("**/*", guard)
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
                 page.wait_for_timeout(1500)
-                # A redirect can land somewhere the pre-flight check would have
-                # refused, so the destination is checked again before anything
-                # about it is written down.
-                final = urlparse(page.url)
+                final_url = page.url
+                final = urlparse(final_url)
                 if final.scheme not in ("http", "https") or host_is_internal(final.hostname or ""):
-                    fail(2, f"refusing a redirect to an internal address: {page.url}")
+                    fail(2, f"refusing a redirect to an internal address: {final_url}")
                 page.screenshot(path=str(destination), full_page=args.full_page)
                 title = page.title()
                 text = page.inner_text("body")
@@ -161,7 +220,13 @@ def main() -> None:
         fail(2, f"screenshot is {size} bytes (max {MAX_IMAGE_BYTES}); try without --full-page")
 
     print(f"saved: {destination.name}  ({size} bytes)")
-    print(f"final url: {url}")
+    # page.url, not the argument: a 302 means the page you are looking at is
+    # not the one you asked for, and this line is what the model cites as its
+    # source. Printing the request URL made every redirected capture cite the
+    # address it did not screenshot.
+    print(f"final url: {final_url}")
+    if refused_hosts:
+        print(f"refused (internal): {', '.join(sorted(h for h in refused_hosts if h))}")
     print(f"title: {title}")
     print("--- page text ---")
     print(text[:MAX_TEXT_CHARS])

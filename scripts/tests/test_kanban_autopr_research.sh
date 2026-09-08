@@ -302,7 +302,7 @@ check "the research prompt points the model at the one bounded capture command" 
 ################################################################################
 # decision.sh normalize-research
 cat > "$TMP_DIR/research-raw.json" <<'EOF'
-{"schema_version":1,"outcome":"research_report","card_note":"Lambda fits the worker tier; keep the API on containers.","summary":"Lambda suits bursty, stateless jobs. Matcha's Celery worker tier is the candidate; the FastAPI app is not.","sources":[{"title":"AWS Lambda pricing","url":"https://aws.example.com/lambda/pricing"},{"title":"Lambda cold starts","url":"https://aws.example.com/lambda/cold-starts"}],"confidence":{"score":82,"reason":"primary vendor docs plus the worker code"},"questions":[],"staged_actions":[{"kind":"email","to":"AWS account team","subject":"Lambda pricing for a small workload","body":"Hi — we run ~2k jobs/day…","why":"Confirms the committed-use discount before we plan the move."}]}
+{"schema_version":1,"outcome":"research_report","card_note":"Lambda fits the worker tier; keep the API on containers.","summary":"Lambda suits bursty, stateless jobs. Matcha's Celery worker tier is the candidate; the FastAPI app is not.","sources":[{"title":"AWS Lambda pricing","url":"https://aws.example.com/lambda/pricing"},{"title":"Lambda cold starts","url":"https://aws.example.com/lambda/cold-starts"}],"confidence":{"score":82,"reason":"primary vendor docs plus the worker code"},"questions":[],"staged_actions":[{"kind":"email","to":"account-team@aws.example.com","subject":"Lambda pricing for a small workload","body":"Hi — we run ~2k jobs/day…","why":"Confirms the committed-use discount before we plan the move."}]}
 EOF
 "$AUTOPR_DIR/decision.sh" normalize-research "$TMP_DIR/research-raw.json" "$TMP_DIR/research-decision.json" >/dev/null 2>&1
 normalize_rc=$?
@@ -332,6 +332,28 @@ check "a PR-lane outcome is rejected by the research validator" \
 jq '.staged_actions[0].kind = "send_now"' "$TMP_DIR/research-raw.json" > "$TMP_DIR/research-badaction.json"
 check "a staged action outside email|contact|review_request is rejected" \
     $(! "$AUTOPR_DIR/decision.sh" normalize-research "$TMP_DIR/research-badaction.json" "$TMP_DIR/x.json" >/dev/null 2>&1 && echo 0 || echo 1)
+
+# `to` is the To: header the send path uses verbatim, so a name there is a
+# proposal that can only fail after a human has already approved it.
+jq '.staged_actions[0].to = "AWS account team"' "$TMP_DIR/research-raw.json" > "$TMP_DIR/research-nameaddr.json"
+check "an email proposal addressed to a name instead of an address is rejected" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-research "$TMP_DIR/research-nameaddr.json" "$TMP_DIR/x.json" >/dev/null 2>&1 && echo 0 || echo 1)
+
+jq '.staged_actions[0] |= (.kind = "contact" | .to = "AWS account team")' "$TMP_DIR/research-raw.json" \
+    > "$TMP_DIR/research-contact.json"
+check "a contact proposal may name a person, because nothing sends it" \
+    $("$AUTOPR_DIR/decision.sh" normalize-research "$TMP_DIR/research-contact.json" "$TMP_DIR/x.json" >/dev/null 2>&1 && echo 0 || echo 1)
+
+# publish-research.sh trusts `kind == "research"` as proof a decision went
+# through the normalizer. That is only worth anything if the model cannot
+# write the marker itself.
+jq '. + {kind: "research"}' "$TMP_DIR/research-raw.json" > "$TMP_DIR/research-forged.json"
+check "a raw decision that forges the validated-research marker is rejected" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-research "$TMP_DIR/research-forged.json" "$TMP_DIR/x.json" >/dev/null 2>&1 && echo 0 || echo 1)
+
+jq '. + {autopr_directives: ["draft_pr"]}' "$TMP_DIR/research-raw.json" > "$TMP_DIR/research-extrakey.json"
+check "an unknown top-level key never rides through normalization" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-research "$TMP_DIR/research-extrakey.json" "$TMP_DIR/x.json" >/dev/null 2>&1 && echo 0 || echo 1)
 
 jq '.card_note = "one · two"' "$TMP_DIR/research-raw.json" > "$TMP_DIR/research-badnote.json"
 check "a card note carrying the note separator is rejected" \
@@ -447,7 +469,7 @@ check "the uploaded file carries a trusted provenance header, the model report, 
       && grep -q '^### Findings' "$RESEARCH_TEST_UPLOADED" \
       && grep -q '^### Proposed actions (not sent)' "$RESEARCH_TEST_UPLOADED" \
       && grep -q 'NOT sent; each needs your approval' "$RESEARCH_TEST_UPLOADED" \
-      && grep -q '\[email\] to: AWS account team' "$RESEARCH_TEST_UPLOADED" \
+      && grep -q '\[email\] to: account-team@aws.example.com' "$RESEARCH_TEST_UPLOADED" \
       && echo 0 || echo 1)
 check "a summary note is posted with the report attached and threaded under the additional-context event" \
     $(jq -e '.kind == "note" and .attachment_ids == ["file-research-report-aaaa0000-r2.md"]
@@ -458,7 +480,7 @@ check "a summary note is posted with the report attached and threaded under the 
         "$RESEARCH_TEST_ACTIVITY" >/dev/null && echo 0 || echo 1)
 check "the card moves to Review with a structured note that replaces the prior round's prefix and keeps the human line" \
     $(jq -e '.board_column == "review"
-             and (.progress_note | startswith("🤖 AUTO SETUP · READY FOR REVIEW · build 850 · prod 68a70f4 · 🟡 C82 · note: Lambda fits the worker tier; keep the API on containers."))
+             and (.progress_note | startswith("🤖 AUTO SETUP · READY FOR REVIEW · build 850 · prod 68a70f4 · 🟢 C82 · note: Lambda fits the worker tier; keep the API on containers."))
              and (.progress_note | contains("keep this human line"))
              and (.progress_note | contains("C50") | not)' \
         "$RESEARCH_TEST_CARD_PATCH" >/dev/null && echo 0 || echo 1)
@@ -470,7 +492,7 @@ check "the additional-context author gets a decision-bound result notification" 
 check "an outreach-granted board gets the proposals posted for approval, with nothing sent" \
   $(jq -e '(.actions | length) == 1
            and .actions[0].kind == "email"
-           and .actions[0].to == "AWS account team"
+           and .actions[0].to == "account-team@aws.example.com"
            and (.actions[0].body | length > 0)' "$RESEARCH_TEST_STAGED" >/dev/null \
     && grep -q 'POST https://example.invalid/api/matcha-work/projects/8b924347-d6e4-4000-8e7d-ca8f46f76fba/tasks/aaaa0000-0000-4000-8000-000000000001/autopr/staged-actions' "$RESEARCH_TEST_CURL_LOG" \
     && echo 0 || echo 1)
@@ -515,7 +537,7 @@ check "a board without the outreach grant stages nothing and says so in the repo
     && [ ! -e "$RESEARCH_TEST_STAGED" ] \
     && ! grep -q 'autopr/staged-actions' "$RESEARCH_TEST_CURL_LOG" \
     && grep -q 'not granted outreach' "$RESEARCH_TEST_UPLOADED" \
-    && grep -q '\[email\] to: AWS account team' "$RESEARCH_TEST_UPLOADED" \
+    && grep -q '\[email\] to: account-team@aws.example.com' "$RESEARCH_TEST_UPLOADED" \
     && echo 0 || echo 1)
 
 # A grant revoked between selection and publication answers 409. The report is
@@ -541,7 +563,7 @@ check "a fresh card gets round 1, a plain note, and no result notification" \
       && ! grep -q 'Proposed actions' "$RESEARCH_TEST_UPLOADED" \
       && jq -e '(.body | contains("NOT sent") | not) and (has("reply_to") | not)' "$RESEARCH_TEST_ACTIVITY" >/dev/null \
       && [ ! -e "$RESEARCH_TEST_RESULT_NOTIFICATION" ] \
-      && jq -e '.progress_note == "🤖 AUTO SETUP · READY FOR REVIEW · build 850 · prod 68a70f4 · 🟡 C82 · note: Lambda fits the worker tier; keep the API on containers."' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
+      && jq -e '.progress_note == "🤖 AUTO SETUP · READY FOR REVIEW · build 850 · prod 68a70f4 · 🟢 C82 · note: Lambda fits the worker tier; keep the API on containers."' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
       && echo 0 || echo 1)
 
 # Too vague: park the card with the exact question form Espresso parses.
@@ -551,7 +573,10 @@ clarify_rc=$?
 check "a needs_clarification result parks the card in Changes Requested with a durable no-spec marker" \
     $([ "$clarify_rc" = 0 ] \
       && jq -e '.board_column == "changes_requested"
-                and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 850 · prod 68a70f4 · 🟡 C20 · [autopr:no-spec "))
+                # 🔴, not 🟡: normalize-research already computed the band, and a
+                # card face that marks every report amber says nothing about
+                # which ones the model itself called thin.
+                and (.progress_note | startswith("🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 850 · prod 68a70f4 · 🔴 C20 · [autopr:no-spec "))
                 and (.progress_note | contains("] needs_clarification · note: Which system the card means is undecided."))
                 and (.progress_note | contains("Answers needed — reply below with the numbered choices:"))
                 and (.progress_note | contains("1. Which workload should the research target?"))' \
@@ -593,6 +618,41 @@ check "ci syntax-checks the research publisher and the self-audit runs this suit
     $(grep -qF 'scripts/kanban-autopr/publish-research.sh' "$REPO_ROOT/.github/workflows/ci.yml" \
       && grep -qF 'test_kanban_autopr_research.sh' "$REPO_ROOT/scripts/autopr-self-audit/audit.sh" \
       && echo 0 || echo 1)
+################################################################################
+# An ungranted board with an explicit "Run research now": the request is still
+# consumed (an unconsumed one re-dispatches every minute forever), but the card
+# has to say why, or the operator sees only the button come back and presses it
+# again forever — Espresso's run button knows nothing about grants.
+jq '.[0] |= (.autopr_capabilities = [] | .autopr_run_requested_at = "2026-09-08T02:00:00Z")' \
+    "$TMP_DIR/cards-todo.json" > "$TMP_DIR/cards-ungranted-run.json"
+: > "$RESEARCH_TEST_CURL_LOG"
+rm -f "$RESEARCH_TEST_ACTIVITY"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+MATCHA_AUTOPR_ENV="$TMP_DIR/env" \
+AUTOPR_BOT_PRS_FILE="$TMP_DIR/bot-prs.json" AUTOPR_CACHE_DIR="$TMP_DIR/cache-ungranted" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards-ungranted-run.json" \
+    > "$TMP_DIR/select-ungranted-run.json" 2>"$TMP_DIR/select-ungranted-run.err"
+ungranted_run_rc=$?
+check "an explicit run on an ungranted board is answered on the card, not silently eaten" \
+    $([ "$ungranted_run_rc" = 3 ] \
+      && grep -q 'autopr/run-claim' "$RESEARCH_TEST_CURL_LOG" \
+      && jq -e '.kind == "note" and (.body | contains("research")) and (.body | contains("Admin"))' \
+            "$RESEARCH_TEST_ACTIVITY" >/dev/null \
+      && echo 0 || echo 1)
+
+# No press, no note: a cron pass over the same ungranted card must stay silent
+# rather than posting the same paragraph every twenty minutes.
+: > "$RESEARCH_TEST_CURL_LOG"
+rm -f "$RESEARCH_TEST_ACTIVITY"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+MATCHA_AUTOPR_ENV="$TMP_DIR/env" \
+AUTOPR_BOT_PRS_FILE="$TMP_DIR/bot-prs.json" AUTOPR_CACHE_DIR="$TMP_DIR/cache-ungranted2" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards-ungranted.json" \
+    > "$TMP_DIR/select-ungranted-quiet.json" 2>"$TMP_DIR/select-ungranted-quiet.err"
+quiet_rc=$?
+check "a scheduled pass over an ungranted card posts nothing" \
+    $([ "$quiet_rc" = 3 ] && [ ! -f "$RESEARCH_TEST_ACTIVITY" ] && echo 0 || echo 1)
+
 check "the research prompt forbids repository edits and sending, and names every required heading" \
     $(prompt="$AUTOPR_DIR/_prompt_research.txt"; \
       grep -q 'Do not edit, create, move, or delete any repository file' "$prompt" \
