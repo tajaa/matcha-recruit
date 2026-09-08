@@ -60,6 +60,45 @@ struct MWElementNote: Codable, Identifiable, Hashable {
 /// One row from `mw_task_history` — appears in the TaskViewerSheet
 /// timeline. `eventType` is one of: created | column_change |
 /// assignee_change | deleted.
+/// Outreach a research run PROPOSED. Nothing here has been sent: the harness
+/// never sends, and `state` stays `pending` until a person approves or closes
+/// this exact item. An approved email goes out from the approver's own
+/// mailbox, never from a system account.
+struct MWStagedAction: Codable, Identifiable, Hashable {
+    let id: String
+    /// email | contact | review_request. Only `email` has a delivery channel
+    /// here; the other two describe something a person does.
+    let kind: String
+    let to: String
+    let subject: String
+    let body: String
+    /// What approving this unblocks — the model's own justification.
+    let why: String
+    /// pending | sending | sent | handled | dismissed | failed. `sending` is
+    /// the claim the server writes before handing mail to Gmail; seeing it
+    /// means no outcome row followed, so the send was interrupted.
+    let state: String
+    let detail: String?
+    let resolvedAt: String?
+    let resolvedByName: String?
+    let createdAt: String
+
+    var isPending: Bool { state == "pending" }
+    /// Claimed but unresolved. Not pending (the buttons are gone — a second
+    /// approval is refused server-side) and emphatically not sent.
+    var isInterrupted: Bool { state == "sending" }
+    /// `sent` is reserved for mail this system actually delivered; `handled`
+    /// means a person did it themselves. Keeping them apart is the point.
+    var isSendable: Bool { kind == "email" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, to, subject, body, why, state, detail
+        case resolvedAt = "resolved_at"
+        case resolvedByName = "resolved_by_name"
+        case createdAt = "created_at"
+    }
+}
+
 struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
     let id: String
     let taskId: String?

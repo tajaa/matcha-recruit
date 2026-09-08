@@ -1,4 +1,4 @@
-import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, type LucideIcon } from 'lucide-react'
+import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, Search, type LucideIcon } from 'lucide-react'
 import type { TaskPriority } from '../types'
 
 export type TemplateFieldKind = 'single' | 'multi' | { picker: string[] }
@@ -113,6 +113,23 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
       { key: 'problem', label: 'Problem', placeholder: "What's broken.", kind: 'multi' },
       { key: 'rootcause', label: 'Root cause', placeholder: 'Where in the code.', kind: 'multi' },
       { key: 'steps', label: 'Steps', placeholder: '- ', kind: 'multi' },
+    ],
+  },
+  {
+    // Assigned to the AutoPR bot, a research card runs the research lane
+    // (web search + repo clone + attached screenshots) and the report lands
+    // under the card's attachments instead of a PR — docs/ops/KANBAN_AUTOPR.md.
+    key: 'research',
+    displayName: 'Research',
+    icon: Search,
+    colorClass: 'text-indigo-400',
+    defaultPriority: 'medium',
+    fields: [
+      { key: 'subject', label: 'Subject', placeholder: 'One line: what to research.', kind: 'single' },
+      { key: 'questions', label: 'Questions to answer', placeholder: '- ', kind: 'multi' },
+      { key: 'why', label: 'Why it matters to us', placeholder: 'The decision this informs.', kind: 'multi' },
+      { key: 'constraints', label: 'Constraints / scope', placeholder: 'Budget, timeline, what to leave out.', kind: 'multi' },
+      { key: 'sources', label: 'Preferred sources', placeholder: 'Vendor docs, a competitor, a paper — or leave blank.', kind: 'single' },
     ],
   },
 ]

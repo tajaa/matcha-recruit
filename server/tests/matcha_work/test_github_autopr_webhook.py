@@ -557,3 +557,13 @@ def test_no_spec_regexes_accept_every_reason_the_harness_writes():
     m = github._AUTOPR_STRUCTURED_NOTE_RE.match(note)
     assert m and m.group(0).endswith("acceptance_criteria_met")
     assert project_task_service._AUTOPR_NO_SPEC_RE.search(note)
+
+    # publish-research.sh writes needs_clarification when a research card is
+    # too vague to report on; it parks the card exactly like a no-safe-action.
+    research_note = (
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 900 · prod abc1234 · 🟡 C35 · "
+        "[autopr:no-spec 2026-09-08T01:00:00Z] needs_clarification · note: subject too broad"
+    )
+    m = github._AUTOPR_STRUCTURED_NOTE_RE.match(research_note)
+    assert m and m.group(0).endswith("needs_clarification")
+    assert project_task_service._AUTOPR_NO_SPEC_RE.search(research_note)

@@ -31,6 +31,19 @@ CODEX_MODEL="${AUTOPR_CODEX_MODEL:-gpt-5.6-sol}"
 CODEX_REASONING_EFFORT="${AUTOPR_CODEX_REASONING_EFFORT:-medium}"
 REQUIRE_EMPTY_PATCH="${AUTOPR_CODEX_REQUIRE_EMPTY_PATCH:-0}"
 RESUME_PATCH="${AUTOPR_RESUME_PATCH:-}"
+# Research runs only (see the kind registry in lib.sh). Live web search
+# executes on OpenAI's side, so the container's network posture is unchanged;
+# image inputs hand the card's screenshots to the model natively instead of as
+# opaque files. Both default off: the PR lanes behave exactly as before.
+WEB_SEARCH="${AUTOPR_CODEX_WEB_SEARCH:-0}"
+IMAGE_INPUTS="${AUTOPR_CODEX_IMAGE_INPUTS:-0}"
+# Screenshots the model captured with browse-capture.py. They come back the
+# same way report.md does — through one directory the trusted side empties and
+# bounds — so a browsing run cannot widen what crosses the boundary.
+COLLECT_ARTIFACTS="${AUTOPR_CODEX_COLLECT_ARTIFACTS:-0}"
+ARTIFACTS_DIR="${AUTOPR_SANDBOX_ARTIFACTS_DIR:-}"
+MAX_ARTIFACTS="${AUTOPR_SANDBOX_MAX_ARTIFACTS:-12}"
+MAX_ARTIFACT_BYTES="${AUTOPR_SANDBOX_MAX_ARTIFACT_BYTES:-4194304}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
 MAX_PATCH_BYTES="${AUTOPR_SANDBOX_MAX_PATCH_BYTES:-5242880}"
 MAX_REPORT_BYTES="${AUTOPR_SANDBOX_MAX_REPORT_BYTES:-1048576}"
@@ -108,7 +121,7 @@ git -C "$SANDBOX_WORKSPACE" branch --force main "$MAIN_SHA" >/dev/null
 git -C "$SANDBOX_WORKSPACE" remote remove origin
 git -C "$SANDBOX_WORKSPACE" config core.hooksPath /dev/null
 
-mkdir -p "$IO_DIR/input" "$IO_DIR/output"
+mkdir -p "$IO_DIR/input" "$IO_DIR/output" "$IO_DIR/output/artifacts"
 printf '%s\n' "$MODEL_BASE_SHA" > "$IO_DIR/model-base-sha"
 # Bind this clone to the card it was made for. The runtime root survives
 # between runs and is only wiped here, so a checkpoint taken by a run that died
@@ -132,6 +145,7 @@ fi
 MODEL_INPUT_LIST=""
 PATH_MAP='{}'
 CONTEXT_COPY=""
+IMAGE_ARGS=()
 input_index=0
 while [ "$#" -gt 0 ]; do
     [ "$1" = -f ] || die "unexpected argument: $1"
@@ -150,6 +164,12 @@ while [ "$#" -gt 0 ]; do
 - $model_path"
     PATH_MAP="$(jq -c --arg old "$input_path" --arg new "$model_path" '. + {($old): $new}' <<< "$PATH_MAP")"
     [ -n "$CONTEXT_COPY" ] || CONTEXT_COPY="$copied_path"
+    # The container path, not the host one: codex opens the image where it runs.
+    if [ "$IMAGE_INPUTS" = 1 ]; then
+        case "$(printf '%s' "$safe_name" | tr '[:upper:]' '[:lower:]')" in
+            *.png|*.jpg|*.jpeg|*.gif|*.webp) IMAGE_ARGS+=(-i "$model_path") ;;
+        esac
+    fi
 done
 
 # Keep context.json's attachment paths truthful inside the container. The
@@ -181,8 +201,14 @@ $(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
 
 CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --ephemeral
     --ignore-user-config --model "$CODEX_MODEL"
-    -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\""
-    -C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
+    -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\"")
+# `codex exec` has no --search flag (the TUI does); the config key is the
+# documented route and --ignore-user-config leaves -c overrides in force.
+# Verified against codex-cli 0.153.4, the pinned sandbox version.
+[ "$WEB_SEARCH" != 1 ] || CODEX_ARGS+=(-c 'web_search="live"')
+# Bash 3.2 + set -u: an empty array expands as unbound without this guard.
+[ "$IMAGE_INPUTS" != 1 ] || CODEX_ARGS+=(${IMAGE_ARGS[@]+"${IMAGE_ARGS[@]}"})
+CODEX_ARGS+=(-C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
 
 # Keep one copy of the transcript on the trusted side. A non-zero exit that
 # names an exhausted usage limit is a lane-wide condition, not a per-card one:
@@ -236,6 +262,45 @@ HOST_DECISION="$IO_DIR/output/decision.json"
     || die "Codex decision exceeds $MAX_DECISION_BYTES bytes"
 cp "$HOST_REPORT" "$REPORT_FILE"
 cp "$HOST_DECISION" "$DECISION_FILE"
+
+# Screenshots, if this run was allowed to take any. Every one of them is about
+# to be uploaded to a real ticket, so the filter is an allowlist of image
+# extensions on a flat directory — never a copy of whatever the model left
+# behind. A file that fails any check is skipped and named on stderr rather
+# than silently dropped.
+if [ "$COLLECT_ARTIFACTS" = 1 ] && [ -n "$ARTIFACTS_DIR" ]; then
+    mkdir -p "$ARTIFACTS_DIR"
+    artifact_count=0
+    while IFS= read -r -d '' artifact; do
+        artifact_name="$(basename "$artifact")"
+        case "$(printf '%s' "$artifact_name" | tr '[:upper:]' '[:lower:]')" in
+            *.png|*.jpg|*.jpeg|*.webp) ;;
+            *)
+                printf 'kanban-autopr sandbox: ignoring non-image artifact %s\n' "$artifact_name" >&2
+                continue ;;
+        esac
+        # Reject a name that could escape the destination or hide as a dotfile.
+        case "$artifact_name" in
+            .*|*/*|*..*)
+                printf 'kanban-autopr sandbox: ignoring unsafe artifact name %s\n' "$artifact_name" >&2
+                continue ;;
+        esac
+        if [ "$artifact_count" -ge "$MAX_ARTIFACTS" ]; then
+            printf 'kanban-autopr sandbox: artifact cap reached (%s); ignoring %s\n' \
+                "$MAX_ARTIFACTS" "$artifact_name" >&2
+            continue
+        fi
+        artifact_bytes="$(wc -c < "$artifact" | tr -d '[:space:]')"
+        if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+            printf 'kanban-autopr sandbox: artifact %s is %s bytes (max %s); ignoring\n' \
+                "$artifact_name" "$artifact_bytes" "$MAX_ARTIFACT_BYTES" >&2
+            continue
+        fi
+        cp "$artifact" "$ARTIFACTS_DIR/$artifact_name"
+        artifact_count=$((artifact_count + 1))
+    done < <(find "$IO_DIR/output/artifacts" -maxdepth 1 -type f -print0 2>/dev/null | sort -z)
+    printf 'Collected %s screenshot(s) from the sandbox\n' "$artifact_count"
+fi
 
 # Include new files with intent-to-add, then compare against the immutable
 # pre-model commit. This still captures edits if a model ignored the prompt

@@ -299,6 +299,62 @@ extension MatchaWorkService {
         )
     }
 
+    // MARK: - Staged outreach
+
+    struct StagedActionsResponse: Decodable { let actions: [MWStagedAction] }
+
+    /// Outreach a research run proposed on this ticket. Nothing in the list
+    /// has been sent.
+    func listStagedActions(projectId: String, taskId: String) async throws -> [MWStagedAction] {
+        let response: StagedActionsResponse = try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/staged-actions"
+        )
+        return response.actions
+    }
+
+    struct StagedActionSendResponse: Decodable {
+        let ok: Bool
+        let state: String
+        let messageId: String?
+        let to: String?
+
+        enum CodingKeys: String, CodingKey {
+            case ok, state, to
+            case messageId = "message_id"
+        }
+    }
+
+    /// Approve one staged email and send it — from the signed-in user's OWN
+    /// Gmail, which must be connected. The server refuses a second approval of
+    /// the same action, so a double tap cannot send twice.
+    func sendStagedAction(projectId: String, taskId: String, actionId: String) async throws -> StagedActionSendResponse {
+        struct Req: Encodable {}
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/staged-actions/\(actionId)/send",
+            body: Req()
+        )
+    }
+
+    struct StagedActionResolveResponse: Decodable { let ok: Bool; let state: String }
+
+    /// Close a staged action without this system sending anything.
+    /// `handled` = the person did it themselves; `dismissed` = it will not be done.
+    func resolveStagedAction(
+        projectId: String,
+        taskId: String,
+        actionId: String,
+        state: String
+    ) async throws -> StagedActionResolveResponse {
+        struct Req: Encodable { let state: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/staged-actions/\(actionId)/resolve",
+            body: Req(state: state)
+        )
+    }
+
     /// Reviewer sends a task back for changes: server bounces review →
     /// changes_requested, stores the note, and emails the assignee. Returns the
     /// updated task.

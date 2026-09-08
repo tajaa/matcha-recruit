@@ -69,6 +69,25 @@ MODE="$(jq -r '.mode' "$CARD_FILE")"
 PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
 ID8="$(jq -r '.id8' "$CARD_FILE")"
+# Everything mode-specific — prompt, model, sandbox switches, required report
+# headings, decision validator — comes from the kind registry in lib.sh.
+KIND_OUTCOME="$(autopr_kind_field "$MODE" outcome)" || die "unknown investigation mode: $MODE"
+KIND_PROMPT="$(autopr_kind_field "$MODE" prompt)"
+KIND_MODEL="$(autopr_kind_field "$MODE" model)"
+KIND_EFFORT="$(autopr_kind_field "$MODE" effort)"
+KIND_SANDBOX_ENV="$(autopr_kind_field "$MODE" sandbox)"
+KIND_HEADINGS="$(autopr_kind_field "$MODE" headings)"
+KIND_DECISION="$(autopr_kind_field "$MODE" decision)"
+# `browse` is an extra grant on top of the kind's own capability: a research
+# run on a board without it still reads the web through search, it just cannot
+# drive a browser or bring screenshots back.
+BOARD_CAPABILITIES="$(jq -r '(.autopr_capabilities // [])[]' "$CARD_FILE" 2>/dev/null || true)"
+BROWSE_GRANTED=false
+if [ "$KIND_OUTCOME" = artifact ]; then
+    printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF browse && BROWSE_GRANTED=true
+fi
+ARTIFACTS_DIR="$WORK_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
@@ -84,7 +103,10 @@ if [ -n "$prior_checkpoint" ]; then
     fi
     # Trust the metadata over the file: a checkpoint that records no patch must
     # never replay one left behind by an earlier pass of the same run.
-    if [ -s "$prior_checkpoint/model.patch" ] \
+    # An artifact kind never has a patch to restore: its checkpointed report
+    # rides along as an untrusted `-f` input below instead.
+    if [ "$KIND_OUTCOME" = pull_request ] \
+        && [ -s "$prior_checkpoint/model.patch" ] \
         && [ "$(jq -r '.patch_saved // true' "$PRIOR_CHECKPOINT_FILE" 2>/dev/null)" != false ]; then
         RESUME_PATCH="$prior_checkpoint/model.patch"
     fi
@@ -289,8 +311,8 @@ else
     ATTACH_ARGS=(-f "$CONTEXT_FILE")
 fi
 
+PROMPT_FILE="$SCRIPT_DIR/$KIND_PROMPT"
 if [ "$MODE" = rework ]; then
-    PROMPT_FILE="$SCRIPT_DIR/_prompt_rework.txt"
     branch="bot/task-$ID8"
     pr_number="$(gh pr list --repo "$REPO" --head "$branch" --state open --limit 1 --json number --jq '.[0].number // empty')"
     if [ -n "$pr_number" ]; then
@@ -308,8 +330,6 @@ if [ "$MODE" = rework ]; then
         FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
     fi
     ATTACH_ARGS+=(-f "$WORK_DIR/feedback.json")
-else
-    PROMPT_FILE="$SCRIPT_DIR/_prompt_todo.txt"
 fi
 
 # Defense in depth: this step's workflow env should already omit these, but
@@ -342,10 +362,28 @@ run_codex() {
     runner_env=(
         env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY
         -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD
-        AUTOPR_CODEX_MODEL=gpt-5.6-sol
-        AUTOPR_CODEX_REASONING_EFFORT=medium
+        AUTOPR_CODEX_MODEL="$KIND_MODEL"
+        AUTOPR_CODEX_REASONING_EFFORT="$KIND_EFFORT"
         AUTOPR_TASK_ID="$TASK_ID"
     )
+    # Kind-specific sandbox switches (empty-patch enforcement, web search,
+    # image inputs): space-separated KEY=VALUE from the registry.
+    local kind_switch
+    for kind_switch in $KIND_SANDBOX_ENV; do
+        runner_env+=("$kind_switch")
+    done
+    if [ "$BROWSE_GRANTED" = true ]; then
+        # No INSTALL_PLAYWRIGHT_BROWSERS here: it is a Docker BUILD arg
+        # (docker/agent-sandbox/Dockerfile), read by `msandbox build
+        # --playwright`, and setting it at run time installs nothing. The image
+        # either carries Chromium or it does not; browse-capture.py exits 3 and
+        # says so, and the prompt tells the model to fall back to web search
+        # rather than treat that as a research failure.
+        runner_env+=(
+            AUTOPR_CODEX_COLLECT_ARTIFACTS=1
+            AUTOPR_SANDBOX_ARTIFACTS_DIR="$ARTIFACTS_DIR"
+        )
+    fi
     [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
     "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
         "${ATTACH_ARGS[@]}"
@@ -371,11 +409,13 @@ codex_pass() {
         die "investigation produced no report at $REPORT_FILE"
     fi
 
-    for heading in '### Summary' '### Changes' '### Blast radius' '### Confidence'; do
+    local heading
+    while IFS= read -r heading; do
+        [ -n "$heading" ] || continue
         if ! grep -qF "$heading" "$REPORT_FILE"; then
             die "report is missing required heading: $heading"
         fi
-    done
+    done <<< "$KIND_HEADINGS"
 }
 
 # Snapshot the live sandbox on a timer. checkpoint.sh save runs as a separate
@@ -417,7 +457,12 @@ codex_pass
 # trusted validation below still has the last word.
 CORRECTION_KIND=""
 CORRECTION_INSTRUCTION=""
-if [ -s "$DIRECTIVE_FILE" ] \
+if [ "$KIND_OUTCOME" != pull_request ]; then
+    # Directive, migration, and cosmetic-diff corrections all describe a
+    # patch; an artifact kind produces none. Its schema check below is the
+    # only gate, and a failure there is fatal rather than retried.
+    :
+elif [ -s "$DIRECTIVE_FILE" ] \
     && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
     CORRECTION_KIND="directive_violation"
     CORRECTION_INSTRUCTION="The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. A needed migration is never a reason to refuse. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."
@@ -487,10 +532,20 @@ stop_inflight_snapshots
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
-"$SCRIPT_DIR/decision.sh" normalize "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE"
+"$SCRIPT_DIR/decision.sh" "$KIND_DECISION" "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE"
 jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     '. + {feedback_checkpoint: $checkpoint}' \
     "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
 mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
 mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+# Screenshots ride to the publisher through a stable directory rather than the
+# decision JSON: the model names them, but only files the trusted bridge
+# actually admitted are here.
+if [ "$BROWSE_GRANTED" = true ] && [ -n "${AUTOPR_ARTIFACTS_OUTPUT_DIR:-}" ]; then
+    mkdir -p "$AUTOPR_ARTIFACTS_OUTPUT_DIR"
+    find "$ARTIFACTS_DIR" -maxdepth 1 -type f -exec cp {} "$AUTOPR_ARTIFACTS_OUTPUT_DIR/" \; 2>/dev/null || true
+    collected="$(find "$AUTOPR_ARTIFACTS_OUTPUT_DIR" -maxdepth 1 -type f | wc -l | tr -d '[:space:]')"
+    printf 'kanban-autopr: %s screenshot(s) ready for publication\n' "$collected" >&2
+fi
+
 "$SCRIPT_DIR/checkpoint.sh" consume "$CARD_FILE"

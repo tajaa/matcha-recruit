@@ -133,6 +133,7 @@
 		7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F010 /* NewRoundSheet.swift */; };
 		7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */; };
 		7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */; };
+		7A5C0000000000000000B0AA /* TaskViewerSheet+Outreach.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */; };
 		7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */; };
 		7A5C0000000000000000B014 /* TaskViewerSheet+Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */; };
 		7A5C0000000000000000B015 /* TaskViewerSheet+Review.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */; };
@@ -489,6 +490,7 @@
 		7A5C0000000000000000F010 /* NewRoundSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewRoundSheet.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Graph.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Sections.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Outreach.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Actions.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Header.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Review.swift"; sourceTree = "<group>"; };
@@ -987,6 +989,7 @@
 				7A5C0000000000000000F010 /* NewRoundSheet.swift */,
 				7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */,
 				7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */,
+				7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */,
 				7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */,
 				7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */,
 				7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */,
@@ -1607,6 +1610,7 @@
 				7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */,
 				7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */,
 				7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */,
+				7A5C0000000000000000B0AA /* TaskViewerSheet+Outreach.swift in Sources */,
 				7A5C0000000000000000B017 /* TaskViewerSheet+Discussion.swift in Sources */,
 				7A5C0000000000000000B016 /* TaskViewerSheet+History.swift in Sources */,
 				7A5C0000000000000000B015 /* TaskViewerSheet+Review.swift in Sources */,

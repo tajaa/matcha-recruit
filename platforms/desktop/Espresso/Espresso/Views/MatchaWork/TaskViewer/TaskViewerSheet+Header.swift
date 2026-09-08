@@ -158,6 +158,12 @@ extension TaskViewerSheet {
         didRequestAutoPRRun || liveAutoPRTask.autoprRunRequestedAt != nil
     }
 
+    /// Same endpoint and same queue; a research card just produces a report
+    /// under the attachments instead of a draft PR, so say so on the button.
+    var autoPRRunNowLabel: String {
+        liveAutoPRTask.category == "research" ? "Run research now" : "Run AutoPR now"
+    }
+
     @ViewBuilder
     var autoPRRunNowControl: some View {
         if canRequestAutoPRRun {
@@ -171,7 +177,7 @@ extension TaskViewerSheet {
                         Task { await requestAutoPRRun() }
                     } label: {
                         Label(
-                            requestingAutoPRRun ? "Queueing…" : "Run AutoPR now",
+                            requestingAutoPRRun ? "Queueing…" : autoPRRunNowLabel,
                             systemImage: "bolt.fill"
                         )
                         .font(.system(size: 10, weight: .semibold))

@@ -15,6 +15,7 @@ __all__ = [
     "JurisdictionProcessRequest",
     "PlatformSettingsResponse",
     "TenantCodifiedOnlyUpdate",
+    "AutoPRBoardCapabilitiesUpdate",
     "SubscriptionSummary",
     "BusinessRegistrationResponse",
     "BusinessRegistrationListResponse",
@@ -92,11 +93,23 @@ class PlatformSettingsResponse(BaseModel):
     matcha_work_model_mode: str
     jurisdiction_research_model_mode: str
     er_similarity_weights: dict[str, float]
+    autopr_board_capabilities: dict[str, list[str]] = {}
     tenant_codified_only: bool
 
 
 class TenantCodifiedOnlyUpdate(BaseModel):
     enabled: bool
+
+
+class AutoPRBoardCapabilitiesUpdate(BaseModel):
+    """{project_id: [capability, ...]} — the whole map, replaced atomically.
+
+    Sending a partial map REVOKES every board it omits. That is deliberate:
+    these grants let automation send email and drive a browser, so the admin
+    surface shows and writes the complete picture rather than accumulating
+    grants nobody remembers making.
+    """
+    capabilities: dict[str, list[str]]
 
 
 class SubscriptionSummary(BaseModel):

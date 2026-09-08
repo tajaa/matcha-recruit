@@ -113,14 +113,36 @@ consume_run_request() {
             "$task_id" >&2
 }
 
+# Tell the operator why an explicit run did nothing. Only reachable from a
+# board that is missing the grant its card kind needs — the one unselectable
+# state a person can act on — and only on an explicit press, so a cron pass
+# over an ungranted card stays silent instead of posting the same note forever.
+note_ungranted_capability() {
+    local card="$1" capability="$2" project_id task_id body
+    [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] && return 0
+    [ -n "$capability" ] || return 0
+    project_id="$(printf '%s' "$card" | jq -r '.project_id // empty')"
+    task_id="$(printf '%s' "$card" | jq -r '.task_id // empty')"
+    [ -n "$project_id" ] && [ -n "$task_id" ] || return 0
+    body="AutoPR did not run this card: this board is not granted the \`$capability\` capability, so the harness has nothing it may do here. An admin can grant it in Admin → Settings → AutoPR board capabilities, then press Run again."
+    ( mw_api POST "/matcha-work/projects/$project_id/tasks/$task_id/activity" \
+        "$(jq -n --arg body "$body" '{kind:"note", body:$body}')" ) >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not post the ungranted-capability note for %s\n' \
+            "$task_id" >&2
+}
+
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
-# Echoes "skip", "investigate", or "rework" (rework = push to the existing
-# open PR rather than opening a new one).
+#                 CATEGORY
+# Echoes "skip", "skip_ungranted" (skip whose only cause is a missing board
+# grant), "investigate", "rework" (rework = push to the existing open PR rather
+# than opening a new one), or an artifact mode such as "research" for a kind
+# whose deliverable is attached to the card instead of a PR.
 already_handled() {
     local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
-    local run_requested_at="${8:-}" branch="bot/task-$id8"
+    local run_requested_at="${8:-}" category="${9:-}" capabilities="${10:-}"
+    local branch="bot/task-$id8"
     # An explicit "run now" from the card is the same class of authorization as
     # decision-bound context: it overrides the cooldown, the durable no-spec
     # ledger, and (in Todo) the historical PR ledger.
@@ -189,6 +211,37 @@ already_handled() {
             echo skip
             return
         fi
+    fi
+
+    # Artifact kinds own no branch and no PR, so GitHub is not their ledger:
+    # the cooldown, pause, and no-spec checks above are the whole gate. Todo
+    # runs the first report; Changes Requested (a human rejected the report
+    # with a note) runs the next round against that note. Never consult
+    # `gh pr list` here — there is nothing on GitHub to find, and a "PR
+    # exists" skip would silently park every research card forever.
+    local kind_mode
+    kind_mode="$(autopr_kind_for_category "$category")"
+    if [ "$(autopr_kind_field "$kind_mode" outcome)" = artifact ]; then
+        # An artifact kind runs only on a board granted the matching
+        # capability. Ungranted, the card is left alone rather than downgraded
+        # to a code run: a Research card is not a request for a PR, and
+        # silently drafting one would be a worse answer than doing nothing.
+        # Reported as its own decision, not a plain skip: an ungranted board is
+        # the one skip a human can fix, and the caller has to say so on the
+        # card instead of quietly eating their "Run research now" press.
+        local required_capability
+        required_capability="$(autopr_kind_field "$kind_mode" capability)"
+        if [ -n "$required_capability" ] \
+            && ! printf '%s\n' "$capabilities" | grep -qxF "$required_capability"; then
+            echo skip_ungranted
+            return
+        fi
+        if [ "$paused" = true ]; then
+            echo skip
+        else
+            echo "$kind_mode"
+        fi
+        return
     fi
 
     # A card may be owned by a PR from the other automation lane, so its head
@@ -325,9 +378,26 @@ for ((i = 0; i < n; i++)); do
     reconsideration_pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
     run_requested_at="$(printf '%s' "$card" | jq -r '.autopr_run_requested_at // empty')"
+    category="$(printf '%s' "$card" | jq -r '.category // "manual"')"
+    # One capability per line so already_handled can grep -qx for an exact
+    # match instead of substring-matching "browse" inside a longer name.
+    capabilities="$(printf '%s' "$card" | jq -r '(.autopr_capabilities // [])[]' 2>/dev/null || true)"
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
-        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at")"
+        "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
+        "$capabilities")"
+    if [ "$decision" = skip_ungranted ]; then
+        # Still consume the request — an unconsumed one re-dispatches every
+        # minute forever — but never silently: without the note the operator
+        # sees the button come back and no reason anywhere, and can loop on it
+        # indefinitely (Espresso's run button does not know about grants).
+        if [ -n "$run_requested_at" ]; then
+            note_ungranted_capability "$card" \
+                "$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+            consume_run_request "$card"
+        fi
+        continue
+    fi
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and
@@ -343,7 +413,9 @@ for ((i = 0; i < n; i++)); do
     if [ "$decision" = skip ] && [ -n "$run_requested_at" ]; then
         consume_run_request "$card"
     fi
-    if [ "$decision" = investigate ] || [ "$decision" = rework ]; then
+    # The open-PR cap above applies to `investigate` only: rework pushes to a
+    # PR that is already open, and an artifact mode opens no PR at all.
+    if [ "$decision" != skip ]; then
         # The tmux dashboard asks the same selector what would run next. Its
         # read-only probe must never create a cooldown marker or consume work.
         [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || touch "$ATTEMPTS_DIR/$id8"

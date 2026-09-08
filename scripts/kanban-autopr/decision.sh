@@ -5,6 +5,16 @@
 set -euo pipefail
 _AUTOPR_DECISION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Runs standalone from investigate.sh as well as sourced by the publishers
+# (which already carry lib.sh's die). Standalone, a failed validation must
+# still be a real exit with its message, not "die: command not found".
+if ! command -v die >/dev/null 2>&1; then
+    die() {
+        printf 'kanban-autopr: %s\n' "$1" >&2
+        exit 1
+    }
+fi
+
 _autopr_decision_schema_ok() {
     local file="$1"
     jq -L "$_AUTOPR_DECISION_DIR" -e '
@@ -171,6 +181,119 @@ autopr_normalize_decision() {
     ' "$raw_file" > "$normalized_file"
 }
 
+# ---- research (artifact) decisions -----------------------------------------
+# The research pass writes a report, not a patch, so its decision carries a
+# summary, sources, one confidence score, and — when the subject was too vague
+# — the same numbered questions the PR lane uses. `staged_actions` lets the
+# report propose outreach (an email, a contact, a review request); the
+# harness renders them on the card and NEVER sends one. Sending is a human
+# action in Espresso, per item.
+_autopr_research_decision_schema_ok() {
+    local file="$1"
+    jq -e '
+      def valid_question:
+        (.id | type == "string" and length > 0)
+        and (.question | type == "string" and length > 0)
+        and (.why_blocking | type == "string" and length > 0)
+        and (.default_assumption | type == "string" and length > 0)
+        and (.options | type == "array" and length >= 2
+             and all(.[]; (.key | type == "string" and length > 0)
+                         and (.label | type == "string" and length > 0)
+                         and (.impact | type == "string" and length > 0)));
+      def valid_source:
+        type == "object"
+        and (.title | type == "string" and length > 0 and length <= 200)
+        and (.url | type == "string" and test("^https?://") and length <= 2000);
+      def valid_staged_action:
+        type == "object"
+        and (.kind | IN("email", "contact", "review_request"))
+        and (.to | type == "string" and length > 0 and length <= 200)
+        # `to` on an email is the RFC 5322 To: header the send path uses
+        # verbatim, so it must be an address here. contact / review_request
+        # name someone for a human to approach and are never handed to a
+        # mail server, so a name or a role is fine there.
+        and (if .kind == "email"
+             then (.to | test("^[^@[:space:],;<>]+@[^@[:space:],;<>]+\\.[A-Za-z]{2,}$"))
+             else true end)
+        and (.subject | type == "string" and length > 0 and length <= 200)
+        and (.body | type == "string" and length > 0 and length <= 4000)
+        and (.why | type == "string" and length > 0 and length <= 600);
+      type == "object"
+      # Top-level keys are an allowlist, so the model cannot author `kind`.
+      # publish-research.sh refuses any decision whose kind is not "research",
+      # and that guard is only worth anything if the marker can be written
+      # solely by the normalizer below.
+      and ((keys_unsorted - ["schema_version", "outcome", "card_note", "summary",
+                             "sources", "confidence", "questions", "staged_actions"])
+           | length == 0)
+      and .schema_version == 1
+      and (.outcome | IN("research_report", "needs_clarification"))
+      and (.card_note | type == "string" and length >= 1 and length <= 240
+           and (test("[\r\n·]") | not))
+      and (.summary | type == "string" and length >= 1 and length <= 1200)
+      and (.sources | type == "array" and length <= 50 and all(.[]; valid_source))
+      and (.confidence | type == "object")
+      and (.confidence.score | type == "number" and floor == . and . >= 0 and . <= 100)
+      and (.confidence.reason | type == "string" and length > 0)
+      and ((.questions // []) | type == "array" and all(.[]; valid_question))
+      and ([(.questions // [])[].id] | length == (unique | length))
+      and ((.staged_actions // []) | type == "array" and length <= 10
+           and all(.[]; valid_staged_action))
+      and (if .outcome == "research_report" then
+             (.sources | length >= 1) and ((.questions // []) | length == 0)
+           else
+             ((.questions // []) | length >= 1) and ((.staged_actions // []) | length == 0)
+           end)
+    ' "$file" >/dev/null
+}
+
+# Emits the normalized decision. The generic workflow steps read
+# safe_changes_present / awaiting_human / confidence_score from every kind,
+# so those keys are filled in here even though research has no patch.
+autopr_normalize_research_decision() {
+    local raw_file="$1" normalized_file="$2"
+    [ -s "$raw_file" ] || die "research produced no decision at $raw_file"
+    _autopr_research_decision_schema_ok "$raw_file" \
+        || die "research decision failed schema validation"
+    # Rebuilt field by field rather than `. + {...}`: the output is exactly the
+    # keys listed here, so nothing the model wrote can ride through into a file
+    # the trusted publisher treats as validated.
+    jq '
+      {
+        kind: "research",
+        schema_version: .schema_version,
+        outcome: .outcome,
+        card_note: .card_note,
+        summary: .summary,
+        sources: (.sources // []),
+        confidence: .confidence,
+        questions: (.questions // []),
+        staged_actions: (.staged_actions // []),
+        safe_changes_present: false,
+        awaiting_human: (.outcome == "needs_clarification"),
+        confidence_score: .confidence.score,
+        confidence_band: (if .confidence.score >= 75 then "high"
+                          elif .confidence.score >= 45 then "medium"
+                          else "low" end),
+        criticality: {level: "yellow", reasons: ["research report; no product change"]}
+      }
+    ' "$raw_file" > "$normalized_file"
+}
+
+# Rendered for the card note and the report tail. Plain text, one action per
+# bullet, always headed by the fact that nothing was sent.
+autopr_render_staged_actions() {
+    local decision_file="$1"
+    jq -r '
+      if ((.staged_actions // []) | length) == 0 then empty else
+        "Proposed actions — NOT sent; each needs your approval:\n" +
+        ([.staged_actions[] |
+          "- [" + .kind + "] to: " + .to + " · subject: " + .subject + "\n  why: " + .why
+        ] | join("\n"))
+      end
+    ' "$decision_file"
+}
+
 autopr_feedback_snapshot_file() {
     local feedback_file="$1"
     jq -c '
@@ -270,8 +393,15 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
             [ "$#" -eq 2 ] || die "usage: decision.sh feedback-snapshot feedback.json"
             autopr_feedback_snapshot_file "$2"
             ;;
+        normalize-research)
+            # A third argument (the directive policy) is accepted and ignored
+            # so investigate.sh can call every validator the same way.
+            { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
+                || die "usage: decision.sh normalize-research raw-decision.json decision.json"
+            autopr_normalize_research_decision "$2" "$3"
+            ;;
         *)
-            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
+            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
             ;;
     esac
 fi

@@ -315,7 +315,7 @@ _AUTOPR_LEGACY_STRUCTURED_NOTE_RE = re.compile(
     r"(?: · PR #[0-9]+)?"
     r"(?: · [^·]+ C[0-9]+ · (?:awaiting answers|ready for review|no safe action))?"
     r"(?: · \[autopr:no-spec [^]]+\] "
-    r"(?:already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?",
+    r"(?:already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?",
     re.IGNORECASE,
 )
 # The status segment is matched lazily up to the next " · " (or the end):
@@ -330,7 +330,7 @@ _AUTOPR_STRUCTURED_NOTE_RE = re.compile(
     r"(?: · PR #[0-9]+)?"
     r"(?: · [^·]+ C[0-9]+)?"
     r"(?: · \[autopr:no-spec [^]]+\] "
-    r"(?:already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency))?",
+    r"(?:already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?",
     re.IGNORECASE,
 )
 

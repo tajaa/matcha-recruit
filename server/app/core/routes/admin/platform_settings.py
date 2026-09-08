@@ -55,7 +55,9 @@ from app.core.services.platform_settings import (
     get_jurisdiction_research_model_mode, prime_jurisdiction_research_model_mode_cache,
     get_er_similarity_weights, prime_er_similarity_weights_cache,
     get_tenant_codified_only, prime_tenant_codified_only_cache,
+    get_autopr_board_capabilities, prime_autopr_board_capabilities_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
+    AUTOPR_BOARD_CAPABILITIES,
 )
 from app.config import get_settings
 from app.core.services.stripe_service import StripeService, StripeServiceError
@@ -460,12 +462,14 @@ async def get_all_platform_settings():
     jr_mode = await get_jurisdiction_research_model_mode()
     er_weights = await get_er_similarity_weights()
     codified_only = await get_tenant_codified_only()
+    autopr_boards = await get_autopr_board_capabilities()
     return {
         "visible_features": visible,
         "matcha_work_model_mode": mw_mode,
         "jurisdiction_research_model_mode": jr_mode,
         "er_similarity_weights": er_weights,
         "tenant_codified_only": codified_only,
+        "autopr_board_capabilities": autopr_boards,
     }
 
 
@@ -494,6 +498,70 @@ async def update_platform_features(
         )
     visible = prime_visible_features_cache(body.visible_features)
     return {"visible_features": visible}
+
+
+@router.get("/platform-settings/autopr-board-capabilities", dependencies=[Depends(require_admin)])
+async def get_autopr_board_capabilities_endpoint():
+    """Per-board AutoPR grants, plus the boards the harness actually watches.
+
+    `watched_project_ids` is the hardcoded outer allowlist — a board outside it
+    has no harness polling it, so granting it a capability would do nothing.
+    The admin UI shows both so the operator can see why a board is not
+    grantable rather than granting into a void.
+    """
+    from app.matcha.services.matcha_work.project_task_service import (
+        KANBAN_AUTOPR_PROJECT_IDS,
+    )
+
+    return {
+        "capabilities": await get_autopr_board_capabilities(),
+        "known_capabilities": list(AUTOPR_BOARD_CAPABILITIES),
+        "watched_project_ids": sorted(KANBAN_AUTOPR_PROJECT_IDS),
+    }
+
+
+@router.put("/platform-settings/autopr-board-capabilities", dependencies=[Depends(require_admin)])
+async def update_autopr_board_capabilities(
+    body: AutoPRBoardCapabilitiesUpdate,
+    admin=Depends(require_admin),
+):
+    """Replace the whole grant map.
+
+    Validated before the write, not after: an unknown capability name or a
+    board the harness does not watch is a mistake the admin should see, not a
+    silently-dropped key that reads as granted in the UI.
+    """
+    from app.matcha.services.matcha_work.project_task_service import (
+        KANBAN_AUTOPR_PROJECT_IDS,
+    )
+
+    cleaned: dict[str, list[str]] = {}
+    for raw_project_id, caps in body.capabilities.items():
+        try:
+            project_id = str(UUID(str(raw_project_id)))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Not a project id: {raw_project_id}")
+        if project_id not in KANBAN_AUTOPR_PROJECT_IDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"AutoPR does not watch board {project_id}, so it cannot be granted capabilities",
+            )
+        unknown = sorted({c for c in caps if c not in AUTOPR_BOARD_CAPABILITIES})
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown capabilities: {unknown}")
+        # Preserve the caller's order but drop duplicates.
+        cleaned[project_id] = list(dict.fromkeys(caps))
+
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('autopr_board_capabilities', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(cleaned),
+        )
+    return {"capabilities": prime_autopr_board_capabilities_cache(cleaned)}
 
 
 @router.put("/platform-settings/matcha-work-model-mode", dependencies=[Depends(require_admin)])

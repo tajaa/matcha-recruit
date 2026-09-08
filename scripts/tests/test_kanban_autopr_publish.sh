@@ -209,7 +209,7 @@ unicode_truncated="$(printf '%s' "$unicode_sample" | jq -Rrs '.[0:4000]')"
 check "context-request truncation preserves UTF-8 at the boundary" \
   $([ "$(printf '%s' "$unicode_truncated" | jq -Rrs 'length')" = 4000 ] \
     && [[ "$unicode_truncated" == *🙂 ]] \
-    && grep -q "jq -Rsr '\.\[0:4000\]'" "$TEST_REPO/scripts/kanban-autopr/publish.sh" \
+    && grep -q "jq -Rsr '\.\[0:4000\]'" "$TEST_REPO/scripts/kanban-autopr/lib.sh" \
     && echo 0 || echo 1)
 
 # The acceptance-evidence block is the payload, so its line structure has to

@@ -76,6 +76,9 @@ struct AttachmentPreviewContent: View {
     @State private var textContent: String?
     @State private var csvRows: [[String]]?
     @State private var loadError: String?
+    /// `.md` attachments open rendered (AutoPR research reports land here);
+    /// the toggle drops to the raw source.
+    @State private var markdownRendered = true
 
     /// Hard caps so a huge export can't lock the main thread on parse/render.
     private static let maxTextBytes = 512 * 1024
@@ -93,6 +96,10 @@ struct AttachmentPreviewContent: View {
     private var isCSV: Bool {
         if let ct = file.contentType, ct.lowercased().contains("csv") { return true }
         return ext == "csv" || ext == "tsv"
+    }
+
+    private var isMarkdown: Bool {
+        ext == "md" || ext == "markdown"
     }
 
     private var isTextLike: Bool {
@@ -161,14 +168,11 @@ struct AttachmentPreviewContent: View {
             }
         } else if isTextLike {
             if let text = textContent {
-                ScrollView {
-                    Text(text)
-                        .font(.system(size: 12, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(16)
+                if isMarkdown {
+                    markdownPreview(text)
+                } else {
+                    plainTextPreview(text)
                 }
-                .background(Color.appBackground)
             } else if let err = loadError {
                 centeredMessage(icon: "exclamationmark.triangle", text: err)
             } else {
@@ -203,6 +207,59 @@ struct AttachmentPreviewContent: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(32)
+        }
+    }
+
+    // MARK: - Text / markdown
+
+    @ViewBuilder
+    private func plainTextPreview(_ text: String) -> some View {
+        ScrollView {
+            Text(text)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(16)
+        }
+        .background(Color.appBackground)
+    }
+
+    /// Rendered | Source. Rendering goes through `JournalContentView`, the
+    /// same block renderer chat bubbles use, so headings, lists, emphasis,
+    /// links, and code blocks look like the rest of the app. Tables stay as
+    /// plain text: the parser has no table case.
+    @ViewBuilder
+    private func markdownPreview(_ text: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $markdownRendered) {
+                    Text("Rendered").tag(true)
+                    Text("Source").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+            if markdownRendered {
+                ScrollView {
+                    JournalContentView(
+                        content: text,
+                        fontFamily: "system",
+                        fontSize: 13,
+                        lineSpacing: 4,
+                        baseColor: .primary
+                    )
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(16)
+                }
+                .background(Color.appBackground)
+            } else {
+                plainTextPreview(text)
+            }
         }
     }
 

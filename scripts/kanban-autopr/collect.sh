@@ -161,4 +161,26 @@ out="$(printf '%s' "$out" | jq -c '
   | map(del(.assigned_to_autopr))
 ')"
 
+# Stamp each card with its board's granted capabilities (research / outreach /
+# browse), read once for every configured board rather than per card. The
+# selector refuses a capability the board was not granted; the server re-checks
+# the acts themselves (sending an email, driving a browser) at the moment they
+# happen, so this stamp is a spend guard and not the security boundary.
+#
+# Fail CLOSED on an unreadable answer: an empty grant map means the lane keeps
+# doing exactly what it did before capabilities existed — code PRs and nothing
+# else. A missing endpoint (a runner ahead of production) lands here too.
+capabilities='{}'
+if capability_response="$(mw_api GET \
+    "/matcha-work/autopr/board-capabilities?project_ids=$(printf '%s' "$MATCHA_PROJECT_IDS" | tr -d '[:space:]')" \
+    2>/dev/null)"; then
+    capabilities="$(printf '%s' "$capability_response" \
+        | jq -c 'if (.capabilities | type) == "object" then .capabilities else {} end' 2>/dev/null || printf '{}')"
+else
+    printf 'kanban-autopr: warning: board capabilities unreadable; granting none this pass\n' >&2
+fi
+out="$(printf '%s' "$out" | jq -c --argjson caps "$capabilities" '
+  map(. + {autopr_capabilities: ($caps[.project_id] // [])})
+')"
+
 printf '%s\n' "$out"
