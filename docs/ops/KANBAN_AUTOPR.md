@@ -127,9 +127,15 @@ While the `msandbox` master switch is ON, the LaunchAgent recreates the read-onl
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
 considered healthy: if any of the four panes is dead or missing, the helper replaces the
 whole observer session. Autonomous model startup fails closed until all four panes are
-live. The overview owns the full-height left side; the right side stacks live agent work,
-active PR detail, and automation health. This keeps the operational answer readable from
-across a room while retaining drill-down detail in the same tmux window.
+live. The overview owns the full-height, 62%-wide left side; the 38% detail rail stacks
+live agent work, active PR detail, and automation health. At the common 133-column
+terminal size this leaves the overview 82 columns wide, avoiding wrapped queue rows. The
+tmux window uses the Matcha ops-console theme: dark slate chrome, mint active-pane
+accents, semantic status colors, and a compact bottom bar with the detach shortcut. Set
+`NO_COLOR=1` for a plain-text dashboard, or `AUTOPR_DASHBOARD_COLOR=1` to force ANSI
+color when output is routed through a terminal-compatible wrapper. Detached sessions
+start at `133x45` so the intended proportions survive their first attach; override that
+baseline with `AUTOPR_TMUX_WIDTH` and `AUTOPR_TMUX_HEIGHT` when needed.
 
 The panes are observers and are budgeted like observers. Every GitHub read they make
 goes through `gh-cached.sh TTL KEY <command>`: open/merged PR lists and the selector

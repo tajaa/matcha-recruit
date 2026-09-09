@@ -37,6 +37,68 @@ DISPATCH_LOG="${AUTOPR_DISPATCH_LOG:-$USER_HOME/Library/Logs/matcha-kanban-autop
 PLAN_PY="${AUTOPR_PLAN_PY:-$SCRIPT_DIR/plan.py}"
 RUN_SNAPSHOT="${AUTOPR_RUN_SNAPSHOT:-$SCRIPT_DIR/run-snapshot.sh}"
 
+# Calm, high-contrast terminal palette. Color is enabled only for an interactive
+# terminal (or explicitly with AUTOPR_DASHBOARD_COLOR=1), so redirected logs and
+# tests remain clean plain text. NO_COLOR always wins.
+TUI_COLOR=false
+case "${AUTOPR_DASHBOARD_COLOR:-auto}" in
+    1|always|true) TUI_COLOR=true ;;
+    0|never|false) TUI_COLOR=false ;;
+    *) [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && TUI_COLOR=true ;;
+esac
+[ -z "${NO_COLOR:-}" ] || TUI_COLOR=false
+
+if [ "$TUI_COLOR" = true ]; then
+    C_RESET=$'\033[0m'
+    C_BOLD=$'\033[1m'
+    C_BRAND=$'\033[38;5;157m'
+    C_ACCENT=$'\033[38;5;80m'
+    C_BLUE=$'\033[38;5;75m'
+    C_GOOD=$'\033[38;5;114m'
+    C_WARN=$'\033[38;5;221m'
+    C_BAD=$'\033[38;5;203m'
+    C_TEXT=$'\033[38;5;255m'
+    C_MUTED=$'\033[38;5;245m'
+    C_RAIL=$'\033[38;5;239m'
+else
+    C_RESET='' C_BOLD='' C_BRAND='' C_ACCENT='' C_BLUE=''
+    C_GOOD='' C_WARN='' C_BAD='' C_TEXT='' C_MUTED='' C_RAIL=''
+fi
+
+tui_width() {
+    local width
+    # COLUMNS is often the 80-column value inherited when launchd created the
+    # detached session; tput reflects the pane after a real client attaches.
+    width="$(tput cols 2>/dev/null || printf '%s' "${COLUMNS:-80}")"
+    [[ "$width" =~ ^[0-9]+$ ]] || width=80
+    [ "$width" -ge 40 ] 2>/dev/null || width=40
+    [ "$width" -le 100 ] 2>/dev/null || width=100
+    printf '%s' "$width"
+}
+
+tui_rule() {
+    local width i
+    width="$(tui_width)"
+    printf '%b' "$C_RAIL"
+    for ((i = 0; i < width; i++)); do printf '─'; done
+    printf '%b\n' "$C_RESET"
+}
+
+section_heading() {
+    printf '\n%b◆ %s%b\n' "$C_BRAND$C_BOLD" "$1" "$C_RESET"
+}
+
+badge_style() {
+    case "$1" in
+        NOW|ACTIVE|SUCCESS|READY|LIVE) printf '%s' "$C_GOOD$C_BOLD" ;;
+        FEEDBACK|REWORK|RUNNING|IN_PROGRESS|VERIFYING|INVESTIGATING) printf '%s' "$C_BLUE$C_BOLD" ;;
+        WAITING|HELD|CONTEXT|DRAFT|UNKNOWN|STALE) printf '%s' "$C_WARN$C_BOLD" ;;
+        FAILURE|FAILED|ERROR|CANCELLED|DEGRADED) printf '%s' "$C_BAD$C_BOLD" ;;
+        TODO|IDLE) printf '%s' "$C_MUTED$C_BOLD" ;;
+        *) printf '%s' "$C_ACCENT$C_BOLD" ;;
+    esac
+}
+
 dashboard_now_epoch() {
     printf '%s\n' "${AUTOPR_DASHBOARD_NOW_EPOCH:-$(date +%s)}"
 }
@@ -190,12 +252,12 @@ render_dashboard() {
     local cutoff kanban_runs error_runs audit_runs admin_updates_runs runs
     local open_kanban open_errors open_audits open_prs merged_prs cards bot_prs plan selected selected_rc
     local kanban_state error_state audit_state admin_state open_kanban_state open_errors_state
-    local open_audits_state merged_state board_state bot_pr_state plan_state all_states source_state
+    local open_audits_state merged_state board_state bot_pr_state plan_state all_states source_state source_style
     local selected_cache empty_marker
     local active run_id run_lane run_status run_created run_title run_elapsed run_started current_id8=""
     local run_details run_details_state step_line phase branch id8 active_card project card_title
     local dispatch_line dispatch_ts dispatch_action dispatch_reason dispatch_time
-    local queue_counts row_badge row_project row_title row_time row_when row_iso
+    local queue_counts row_badge row_project row_title row_time row_when row_iso row_symbol
     local pr_number pr_lane pr_state pr_title pr_created pr_flag
     local merged_number merged_lane merged_title merged_created merged_at merged_verification
     local recent_id recent_lane recent_result recent_created recent_updated
@@ -301,11 +363,17 @@ render_dashboard() {
     fi
 
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'MATCHA AUTOPR CONTROL BOARD\n'
-    printf '%s · %s · refresh %ss\n' \
+    printf '%b╭─ %bMATCHA AUTOPR CONTROL BOARD%b\n' "$C_RAIL" "$C_BRAND$C_BOLD" "$C_RESET"
+    case "$source_state" in
+        LIVE) source_style="$C_GOOD$C_BOLD" ;;
+        STALE*) source_style="$C_WARN$C_BOLD" ;;
+        *) source_style="$C_BAD$C_BOLD" ;;
+    esac
+    printf '%b│%b %s  %b● %s%b  %b↻ %ss%b\n' \
+        "$C_RAIL" "$C_RESET" \
         "$(TZ="$PACIFIC_TZ" date '+%a %b %-d · %-I:%M:%S %p %Z' 2>/dev/null \
           || TZ="$PACIFIC_TZ" date '+%a %b %d · %I:%M:%S %p %Z')" \
-        "$source_state" "$REFRESH_SECONDS"
+        "$source_style" "$source_state" "$C_RESET" "$C_MUTED" "$REFRESH_SECONDS" "$C_RESET"
 
     # The one-minute request watcher shares this log with the five-minute
     # scheduler. Its idle ticks are bookkeeping, not a scheduling signal, so
@@ -318,15 +386,18 @@ render_dashboard() {
     dispatch_reason="$(printf '%s' "$dispatch_line" | jq -r '.reason // empty' 2>/dev/null)"
     dispatch_time="$(iso_to_pacific "$dispatch_ts")"
     if [ -n "$dispatch_action" ]; then
-        printf 'Scheduler last signal %s · %s · %s\n' "$dispatch_time" "$dispatch_action" "$dispatch_reason"
+        printf '%b│%b %bSCHEDULER%b  %s · %b%s%b · %s\n' \
+            "$C_RAIL" "$C_RESET" "$C_MUTED$C_BOLD" "$C_RESET" "$dispatch_time" \
+            "$C_ACCENT" "$dispatch_action" "$C_RESET" "$dispatch_reason"
     else
-        printf 'Scheduler last signal unavailable\n'
+        printf '%b│%b %bSCHEDULER%b  last signal unavailable\n' \
+            "$C_RAIL" "$C_RESET" "$C_MUTED$C_BOLD" "$C_RESET"
     fi
+    tui_rule
 
     active="$(printf '%s' "$runs" | jq -c \
         '[.[] | select(.status | IN("queued", "in_progress", "requested", "waiting", "pending"))][0] // {}')"
     run_id="$(printf '%s' "$active" | jq -r '.databaseId // empty')"
-    printf '\nNOW'
     if [ -n "$run_id" ]; then
         run_lane="$(printf '%s' "$active" | jq -r '.lane // "?"')"
         run_status="$(printf '%s' "$active" | jq -r '.status // "?"')"
@@ -339,9 +410,11 @@ render_dashboard() {
           [.jobs[]? as $job | $job.steps[]? | select(.status == "in_progress") | ($job.name + " · " + .name)][0] // empty
         ' 2>/dev/null)"
         phase="$(phase_label "${step_line#* · }")"
-        printf ' · %s · %s\n' "$phase" "$run_elapsed"
-        printf '  %s run #%s · %s · started %s\n' "$(printf '%s' "$run_lane" | tr '[:lower:]' '[:upper:]')" \
-            "$run_id" "$run_status" "$run_started"
+        section_heading "NOW · $phase · $run_elapsed"
+        printf '  %b●%b %b%s%b run %b#%s%b · %s · started %s\n' \
+            "$C_GOOD" "$C_RESET" "$C_TEXT$C_BOLD" \
+            "$(printf '%s' "$run_lane" | tr '[:lower:]' '[:upper:]')" "$C_RESET" \
+            "$C_ACCENT" "$run_id" "$C_RESET" "$run_status" "$run_started"
         branch="$(runner_task_branch 2>/dev/null || true)"
         if [ "$run_lane" = kanban ] && [ -n "$branch" ]; then
             id8="${branch#bot/task-}"
@@ -349,29 +422,31 @@ render_dashboard() {
             active_card="$(printf '%s' "$cards" | jq -c --arg id8 "$id8" '[.[] | select(.id8 == $id8)][0] // {}')"
             project="$(printf '%s' "$active_card" | jq -r '.project_title // "MATCHA"')"
             card_title="$(printf '%s' "$active_card" | jq -r '.title // empty')"
-            printf '  %s · %s\n' "$project" "${card_title:-task $id8}"
-            printf '  branch %s\n' "$branch"
+            printf '  %b%s%b · %s\n' "$C_ACCENT$C_BOLD" "$project" "$C_RESET" "${card_title:-task $id8}"
+            printf '  %bbranch%b %s\n' "$C_MUTED" "$C_RESET" "$branch"
         elif [ -n "$run_title" ]; then
             printf '  %s\n' "$run_title"
         fi
     else
-        printf ' · IDLE\n'
-        printf '  No workflow is currently queued or running.\n'
+        printf '\n%b◆ NOW · IDLE%b\n' "$C_MUTED$C_BOLD" "$C_RESET"
+        printf '  %b○%b No workflow is currently queued or running.\n' "$C_MUTED" "$C_RESET"
     fi
 
     plan_id="$(printf '%s' "$plan" | jq -r '.plan_id // "unavailable"')"
-    printf '\nPLAN · %s · NOT-READY PRS ONLY\n' "$plan_id"
+    section_heading "PLAN · $plan_id · NOT-READY PRS ONLY"
     if [ "$plan_state" != live ]; then
-        printf '  unavailable · existing queue remains visible below\n'
+        printf '  %b! unavailable%b · existing queue remains visible below\n' "$C_WARN$C_BOLD" "$C_RESET"
     else
-        printf '  WORK ORDER\n'
+        printf '  %bWORK ORDER%b\n' "$C_MUTED$C_BOLD" "$C_RESET"
         printf '%s' "$plan" | jq -r '.work_order[:5][] |
           [(.position | tostring), .cluster_id, (if .blocked then "CONTEXT" elif .board_column == "changes_requested" then "REWORK" else "TODO" end), (.title[0:52])] | @tsv
         ' | while IFS=$'\t' read -r plan_position row_project row_badge plan_title; do
-            printf '    %-2s %-4s %-8s %s\n' "$plan_position" "$row_project" "$row_badge" "$plan_title"
+            printf '    %b%-2s%b %-4s %b%-8s%b %s\n' \
+                "$C_ACCENT$C_BOLD" "$plan_position" "$C_RESET" "$row_project" \
+                "$(badge_style "$row_badge")" "$row_badge" "$C_RESET" "$plan_title"
         done
         plan_merge_count="$(printf '%s' "$plan" | jq '.merge_order | length')"
-        printf '  MERGE ORDER · %s draft(s)\n' "$plan_merge_count"
+        printf '  %bMERGE ORDER%b · %s draft(s)\n' "$C_MUTED$C_BOLD" "$C_RESET" "$plan_merge_count"
         if [ "$plan_merge_count" -eq 0 ]; then
             printf '    none · PRs already ready for review are deliberately excluded\n'
         else
@@ -384,25 +459,27 @@ render_dashboard() {
         fi
         plan_release_blockers="$(printf '%s' "$plan" | jq '.release_blockers | length')"
         if [ "$plan_merge_count" -gt 0 ] && [ "$plan_release_blockers" -eq 0 ]; then
-            printf '  RELEASE gh workflow run autopr-release-plan.yml -f plan_id=%s\n' "$plan_id"
+            printf '  %bREADY TO RELEASE%b · gh workflow run autopr-release-plan.yml -f plan_id=%s\n' \
+                "$C_GOOD$C_BOLD" "$C_RESET" "$plan_id"
         elif [ "$plan_release_blockers" -gt 0 ]; then
-            printf '  RELEASE BLOCKED · %s unresolved review/check/context condition(s)\n' "$plan_release_blockers"
+            printf '  %bRELEASE BLOCKED%b · %s unresolved review/check/context condition(s)\n' \
+                "$C_WARN$C_BOLD" "$C_RESET" "$plan_release_blockers"
         fi
     fi
 
-    printf '\nNEXT'
     if [ "$selected_rc" -eq 0 ] && [ -n "$selected" ]; then
-        printf ' · EXACT SELECTOR RESULT\n'
+        section_heading 'NEXT · EXACT SELECTOR RESULT'
         printf '%s' "$selected" | jq -r '
           "  " + (.project_title // "?") + " · " + .title,
           "  " + (if .board_column == "changes_requested" then "rework" else "new work" end) + " · task " + .id8
         '
     elif [ "$selected_rc" -eq 3 ]; then
-        printf ' · NONE ELIGIBLE AFTER CURRENT WORK\n'
-        printf '  Queue entries below may be waiting, held, or cooling down.\n'
+        section_heading 'NEXT · NONE ELIGIBLE AFTER CURRENT WORK'
+        printf '  %b○%b Queue entries below may be waiting, held, or cooling down.\n' "$C_MUTED" "$C_RESET"
     else
-        printf ' · UNKNOWN\n'
-        printf '  Selector failed (exit %s); this does not mean the queue is empty.\n' "$selected_rc"
+        section_heading 'NEXT · UNKNOWN'
+        printf '  %b! Selector failed (exit %s)%b; this does not mean the queue is empty.\n' \
+            "$C_BAD$C_BOLD" "$selected_rc" "$C_RESET"
     fi
 
     queue_counts="$(printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" '
@@ -411,7 +488,7 @@ render_dashboard() {
       def held: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
       "\(length) tracked · \([.[] | select(.id8 == $current_id8)] | length) active · \([.[] | select(pending and .id8 != $current_id8)] | length) feedback · \([.[] | select(waiting and .id8 != $current_id8)] | length) waiting · \([.[] | select(held and .id8 != $current_id8)] | length) held"
     ')"
-    printf '\nQUEUE · %s\n' "$queue_counts"
+    section_heading "QUEUE · $queue_counts"
     printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" '
       def pending: (.autopr_reconsideration_pending // false);
       def waiting: ((.progress_note // "") | test("awaiting answers"; "i"));
@@ -429,11 +506,21 @@ render_dashboard() {
             *+00:00) row_iso="${row_iso%+00:00}Z" ;;
         esac
         row_time="$(iso_to_pacific "$row_iso")"
-        printf '  %-8s %-9s %-42s %s\n' "$row_badge" "$row_project" "$row_title" "$row_time"
+        case "$row_badge" in
+            NOW) row_symbol='▶' ;;
+            FEEDBACK) row_symbol='↺' ;;
+            REWORK) row_symbol='↻' ;;
+            WAITING) row_symbol='?' ;;
+            HELD) row_symbol='!' ;;
+            *) row_symbol='○' ;;
+        esac
+        printf '  %b%s %-8s%b %-9s %-42s %b%s%b\n' \
+            "$(badge_style "$row_badge")" "$row_symbol" "$row_badge" "$C_RESET" \
+            "$row_project" "$row_title" "$C_MUTED" "$row_time" "$C_RESET"
     done
     [ "$(printf '%s' "$cards" | jq 'length')" -gt 0 ] || printf '  No cards, or the board source is unavailable.\n'
 
-    printf '\nOPEN BOT PRS · AGE\n'
+    section_heading 'OPEN BOT PRS · AGE'
     if [ "$(printf '%s' "$open_prs" | jq 'length')" -eq 0 ]; then
         printf '  none\n'
     else
@@ -441,15 +528,17 @@ render_dashboard() {
           [(.number | tostring),
            (if ([.labels[].name] | index("autopr")) then "KANBAN" elif ([.labels[].name] | index("autofix")) then "ERROR" else "AUDIT" end),
            (if .isDraft then "DRAFT" else "OPEN" end),
-           (.title[0:42]), (.createdAt // ""),
+           (.title[0:35]), (.createdAt // ""),
            (if ([.labels[].name] | index("autopr-awaiting-input")) then "WAITING" elif ([.labels[].name] | index("needs-work")) then "NEEDS WORK" else "" end)] | @tsv
         ' | while IFS=$'\t' read -r pr_number pr_lane pr_state pr_title pr_created pr_flag; do
-            printf '  #%-4s %-6s %-5s %-42s %8s%s\n' "$pr_number" "$pr_lane" "$pr_state" "$pr_title" \
-                "$(duration_between "$pr_created" '')" "${pr_flag:+ · $pr_flag}"
+            printf '  %b#%-4s%b %-6s %b%-5s%b %-35s %b%8s%b%s\n' \
+                "$C_ACCENT$C_BOLD" "$pr_number" "$C_RESET" "$pr_lane" \
+                "$(badge_style "$pr_state")" "$pr_state" "$C_RESET" "$pr_title" \
+                "$C_MUTED" "$(duration_between "$pr_created" '')" "$C_RESET" "${pr_flag:+ · $pr_flag}"
         done
     fi
 
-    printf '\nRECENT BOT PRS · OPEN → MERGE · PACIFIC\n'
+    section_heading 'RECENT BOT PRS · OPEN → MERGE · PACIFIC'
     printf '%s' "$merged_prs" | jq -r --arg cutoff "$cutoff" '
       [.[] | select((.mergedAt // "") >= $cutoff) |
         select([.labels[].name] | any(. == "autopr" or . == "autofix" or . == "autopr-self-audit"))]
@@ -463,18 +552,22 @@ render_dashboard() {
         elif ([.labels[].name] | index("production-verification-needed")) then "PROD CHECK NEEDED"
         else "AWAITING DEPLOY/CHECK" end)] | @tsv
     ' | while IFS=$'\t' read -r merged_number merged_lane merged_title merged_created merged_at merged_verification; do
-        printf '  #%-4s %-6s %-40s %8s · %s%s\n' "$merged_number" "$merged_lane" "$merged_title" \
-            "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")" \
+        printf '  %b#%-4s%b %-6s %-40s %b%8s · %s%b%s\n' \
+            "$C_ACCENT$C_BOLD" "$merged_number" "$C_RESET" "$merged_lane" "$merged_title" \
+            "$C_MUTED" "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")" "$C_RESET" \
             "${merged_verification:+ · $merged_verification}"
     done
 
-    printf '\nRECENT RUNS · DURATION · PACIFIC\n'
+    section_heading 'RECENT RUNS · DURATION · PACIFIC'
     printf '%s' "$runs" | jq -r --arg cutoff "$cutoff" '
       [.[] | select(.status == "completed" and (.createdAt // "") >= $cutoff)][:5][] |
       [(.databaseId | tostring), .lane, (.conclusion // "completed"), (.createdAt // ""), (.updatedAt // "")] | @tsv
     ' | while IFS=$'\t' read -r recent_id recent_lane recent_result recent_created recent_updated; do
-        printf '  %-13s %-13s %-9s %8s · %s\n' "#$recent_id" "$recent_lane" "$recent_result" \
-            "$(duration_between "$recent_created" "$recent_updated")" "$(iso_to_pacific "$recent_updated")"
+        printf '  %b%-13s%b %-13s %b%-9s%b %b%8s · %s%b\n' \
+            "$C_ACCENT$C_BOLD" "#$recent_id" "$C_RESET" "$recent_lane" \
+            "$(badge_style "$(printf '%s' "$recent_result" | tr '[:lower:]' '[:upper:]')")" \
+            "$recent_result" "$C_RESET" "$C_MUTED" \
+            "$(duration_between "$recent_created" "$recent_updated")" "$(iso_to_pacific "$recent_updated")" "$C_RESET"
     done
 }
 

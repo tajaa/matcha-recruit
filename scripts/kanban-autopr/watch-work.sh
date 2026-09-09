@@ -26,6 +26,27 @@ GH_CACHED="${AUTOPR_GH_CACHED:-$SCRIPT_DIR/gh-cached.sh}"
 # the only one worth refreshing on the minute.
 RUN_DETAIL_TTL_SECONDS="${AUTOPR_WORK_RUN_DETAIL_TTL_SECONDS:-45}"
 
+TUI_COLOR=false
+case "${AUTOPR_DASHBOARD_COLOR:-auto}" in
+    1|always|true) TUI_COLOR=true ;;
+    0|never|false) TUI_COLOR=false ;;
+    *) [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && TUI_COLOR=true ;;
+esac
+[ -z "${NO_COLOR:-}" ] || TUI_COLOR=false
+if [ "$TUI_COLOR" = true ]; then
+    C_RESET=$'\033[0m' C_BRAND=$'\033[38;5;157m' C_ACCENT=$'\033[38;5;80m'
+    C_BLUE=$'\033[38;5;75m' C_GOOD=$'\033[38;5;114m' C_MUTED=$'\033[38;5;245m'
+    C_RAIL=$'\033[38;5;239m' C_BOLD=$'\033[1m'
+else
+    C_RESET='' C_BRAND='' C_ACCENT='' C_BLUE='' C_GOOD='' C_MUTED='' C_RAIL='' C_BOLD=''
+fi
+
+work_header() {
+    printf '%b╭─ %bLIVE CODEX WORK%b\n' "$C_RAIL" "$C_BRAND$C_BOLD" "$C_RESET"
+    printf '%b│%b %s\n' "$C_RAIL" "$C_RESET" "$1"
+    printf '%b╰────────────────────────────────────────%b\n' "$C_RAIL" "$C_RESET"
+}
+
 RUN_ID=""
 RUN_STATUS="idle"
 RUN_LANE=""
@@ -79,21 +100,25 @@ render_work_snapshot() {
     local pane_rows log_lines pids sandbox_project
     refresh_workflow_status
     pane_rows="$(tput lines 2>/dev/null || printf '24')"
-    log_lines=$((pane_rows - 8))
+    # Chrome above the stream is nine lines: the three-line header box,
+    # EXECUTION, RUN, STEP, PROCESS, a blank, and the MODEL STREAM heading.
+    # Reserve those plus one spare row, or the snapshot fills the pane exactly
+    # and scrolls its own header off the top.
+    log_lines=$((pane_rows - 10))
     [ "$log_lines" -ge 6 ] || log_lines=6
 
-    printf 'LIVE CODEX WORK · %s\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
+    work_header "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
     case "$RUN_LANE" in
         errors) sandbox_project=matcha-error-autofix-sandbox ;;
         self-audit) sandbox_project=matcha-autopr-self-audit-sandbox ;;
         *) sandbox_project=matcha-kanban-autopr-sandbox ;;
     esac
-    printf 'EXECUTION msandbox · %s\n' "${AUTOPR_SANDBOX_PROJECT_NAME:-$sandbox_project}"
+    printf '%bEXECUTION%b msandbox · %s\n' "$C_MUTED$C_BOLD" "$C_RESET" "${AUTOPR_SANDBOX_PROJECT_NAME:-$sandbox_project}"
     if [ -n "$RUN_ID" ]; then
-        printf 'RUN %s #%s · %s\n' "$RUN_LANE" "$RUN_ID" "$RUN_STATUS"
-        [ -z "$STEP_LINE" ] || printf 'STEP %s\n' "$STEP_LINE"
+        printf '%bRUN%b %s %b#%s%b · %s\n' "$C_MUTED$C_BOLD" "$C_RESET" "$RUN_LANE" "$C_ACCENT$C_BOLD" "$RUN_ID" "$C_RESET" "$RUN_STATUS"
+        [ -z "$STEP_LINE" ] || printf '%bSTEP%b %s\n' "$C_BLUE$C_BOLD" "$C_RESET" "$STEP_LINE"
     else
-        printf 'RUN idle\n'
+        printf '%bRUN%b %bidle%b\n' "$C_MUTED$C_BOLD" "$C_RESET" "$C_MUTED" "$C_RESET"
     fi
 
     pids="$(pgrep -f 'codex exec' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
@@ -102,7 +127,7 @@ render_work_snapshot() {
         ps -p "$pids" -o pid=,etime=,comm= 2>/dev/null | paste -sd' ' - || true
     fi
 
-    printf '\nMODEL STREAM · latest %s lines\n' "$log_lines"
+    printf '\n%b◆ MODEL STREAM%b · latest %s lines\n' "$C_BRAND$C_BOLD" "$C_RESET" "$log_lines"
     if [ -s "$LIVE_LOG" ]; then
         sanitize_model_stream < "$LIVE_LOG" | tail -n "$log_lines"
     else
@@ -142,11 +167,12 @@ emit_status_change() {
         self-audit) sandbox_project=matcha-autopr-self-audit-sandbox ;;
         *) sandbox_project=matcha-kanban-autopr-sandbox ;;
     esac
-    printf '\n[STATUS %s] msandbox · %s\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')" \
+    printf '\n%b● STATUS %s%b · msandbox · %s\n' "$C_GOOD$C_BOLD" \
+        "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')" "$C_RESET" \
         "${AUTOPR_SANDBOX_PROJECT_NAME:-$sandbox_project}"
     if [ -n "$RUN_ID" ]; then
-        printf 'RUN %s #%s · %s\n' "$RUN_LANE" "$RUN_ID" "$RUN_STATUS"
-        [ -z "$STEP_LINE" ] || printf 'STEP %s\n' "$STEP_LINE"
+        printf '%bRUN%b %s %b#%s%b · %s\n' "$C_MUTED$C_BOLD" "$C_RESET" "$RUN_LANE" "$C_ACCENT$C_BOLD" "$RUN_ID" "$C_RESET" "$RUN_STATUS"
+        [ -z "$STEP_LINE" ] || printf '%bSTEP%b %s\n' "$C_BLUE$C_BOLD" "$C_RESET" "$STEP_LINE"
     else
         printf 'RUN idle\n'
     fi
@@ -175,14 +201,15 @@ append_model_stream() {
         WAITING_SHOWN=0
     fi
     if [ "$line_count" -gt "$STREAM_LINES" ]; then
-        [ "$STREAM_LINES" -ne 0 ] || printf '\nMODEL STREAM · current run\n'
+        [ "$STREAM_LINES" -ne 0 ] || printf '\n%b◆ MODEL STREAM%b · current run\n' "$C_BRAND$C_BOLD" "$C_RESET"
         sed -n "$((STREAM_LINES + 1)),${line_count}p" "$SANITIZED_LOG"
         STREAM_LINES="$line_count"
     fi
 }
 
-printf 'LIVE CODEX WORK · append-only history\n'
-printf 'Scroll with mouse/trackpad or Ctrl-b [ · detach with Ctrl-b d\n'
+work_header 'append-only history'
+printf '%bScroll%b with mouse/trackpad or Ctrl-b [ · %bdetach%b with Ctrl-b d\n' \
+    "$C_MUTED$C_BOLD" "$C_RESET" "$C_MUTED$C_BOLD" "$C_RESET"
 while :; do
     emit_status_change
     append_model_stream

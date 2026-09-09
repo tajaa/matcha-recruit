@@ -55,15 +55,22 @@ AUTOPR_TMUX_BIN="$TMP_DIR/tmux" AUTOPR_TEST_TMUX_LOG="$TMP_DIR/tmux.log" \
 
 check "tmux observer creates one session with four panes" \
   $([ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] \
+    && grep -q '^new-session -d -x 133 -y 45 ' "$TMP_DIR/tmux.log" \
     && [ "$(grep -c '^split-window ' "$TMP_DIR/tmux.log")" = 3 ] \
-    && grep -q '^split-window -h -p 42 ' "$TMP_DIR/tmux.log" \
-    && [ "$(grep -c '^split-window -v -p 50 ' "$TMP_DIR/tmux.log")" = 2 ] \
+    && grep -q '^split-window -h -p 38 ' "$TMP_DIR/tmux.log" \
+    && grep -q '^split-window -v -p 62 ' "$TMP_DIR/tmux.log" \
+    && grep -q '^split-window -v -p 54 ' "$TMP_DIR/tmux.log" \
     && echo 0 || echo 1)
 check "tmux panes receive operator-facing titles" \
-  $(grep -q 'operations overview · Pacific time' "$TMP_DIR/tmux.log" \
-    && grep -q 'live agent detail' "$TMP_DIR/tmux.log" \
-    && grep -q 'automation health' "$TMP_DIR/tmux.log" \
-    && grep -q 'active PR detail' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+  $(grep -q 'CONTROL BOARD · PACIFIC' "$TMP_DIR/tmux.log" \
+    && grep -q 'LIVE AGENT' "$TMP_DIR/tmux.log" \
+    && grep -q 'SYSTEM HEALTH' "$TMP_DIR/tmux.log" \
+    && grep -q 'ACTIVE PR' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
+check "tmux chrome uses the Matcha ops-console theme" \
+  $(grep -q 'status-left.*MATCHA.*AUTOPR' "$TMP_DIR/tmux.log" \
+    && grep -q 'pane-active-border-style fg=#2dd4bf' "$TMP_DIR/tmux.log" \
+    && grep -q 'window-active-style bg=#0b1017' "$TMP_DIR/tmux.log" \
+    && echo 0 || echo 1)
 check "tmux observer preserves a large mouse-scrollable history" \
   $(grep -q '^set-option -t matcha-autopr history-limit 100000' "$TMP_DIR/tmux.log" \
     && grep -q '^set-option -t matcha-autopr mouse on' "$TMP_DIR/tmux.log" \
@@ -161,6 +168,20 @@ check "control board shows cross-queue plan, exact next, PR timing, and Pacific 
     && grep -q '6:00 PM PDT' "$TMP_DIR/dashboard.out" \
     && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
     && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_DASHBOARD_COLOR=1 NO_COLOR= AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/color-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-color.out"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_DASHBOARD_COLOR=1 NO_COLOR=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/no-color-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-no-color.out"
+check "semantic ANSI colors are opt-in for redirects and respect NO_COLOR" \
+  $(grep -Fq $'\033[38;5;157m' "$TMP_DIR/dashboard-color.out" \
+    && grep -q '◆ QUEUE' "$TMP_DIR/dashboard-color.out" \
+    && ! grep -Fq $'\033[' "$TMP_DIR/dashboard-no-color.out" \
+    && echo 0 || echo 1)
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_TEST_PR_CONTEXT_FAIL=true \
   AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-no-pr-cache" \
@@ -369,8 +390,34 @@ AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
   AUTOPR_TEST_SANDBOX_STATE=running "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-running.out"
 check "health pane distinguishes a blocked container from a running worker" \
-  $(grep -q 'blocked · container state created' "$TMP_DIR/health-created.out" \
-    && grep -q 'running · matcha-kanban-autopr-sandbox' "$TMP_DIR/health-running.out" \
+  $(grep -q 'Worker kanban.*blocked (created)' "$TMP_DIR/health-created.out" \
+    && grep -q 'Worker kanban.*running' "$TMP_DIR/health-running.out" \
+    && echo 0 || echo 1)
+
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  AUTOPR_TEST_SANDBOX_STATE=error "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-error.out"
+check "health pane keeps the reason a worker probe failed" \
+  $(grep -q 'Worker kanban.*unavailable.*docker unavailable' "$TMP_DIR/health-error.out" \
+    && echo 0 || echo 1)
+
+# launchctl repeats "state = ..." for nested endpoints. The pane must report the
+# top-level job only, and must not paint a failed run green.
+mkdir -p "$TMP_DIR/health-bin"
+cat > "$TMP_DIR/health-bin/launchctl" <<'EOF'
+#!/usr/bin/env bash
+printf '\tstate = not running\n\truns = 4\n\tlast exit code = %s\n' "${AUTOPR_TEST_LAUNCH_EXIT:-0}"
+printf '\t\tstate = active\n\t\tstate = active\n'
+EOF
+chmod +x "$TMP_DIR/health-bin/launchctl"
+PATH="$TMP_DIR/health-bin:$PATH" AUTOPR_DASHBOARD_ONCE=1 \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-launch-ok.out"
+PATH="$TMP_DIR/health-bin:$PATH" AUTOPR_DASHBOARD_ONCE=1 AUTOPR_TEST_LAUNCH_EXIT=78 \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-launch-fail.out"
+check "health pane reads only the top-level LaunchAgent state and flags a bad exit" \
+  $(grep -qE '^  LaunchAgent +○ not running · runs 4$' "$TMP_DIR/health-launch-ok.out" \
+    && grep -qE '^  LaunchAgent +! not running · runs 4 · exit 78$' "$TMP_DIR/health-launch-fail.out" \
     && echo 0 || echo 1)
 
 echo

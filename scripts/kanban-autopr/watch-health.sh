@@ -13,6 +13,31 @@ KANBAN_SANDBOX_PROJECT="${AUTOPR_KANBAN_SANDBOX_PROJECT_NAME:-matcha-kanban-auto
 ERROR_SANDBOX_PROJECT="${AUTOPR_ERROR_SANDBOX_PROJECT_NAME:-matcha-error-autofix-sandbox}"
 AUDIT_SANDBOX_PROJECT="${AUTOPR_AUDIT_SANDBOX_PROJECT_NAME:-matcha-autopr-self-audit-sandbox}"
 
+TUI_COLOR=false
+case "${AUTOPR_DASHBOARD_COLOR:-auto}" in
+    1|always|true) TUI_COLOR=true ;;
+    0|never|false) TUI_COLOR=false ;;
+    *) [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && TUI_COLOR=true ;;
+esac
+[ -z "${NO_COLOR:-}" ] || TUI_COLOR=false
+if [ "$TUI_COLOR" = true ]; then
+    C_RESET=$'\033[0m' C_BRAND=$'\033[38;5;157m' C_ACCENT=$'\033[38;5;80m'
+    C_GOOD=$'\033[38;5;114m' C_WARN=$'\033[38;5;221m' C_BAD=$'\033[38;5;203m'
+    C_MUTED=$'\033[38;5;245m' C_RAIL=$'\033[38;5;239m' C_BOLD=$'\033[1m'
+else
+    C_RESET='' C_BRAND='' C_ACCENT='' C_GOOD='' C_WARN='' C_BAD=''
+    C_MUTED='' C_RAIL='' C_BOLD=''
+fi
+
+health_header() {
+    printf '%b◆ LOCAL TIMER + RUNNER HEALTH%b · %s\n' \
+        "$C_BRAND$C_BOLD" "$C_RESET" "$1"
+}
+
+health_section() {
+    printf '%b◆ %s%b\n' "$C_BRAND$C_BOLD" "$1" "$C_RESET"
+}
+
 dispatch_time_pacific() {
     local timestamp="$1" epoch rendered
     epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$timestamp" +%s 2>/dev/null \
@@ -27,69 +52,116 @@ dispatch_time_pacific() {
 
 render_worker_state() {
     local label="$1" project="$2" sandbox_state
-    printf '\nAUTOPR MSANDBOX · %s · ' "$label"
+    printf '  %-18s ' "Worker $label"
     if [ ! -x "$MSANDBOX_BIN" ]; then
-        printf 'missing (%s)\n' "$MSANDBOX_BIN"
+        printf '%b! missing%b\n' "$C_BAD$C_BOLD" "$C_RESET"
     elif sandbox_state="$(env AGENT_SANDBOX_PROJECT_NAME="$project" \
         "$MSANDBOX_BIN" workspace-state 2>&1)"; then
         case "$sandbox_state" in
-            running) printf 'running · %s\n' "$project" ;;
-            absent) printf 'ready, idle · %s\n' "$project" ;;
-            *) printf 'blocked · container state %s · %s\n' "$sandbox_state" "$project" ;;
+            running) printf '%b● running%b\n' "$C_GOOD$C_BOLD" "$C_RESET" ;;
+            absent) printf '%b○ ready, idle%b\n' "$C_MUTED$C_BOLD" "$C_RESET" ;;
+            *) printf '%b! blocked (%s)%b\n' "$C_WARN$C_BOLD" "$sandbox_state" "$C_RESET" ;;
         esac
     else
-        printf 'unavailable · %s\n' "$(printf '%s' "$sandbox_state" | head -n 1)"
+        # Keep the failure reason. "unavailable" with no cause forces the
+        # operator to leave the dashboard to find out why the sandbox is down.
+        printf '%b! unavailable%b (%s)\n' "$C_BAD$C_BOLD" "$C_RESET" \
+            "$(printf '%s' "$sandbox_state" | head -n 1 | cut -c1-24)"
     fi
 }
 
 render_health() {
-    local launch_state runner_pids
+    local launch_print launch_run_state launch_exit launch_runs launch_state
+    local launch_style launch_glyph runner_pids runner_state runner_count
+    local pane_rows event_count
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
-    printf 'LOCAL TIMER + RUNNER HEALTH · %s\n\n' "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
+    health_header "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
 
-    launch_state="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null \
-        | sed -nE '/state =|runs =|last exit code =/p' | sed 's/^[[:space:]]*/  /')"
-    if [ -n "$launch_state" ]; then
-        printf 'LAUNCHAGENT\n%s\n' "$launch_state"
+    # launchctl repeats "state = ..." for every nested endpoint, so take only
+    # the first (top-level) match of each field. Concatenating all of them
+    # produced a self-contradictory "not running · active · active" line.
+    launch_print="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null || true)"
+    launch_run_state="$(printf '%s\n' "$launch_print" \
+        | sed -nE 's/^[[:space:]]*state = (.*)$/\1/p' | head -n 1)"
+    launch_exit="$(printf '%s\n' "$launch_print" \
+        | sed -nE 's/^[[:space:]]*last exit code = (.*)$/\1/p' | head -n 1)"
+    launch_runs="$(printf '%s\n' "$launch_print" \
+        | sed -nE 's/^[[:space:]]*runs = (.*)$/\1/p' | head -n 1)"
+
+    health_section 'SYSTEMS'
+    printf '  %-18s ' 'LaunchAgent'
+    if [ -z "$launch_run_state" ] && [ -z "$launch_exit" ]; then
+        printf '%b○ not loaded%b\n' "$C_MUTED" "$C_RESET"
     else
-        printf 'LAUNCHAGENT\n  not loaded\n'
+        launch_state="${launch_run_state:-unknown}"
+        [ -z "$launch_runs" ] || launch_state="$launch_state · runs $launch_runs"
+        # This is an interval job: "not running" between ticks is normal, a
+        # non-zero last exit code is not. Only the exit code earns an alarm.
+        if [ -n "$launch_exit" ] && [ "$launch_exit" != 0 ]; then
+            launch_state="$launch_state · exit $launch_exit"
+            launch_style="$C_BAD$C_BOLD" launch_glyph='!'
+        elif [ "$launch_run_state" = running ]; then
+            launch_style="$C_GOOD$C_BOLD" launch_glyph='●'
+        elif [ -z "$launch_run_state" ]; then
+            launch_style="$C_WARN$C_BOLD" launch_glyph='!'
+        else
+            launch_style="$C_MUTED" launch_glyph='○'
+        fi
+        printf '%b%s %s%b\n' "$launch_style" "$launch_glyph" "$launch_state" "$C_RESET"
     fi
 
-    printf '\nMSANDBOX MASTER SWITCH · '
+    printf '  %-18s ' 'Master switch'
     if [ ! -x "$MSANDBOX_BIN" ]; then
-        printf 'unavailable\n'
+        printf '%b! unavailable%b\n' "$C_BAD$C_BOLD" "$C_RESET"
     elif "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
-        printf 'ON · autonomous work permitted\n'
+        printf '%b● ON%b · dispatch enabled\n' "$C_GOOD$C_BOLD" "$C_RESET"
     else
-        printf 'OFF · no AutoPR dispatch or model start permitted\n'
+        printf '%b○ OFF%b · dispatch disabled\n' "$C_WARN$C_BOLD" "$C_RESET"
     fi
 
-    printf '\nSELF-HOSTED RUNNER · '
     runner_pids="$(pgrep -f 'Runner.Listener' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
+    printf '  %-18s ' 'Runner'
     if [ -n "$runner_pids" ]; then
-        ps -p "$runner_pids" -o pid=,etime=,comm= 2>/dev/null | sed 's/^[[:space:]]*//' || true
+        runner_count="$(printf '%s' "$runner_pids" | awk -F, '{print NF}')"
+        runner_state="$(ps -p "$runner_pids" -o pid=,etime= 2>/dev/null \
+            | sed 's/^[[:space:]]*//' | paste -sd'/' - || true)"
+        # A stale listener beside the live one is exactly what this pane exists
+        # to surface, so never collapse the list down to the first row.
+        if [ "$runner_count" -gt 1 ] 2>/dev/null; then
+            printf '%b! %s listeners%b · %s\n' "$C_WARN$C_BOLD" "$runner_count" "$C_RESET" "$runner_state"
+        else
+            printf '%b● online%b · %s\n' "$C_GOOD$C_BOLD" "$C_RESET" "$runner_state"
+        fi
     else
-        printf '  Runner.Listener not found\n'
+        printf '%b○ offline%b\n' "$C_WARN$C_BOLD" "$C_RESET"
     fi
 
     render_worker_state kanban "$KANBAN_SANDBOX_PROJECT"
     render_worker_state errors "$ERROR_SANDBOX_PROJECT"
     render_worker_state self-audit "$AUDIT_SANDBOX_PROJECT"
 
-    printf '\nRECENT TIMER EVENTS\n'
+    health_section 'RECENT TIMER EVENTS'
+    # stty asks the live pane PTY. LINES/tput can retain the larger height from
+    # before tmux split the detail rail and would render too many event rows.
+    pane_rows="$(stty size 2>/dev/null | awk '{print $1}')"
+    [[ "$pane_rows" =~ ^[0-9]+$ ]] || pane_rows=15
+    event_count=$((pane_rows - 10))
+    [ "$event_count" -ge 2 ] || event_count=2
+    [ "$event_count" -le 5 ] || event_count=5
     if [ -s "$LOG_FILE" ]; then
         # Active-workflow snapshots can contain dozens of prior runs. The
         # health pane needs the timer decision, not a wrapped dump of that
         # snapshot; the 24-hour dashboard owns workflow history.
-        tail -n 8 "$LOG_FILE" | jq -r '[.timestamp // "", .action // "?", .reason // "?"] | @tsv' 2>/dev/null \
+        tail -n "$event_count" "$LOG_FILE" | jq -r '[.timestamp // "", .action // "?", .reason // "?"] | @tsv' 2>/dev/null \
           | while IFS=$'\t' read -r event_time event_action event_reason; do
+              if [ "${#event_reason}" -gt 20 ]; then
+                  event_reason="${event_reason:0:19}…"
+              fi
               printf '  %-15s %-8s %s\n' "$(dispatch_time_pacific "$event_time")" "$event_action" "$event_reason"
             done
     else
         printf '  no timer events yet\n'
     fi
-
-    printf '\nSession exists only while the msandbox master switch is ON.\n'
 }
 
 while :; do
