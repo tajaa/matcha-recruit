@@ -2586,8 +2586,9 @@ class CapabilityTests(MsandboxTestCase):
             title = _session_menu_title(record)
         measured.assert_not_called()
         self.assertIn("test — codex / standard / created", title)
-        self.assertIn("✅ GitHub CLI", title)
-        self.assertIn("❌ Production admin/secrets", title)
+        self.assertIn("available at last check", title)
+        self.assertIn("Tools & access", title)
+        self.assertNotIn("invoke:", title)
         # The report was measured with the container up; this session is not.
         self.assertIn("measured while the container was running", title)
 

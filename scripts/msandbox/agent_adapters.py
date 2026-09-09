@@ -17,7 +17,12 @@ from .capabilities import (
     report_paths,
     write_report,
 )
-from .docker_runtime import compose_command, compose_environment, exec_in_session, session_home
+from .docker_runtime import (
+    compose_command,
+    compose_environment,
+    exec_in_session,
+    session_home,
+)
 from .models import Attachment, CapabilityReport, SessionRecord
 from .session_auth import refresh_github_auth
 
@@ -236,6 +241,13 @@ def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    # Preserve output from a failed CLI, but release the attached terminal so
+    # the manager can offer restart/switch instead of trapping it on a dead pane.
+    subprocess.run(
+        ["tmux", "set-hook", "-t", record.tmux_session, "pane-died",
+         f"detach-client -s {shlex.quote('=' + record.tmux_session)}"],
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
     subprocess.run(
         [
             "tmux",
@@ -243,7 +255,7 @@ def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
             "-t",
             record.tmux_session,
             "status-right",
-            "Ctrl-b s: sessions · Ctrl-b d: detach | %H:%M",
+            "Ctrl-b d: Sandbox menu | Ctrl-c: interrupt | %H:%M",
         ],
         check=False,
         stdout=subprocess.DEVNULL,

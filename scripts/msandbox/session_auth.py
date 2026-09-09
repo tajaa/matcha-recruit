@@ -151,7 +151,9 @@ def _copy_agent_auth(record: SessionRecord) -> None:
     }
     for source, destination in candidates[record.agent]:
         if source.is_file() and not source.is_symlink():
-            _atomic_secret_copy(source, destination)
+            relative = destination.relative_to(home)
+            with _private_directory(home, *relative.parts[:-1]) as directory_fd:
+                _atomic_private_write(directory_fd, relative.name, source.read_bytes())
 
 
 def _github_origin(record: SessionRecord) -> bool:

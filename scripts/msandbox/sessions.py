@@ -5,10 +5,16 @@ import os
 import re
 import secrets
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Sequence
 
-from .agent_adapters import launch_agent, refresh_capability_context, stop_agent, tmux_running
+from .agent_adapters import (
+    launch_agent,
+    refresh_capability_context,
+    stop_agent,
+    tmux_running,
+)
 from .capabilities import load_report, report_is_stale
 from .docker_runtime import (
     allocate_port_block,
@@ -319,6 +325,28 @@ def start_session(
     return record
 
 
+def switch_session(record: SessionRecord, agent: str) -> SessionRecord:
+    """Switch one stopped workspace's harness without changing Git or permissions."""
+    from dataclasses import replace
+
+    from .state import load_session
+
+    if agent not in ("codex", "claude", "opencode"):
+        raise SessionError("unsupported harness")
+    with state_lock(f"session-{record.id}"):
+        current = load_session(record.id)
+        if current.phase in ("released", "orphaned", "submitting", "submitted_needs_release"):
+            raise SessionError("this session cannot switch harnesses in its current state")
+        stop_session(current, _lock_held=True)
+        proposed = replace(current, agent=agent, agent_session_id=None, phase="stopped")
+        # A failed login copy leaves the durable record pointing at the old
+        # harness, stopped and retryable; never erase either harness's history.
+        provision_session_auth(proposed)
+        save_session(proposed)
+        record.__dict__.update(proposed.__dict__)
+        return record
+
+
 def reconcile_session(record: SessionRecord, *, _lock_held: bool = False) -> SessionRecord:
     if not _lock_held:
         with state_lock(f"session-{record.id}"):
@@ -382,7 +410,7 @@ def _validation_current(
     )
 
 
-def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None) -> tuple[int, str]:
+def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None, body: str | None = None) -> tuple[int, str]:
     assert record.target_branch
     repo_name = _github_repo(record.repo_path)
     listed = subprocess.run(
@@ -394,6 +422,15 @@ def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None)
     if listed.returncode == 0:
         matches = json.loads(listed.stdout)
         if matches:
+            if body is not None:
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.md') as copy:
+                    copy.write(body)
+                    copy.flush()
+                    edited = subprocess.run(['gh', 'pr', 'edit', str(matches[0]['number']), '--repo', repo_name,
+                                             '--title', title or record.name, '--body-file', copy.name],
+                                            capture_output=True, text=True, check=False)
+                    if edited.returncode:
+                        raise SessionError('PR copy update failed; pushed commit is preserved. Retry submission.')
             return int(matches[0]["number"]), str(matches[0]["url"])
     command = [
         "gh",
@@ -407,12 +444,13 @@ def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None)
         "main",
         "--title",
         title or record.name,
-        "--body",
-        f"Created from msandbox session `{record.name}`.",
     ]
     if draft:
         command.append("--draft")
-    created = subprocess.run(command, check=False, text=True, capture_output=True)
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.md') as copy:
+        copy.write(body if body is not None else f"Created from msandbox session `{record.name}`.")
+        copy.flush()
+        created = subprocess.run([*command, '--body-file', copy.name], check=False, text=True, capture_output=True)
     if created.returncode:
         raise SessionError(created.stderr.strip() or "gh pr create failed")
     url = created.stdout.strip().splitlines()[-1]
@@ -420,7 +458,7 @@ def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None)
     return number, url
 
 
-def submit_session(record: SessionRecord, *, draft: bool = True, title: str | None = None) -> PullRequest:
+def submit_session(record: SessionRecord, *, draft: bool = True, title: str | None = None, body: str | None = None) -> PullRequest:
     """Publish detached HEAD, verify the PR branch, then release the worktree."""
     if not record.target_branch:
         raise SessionError("session has no target branch")
@@ -470,7 +508,7 @@ def submit_session(record: SessionRecord, *, draft: bool = True, title: str | No
         record.expected_remote_sha = pushed_head
         record.remote_head_sha = pushed_head
         save_session(record)
-        number, url = _find_or_create_pr(record, draft=draft, title=title)
+        number, url = _find_or_create_pr(record, draft=draft, title=title, body=body)
         record.pr_number = number
         record.pr_url = url
         record.submitted_at = utc_now()

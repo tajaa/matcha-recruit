@@ -2,7 +2,8 @@
 
 `msandbox` runs Codex, OpenCode, and Claude in independent Linux containers
 without making a feature branch belong to a worktree. A session remains at
-detached `HEAD`; its intended PR branch is metadata until publication.
+detached `HEAD`. The manager can create a local PR branch without checking it
+out; publication pushes the validated detached commit to that branch.
 
 ## Create and resume work
 
@@ -15,6 +16,89 @@ garbage collection.
 Names are generated automatically, and leaving an agent returns to the wizard.
 Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
 exposing a host Docker or tmux socket to the container.
+
+## Interactive control center
+
+All menus support mouse clicks, scroll wheel, arrows, `j`/`k`, and numbered
+selection. The selected action's description stays at the bottom of the screen.
+Long session lists scroll within the terminal height. `Esc`, `q`, and `Ctrl-C`
+go back; leaving the manager keeps background sessions alive. Long reports use
+`less` when available; `q` closes the report. Redirected terminals retain the
+plain numbered interface.
+
+Opening an existing session always shows its controls before attaching:
+
+- **Start/Resume harness** opens the selected Codex, Claude, or OpenCode CLI.
+  `Ctrl-b d` returns to the manager while the harness continues running. Normal
+  harness exit now detaches the dead pane automatically and returns to the menu;
+  `Ctrl-C` inside a harness retains that CLI's interrupt behavior. Plain `exit`
+  is a shell command, not a universal agent-chat command.
+- **Change harness** stops the workspace and switches the selected harness.
+  Files, Git history, attachments, ports, and explicit permissions persist.
+  Each harness keeps its own conversation history; this opens a new conversation
+  and does not translate one harness's transcript into another. Login provisioning
+  must succeed before the new harness is saved. Start it from the session menu.
+- **Environment & processes** measures Docker state, harness terminals,
+  container executable names/PIDs/uptime, `dev-remote.sh` panes, host development
+  endpoints, session endpoints, and database/Redis TCP reachability. Start/stop
+  development controls act only inside the selected sandbox, using the existing
+  `dev-remote.sh` and shared host development data. They do not manage host services.
+  Refresh never starts containers. A configured port, an existing tmux pane, and
+  a reachable TCP socket are explicitly different observations. SSH processes
+  are identified without exposing argv or destinations; no tunnel-health claim
+  is inferred from an SSH process merely existing.
+- **Browser** enables the browser image (stopping current workspace processes),
+  starts/stops a managed headless Chromium, or captures a URL into a viewport PNG.
+  Managed Chromium's CDP endpoint is `http://127.0.0.1:9222` **inside** the container,
+  with no host publication. Screenshot capture uses a separate short-lived browser
+  and closes it after success or failure. Browser executable/PID state appears in
+  Environment & processes.
+- **Files & attachments** imports quoted/dragged host paths or the clipboard,
+  lists uploaded inputs and generated output, previews text, pastes references
+  into the harness, and exports durable copies (revealed in Finder on macOS).
+  Uploads stay at `/attachments`; generated files should be written under
+  `/workspace/.msandbox/outputs`. Enumeration is bounded to 200 files / 500
+  directories; symlinks are refused, and export rechecks every path component.
+  Exports are limited to 50 MiB per file and 1 GiB per session and live at
+  `~/.local/share/matcha-msandbox/exports/<id>`, outside the releasable worktree.
+  **Export wanted generated files before releasing or submitting a session.**
+  Generated output is ignored by Git and otherwise disappears with the worktree.
+- **Testing** offers existing changed-file, full-PR, browser and native validation.
+  Results stay visible after a run. Tests use the existing isolated validation
+  services and immutable reports, including their existing stop/snapshot behavior.
+- **Tools & access** opens the full measured capability report on demand. Its
+  remeasure action explicitly starts the workspace if needed. Session overview
+  only shows a compact historical summary, with stale/stopped warnings.
+- **Branch & pull request** runs `gpt-5.6-luna` with `high` reasoning to suggest
+  a branch name, commit subject, title, and description from bounded Git summaries.
+  The helper uses a temporary read-only container with writable tmpfs, a read-only
+  Codex login mount, no workspace/host-service mounts, and no shell or web-search
+  tools. It cannot apply a patch. The draft survives menu navigation and restart.
+  Review the copy and displayed changed-file list, then click **Create branch /
+  commit** to commit all shown changes. The controller rejects stale drafts,
+  colliding branches, and invalid model output. Existing PR sessions retain their
+  branch. Run **Validate full PR**, then **Publish draft pull request**; the existing
+  exact-commit validation, push lease, and release checks still apply. The helper
+  needs the current sandbox image built and a valid host `codex login`.
+
+Equivalent navigation commands:
+
+```bash
+msandbox session switch payroll-fix --agent claude
+msandbox session start payroll-fix
+msandbox session ps payroll-fix
+msandbox session ps payroll-fix --json
+```
+
+Controller changes are picked up by `msandbox install` from the checkout that
+contains them. No terminal GUI dependency or database migration is required.
+Unit coverage runs through `bash scripts/tests/test_msandbox_sessions.sh`.
+Optional browser smoke (one disposable container, no host data/credentials or
+network) uses an existing browser-enabled image:
+
+```bash
+python3 -m scripts.tests.msandbox_manager_smoke --image <browser-enabled-image>
+```
 
 AutoPR and independent sessions share one lifecycle even though their durable
 terminal sessions stay on the host side of the container boundary. From an
@@ -76,7 +160,7 @@ msandbox capabilities payroll-fix
 msandbox capabilities payroll-fix --refresh
 ```
 
-Selecting a session in the picker, confirming a new one, and `msandbox doctor`
+The session's Tools & access screen, a newly created session, and `msandbox doctor`
 all render the same measured report:
 
 ```text

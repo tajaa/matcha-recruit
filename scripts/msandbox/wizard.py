@@ -14,6 +14,7 @@ from typing import Callable, Sequence, TextIO, TypeVar
 
 from .agent_adapters import attach_agent
 from .capabilities import (
+    leaks,
     load_report,
     planned_capabilities,
     render_report_text,
@@ -33,8 +34,8 @@ from .sessions import (
     submit_session,
 )
 from .state import list_sessions, save_session
+from .terminal_ui import frame, mouse_key, plain
 from .validation import build_test_plan, run_test_plan
-
 
 ChoiceValue = TypeVar("ChoiceValue")
 Reader = Callable[[str], str]
@@ -50,6 +51,9 @@ def _cancel_choice_index(choices: Sequence[tuple[str, ChoiceValue]]) -> int | No
 
 
 def _interpret_terminal_key(data: bytes) -> str | None:
+    mouse = mouse_key(data)
+    if mouse:
+        return mouse
     if data in (b"\r", b"\n"):
         return "enter"
     if data in (b"k", b"K") or (
@@ -74,7 +78,7 @@ def _read_terminal_key(descriptor: int) -> str | None:
     if data == b"\x1b":
         # Kitty sends arrows as a short escape sequence. Collect only bytes
         # that are already waiting so a bare Escape remains responsive.
-        while len(data) < 16 and select.select([descriptor], [], [], 0.04)[0]:
+        while len(data) < 64 and select.select([descriptor], [], [], 0.04)[0]:
             byte = os.read(descriptor, 1)
             data += byte
             if len(data) >= 3 and (byte.isalpha() or byte == b"~"):
@@ -102,21 +106,20 @@ def _choose_terminal(
     selected = default - 1
     numeric = ""
     cancel_index = _cancel_choice_index(choices)
-    output.write("\x1b[?1049h\x1b[?25l")
+    output.write("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h")
     output.flush()
     try:
         tty.setcbreak(descriptor)
         while True:
-            output.write("\x1b[H\x1b[2J")
-            output.write(f"{title}\n\n")
-            for index, (label, _) in enumerate(choices, start=1):
-                marker = "❯" if index - 1 == selected else " "
-                output.write(f" {marker} {index}. {label}\n")
-            number_hint = f" • selection {numeric}" if numeric else ""
-            output.write(f"\n↑/↓ or j/k • Enter • number + Enter • q to go back{number_hint}")
+            size = shutil.get_terminal_size((100, 30))
+            rendered, targets = frame(title, [label for label, _ in choices], selected, size.columns, size.lines)
+            output.write(rendered)
             output.flush()
 
-            key = _read_terminal_key(descriptor)
+            try:
+                key = _read_terminal_key(descriptor)
+            except KeyboardInterrupt:
+                key = "cancel"
             if key == "up":
                 selected = (selected - 1) % len(choices)
                 numeric = ""
@@ -130,6 +133,10 @@ def _choose_terminal(
                     return choices[cancel_index][1]
                 output.write("\a")
                 output.flush()
+            elif key and key.startswith("click:"):
+                row = int(key.rsplit(":", 1)[1])
+                if row in targets:
+                    return choices[targets[row]][1]
             elif key == "eof":
                 raise EOFError
             elif key is not None and key.isdigit():
@@ -145,7 +152,7 @@ def _choose_terminal(
                     output.flush()
     finally:
         termios.tcsetattr(descriptor, termios.TCSADRAIN, previous_attributes)
-        output.write("\x1b[?25h\x1b[?1049l")
+        output.write("\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l")
         output.flush()
 
 
@@ -170,14 +177,14 @@ def choose(
             pass
     cancel_index = _cancel_choice_index(choices)
     while True:
-        print(f"\n{title}\n", file=output)
+        print(f"\n{plain(title)}\n", file=output)
         for index, (label, _) in enumerate(choices, start=1):
             marker = "*" if index == default else " "
-            print(f" {marker} {index}. {label}", file=output)
+            print(f" {marker} {index}. {plain(label)}", file=output)
         raw = reader(f"\nChoice [{default}]: ").strip()
         if not raw:
             return choices[default - 1][1]
-        if raw.lower() in ("q", "quit") and cancel_index is not None:
+        if raw.lower() in ("q", "quit", "exit", "back") and cancel_index is not None:
             return choices[cancel_index][1]
         if raw.isdigit() and 1 <= int(raw) <= len(choices):
             return choices[int(raw) - 1][1]
@@ -273,9 +280,9 @@ def _new_session(
     agent = choose(
         "Choose an agent",
         (
-            ("Codex", "codex"),
-            ("Claude", "claude"),
-            ("OpenCode", "opencode"),
+            ("Codex — OpenAI coding CLI; uses your Codex login", "codex"),
+            ("Claude — Anthropic coding CLI; uses your Claude login", "claude"),
+            ("OpenCode — Coding CLI with your configured model provider", "opencode"),
             ("Back", None),
         ),
         reader=reader,
@@ -336,12 +343,17 @@ def _new_session(
         f"{'PR #' + str(pr_number) if pr_number else 'origin/main'}"
     )
     planned = "\n".join(planned_capabilities(dev=dev, playwright=playwright))
-    confirmed = choose(
-        f"Create {name}?\n  {summary}\n\nPlanned capabilities\n{planned}",
-        (("Create and open", True), ("Cancel", False)),
-        reader=reader,
-        output=output,
-    )
+    while True:
+        confirmed = choose(
+            f"Create {name}?\n{summary}\nFiles persist when you return to the manager.",
+            (("Create and open", True), ("Cancel", False), ("Review planned tools — Inspect tools and access before creating", "details")),
+            reader=reader,
+            output=output,
+        )
+        if confirmed != "details":
+            break
+        from .manager import show
+        show(planned, reader=reader, output=output)
     if not confirmed:
         return
     record = create_session(
@@ -413,9 +425,12 @@ def _session_menu_title(record: SessionRecord) -> str:
         if report is None:
             return (
                 f"{header}\n\nCapabilities have not been measured yet — "
-                "choose Refresh capabilities."
+                "open Tools & access to measure them."
             )
-        body = render_report_text(report, name=record.name)
+        available = sum(item.status == "available" for item in report.results)
+        body = f"Tools: {available} available at last check · open Tools & access for details"
+        if leaks(report):
+            body = "ATTENTION: capability report found unexpected access — open Tools & access"
     except (KeyError, RuntimeError, ValueError, OSError) as exc:
         return f"{header}\n\nCapabilities are unavailable: {exc}"
     notes = []
@@ -424,8 +439,8 @@ def _session_menu_title(record: SessionRecord) -> str:
             f"  measured while the container was running; this session is now {record.phase}"
         )
     if report_is_stale(report):
-        notes.append("  measured more than 15 minutes ago; Refresh capabilities to remeasure")
-    return "\n".join([f"{header}\n\n{body}", *notes])
+        notes.append("  measured more than 15 minutes ago; Tools & access can remeasure")
+    return "\n".join([header, f"Branch: {record.target_branch or 'not selected'}", body, *notes])
 
 
 def _open_session(
@@ -438,13 +453,17 @@ def _open_session(
         action = choose(
             _session_menu_title(record),
             (
-                ("Open agent", "open"),
-                ("Open shell", "shell"),
-                ("Run validation", "validate"),
-                ("Refresh capabilities", "capabilities"),
-                ("Stop session", "stop"),
-                ("Submit draft pull request", "submit"),
-                ("Release published session", "release"),
+                (f"{'Resume' if record.phase == 'running' else 'Start'} {record.agent} — Open this harness; Ctrl-b d returns here", "open"),
+                ("Change harness — Keep files and commits; start a different conversation", "switch"),
+                ("Open shell — Terminal in this workspace; exit returns here", "shell"),
+                ("Environment & processes — Connections, dev-remote.sh, SSH and running tools", "environment"),
+                ("Browser — Enable Chromium, check it, or capture a screenshot", "browser"),
+                ("Files & attachments — Import, inspect, deliver and export sandbox files", "files"),
+                ("Testing — Changed files, full PR, browser and Xcode validation", "validate"),
+                ("Tools & access — Measured capabilities and configuration requirements", "tools"),
+                ("Branch & pull request — Luna high drafts branch, commit and PR copy", "publish"),
+                ("Stop session — Stop its harness and container; preserve files", "stop"),
+                ("Release published session — Free a clean, published worktree", "release"),
                 ("Back", "back"),
             ),
             reader=reader,
@@ -452,6 +471,10 @@ def _open_session(
         )
         if action == "back":
             return
+        if action in ("switch", "environment", "browser", "files", "tools", "publish"):
+            from .manager import manage
+
+            manage(action, record, reader=reader, output=output)
         if action == "open":
             # A running session's agent already read its context at startup;
             # rewriting the report cannot reach that process, and remeasuring
@@ -470,6 +493,7 @@ def _open_session(
             )
         elif action == "validate":
             _run_validation(record, reader=reader, output=output)
+            _acknowledge(reader, output)
         elif action == "capabilities":
             print("\nMeasuring capabilities...", file=output)
             report = ensure_capability_report(record, refresh=True)
@@ -490,7 +514,7 @@ def _open_session(
                 print(f"PR #{pull_request.number}: {pull_request.url}", file=output)
         elif action == "release":
             confirmed = choose(
-                "Release only removes a clean worktree whose HEAD is published.",
+                "Release removes a clean worktree whose HEAD is published.\nExport wanted generated files first; unexported files are removed with it.",
                 (("Cancel", False), ("Release", True)),
                 reader=reader,
                 output=output,
@@ -539,18 +563,18 @@ def run_wizard(
             records = [reconcile_session(record) for record in list_sessions()]
             choices: list[tuple[str, tuple[str, str | None]]] = [
                 (
-                    f"{record.name} — {record.agent} / {record.permission_mode} / {record.phase}",
+                    f"{record.name} [{record.phase}] · {record.agent} — {record.permission_mode} permissions; open session controls",
                     ("session", record.id),
                 )
                 for record in reversed(records)
             ]
             choices.extend(
                 [
-                    ("New isolated session", ("new", None)),
-                    ("Legacy workspace", ("legacy", None)),
-                    ("AutoPR dashboard", ("dashboard", None)),
-                    ("Clean up unused resources", ("cleanup", None)),
-                    ("Exit", ("exit", None)),
+                    ("New isolated session — Choose harness, permissions and starting branch / PR", ("new", None)),
+                    ("Legacy workspace — Shared original workspace terminal", ("legacy", None)),
+                    ("AutoPR dashboard — Background work and automation health", ("dashboard", None)),
+                    ("Clean up unused resources — Preview unused Docker resources before removal", ("cleanup", None)),
+                    ("Exit — Close manager; running sessions continue", ("exit", None)),
                 ]
             )
             action, value = choose(
@@ -572,9 +596,11 @@ def run_wizard(
             elif action == "session" and value:
                 record = next(item for item in records if item.id == value)
                 _open_session(record, reader=reader, output=output)
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             print(file=output)
             return 0
-        except (KeyError, RuntimeError, OSError) as exc:
+        except KeyboardInterrupt:
+            print('\nReturned to Sandbox. Check process status for interrupted actions.', file=output)
+        except (KeyError, RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
             print(f"\nCould not complete that action: {exc}", file=output)
             _acknowledge(reader, output)
