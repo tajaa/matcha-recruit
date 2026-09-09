@@ -13,8 +13,9 @@ a DB call).
 
 import asyncio
 import unittest
-from datetime import date as _date
+from datetime import date as _date, datetime, timezone
 from unittest import mock
+from uuid import uuid4
 
 from app.matcha.services.huume.actions import evaluate_huume_action
 from app.matcha.services.huume.agent import _HR_OPS_TOOL_SPECS, _build_hr_ops_staged
@@ -968,6 +969,7 @@ class TestExecuteBatchDispatch(unittest.TestCase):
         with (
             mock.patch.object(database, "get_connection", lambda: _ConnCtx(_ProposalConn(row))),
             mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(schedule_skill, "_execution_verification_error", mock.AsyncMock(return_value=None)),
             mock.patch.object(schedule_chat, "execute_batch_proposal", executor),
             mock.patch.object(schedule_chat, "execute_edit_proposal", mock.AsyncMock(side_effect=AssertionError("wrong executor"))),
             mock.patch.object(schedule_chat, "execute_proposal", mock.AsyncMock(side_effect=AssertionError("wrong executor"))),
@@ -1006,6 +1008,55 @@ class TestExecuteBatchDispatch(unittest.TestCase):
         assert result["status"] == "error"
         assert "rolled back" in result["message"]
 
+    def test_unexpected_failure_in_a_single_edit_reports_rollback(self):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        row = {
+            **_batch_row(),
+            "proposal": {"kind": "edit", "ops": [{"kind": "cancel"}]},
+        }
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        with (
+            mock.patch.object(database, "get_connection", lambda: _ConnCtx(_ProposalConn(row))),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(schedule_chat, "execute_edit_proposal", mock.AsyncMock(side_effect=RuntimeError("boom"))),
+        ):
+            result = _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1", action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+        assert result["status"] == "error"
+        assert "Nothing was applied" in result["message"]
+        assert "rolled back" in result["message"]
+
+    def test_post_commit_verification_failure_requires_reload(self):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        with (
+            mock.patch.object(database, "get_connection", lambda: _ConnCtx(_ProposalConn(_batch_row()))),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(schedule_chat, "execute_batch_proposal", mock.AsyncMock(return_value="Done.")),
+            mock.patch.object(
+                schedule_skill, "_execution_verification_error",
+                mock.AsyncMock(side_effect=RuntimeError("read failed")),
+            ),
+        ):
+            result = _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1", action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+        assert result["status"] == "error"
+        assert "could not be verified" in result["message"]
+        assert "Reload" in result["message"]
+
     def test_already_claimed_batch_is_refused(self):
         async def failing(conn, **kwargs):
             raise schedule_chat.ProposalExecutionClaimError("That proposal is already being applied or is no longer available.")
@@ -1017,6 +1068,70 @@ class TestExecuteBatchDispatch(unittest.TestCase):
     def test_stale_batch_row_is_refused_before_any_executor(self):
         result = self._run_execute(_batch_row(status="confirmed"), mock.AsyncMock(side_effect=AssertionError("must not run")))
         assert result["status"] == "error"
+
+
+class _VerificationConn:
+    def __init__(self, *, touched_ids, rows):
+        self.touched_ids = touched_ids
+        self.rows = rows
+
+    async def fetchrow(self, *_args):
+        return {"status": "confirmed", "created_shift_ids": self.touched_ids}
+
+    async def fetch(self, *_args):
+        return self.rows
+
+
+class TestPersistedExecutionVerification(unittest.TestCase):
+    def _proposal(self, employee_id=None):
+        assignees = [] if employee_id is None else [{"employee_id": str(employee_id)}]
+        return {
+            "kind": "create",
+            "shifts": [{
+                "starts_at": "2026-09-27T10:00:00+00:00",
+                "ends_at": "2026-09-27T15:30:00+00:00",
+                "location_id": "11111111-1111-4111-8111-111111111111",
+                "role": "Barista",
+                "assignees": assignees,
+            }],
+        }
+
+    def _row(self, shift_id, assignee_ids):
+        return {
+            "id": shift_id,
+            "starts_at": datetime(2026, 9, 27, 10, tzinfo=timezone.utc),
+            "ends_at": datetime(2026, 9, 27, 15, 30, tzinfo=timezone.utc),
+            "location_id": "11111111-1111-4111-8111-111111111111",
+            "role": "Barista", "status": "published",
+            "assignee_ids": [str(value) for value in assignee_ids],
+        }
+
+    def test_unassigned_create_rejects_an_unrequested_persisted_assignee(self):
+        shift_id, invented_employee = uuid4(), uuid4()
+        error = _run(schedule_skill._execution_verification_error(
+            _VerificationConn(
+                touched_ids=[shift_id], rows=[self._row(shift_id, [invented_employee])],
+            ),
+            company_id=uuid4(), proposal_id=uuid4(), proposal=self._proposal(),
+        ))
+        assert error is not None
+        assert "did not match" in error
+
+    def test_exact_unassigned_create_is_verified(self):
+        shift_id = uuid4()
+        error = _run(schedule_skill._execution_verification_error(
+            _VerificationConn(touched_ids=[shift_id], rows=[self._row(shift_id, [])]),
+            company_id=uuid4(), proposal_id=uuid4(), proposal=self._proposal(),
+        ))
+        assert error is None
+
+    def test_confirmed_no_op_is_not_reported_as_success(self):
+        error = _run(schedule_skill._execution_verification_error(
+            _VerificationConn(touched_ids=[], rows=[]),
+            company_id=uuid4(), proposal_id=uuid4(), proposal={"kind": "edit", "ops": []},
+        ))
+        assert error is not None
+        assert "None of the requested shifts changed" in error
 
 
 class _VacantConn:

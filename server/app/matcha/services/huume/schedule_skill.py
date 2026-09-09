@@ -49,6 +49,114 @@ _ALLOWED_ROLES = frozenset({"client", "admin"})
 _MAX_BULK_VACANT_SHIFTS = 500
 
 
+def _comparable_iso(value: Any) -> str:
+    """Comparable ISO text for asyncpg datetimes and proposal strings."""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+async def _execution_verification_error(
+    conn, *, company_id: UUID, proposal_id: UUID, proposal: dict[str, Any],
+) -> Optional[str]:
+    """Return a user-facing error unless the committed proposal is observable.
+
+    The schedule executors build their result text from the operations they
+    actually applied. This second read is the stronger Huume boundary: the
+    proposal must be finalized, every reported touched id must still belong to
+    the tenant, and every requested create must exist with no assignee the
+    staged proposal did not contain.
+    """
+    finalized = await conn.fetchrow(
+        "SELECT status, created_shift_ids FROM schedule_chat_proposals "
+        "WHERE id = $1 AND company_id = $2",
+        proposal_id, company_id,
+    )
+    if finalized is None or finalized["status"] != "confirmed":
+        return (
+            "The schedule operation returned, but its committed result could not be verified. "
+            "Reload the schedule before trying again so the same change is not repeated."
+        )
+
+    touched_ids = list(finalized["created_shift_ids"] or [])
+    if not touched_ids:
+        return (
+            "None of the requested shifts changed. Reload the schedule, review the conflict "
+            "details above, and stage only the remaining change."
+        )
+
+    rows = await conn.fetch(
+        """
+        SELECT s.id, s.location_id, s.role, s.starts_at, s.ends_at, s.status,
+               ARRAY(
+                   SELECT a.employee_id::text
+                   FROM schedule_shift_assignments a
+                   WHERE a.shift_id = s.id
+                   ORDER BY a.employee_id
+               ) AS assignee_ids
+        FROM schedule_shifts s
+        WHERE s.company_id = $1 AND s.id = ANY($2::uuid[])
+        """,
+        company_id, touched_ids,
+    )
+    by_id = {str(row["id"]): row for row in rows}
+    if len(by_id) != len({str(value) for value in touched_ids}):
+        return (
+            "The schedule changed, but the resulting shifts could not all be verified. "
+            "Reload the schedule before making another change."
+        )
+
+    kind = proposal.get("kind")
+    if kind == "batch":
+        create_specs = list((proposal.get("create") or {}).get("shifts") or [])
+        edit_ops = list((proposal.get("edit") or {}).get("ops") or [])
+    elif kind == "edit":
+        create_specs = []
+        edit_ops = list(proposal.get("ops") or [])
+    else:
+        create_specs = list(proposal.get("shifts") or [])
+        edit_ops = []
+
+    if not create_specs:
+        return None
+
+    edited_ids = {
+        str(value)
+        for op in edit_ops
+        for value in (op.get("shift_id"), op.get("second_shift_id"))
+        if value
+    }
+    created_ids = [str(value) for value in touched_ids if str(value) not in edited_ids]
+    if len(created_ids) != len(create_specs):
+        return (
+            "The schedule operation did not create exactly the shifts that were staged. "
+            "Reload the schedule and review the staged dates and times before trying again."
+        )
+
+    for shift_id, expected in zip(created_ids, create_specs):
+        actual = by_id[shift_id]
+        expected_assignees = {
+            str(assignee.get("employee_id"))
+            for assignee in expected.get("assignees") or []
+            if assignee.get("employee_id")
+        }
+        actual_assignees = {str(value) for value in actual["assignee_ids"] or []}
+        matches = (
+            actual["status"] != "cancelled"
+            and _comparable_iso(actual["starts_at"]) == _comparable_iso(expected.get("starts_at"))
+            and _comparable_iso(actual["ends_at"]) == _comparable_iso(expected.get("ends_at"))
+            and str(actual["location_id"] or "") == str(expected.get("location_id") or "")
+            and (actual["role"] or None) == (expected.get("role") or None)
+            and actual_assignees.issubset(expected_assignees)
+        )
+        if not matches:
+            return (
+                "A resulting shift did not match the staged time, role, location, or assignees. "
+                "Reload the schedule before making another change."
+            )
+    return None
+
+
 class ScheduleProposalResult(TypedDict):
     status: Literal["ready", "clarify", "refused"]
     message: NotRequired[str]
@@ -722,16 +830,43 @@ async def execute(
             # Raised inside the batch transaction → everything rolled back.
             return {"status": "error", "message": f"Nothing was applied — {exc}"}
         except Exception:
-            if proposal_kind != "batch":
-                raise
-            # The batch executor runs both halves in one transaction, so an
-            # unexpected failure here means the DB rolled ALL of it back —
-            # say so plainly rather than letting the agent's generic failure
-            # path imply a partial write.
-            logger.exception("schedule batch %s failed and was rolled back", proposal_id)
+            # Every schedule_chat executor owns a transaction. An unexpected
+            # failure therefore rolls its writes back; return that fact as a
+            # terminal schedule result instead of letting the outer agent
+            # convert it to a generic mid-turn failure and invite a blind
+            # retry against unknown state.
+            logger.exception("schedule proposal %s failed and was rolled back", proposal_id)
             return {
                 "status": "error",
-                "message": "Nothing was applied — that batch failed partway and was rolled back. "
+                "message": "Nothing was applied — that schedule change failed and was rolled back. "
                            "Try confirming again, or make the change on the Schedule page.",
             }
-    return {"status": "created", "message": text, "record_id": proposal_id, "bg_tasks": []}
+        try:
+            verification_error = await _execution_verification_error(
+                conn, company_id=company_id, proposal_id=UUID(proposal_id), proposal=proposal,
+            )
+        except Exception:
+            # The executor has already committed by this point. Never let a
+            # failed verification read turn into an unclassified stream error:
+            # the manager must reload before deciding whether another write is
+            # safe, and the failed action state prevents a blind re-confirm.
+            logger.exception("schedule proposal %s result verification failed", proposal_id)
+            verification_error = (
+                "The schedule operation returned, but its committed result could not be verified. "
+                "Reload the schedule before trying again so the same change is not repeated."
+            )
+        if verification_error:
+            # When every op was rejected, the executor's deterministic text
+            # carries the per-op conflict reasons. Preserve those actionable
+            # details; for every other verification mismatch omit its apparent
+            # success text because that is precisely what cannot be trusted.
+            message = (
+                f"{text}\n{verification_error}"
+                if verification_error.startswith("None of the requested shifts changed")
+                else verification_error
+            )
+            return {"status": "error", "message": message}
+    return {
+        "status": "created", "message": text, "record_id": proposal_id,
+        "verified": True, "bg_tasks": [],
+    }

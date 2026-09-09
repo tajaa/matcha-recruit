@@ -169,7 +169,7 @@ async def test_matching_confirm_call_is_not_blocked_by_schedule_cap(monkeypatch)
     responses = [_fake_response(calls=[_fake_call(
         "propose_schedule_change", {"kind": "assign", "confirm_id": confirm_id},
     )])]
-    frames, _client = await _run_turn(
+    frames, client = await _run_turn(
         monkeypatch,
         responses,
         current_state={
@@ -187,9 +187,45 @@ async def test_matching_confirm_call_is_not_blocked_by_schedule_cap(monkeypatch)
     )
     result = _result(frames)
 
+    assert client.aio.models.generate_content.await_count == 1
+    assert result["message"] == "Schedule updated."
     assert result["token_usage"]["schedule_proposal_attempts"] == 0
-    assert result["token_usage"].get("stop_reason") is None
+    assert result["token_usage"]["stop_reason"] == "schedule_execution_verified"
     assert result["steps"][-1]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_failed_confirm_uses_executor_result_and_does_not_retry_the_model(monkeypatch):
+    confirm_id = "cc33dd44"
+    responses = [
+        _fake_response(calls=[_fake_call(
+            "propose_schedule_change", {"confirm_id": confirm_id},
+        )]),
+        RuntimeError("a failed mutation must not get a model-written recovery pass"),
+    ]
+    frames, client = await _run_turn(
+        monkeypatch,
+        responses,
+        current_state={
+            "huume_action": {
+                "type": "schedule_change", "status": "proposed",
+                "confirm_id": confirm_id, "proposal_id": "proposal-1",
+                "kind": "create",
+            },
+        },
+        schedule_execute_result={
+            "status": "error",
+            "message": "None of the requested shifts changed. Reload the schedule and stage the remaining change.",
+        },
+        history_text="confirm",
+    )
+    result = _result(frames)
+
+    assert client.aio.models.generate_content.await_count == 1
+    assert result["message"].startswith("None of the requested shifts changed")
+    assert result["state_updates"]["huume_action"]["status"] == "failed"
+    assert result["token_usage"]["stop_reason"] == "schedule_execution_failed"
+    assert result["token_usage"]["tool_rejections"] == 1
 
 
 @pytest.mark.asyncio
