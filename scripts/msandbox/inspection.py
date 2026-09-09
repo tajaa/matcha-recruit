@@ -65,6 +65,8 @@ def inspect_session(record: SessionRecord) -> Snapshot:
                 "-a",
                 "--filter",
                 f"label=com.docker.compose.project={record.compose_project}",
+                "--filter",
+                "label=com.docker.compose.service=workspace",
                 "--format",
                 "{{json .}}",
             ]
@@ -79,7 +81,7 @@ def inspect_session(record: SessionRecord) -> Snapshot:
             lines.append(
                 f"{name}: {item.get('State', 'unknown')} · {item.get('Status', '')}"
             )
-            if "workspace" in name and item.get("State") == "running":
+            if item.get("State") == "running":
                 container_id = item["ID"]
         if not lines:
             lines.append("No session containers exist.")
@@ -156,7 +158,14 @@ def inspect_session(record: SessionRecord) -> Snapshot:
             lines.append(
                 "Workspace stopped; in-container connections and processes are not measured."
             )
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+        subprocess.TimeoutExpired,
+    ):
         lines.append("Some probes unavailable or timed out; refresh to retry.")
         return Snapshot(
             utc_now(), container_id, tuple(plain(line) for line in lines), False

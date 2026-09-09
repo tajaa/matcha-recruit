@@ -388,8 +388,15 @@ def manage(
                         "Workspace changed since this copy was reviewed. Generate a fresh draft."
                     )
                     continue
+                existing_pr_notice = (
+                    f"Existing PR #{record.pr_number}: its title and description will be replaced by the reviewed copy.\n"
+                    if record.pr_number and draft
+                    else ""
+                )
                 if pick(
-                    "Publish this validated commit and release its clean worktree?\nExport wanted generated files first; unexported files are removed with it.",
+                    existing_pr_notice
+                    + "Publish this validated commit and release its clean worktree?\n"
+                    "Export wanted generated files first; unexported files are removed with it.",
                     [("Cancel", False), ("Publish draft PR", True)],
                 ):
                     pr = submit_session(

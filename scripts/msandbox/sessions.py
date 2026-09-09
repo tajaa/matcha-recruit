@@ -505,17 +505,27 @@ def submit_session(record: SessionRecord, *, draft: bool = True, title: str | No
             raise SessionError("session changed while preparing submission; validate it again")
         record.phase = "submitting"
         save_session(record)
-        pushed_head = push_detached_head(
-            record.repo_path,
-            record.worktree,
-            record.target_branch,
-            record.expected_remote_sha,
-            head_sha=head,
-        )
-        record.expected_remote_sha = pushed_head
-        record.remote_head_sha = pushed_head
-        save_session(record)
-        number, url = _find_or_create_pr(record, draft=draft, title=title, body=body)
+        try:
+            pushed_head = push_detached_head(
+                record.repo_path,
+                record.worktree,
+                record.target_branch,
+                record.expected_remote_sha,
+                head_sha=head,
+            )
+            record.expected_remote_sha = pushed_head
+            record.remote_head_sha = pushed_head
+            save_session(record)
+            number, url = _find_or_create_pr(
+                record, draft=draft, title=title, body=body
+            )
+        except BaseException:
+            # A failed/interruptible push or GitHub step leaves a stopped,
+            # retryable session. Any proven push SHA above remains recorded so
+            # the next attempt compares against live origin with the right lease.
+            record.phase = "stopped"
+            save_session(record)
+            raise
         record.pr_number = number
         record.pr_url = url
         record.submitted_at = utc_now()

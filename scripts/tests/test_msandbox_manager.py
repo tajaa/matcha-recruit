@@ -27,7 +27,7 @@ from scripts.msandbox.publication import (
     save_draft,
     validate_copy,
 )
-from scripts.msandbox.sessions import create_session, switch_session
+from scripts.msandbox.sessions import create_session, submit_session, switch_session
 from scripts.msandbox.state import load_session, save_session
 from scripts.msandbox.terminal_ui import clip, frame, mouse_key, plain
 from scripts.msandbox.tool_actions import tool_action
@@ -239,6 +239,34 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                 for call in calls.call_args_list
             )
         )
+        docker_ps = calls.call_args_list[0].args[0]
+        self.assertIn("label=com.docker.compose.service=workspace", docker_ps)
+
+    def test_malformed_probe_json_is_an_unreliable_snapshot_not_a_crash(self):
+        def run(argv, **kwargs):
+            if argv[:2] == ["docker", "ps"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    json.dumps(
+                        {
+                            "Names": "session-workspace-1",
+                            "State": "running",
+                            "Status": "Up",
+                            "ID": "workspace-id",
+                        }
+                    ),
+                    "",
+                )
+            if argv[:2] == ["docker", "exec"]:
+                return subprocess.CompletedProcess(argv, 0, "null\n", "")
+            return subprocess.CompletedProcess(argv, 1, "", "")
+
+        with mock.patch("scripts.msandbox.inspection.run", side_effect=run):
+            snapshot = inspect_session(self.record())
+        self.assertFalse(snapshot.reliable)
+        self.assertEqual(snapshot.container_id, "workspace-id")
+        self.assertIn("Some probes unavailable", snapshot.lines[-1])
 
     def test_docker_error_is_unknown_not_false_health(self):
         with mock.patch(
@@ -424,6 +452,45 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                     )
                     self.assertIn("PR #7:", output.getvalue())
 
+    def test_existing_pr_publish_confirms_copy_replacement(self):
+        record = self.record()
+        record.pr_number = 7
+        draft = PublicationDraft(
+            "codex/existing",
+            "fix: existing",
+            "Replacement title",
+            "Replacement body",
+            "head",
+            "clean",
+        )
+        prompts = []
+        answers = iter(("submit", False, None))
+
+        def choose(title, choices, **kwargs):
+            prompts.append(title)
+            return next(answers)
+
+        with (
+            mock.patch("scripts.msandbox.manager.load_draft", return_value=draft),
+            mock.patch("scripts.msandbox.wizard.choose", side_effect=choose),
+            mock.patch(
+                "scripts.msandbox.git_worktrees.current_head", return_value="head"
+            ),
+            mock.patch(
+                "scripts.msandbox.git_worktrees.dirty_fingerprint",
+                return_value="clean",
+            ),
+            mock.patch("scripts.msandbox.manager.submit_session") as submit,
+        ):
+            manage("publish", record, reader=lambda _: "", output=io.StringIO())
+        submit.assert_not_called()
+        self.assertTrue(
+            any(
+                "Existing PR #7: its title and description will be replaced" in prompt
+                for prompt in prompts
+            )
+        )
+
     def test_released_session_cannot_switch_or_launch_tools(self):
         record = self.record()
         record.phase = "released"
@@ -444,6 +511,48 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             inspect.return_value.container_id = None
             self.assertIn("already stopped", tool_action(record, "browser-stop"))
         start.assert_not_called()
+
+    def test_stop_reports_already_stopped_when_tmux_session_is_absent(self):
+        for action in ("browser-stop", "dev-stop"):
+            with self.subTest(action=action):
+                record = self.record()
+                record.playwright = True
+                record.dev = True
+                save_session(record)
+                snapshot = mock.Mock(reliable=True, container_id="workspace-id")
+                with (
+                    mock.patch(
+                        "scripts.msandbox.inspection.inspect_session",
+                        return_value=snapshot,
+                    ),
+                    mock.patch(
+                        "scripts.msandbox.tool_actions.ensure_container"
+                    ) as start,
+                    mock.patch(
+                        "scripts.msandbox.tool_actions.exec_in_session",
+                        return_value=subprocess.CompletedProcess([], 1, "", ""),
+                    ),
+                ):
+                    result = tool_action(record, action)
+                self.assertIn("already stopped", result)
+                start.assert_not_called()
+
+    def test_browser_readiness_host_timeout_covers_probe_budget(self):
+        record = self.record()
+        record.playwright = True
+        save_session(record)
+        with (
+            mock.patch("scripts.msandbox.tool_actions.ensure_container"),
+            mock.patch(
+                "scripts.msandbox.tool_actions.exec_in_session",
+                side_effect=[
+                    subprocess.CompletedProcess([], 0, "", ""),
+                    subprocess.CompletedProcess([], 0, "", ""),
+                ],
+            ) as execute,
+        ):
+            self.assertIn("is ready", tool_action(record, "browser-start"))
+        self.assertEqual(execute.call_args_list[1].kwargs["timeout"], 20)
 
     def test_browser_url_is_argument_not_shell_code(self):
         record = self.record()
@@ -779,6 +888,45 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         ):
             number, _ = _find_or_create_pr(record, draft=True, title="Title", body=body)
         self.assertEqual(number, 7)
+
+    def test_pr_step_failure_returns_submission_to_stopped_and_retries(self):
+        record = create_session(
+            self.repo, SessionSpec("submit-retry", "codex", "main", start=False)
+        )
+        head = git(record.worktree, "rev-parse", "HEAD")
+        with (
+            mock.patch.dict(os.environ, {"MSANDBOX_NO_VERIFY": "1"}),
+            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch(
+                "scripts.msandbox.sessions.remote_branch_sha",
+                side_effect=[None, head],
+            ),
+            mock.patch(
+                "scripts.msandbox.sessions.push_detached_head", return_value=head
+            ) as push,
+            mock.patch(
+                "scripts.msandbox.sessions._find_or_create_pr",
+                side_effect=[
+                    RuntimeError("gh pr edit failed"),
+                    (7, "https://github.com/example/test/pull/7"),
+                ],
+            ),
+            mock.patch(
+                "scripts.msandbox.sessions.release_session",
+                return_value=mock.Mock(released=True),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "edit failed"):
+                submit_session(record, title="Replacement", body="Replacement")
+            saved = load_session(record.id)
+            self.assertEqual(saved.phase, "stopped")
+            self.assertEqual(saved.expected_remote_sha, head)
+            self.assertEqual(saved.remote_head_sha, head)
+
+            result = submit_session(record, title="Replacement", body="Replacement")
+
+        self.assertEqual(result.number, 7)
+        self.assertEqual(push.call_args_list[1].args[3], head)
 
 
 if __name__ == "__main__":

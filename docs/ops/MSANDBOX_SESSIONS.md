@@ -51,12 +51,16 @@ Opening an existing session always shows its controls before attaching:
   a reachable TCP socket are explicitly different observations. SSH processes
   are identified without exposing argv or destinations; no tunnel-health claim
   is inferred from an SSH process merely existing.
+  Workspace discovery filters Docker's exact Compose `workspace` service; session
+  names cannot cause database or Redis containers to be selected. Malformed probe
+  output is shown as an unreliable measurement instead of closing the manager.
 - **Browser** enables the browser image (stopping current workspace processes),
   starts/stops a managed headless Chromium, or captures a URL into a viewport PNG.
   Managed Chromium's CDP endpoint is `http://127.0.0.1:9222` **inside** the container,
   with no host publication. Screenshot capture uses a separate short-lived browser
   and closes it after success or failure. Browser executable/PID state appears in
-  Environment & processes.
+  Environment & processes. Browser readiness allows the complete bounded probe
+  window, and stopping an absent browser or development tmux session is idempotent.
 - **Files & attachments** imports quoted/dragged host paths or the clipboard,
   lists uploaded inputs and generated output, previews text, pastes references
   into the harness, and exports durable copies (revealed in Finder on macOS).
@@ -98,6 +102,10 @@ Opening an existing session always shows its controls before attaching:
   directly, with the session name and default PR description. Claude and OpenCode
   sessions do not need a Codex login to publish; the same validation and release
   checks apply.
+  When reviewed copy would replace an existing PR's title and description, the
+  confirmation names that PR and the fields being replaced. A failed or interrupted
+  push/GitHub step returns the session to `stopped`; proven pushed state is retained
+  so publishing can retry with the correct remote lease.
 
 Equivalent navigation commands:
 

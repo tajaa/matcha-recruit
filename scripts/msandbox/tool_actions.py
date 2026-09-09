@@ -133,6 +133,8 @@ def tool_action(record: SessionRecord, action: str, *, url: str = "") -> str:
         else:
             raise ValueError("unknown tool action")
         result = exec_in_session(current, argv, tty=False, capture=True, timeout=90)
+        if action.endswith("-stop") and result.returncode == 1:
+            return f"{action.removesuffix('-stop')} is already stopped."
         if action == "dev-start":
             # dev-remote ends with attach; readiness is measured separately.
             check = exec_in_session(
@@ -154,7 +156,7 @@ def tool_action(record: SessionRecord, action: str, *, url: str = "") -> str:
                 ["/workspace/server/venv/bin/python", "-c", BROWSER_READY],
                 tty=False,
                 capture=True,
-                timeout=8,
+                timeout=20,
             )
             if ready.returncode:
                 raise RuntimeError(
