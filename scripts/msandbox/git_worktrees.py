@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
 from .models import PublishState, ReleaseResult, WorktreeInfo, WorktreeOwner
-from .state import data_root
+from .state import data_root, state_lock
 
 
 class GitError(RuntimeError):
@@ -86,6 +88,40 @@ def session_git_head(session_id: str) -> str:
     return resolve_ref(git_dir, "HEAD")
 
 
+def exclude_generated_outputs(worktree: Path, session_id: str) -> None:
+    """Ignore generated outputs in both host and isolated Git, even on old bases.
+
+    Host info/exclude is shared by linked worktrees. Append one anchored rule,
+    preserving existing rules, without modifying any versioned .gitignore.
+    """
+    raw = Path(_git(worktree, "rev-parse", "--git-path", "info/exclude").stdout.strip())
+    host_exclude = raw if raw.is_absolute() else worktree / raw
+    with state_lock("generated-output-excludes"):
+        for path in (host_exclude, session_git_dir(session_id) / "info/exclude"):
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                fd = os.open(
+                    path.name,
+                    os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    0o600,
+                    dir_fd=directory_fd,
+                )
+                with os.fdopen(fd, "a+b") as handle:
+                    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                        raise GitError("Git exclude file is not a regular file")
+                    handle.seek(0)
+                    existing = handle.read(1024 * 1024 + 1)
+                    if len(existing) > 1024 * 1024:
+                        raise GitError("Git exclude file exceeds 1 MiB")
+                    rule = b"/.msandbox/outputs/"
+                    if existing.splitlines()[-1:] != [rule]:
+                        handle.write(b"\n" + rule + b"\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+            finally:
+                os.close(directory_fd)
+
+
 def initialize_session_git(
     repo: Path,
     worktree: Path,
@@ -125,6 +161,7 @@ def initialize_session_git(
         _git(git_dir, "read-tree", head_sha)
         pointer.write_text("gitdir: /msandbox-git\n", encoding="utf-8")
         pointer.chmod(0o600)
+        exclude_generated_outputs(worktree, session_id)
     except Exception:
         shutil.rmtree(git_dir.parent, ignore_errors=True)
         raise

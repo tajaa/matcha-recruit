@@ -23,7 +23,8 @@ All menus support mouse clicks, scroll wheel, arrows, `j`/`k`, and numbered
 selection. The selected action's description stays at the bottom of the screen.
 Long session lists scroll within the terminal height. `Esc`, `q`, and `Ctrl-C`
 go back; leaving the manager keeps background sessions alive. Long reports use
-`less` when available; `q` closes the report. Redirected terminals retain the
+`less` when available; even short results wait for `q`. Pager interrupts restore
+terminal input settings before returning. Redirected terminals retain the
 plain numbered interface.
 
 Opening an existing session always shows its controls before attaching:
@@ -37,7 +38,10 @@ Opening an existing session always shows its controls before attaching:
   Files, Git history, attachments, ports, and explicit permissions persist.
   Each harness keeps its own conversation history; this opens a new conversation
   and does not translate one harness's transcript into another. Login provisioning
-  must succeed before the new harness is saved. Start it from the session menu.
+  must succeed before the new harness is saved. Switching removes the other
+  harnesses' login files (including Claude's `.claude.json` login/settings file),
+  while retaining conversation history. Failed provisioning or saving restores
+  the previous login files. Start it from the session menu.
 - **Environment & processes** measures Docker state, harness terminals,
   container executable names/PIDs/uptime, `dev-remote.sh` panes, host development
   endpoints, session endpoints, and database/Redis TCP reachability. Start/stop
@@ -63,6 +67,10 @@ Opening an existing session always shows its controls before attaching:
   `~/.local/share/matcha-msandbox/exports/<id>`, outside the releasable worktree.
   **Export wanted generated files before releasing or submitting a session.**
   Generated output is ignored by Git and otherwise disappears with the worktree.
+  Creation and reconciliation install `/.msandbox/outputs/` in host and isolated
+  Git `info/exclude`, including sessions based on older commits. The host rule is
+  shared by the repository's linked worktrees; existing rules are preserved.
+  Controller commits also exclude `.msandbox` and refuse forcibly staged sandbox files.
 - **Testing** offers existing changed-file, full-PR, browser and native validation.
   Results stay visible after a run. Tests use the existing isolated validation
   services and immutable reports, including their existing stop/snapshot behavior.
@@ -72,14 +80,24 @@ Opening an existing session always shows its controls before attaching:
 - **Branch & pull request** runs `gpt-5.6-luna` with `high` reasoning to suggest
   a branch name, commit subject, title, and description from bounded Git summaries.
   The helper uses a temporary read-only container with writable tmpfs, a read-only
-  Codex login mount, no workspace/host-service mounts, and no shell or web-search
-  tools. It cannot apply a patch. The draft survives menu navigation and restart.
+  Codex login mount and no workspace/host-service mounts. Codex runs with read-only
+  sandboxing and approval policy `never`; shell/unified execution, browser/computer
+  use, host code execution, apps, plugins, subagents, image generation, hooks, and
+  web search are explicitly disabled. User config and execution rules are ignored.
+  Network remains available for model authentication and inference; this is not
+  a network-isolated helper. The draft survives menu navigation and restart.
   Review the copy and displayed changed-file list, then click **Create branch /
   commit** to commit all shown changes. The controller rejects stale drafts,
-  colliding branches, and invalid model output. Existing PR sessions retain their
+  colliding branches, and invalid model output. Repeated applies advance the local
+  branch with a compare-and-swap update; checked-out branches are refused.
+  Existing PR sessions retain their
   branch. Run **Validate full PR**, then **Publish draft pull request**; the existing
   exact-commit validation, push lease, and release checks still apply. The helper
   needs the current sandbox image built and a valid host `codex login`.
+  **Luna is optional:** already committed work can use **Publish draft pull request**
+  directly, with the session name and default PR description. Claude and OpenCode
+  sessions do not need a Codex login to publish; the same validation and release
+  checks apply.
 
 Equivalent navigation commands:
 

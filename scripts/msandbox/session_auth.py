@@ -7,7 +7,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Iterator
 
@@ -18,6 +18,52 @@ from .models import SessionRecord
 
 class SessionAuthError(RuntimeError):
     pass
+
+
+AGENT_AUTH_FILES = {
+    "codex": (".codex/auth.json",),
+    "claude": (".claude/.credentials.json", ".claude.json"),
+    "opencode": (".local/share/opencode/auth.json",),
+}
+
+
+@contextmanager
+def switching_agent_auth(record: SessionRecord) -> Iterator[None]:
+    """Remove other logins while stopped; restore login files if switching fails.
+
+    Open every parent before changing anything. Directory symlinks fail closed;
+    final symlinks are unlinked without ever following their targets. Histories
+    and other harness files are untouched.
+    """
+    with ExitStack() as stack:
+        files = []
+        for agent, paths in AGENT_AUTH_FILES.items():
+            for path in paths:
+                relative = Path(path)
+                fd = stack.enter_context(
+                    _private_directory(session_home(record), *relative.parts[:-1])
+                )
+                files.append(
+                    (agent, fd, relative.name, _read_private_regular_file(fd, relative.name))
+                )
+        try:
+            for agent, fd, name, _ in files:
+                if agent != record.agent:
+                    try:
+                        os.unlink(name, dir_fd=fd)
+                    except FileNotFoundError:
+                        pass
+            yield
+        except BaseException:
+            for _, fd, name, payload in files:
+                if payload is not None:
+                    _atomic_private_write(fd, name, payload)
+                else:
+                    try:
+                        os.unlink(name, dir_fd=fd)
+                    except FileNotFoundError:
+                        pass
+            raise
 
 
 def _directory_open_flags() -> int:
@@ -63,7 +109,7 @@ def _read_private_regular_file(directory_fd: int, name: str) -> bytes | None:
     try:
         descriptor = os.open(
             name,
-            os.O_RDONLY | os.O_NOFOLLOW,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
             dir_fd=directory_fd,
         )
     except FileNotFoundError:
@@ -77,7 +123,10 @@ def _read_private_regular_file(directory_fd: int, name: str) -> bytes | None:
             return None
         with os.fdopen(descriptor, "rb") as handle:
             descriptor = -1
-            return handle.read()
+            payload = handle.read(1024 * 1024 + 1)
+            if len(payload) > 1024 * 1024:
+                raise SessionAuthError(f"private credential file {name} exceeds 1 MiB")
+            return payload
     finally:
         if descriptor >= 0:
             os.close(descriptor)
@@ -136,22 +185,10 @@ def _copy_agent_auth(record: SessionRecord) -> None:
     """Seed only the selected agent's login; never copy histories or logs."""
     home = session_home(record)
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
-    candidates: dict[str, list[tuple[Path, Path]]] = {
-        "codex": [(Path.home() / ".codex/auth.json", home / ".codex/auth.json")],
-        "opencode": [
-            (
-                Path.home() / ".local/share/opencode/auth.json",
-                home / ".local/share/opencode/auth.json",
-            )
-        ],
-        "claude": [
-            (Path.home() / ".claude/.credentials.json", home / ".claude/.credentials.json"),
-            (Path.home() / ".claude.json", home / ".claude.json"),
-        ],
-    }
-    for source, destination in candidates[record.agent]:
+    for path in AGENT_AUTH_FILES[record.agent]:
+        source = Path.home() / path
         if source.is_file() and not source.is_symlink():
-            relative = destination.relative_to(home)
+            relative = Path(path)
             with _private_directory(home, *relative.parts[:-1]) as directory_fd:
                 _atomic_private_write(directory_fd, relative.name, source.read_bytes())
 

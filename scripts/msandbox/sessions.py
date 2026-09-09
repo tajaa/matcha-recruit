@@ -31,6 +31,7 @@ from .git_worktrees import (
     create_detached_worktree,
     current_head,
     dirty_fingerprint,
+    exclude_generated_outputs,
     fetch_origin,
     initialize_session_git,
     merge_base,
@@ -52,7 +53,11 @@ from .models import (
     SessionSpec,
     utc_now,
 )
-from .session_auth import provision_session_auth, refresh_github_auth
+from .session_auth import (
+    provision_session_auth,
+    refresh_github_auth,
+    switching_agent_auth,
+)
 from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
     SCHEMA_VERSION,
@@ -233,6 +238,7 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
 
 def _ensure_isolated_git(record: SessionRecord) -> None:
     if session_git_dir(record.id).is_dir():
+        exclude_generated_outputs(record.worktree, record.id)
         return
     head = current_head(record.worktree)
     initialize_session_git(record.repo_path, record.worktree, record.id, head)
@@ -339,10 +345,11 @@ def switch_session(record: SessionRecord, agent: str) -> SessionRecord:
             raise SessionError("this session cannot switch harnesses in its current state")
         stop_session(current, _lock_held=True)
         proposed = replace(current, agent=agent, agent_session_id=None, phase="stopped")
-        # A failed login copy leaves the durable record pointing at the old
-        # harness, stopped and retryable; never erase either harness's history.
-        provision_session_auth(proposed)
-        save_session(proposed)
+        # A failed copy/save restores previous login files and leaves the old
+        # harness stopped and retryable. Only login files change, not history.
+        with switching_agent_auth(proposed):
+            provision_session_auth(proposed)
+            save_session(proposed)
         record.__dict__.update(proposed.__dict__)
         return record
 

@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import termios
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,10 +25,24 @@ from .tool_actions import tool_action
 
 def show(text: str, *, reader, output) -> None:
     """Long details get a scrollable pager, never push navigation off-screen."""
-    if reader is input and output.isatty() and shutil.which("less"):
-        subprocess.run(
-            ["less", "-X", "-F"], input=plain(text) + "\n", text=True, check=False
-        )
+    if (
+        reader is input
+        and sys.stdin.isatty()
+        and output.isatty()
+        and shutil.which("less")
+    ):
+        descriptor = sys.stdin.fileno()
+        attributes = termios.tcgetattr(descriptor)
+        try:
+            subprocess.run(
+                ["less", "-X", "-+F"],
+                input=plain(text) + "\n",
+                text=True,
+                stdout=output,
+                check=False,
+            )
+        finally:
+            termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
     else:
         print(plain(text), file=output)
         reader("\nEnter to return...")
@@ -265,7 +280,7 @@ def manage(
         draft = load_draft(record)
         while True:
             selected = pick(
-                f"{record.name} / Branch & pull request\nTarget: {record.target_branch or 'not selected'}\nLuna high proposes copy; you review before Git changes.\nSubmission requires passing validation for the committed tree.",
+                f"{record.name} / Branch & pull request\nTarget: {record.target_branch or 'not selected'}\nLuna copy is optional; committed work can be published directly.\nSubmission requires passing validation for the committed tree.",
                 [
                     (
                         "Draft with Luna high — Stops workspace; generates branch, commit and PR copy",
@@ -308,7 +323,7 @@ def manage(
                     record, build_test_plan(record, "pr", browser=record.playwright)
                 )
                 view(f"Validation: {result.status}\n{result.result_path}")
-            elif draft is None:
+            elif draft is None and selected != "submit":
                 view("Generate a Luna draft first.")
             elif selected == "review":
                 from .publication import git
@@ -358,10 +373,14 @@ def manage(
             elif selected == "submit":
                 from .git_worktrees import current_head, dirty_fingerprint
 
-                if not record.pr_number and record.target_branch != draft.branch:
+                if (
+                    draft
+                    and not record.pr_number
+                    and record.target_branch != draft.branch
+                ):
                     view("Apply the reviewed branch before publishing this draft.")
                     continue
-                if (
+                if draft and (
                     current_head(record.worktree) != draft.head
                     or dirty_fingerprint(record.worktree) != draft.fingerprint
                 ):
@@ -374,7 +393,10 @@ def manage(
                     [("Cancel", False), ("Publish draft PR", True)],
                 ):
                     pr = submit_session(
-                        record, draft=True, title=draft.title, body=draft.body
+                        record,
+                        draft=True,
+                        title=draft.title if draft else record.name,
+                        body=draft.body if draft else None,
                     )
                     view(f"PR #{pr.number}: {pr.url}")
                     return

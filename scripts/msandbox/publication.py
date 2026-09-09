@@ -11,7 +11,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from .docker_runtime import compose_environment
-from .git_worktrees import current_head, dirty_fingerprint, remote_branch_sha
+from .git_worktrees import (
+    current_head,
+    dirty_fingerprint,
+    remote_branch_sha,
+    resolve_worktree_owner,
+)
 from .models import SessionRecord
 from .state import list_sessions, load_session, save_session, session_dir, state_lock
 
@@ -198,12 +203,32 @@ def generate_copy(image: str, context: dict) -> dict:
         "codex",
         "-i",
         image,
+        "-a",
+        "never",
         "exec",
         "--ephemeral",
         "--skip-git-repo-check",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--disable",
-        "shell_tool",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--sandbox",
+        "read-only",
+        *[
+            arg
+            for feature in (
+                "shell_tool",
+                "unified_exec",
+                "browser_use",
+                "computer_use",
+                "code_mode_host",
+                "apps",
+                "plugins",
+                "multi_agent",
+                "multi_agent_v2",
+                "image_generation",
+                "hooks",
+            )
+            for arg in ("--disable", feature)
+        ],
         "-m",
         "gpt-5.6-luna",
         "-c",
@@ -275,7 +300,7 @@ def apply_draft(
             {key: getattr(draft, key) for key in ("branch", "commit", "title", "body")}
         )
         branch = current.target_branch if current.pr_number else draft.branch
-        created_branch = False
+        previous_branch_head = None
         if not current.pr_number:
             if any(
                 s.id != current.id and s.target_branch == branch
@@ -300,23 +325,45 @@ def apply_draft(
             )
             if exists.returncode == 0 and branch != current.target_branch:
                 raise RuntimeError("Local branch already exists; choose another name")
-            if exists.returncode != 0:
+            if exists.returncode not in (0, 1):
+                raise RuntimeError("Could not inspect local branch")
+            if resolve_worktree_owner(current.repo_path, branch):
+                raise RuntimeError(
+                    "Local branch is checked out; detach it before applying"
+                )
+            if exists.returncode == 0:
+                previous_branch_head = git(current, "rev-parse", f"refs/heads/{branch}")
+                # A retry can have a newer detached HEAD after a failed commit/ref
+                # update. Never overwrite a local ref that moved independently.
+                git(
+                    current,
+                    "merge-base",
+                    "--is-ancestor",
+                    previous_branch_head,
+                    draft.head,
+                )
+            else:
                 git(current, "branch", branch, draft.head)
-                created_branch = True
+                previous_branch_head = draft.head
             current.target_branch = branch
             current.expected_remote_sha = None
             save_session(current)
         if commit and draft.fingerprint != "clean":
-            git(current, "add", "--all")
-            git(current, "commit", "-m", draft.commit)
-            current.last_validation = None
-            save_session(current)
-        if created_branch:
+            if git(current, "diff", "--cached", "--name-only", "--", ".msandbox"):
+                raise RuntimeError(
+                    "Sandbox files are staged; unstage .msandbox before committing"
+                )
+            git(current, "add", "--all", "--", ".", ":(top,exclude).msandbox")
+            if git(current, "diff", "--cached", "--name-only"):
+                git(current, "commit", "-m", draft.commit)
+                current.last_validation = None
+                save_session(current)
+        if previous_branch_head is not None:
             git(
                 current,
                 "update-ref",
                 f"refs/heads/{branch}",
                 current_head(current.worktree),
-                draft.head,
+                previous_branch_head,
             )
         record.__dict__.update(current.__dict__)
