@@ -5,7 +5,7 @@ from __future__ import annotations
 import textwrap
 from dataclasses import dataclass, field
 
-from .models import SessionRecord
+from .models import SessionRecord, port_lines
 from .terminal_ui import clip, plain
 
 TABS = ("Overview", "Processes", "Tools & access", "Files", "Testing", "Branch & PR")
@@ -94,19 +94,8 @@ def overview(record: SessionRecord) -> list[Row]:
         rows.append(
             Row(f"PR #{record.pr_number}: {record.pr_url or 'URL unavailable'}")
         )
-    if record.ports:
-        rows += [
-            Row(
-                "Configured development ports (reachability: Processes tab)",
-                tone="muted",
-            )
-        ]
-        rows += [
-            Row(f"{name}: http://127.0.0.1:{port}")
-            for name, port in vars(record.ports).items()
-        ]
-    else:
-        rows.append(Row("Development ports: not allocated", tone="muted"))
+    rows.append(Row("Development ports (reachability: Processes tab)", tone="muted"))
+    rows += [Row(line) for line in port_lines(record.ports)]
     rows += [
         Row(""),
         Row("WHAT HAPPENS NEXT", tone="accent"),
@@ -139,6 +128,10 @@ def build_layout(
     """Return clipped drawing commands and exact click targets for this viewport."""
     width, height = max(1, width - 1), max(1, height)
     layout = Layout(width, height)
+    entries = [(r.name + f" · {r.phase}", f"session:{r.id}") for r in records] + list(
+        GLOBALS
+    )
+    state.sidebar = min(max(0, state.sidebar), len(entries) - 1)
     layout.put(2, 1, "◆  Matcha Sandbox", "accent")
     if width < 72 or height < 20:
         layout.put(1, 4, "Resize to at least 73 columns × 20 rows.")
@@ -152,10 +145,6 @@ def build_layout(
         max(side + 3, width - 38), 1, "Local controller · saved session state", "muted"
     )
     layout.put(2, 4, "SESSIONS", "muted")
-    entries = [(r.name + f" · {r.phase}", f"session:{r.id}") for r in records] + list(
-        GLOBALS
-    )
-    state.sidebar = min(state.sidebar, len(entries) - 1)
     visible = max(1, (height - 11) // 3)
     start = max(0, min(state.sidebar - visible // 2, len(entries) - visible))
     for offset, index in enumerate(range(start, min(len(entries), start + visible))):
@@ -228,20 +217,22 @@ def build_layout(
     layout.content_height = max(1, bottom - top)
     expanded: list[Row] = []
     for row in rows:
-        lines = (
-            textwrap.wrap(
-                plain(row.text),
-                width=max(1, content_width // 2),
-                replace_whitespace=False,
-            )
-            if any(ord(c) > 0x2FFF for c in row.text)
-            else textwrap.wrap(plain(row.text), width=max(1, content_width - 3))
-        )
         # Action labels stay on one row; description text wraps and scrolls.
         if row.action:
             layout.action_lines.append(len(expanded))
             expanded.append(row)
         else:
+            safe_text = plain(row.text)
+            lines = textwrap.wrap(
+                safe_text,
+                width=max(
+                    1,
+                    content_width // 2
+                    if any(ord(c) > 0x2FFF for c in safe_text)
+                    else content_width - 3,
+                ),
+                replace_whitespace=False,
+            )
             expanded.extend(Row(line, tone=row.tone) for line in (lines or [""]))
     layout.content_lines = len(expanded)
     state.cursor = min(state.cursor, max(0, len(layout.action_lines) - 1))

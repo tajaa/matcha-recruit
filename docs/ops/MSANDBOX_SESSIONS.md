@@ -178,7 +178,8 @@ terminal temporarily, then return to the selected session and tab.
 
 - Click a session or action, or use arrows and Enter. Tab / Shift-Tab moves
   focus between the sidebar, tabs, and actions. Keys 1–6 select a detail tab.
-- Page Up / Page Down scroll details; mouse wheel scrolls the detail pane.
+- Page Up / Page Down scroll details. Terminals whose curses library reports
+  both wheel directions can also scroll the detail pane with the mouse wheel.
   Arrow keys scroll the sidebar through all sessions and global actions.
 - `r` reloads saved records and refreshes the selected session's process and
   connection snapshot. Entering Processes also starts its first read-only
@@ -192,7 +193,11 @@ terminal temporarily, then return to the selected session and tab.
 
 The header and sidebar show **saved** session state, not a health guarantee.
 Tool and validation reports are historical; publication still validates the
-current commit. AutoPR health is available through the AutoPR dashboard action.
+current commit. Unexpected access and missing required capabilities are marked
+as warnings in Tools & access. Every dashboard reload reconciles all saved
+sessions and surfaces per-session repair failures without hiding healthy ones.
+Cached capability reports and file indexes load in the background when their
+tabs open. AutoPR health is available through the AutoPR dashboard action.
 No browser, Electron, Python package download, or daemon is required for the UI;
 it uses Python's standard `curses` module on macOS/Linux. A 256-color terminal
 gets the green palette; basic color and monochrome terminals remain usable.

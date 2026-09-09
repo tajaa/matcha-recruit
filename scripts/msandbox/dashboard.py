@@ -8,7 +8,7 @@ import termios
 import threading
 from pathlib import Path
 
-from .capabilities import load_report, report_is_stale
+from .capabilities import leaks, load_report, missing_required, report_is_stale
 from .dashboard_view import GLOBALS, TABS, Row, ViewState, build_layout, overview
 from .errors import RECOVERABLE_ERRORS
 from .files import list_files
@@ -17,26 +17,47 @@ from .state import list_sessions, load_session
 
 
 class Observations:
-    """One bounded read-only probe at a time; results retain their session ID."""
+    """Queue bounded process probes; explicit refreshes are never dropped."""
 
     def __init__(self):
         self.snapshots = {}
         self.pending = None
         self.completed = queue.SimpleQueue()
         self.versions = {}
+        self.queued = {}
 
     def request(self, record):
-        if self.pending is not None:
+        version = self.versions.get(record.id, 0) + 1
+        self.versions[record.id] = version
+        self.snapshots.pop(record.id, None)
+        self.queued[record.id] = (version, record)
+        self._start_next()
+
+    def ensure(self, record):
+        if record.id not in self.snapshots and not self.is_pending(record.id):
+            self.request(record)
+
+    def is_pending(self, session_id):
+        return self.pending == session_id or session_id in self.queued
+
+    def _start_next(self):
+        if self.pending is not None or not self.queued:
             return
-        self.pending = record.id
-        version = self.versions.get(record.id, 0)
+        session_id = next(iter(self.queued))
+        version, record = self.queued.pop(session_id)
+        self.pending = session_id
 
         def inspect():
+            result = "Inspection failed before producing a result."
             try:
                 result = inspect_session(record)
-            except (*RECOVERABLE_ERRORS, TypeError) as exc:
-                result = str(exc)
-            self.completed.put((record.id, version, result))
+            except BaseException as exc:  # noqa: BLE001 - worker must always release the probe slot
+                try:
+                    result = f"{type(exc).__name__}: {exc}"
+                except BaseException:  # noqa: BLE001
+                    result = "Unexpected inspection failure."
+            finally:
+                self.completed.put((session_id, version, result))
 
         # Inspection has subprocess timeouts and never starts containers. A slow
         # Docker daemon must not hold the UI or keep a quitting manager alive.
@@ -45,17 +66,117 @@ class Observations:
         ).start()
 
     def poll(self):
-        try:
-            session_id, version, result = self.completed.get_nowait()
-        except queue.Empty:
-            return
-        if self.versions.get(session_id, 0) == version:
-            self.snapshots[session_id] = result
-        self.pending = None
+        while True:
+            try:
+                session_id, version, result = self.completed.get_nowait()
+            except queue.Empty:
+                break
+            if self.versions.get(session_id, 0) == version:
+                self.snapshots[session_id] = result
+            if self.pending == session_id:
+                self.pending = None
+            self._start_next()
 
     def invalidate(self, session_id):
         self.versions[session_id] = self.versions.get(session_id, 0) + 1
         self.snapshots.pop(session_id, None)
+        self.queued.pop(session_id, None)
+
+
+class LocalDetails:
+    """Load cached reports and file indexes off the curses input thread."""
+
+    def __init__(self):
+        self.values = {}
+        self.errors = {}
+        self.pending = set()
+        self.completed = queue.SimpleQueue()
+        self.versions = {}
+        self.queued = {}
+        self.active = None
+
+    def ensure(self, record, tab):
+        kind = {2: "report", 3: "files"}.get(tab)
+        if kind is None:
+            return
+        key = (record.id, kind)
+        if key in self.values or key in self.errors or key in self.pending:
+            return
+        version = self.versions.get(key, 0)
+        self.pending.add(key)
+        self.queued[key] = (version, record, kind)
+        self._start_next()
+
+    def _start_next(self):
+        if self.active is not None or not self.queued:
+            return
+        key = next(iter(self.queued))
+        version, record, kind = self.queued.pop(key)
+        self.active = key
+
+        def read():
+            value, error = None, None
+            try:
+                value = load_report(record) if kind == "report" else list_files(record)
+            except BaseException as exc:  # noqa: BLE001 - worker must always release the read slot
+                try:
+                    error = f"{kind}: {type(exc).__name__}: {exc}"
+                except BaseException:  # noqa: BLE001
+                    error = f"{kind}: unexpected read failure"
+            finally:
+                self.completed.put((key, version, value, error))
+
+        threading.Thread(
+            target=read, daemon=True, name=f"msandbox-{kind}-{record.id}"
+        ).start()
+
+    def poll(self):
+        while True:
+            try:
+                key, version, value, error = self.completed.get_nowait()
+            except queue.Empty:
+                break
+            self.pending.discard(key)
+            if self.active == key:
+                self.active = None
+            if self.versions.get(key, 0) != version:
+                self._start_next()
+                continue
+            if error:
+                self.errors[key] = error
+            else:
+                self.values[key] = value
+            self._start_next()
+
+    def for_record(self, record):
+        if record is None:
+            return {}
+        result = {
+            kind: self.values[(record.id, kind)]
+            for kind in ("report", "files")
+            if (record.id, kind) in self.values
+        }
+        errors = [
+            error
+            for (session_id, _), error in self.errors.items()
+            if session_id == record.id
+        ]
+        if errors:
+            result["errors"] = errors
+        result["pending"] = {
+            kind for session_id, kind in self.pending if session_id == record.id
+        }
+        return result
+
+    def invalidate(self, session_id):
+        for kind in ("report", "files"):
+            key = (session_id, kind)
+            self.versions[key] = self.versions.get(key, 0) + 1
+            self.values.pop(key, None)
+            self.errors.pop(key, None)
+            if key in self.queued:
+                self.queued.pop(key)
+                self.pending.discard(key)
 
 
 def session_rows(record, tab, observations, local):
@@ -84,7 +205,7 @@ def session_rows(record, tab, observations, local):
             Row(""),
         ]
         snapshot = observations.snapshots.get(record.id)
-        if observations.pending == record.id:
+        if observations.is_pending(record.id):
             rows.append(Row("Inspecting… you can keep navigating.", tone="accent"))
         if snapshot is None:
             rows.append(
@@ -114,9 +235,15 @@ def session_rows(record, tab, observations, local):
         report = local.get("report")
         if report is None:
             rows.append(
-                Row("No cached capability report. Open Tools & access to measure.")
+                Row(
+                    "Loading cached capability report…"
+                    if "report" in local.get("pending", set())
+                    else "No cached capability report. Open Tools & access to measure."
+                )
             )
         else:
+            leaked = {item.id for item in leaks(report)}
+            required = {item.id for item in missing_required(report)}
             rows += [
                 Row(
                     f"Last measured {report.checked_at}"
@@ -128,11 +255,37 @@ def session_rows(record, tab, observations, local):
                     tone="muted",
                 ),
             ]
+            if leaked:
+                rows.append(
+                    Row(
+                        "ATTENTION: unexpected sandbox access was measured — review leaked capabilities below.",
+                        tone="warning",
+                    )
+                )
+            elif required:
+                rows.append(
+                    Row(
+                        "Required capabilities are unavailable — review the affected tools below.",
+                        tone="warning",
+                    )
+                )
             for item in report.results:
+                problem = item.id in leaked or item.id in required
+                label = (
+                    "LEAK"
+                    if item.id in leaked
+                    else "REQUIRED MISSING"
+                    if item.id in required
+                    else item.status.upper()
+                )
                 rows += [
                     Row(
-                        f"{item.status.upper()}  {item.title}",
-                        tone="accent" if item.status == "available" else "warning",
+                        f"{label}  {item.title}",
+                        tone="warning"
+                        if problem
+                        else "accent"
+                        if item.status == "available"
+                        else "muted",
                     ),
                     Row(item.detail),
                     Row(""),
@@ -149,7 +302,9 @@ def session_rows(record, tab, observations, local):
         if not files:
             rows.append(
                 Row(
-                    "No files yet. Import attachments or save generated work in .msandbox/outputs/."
+                    "Loading file index…"
+                    if "files" in local.get("pending", set())
+                    else "No files yet. Import attachments or save generated work in .msandbox/outputs/."
                 )
             )
         rows.append(
@@ -193,18 +348,7 @@ def session_rows(record, tab, observations, local):
     ]
 
 
-def local_details(record):
-    details = {}
-    if record:
-        for name, read in (("report", load_report), ("files", list_files)):
-            try:
-                details[name] = read(record)
-            except (*RECOVERABLE_ERRORS, TypeError) as exc:
-                details.setdefault("errors", []).append(f"{name}: {exc}")
-    return details
-
-
-def _screen(window, records, state, observations):
+def _screen(window, records, state, observations, details=None):
     import curses
 
     try:
@@ -248,14 +392,16 @@ def _screen(window, records, state, observations):
             except curses.error:
                 pass
         window.bkgd(" ", colors.get("text", 0))
-    local_id, local = None, {}
+    details = details or LocalDetails()
     while True:
         observations.poll()
+        details.poll()
         record = next((r for r in records if r.id == state.session_id), None)
-        if record and local_id != record.id:
-            local_id, local = record.id, local_details(record)
-        if record and state.tab == 1 and record.id not in observations.snapshots:
-            observations.request(record)
+        if record and state.tab == 1:
+            observations.ensure(record)
+        if record:
+            details.ensure(record, state.tab)
+        local = details.for_record(record)
         rows = session_rows(record, state.tab, observations, local)
         rows += [Row(error, tone="warning") for error in local.get("errors", [])]
         height, width = window.getmaxyx()
@@ -357,9 +503,10 @@ def _screen(window, records, state, observations):
                 _, x, y, _, buttons = curses.getmouse()
             except curses.error:
                 continue
-            if buttons & curses.BUTTON4_PRESSED:
+            wheel_down = getattr(curses, "BUTTON5_PRESSED", None)
+            if wheel_down and buttons & curses.BUTTON4_PRESSED:
                 state.scroll = max(0, state.scroll - 3)
-            elif buttons & getattr(curses, "BUTTON5_PRESSED", 0):
+            elif wheel_down and buttons & wheel_down:
                 state.scroll += 3
             elif buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
                 command = layout.hit(x, y)
@@ -379,13 +526,13 @@ def _screen(window, records, state, observations):
             return command
 
 
-def _terminal_screen(records, state, observations):
+def _terminal_screen(records, state, observations, details=None):
     import curses
 
     descriptor = sys.stdin.fileno()
     attributes = termios.tcgetattr(descriptor)
     try:
-        return curses.wrapper(_screen, records, state, observations)
+        return curses.wrapper(_screen, records, state, observations, details)
     finally:
         termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
 
@@ -402,15 +549,57 @@ def run_dashboard(repo: Path, *, output=sys.stdout):
     from .manager import show
     from .sessions import reconcile_session
 
-    state, observations = ViewState(), Observations()
+    state, observations, details = ViewState(), Observations(), LocalDetails()
+    curses_failures = 0
     while True:
-        records = list(reversed(list_sessions()))
-        if not any(r.id == state.session_id for r in records):
+        failures = []
+        try:
+            records = []
+            for record in list_sessions():
+                try:
+                    records.append(reconcile_session(record))
+                except (*RECOVERABLE_ERRORS, TypeError) as exc:
+                    records.append(record)
+                    failures.append(f"{record.name}: {exc}")
+            records.reverse()
+        except KeyboardInterrupt:
+            state.notice = (
+                "Refresh interrupted. Saved session records remain available."
+            )
+            continue
+        selected = next(
+            (
+                index
+                for index, record in enumerate(records)
+                if record.id == state.session_id
+            ),
+            None,
+        )
+        if selected is None:
             state.session_id = records[0].id if records else None
             state.sidebar = state.scroll = state.cursor = 0
+        else:
+            state.sidebar = selected
+        if failures:
+            state.notice = "Sessions needing repair: " + "; ".join(failures)
         try:
-            command = _terminal_screen(records, state, observations)
-        except (curses.error, termios.error):
+            command = _terminal_screen(records, state, observations, details)
+            curses_failures = 0
+        except KeyboardInterrupt:
+            state.region = 0
+            state.notice = "Returned to session navigation. Running work continues."
+            continue
+        except curses.error:
+            curses_failures += 1
+            if curses_failures == 1:
+                state.notice = "Terminal changed while drawing; dashboard recovered."
+                continue
+            print(
+                "Dashboard unavailable in this terminal; opening classic menu.",
+                file=output,
+            )
+            return None
+        except termios.error:
             print(
                 "Dashboard unavailable in this terminal; opening classic menu.",
                 file=output,
@@ -423,7 +612,9 @@ def run_dashboard(repo: Path, *, output=sys.stdout):
         try:
             if command == "reload":
                 if state.session_id:
-                    observations.request(load_session(state.session_id))
+                    record = load_session(state.session_id)
+                    observations.request(record)
+                    details.invalidate(record.id)
             elif command == "new":
                 wizard._new_session(repo, reader=input, output=output)
                 state.session_id = None
@@ -436,10 +627,11 @@ def run_dashboard(repo: Path, *, output=sys.stdout):
                 wizard._acknowledge(input, output)
             elif state.session_id:
                 record = reconcile_session(load_session(state.session_id))
-                wizard._open_session(
-                    record, reader=input, output=output, initial_action=command
+                wizard._perform_session_action(
+                    record, command, reader=input, output=output
                 )
                 observations.invalidate(record.id)
+                details.invalidate(record.id)
             state.notice = (
                 "Returned to dashboard. r refreshes processes and connections."
             )

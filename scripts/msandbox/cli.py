@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 from . import __version__
@@ -20,7 +19,7 @@ from .git_worktrees import (
     resolve_worktree_owner,
 )
 from .install import install_release, rollback_release
-from .models import SessionSpec
+from .models import SessionSpec, port_lines
 from .session_auth import refresh_github_auth
 from .sessions import (
     SessionError,
@@ -243,7 +242,9 @@ def run(argv: list[str] | None = None) -> int:
             )
             print(f"Created {record.name}: {record.worktree_path}")
             if record.ports:
-                print("Ports: " + json.dumps(asdict(record.ports), sort_keys=True))
+                print("Ports:")
+                for line in port_lines(record.ports):
+                    print(f"  {line}")
             if record.phase == "running" and not args.no_attach:
                 return attach_agent(record)
             return 0
