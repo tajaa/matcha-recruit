@@ -113,7 +113,7 @@ extension TaskViewerSheet {
             ComposerTextView(
                 text: $newNote,
                 placeholder: isAddingAutoPRContext
-                    ? "Write your numbered answers and additional context…"
+                    ? "Add answers, context, or research guidance…"
                     : (replyingToNote == nil ? "Add a note…" : "Write a reply…"),
                 font: .systemFont(ofSize: 13),
                 textColor: appState.themeText,

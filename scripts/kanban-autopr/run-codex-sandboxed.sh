@@ -31,10 +31,10 @@ CODEX_MODEL="${AUTOPR_CODEX_MODEL:-gpt-5.6-sol}"
 CODEX_REASONING_EFFORT="${AUTOPR_CODEX_REASONING_EFFORT:-medium}"
 REQUIRE_EMPTY_PATCH="${AUTOPR_CODEX_REQUIRE_EMPTY_PATCH:-0}"
 RESUME_PATCH="${AUTOPR_RESUME_PATCH:-}"
-# Research runs only (see the kind registry in lib.sh). Live web search
-# executes on OpenAI's side, so the container's network posture is unchanged;
-# image inputs hand the card's screenshots to the model natively instead of as
-# opaque files. Both default off: the PR lanes behave exactly as before.
+# Implementation and research kinds opt into live web search via lib.sh.
+# Search executes on OpenAI's side; the container's network posture is unchanged.
+# Image inputs remain a separate research-kind switch. Other callers (such as
+# publication copy) opt into neither capability by default.
 WEB_SEARCH="${AUTOPR_CODEX_WEB_SEARCH:-0}"
 IMAGE_INPUTS="${AUTOPR_CODEX_IMAGE_INPUTS:-0}"
 # Screenshots the model captured with browse-capture.py. They come back the
@@ -52,6 +52,10 @@ ARTIFACTS_DIR="${AUTOPR_SANDBOX_ARTIFACTS_DIR:-}"
 BROWSE_SECTION_FILE=""
 if [ "$COLLECT_ARTIFACTS" = 1 ] && [ -f "$(dirname "$PROMPT_TEMPLATE")/_prompt_research_browse.txt" ]; then
     BROWSE_SECTION_FILE="$(dirname "$PROMPT_TEMPLATE")/_prompt_research_browse.txt"
+fi
+GROUNDING_SECTION_FILE=""
+if [ -f "$(dirname "$PROMPT_TEMPLATE")/_prompt_grounding.txt" ]; then
+    GROUNDING_SECTION_FILE="$(dirname "$PROMPT_TEMPLATE")/_prompt_grounding.txt"
 fi
 MAX_ARTIFACTS="${AUTOPR_SANDBOX_MAX_ARTIFACTS:-12}"
 MAX_ARTIFACT_BYTES="${AUTOPR_SANDBOX_MAX_ARTIFACT_BYTES:-4194304}"
@@ -209,10 +213,19 @@ AUTOPR_INPUTS_END
 
 $(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
     -e "s#DECISION_PATH#$MODEL_DECISION#g" "$PROMPT_TEMPLATE" \
-    | awk -v section_file="$BROWSE_SECTION_FILE" '
+    | awk -v browse_file="$BROWSE_SECTION_FILE" \
+          -v grounding_file="$GROUNDING_SECTION_FILE" '
         /^BROWSE_TOOL_SECTION$/ {
-            if (section_file != "") { while ((getline line < section_file) > 0) print line }
+            if (browse_file != "") { while ((getline line < browse_file) > 0) print line }
             else print "- No browser. This board is not granted browsing: `browse-capture.py` is\n  not available to you, no screenshot would be collected, and the attempt\n  only spends your time. Use web search alone."
+            next
+        }
+        /^GROUNDING_CONTEXT_SECTION$/ {
+            if (grounding_file == "") {
+                print "Grounding instructions are unavailable; do not guess or claim web research."
+            } else {
+                while ((getline line < grounding_file) > 0) print line
+            }
             next
         }
         { print }')"
