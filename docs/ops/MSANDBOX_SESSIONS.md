@@ -25,7 +25,13 @@ Long session lists scroll within the terminal height. `Esc`, `q`, and `Ctrl-C`
 go back; leaving the manager keeps background sessions alive. Long reports use
 `less` when available; even short results wait for `q`. Pager interrupts restore
 terminal input settings before returning. Redirected terminals retain the
-plain numbered interface.
+plain numbered interface. Terminal hops that fall back from SGR to legacy X10
+mouse reports are consumed as complete six-byte events; coordinate bytes cannot
+become menu shortcuts.
+
+Recoverable action errors remain in the active submenu and show their message
+before retry. Publication edits also retain the entered branch, title, and commit
+while an invalid value is corrected.
 
 Opening an existing session always shows its controls before attaching:
 
@@ -75,6 +81,9 @@ Opening an existing session always shows its controls before attaching:
   Git `info/exclude`, including sessions based on older commits. The host rule is
   shared by the repository's linked worktrees; existing rules are preserved.
   Controller commits also exclude `.msandbox` and refuse forcibly staged sandbox files.
+  Files with Unicode control-category characters in any path component are hidden
+  and cannot be delivered. Harness delivery uses bracketed paste so a pasted path
+  cannot submit the current prompt.
 - **Testing** offers existing changed-file, full-PR, browser and native validation.
   Results stay visible after a run. Tests use the existing isolated validation
   services and immutable reports, including their existing stop/snapshot behavior.
@@ -91,7 +100,8 @@ Opening an existing session always shows its controls before attaching:
   Network remains available for model authentication and inference; this is not
   a network-isolated helper. The draft survives menu navigation and restart.
   Review the copy and displayed changed-file list, then click **Create branch /
-  commit** to commit all shown changes. The controller rejects stale drafts,
+  commit** to stop the running harness/workspace and commit all shown changes;
+  both the action label and confirmation disclose that stop. The controller rejects stale drafts,
   colliding branches, and invalid model output. Repeated applies advance the local
   branch with a compare-and-swap update; checked-out branches are refused.
   Existing PR sessions retain their

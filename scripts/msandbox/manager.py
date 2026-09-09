@@ -48,8 +48,38 @@ def show(text: str, *, reader, output) -> None:
         reader("\nEnter to return...")
 
 
+MANAGED_ERRORS = (
+    KeyError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    subprocess.SubprocessError,
+)
+
+
 def manage(
     action: str, record: SessionRecord, *, reader=input, output=sys.stdout
+) -> None:
+    state = {}
+    while True:
+        try:
+            return _manage(action, record, reader=reader, output=output, state=state)
+        except MANAGED_ERRORS as exc:
+            show(
+                f"Could not complete that action: {exc}\n"
+                "You are still in this submenu; correct the input or go Back.",
+                reader=reader,
+                output=output,
+            )
+
+
+def _manage(
+    action: str,
+    record: SessionRecord,
+    *,
+    reader=input,
+    output=sys.stdout,
+    state,
 ) -> None:
     # Import at dispatch time: wizard owns only navigation primitives.
     from .wizard import choose
@@ -277,7 +307,11 @@ def manage(
                 )
 
     if action == "publish":
-        draft = load_draft(record)
+        if "draft" not in state:
+            state["draft"] = load_draft(record)
+            state["draft_valid"] = state["draft"] is not None
+        draft = state["draft"]
+        draft_valid = state["draft_valid"]
         while True:
             selected = pick(
                 f"{record.name} / Branch & pull request\nTarget: {record.target_branch or 'not selected'}\nLuna copy is optional; committed work can be published directly.\nSubmission requires passing validation for the committed tree.",
@@ -295,7 +329,7 @@ def manage(
                         "edit",
                     ),
                     (
-                        "Create branch / commit — Apply the reviewed name and commit all shown changes",
+                        "Create branch / commit — Stops workspace; applies the reviewed name and commits all shown changes",
                         "apply",
                     ),
                     (
@@ -314,6 +348,8 @@ def manage(
             if selected == "draft":
                 print("Drafting with gpt-5.6-luna / high…", file=output, flush=True)
                 draft = generate_draft(record)
+                draft_valid = True
+                state.update(draft=draft, draft_valid=True)
                 save_draft(record, draft)
                 view(f"{draft.branch}\n{draft.commit}\n\n{draft.title}\n\n{draft.body}")
             elif selected == "validate":
@@ -340,22 +376,37 @@ def manage(
                     title=reader(f"PR title [{draft.title}]: ").strip() or draft.title,
                     commit=reader(f"Commit [{draft.commit}]: ").strip() or draft.commit,
                 )
-                validate_copy(
-                    {
-                        key: getattr(proposed, key)
-                        for key in ("branch", "title", "commit", "body")
-                    }
-                )
                 draft = proposed
+                draft_valid = False
+                state.update(draft=draft, draft_valid=False)
+                try:
+                    validate_copy(
+                        {
+                            key: getattr(proposed, key)
+                            for key in ("branch", "title", "commit", "body")
+                        }
+                    )
+                except ValueError as exc:
+                    view(
+                        f"Draft needs correction: {exc}\n"
+                        "Your branch, title, and commit inputs are retained for another edit."
+                    )
+                    continue
+                draft_valid = True
+                state["draft_valid"] = True
                 save_draft(record, draft)
             elif selected == "apply":
                 from .publication import git
 
+                if not draft_valid:
+                    view("Correct the invalid draft before creating a branch or commit.")
+                    continue
                 view(
                     f"Files to commit:\n{git(record, 'status', '--short')}\n\nCommit: {draft.commit}\nBranch: {record.target_branch if record.pr_number else draft.branch}"
                 )
                 if pick(
-                    "Apply reviewed branch and commit all displayed changes?",
+                    "Creating the branch and commit stops the running harness and workspace.\n"
+                    "Apply the reviewed branch and commit all displayed changes?",
                     [("Cancel", False), ("Create branch and commit", True)],
                 ):
                     apply_draft(record, draft, commit=True)
@@ -366,6 +417,7 @@ def manage(
                         head=current_head(record.worktree),
                         fingerprint=dirty_fingerprint(record.worktree),
                     )
+                    state.update(draft=draft, draft_valid=True)
                     save_draft(record, draft)
                     view(
                         "Branch selected and changes committed. Run full PR validation next."
@@ -373,6 +425,9 @@ def manage(
             elif selected == "submit":
                 from .git_worktrees import current_head, dirty_fingerprint
 
+                if draft is not None and not draft_valid:
+                    view("Correct the invalid draft before publishing it.")
+                    continue
                 if (
                     draft
                     and not record.pr_number

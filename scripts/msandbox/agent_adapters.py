@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Sequence
 
@@ -313,6 +314,10 @@ def deliver_attachments(
 ) -> str:
     if not attachments:
         raise AgentError("no attachments to deliver")
+    for attachment in attachments:
+        path = str(attachment.container_path)
+        if any(unicodedata.category(char).startswith("C") for char in path):
+            raise AgentError("attachment paths cannot contain control characters")
     paths = " ".join(shlex.quote(str(item.container_path)) for item in attachments)
     message = " ".join(part for part in (paths, prompt or "") if part).strip()
     if record.agent == "codex" and record.agent_session_id:
@@ -327,5 +332,7 @@ def deliver_attachments(
     if not tmux_running(record):
         return message
     subprocess.run(["tmux", "set-buffer", "--", message], check=True)
-    subprocess.run(["tmux", "paste-buffer", "-t", record.tmux_session], check=True)
+    subprocess.run(
+        ["tmux", "paste-buffer", "-p", "-t", record.tmux_session], check=True
+    )
     return message

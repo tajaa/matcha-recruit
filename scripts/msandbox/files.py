@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,10 @@ class SandboxFile:
     relative: Path
     container_path: str
     size: int
+
+
+def _safe_name(value: str) -> bool:
+    return not any(unicodedata.category(char).startswith("C") for char in value)
 
 
 def list_files(record: SessionRecord) -> list[SandboxFile]:
@@ -39,8 +44,14 @@ def list_files(record: SessionRecord) -> list[SandboxFile]:
         visited = 0
         for directory, dirs, names in os.walk(root, followlinks=False):
             visited += 1
-            dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())
+            dirs[:] = sorted(
+                d
+                for d in dirs
+                if _safe_name(d) and not (Path(directory) / d).is_symlink()
+            )
             for name in sorted(names):
+                if not _safe_name(name):
+                    continue
                 path = Path(directory) / name
                 try:
                     metadata = path.lstat()
@@ -48,6 +59,8 @@ def list_files(record: SessionRecord) -> list[SandboxFile]:
                     continue
                 if stat.S_ISREG(metadata.st_mode):
                     relative = path.relative_to(root)
+                    if not _safe_name(relative.as_posix()):
+                        continue
                     result.append(
                         SandboxFile(
                             root,

@@ -13,12 +13,13 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+from scripts.msandbox.agent_adapters import AgentError, deliver_attachments
 from scripts.msandbox.docker_runtime import session_home
 from scripts.msandbox.files import SandboxFile, export_file, list_files, read_file
 from scripts.msandbox.git_worktrees import dirty_fingerprint
 from scripts.msandbox.inspection import inspect_session
 from scripts.msandbox.manager import manage
-from scripts.msandbox.models import SessionSpec
+from scripts.msandbox.models import Attachment, SessionSpec
 from scripts.msandbox.publication import (
     PublicationDraft,
     apply_draft,
@@ -206,8 +207,22 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
     def test_mouse_and_unicode_do_not_corrupt_terminal(self):
         self.assertEqual(mouse_key(b"\x1b[<0;12;4M"), "click:12:4")
         self.assertEqual(mouse_key(b"\x1b[<65;12;4M"), "down")
+        self.assertEqual(mouse_key(b"\x1b[M q1"), "ignore")
         self.assertEqual(clip("猫猫a", 3), "猫")
         self.assertNotIn("\x1b", plain("file\x1b]52;c;secret\a"))
+
+    def test_legacy_mouse_payload_cannot_become_navigation_keys(self):
+        from scripts.msandbox.wizard import _read_terminal_key
+
+        read_fd, write_fd = os.pipe()
+        try:
+            # X10 button + column + row bytes include q and 1, both active keys.
+            os.write(write_fd, b"\x1b[M q1\n")
+            self.assertEqual(_read_terminal_key(read_fd), "ignore")
+            self.assertEqual(_read_terminal_key(read_fd), "enter")
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
 
     def test_stopped_inspection_never_executes_or_starts_container(self):
         record = self.record()
@@ -289,6 +304,58 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         exported = export_file(record, files[0])
         (directory / "output.txt").unlink()
         self.assertEqual(exported.read_text(), "generated content")
+
+    def test_control_character_filenames_are_hidden_and_cannot_be_delivered(self):
+        record = self.record()
+        directory = record.worktree / ".msandbox/outputs"
+        directory.mkdir(parents=True)
+        (directory / "safe.txt").write_text("safe")
+        (directory / "report\nq.txt").write_text("unsafe")
+        self.assertEqual([item.relative.name for item in list_files(record)], ["safe.txt"])
+
+        unsafe = Attachment(
+            "",
+            "report.txt",
+            "text/plain",
+            "",
+            6,
+            directory / "report\nq.txt",
+            Path("/workspace/.msandbox/outputs/report\nq.txt"),
+        )
+        with (
+            mock.patch("scripts.msandbox.agent_adapters.tmux_running") as running,
+            mock.patch("scripts.msandbox.agent_adapters.subprocess.run") as run,
+            self.assertRaisesRegex(AgentError, "control characters"),
+        ):
+            deliver_attachments(record, [unsafe])
+        running.assert_not_called()
+        run.assert_not_called()
+
+    def test_tmux_attachment_delivery_uses_bracketed_paste(self):
+        record = self.record()
+        attachment = Attachment(
+            "",
+            "safe.txt",
+            "text/plain",
+            "",
+            4,
+            record.worktree / "safe.txt",
+            Path("/workspace/.msandbox/outputs/safe.txt"),
+        )
+        with (
+            mock.patch(
+                "scripts.msandbox.agent_adapters.tmux_running", return_value=True
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ) as run,
+        ):
+            deliver_attachments(record, [attachment])
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            ["tmux", "paste-buffer", "-p", "-t", record.tmux_session],
+        )
 
     def test_file_export_rechecks_ancestor_symlinks(self):
         record = self.record()
@@ -489,6 +556,105 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
                 "Existing PR #7: its title and description will be replaced" in prompt
                 for prompt in prompts
             )
+        )
+
+    def test_submenu_error_stays_in_browser_menu(self):
+        record = self.record()
+        record.playwright = True
+        save_session(record)
+        choices = iter(("browser-capture", None))
+        reader_prompts = []
+
+        def reader(prompt):
+            reader_prompts.append(prompt)
+            return "ftp://invalid" if prompt.startswith("Page URL") else ""
+
+        with (
+            mock.patch(
+                "scripts.msandbox.wizard.choose",
+                side_effect=lambda *args, **kwargs: next(choices),
+            ) as choose,
+            mock.patch("scripts.msandbox.tool_actions.ensure_container"),
+        ):
+            output = io.StringIO()
+            manage("browser", record, reader=reader, output=output)
+        self.assertEqual(choose.call_count, 2)
+        self.assertIn("still in this submenu", output.getvalue())
+        self.assertIn("Enter to return", " ".join(reader_prompts))
+
+    def test_invalid_draft_edit_keeps_other_fields_for_correction(self):
+        record = self.record()
+        save_session(record)
+        draft = PublicationDraft(
+            "codex/original",
+            "fix: original",
+            "Original title",
+            "Body",
+            "head",
+            "clean",
+        )
+        choices = iter(("edit", "edit", None))
+        reader_prompts = []
+
+        def reader(prompt):
+            reader_prompts.append(prompt)
+            if prompt == "Branch [codex/original]: ":
+                return "main"
+            if prompt == "PR title [Original title]: ":
+                return "Retained title"
+            if prompt == "Commit [fix: original]: ":
+                return "fix: retained"
+            if prompt == "Branch [main]: ":
+                return "codex/corrected"
+            return ""
+
+        with (
+            mock.patch("scripts.msandbox.manager.load_draft", return_value=draft),
+            mock.patch(
+                "scripts.msandbox.wizard.choose",
+                side_effect=lambda *args, **kwargs: next(choices),
+            ),
+        ):
+            manage("publish", record, reader=reader, output=io.StringIO())
+        saved = load_draft(record)
+        self.assertEqual(saved.branch, "codex/corrected")
+        self.assertEqual(saved.title, "Retained title")
+        self.assertEqual(saved.commit, "fix: retained")
+        self.assertIn("PR title [Retained title]: ", reader_prompts)
+        self.assertIn("Commit [fix: retained]: ", reader_prompts)
+
+    def test_branch_commit_action_discloses_workspace_stop(self):
+        record = self.record()
+        draft = PublicationDraft(
+            "codex/apply",
+            "fix: apply",
+            "Apply",
+            "Body",
+            "head",
+            "clean",
+        )
+        answers = iter(("apply", False, None))
+        menus = []
+
+        def choose(title, choices, **kwargs):
+            menus.append((title, [label for label, _ in choices]))
+            return next(answers)
+
+        with (
+            mock.patch("scripts.msandbox.manager.load_draft", return_value=draft),
+            mock.patch("scripts.msandbox.wizard.choose", side_effect=choose),
+            mock.patch("scripts.msandbox.publication.git", return_value="M README.md"),
+        ):
+            manage("publish", record, reader=lambda _: "", output=io.StringIO())
+        labels = [label for _, choices in menus for label in choices]
+        self.assertTrue(
+            any(
+                label.startswith("Create branch / commit — Stops workspace")
+                for label in labels
+            )
+        )
+        self.assertTrue(
+            any("stops the running harness and workspace" in title for title, _ in menus)
         )
 
     def test_released_session_cannot_switch_or_launch_tools(self):

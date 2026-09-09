@@ -32,6 +32,10 @@ def clip(value: str, width: int) -> str:
 
 
 def mouse_key(data: bytes) -> str | None:
+    # X10 reports are ESC [ M followed by three encoded bytes. Some terminal
+    # hops support mouse tracking but ignore the requested SGR (1006) mode.
+    if len(data) == 6 and data.startswith(b"\x1b[M"):
+        return "ignore"
     match = re.fullmatch(rb"\x1b\[<(\d+);(\d+);(\d+)([Mm])", data)
     if not match:
         return None

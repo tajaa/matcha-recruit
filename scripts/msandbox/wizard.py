@@ -83,6 +83,15 @@ def _read_terminal_key(descriptor: int) -> str | None:
             data += byte
             if len(data) >= 3 and (byte.isalpha() or byte == b"~"):
                 break
+        if data == b"\x1b[M":
+            # A terminal without SGR mouse support emits an X10 report. Consume
+            # its three payload bytes as one event so coordinates such as "q"
+            # or digits can never become navigation keystrokes.
+            while len(data) < 6:
+                chunk = os.read(descriptor, 6 - len(data))
+                if not chunk:
+                    break
+                data += chunk
     return _interpret_terminal_key(data)
 
 
