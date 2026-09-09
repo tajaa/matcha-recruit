@@ -47,6 +47,7 @@ from .inventory_forecast import router as inventory_forecast_router
 from .inventory_buying import router as inventory_buying_router
 from .inventory_pos import router as inventory_pos_router
 from .safety_meetings import router as safety_meetings_router
+from .symlink import router as symlink_router
 from .ops_permissions import router as ops_permissions_router
 from ..dependencies import require_feature, require_any_feature, require_all_features
 from ...core.dependencies import require_admin
@@ -88,7 +89,7 @@ from .onboarding import (
     ir_onboarding_router,
     matcha_x_onboarding_router,
 )
-from .intake import anonymous_report_router, external_intake_router
+from .intake import anonymous_report_router, external_intake_router, symlink_public_router
 
 matcha_router = APIRouter()
 
@@ -181,6 +182,10 @@ matcha_router.include_router(
 # toolbox-talk records. Standalone admin-toggle; not tied to Matcha Ops.
 matcha_router.include_router(safety_meetings_router, prefix="/safety-meetings", tags=["safety-meetings"],
                               dependencies=[Depends(require_feature("safety_meetings"))])
+# Sym-link — sender-side link/submission/passcode management. The recipient
+# endpoints are the public symlink_public_router mounted below.
+matcha_router.include_router(symlink_router, prefix="/symlink", tags=["symlink"],
+                              dependencies=[Depends(require_feature("symlink"))])
 # Matcha Ops permission management — company-scoped grants, gated on
 # matcha_ops at the mount and permissions.manage per mutation inside.
 matcha_router.include_router(ops_permissions_router, prefix="/ops/permissions", tags=["ops-permissions"],
@@ -353,6 +358,9 @@ matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting
 matcha_router.include_router(legal_defense_public_router, tags=["legal-pilot-public"])
 # Public off-platform client-intake — no auth, token-validated internally
 matcha_router.include_router(external_intake_router, prefix="/external-intake", tags=["external-intake-public"])
+# Public sym-link recipient endpoints (/sym/{token}/*) — no auth, no feature gate; token +
+# passcode validated internally (routes/intake/symlink_public.py)
+matcha_router.include_router(symlink_public_router, tags=["symlink-public"])
 # Admin WC rate-data import (require_admin per-endpoint)
 matcha_router.include_router(wc_rates_admin_router, prefix="/admin/wc-rates", tags=["wc-rates-admin"])
 # Fake HRIS (simulates ADP Workforce Now API) — no auth gate

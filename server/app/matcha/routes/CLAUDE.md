@@ -24,6 +24,8 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `onboarding/ir.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
 | `intake/inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
+| `intake/symlink_public.py` | (none) | Public sym-link recipient endpoints `/sym/:token` (validate / unlock with the weekly passcode / chat turn / attachments / submit) — token-validated, reads the raw stored `symlink` flag |
+| `symlink.py` | `/symlink` | Sym-link sender side: links CRUD + resend/revoke, staged-submission apply/reject, weekly passcode view/rotate/settings, announce-channel + roster lookups; `require_feature("symlink")` |
 | `employee_lifecycle/accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
 | `employee_lifecycle/discipline.py` | `/discipline` | Progressive discipline workflow + signatures + HR-approval workflow (pending-approval queue, approve/deny), letter templates CRUD, HR-approver designation (`clients.is_hr_approver`) — see root CLAUDE.md's Discipline module entry |
 | `risk_assessment.py` | `/risk-assessment` | Risk-assessment dashboard data (849 lines) |

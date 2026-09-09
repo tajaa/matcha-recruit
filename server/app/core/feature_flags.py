@@ -390,6 +390,19 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # router + the /app/safety-meetings pages. Default off; admin-toggle;
     # NOT in any tier overlay.
     "safety_meetings": False,
+    # Sym-link — bounded, guided task links. A sender picks a kind
+    # (credential/document upload, manager review, info update/confirmation,
+    # or a custom goal + checklist), names a recipient, and sends a per-task
+    # link; the recipient unlocks it with the company's weekly-rotating
+    # passcode and a Gemini "tunnel chat" (services/symlink/chat.py — same
+    # stateless-turn shape as ir_chat_intake) collects every required field +
+    # attachment before an editable review step. Completion STAGES a
+    # submission the sender must apply (confirm-first, like Huume); nothing
+    # is written to a domain table automatically. Gates the /symlink admin
+    # router + /app/symlink pages; the public /sym/{token} endpoints read the
+    # RAW stored flag (default False ⇒ a missing key means OFF). Default off;
+    # admin-toggle; NOT in any tier overlay; composable in /admin/products.
+    "symlink": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
