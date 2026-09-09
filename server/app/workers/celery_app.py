@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.workers.tasks.leave_deadline_checks",
         "app.workers.tasks.leave_agent_tasks",
         "app.workers.tasks.onboarding_reminders",
+        "app.workers.tasks.symlink",
         "app.workers.tasks.compliance_action_reminders",
         "app.workers.tasks.legal_deadline_reminders",
         "app.workers.tasks.handbook_freshness",
@@ -184,6 +185,8 @@ _SCHEDULED_TASKS = [
     ("grievance_deadline_alerts", "app.workers.tasks.grievance_deadline_alerts", "run_grievance_deadline_alerts"),
     ("hr_proactive_push", "app.workers.tasks.hr_proactive_push", "run_hr_proactive_push"),
     ("ir_deadline_alerts", "app.workers.tasks.ir_deadline_alerts", "run_ir_deadline_alerts"),
+    ("symlink_passcode_rotation", "app.workers.tasks.symlink", "run_symlink_passcode_rotation"),
+    ("symlink_sweep", "app.workers.tasks.symlink", "run_symlink_sweep"),
     # Fires on every worker restart; the task itself declines unless the last
     # scheduled run is older than MIN_SCHEDULED_INTERVAL_DAYS.
     ("compliance_evals", "app.workers.tasks.compliance_evals", "run_scheduled_compliance_evals"),
