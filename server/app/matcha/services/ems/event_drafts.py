@@ -37,6 +37,41 @@ class DraftDecisionResult:
     changed: bool
 
 
+async def _sync_confirmation_card_status(
+    conn,
+    *,
+    channel_id: UUID,
+    draft_id: UUID,
+    status: str,
+) -> None:
+    """Persist the canonical draft status on every card for this draft.
+
+    A draft can have more than one card when an ambiguous reply causes Huume
+    to repeat the confirmation prompt.  Updating by action identity, rather
+    than only ``confirmation_message_id``, prevents any of those persisted
+    messages from becoming an actionable card again after a history reload.
+    """
+
+    await conn.execute(
+        """
+        UPDATE channel_messages
+           SET metadata = jsonb_set(
+               metadata,
+               '{action,status}',
+               to_jsonb($3::text),
+               true
+           )
+         WHERE channel_id = $1
+           AND message_type = 'system'
+           AND metadata #>> '{action,kind}' = 'event_draft'
+           AND metadata #>> '{action,id}' = $2
+        """,
+        channel_id,
+        str(draft_id),
+        status,
+    )
+
+
 def _decode_json(value: Any) -> dict:
     if isinstance(value, str):
         try:
@@ -180,6 +215,12 @@ async def confirm_event_draft(
         raise EventDraftForbidden("You do not have permission to confirm this event draft")
 
     if draft["status"] == "confirmed":
+        await _sync_confirmation_card_status(
+            conn,
+            channel_id=draft["channel_id"],
+            draft_id=draft_id,
+            status="confirmed",
+        )
         event = None
         if draft["event_id"]:
             event = await conn.fetchrow(
@@ -235,6 +276,12 @@ async def confirm_event_draft(
     )
     if not updated:
         raise EventDraftConflict("Event draft changed while confirming")
+    await _sync_confirmation_card_status(
+        conn,
+        channel_id=updated["channel_id"],
+        draft_id=draft_id,
+        status="confirmed",
+    )
     await conn.execute(
         """
         INSERT INTO ems_event_audit_log (event_id, user_id, action, details)
@@ -279,6 +326,12 @@ async def reject_event_draft(
     ):
         raise EventDraftForbidden("You do not have permission to reject this event draft")
     if draft["status"] == "rejected":
+        await _sync_confirmation_card_status(
+            conn,
+            channel_id=draft["channel_id"],
+            draft_id=draft_id,
+            status="rejected",
+        )
         return DraftDecisionResult(draft=draft, event=None, changed=False)
     if draft["status"] != "pending":
         raise EventDraftConflict(f"Event draft is already {draft['status']}")
@@ -301,4 +354,10 @@ async def reject_event_draft(
     )
     if not updated:
         raise EventDraftConflict("Event draft changed while rejecting")
+    await _sync_confirmation_card_status(
+        conn,
+        channel_id=updated["channel_id"],
+        draft_id=draft_id,
+        status="rejected",
+    )
     return DraftDecisionResult(draft=dict(updated), event=None, changed=True)

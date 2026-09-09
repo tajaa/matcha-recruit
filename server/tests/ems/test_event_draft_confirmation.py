@@ -8,7 +8,11 @@ from app.matcha.services.ops.permissions import (
     OpsAccess,
     OpsCapability,
 )
-from app.matcha.services.ems.event_drafts import confirm_event_draft, may_decide_event_draft
+from app.matcha.services.ems.event_drafts import (
+    _sync_confirmation_card_status,
+    confirm_event_draft,
+    may_decide_event_draft,
+)
 from app.werk.routes.channels_ws import (
     _draft_reply_decision,
     _event_draft_confirmation_text,
@@ -63,6 +67,7 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
     company_id = uuid4()
     draft_id = uuid4()
     event_id = uuid4()
+    channel_id = uuid4()
     actor = uuid4()
     access = OpsAccess(
         company_id=company_id,
@@ -79,6 +84,7 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
             "status": "confirmed",
             "event_id": event_id,
             "reporter_user_id": None,
+            "channel_id": channel_id,
         },
         {"id": event_id},
     ]
@@ -92,3 +98,26 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
 
     assert result.changed is False
     assert result.event == {"id": event_id}
+    status_update = conn.execute.await_args
+    assert "UPDATE channel_messages" in status_update.args[0]
+    assert status_update.args[1:] == (channel_id, str(draft_id), "confirmed")
+
+
+@pytest.mark.asyncio
+async def test_confirmation_status_updates_every_card_with_the_same_draft_action():
+    from uuid import uuid4
+
+    conn = AsyncMock()
+    channel_id = uuid4()
+    draft_id = uuid4()
+
+    await _sync_confirmation_card_status(
+        conn,
+        channel_id=channel_id,
+        draft_id=draft_id,
+        status="rejected",
+    )
+
+    query, *args = conn.execute.await_args.args
+    assert "metadata #>> '{action,id}' = $2" in query
+    assert args == [channel_id, str(draft_id), "rejected"]
