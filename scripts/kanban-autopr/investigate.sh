@@ -83,8 +83,14 @@ KIND_DECISION="$(autopr_kind_field "$MODE" decision)"
 # drive a browser or bring screenshots back.
 BOARD_CAPABILITIES="$(jq -r '(.autopr_capabilities // [])[]' "$CARD_FILE" 2>/dev/null || true)"
 BROWSE_GRANTED=false
+SEARCH_GRANTED=false
 if [ "$KIND_OUTCOME" = artifact ]; then
+    SEARCH_GRANTED=true
     printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF browse && BROWSE_GRANTED=true
+elif printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF research; then
+    # Code drafting itself needs no grant. Reading the live web still crosses
+    # the repository boundary and uses the existing per-board research grant.
+    SEARCH_GRANTED=true
 fi
 ARTIFACTS_DIR="$WORK_DIR/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
@@ -116,16 +122,12 @@ if [ -n "$prior_checkpoint" ]; then
     done
 fi
 
-# Consume any "run now" request as soon as this card is actually picked up.
-# The claim is what stops the one-minute watcher re-dispatching for a card
-# whose run then crashes, is capped, or produces no PR. Non-fatal: losing the
-# claim must never abandon an investigation that is otherwise ready to go.
-if [ "$(jq -r '.autopr_run_requested_at // empty' "$CARD_FILE")" != "" ]; then
-    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/run-claim" '{}' \
-        >/dev/null 2>&1 \
-        || printf 'kanban-autopr: warning: could not claim the run request for %s\n' \
-            "$TASK_ID" >&2
-fi
+# Recheck every selected card against the live hold before starting work.
+# A cached candidate or failed API request must never bypass an unqueue.
+claim="$(mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/run-claim" '{}')" \
+    || die "could not verify the AutoPR queue state for $TASK_ID"
+[ "$(printf '%s' "$claim" | jq -r '.ok')" = true ] \
+    || die "ticket $TASK_ID was unqueued or left the queue before investigation"
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist
@@ -325,7 +327,8 @@ jq -n \
     --rawfile production_log_signals "$WORK_DIR/production-log-signals.txt" \
     --argjson downloaded "$downloaded" \
     --argjson withheld "$withheld_attachments" \
-    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded, withheld_attachments: $withheld}' \
+    --argjson web_search_available "$SEARCH_GRANTED" \
+    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], grounding: {web_search_available: $web_search_available}, production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded, withheld_attachments: $withheld}' \
     > "$CONTEXT_FILE"
 
 if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
@@ -403,6 +406,9 @@ run_codex() {
     for kind_switch in $KIND_SANDBOX_ENV; do
         runner_env+=("$kind_switch")
     done
+    if [ "$SEARCH_GRANTED" = true ] && [[ "$KIND_SANDBOX_ENV" != *AUTOPR_CODEX_WEB_SEARCH=1* ]]; then
+        runner_env+=(AUTOPR_CODEX_WEB_SEARCH=1)
+    fi
     if [ "$BROWSE_GRANTED" = true ]; then
         # No INSTALL_PLAYWRIGHT_BROWSERS here: it is a Docker BUILD arg
         # (docker/agent-sandbox/Dockerfile), read by `msandbox build
@@ -488,24 +494,64 @@ codex_pass
 # trusted validation below still has the last word.
 CORRECTION_KIND=""
 CORRECTION_INSTRUCTION=""
+append_correction() {
+    local kind="$1" instruction="$2"
+    if [ -z "$CORRECTION_KIND" ]; then
+        CORRECTION_KIND="$kind"
+        CORRECTION_INSTRUCTION="$instruction"
+    else
+        CORRECTION_KIND="$CORRECTION_KIND,$kind"
+        CORRECTION_INSTRUCTION="$CORRECTION_INSTRUCTION
+
+$instruction"
+    fi
+}
 if [ "$KIND_OUTCOME" != pull_request ]; then
     # Directive, migration, and cosmetic-diff corrections all describe a
     # patch; an artifact kind produces none. Its schema check below is the
     # only gate, and a failure there is fatal rather than retried.
     :
-elif [ -s "$DIRECTIVE_FILE" ] \
-    && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
-    CORRECTION_KIND="directive_violation"
-    CORRECTION_INSTRUCTION="The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. A needed migration is never a reason to refuse. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."
 elif [ "$(jq -r '.no_safe_action_reason // ""' "$RAW_DECISION_FILE" 2>/dev/null)" = migration_required ]; then
     # The single most common refusal, and it never protected anything: the
     # operator applies every migration by hand, so authoring the version file
     # is ordinary drafting work. decision.sh no longer accepts the reason at
     # all; correct it here so an out-of-date model costs one retry instead of
     # a dead run.
-    CORRECTION_KIND="migration_is_not_a_blocker"
-    CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: migration_required is not an outcome this harness accepts. Needing a database migration is ordinary drafting work, not a blocker. Investigate again and implement the change: author the application code, its tests, and a new server/alembic/versions/<revision>.py version file for human review — its name must use only letters, digits and underscores without a leading underscore, it must assign a string literal `revision`, its `down_revision` must be one of the current repository heads, and it must define both `upgrade()` and `downgrade()`. You must never run a migration against any database and you must not touch env.py, templates, alembic.ini, or any migration runner code — a human reviews and applies every migration. If something OTHER than the schema change genuinely blocks you, use questions_only with concrete options, or no_safe_action with already_fixed, acceptance_criteria_met, policy_blocked, or external_dependency."
+    append_correction migration_is_not_a_blocker "The trusted harness REJECTED the decision you just returned: migration_required is not an outcome this harness accepts. Needing a database migration is ordinary drafting work, not a blocker. Investigate again and implement the change: author the application code, its tests, and a new server/alembic/versions/<revision>.py version file for human review — its name must use only letters, digits and underscores without a leading underscore, it must assign a string literal `revision`, its `down_revision` must be one of the current repository heads, and it must define both `upgrade()` and `downgrade()`. You must never run a migration against any database and you must not touch env.py, templates, alembic.ini, or any migration runner code — a human reviews and applies every migration. If something OTHER than the schema change genuinely blocks you, use questions_only with concrete options, or no_safe_action with already_fixed, acceptance_criteria_met, policy_blocked, or external_dependency."
+    if [ -s "$DIRECTIVE_FILE" ] \
+        && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
+        append_correction directive_violation "The authorized card owner issued the directives above. The replacement decision must honor them as well as implementing the needed migration."
+    fi
+    if ! "$SCRIPT_DIR/decision.sh" grounding-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+        append_correction unresolved_researchable_context "Any remaining question or blocker must also carry the grounded resolution evidence and rationale described in the shared prompt contract."
+    fi
+elif [ "$(jq -r '.no_safe_action_reason // ""' "$RAW_DECISION_FILE" 2>/dev/null)" = already_fixed ] \
+    && ! "$SCRIPT_DIR/decision.sh" acceptance-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+    append_correction already_fixed_requires_evidence "The trusted harness REJECTED an unevidenced already_fixed verdict. Either implement the uncovered work or return already_fixed with acceptance_evidence containing at least one real repository citation: criterion, path, nonblank line, and a commit at HEAD or in its ancestry. The harness verifies every citation. Do not manufacture a cosmetic change or guess evidence."
+    if [ -s "$DIRECTIVE_FILE" ] \
+        && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
+        append_correction directive_violation "The authorized card owner also issued directives that this decision violates. Honor every directive in the replacement decision."
+    fi
+    if ! "$SCRIPT_DIR/decision.sh" grounding-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+        append_correction unresolved_researchable_context "Any remaining question or blocker must also carry the grounded resolution evidence and rationale described in the shared prompt contract."
+    fi
+elif ! "$SCRIPT_DIR/decision.sh" schema-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+    # Invalid JSON and unrelated schema failures are not grounding failures.
+    # Let the normalizer below report the precise validation error without a
+    # misleading retry or an unreadable correction attachment.
+    :
 else
+    # Detect every independent defect in this decision before spending the one
+    # retry. An elif chain made a directive failure hide missing grounding (or
+    # vice versa), so the replacement pass could satisfy only the first error
+    # and then fail publication on the second.
+    if [ -s "$DIRECTIVE_FILE" ] \
+        && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
+        append_correction directive_violation "The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. A needed migration is never a reason to refuse. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."
+    fi
+    if ! "$SCRIPT_DIR/decision.sh" grounding-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+        append_correction unresolved_researchable_context "The trusted harness REJECTED an unexplained blocker. Read the latest additional context as plain-language answers or research guidance, not just numbered choices. When context.json says grounding.web_search_available is true, use live web search and primary sources for missing public facts. When it is false, record that the board has not granted search and do not claim a search. Draft safe repo-local work through the existing research, catalog, and consumer path. Do not invent a counsel-approval requirement. Preserve actual review/approval gates and never write production data or apply migrations. Every remaining question needs resolution.kind (product_decision, private_context, source_unavailable, or explicit_approval), 1-5 nonblank resolution.evidence entries of at most 300 characters, and resolution.why_user_needed of at most 600 characters. A policy_blocked/external_dependency refusal needs the same object as blocker_resolution. Record only work actually done; if research is unavailable or fails, say so accurately. Prefer partial_implementation when safe independent work is possible."
+    fi
     # publish.sh refuses a string-literal-only diff on a card asking for
     # structure and discards the run. Catching it here instead gives the model
     # the one thing that failure never had: a correction path.
@@ -515,19 +561,16 @@ else
             git -C "$REPO_ROOT" diff HEAD > "$WORKTREE_DIFF" 2>/dev/null || : > "$WORKTREE_DIFF"
             if autopr_cosmetic_only_diff "$WORKTREE_DIFF" \
                 "$(jq -r '.title // ""' "$CARD_FILE")" "$(jq -r '.description // ""' "$CARD_FILE")"; then
-                CORRECTION_KIND="cosmetic_only_diff"
-                CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: this card asks for structure — a route, a sidebar row, a menu entry, an endpoint — and your diff only rewrites string literals, which changes nothing a reader of the card asked for. Investigate again. If every acceptance criterion is already satisfied on this branch, return no_safe_action with acceptance_criteria_met and one acceptance_evidence entry per criterion (criterion text plus path, line, commit); the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. If a specific missing product decision blocks the structural change, return questions_only and say what is missing. Only return an implementation if you make the structural change the card actually asks for."
+                append_correction cosmetic_only_diff "The trusted harness REJECTED the decision you just returned: this card asks for structure — a route, a sidebar row, a menu entry, an endpoint — and your diff only rewrites string literals, which changes nothing a reader of the card asked for. Investigate again. If every acceptance criterion is already satisfied on this branch, return no_safe_action with acceptance_criteria_met and one acceptance_evidence entry per criterion (criterion text plus path, line, commit); the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. If a specific missing product decision blocks the structural change, return questions_only and say what is missing. Only return an implementation if you make the structural change the card actually asks for."
             fi
             # The publisher's migration gate, run here instead of there. A
             # mistyped down_revision used to cost the whole investigation:
             # publish.sh's only answer is `git reset --hard` and exit. Now that
             # drafting a migration is the routine path rather than a rare
             # exception, that failure needed a correction path like every other.
-            if [ -z "$CORRECTION_KIND" ] \
-                && ! MIGRATION_DRAFT_ERRORS="$(autopr_migration_draft_errors "$REPO_ROOT" \
+            if ! MIGRATION_DRAFT_ERRORS="$(autopr_migration_draft_errors "$REPO_ROOT" \
                     "${AUTOPR_MIGRATION_BASE_REF:-main}")"; then
-                CORRECTION_KIND="migration_draft_invalid"
-                CORRECTION_INSTRUCTION="The trusted harness REJECTED the decision you just returned: the migration you drafted cannot be published.
+                append_correction migration_draft_invalid "The trusted harness REJECTED the decision you just returned: the migration you drafted cannot be published.
 $MIGRATION_DRAFT_ERRORS
 Investigate again and re-author the change. A drafted migration must be a NEW file server/alembic/versions/<revision>.py whose name uses only letters, digits and underscores and does not start with an underscore; it must assign a string literal \`revision\`; its \`down_revision\` must be one of the current repository heads (listed as repository_heads in the production context) or another migration you are adding in this same change, never None and never a mid-chain revision; and it must define both \`upgrade()\` and \`downgrade()\`. Never edit or delete a migration already on main, never touch env.py, templates, alembic.ini, or any migration runner code, and never run a migration against any database."
             fi
@@ -537,6 +580,18 @@ fi
 
 if [ -n "$CORRECTION_KIND" ]; then
     echo "kanban-autopr: decision rejected ($CORRECTION_KIND); retrying once" >&2
+    case ",$CORRECTION_KIND," in
+        *,unresolved_researchable_context,*)
+            if [ "$(jq -r '.outcome // ""' "$RAW_DECISION_FILE" 2>/dev/null)" = partial_implementation ] \
+                && [[ ",$CORRECTION_KIND," != *,cosmetic_only_diff,* ]] \
+                && [[ ",$CORRECTION_KIND," != *,migration_draft_invalid,* ]]; then
+                grounding_patch="$WORK_DIR/grounding-resume.patch"
+                git -C "$REPO_ROOT" diff HEAD > "$grounding_patch" 2>/dev/null \
+                    || : > "$grounding_patch"
+                [ ! -s "$grounding_patch" ] || RESUME_PATCH="$grounding_patch"
+            fi
+            ;;
+    esac
     # The rejected pass must not leave edits behind for the retry to inherit.
     git -C "$REPO_ROOT" reset --hard HEAD >/dev/null 2>&1 || true
     git -C "$REPO_ROOT" clean -fd >/dev/null 2>&1 || true
@@ -548,7 +603,9 @@ if [ -n "$CORRECTION_KIND" ]; then
         '{kind: $kind,
           directive_policy: ($policy[0] // null),
           rejected_decision: {outcome: $rejected[0].outcome,
-                              no_safe_action_reason: $rejected[0].no_safe_action_reason},
+                              no_safe_action_reason: $rejected[0].no_safe_action_reason,
+                              questions: $rejected[0].questions,
+                              blocker_resolution: $rejected[0].blocker_resolution},
           instruction: $instruction}' \
         > "$CORRECTION_FILE"
     ATTACH_ARGS+=(-f "$CORRECTION_FILE")
@@ -557,18 +614,70 @@ if [ -n "$CORRECTION_KIND" ]; then
     codex_pass
 fi
 
+park_rejected_after_correction() {
+    local failure="$1" existing marker origin_note
+    stop_inflight_snapshots
+    existing="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+    marker="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] needs_clarification"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · $marker · note: AutoPR $failure after one correction." \
+        "$existing")"
+    mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$origin_note" \
+            '{board_column:"changes_requested",progress_note:$note}')" >/dev/null \
+        || die "could not park the rejected investigation on task $TASK_ID"
+    autopr_post_context_request "$PROJECT_ID" "$TASK_ID" \
+        "AutoPR $failure after one correction. Review the saved checkpoint, then add plain-language context, clarify what it should research, or press Run to resume the repair." \
+        "$origin_note"
+}
+
+POST_CORRECTION_FAILURE=""
+if [ "$KIND_OUTCOME" = pull_request ] && [ -n "$CORRECTION_KIND" ]; then
+    if ! "$SCRIPT_DIR/decision.sh" schema-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+        POST_CORRECTION_FAILURE="returned an invalid decision"
+    elif [ -s "$DIRECTIVE_FILE" ] \
+        && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
+        POST_CORRECTION_FAILURE="still violated the owner's directive"
+    elif ! "$SCRIPT_DIR/decision.sh" grounding-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+        POST_CORRECTION_FAILURE="could not justify its remaining questions"
+    else
+        case "$(jq -r '.outcome // ""' "$RAW_DECISION_FILE")" in
+            implementation|partial_implementation)
+                POST_RETRY_DIFF="$WORK_DIR/post-retry.diff"
+                git -C "$REPO_ROOT" diff HEAD > "$POST_RETRY_DIFF" 2>/dev/null \
+                    || : > "$POST_RETRY_DIFF"
+                if autopr_cosmetic_only_diff "$POST_RETRY_DIFF" \
+                    "$(jq -r '.title // ""' "$CARD_FILE")" \
+                    "$(jq -r '.description // ""' "$CARD_FILE")"; then
+                    POST_CORRECTION_FAILURE="still produced only a cosmetic diff"
+                elif ! autopr_migration_draft_errors "$REPO_ROOT" \
+                    "${AUTOPR_MIGRATION_BASE_REF:-main}" >/dev/null; then
+                    POST_CORRECTION_FAILURE="still produced an invalid migration draft"
+                fi
+                ;;
+        esac
+    fi
+fi
+if [ -n "$POST_CORRECTION_FAILURE" ]; then
+    park_rejected_after_correction "$POST_CORRECTION_FAILURE"
+    die "corrected investigation still failed validation; card parked for context"
+fi
+
 # Nothing below needs another snapshot, and `consume` must not race one.
 stop_inflight_snapshots
 
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
-"$SCRIPT_DIR/decision.sh" "$KIND_DECISION" "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE"
+"$SCRIPT_DIR/decision.sh" "$KIND_DECISION" "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE" \
+    || die "investigation decision rejected; publication is blocked"
 jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     '. + {feedback_checkpoint: $checkpoint}' \
-    "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
-mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
-mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+    "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback" \
+    || die "could not attach the validated feedback checkpoint"
+mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized" \
+    && mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE" \
+    || die "could not install the validated investigation decision"
 # Screenshots ride to the publisher through a stable directory rather than the
 # decision JSON: the model names them, but only files the trusted bridge
 # actually admitted are here.

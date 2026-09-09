@@ -44,7 +44,13 @@ check "research sandbox switches enforce an empty patch and enable search + imag
       [[ "$switches" == *AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1* ]] \
       && [[ "$switches" == *AUTOPR_CODEX_WEB_SEARCH=1* ]] \
       && [[ "$switches" == *AUTOPR_CODEX_IMAGE_INPUTS=1* ]] \
-      && [ -z "$(autopr_kind_field investigate sandbox)" ] \
+      && echo 0 || echo 1)
+check "both PR lanes validate grounded blockers while search remains grant-gated" \
+    $([ -z "$(autopr_kind_field investigate sandbox)" ] \
+      && [ -z "$(autopr_kind_field rework sandbox)" ] \
+      && [ "$(autopr_kind_field investigate decision)" = normalize-grounded ] \
+      && [ "$(autopr_kind_field rework decision)" = normalize-grounded ] \
+      && [ -z "$(autopr_kind_field investigate capability)" ] \
       && echo 0 || echo 1)
 check "an unknown mode is refused by the registry" \
     $(! autopr_kind_field shortlist model >/dev/null 2>&1 && echo 0 || echo 1)
@@ -232,7 +238,8 @@ printf '{"schema_version":1}\n' > "$decision_path"
 [ "${CODEX_STUB_TOUCH:-0}" != 1 ] || printf 'export const b = 2;\n' > "$workspace/client/src/b.ts"
 EOF
 chmod +x "$TMP_DIR/bin/codex"
-printf '%s\n' 'REPORT=REPORT_PATH' 'DECISION=DECISION_PATH' > "$TMP_DIR/sandbox-prompt.txt"
+printf '%s\n' 'GROUNDING_CONTEXT_SECTION' 'REPORT=REPORT_PATH' 'DECISION=DECISION_PATH' > "$TMP_DIR/sandbox-prompt.txt"
+cp "$AUTOPR_DIR/_prompt_grounding.txt" "$TMP_DIR/_prompt_grounding.txt"
 printf '{"downloaded_attachments":[]}\n' > "$TMP_DIR/context.json"
 printf 'PNGSTUB\n' > "$TMP_DIR/shot.png"
 printf 'notes\n' > "$TMP_DIR/notes.txt"
@@ -258,6 +265,11 @@ check "with the research switches on, codex exec gets live web search and the pn
       && grep -qE '/\.git/autopr-io/input/02-shot\.png$' "$TMP_DIR/codex-args" \
       && [ "$(grep -cx -- '-i' "$TMP_DIR/codex-args")" = 1 ] \
       && echo 0 || echo 1)
+check "the shared grounding contract is expanded for every implementation template" \
+    $(grep -qF 'A reply in `metadata.body` may answer in plain language' "$TMP_DIR/codex-args" \
+      && ! grep -qF 'GROUNDING_CONTEXT_SECTION' "$TMP_DIR/codex-args" \
+      && [ "$(grep -lFx 'GROUNDING_CONTEXT_SECTION' "$AUTOPR_DIR/_prompt_todo.txt" "$AUTOPR_DIR/_prompt_rework.txt" | wc -l | tr -d '[:space:]')" = 2 ] \
+      && echo 0 || echo 1)
 check "the image input path is the workspace path codex runs in, not the host attachment path" \
     $(image_path="$(grep -A1 -x -- '-i' "$TMP_DIR/codex-args" | tail -1)"; \
       [[ "$image_path" == "$TMP_DIR/sandbox-runtime/workspace/"* ]] \
@@ -266,9 +278,9 @@ check "the image input path is the workspace path codex runs in, not the host at
 
 run_bridge env > "$TMP_DIR/bridge-off.log" 2>&1
 bridge_off_rc=$?
-check "with the switches off (every PR lane), neither web search nor image inputs are passed" \
+check "with no kind switches (publication helpers), neither web search nor image inputs are passed" \
     $([ "$bridge_off_rc" = 0 ] \
-      && ! grep -q 'web_search' "$TMP_DIR/codex-args" \
+      && ! grep -qxF 'web_search="live"' "$TMP_DIR/codex-args" \
       && ! grep -qx -- '-i' "$TMP_DIR/codex-args" \
       && echo 0 || echo 1)
 

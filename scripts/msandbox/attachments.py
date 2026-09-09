@@ -68,10 +68,13 @@ def import_files_to_inbox(
     lock_name: str,
     max_bytes: int = DEFAULT_MAX_BYTES,
     session_max_bytes: int = DEFAULT_SESSION_MAX_BYTES,
+    source_fd: int | None = None,
 ) -> list[Attachment]:
     """Copy bounded regular files into an explicitly mounted attachment inbox."""
     if not sources:
         raise AttachmentError("at least one attachment is required")
+    if source_fd is not None and len(sources) != 1:
+        raise AttachmentError("an open descriptor must identify exactly one source")
     inbox.mkdir(parents=True, exist_ok=True, mode=0o700)
     imported: list[Attachment] = []
     with state_lock(lock_name):
@@ -79,7 +82,7 @@ def import_files_to_inbox(
         for source in sources:
             source = source.expanduser()
             try:
-                before = source.lstat()
+                before = os.fstat(source_fd) if source_fd is not None else source.lstat()
             except OSError as exc:
                 raise AttachmentError(f"attachment is not readable: {source}: {exc}") from exc
             if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
@@ -88,7 +91,7 @@ def import_files_to_inbox(
                 raise AttachmentError(f"attachment exceeds {max_bytes} bytes: {source}")
             digest = hashlib.sha256()
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            fd = os.open(source, flags)
+            fd = os.dup(source_fd) if source_fd is not None else os.open(source, flags)
             try:
                 opened = os.fstat(fd)
                 if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):

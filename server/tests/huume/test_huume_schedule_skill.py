@@ -15,6 +15,7 @@ import asyncio
 import unittest
 from datetime import date as _date
 from unittest import mock
+from uuid import uuid4
 
 from app.matcha.services.huume.actions import evaluate_huume_action
 from app.matcha.services.huume.agent import _HR_OPS_TOOL_SPECS, _build_hr_ops_staged
@@ -327,9 +328,11 @@ class TestProposeClarify(unittest.TestCase):
             kind="create", proposal_id=PROPOSAL_ID, pill_text="Create shift pill",
         )
         captured = {}
+        modes = []
 
         async def fake_build_proposal(*args, **kwargs):
             captured.update(kwargs["parsed"])
+            modes.append(kwargs["auto_assign_unpinned"])
             return build
 
         with mock.patch.object(schedule_chat, "build_proposal", fake_build_proposal):
@@ -345,6 +348,7 @@ class TestProposeClarify(unittest.TestCase):
         assert result["status"] == "ready"
         assert result["operation_count"] == 1
         assert captured["shift_requests"][0]["date"] == "2026-08-27"
+        assert modes == [False]
 
     def test_editor_resolution_includes_visible_draft_shifts(self):
         """The schedule editor deliberately exposes draft shifts. Huume must
@@ -544,6 +548,7 @@ class TestSevenDayCorrectionBatch(unittest.TestCase):
         assert captured["shift_requests"][0]["count"] == 2
         assert captured["location_hint"] == "Downtown"
         assert captured["shift_statuses"] == ("published",)  # thread surface, no editor scope
+        assert captured["auto_assign_unpinned"] is False
 
     def test_editor_scope_reaches_the_batch_builder(self):
         from datetime import date
@@ -941,8 +946,10 @@ class _ConnCtx:
 class _ProposalConn:
     def __init__(self, row):
         self.row = row
+        self.queries = []
 
-    async def fetchrow(self, *_a, **_k):
+    async def fetchrow(self, query, *_a, **_k):
+        self.queries.append(query)
         return self.row
 
 
@@ -966,14 +973,23 @@ class TestExecuteBatchDispatch(unittest.TestCase):
             return {"employee_schedule": True}
 
         with (
-            mock.patch.object(database, "get_connection", lambda: _ConnCtx(_ProposalConn(row))),
+            mock.patch.object(
+                database, "get_connection", lambda: _ConnCtx(_ProposalConn(row)),
+            ),
             mock.patch.object(feature_flags, "get_company_features", fake_features),
             mock.patch.object(schedule_chat, "execute_batch_proposal", executor),
-            mock.patch.object(schedule_chat, "execute_edit_proposal", mock.AsyncMock(side_effect=AssertionError("wrong executor"))),
-            mock.patch.object(schedule_chat, "execute_proposal", mock.AsyncMock(side_effect=AssertionError("wrong executor"))),
+            mock.patch.object(
+                schedule_chat, "execute_edit_proposal",
+                mock.AsyncMock(side_effect=AssertionError("wrong executor")),
+            ),
+            mock.patch.object(
+                schedule_chat, "execute_proposal",
+                mock.AsyncMock(side_effect=AssertionError("wrong executor")),
+            ),
         ):
             return _run(schedule_skill.execute(
-                company_id="c1", actor_user_id="u1", action=_change(proposal_id=PROPOSAL_ID),
+                company_id="c1", actor_user_id="u1",
+                action=_change(proposal_id=PROPOSAL_ID),
             ))
 
     def test_batch_row_dispatches_to_the_batch_executor(self):
@@ -981,7 +997,10 @@ class TestExecuteBatchDispatch(unittest.TestCase):
 
         async def fake_execute_batch(conn, **kwargs):
             captured.update(kwargs)
-            return "✅ Done — 28 changes are live\n✅ Done — 7 shifts are live"
+            return schedule_chat.ProposalExecutionReceipt(
+                text="✅ Done — 28 changes are live\n✅ Done — 7 shifts are live",
+                touched_shift_ids=(uuid4(),),
+            )
 
         result = self._run_execute(_batch_row(), fake_execute_batch)
         assert result["status"] == "created"
@@ -991,12 +1010,48 @@ class TestExecuteBatchDispatch(unittest.TestCase):
 
     def test_scope_failure_reports_nothing_applied(self):
         async def failing(conn, **kwargs):
-            raise schedule_chat.ProposalScopeError("That schedule proposal is outside the selected schedule week.")
+            raise schedule_chat.ProposalScopeError(
+                "That schedule proposal is outside the selected schedule week.",
+            )
 
         result = self._run_execute(_batch_row(), failing)
         assert result["status"] == "error"
         assert result["message"].startswith("Nothing was applied")
         assert "outside the selected schedule week" in result["message"]
+
+    def test_single_create_scope_failure_preserves_the_actionable_message(self):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        row = {
+            **_batch_row(),
+            "proposal": {"shifts": [{"starts_at": "2026-08-23T07:00:00+00:00"}]},
+        }
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        with (
+            mock.patch.object(
+                database, "get_connection", lambda: _ConnCtx(_ProposalConn(row)),
+            ),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(
+                schedule_chat, "execute_proposal",
+                mock.AsyncMock(side_effect=schedule_chat.ProposalScopeError(
+                    "That schedule proposal is outside the selected schedule week.",
+                )),
+            ),
+        ):
+            result = _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1",
+                action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+        assert result["status"] == "error"
+        assert result["message"] == (
+            "Nothing was applied — That schedule proposal is outside the selected schedule week."
+        )
 
     def test_unexpected_failure_in_a_batch_reports_rollback(self):
         async def failing(conn, **kwargs):
@@ -1006,17 +1061,173 @@ class TestExecuteBatchDispatch(unittest.TestCase):
         assert result["status"] == "error"
         assert "rolled back" in result["message"]
 
+    def test_unexpected_failure_in_a_single_edit_reports_rollback(self):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        row = {
+            **_batch_row(),
+            "proposal": {"kind": "edit", "ops": [{"kind": "cancel"}]},
+        }
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        with (
+            mock.patch.object(
+                database, "get_connection", lambda: _ConnCtx(_ProposalConn(row)),
+            ),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(
+                schedule_chat, "execute_edit_proposal",
+                mock.AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+        ):
+            result = _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1",
+                action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+        assert result["status"] == "error"
+        assert "Nothing was applied" in result["message"]
+        assert "rolled back" in result["message"]
+
+    def test_lost_commit_ack_recovers_the_durable_success_receipt(self):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        shift_id = uuid4()
+        row = _batch_row()
+        connections = []
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        async def committed_then_disconnected(conn, **_kwargs):
+            row["status"] = "confirmed"
+            row["created_shift_ids"] = [shift_id]
+            row["proposal"] = {
+                **row["proposal"],
+                "execution_receipt": {
+                    "version": 1,
+                    "message": "Schedule updated.",
+                    "touched_shift_ids": [str(shift_id)],
+                },
+            }
+            raise ConnectionError("commit acknowledgement lost")
+
+        def fake_connection():
+            conn = _ProposalConn(row)
+            connections.append(conn)
+            return _ConnCtx(conn)
+
+        with (
+            mock.patch.object(database, "get_connection", fake_connection),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(
+                schedule_chat, "execute_batch_proposal", committed_then_disconnected,
+            ),
+        ):
+            result = _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1",
+                action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+        assert result["status"] == "created"
+        assert result["message"] == "Schedule updated."
+        assert result["verified"] is True
+        assert len(connections) == 2 and connections[0] is not connections[1]
+        assert "FOR UPDATE" in connections[1].queries[0]
+
+    def test_confirmed_without_a_valid_receipt_is_reported_as_unknown(self):
+        import app.database as database
+        import app.core.feature_flags as feature_flags
+
+        row = _batch_row()
+
+        async def fake_features(*_a, **_k):
+            return {"employee_schedule": True}
+
+        async def committed_without_receipt(conn, **_kwargs):
+            row["status"] = "confirmed"
+            row["created_shift_ids"] = [uuid4()]
+            raise ConnectionError("commit acknowledgement lost")
+
+        with (
+            mock.patch.object(
+                database, "get_connection", lambda: _ConnCtx(_ProposalConn(row)),
+            ),
+            mock.patch.object(feature_flags, "get_company_features", fake_features),
+            mock.patch.object(
+                schedule_chat, "execute_batch_proposal", committed_without_receipt,
+            ),
+        ):
+            result = _run(schedule_skill.execute(
+                company_id="c1", actor_user_id="u1",
+                action=_change(proposal_id=PROPOSAL_ID),
+            ))
+
+        assert result["status"] == "error"
+        assert "outcome could not be verified" in result["message"]
+        assert "Nothing was applied" not in result["message"]
+
     def test_already_claimed_batch_is_refused(self):
         async def failing(conn, **kwargs):
-            raise schedule_chat.ProposalExecutionClaimError("That proposal is already being applied or is no longer available.")
+            raise schedule_chat.ProposalExecutionClaimError(
+                "That proposal is already being applied or is no longer available.",
+            )
 
         result = self._run_execute(_batch_row(), failing)
         assert result["status"] == "error"
         assert "already being applied" in result["message"]
 
     def test_stale_batch_row_is_refused_before_any_executor(self):
-        result = self._run_execute(_batch_row(status="confirmed"), mock.AsyncMock(side_effect=AssertionError("must not run")))
+        result = self._run_execute(
+            _batch_row(status="confirmed"),
+            mock.AsyncMock(side_effect=AssertionError("must not run")),
+        )
         assert result["status"] == "error"
+
+
+class TestPersistedExecutionReceipt(unittest.TestCase):
+    def test_confirmed_receipt_round_trips(self):
+        shift_id = uuid4()
+        row = {
+            "status": "confirmed",
+            "created_shift_ids": [shift_id],
+            "proposal": {"execution_receipt": {
+                "version": 1,
+                "message": "Schedule updated.",
+                "touched_shift_ids": [str(shift_id)],
+            }},
+        }
+        receipt = schedule_skill._receipt_from_row(row, schedule_chat)
+        assert receipt == schedule_chat.ProposalExecutionReceipt(
+            text="Schedule updated.", touched_shift_ids=(shift_id,),
+        )
+
+    def test_receipt_and_finalized_ids_must_match(self):
+        row = {
+            "status": "confirmed",
+            "created_shift_ids": [uuid4()],
+            "proposal": {"execution_receipt": {
+                "version": 1,
+                "message": "Schedule updated.",
+                "touched_shift_ids": [str(uuid4())],
+            }},
+        }
+        assert schedule_skill._receipt_from_row(row, schedule_chat) is None
+
+    def test_confirmed_no_op_is_not_reported_as_success(self):
+        result = schedule_skill._execution_response(
+            schedule_chat.ProposalExecutionReceipt(
+                text="No edits applied.", touched_shift_ids=(),
+            ),
+            proposal_id=PROPOSAL_ID,
+        )
+        assert result["status"] == "error"
+        assert "No edits applied" in result["message"]
+        assert "None of the requested shifts changed" in result["message"]
 
 
 class _VacantConn:

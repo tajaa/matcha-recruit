@@ -2390,6 +2390,28 @@ async def run_huume_turn(
                     yield {"type": "step", "data": step}
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
 
+                confirming_shift_change = (
+                    name == "propose_schedule_change"
+                    and _is_confirming_schedule_call(args, pre_turn_action)
+                )
+                if confirming_shift_change and payload.get("status") in {"created", "error"}:
+                    # The executor's deterministic prose comes from the
+                    # transaction receipt. End the model loop on that result,
+                    # but first finish every sibling call the provider placed
+                    # in this same response batch.
+                    if terminal_message is None:
+                        terminal_message = str(
+                            payload.get("message") or "That schedule request could not be completed."
+                        )
+                        stop_reason = (
+                            "schedule_execution_verified"
+                            if payload.get("status") == "created"
+                            else "schedule_execution_failed"
+                        )
+                        if payload.get("status") == "error":
+                            tool_rejections += 1
+                    continue
+
                 if name in _TERMINAL_SCHEDULE_TOOLS and payload.get("status") in {"clarify", "refused"}:
                     tool_rejections += 1
                     terminal_message = str(payload.get("message") or "That schedule request could not be completed.")

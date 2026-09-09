@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
 from .models import PublishState, ReleaseResult, WorktreeInfo, WorktreeOwner
-from .state import data_root
+from .state import data_root, state_lock
 
 
 class GitError(RuntimeError):
@@ -86,6 +88,45 @@ def session_git_head(session_id: str) -> str:
     return resolve_ref(git_dir, "HEAD")
 
 
+def exclude_generated_outputs(worktree: Path, session_id: str) -> None:
+    """Ignore generated outputs in both host and isolated Git, even on old bases.
+
+    Host info/exclude is shared by linked worktrees; touch it only when existing
+    ignore rules do not cover outputs (old-base sessions). Preserve other rules.
+    """
+    paths = [session_git_dir(session_id) / "info/exclude"]
+    ignored = _git(worktree, "check-ignore", "--quiet", ".msandbox/outputs/probe", check=False)
+    if ignored.returncode not in (0, 1):
+        raise GitError("Could not inspect generated-output exclusion")
+    if ignored.returncode == 1:
+        raw = Path(_git(worktree, "rev-parse", "--git-path", "info/exclude").stdout.strip())
+        paths.append(raw if raw.is_absolute() else worktree / raw)
+    with state_lock("generated-output-excludes"):
+        for path in paths:
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                fd = os.open(
+                    path.name,
+                    os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    0o600,
+                    dir_fd=directory_fd,
+                )
+                with os.fdopen(fd, "a+b") as handle:
+                    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                        raise GitError("Git exclude file is not a regular file")
+                    handle.seek(0)
+                    existing = handle.read(1024 * 1024 + 1)
+                    if len(existing) > 1024 * 1024:
+                        raise GitError("Git exclude file exceeds 1 MiB")
+                    rule = b"/.msandbox/outputs/"
+                    if existing.splitlines()[-1:] != [rule]:
+                        handle.write(b"\n" + rule + b"\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+            finally:
+                os.close(directory_fd)
+
+
 def initialize_session_git(
     repo: Path,
     worktree: Path,
@@ -125,6 +166,7 @@ def initialize_session_git(
         _git(git_dir, "read-tree", head_sha)
         pointer.write_text("gitdir: /msandbox-git\n", encoding="utf-8")
         pointer.chmod(0o600)
+        exclude_generated_outputs(worktree, session_id)
     except Exception:
         shutil.rmtree(git_dir.parent, ignore_errors=True)
         raise
@@ -305,6 +347,50 @@ def remove_session_worktree(repo: Path, worktree: Path, branch: str) -> ReleaseR
         return ReleaseResult(False, result.stderr.strip() or "git worktree remove failed", worktree)
     _git(repo, "worktree", "prune", check=False)
     return ReleaseResult(True, "clean published worktree removed", worktree)
+
+
+def remove_managed_local_branch(
+    repo: Path, branch: str, published_head: str
+) -> str | None:
+    """Delete an msandbox-created ref only when it has no unpublished commits.
+
+    The ancestry check permits a ref left behind at an earlier session commit,
+    while update-ref's expected value prevents overwriting a concurrent move.
+    A missing ref is already clean.
+    """
+    reference = f"refs/heads/{branch}"
+    exists = _git(repo, "show-ref", "--verify", "--quiet", reference, check=False)
+    if exists.returncode == 1:
+        return None
+    if exists.returncode:
+        return "could not inspect the managed local branch"
+    local_head = resolve_ref(repo, reference)
+    owner = resolve_worktree_owner(repo, branch)
+    if owner is not None:
+        return f"managed local branch is checked out at {owner.path}"
+    ancestor = _git(
+        repo,
+        "merge-base",
+        "--is-ancestor",
+        local_head,
+        published_head,
+        check=False,
+    )
+    if ancestor.returncode == 1:
+        return "managed local branch contains commits outside the published session"
+    if ancestor.returncode:
+        return "could not compare the managed local branch with the published session"
+    deleted = _git(
+        repo,
+        "update-ref",
+        "-d",
+        reference,
+        local_head,
+        check=False,
+    )
+    if deleted.returncode:
+        return "managed local branch moved while it was being released"
+    return None
 
 
 def prune_stale_worktree_metadata(repo: Path, *, apply: bool = False) -> list[Path]:

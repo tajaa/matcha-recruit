@@ -5,10 +5,18 @@ import os
 import re
 import secrets
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Sequence
 
-from .agent_adapters import launch_agent, refresh_capability_context, stop_agent, tmux_running
+from .agent_adapters import (
+    ensure_agent_pane_controls,
+    exited_agent_output,
+    launch_agent,
+    refresh_capability_context,
+    stop_agent,
+    tmux_running,
+)
 from .capabilities import load_report, report_is_stale
 from .docker_runtime import (
     allocate_port_block,
@@ -25,11 +33,13 @@ from .git_worktrees import (
     create_detached_worktree,
     current_head,
     dirty_fingerprint,
+    exclude_generated_outputs,
     fetch_origin,
     initialize_session_git,
     merge_base,
     push_detached_head,
     remote_branch_sha,
+    remove_managed_local_branch,
     remove_session_git,
     remove_session_worktree,
     resolve_ref,
@@ -39,6 +49,7 @@ from .git_worktrees import (
     sync_session_git_to_host,
 )
 from .models import (
+    UNAVAILABLE_PHASES,
     CapabilityReport,
     PullRequest,
     ReleaseResult,
@@ -46,7 +57,11 @@ from .models import (
     SessionSpec,
     utc_now,
 )
-from .session_auth import provision_session_auth, refresh_github_auth
+from .session_auth import (
+    provision_session_auth,
+    refresh_github_auth,
+    switching_agent_auth,
+)
 from .state import (
     ARTIFACT_LIFECYCLE_LOCK,
     SCHEMA_VERSION,
@@ -225,8 +240,10 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
         return record
 
 
-def _ensure_isolated_git(record: SessionRecord) -> None:
+def _ensure_isolated_git(record: SessionRecord, *, repair: bool = True) -> None:
     if session_git_dir(record.id).is_dir():
+        if repair:
+            exclude_generated_outputs(record.worktree, record.id)
         return
     head = current_head(record.worktree)
     initialize_session_git(record.repo_path, record.worktree, record.id, head)
@@ -302,11 +319,22 @@ def start_session(
     record: SessionRecord,
     extra_agent_args: Sequence[str] = (),
     *,
+    replace_exited: bool = False,
     _lock_held: bool = False,
 ) -> SessionRecord:
     if not _lock_held:
         with state_lock(f"session-{record.id}"):
-            return start_session(record, extra_agent_args, _lock_held=True)
+            return start_session(
+                record,
+                extra_agent_args,
+                replace_exited=replace_exited,
+                _lock_held=True,
+            )
+    if exited_agent_output(record) is not None and not replace_exited:
+        raise SessionError(
+            "the previous harness exited and its output is preserved; "
+            "view it in the manager or restart with --replace-exited"
+        )
     _reconcile_isolated_git(record)
     refresh_github_auth(record)
     ensure_container(record)
@@ -319,6 +347,33 @@ def start_session(
     return record
 
 
+def switch_session(record: SessionRecord, agent: str) -> SessionRecord:
+    """Switch one stopped workspace's harness without changing Git or permissions."""
+    from dataclasses import replace
+
+    from .state import load_session
+
+    if agent not in ("codex", "claude", "opencode"):
+        raise SessionError("unsupported harness")
+    with state_lock(f"session-{record.id}"):
+        current = load_session(record.id)
+        if current.phase in UNAVAILABLE_PHASES:
+            raise SessionError("this session cannot switch harnesses in its current state")
+        stop_session(current, _lock_held=True)
+        if current.phase == "orphaned":
+            raise SessionError(
+                "the session became orphaned while stopping; restore its worktree before switching"
+            )
+        proposed = replace(current, agent=agent, agent_session_id=None, phase="stopped")
+        # A failed copy/save restores previous login files and leaves the old
+        # harness stopped and retryable. Only login files change, not history.
+        with switching_agent_auth(proposed):
+            provision_session_auth(proposed, require_login=True)
+            save_session(proposed)
+        record.__dict__.update(proposed.__dict__)
+        return record
+
+
 def reconcile_session(record: SessionRecord, *, _lock_held: bool = False) -> SessionRecord:
     if not _lock_held:
         with state_lock(f"session-{record.id}"):
@@ -328,7 +383,8 @@ def reconcile_session(record: SessionRecord, *, _lock_held: bool = False) -> Ses
     if not record.worktree.exists():
         record.phase = "orphaned"
     else:
-        _ensure_isolated_git(record)
+        _ensure_isolated_git(record, repair=False)
+        ensure_agent_pane_controls(record)
         if container_running(record) and tmux_running(record):
             record.phase = "running"
         elif record.phase == "running":
@@ -382,7 +438,7 @@ def _validation_current(
     )
 
 
-def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None) -> tuple[int, str]:
+def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None, body: str | None = None) -> tuple[int, str]:
     assert record.target_branch
     repo_name = _github_repo(record.repo_path)
     listed = subprocess.run(
@@ -394,6 +450,15 @@ def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None)
     if listed.returncode == 0:
         matches = json.loads(listed.stdout)
         if matches:
+            if body is not None:
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.md') as copy:
+                    copy.write(body)
+                    copy.flush()
+                    edited = subprocess.run(['gh', 'pr', 'edit', str(matches[0]['number']), '--repo', repo_name,
+                                             '--title', title or record.name, '--body-file', copy.name],
+                                            capture_output=True, text=True, check=False)
+                    if edited.returncode:
+                        raise SessionError('PR copy update failed; pushed commit is preserved. Retry submission.')
             return int(matches[0]["number"]), str(matches[0]["url"])
     command = [
         "gh",
@@ -407,12 +472,13 @@ def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None)
         "main",
         "--title",
         title or record.name,
-        "--body",
-        f"Created from msandbox session `{record.name}`.",
     ]
     if draft:
         command.append("--draft")
-    created = subprocess.run(command, check=False, text=True, capture_output=True)
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.md') as copy:
+        copy.write(body if body is not None else f"Created from msandbox session `{record.name}`.")
+        copy.flush()
+        created = subprocess.run([*command, '--body-file', copy.name], check=False, text=True, capture_output=True)
     if created.returncode:
         raise SessionError(created.stderr.strip() or "gh pr create failed")
     url = created.stdout.strip().splitlines()[-1]
@@ -420,7 +486,7 @@ def _find_or_create_pr(record: SessionRecord, *, draft: bool, title: str | None)
     return number, url
 
 
-def submit_session(record: SessionRecord, *, draft: bool = True, title: str | None = None) -> PullRequest:
+def submit_session(record: SessionRecord, *, draft: bool = True, title: str | None = None, body: str | None = None) -> PullRequest:
     """Publish detached HEAD, verify the PR branch, then release the worktree."""
     if not record.target_branch:
         raise SessionError("session has no target branch")
@@ -460,17 +526,27 @@ def submit_session(record: SessionRecord, *, draft: bool = True, title: str | No
             raise SessionError("session changed while preparing submission; validate it again")
         record.phase = "submitting"
         save_session(record)
-        pushed_head = push_detached_head(
-            record.repo_path,
-            record.worktree,
-            record.target_branch,
-            record.expected_remote_sha,
-            head_sha=head,
-        )
-        record.expected_remote_sha = pushed_head
-        record.remote_head_sha = pushed_head
-        save_session(record)
-        number, url = _find_or_create_pr(record, draft=draft, title=title)
+        try:
+            pushed_head = push_detached_head(
+                record.repo_path,
+                record.worktree,
+                record.target_branch,
+                record.expected_remote_sha,
+                head_sha=head,
+            )
+            record.expected_remote_sha = pushed_head
+            record.remote_head_sha = pushed_head
+            save_session(record)
+            number, url = _find_or_create_pr(
+                record, draft=draft, title=title, body=body
+            )
+        except BaseException:
+            # A failed/interruptible push or GitHub step leaves a stopped,
+            # retryable session. Any proven push SHA above remains recorded so
+            # the next attempt compares against live origin with the right lease.
+            record.phase = "stopped"
+            save_session(record)
+            raise
         record.pr_number = number
         record.pr_url = url
         record.submitted_at = utc_now()
@@ -496,6 +572,7 @@ def release_session(
     if not record.worktree.exists():
         stop_agent(record)
         remove_orphaned_container_project(record)
+        published_head = record.remote_head_sha
         if session_git_dir(record.id).is_dir():
             isolated_head = session_git_head(record.id)
             if remote_branch_sha(record.repo_path, record.target_branch) != isolated_head:
@@ -504,11 +581,25 @@ def release_session(
                     "worktree is absent but isolated Git HEAD is not published to origin",
                     record.worktree,
                 )
+            published_head = isolated_head
+        if record.managed_local_branch:
+            published_head = published_head or remote_branch_sha(
+                record.repo_path, record.target_branch
+            )
+            if published_head is None:
+                return ReleaseResult(
+                    False,
+                    "worktree is absent but the managed branch is not published",
+                    record.worktree,
+                )
+            branch_error = _release_local_branch(record, published_head)
+        else:
+            branch_error = None
         remove_session_git(record.id)
         record.phase = "released"
         record.ports = None
         save_session(record)
-        return ReleaseResult(True, "worktree already absent", record.worktree)
+        return ReleaseResult(True, "worktree already absent" + (f"; local branch retained: {branch_error}" if branch_error else ""), record.worktree)
     stop_session(record, _lock_held=True)
     if keep_worktree:
         return ReleaseResult(True, "session stopped; worktree retained", record.worktree)
@@ -522,8 +613,25 @@ def release_session(
     remove_container_project(record, volumes=True)
     result = remove_session_worktree(record.repo_path, record.worktree, record.target_branch)
     if result.released:
+        if record.managed_local_branch:
+            branch_error = _release_local_branch(record, publish_state.head_sha)
+            if branch_error:
+                result = ReleaseResult(
+                    True, f"worktree released; local branch retained: {branch_error}", record.worktree
+                )
         remove_session_git(record.id)
         record.phase = "released"
         record.ports = None
         save_session(record)
     return result
+
+
+def _release_local_branch(record: SessionRecord, published_head: str) -> str | None:
+    """Optional ref cleanup must not block finalizing a removed workspace."""
+    try:
+        error = remove_managed_local_branch(record.repo_path, record.target_branch, published_head)
+    except (OSError, GitError) as exc:
+        error = str(exc)
+    if error is None:
+        record.managed_local_branch = False
+    return error

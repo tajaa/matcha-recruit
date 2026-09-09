@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Card } from '../../components/ui'
 import { Button } from '../../components/ui'
 import { Loader2, Trash2, Plus, RefreshCw, Send } from 'lucide-react'
@@ -28,7 +28,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const AUTOPR_CAPABILITY_COPY: Record<string, { label: string; description: string }> = {
   research: {
     label: 'Research',
-    description: 'Research cards run: live web search + the repo, report attached to the ticket. No PR, no code change.',
+    description: 'Allows live web search for Research tickets and implementation/rework PRs. Research tickets attach a report without changing code.',
   },
   outreach: {
     label: 'Outreach',
@@ -69,12 +69,7 @@ export default function Settings() {
   const researchMode = settings.data
     ? (settings.data.jurisdiction_research_model_mode ?? DEFAULT_RESEARCH_MODE)
     : null
-
-  // Seed the pending selection once the saved value arrives, without clobbering
-  // a choice the admin has already made while it was in flight.
-  useEffect(() => {
-    if (researchMode && pendingMode === null) setPendingMode(researchMode)
-  }, [researchMode, pendingMode])
+  const selectedMode = pendingMode ?? researchMode
 
   const quotaState = useAsync<{ quotas: TokenQuota[]; usage: TokenUsage[] }>(
     async () => {
@@ -97,16 +92,11 @@ export default function Settings() {
     [],
     null,
   )
-  // Same two-nulls rule as the research mode above: only seed the editable
-  // copy once a real payload has arrived, so a failed load renders as an
-  // error rather than as "every board is granted nothing".
-  useEffect(() => {
-    if (boards.data && pendingBoards === null) setPendingBoards(boards.data.capabilities ?? {})
-  }, [boards.data, pendingBoards])
+  const editableBoards = pendingBoards ?? boards.data?.capabilities ?? null
 
   const toggleBoardCapability = (projectId: string, capability: string) => {
     setPendingBoards((prev) => {
-      const base = prev ?? {}
+      const base = prev ?? boards.data?.capabilities ?? {}
       const current = base[projectId] ?? []
       const next = current.includes(capability)
         ? current.filter((c) => c !== capability)
@@ -127,12 +117,12 @@ export default function Settings() {
         .sort(([a], [b]) => a.localeCompare(b)),
     )
   const boardsDirty =
-    pendingBoards !== null &&
+    editableBoards !== null &&
     boards.data !== null &&
-    boardGrantsKey(pendingBoards) !== boardGrantsKey(boards.data.capabilities ?? {})
+    boardGrantsKey(editableBoards) !== boardGrantsKey(boards.data.capabilities ?? {})
 
   const handleSaveBoards = async () => {
-    if (!pendingBoards || !boards.data) return
+    if (!editableBoards || !boards.data) return
     setBoardsSaving(true)
     setBoardsError(null)
     try {
@@ -142,13 +132,13 @@ export default function Settings() {
       // every save fail on a board the admin cannot see or clear.
       const watched = new Set(boards.data.watched_project_ids)
       const submitted = Object.fromEntries(
-        Object.entries(pendingBoards).filter(([id]) => watched.has(id)),
+        Object.entries(editableBoards).filter(([id]) => watched.has(id)),
       )
       const saved = await adminSettingsApi.setAutoPRBoardCapabilities(submitted)
       // Adopt the server's normalized map, not the local draft: it deduped and
       // ordered the grants, and the dirty check compares against it.
       boards.setData({ ...(boards.data as AutoPRBoardCapabilities), capabilities: saved.capabilities })
-      setPendingBoards(saved.capabilities)
+      setPendingBoards(null)
     } catch (e) {
       setBoardsError(errText(e))
     } finally {
@@ -159,12 +149,13 @@ export default function Settings() {
   const betaLoading = beta.loading
 
   async function handleSave() {
-    if (!pendingMode || pendingMode === researchMode) return
+    if (!selectedMode || selectedMode === researchMode) return
     setSaving(true)
     setSaveError(null)
     try {
-      await adminSettingsApi.setResearchModelMode(pendingMode)
-      settings.setData({ jurisdiction_research_model_mode: pendingMode })
+      await adminSettingsApi.setResearchModelMode(selectedMode)
+      settings.setData({ jurisdiction_research_model_mode: selectedMode })
+      setPendingMode(null)
     } catch (e) {
       // api/client.ts throws on non-2xx. Uncaught, this was an unhandled
       // rejection: the button returned to "Saved" and the admin had no way to
@@ -260,7 +251,7 @@ export default function Settings() {
     await beta.reload()
   }
 
-  const hasChanges = pendingMode !== researchMode
+  const hasChanges = selectedMode !== null && selectedMode !== researchMode
 
   return (
     <div>
@@ -287,12 +278,12 @@ export default function Settings() {
               <Card
                 key={m.id}
                 className={`flex items-center gap-4 p-4 cursor-pointer transition-colors ${
-                  pendingMode === m.id ? 'border-emerald-500 bg-emerald-950/20' : 'hover:border-zinc-700'
+                  selectedMode === m.id ? 'border-emerald-500 bg-emerald-950/20' : 'hover:border-zinc-700'
                 }`}
                 onClick={() => setPendingMode(m.id)}
               >
                 <div className={`h-3 w-3 rounded-full border-2 shrink-0 ${
-                  pendingMode === m.id ? 'border-emerald-500 bg-emerald-500' : 'border-zinc-600'
+                  selectedMode === m.id ? 'border-emerald-500 bg-emerald-500' : 'border-zinc-600'
                 }`} />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-zinc-100">
@@ -337,7 +328,7 @@ export default function Settings() {
               </p>
             )}
             {boards.data.watched_project_ids.map((projectId) => {
-              const granted = pendingBoards?.[projectId] ?? []
+              const granted = editableBoards?.[projectId] ?? []
               const title = boards.data?.watched_projects?.find((p) => p.id === projectId)?.title
               return (
                 <Card key={projectId} className="p-4">

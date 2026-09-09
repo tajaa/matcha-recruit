@@ -20,6 +20,8 @@ SessionPhase = Literal[
 ValidationStatus = Literal["pass", "fail", "unavailable", "skip"]
 CapabilityStatus = Literal["available", "unavailable", "denied"]
 
+UNAVAILABLE_PHASES = frozenset(("released", "orphaned", "submitting", "submitted_needs_release"))
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -93,6 +95,16 @@ class PortSet:
     chat: int
 
 
+def port_lines(ports: PortSet | None) -> tuple[str, ...]:
+    """Render one consistent human-readable view of published session ports."""
+    if ports is None:
+        return ("No published development ports.",)
+    return tuple(
+        f"{name}: http://127.0.0.1:{value} (configured publication)"
+        for name, value in vars(ports).items()
+    )
+
+
 @dataclass
 class ValidationReference:
     mode: str
@@ -135,6 +147,7 @@ class SessionRecord:
     last_validation: ValidationReference | None = None
     last_capability_check_at: str | None = None
     capability_report_path: str | None = None
+    managed_local_branch: bool = False
 
     @property
     def repo_path(self) -> Path:
@@ -156,6 +169,9 @@ class SessionRecord:
         data.setdefault("permission_mode", "autonomous")
         if data["permission_mode"] not in ("standard", "autonomous"):
             raise ValueError(f"invalid permission mode: {data['permission_mode']!r}")
+        data.setdefault("managed_local_branch", False)
+        if not isinstance(data["managed_local_branch"], bool):
+            raise ValueError("invalid managed local branch marker")
         ports = data.get("ports")
         if ports:
             data["ports"] = PortSet(**ports)

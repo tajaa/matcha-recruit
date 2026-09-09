@@ -387,7 +387,7 @@ autopr_kind_field() {
                 effort) printf 'medium' ;;
                 sandbox) printf '' ;;
                 headings) printf '### Summary\n### Changes\n### Blast radius\n### Confidence\n' ;;
-                decision) printf 'normalize' ;;
+                decision) printf 'normalize-grounded' ;;
                 publisher) printf 'publish.sh' ;;
                 outcome) printf 'pull_request' ;;
                 # Drafting code PRs is what this lane has always done on every

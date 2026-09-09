@@ -50,6 +50,7 @@ struct TaskViewerSheet: View {
     @State var isAddingAutoPRContext = false
     @State var didSubmitAutoPRContext = false
     @State var autoPRContextError: String?
+    @State var autoPRContextExpectedNote: String?
     /// "Run AutoPR now": optimistic local state so the control flips the
     /// instant the request lands, before the next task-list refresh carries
     /// the server's `autopr_run_requested_at` back.
@@ -75,7 +76,7 @@ struct TaskViewerSheet: View {
     /// server / harness answer as before. false disables it with the reason.
     @State var researchGranted: Bool?
     @State var boardWatchedByAutoPR: Bool?
-    @FocusState var isNoteFieldFocused: Bool
+    @State var isNoteFieldFocused = false
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
     @State var replyingToNote: MWTaskHistoryEntry?
@@ -229,9 +230,9 @@ struct TaskViewerSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text(task.title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(appState.themeText)
-                    .lineLimit(2)
+                    .lineLimit(3)
                 Spacer()
                 HStack(spacing: 2) {
                     modeButton(.list, icon: "list.bullet")
@@ -240,6 +241,9 @@ struct TaskViewerSheet: View {
                 .padding(2)
                 .background(appState.themeText.opacity(0.08))
                 .cornerRadius(5)
+                Button("Edit") { onEdit() }
+                    .buttonStyle(.bordered)
+                    .help("Edit this ticket")
                 Button {
                     Task { await copyTicketToClipboard() }
                 } label: {
@@ -343,6 +347,8 @@ struct TaskViewerSheet: View {
                 // Action-first order: the concrete steps to clear this round sit
                 // directly under the directive hero.
                 checklistSection
+                    .padding(16)
+                    .background(appState.themeText.opacity(0.035)).cornerRadius(12)
 
                 // Supporting context, collapsed by default (one click away) so it
                 // doesn't crowd the directive: the brief, then the AI catch-up.
@@ -353,6 +359,8 @@ struct TaskViewerSheet: View {
                 // Available in every column — clarifying questions shouldn't sit
                 // behind a toggle.
                 discussionSection
+                    .padding(16)
+                    .background(appState.themeText.opacity(0.035)).cornerRadius(12)
 
                 // Proposed outreach sits directly under the discussion: it is
                 // the one thing on the ticket that asks the reader for a
@@ -432,10 +440,23 @@ struct TaskViewerSheet: View {
                     .foregroundColor(.mwInkStrong)
             }
         }
-        .padding(16)
+        .padding(24)
         }
-        .frame(width: viewMode == .graph ? 820 : 600)
-        .frame(maxHeight: 760)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isAddingAutoPRContext {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(autoPRContextInstructions)
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                    noteComposer
+                }
+                .padding(16)
+                .background(Color.appBackground)
+                .overlay(alignment: .top) { Divider() }
+            }
+        }
+        .frame(width: viewMode == .graph ? 820 : 700)
+        .frame(maxHeight: 820)
         .background(Color.appBackground)
         .task {
             // Ensure the per-user updates store is bound to this ticket's

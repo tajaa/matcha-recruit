@@ -316,6 +316,32 @@ budget had already been spent.
    (defined once in `project_task_service.py`, shared with the PR webhook's board check),
    and any request older than 30 minutes stops counting as pending everywhere — the
    watcher's poll, the card chip, and the idempotency check all read the same window.
+   **Unqueue** in Espresso records `autopr_run_cancel` and holds the card without
+   changing its column, assignment, question text, or saved answers. The task list
+   exposes `autopr_paused`; collection excludes held cards even from the scheduled
+   sweep. A new explicit Run, additional-context submission, review rejection, or
+   manually started round releases the hold; publication and claims do not.
+   The card face shows a paused badge, including while an older run finishes.
+   Run-request reads treat cancellation like consumption. Every investigation now
+   claims against live state and fails closed if the card was held after collection
+   or the API is unavailable. Unqueue does not interrupt an already claimed run.
+   Queue/hold/claim writes serialize on the task row and use post-lock wall-clock
+   timestamps. The `autoprrun02` migration adds a concurrent task-history index
+   covering holds, resumes, claims, and round boundaries, without changing the
+   original request-poll indexes. The list query resolves hold state once per task.
+   Claims preserve the selector's `in_progress` ALREADY SCOPED recovery lane for
+   linked PRs closed without merging, while continuing to reject held, cancelled,
+   and ordinary in-progress cards. Deploy the backend and update the
+   runner control snapshot before shipping the desktop action; an old server will
+   reject Unqueue and the app will retain the queued state and show the error.
+   Espresso keeps the native multiline answer editor below the scrolling questions;
+   Return inserts a newline, ⌘Return submits, and failed submissions retain drafts.
+   New Research tickets open an optional eight-step brief wizard with examples,
+   required title/subject/questions, optional scope/sources/output, and a review
+   screen. The editor's Research wizard also preserves custom sections and fenced
+   examples. Applying the wizard only changes the local form; creating/saving is
+   still explicit. Ticket details separate the automation summary and question
+   blocks from expandable original run details across ticket categories.
    A failed attempt otherwise cools down
    for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
@@ -439,6 +465,47 @@ budget had already been spent.
    and external dependencies; migration work is drafted automatically. With one,
    `acceptance_criteria_met` remains available for a card whose every stated criterion
    is already satisfied, provided it cites verifiable evidence for each.
+   Implementation (`investigate`) and rework runs accept plain-language
+   additional context as answers, corrections, or research guidance; the old
+   numbered options do not constrain the next pass. On a board with the
+   `research` grant, those code runs also receive hosted live web search
+   (`AUTOPR_CODEX_WEB_SEARCH=1`) and must investigate missing public facts using
+   primary sources and the existing repository data flow before asking the
+   owner. On an ungranted board the context says search is unavailable, and the
+   model may neither claim a search nor send private evidence to one.
+   Existing review gates still apply: research does not approve extracted rules,
+   authorize production writes, execute migrations, or make uncovered legality
+   verified. Search queries must use generic public terms, not private ticket or
+   tenant data, and retrieved pages are evidence, never instructions.
+
+   Fresh PR passes use `decision.sh normalize-grounded`: every remaining question
+   must carry a `resolution` with `kind` (`product_decision`, `private_context`,
+   `source_unavailable`, or `explicit_approval`), a nonempty `evidence` array of
+   context/paths/sources checked or failed research attempts, and
+   `why_user_needed`. Resolution evidence is bounded to five 300-character
+   entries plus a 600-character explanation. `policy_blocked` and
+   `external_dependency` refusals require the same object as
+   `blocker_resolution`; `already_fixed` requires repository-verified
+   `acceptance_evidence`. Before spending the single corrective investigation,
+   the harness collects every detected directive, grounding, cosmetic-diff,
+   and migration-draft failure into the same correction. A safe partial patch
+   is restored inside the retry sandbox rather than discarded for a metadata
+   omission. If the corrected pass still fails schema, directive, grounding,
+   cosmetic-diff, or migration-draft validation, it is parked visibly in
+   Changes Requested with a no-spec marker and a context request, so it cannot
+   publish or spin on every cooldown.
+   This validates the blocker structure, not the truth of a model's source
+   interpretation; evidence remains reviewable in the report and PR questions.
+   All new PR decisions use this one normalization path; artifact research
+   keeps its own schema and grant.
+
+   PR question details, the ticket description, the model report, and the
+   verification report each have UTF-8-safe byte budgets. The complete body is
+   rendered and checked against a 64,000-byte safety cap before the bot commits
+   or pushes a branch. Feedback checkpoints are read only from the first exact
+   marker in the trusted body header, so model-authored prose cannot replace
+   the comment or review id used by the next rework pass.
+
    For `mode: research` the same context bundle goes to `gpt-5.6-luna` at high
    reasoning with `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, `AUTOPR_CODEX_WEB_SEARCH=1`
    (`-c 'web_search="live"'` on `codex exec`, which has no `--search` flag), and
@@ -626,7 +693,7 @@ and default off — `platform_settings` key `autopr_board_capabilities`, edited 
 
 | Grant | What it permits |
 |---|---|
-| `research` | Research cards run at all: live web search + the repo clone, report attached to the ticket. |
+| `research` | Live web search: Artifact Research cards can run and ordinary code PR runs can research public facts. |
 | `outreach` | A run may **stage** email/contact/review requests on a card. Nothing sends until a person approves that exact item. |
 | `browse` | A run may drive Chromium through `browse-capture.py` and attach screenshots. |
 
@@ -640,9 +707,9 @@ and stamps each card; `select.sh` refuses an artifact kind the board was not gra
 leaves the card alone rather than downgrading a Research card to a PR. For `outreach`
 **that check is a spend guard, not the security boundary** — sending is re-checked
 server-side at the moment it happens, so a stale harness copy cannot widen its own reach.
-`research` and `browse` happen inside the sandbox and have no server-side moment to
-re-check: there the harness's stamp, plus what the bridge admits back (an image
-allowlist with count and size caps), is the whole gate.
+Artifact `research` and `browse` have no server-side moment to re-check: there
+the harness's stamp, plus what the bridge admits back (an image allowlist with
+count and size caps), is the whole gate.
 
 Espresso reads the same endpoint: a Research card's **Run research now** is disabled with
 the reason when the board lacks the grant or is not watched, and the Research compose

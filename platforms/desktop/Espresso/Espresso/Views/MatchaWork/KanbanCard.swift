@@ -75,6 +75,13 @@ struct KanbanCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if task.autoprPaused == true {
+                Label("AutoPR paused", systemImage: "pause.circle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 12).padding(.top, 10)
+                    .help("Open the ticket to run again. A new review round also releases this hold.")
+            }
             // Header — checkbox + title. Staleness no longer tints the whole
             // band (the 18% red/orange wash read as mud on dark surfaces);
             // the aging signal lives in the footer's clock + tinted time.

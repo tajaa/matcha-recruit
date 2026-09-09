@@ -243,6 +243,16 @@ half's cancelled `shift_id`s as `ignore_shift_ids`: those drafts still exist
 at stage time, and without it the busy/conflict pre-filter keeps everyone on
 the old draft off its own replacement.
 
+All three proposal executors persist an `execution_receipt` inside the proposal JSONB in the same
+transaction as `status='confirmed'` and `created_shift_ids`. The receipt holds the deterministic result
+message and the ordered, de-duplicated touched IDs. Callers that need an atomic outcome can request a
+`ProposalExecutionReceipt`; ordinary channel/editor callers retain the string return contract. This is
+also the recovery source for a lost COMMIT acknowledgement—the bounded recovery read locks the proposal row
+to wait out the original transaction, while live schedule rows are deliberately not used as post-commit
+proof because another manager can legitimately assign, unassign, or delete them immediately.
+`build_proposal` and `build_batch_proposal` expose `auto_assign_unpinned`: channel callers keep the default
+candidate ranking, while thread Huume disables it so unnamed new shifts stay unassigned.
+
 `execute_batch_proposal` is one claim + one transaction: `_apply_edit_ops`
 (cancels and edits, the two-phase removal/addition write unchanged) THEN
 `_apply_create_shifts`, so a replacement's conflict check runs after the

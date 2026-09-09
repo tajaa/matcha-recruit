@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 from . import __version__
@@ -14,9 +13,13 @@ from .attachments import AttachmentError, import_clipboard, import_files
 from .capabilities import render_report_text, report_ok
 from .docker_gc import collect_garbage
 from .docker_runtime import ensure_container, exec_in_session
-from .git_worktrees import detach_branch_owner, prune_stale_worktree_metadata, resolve_worktree_owner
+from .git_worktrees import (
+    detach_branch_owner,
+    prune_stale_worktree_metadata,
+    resolve_worktree_owner,
+)
 from .install import install_release, rollback_release
-from .models import SessionSpec
+from .models import SessionSpec, port_lines
 from .session_auth import refresh_github_auth
 from .sessions import (
     SessionError,
@@ -83,6 +86,12 @@ def _add_session_subcommands(parent: argparse._SubParsersAction) -> None:
     session_list = commands.add_parser("list")
     session_list.add_argument("--all", action="store_true")
     commands.add_parser("has-running", help=argparse.SUPPRESS)
+    switch = commands.add_parser("switch", help="change harness while preserving the workspace")
+    switch.add_argument("session")
+    switch.add_argument("--agent", choices=("codex", "claude", "opencode"), required=True)
+    processes = commands.add_parser("ps", help="inspect live processes and connections without starting services")
+    processes.add_argument("session")
+    processes.add_argument("--json", action="store_true")
     for name in ("attach", "shell", "stop", "start", "release"):
         command = commands.add_parser(name)
         if name == "stop":
@@ -95,6 +104,12 @@ def _add_session_subcommands(parent: argparse._SubParsersAction) -> None:
             command.add_argument("--force", action="store_true")
         else:
             command.add_argument("session")
+            if name == "start":
+                command.add_argument(
+                    "--replace-exited",
+                    action="store_true",
+                    help="discard preserved output from an exited harness and restart it",
+                )
         if name == "release":
             command.add_argument("--keep-worktree", action="store_true")
     execute = commands.add_parser("exec")
@@ -227,7 +242,9 @@ def run(argv: list[str] | None = None) -> int:
             )
             print(f"Created {record.name}: {record.worktree_path}")
             if record.ports:
-                print("Ports: " + json.dumps(asdict(record.ports), sort_keys=True))
+                print("Ports:")
+                for line in port_lines(record.ports):
+                    print(f"  {line}")
             if record.phase == "running" and not args.no_attach:
                 return attach_agent(record)
             return 0
@@ -257,6 +274,20 @@ def run(argv: list[str] | None = None) -> int:
         if args.session_command == "stop" and not args.session:
             raise SessionError("session stop requires SESSION or --all")
         record = load_session(args.session)
+        if args.session_command == 'switch':
+            from .sessions import switch_session
+            switch_session(record, args.agent)
+            print(f'Harness set to {args.agent}; workspace preserved. Run session start to continue.')
+            return 0
+        if args.session_command == 'ps':
+            from .inspection import inspect_session
+            snapshot = inspect_session(record)
+            print(
+                json.dumps(snapshot.to_dict(), sort_keys=True)
+                if args.json
+                else '\n'.join(snapshot.lines)
+            )
+            return 0 if snapshot.reliable else 1
         if args.session_command == "attach":
             return attach_agent(record)
         if args.session_command == "shell":
@@ -274,7 +305,7 @@ def run(argv: list[str] | None = None) -> int:
             stop_session(record, force=args.force)
             return 0
         if args.session_command == "start":
-            start_session(record)
+            start_session(record, replace_exited=args.replace_exited)
             return 0
         if args.session_command == "submit":
             pull_request = submit_session(record, draft=args.draft, title=args.title)

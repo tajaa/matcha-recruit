@@ -2,4 +2,4 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
-python3 -m unittest -v scripts.tests.test_msandbox_v2
+python3 -m unittest -v scripts.tests.test_msandbox_v2 scripts.tests.test_msandbox_manager scripts.tests.test_msandbox_dashboard

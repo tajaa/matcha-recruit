@@ -2,7 +2,8 @@
 
 `msandbox` runs Codex, OpenCode, and Claude in independent Linux containers
 without making a feature branch belong to a worktree. A session remains at
-detached `HEAD`; its intended PR branch is metadata until publication.
+detached `HEAD`. The manager can create a local PR branch without checking it
+out; publication pushes the validated detached commit to that branch.
 
 ## Create and resume work
 
@@ -15,6 +16,204 @@ garbage collection.
 Names are generated automatically, and leaving an agent returns to the wizard.
 Inside a wizard-opened shell, bare `msandbox` returns to the wizard without
 exposing a host Docker or tmux socket to the container.
+
+## Interactive control center
+
+All menus support mouse clicks, scroll wheel, arrows, `j`/`k`, and numbered
+selection. The selected action's description stays at the bottom of the screen.
+Long session lists scroll within the terminal height. `Esc`, `q`, and `Ctrl-C`
+go back; leaving the manager keeps background sessions alive. Long reports use
+`less` when available; even short results wait for `q`. Pager interrupts restore
+terminal input settings before returning. Redirected terminals retain the
+plain numbered interface. Terminal hops that fall back from SGR to legacy X10
+mouse reports are consumed as complete six-byte events; coordinate bytes cannot
+become menu shortcuts.
+
+Recoverable action errors remain in the active submenu and show their message
+before retry. Publication edits also retain the entered branch, title, and commit
+while an invalid value is corrected.
+
+Opening an existing session always shows its controls before attaching:
+
+- **Start/Resume harness** opens the selected Codex, Claude, or OpenCode CLI.
+  `Ctrl-b d` returns to the manager while the harness continues running. Normal
+  harness exit now detaches the dead pane automatically and returns to the menu;
+  `Ctrl-C` inside a harness retains that CLI's interrupt behavior. Plain `exit`
+  is a shell command, not a universal agent-chat command.
+- **Change harness** stops the workspace and switches the selected harness.
+  Files, Git history, attachments, ports, and explicit permissions persist.
+  Each harness keeps its own conversation history; this opens a new conversation
+  and does not translate one harness's transcript into another. Login provisioning
+  must succeed before the new harness is saved. Switching removes the other
+  harnesses' login files (including Claude's `.claude.json` login/settings file),
+  while retaining conversation history. Failed provisioning or saving restores
+  the previous login files. A missing target login produces a host-authentication
+  instruction and rolls back the switch. Credential rollback uses private disk
+  snapshots, so large Claude configuration files do not exceed a memory cap.
+  Start it from the session menu.
+- **Environment & processes** measures Docker state, harness terminals,
+  container executable names/PIDs/uptime, `dev-remote.sh` panes, host development
+  endpoints, session endpoints, and database/Redis TCP reachability. Start/stop
+  development controls act only inside the selected sandbox, using the existing
+  `dev-remote.sh` and shared host development data. They do not manage host services.
+  Refresh never starts containers. A configured port, an existing tmux pane, and
+  a reachable TCP socket are explicitly different observations. SSH processes
+  are identified without exposing argv or destinations; no tunnel-health claim
+  is inferred from an SSH process merely existing.
+  Workspace discovery filters Docker's exact Compose `workspace` service; session
+  names cannot cause database or Redis containers to be selected. Malformed probe
+  output is shown as an unreliable measurement instead of closing the manager.
+  Missing or malformed endpoint URLs are never probed as loopback addresses.
+- **Browser** enables the browser image (stopping current workspace processes),
+  starts/stops a managed headless Chromium, or captures a URL into a viewport PNG.
+  Managed Chromium's CDP endpoint is `http://127.0.0.1:9222` **inside** the container,
+  with no host publication. Screenshot capture uses a separate short-lived browser
+  and closes it after success or failure. Browser executable/PID state appears in
+  Environment & processes. Browser readiness allows the complete bounded probe
+  window, and stopping an absent browser or development tmux session is idempotent.
+- **Files & attachments** imports quoted/dragged host paths or the clipboard,
+  lists uploaded inputs and generated output, previews text, pastes references
+  into the harness, and exports durable copies (revealed in Finder on macOS).
+  Uploads stay at `/attachments`; generated files should be written under
+  `/workspace/.msandbox/outputs`. Enumeration is bounded to 200 files / 500
+  directories; symlinks are refused, and export rechecks every path component.
+  Exports are limited to 50 MiB per file and 1 GiB per session and live at
+  `~/.local/share/matcha-msandbox/exports/<id>`, outside the releasable worktree.
+  **Export wanted generated files before releasing or submitting a session.**
+  Generated output is ignored by Git and otherwise disappears with the worktree.
+  Creation and explicit lifecycle repair install `/.msandbox/outputs/` in isolated
+  Git `info/exclude`. A host exclusion is added only when Git does not already
+  ignore outputs, to protect sessions based on older commits. That fallback rule
+  is shared by linked worktrees; existing rules are preserved. Routine menu
+  redraws do not repeat this repair.
+  Binary previews use file type, signatures, and UTF-8 validation. Exports stream
+  from the validated file descriptor without buffering the whole file or making
+  an intermediate temporary copy.
+  Controller commits also exclude `.msandbox` and refuse forcibly staged sandbox files.
+  Files with Unicode control-category characters in any path component are hidden
+  and cannot be delivered. Harness delivery uses bracketed paste so a pasted path
+  cannot submit the current prompt.
+- **Testing** offers existing changed-file, full-PR, browser and native validation.
+  Results stay visible after a run. Tests use the existing isolated validation
+  services and immutable reports, including their existing stop/snapshot behavior.
+- **Tools & access** opens the full measured capability report on demand. Its
+  remeasure action explicitly starts the workspace if needed. Session overview
+  only shows a compact historical summary, with stale/stopped warnings.
+- **Branch & pull request** runs `gpt-5.6-luna` with `high` reasoning to suggest
+  a branch name, commit subject, title, and description from bounded Git summaries.
+  The helper uses a temporary read-only container with writable tmpfs, a read-only
+  Codex login mount and no workspace/host-service mounts. Codex runs with read-only
+  sandboxing and approval policy `never`; shell/unified execution, browser/computer
+  use, host code execution, apps, plugins, subagents, image generation, hooks, and
+  web search are explicitly disabled. User config and execution rules are ignored.
+  Network remains available for model authentication and inference; this is not
+  a network-isolated helper. The draft survives menu navigation and restart.
+  Review the copy and displayed changed-file list, then click **Create branch /
+  commit** to stop the running harness/workspace and commit all shown changes;
+  both the action label and confirmation disclose that stop. The controller rejects stale drafts,
+  colliding branches, and invalid model output. Repeated applies advance the local
+  branch with a compare-and-swap update; checked-out branches are refused. A local
+  branch created by the controller is removed during successful release only when
+  it has no commits outside the published session and has not moved concurrently.
+  A stale, remote-deleted local ref with no unique commits can be safely adopted
+  by a later session and receives the same cleanup protection.
+  If optional local-branch cleanup fails after the worktree is removed, release
+  still finalizes the session and frees its ports; the result names the retained
+  branch cleanup warning.
+  Existing PR sessions retain their
+  branch. Run **Validate full PR**, then **Publish draft pull request**; the existing
+  exact-commit validation, push lease, and release checks still apply. The helper
+  needs the current sandbox image built and a valid host `codex login`.
+  **Luna is optional:** already committed work can use **Publish draft pull request**
+  directly, with the session name and default PR description. Claude and OpenCode
+  sessions do not need a Codex login to publish; the same validation and release
+  checks apply.
+  When reviewed copy would replace an existing PR's title and description, the
+  confirmation names that PR and the fields being replaced. A failed or interrupted
+  push/GitHub step returns the session to `stopped`; proven pushed state is retained
+  so publishing can retry with the correct remote lease.
+
+Submenu loading failures offer Back and Retry. A broken session remains visible
+with a repair notice while healthy sessions stay selectable. Testing → Back
+returns directly. Terminal headings retain trailing notices, and incomplete mouse
+reports time out instead of blocking input.
+
+Equivalent navigation commands:
+
+```bash
+msandbox session switch payroll-fix --agent claude
+msandbox session start payroll-fix
+msandbox session ps payroll-fix
+msandbox session ps payroll-fix --json
+```
+
+If a harness exits, the manager preserves and offers up to its last 120 lines before
+showing a restart action that explicitly replaces them. Opening the manager also
+installs this pane lifecycle hook on still-running sessions created by an older
+controller. The CLI protects preserved output by default; use `session start
+SESSION --replace-exited` only after inspecting it in the manager.
+
+`session ps` exits nonzero whenever its snapshot is unreliable. With `--json`,
+the versioned object contains `schema_version`, `checked_at`, `reliable`,
+`container_id`, `containers`, `harness_terminals`, `dev_remote_running`,
+`connections`, `ssh_process_observed`, `processes`, and stable error-code values
+in `errors` (`docker_unavailable`, `connection_probe_unavailable`,
+`process_inventory_unavailable`, or `inspection_failed`); it does not expose
+the human-readable display lines.
+
+Endpoint inspection reads `HOST_DEV_BACKEND_URL` and
+`HOST_DEV_FRONTEND_URL` inside the workspace. They are inherited from
+`docker-compose.sandbox.yml` by every session overlay and default to the host
+gateway on ports 8001 and 5174; host `HOST_DEV_BACKEND_PORT` and
+`HOST_DEV_FRONTEND_PORT` overrides flow through Compose interpolation.
+
+### Terminal dashboard
+
+`msandbox` and `msandbox wizard` open a split-pane dashboard in an interactive
+terminal. The left sidebar selects a session; the right side has Overview,
+Processes, Tools & access, Files, Testing, and Branch & PR tabs. The harness,
+shell, browser, attachment, validation, and publication controls open the same
+guarded workflows as the classic manager. Prompts and harnesses take over the
+terminal temporarily, then return to the selected session and tab.
+
+- Click a session or action, or use arrows and Enter. Tab / Shift-Tab moves
+  focus between the sidebar, tabs, and actions. Keys 1–6 select a detail tab.
+- Page Up / Page Down scroll details. Terminals whose curses library reports
+  both wheel directions can also scroll the detail pane with the mouse wheel.
+  Arrow keys scroll the sidebar through all sessions and global actions.
+- `r` reloads saved records and refreshes the selected session's process and
+  connection snapshot. Entering Processes also starts its first read-only
+  inspection in the background; navigation remains available while Docker
+  responds. Measurements show their timestamp and partial/unavailable state.
+- `n` creates a session; Escape returns focus to the sidebar; `q` closes the
+  dashboard while running sessions continue. Inside a harness, press Ctrl-b,
+  then d to detach back to the dashboard. Ctrl-c interrupts that harness.
+- Start checks for preserved exit output and offers inspection or confirmation
+  before replacing it. Release results wait for dismissal before returning.
+
+The header and sidebar show **saved** session state, not a health guarantee.
+Tool and validation reports are historical; publication still validates the
+current commit. Unexpected access and missing required capabilities are marked
+as warnings in Tools & access. Every dashboard reload reconciles all saved
+sessions and surfaces per-session repair failures without hiding healthy ones.
+Cached capability reports and file indexes load in the background when their
+tabs open. AutoPR health is available through the AutoPR dashboard action.
+No browser, Electron, Python package download, or daemon is required for the UI;
+it uses Python's standard `curses` module on macOS/Linux. A 256-color terminal
+gets the green palette; basic color and monochrome terminals remain usable.
+Resize to at least 73 columns × 20 rows, or press `c` for the classic menu.
+`MSANDBOX_UI=classic msandbox wizard` explicitly selects the classic menu;
+redirected/custom-reader usage keeps the numbered prompt behavior.
+
+Controller changes are picked up by `msandbox install` from the checkout that
+contains them. No terminal GUI dependency or database migration is required.
+Unit coverage runs through `bash scripts/tests/test_msandbox_sessions.sh`.
+Optional browser smoke (one disposable container, no host data/credentials or
+network) uses an existing browser-enabled image:
+
+```bash
+python3 -m scripts.tests.msandbox_manager_smoke --image <browser-enabled-image>
+```
 
 AutoPR and independent sessions share one lifecycle even though their durable
 terminal sessions stay on the host side of the container boundary. From an
@@ -76,7 +275,7 @@ msandbox capabilities payroll-fix
 msandbox capabilities payroll-fix --refresh
 ```
 
-Selecting a session in the picker, confirming a new one, and `msandbox doctor`
+The session's Tools & access screen, a newly created session, and `msandbox doctor`
 all render the same measured report:
 
 ```text

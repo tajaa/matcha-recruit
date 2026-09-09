@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 import AppKit
 
 struct TaskEditorSheet: View {
+    @Environment(AppState.self) private var appState
+    @State private var showingResearchWizard = false
     let task: MWProjectTask
     @Bindable var viewModel: ProjectDetailViewModel
     let onSave: (MatchaWorkService.ProjectTaskPatch) -> Void
@@ -82,11 +84,12 @@ struct TaskEditorSheet: View {
     private var isPipeline: Bool { viewModel.project?.pipelineMode == true }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Edit Task")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                Text("Edit ticket")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(appState.themeText)
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark")
@@ -99,9 +102,9 @@ struct TaskEditorSheet: View {
             TextField("Title", text: $title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
                 .padding(8)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -109,33 +112,32 @@ struct TaskEditorSheet: View {
                     Image(systemName: "location.north.line")
                         .font(.system(size: 9))
                         .foregroundColor(.matcha500)
-                    Text("WHERE WE'RE AT")
+                    Text("Status update")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(.matcha500)
                         .tracking(0.5)
                 }
-                TextField("Current status, blockers, latest update…", text: $progressNote, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white)
-                    .lineLimit(2...5)
-                    .padding(8)
-                    .background(Color.zinc800)
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.matcha500.opacity(0.4), lineWidth: 1)
-                    )
+                ComposerTextView(text: $progressNote, placeholder: "Current status, blockers, latest update…",
+                                 font: .systemFont(ofSize: 13), textColor: appState.themeText,
+                                 minLines: 2, maxLines: 6, submitKey: .commandReturnSends)
+                    .padding(10).background(appState.themeText.opacity(0.06)).cornerRadius(8)
+
             }
 
-            TextField("Description", text: $description, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundColor(.white)
-                .lineLimit(2...6)
-                .padding(8)
-                .background(Color.zinc800)
-                .cornerRadius(6)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Brief").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    if task.category == "research" {
+                        Button("Research wizard") { showingResearchWizard = true }
+                            .buttonStyle(.bordered)
+                    }
+                }
+                ComposerTextView(text: $description, placeholder: "Describe the goal, context, and what done looks like…",
+                                 font: .systemFont(ofSize: 13), textColor: appState.themeText,
+                                 minLines: 5, maxLines: 12, submitKey: .commandReturnSends)
+                    .padding(12).background(appState.themeText.opacity(0.06)).cornerRadius(8)
+            }
 
             HStack(spacing: 8) {
                 Picker("Column", selection: $boardColumn) {
@@ -174,9 +176,9 @@ struct TaskEditorSheet: View {
             TextField("Due date (YYYY-MM-DD, optional)", text: $dueDate)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
                 .padding(8)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
 
             attachmentsSection
@@ -224,14 +226,23 @@ struct TaskEditorSheet: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.matcha500)
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(16)
-        .frame(width: 600)
+        .padding(24)
+        }
+        .frame(width: 680)
+        .frame(maxHeight: 780)
         .background(Color.appBackground)
         .task {
             if viewModel.taskFiles[task.id] == nil {
                 await viewModel.loadTaskFiles(taskId: task.id)
+            }
+        }
+        .sheet(isPresented: $showingResearchWizard) {
+            ResearchBriefWizard(initialTitle: title, existingDescription: description) { newTitle, _, brief in
+                title = newTitle
+                description = brief
             }
         }
         .sheet(item: $previewFile) { file in
@@ -248,9 +259,9 @@ struct TaskEditorSheet: View {
                 TextField("New element name", text: $newElementName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .padding(6)
-                    .background(Color.zinc800)
+                    .background(appState.themeText.opacity(0.06))
                     .cornerRadius(5)
                     .onSubmit { commitNewElement() }
                 Button("Add") { commitNewElement() }
@@ -351,9 +362,9 @@ struct TaskEditorSheet: View {
             TextField("Log a call / email / note…", text: $activityNote)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
                 .padding(8)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
             Menu {
                 ForEach(["call", "email", "note", "meeting"], id: \.self) { kind in
@@ -383,9 +394,9 @@ struct TaskEditorSheet: View {
         TextField(placeholder, text: text)
             .textFieldStyle(.plain)
             .font(.system(size: 12))
-            .foregroundColor(.white)
+            .foregroundColor(appState.themeText)
             .padding(8)
-            .background(Color.zinc800)
+            .background(appState.themeText.opacity(0.06))
             .cornerRadius(6)
     }
 
@@ -422,7 +433,7 @@ struct TaskEditorSheet: View {
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.zinc800)
+                        .background(appState.themeText.opacity(0.06))
                         .cornerRadius(4)
                 }
                 Spacer()

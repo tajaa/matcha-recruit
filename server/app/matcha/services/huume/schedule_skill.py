@@ -33,6 +33,7 @@ round trip the way channels do — so it's surfaced as a terminal clarification
 asking the admin to be more specific, not staged. That's a deliberate v1
 scope cut, not an oversight."""
 
+import asyncio
 import logging
 from datetime import date as _date
 from typing import Any, Literal, NotRequired, Optional, TypedDict
@@ -47,6 +48,98 @@ logger = logging.getLogger(__name__)
 
 _ALLOWED_ROLES = frozenset({"client", "admin"})
 _MAX_BULK_VACANT_SHIFTS = 500
+_EXECUTION_RECOVERY_TIMEOUT_SECONDS = 5.0
+
+
+_NO_SCHEDULE_CHANGES = (
+    "None of the requested shifts changed. Reload the schedule, review the conflict "
+    "details above, and stage only the remaining change."
+)
+_UNKNOWN_SCHEDULE_OUTCOME = (
+    "The schedule operation's outcome could not be verified. Reload the schedule "
+    "before trying again so the same change is not repeated."
+)
+
+
+def _execution_response(receipt, *, proposal_id: str) -> dict[str, Any]:
+    """Translate the executor's immutable transaction receipt for Huume."""
+    if not receipt.touched_shift_ids:
+        message = (
+            f"{receipt.text}\n{_NO_SCHEDULE_CHANGES}"
+            if receipt.text else _NO_SCHEDULE_CHANGES
+        )
+        return {"status": "error", "message": message}
+    return {
+        "status": "created", "message": receipt.text, "record_id": proposal_id,
+        "verified": True, "bg_tasks": [],
+    }
+
+
+def _receipt_from_row(row, schedule_chat):
+    """Validate the receipt persisted atomically with proposal confirmation."""
+    if row is None or row["status"] != "confirmed":
+        return None
+    proposal = row["proposal"]
+    if isinstance(proposal, str):
+        import json as _json
+        proposal = _json.loads(proposal)
+    raw = (proposal or {}).get("execution_receipt")
+    if not isinstance(raw, dict) or raw.get("version") != 1:
+        return None
+    try:
+        receipt_ids = tuple(
+            UUID(str(value)) for value in raw.get("touched_shift_ids") or []
+        )
+        persisted_ids = tuple(
+            UUID(str(value)) for value in row["created_shift_ids"] or []
+        )
+    except (TypeError, ValueError, AttributeError):
+        return None
+    message = raw.get("message")
+    if receipt_ids != persisted_ids or not isinstance(message, str):
+        return None
+    return schedule_chat.ProposalExecutionReceipt(
+        text=message, touched_shift_ids=receipt_ids,
+    )
+
+
+async def _recover_execution_failure(
+    *, company_id: UUID, proposal_id: UUID, schedule_chat,
+) -> dict[str, Any]:
+    """Resolve an executor exception after closing the original connection.
+
+    A COMMIT can succeed before its acknowledgement is lost. A bounded
+    ``FOR UPDATE`` waits for the original proposal lock to resolve; the durable
+    receipt then distinguishes a commit from a transaction PostgreSQL rolled back.
+    """
+    from app.database import get_connection
+
+    try:
+        async with get_connection() as recovery_conn:
+            row = await asyncio.wait_for(
+                recovery_conn.fetchrow(
+                    "SELECT status, created_shift_ids, proposal "
+                    "FROM schedule_chat_proposals "
+                    "WHERE id = $1 AND company_id = $2 FOR UPDATE",
+                    proposal_id, company_id,
+                ),
+                timeout=_EXECUTION_RECOVERY_TIMEOUT_SECONDS,
+            )
+    except Exception:
+        logger.exception("schedule proposal %s recovery read failed", proposal_id)
+        return {"status": "error", "message": _UNKNOWN_SCHEDULE_OUTCOME}
+
+    receipt = _receipt_from_row(row, schedule_chat)
+    if receipt is not None:
+        return _execution_response(receipt, proposal_id=str(proposal_id))
+    if row is not None and row["status"] == "proposed":
+        return {
+            "status": "error",
+            "message": "Nothing was applied — that schedule change failed and was "
+                       "rolled back. "
+                       "Stage the change again, or make it on the Schedule page.",
+        }
+    return {"status": "error", "message": _UNKNOWN_SCHEDULE_OUTCOME}
 
 
 class ScheduleProposalResult(TypedDict):
@@ -561,7 +654,7 @@ async def propose(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,
                 original_content="[huume thread] shift create", week_start=week_start,
-                week_end=week_end, surface=surface,
+                week_end=week_end, surface=surface, auto_assign_unpinned=False,
             )
             operation_count = 1
             operation_summary = {"create": 1}
@@ -604,6 +697,7 @@ async def propose(
                     original_content="[huume thread] batched schedule correction",
                     surface=surface, shift_statuses=shift_statuses,
                     editor_location_id=location_id, week_start=week_start, week_end=week_end,
+                    auto_assign_unpinned=False,
                 )
             else:
                 parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": edit_requests}
@@ -691,47 +785,60 @@ async def execute(
     if not proposal_id:
         return {"status": "error", "message": "Nothing was actually staged — try again."}
 
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, company_id, channel_id, proposal, status FROM schedule_chat_proposals "
-            "WHERE id = $1 AND company_id = $2",
-            UUID(proposal_id), company_id,
-        )
-        if row is None or row["status"] != "proposed":
-            return {"status": "error", "message": "That proposal isn't available anymore — try again."}
-        proposal = row["proposal"]
-        if isinstance(proposal, str):
-            proposal = _json.loads(proposal)
-        features = await get_company_features(company_id, conn=conn)
-        proposal_kind = proposal.get("kind")
-        if proposal_kind == "batch":
-            executor = schedule_chat.execute_batch_proposal
-        elif proposal_kind == "edit":
-            executor = schedule_chat.execute_edit_proposal
-        else:
-            executor = schedule_chat.execute_proposal
-        try:
-            text = await executor(
+    parsed_proposal_id = UUID(proposal_id)
+    executor_started = False
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, company_id, channel_id, proposal, status "
+                "FROM schedule_chat_proposals "
+                "WHERE id = $1 AND company_id = $2",
+                parsed_proposal_id, company_id,
+            )
+            if row is None or row["status"] != "proposed":
+                return {
+                    "status": "error",
+                    "message": "That proposal isn't available anymore — try again.",
+                }
+            proposal = row["proposal"]
+            if isinstance(proposal, str):
+                proposal = _json.loads(proposal)
+            features = await get_company_features(company_id, conn=conn)
+            proposal_kind = proposal.get("kind")
+            if proposal_kind == "batch":
+                executor = schedule_chat.execute_batch_proposal
+            elif proposal_kind == "edit":
+                executor = schedule_chat.execute_edit_proposal
+            else:
+                executor = schedule_chat.execute_proposal
+            executor_started = True
+            receipt = await executor(
                 conn, proposal_row={**dict(row), "proposal": proposal},
                 confirmed_by=actor_user_id, features=features,
-                week_start=week_start, week_end=week_end,
+                week_start=week_start, week_end=week_end, include_receipt=True,
             )
-        except schedule_chat.ProposalExecutionClaimError as exc:
-            return {"status": "error", "message": str(exc)}
-        except schedule_chat.ProposalScopeError as exc:
-            # Raised inside the batch transaction → everything rolled back.
-            return {"status": "error", "message": f"Nothing was applied — {exc}"}
-        except Exception:
-            if proposal_kind != "batch":
-                raise
-            # The batch executor runs both halves in one transaction, so an
-            # unexpected failure here means the DB rolled ALL of it back —
-            # say so plainly rather than letting the agent's generic failure
-            # path imply a partial write.
-            logger.exception("schedule batch %s failed and was rolled back", proposal_id)
+    except schedule_chat.ProposalExecutionClaimError as exc:
+        return {"status": "error", "message": str(exc)}
+    except schedule_chat.ProposalScopeError as exc:
+        return {"status": "error", "message": f"Nothing was applied — {exc}"}
+    except Exception:
+        if not executor_started:
+            logger.exception("schedule proposal %s could not be loaded", proposal_id)
             return {
                 "status": "error",
-                "message": "Nothing was applied — that batch failed partway and was rolled back. "
-                           "Try confirming again, or make the change on the Schedule page.",
+                "message": "That schedule change could not be loaded. Try again, "
+                           "or make it on the Schedule page.",
             }
-    return {"status": "created", "message": text, "record_id": proposal_id, "bg_tasks": []}
+        logger.exception(
+            "schedule proposal %s executor returned an uncertain outcome", proposal_id,
+        )
+        return await _recover_execution_failure(
+            company_id=company_id,
+            proposal_id=parsed_proposal_id,
+            schedule_chat=schedule_chat,
+        )
+
+    if not isinstance(receipt, schedule_chat.ProposalExecutionReceipt):
+        logger.error("schedule proposal %s executor returned no receipt", proposal_id)
+        return {"status": "error", "message": _UNKNOWN_SCHEDULE_OUTCOME}
+    return _execution_response(receipt, proposal_id=proposal_id)

@@ -70,6 +70,7 @@ for project_id in "${PROJECT_IDS[@]}"; do
               )
             )
             and .status != "cancelled"
+            and (.autopr_paused // false | not)
           ))
         | map(
             . as $t
@@ -163,9 +164,10 @@ out="$(printf '%s' "$out" | jq -c '
 
 # Stamp each card with its board's granted capabilities (research / outreach /
 # browse), read once for every configured board rather than per card. The
-# selector refuses a capability the board was not granted; the server re-checks
-# the acts themselves (sending an email, driving a browser) at the moment they
-# happen, so this stamp is a spend guard and not the security boundary.
+# selector refuses live-web, artifact-research, and browser capabilities the
+# board was not granted. Sending email is also re-checked server-side; hosted
+# search and browser access have no later server-side enforcement point, so
+# this stamped grant is their runtime boundary.
 #
 # Fail CLOSED on an unreadable answer: an empty grant map means the lane keeps
 # doing exactly what it did before capabilities existed — code PRs and nothing

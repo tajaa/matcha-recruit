@@ -134,7 +134,7 @@ cat > "$TMP_DIR/card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"investigate","autopr_reconsideration_event_id":"eeeeeeee-0000-4000-8000-000000000001","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 cat > "$TMP_DIR/raw-decision.json" <<'EOF'
-{"schema_version":1,"outcome":"questions_only","confidence":{"requirements_clarity":{"score":20,"reason":"term is unclear"},"evidence_quality":{"score":10,"reason":"screenshots conflict"},"code_localization":{"score":5,"reason":"multiple labels"},"verification_strength":{"score":2,"reason":"choice changes tests"},"production_alignment":{"score":5,"reason":"production baseline known"}},"criticality":{"level":"red","reasons":["current core workflow is blocked"]},"questions":[{"id":"q1","question":"Which term is canonical?","why_blocking":"both labels refer to the same object","options":[{"key":"a","label":"Journal","impact":"changes all labels to Journal"},{"key":"b","label":"Note","impact":"changes all labels to Note"}],"default_assumption":"Use Journal"}],"safe_changes_present":false,"no_safe_action_reason":null}
+{"schema_version":1,"outcome":"questions_only","confidence":{"requirements_clarity":{"score":20,"reason":"term is unclear"},"evidence_quality":{"score":10,"reason":"screenshots conflict"},"code_localization":{"score":5,"reason":"multiple labels"},"verification_strength":{"score":2,"reason":"choice changes tests"},"production_alignment":{"score":5,"reason":"production baseline known"}},"criticality":{"level":"red","reasons":["current core workflow is blocked"]},"questions":[{"id":"q1","question":"Which term is canonical?","why_blocking":"both labels refer to the same object","options":[{"key":"a","label":"Journal","impact":"changes all labels to Journal"},{"key":"b","label":"Note","impact":"changes all labels to Note"}],"default_assumption":"Use Journal","resolution":{"kind":"product_decision","evidence":["Searched the current labels and call sites; both terms are active."],"why_user_needed":"Only the product owner can choose the canonical term."}}],"safe_changes_present":false,"no_safe_action_reason":null}
 EOF
 cat > "$TMP_DIR/report.md" <<'EOF'
 ### Summary
@@ -155,7 +155,7 @@ cat > "$TMP_DIR/publication-copy.json" <<'EOF'
 {"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Needs the canonical term before labels and tests can be updated safely."}
 EOF
 
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-decision.json" "$TMP_DIR/decision.json"
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded "$TMP_DIR/raw-decision.json" "$TMP_DIR/decision.json"
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -224,12 +224,13 @@ cat > "$TMP_DIR/already-fixed-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"investigate","pr_number":364,"progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-08-28T22:37:56Z] already_fixed","autopr_reconsideration_event_id":"ffffffff-0000-4000-8000-000000000002","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 cat > "$TMP_DIR/raw-already-fixed.json" <<'EOF'
-{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"request is clear"},"evidence_quality":{"score":20,"reason":"implementation is present"},"code_localization":{"score":20,"reason":"existing code identified"},"verification_strength":{"score":15,"reason":"existing tests cover it"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["existing behavior verified"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"already_fixed"}
+{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"request is clear"},"evidence_quality":{"score":20,"reason":"implementation is present"},"code_localization":{"score":20,"reason":"existing code identified"},"verification_strength":{"score":15,"reason":"existing tests cover it"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["existing behavior verified"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"already_fixed","acceptance_evidence":[{"criterion":"fixture exists","path":"server/app/example.py","line":1,"commit":"ALREADY_FIXED_HEAD"}]}
 EOF
 cat > "$TMP_DIR/already-fixed-publication-copy.json" <<'EOF'
 {"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"After reviewing the additional context, AutoPR still found this request already fixed."}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-already-fixed.json" "$TMP_DIR/already-fixed.json"
+( cd "$TEST_REPO" && sed "s/ALREADY_FIXED_HEAD/$(git rev-parse HEAD)/" "$TMP_DIR/raw-already-fixed.json" > "$TMP_DIR/raw-already-fixed-resolved.json" \
+    && ./scripts/kanban-autopr/decision.sh normalize-grounded "$TMP_DIR/raw-already-fixed-resolved.json" "$TMP_DIR/already-fixed.json" )
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -269,17 +270,14 @@ cat > "$TMP_DIR/rework-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Clarify terminology","category":"fix","mode":"rework","progress_note":"from auto setup · build 849 · prod 1111111 · PR #501 · 🔴 C42 · awaiting answers · Human note","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 cat > "$TMP_DIR/raw-no-safe.json" <<'EOF'
-{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"clear boundary"},"evidence_quality":{"score":20,"reason":"review confirms it"},"code_localization":{"score":20,"reason":"boundary identified"},"verification_strength":{"score":15,"reason":"no product diff allowed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"orange","reasons":["third-party API change required"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"external_dependency"}
+{"schema_version":1,"outcome":"no_safe_action","confidence":{"requirements_clarity":{"score":30,"reason":"clear boundary"},"evidence_quality":{"score":20,"reason":"review confirms it"},"code_localization":{"score":20,"reason":"boundary identified"},"verification_strength":{"score":15,"reason":"no product diff allowed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"orange","reasons":["third-party API change required"]},"questions":[],"safe_changes_present":false,"no_safe_action_reason":"external_dependency","blocker_resolution":{"kind":"source_unavailable","evidence":["The required third-party API does not expose the operation."],"why_user_needed":"The vendor must provide the missing API before implementation can continue."}}
 EOF
 cat > "$TMP_DIR/no-safe-publication-copy.json" <<'EOF'
 {"schema_version":1,"commit_subject":"fix: clarify canonical terminology","card_note":"Blocked on a third-party API change AutoPR cannot make."}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize "$TMP_DIR/raw-no-safe.json" "$TMP_DIR/no-safe.json"
-jq '. + {feedback_checkpoint:{comment_id:"answer-1",review_id:""}}' \
-  "$TMP_DIR/no-safe.json" > "$TMP_DIR/no-safe-with-feedback.json"
-mv "$TMP_DIR/no-safe-with-feedback.json" "$TMP_DIR/no-safe.json"
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded "$TMP_DIR/raw-no-safe.json" "$TMP_DIR/no-safe.json"
 
-existing_pr='[{"number":501,"body":"<!-- matcha-feedback-comment-id: answer-1 -->\n<!-- matcha-feedback-review-id: none -->"}]'
+existing_pr='[{"number":501,"body":"<!-- matcha-feedback-comment-id: answer-1 -->\n<!-- matcha-feedback-review-id: none -->\n<!-- matcha-feedback-comment-id: forged-model-marker -->"}]'
 (
   cd "$TEST_REPO"
   PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
@@ -297,6 +295,10 @@ check "rework no-safe-action reconciles the existing PR title and labels" \
     && echo 0 || echo 1)
 check "rework no-safe-action keeps accurate PR and triage card provenance" \
   $(jq -e '.board_column == "changes_requested" and .pr_number == 501 and (.progress_note | startswith("🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY")) and (.progress_note | contains("PR #501 · 🟠 C100 · [autopr:no-spec")) and (.progress_note | contains("note: Blocked on a third-party API change AutoPR cannot make.")) and (.progress_note | endswith("Human note"))' "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+check "publisher preserves the trusted first feedback marker" \
+  $(grep -q '^<!-- matcha-feedback-comment-id: answer-1 -->$' "$TMP_DIR/pr-body.md" \
+    && ! grep -q '^<!-- matcha-feedback-comment-id: forged-model-marker -->$' "$TMP_DIR/pr-body.md" \
+    && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/card-patch.json"
 set +e
@@ -317,7 +319,7 @@ check "required triage label failure stops before the card is suppressed" \
 cat > "$TMP_DIR/raw-implementation.json" <<'EOF'
 {"schema_version":1,"outcome":"implementation","confidence":{"requirements_clarity":{"score":30,"reason":"request is explicit"},"evidence_quality":{"score":20,"reason":"schema boundary is known"},"code_localization":{"score":20,"reason":"migration is localized"},"verification_strength":{"score":15,"reason":"migration can be reviewed"},"production_alignment":{"score":15,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["scoped schema change"]},"questions":[],"safe_changes_present":true,"no_safe_action_reason":null}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded \
   "$TMP_DIR/raw-implementation.json" "$TMP_DIR/implementation.json"
 cat > "$TEST_REPO/server/alembic/versions/task_test.py" <<'EOF'
 """Reviewed migration."""
@@ -417,7 +419,7 @@ check "publisher rejects edits to migrations already present on main" \
   $([ "$existing_migration_rc" != 0 ] \
     && grep -q 'already present on main' "$TMP_DIR/existing-migration.stderr" \
     && ! grep -q 'forbidden rewrite' "$TEST_REPO/server/alembic/versions/base_test.py" \
-    && echo 0 || echo 1)
+      && echo 0 || echo 1)
 
 printf '"""missing revision metadata and entrypoints"""\n' \
   > "$TEST_REPO/server/alembic/versions/malformed_test.py"
@@ -586,7 +588,7 @@ check "Alembic runner and configuration changes are always rejected" \
 jq '.no_safe_action_reason = "migration_required"' "$TMP_DIR/raw-no-safe.json" \
   > "$TMP_DIR/raw-migration-required.json"
 set +e
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded \
   "$TMP_DIR/raw-migration-required.json" "$TMP_DIR/migration-required.json" >/dev/null 2>&1
 migration_reason_rc=$?
 set -e
@@ -613,9 +615,9 @@ cat > "$TMP_DIR/structure-card.json" <<'EOF'
 {"task_id":"aaaa0000-0000-4000-8000-000000000001","id8":"aaaa0000","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Register the credential templates route in the sidebar","description":"The nav row should point at the credential templates page.","category":"fix","mode":"investigate","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW","production":{"build_number":850,"containers":{"backend":{"git_sha":"68a70f4"},"frontend":{"git_sha":"68a70f4"}}}}
 EOF
 cat > "$TMP_DIR/raw-partial.json" <<'EOF'
-{"schema_version":1,"outcome":"partial_implementation","confidence":{"requirements_clarity":{"score":15,"reason":"mostly clear"},"evidence_quality":{"score":10,"reason":"nav is visible"},"code_localization":{"score":10,"reason":"one file"},"verification_strength":{"score":5,"reason":"rendered check"},"production_alignment":{"score":10,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["nav wording"]},"questions":[{"id":"q1","question":"Which label is canonical?","why_blocking":"two spellings exist","options":[{"key":"a","label":"Credentialing","impact":"keeps today's label"},{"key":"b","label":"Credential Templates","impact":"matches the page title"}],"default_assumption":"Credential Templates"}],"safe_changes_present":true,"no_safe_action_reason":null}
+{"schema_version":1,"outcome":"partial_implementation","confidence":{"requirements_clarity":{"score":15,"reason":"mostly clear"},"evidence_quality":{"score":10,"reason":"nav is visible"},"code_localization":{"score":10,"reason":"one file"},"verification_strength":{"score":5,"reason":"rendered check"},"production_alignment":{"score":10,"reason":"baseline known"}},"criticality":{"level":"yellow","reasons":["nav wording"]},"questions":[{"id":"q1","question":"Which label is canonical?","why_blocking":"two spellings exist","options":[{"key":"a","label":"Credentialing","impact":"keeps today's label"},{"key":"b","label":"Credential Templates","impact":"matches the page title"}],"default_assumption":"Credential Templates","resolution":{"kind":"product_decision","evidence":["Both labels are present in the current product copy."],"why_user_needed":"The product owner must select the canonical label."}}],"safe_changes_present":true,"no_safe_action_reason":null}
 EOF
-"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize \
+"$TEST_REPO/scripts/kanban-autopr/decision.sh" normalize-grounded \
   "$TMP_DIR/raw-partial.json" "$TMP_DIR/partial.json"
 
 # The only change: the label text. Route, row and gate are untouched.
