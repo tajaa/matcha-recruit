@@ -1060,7 +1060,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "changes. Nothing happens until they confirm on a LATER turn by "
         "calling this again with EXACTLY the same confirm_id. Use real "
         "names/dates from lookup_context(topic='schedule') or "
-        "find_shift_coverage — never invent one.",
+        "find_shift_coverage — never invent one. A new shift stays unassigned "
+        "unless the manager explicitly asked to put named employees on it; "
+        "never infer an assignee from the roster or from an earlier shift.",
         properties={
             "kind": types.Schema(
                 type=types.Type.STRING,

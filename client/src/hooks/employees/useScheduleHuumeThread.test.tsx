@@ -265,6 +265,24 @@ describe('useScheduleHuumeThread — taking a turn', () => {
     expect(onApplied).toHaveBeenCalledTimes(1)
   })
 
+  it('reloads after a failed confirmed schedule attempt may have partially changed the board', async () => {
+    const { result, onApplied } = render()
+    await waitFor(() => expect(result.current.threadId).toBeTruthy())
+
+    await act(async () => { await result.current.send('Confirm') })
+    act(() => streamCallbacks().onComplete({
+      user_message: message('u1', 'user', 'Confirm'),
+      assistant_message: message('a1', 'assistant', 'Reload before retrying.', { huume_run_id: 'run-1' }),
+      current_state: {
+        huume_action: {
+          type: 'schedule_change', status: 'failed', confirm_id: 'confirm-failed-1',
+        },
+      },
+    }))
+
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1))
+  })
+
   it('drops the optimistic turn and toasts when the stream fails', async () => {
     const { result } = render()
     await waitFor(() => expect(result.current.threadId).toBeTruthy())

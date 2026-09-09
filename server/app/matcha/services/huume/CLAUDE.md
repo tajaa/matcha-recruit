@@ -260,6 +260,20 @@ being left applicable. The route is gated on `huume` + `matcha_work` like the se
 refuses a proposal that is not the caller's own live editor scenario for that session's location and
 week. Full mechanics: `services/scheduling/CLAUDE.md` §"Schedule Pilot workspace".
 
+**Schedule confirmation receipts (2026-09-09).** Thread Huume create and batch builders pass
+`auto_assign_unpinned=False`, so only employees explicitly named by the manager enter candidate ranking;
+an unnamed new shift stays open while channel scheduling retains its existing auto-staffing default.
+Every schedule executor also stores `proposal.execution_receipt` (the deterministic result text and exact
+touched IDs) in the same transaction that marks the proposal confirmed. `schedule_skill.execute` consumes
+that immutable receipt directly instead of re-reading mutable shift/assignment rows after commit. If the
+executor raises around COMMIT, it releases the old connection and reconciles the receipt on a fresh one:
+the recovery read takes a bounded `FOR UPDATE` lock so it waits for the original transaction to resolve;
+confirmed receipts return their real result, a still-proposed row then proves rollback, and an unavailable
+or inconsistent receipt is reported as outcome-unknown with a reload warning. A confirmed receipt with zero
+touched IDs remains an error and preserves the executor's per-operation refusal text. The agent stops
+before another model round after this deterministic result, but still executes every sibling function call
+already present in the provider's response batch.
+
 **Week builder hardening (2026-09-07).** `build_week_schedule`'s staged dict now carries the same
 `ScheduleReview` a schedule_change does (`review`, kind `week_draft`: who goes where, per-person load
 before/after, statutory advisories verbatim, the planner's open seats with reasons, findings,

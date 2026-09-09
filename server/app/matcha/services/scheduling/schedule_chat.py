@@ -614,6 +614,14 @@ class ProposalScopeError(RuntimeError):
     """The proposal targets a date outside the selected schedule week."""
 
 
+@dataclass(frozen=True)
+class ProposalExecutionReceipt:
+    """Immutable result produced and persisted by a proposal transaction."""
+
+    text: str
+    touched_shift_ids: tuple[UUID, ...]
+
+
 @dataclass
 class _Clarify:
     """A resolver's "ask before staging" outcome, not yet persisted — the
@@ -621,6 +629,19 @@ class _Clarify:
     relays it without ever writing the half-resolved batch."""
     question: str
     options: list[str]
+
+
+def _create_candidate_roster(
+    roster: list[dict], resolved_shifts: list[dict], *, auto_assign_unpinned: bool,
+) -> list[dict]:
+    if auto_assign_unpinned:
+        return roster
+    pinned_employee_ids = {
+        employee_id
+        for shift in resolved_shifts
+        for employee_id in shift["pinned_ids"]
+    }
+    return [row for row in roster if str(row["id"]) in pinned_employee_ids]
 
 
 async def _claim_proposal_execution(conn, proposal_id: UUID) -> None:
@@ -698,11 +719,15 @@ async def _resolve_create_shifts(
     conn, *, company_id: UUID, channel_id: Optional[UUID], parsed: dict, today: date,
     week_start: Optional[date] = None, week_end: Optional[date] = None,
     ignore_shift_ids: tuple[str, ...] = (),
+    auto_assign_unpinned: bool = True,
 ) -> dict | _Clarify:
     """Stage B for a create: location → templates → dates → ranked
     candidates, with NO persistence — `build_proposal` wraps it into a row of
     its own and `build_batch_proposal` folds it into a batch alongside the
-    edits it belongs with. `ignore_shift_ids` are shifts the same batch is
+    edits it belongs with. `auto_assign_unpinned=False` restricts candidate
+    ranking to employees the manager explicitly named; editor/thread creates
+    use that mode so an unassigned request cannot silently become staffed.
+    `ignore_shift_ids` are shifts the same batch is
     about to cancel: they still exist at stage time, so without this the
     busy/conflict pre-filter would keep everyone on the old draft off its own
     replacement. Week-hour and rest-gap advisories still count them (they're
@@ -902,7 +927,10 @@ async def _resolve_create_shifts(
         """,
         company_id, list(INACTIVE_EMPLOYMENT_STATUSES), location_id,
     )
-    roster = [dict(r) for r in roster_rows]
+    roster = _create_candidate_roster(
+        [dict(r) for r in roster_rows], resolved_shifts,
+        auto_assign_unpinned=auto_assign_unpinned,
+    )
 
     features = await get_company_features(company_id, conn=conn)
     training_enabled = bool(features.get("training"))
@@ -1063,6 +1091,7 @@ async def build_proposal(
     created_by: UUID, parsed: dict, today: date, original_content: str,
     week_start: Optional[date] = None, week_end: Optional[date] = None,
     surface: str = "channel",
+    auto_assign_unpinned: bool = True,
     clarify_history: Optional[list[dict]] = None,
     existing_proposal_id: Optional[UUID] = None,
 ) -> ProposalBuild:
@@ -1075,6 +1104,7 @@ async def build_proposal(
     resolved = await _resolve_create_shifts(
         conn, company_id=company_id, channel_id=channel_id, parsed=parsed, today=today,
         week_start=week_start, week_end=week_end,
+        auto_assign_unpinned=auto_assign_unpinned,
     )
     if isinstance(resolved, _Clarify):
         return await _persist_clarify(
@@ -2224,16 +2254,32 @@ def compose_clarify_followup(proposal: dict, answer: str) -> str:
     return "\n".join(lines)
 
 
-async def _mark_confirmed(conn, proposal_id: UUID, shift_ids: list[UUID], confirmed_by: UUID) -> None:
+async def _mark_confirmed(
+    conn, proposal_id: UUID, shift_ids: list[UUID], confirmed_by: UUID, result_text: str,
+) -> None:
+    receipt = json.dumps({
+        "version": 1,
+        "message": result_text,
+        "touched_shift_ids": [str(shift_id) for shift_id in shift_ids],
+    })
     await conn.execute(
         """
         UPDATE schedule_chat_proposals
         SET status = 'confirmed', created_shift_ids = $1, confirmed_by = $2,
+            proposal = jsonb_set(proposal, '{execution_receipt}', $3::jsonb, true),
             confirmed_at = NOW(), updated_at = NOW()
-        WHERE id = $3
+        WHERE id = $4
         """,
-        shift_ids, confirmed_by, proposal_id,
+        shift_ids, confirmed_by, receipt, proposal_id,
     )
+
+
+def _execution_result(
+    text: str, shift_ids: list[UUID], *, include_receipt: bool,
+) -> str | ProposalExecutionReceipt:
+    if include_receipt:
+        return ProposalExecutionReceipt(text=text, touched_shift_ids=tuple(shift_ids))
+    return text
 
 
 def _create_scope_error(proposal: dict, week_start: Optional[date], week_end: Optional[date]) -> Optional[str]:
@@ -2250,7 +2296,8 @@ async def execute_proposal(
     create_status: str = _CREATE_STATUS,
     week_start: Optional[date] = None,
     week_end: Optional[date] = None,
-) -> str:
+    include_receipt: bool = False,
+) -> str | ProposalExecutionReceipt:
     """Re-run the compliance gate per (shift, assignee) against CURRENT state
     — the proposal may be minutes or hours old — then create every shift in
     one transaction. A new block or conflict drops that assignee (the shift
@@ -2262,7 +2309,7 @@ async def execute_proposal(
         proposal = json.loads(proposal)
     scope_error = _create_scope_error(proposal, week_start, week_end)
     if scope_error:
-        return scope_error
+        raise ProposalScopeError(scope_error)
     async with conn.transaction():
         await _claim_proposal_execution(conn, proposal_row["id"])
         text, created_shift_ids = await _apply_create_shifts(
@@ -2271,8 +2318,10 @@ async def execute_proposal(
             confirmed_by=confirmed_by, features=features, create_status=create_status,
             week_start=week_start, week_end=week_end,
         )
-        await _mark_confirmed(conn, proposal_row["id"], created_shift_ids, confirmed_by)
-    return text
+        await _mark_confirmed(
+            conn, proposal_row["id"], created_shift_ids, confirmed_by, text,
+        )
+    return _execution_result(text, created_shift_ids, include_receipt=include_receipt)
 
 
 async def _apply_create_shifts(
@@ -2401,7 +2450,8 @@ async def execute_edit_proposal(
     edit_published: bool = True,
     week_start: Optional[date] = None,
     week_end: Optional[date] = None,
-) -> str:
+    include_receipt: bool = False,
+) -> str | ProposalExecutionReceipt:
     """Two-phase write, all in one transaction: every removal half first
     (bare unassign + the "take X off" half of a reassign), then every
     assign/retime/cancel — each re-checked against CURRENT state (the
@@ -2428,8 +2478,10 @@ async def execute_edit_proposal(
             ops=proposal["ops"], confirmed_by=confirmed_by, edit_published=edit_published,
             week_start=week_start, week_end=week_end, jurisdiction=proposal.get("jurisdiction"),
         )
-        await _mark_confirmed(conn, proposal_row["id"], affected_shift_ids, confirmed_by)
-    return text
+        await _mark_confirmed(
+            conn, proposal_row["id"], affected_shift_ids, confirmed_by, text,
+        )
+    return _execution_result(text, affected_shift_ids, include_receipt=include_receipt)
 
 
 async def _apply_edit_ops(
@@ -2863,6 +2915,7 @@ async def build_batch_proposal(
     surface: str = "channel", shift_statuses: tuple[str, ...] = ("published",),
     editor_location_id: Optional[UUID] = None,
     week_start: Optional[date] = None, week_end: Optional[date] = None,
+    auto_assign_unpinned: bool = True,
 ) -> ProposalBuild:
     """Resolve edits and creates together, persist ONE `schedule_chat_proposals`
     row with `proposal['kind'] == 'batch'`. Either half's clarify is returned
@@ -2901,6 +2954,7 @@ async def build_batch_proposal(
                     "shift_requests": shift_requests, "edit_requests": []},
             today=today, week_start=week_start, week_end=week_end,
             ignore_shift_ids=cancelled_ids,
+            auto_assign_unpinned=auto_assign_unpinned,
         )
         if isinstance(resolved, _Clarify):
             return ProposalBuild(
@@ -2960,7 +3014,8 @@ async def execute_batch_proposal(
     conn, *, proposal_row: dict, confirmed_by: UUID, features: dict,
     create_status: str = _CREATE_STATUS, edit_published: bool = True,
     week_start: Optional[date] = None, week_end: Optional[date] = None,
-) -> str:
+    include_receipt: bool = False,
+) -> str | ProposalExecutionReceipt:
     """One claim, one transaction: every edit op (cancels included) through
     `_apply_edit_ops`, THEN every replacement through `_apply_create_shifts`.
     Per-op refusals inside either half are reported, not raised (same
@@ -3006,7 +3061,10 @@ async def execute_batch_proposal(
             touched.extend(ids)
             created_count = len(ids)
         unique_ids = list(dict.fromkeys(touched))
-        await _mark_confirmed(conn, proposal_row["id"], unique_ids, confirmed_by)
+        combined_text = "\n".join(texts)
+        await _mark_confirmed(
+            conn, proposal_row["id"], unique_ids, confirmed_by, combined_text,
+        )
         await log_audit(
             conn, company_id, "shift", None, confirmed_by, "schedule_chat.batch_confirm",
             {
@@ -3017,7 +3075,7 @@ async def execute_batch_proposal(
                 "shifts_created": created_count,
             },
         )
-    return "\n".join(texts)
+    return _execution_result(combined_text, unique_ids, include_receipt=include_receipt)
 
 
 # ── Pill text ─────────────────────────────────────────────────────────────

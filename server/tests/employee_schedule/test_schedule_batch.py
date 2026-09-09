@@ -11,6 +11,7 @@ transaction skips finalize and propagates so the DB rolls everything back).
 """
 
 import asyncio
+import json
 from datetime import date
 from unittest import mock
 from uuid import UUID, uuid4
@@ -322,8 +323,8 @@ class TestExecuteBatchProposal:
                 raise create_raises
             return "create text", [s3, s2]
 
-        async def mark(conn, pid, ids, by):
-            log.append(("mark", ids))
+        async def mark(conn, pid, ids, by, text):
+            log.append(("mark", ids, text))
 
         async def audit(conn, *a, **k):
             log.append(("audit", a[4]))
@@ -346,7 +347,7 @@ class TestExecuteBatchProposal:
             ))
         assert text == "edit text\ncreate text"
         assert conn.log[:4] == ["txn:enter", "claim", "edits", "creates"]
-        assert ("mark", [s1, s2, s3]) in conn.log            # union, de-duplicated, order kept
+        assert ("mark", [s1, s2, s3], "edit text\ncreate text") in conn.log
         assert ("audit", "schedule_chat.batch_confirm") in conn.log
         assert conn.log[-1] == "txn:exit:commit"
         assert conn.log.count("claim") == 1
@@ -384,7 +385,57 @@ class TestExecuteBatchProposal:
             ))
         assert text == "edit text"
         assert "creates" not in conn.log
-        assert ("mark", [s1, s2]) in conn.log
+        assert ("mark", [s1, s2], "edit text") in conn.log
+
+
+class TestCreateCandidateMode:
+    def test_named_only_mode_leaves_an_unnamed_shift_open(self):
+        employee_id = uuid4()
+        roster = [{"id": employee_id, "first_name": "Dana", "last_name": "Reyes"}]
+        shifts = [{"pinned_ids": []}]
+
+        assert schedule_chat._create_candidate_roster(
+            roster, shifts, auto_assign_unpinned=False,
+        ) == []
+        assert schedule_chat._create_candidate_roster(
+            roster, shifts, auto_assign_unpinned=True,
+        ) == roster
+
+    def test_named_only_mode_keeps_only_explicit_employees(self):
+        named, other = uuid4(), uuid4()
+        roster = [{"id": named}, {"id": other}]
+
+        assert schedule_chat._create_candidate_roster(
+            roster, [{"pinned_ids": [str(named)]}], auto_assign_unpinned=False,
+        ) == [{"id": named}]
+
+
+class TestExecutionReceipt:
+    def test_confirmation_persists_message_and_ids_atomically(self):
+        proposal_id, actor_id, shift_id = uuid4(), uuid4(), uuid4()
+
+        class Conn:
+            call = None
+
+            async def execute(self, query, *args):
+                self.call = (query, args)
+
+        conn = Conn()
+        _run(schedule_chat._mark_confirmed(
+            conn, proposal_id, [shift_id], actor_id, "Schedule updated.",
+        ))
+
+        query, args = conn.call
+        receipt = json.loads(args[2])
+        assert "jsonb_set" in query
+        assert args[0] == [shift_id]
+        assert args[1] == actor_id
+        assert args[3] == proposal_id
+        assert receipt == {
+            "version": 1,
+            "message": "Schedule updated.",
+            "touched_shift_ids": [str(shift_id)],
+        }
 
 
 class TestSingleKindExecutorsStillFinalize:
@@ -403,8 +454,8 @@ class TestSingleKindExecutorsStillFinalize:
             log.append("edits")
             return "text", ids
 
-        async def mark(conn, pid, got, by):
-            log.append(("mark", got))
+        async def mark(conn, pid, got, by, text):
+            log.append(("mark", got, text))
 
         with (
             mock.patch.object(schedule_chat, "_claim_proposal_execution", claim),
@@ -412,25 +463,41 @@ class TestSingleKindExecutorsStillFinalize:
             mock.patch.object(schedule_chat, "_mark_confirmed", mark),
         ):
             text = _run(schedule_chat.execute_edit_proposal(
-                conn, proposal_row={"id": uuid4(), "company_id": uuid4(), "proposal": {"kind": "edit", "ops": []}},
-                confirmed_by=uuid4(), features={},
+                conn,
+                proposal_row={
+                    "id": uuid4(), "company_id": uuid4(),
+                    "proposal": {"kind": "edit", "ops": []},
+                },
+                confirmed_by=uuid4(),
+                features={},
             ))
         assert text == "text"
-        assert log == ["txn:enter", "claim", "edits", ("mark", ids), "txn:exit:commit"]
+        assert log == [
+            "txn:enter", "claim", "edits", ("mark", ids, "text"), "txn:exit:commit",
+        ]
 
-    def test_execute_proposal_returns_scope_message_before_claiming(self):
+    def test_execute_proposal_raises_scope_error_before_claiming(self):
         conn = _Conn()
 
         async def must_not(*a, **k):
             raise AssertionError("out-of-week create must not claim")
 
-        with mock.patch.object(schedule_chat, "_claim_proposal_execution", must_not):
-            text = _run(schedule_chat.execute_proposal(
+        with (
+            mock.patch.object(schedule_chat, "_claim_proposal_execution", must_not),
+            pytest.raises(
+                schedule_chat.ProposalScopeError,
+                match="outside the selected schedule week",
+            ),
+        ):
+            _run(schedule_chat.execute_proposal(
                 conn,
-                proposal_row={"id": uuid4(), "company_id": uuid4(),
-                              "proposal": {"shifts": [{"starts_at": "2026-08-23T07:00:00+00:00"}]}},
+                proposal_row={
+                    "id": uuid4(), "company_id": uuid4(),
+                    "proposal": {"shifts": [{
+                        "starts_at": "2026-08-23T07:00:00+00:00",
+                    }]},
+                },
                 confirmed_by=uuid4(), features={},
                 week_start=date(2026, 8, 30), week_end=date(2026, 9, 5),
             ))
-        assert text == "That schedule proposal is outside the selected schedule week."
         assert conn.log == []

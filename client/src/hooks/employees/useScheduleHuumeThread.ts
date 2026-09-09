@@ -57,7 +57,13 @@ function appliedActionKey(response: MWSendResponse): string | null {
   const action = response.current_state?.huume_action
   if (!action || typeof action !== 'object') return null
   const record = action as Record<string, unknown>
-  if (!['applied', 'created', 'updated'].includes(String(record.status))) return null
+  const status = String(record.status)
+  const applied = ['applied', 'created', 'updated'].includes(status)
+  // A failed confirmed schedule attempt can still have an unknown outcome if
+  // the durable receipt could not be read after a connection failure. Reconcile
+  // the board for that recovery case; the confirm id keeps this one-shot.
+  const scheduleAttemptSettled = record.type === 'schedule_change' && status === 'failed'
+  if (!applied && !scheduleAttemptSettled) return null
   const confirmId = record.confirm_id
   if (typeof confirmId === 'string' && confirmId) return 'confirm:' + confirmId
   const runId = response.assistant_message.metadata?.huume_run_id
