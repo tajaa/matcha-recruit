@@ -100,7 +100,11 @@ render_work_snapshot() {
     local pane_rows log_lines pids sandbox_project
     refresh_workflow_status
     pane_rows="$(tput lines 2>/dev/null || printf '24')"
-    log_lines=$((pane_rows - 8))
+    # Chrome above the stream is nine lines: the three-line header box,
+    # EXECUTION, RUN, STEP, PROCESS, a blank, and the MODEL STREAM heading.
+    # Reserve those plus one spare row, or the snapshot fills the pane exactly
+    # and scrolls its own header off the top.
+    log_lines=$((pane_rows - 10))
     [ "$log_lines" -ge 6 ] || log_lines=6
 
     work_header "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"

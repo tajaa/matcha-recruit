@@ -394,6 +394,32 @@ check "health pane distinguishes a blocked container from a running worker" \
     && grep -q 'Worker kanban.*running' "$TMP_DIR/health-running.out" \
     && echo 0 || echo 1)
 
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  AUTOPR_TEST_SANDBOX_STATE=error "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-error.out"
+check "health pane keeps the reason a worker probe failed" \
+  $(grep -q 'Worker kanban.*unavailable.*docker unavailable' "$TMP_DIR/health-error.out" \
+    && echo 0 || echo 1)
+
+# launchctl repeats "state = ..." for nested endpoints. The pane must report the
+# top-level job only, and must not paint a failed run green.
+mkdir -p "$TMP_DIR/health-bin"
+cat > "$TMP_DIR/health-bin/launchctl" <<'EOF'
+#!/usr/bin/env bash
+printf '\tstate = not running\n\truns = 4\n\tlast exit code = %s\n' "${AUTOPR_TEST_LAUNCH_EXIT:-0}"
+printf '\t\tstate = active\n\t\tstate = active\n'
+EOF
+chmod +x "$TMP_DIR/health-bin/launchctl"
+PATH="$TMP_DIR/health-bin:$PATH" AUTOPR_DASHBOARD_ONCE=1 \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-launch-ok.out"
+PATH="$TMP_DIR/health-bin:$PATH" AUTOPR_DASHBOARD_ONCE=1 AUTOPR_TEST_LAUNCH_EXIT=78 \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_MSANDBOX_BIN="$TMP_DIR/msandbox-health" \
+  "$AUTOPR_DIR/watch-health.sh" > "$TMP_DIR/health-launch-fail.out"
+check "health pane reads only the top-level LaunchAgent state and flags a bad exit" \
+  $(grep -qE '^  LaunchAgent +○ not running · runs 4$' "$TMP_DIR/health-launch-ok.out" \
+    && grep -qE '^  LaunchAgent +! not running · runs 4 · exit 78$' "$TMP_DIR/health-launch-fail.out" \
+    && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -52,7 +52,7 @@ dispatch_time_pacific() {
 
 render_worker_state() {
     local label="$1" project="$2" sandbox_state
-    printf '  %-16s ' "Worker $label"
+    printf '  %-18s ' "Worker $label"
     if [ ! -x "$MSANDBOX_BIN" ]; then
         printf '%b! missing%b\n' "$C_BAD$C_BOLD" "$C_RESET"
     elif sandbox_state="$(env AGENT_SANDBOX_PROJECT_NAME="$project" \
@@ -63,29 +63,54 @@ render_worker_state() {
             *) printf '%b! blocked (%s)%b\n' "$C_WARN$C_BOLD" "$sandbox_state" "$C_RESET" ;;
         esac
     else
-        printf '%b! unavailable%b\n' "$C_BAD$C_BOLD" "$C_RESET"
+        # Keep the failure reason. "unavailable" with no cause forces the
+        # operator to leave the dashboard to find out why the sandbox is down.
+        printf '%b! unavailable%b (%s)\n' "$C_BAD$C_BOLD" "$C_RESET" \
+            "$(printf '%s' "$sandbox_state" | head -n 1 | cut -c1-24)"
     fi
 }
 
 render_health() {
-    local launch_state runner_pids runner_state pane_rows event_count
+    local launch_print launch_run_state launch_exit launch_runs launch_state
+    local launch_style launch_glyph runner_pids runner_state runner_count
+    local pane_rows event_count
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     health_header "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
 
-    launch_state="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null \
-        | sed -nE '/state =|last exit code =/p' \
-        | sed -E 's/^[[:space:]]*//;s/ = /=/' \
-        | awk 'BEGIN { first=1 } { if (!first) printf " · "; printf "%s", $0; first=0 } END { if (!first) print "" }')"
+    # launchctl repeats "state = ..." for every nested endpoint, so take only
+    # the first (top-level) match of each field. Concatenating all of them
+    # produced a self-contradictory "not running · active · active" line.
+    launch_print="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null || true)"
+    launch_run_state="$(printf '%s\n' "$launch_print" \
+        | sed -nE 's/^[[:space:]]*state = (.*)$/\1/p' | head -n 1)"
+    launch_exit="$(printf '%s\n' "$launch_print" \
+        | sed -nE 's/^[[:space:]]*last exit code = (.*)$/\1/p' | head -n 1)"
+    launch_runs="$(printf '%s\n' "$launch_print" \
+        | sed -nE 's/^[[:space:]]*runs = (.*)$/\1/p' | head -n 1)"
 
     health_section 'SYSTEMS'
-    printf '  %-16s ' 'LaunchAgent'
-    if [ -n "$launch_state" ]; then
-        printf '%b● %s%b\n' "$C_GOOD" "$launch_state" "$C_RESET"
-    else
+    printf '  %-18s ' 'LaunchAgent'
+    if [ -z "$launch_run_state" ] && [ -z "$launch_exit" ]; then
         printf '%b○ not loaded%b\n' "$C_MUTED" "$C_RESET"
+    else
+        launch_state="${launch_run_state:-unknown}"
+        [ -z "$launch_runs" ] || launch_state="$launch_state · runs $launch_runs"
+        # This is an interval job: "not running" between ticks is normal, a
+        # non-zero last exit code is not. Only the exit code earns an alarm.
+        if [ -n "$launch_exit" ] && [ "$launch_exit" != 0 ]; then
+            launch_state="$launch_state · exit $launch_exit"
+            launch_style="$C_BAD$C_BOLD" launch_glyph='!'
+        elif [ "$launch_run_state" = running ]; then
+            launch_style="$C_GOOD$C_BOLD" launch_glyph='●'
+        elif [ -z "$launch_run_state" ]; then
+            launch_style="$C_WARN$C_BOLD" launch_glyph='!'
+        else
+            launch_style="$C_MUTED" launch_glyph='○'
+        fi
+        printf '%b%s %s%b\n' "$launch_style" "$launch_glyph" "$launch_state" "$C_RESET"
     fi
 
-    printf '  %-16s ' 'Master switch'
+    printf '  %-18s ' 'Master switch'
     if [ ! -x "$MSANDBOX_BIN" ]; then
         printf '%b! unavailable%b\n' "$C_BAD$C_BOLD" "$C_RESET"
     elif "$MSANDBOX_BIN" autopr-ready >/dev/null 2>&1; then
@@ -95,10 +120,18 @@ render_health() {
     fi
 
     runner_pids="$(pgrep -f 'Runner.Listener' 2>/dev/null | paste -sd, - 2>/dev/null || true)"
-    printf '  %-16s ' 'Runner'
+    printf '  %-18s ' 'Runner'
     if [ -n "$runner_pids" ]; then
-        runner_state="$(ps -p "$runner_pids" -o pid=,etime= 2>/dev/null | head -n 1 | sed 's/^[[:space:]]*//' || true)"
-        printf '%b● online%b · %s\n' "$C_GOOD$C_BOLD" "$C_RESET" "$runner_state"
+        runner_count="$(printf '%s' "$runner_pids" | awk -F, '{print NF}')"
+        runner_state="$(ps -p "$runner_pids" -o pid=,etime= 2>/dev/null \
+            | sed 's/^[[:space:]]*//' | paste -sd'/' - || true)"
+        # A stale listener beside the live one is exactly what this pane exists
+        # to surface, so never collapse the list down to the first row.
+        if [ "$runner_count" -gt 1 ] 2>/dev/null; then
+            printf '%b! %s listeners%b · %s\n' "$C_WARN$C_BOLD" "$runner_count" "$C_RESET" "$runner_state"
+        else
+            printf '%b● online%b · %s\n' "$C_GOOD$C_BOLD" "$C_RESET" "$runner_state"
+        fi
     else
         printf '%b○ offline%b\n' "$C_WARN$C_BOLD" "$C_RESET"
     fi
