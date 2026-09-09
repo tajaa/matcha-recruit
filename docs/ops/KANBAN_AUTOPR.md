@@ -551,9 +551,16 @@ kind is a registry row plus a publisher, not another branch in the PR path.
 2. `select.sh` returns `mode: research` after the ordinary cooldown / pause / no-spec
    checks. No `bot/task-*` branch, no `gh pr list`, no open-PR cap.
 3. The workflow skips branch creation, coverage, verify, publication copy, and
-   `publish.sh` (`steps.select.outputs.mode != 'research'`). `investigate.sh` builds the
-   usual `context.json` plus downloaded attachments and runs the sandbox bridge as
-   described in step 6 above (`_prompt_research.txt`). The model may read the clone to
+   `publish.sh` (`steps.select.outputs.outcome != 'artifact'` — the registry's outcome,
+   never a mode name, so the next artifact kind cannot fall through into the PR path).
+   `investigate.sh` builds the usual `context.json` (minus the lane's own bookkeeping
+   rows — run requests, claims, staged outreach and its outcomes — so the model never
+   reads a draft nobody approved as a teammate's comment) plus downloaded attachments,
+   and runs the sandbox bridge as described in step 6 above (`_prompt_research.txt`).
+   On a revision the bot's own earlier uploads are dropped from the attachment budget
+   except the newest prior report. The browser paragraph of the prompt
+   (`_prompt_research_browse.txt`) is substituted in by the bridge only when the board
+   holds `browse`; otherwise the prompt says there is no browser. The model may read the clone to
    cite `path:line` under *How it applies to Matcha*, search the web, and view images;
    it may not edit a file, install anything, or send anything. Any repository diff
    discards the run.
@@ -567,11 +574,37 @@ kind is a registry row plus a publisher, not another branch in the PR path.
 5. `publish-research.sh` — no git, no `gh`, no labels — counts the card's existing
    `research-report-*.md` files to get round N, writes `research-report-<id8>-rN.md`
    (a trusted provenance line, the model's report, and a *Proposed actions (not sent)*
-   tail when staged actions exist), uploads it with `POST …/tasks/{t}/files`, posts a
-   `note` carrying the summary and `attachment_ids` (threaded under the
+   tail when staged actions exist), uploads it with `POST …/tasks/{t}/files`, stages
+   the proposals (keyed on the report file id), posts a `note` carrying the summary,
+   `attachment_ids`, and whether the proposals were staged (threaded under the
    additional-context event when there is one), then PATCHes
-   `progress_note` to `🤖 AUTO SETUP · READY FOR REVIEW · build … · prod … · 🟡 C<score> ·
-   note: <card_note>` and `board_column: review`. `update_project_task` then emails and
+   `progress_note` to `🤖 AUTO SETUP · READY FOR REVIEW · build … · prod … · 🟢 C<score> ·
+   note: <card_note>` and `board_column: review`. The build/prod segment is omitted when
+   production context is unavailable — a report does not depend on which build is live,
+   and a runner hiccup must not discard a completed pass.
+
+   **Re-entrant.** Artifact kinds have no GitHub ledger, and the move to Review is the
+   last write, so a publication that dies after the upload would otherwise rerun and
+   attach a second report, a second note, and a second set of Send rows. The retry is
+   always the **next scheduled pass** — a new workflow run on a new runner — so the key
+   for "already done" cannot come from the run itself. It keyed on `AUTOPR_RUN_STARTED_AT`
+   until 2026-09-08, which the investigate step re-stamps every job, so it never matched
+   and the duplicate it described still happened; the env var is gone.
+
+   The key is the card. The report's own summary note names it (`Report attached:
+   <file>`) and is posted only after the upload succeeded, so the newest
+   `research-report-<id8>-rN.md` on the card with no such line in the discussion was
+   uploaded by a pass that died before announcing it: an orphan, which this run
+   continues — reusing its file id (so the server's `run_key` short-circuit matches and
+   the Send rows are not restaged), its round number, and any screenshot already
+   uploaded under that round's name. An announced report is a finished round in **any**
+   column: a person can drag a reviewed card back to Todo to ask for a fresh run, and
+   reading "Todo + report" as a crash there would reuse the old file, skip the new
+   upload, and move the card to Review with the new work silently discarded. That
+   discussion read is fatal if it fails: without it the publisher cannot tell a crashed
+   pass from a finished one, and either guess duplicates or loses a round. Known
+   residual: a pass dying between its note and the card move still produces one extra
+   round on the retry. `update_project_task` then emails and
    bells every collaborator ("Ready for review") and broadcasts to Espresso — there is
    no extra notification code. `needs_clarification` instead writes
    `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · … · [autopr:no-spec <ts>]
@@ -604,10 +637,20 @@ outside `KANBAN_AUTOPR_PROJECT_IDS`, so a grant cannot be written into a void.
 
 `collect.sh` reads the grants once per pass from `GET /matcha-work/autopr/board-capabilities`
 and stamps each card; `select.sh` refuses an artifact kind the board was not granted and
-leaves the card alone rather than downgrading a Research card to a PR. **That check is a
-spend guard, not the security boundary** — sending an email and driving a browser are
-each re-checked server-side where they happen, so a stale harness copy cannot widen its
-own reach.
+leaves the card alone rather than downgrading a Research card to a PR. For `outreach`
+**that check is a spend guard, not the security boundary** — sending is re-checked
+server-side at the moment it happens, so a stale harness copy cannot widen its own reach.
+`research` and `browse` happen inside the sandbox and have no server-side moment to
+re-check: there the harness's stamp, plus what the bridge admits back (an image
+allowlist with count and size caps), is the whole gate.
+
+Espresso reads the same endpoint: a Research card's **Run research now** is disabled with
+the reason when the board lacks the grant or is not watched, and the Research compose
+sheet preselects the AutoPR account as assignee (the harness only picks up cards the bot
+owns) and says so. The selector also leaves a hint file
+(`~/.cache/matcha-autopr/ungranted.json`) that the tmux dashboard renders as
+"held: task … needs the `research` board grant", so an ungranted card is not mistaken for
+one cooling down.
 
 An ungranted board is the one skip a human can fix, so it is not silent. When someone
 presses **Run research now** there, `select.sh` still consumes the request (an unconsumed
@@ -635,19 +678,55 @@ than merely guarded. Five states, and the distinctions are load-bearing:
 - `dismissed` — it will not be done.
 - `failed` — the send was attempted and the provider refused.
 
+Transitions, not "any row exists → refuse": `pending` and `failed` may be sent, handled,
+or dismissed (a transient Gmail error must not brick a proposal); a `sending` claim older
+than ten minutes may be handled or dismissed but never re-sent (it may have delivered);
+everything else is settled. `failed` is only written for a failure the provider actually
+reported — a transport error (timeout, connection drop) leaves the claim standing instead,
+because the request reached Gmail and only the reply was lost, so the mail may well have
+gone out. Writing `failed` there would put a Retry button on a delivered email and mail
+the recipient twice. The server reports `retryable` / `closable` per action and
+Espresso draws its buttons from those, shows the provider's error under a failed row, and
+offers **Retry send**. A `sent` row carries Gmail's `message_id`, and the route posts an
+`email` activity in the approver's name so the ticket's discussion shows that mail went
+out — the outcome rows themselves are bookkeeping and render nowhere.
+
+Staged rows store the draft under `action_body`, never `body`: `body` is what every reader
+of activity rows treats as a comment (Espresso's thread and review delta, the AI ticket
+brief, the project overview feed, the harness's own context), and a draft nobody approved
+must never read as something a person said. The key moved on 2026-09-08 and rows written
+before that carry `body`, so both readers fall back to it — Espresso's `MWStagedAction.body`
+is non-optional, and one un-fallen-back row would fail the whole list decode and blank the
+outreach section rather than degrade. Both staged kinds are in
+`_AUTOPR_BOOKKEEPING_KINDS` and in Espresso's mirror `GraphGeom.bookkeepingKinds`.
+
 Only the AutoPR service account may POST `staged-actions`. Board membership is not
 enough: the row renders as "Drafted by AutoPR" with a one-click Send beside it, and
 without an identity check any collaborator could put words in the bot's mouth for a
 colleague to send from their own mailbox, past every other guard.
 
 The send route is the single point where model-drafted text leaves the building, and it
-re-checks all of: the board's `outreach` grant, that the action is still unresolved, that
-the action is an `email` (a contact or review request is something a person does), that
-the **approver's own Gmail** is connected — mail never goes out from a system account —
-and a per-approver ceiling of 20 sends/hour, because `gmail_service`'s own limiter lives
-on the instance and every request builds a fresh one. `to` must already be a deliverable
+re-checks all of: the board's `outreach` grant, that the caller may edit the project
+(viewers and commenters cannot approve), that the action is still sendable, that it is an
+`email` (a contact or review request is something a person does), that the address is not
+on a reserved test domain (same guard as the transactional mailer), that the
+**approver's own Gmail** is connected — mail never goes out from a system account — and a
+per-approver ceiling of 20 sends/hour, because `gmail_service`'s own limiter lives on the
+instance and every request builds a fresh one. `to` must already be a deliverable
 address by then: the validator and the cleaner both refuse a name or a role on an
-`email`, because that only fails at send time, after a human has approved it.
+`email`, because that only fails at send time, after a human has approved it. A recipient
+that can never be delivered to — a reserved test domain — is reported `retryable: false`
+so the card stops offering Send at all, rather than leaving a button that 400s forever.
+
+The ceiling counts the `sending` claim and nothing else: one claim is one attempt, so a
+failed attempt still costs the hour while a successful one is not billed twice by its own
+`sent` row (counting both halved the real ceiling to ten). It is evaluated **inside** the
+transaction that writes the claim, under `pg_advisory_xact_lock` on the approver. Read
+beforehand in its own transaction it bounded nothing — the per-action `FOR UPDATE`
+serializes two approvals of the same action but nothing about two approvals of different
+ones, so N concurrent requests all saw the same pre-claim count and all passed. The count
+is scoped to the watched boards **plus the board being sent from**, since the send gate is
+the stored `outreach` grant and a grant outlives its board's membership in the watched set.
 
 The `sending` claim is what makes a second approval impossible while the first is in
 flight; the real outcome is appended on top of it. Writing `sent` up front instead — as
@@ -656,7 +735,11 @@ this route did until 2026-09-08 — recorded mail that never left as delivered, 
 
 Espresso renders these under **PROPOSED OUTREACH** in the ticket, each showing the full
 body — approving is agreeing to send that exact text. There is deliberately no
-"approve all" control, and `Send` appears only on an email.
+"approve all" control, and `Send` appears only on an email. When the approver's Gmail is
+not connected the row offers **Connect Gmail to send** (the Email panel's own OAuth flow)
+instead of failing on Send. A 404 from a backend that predates the route is an empty list,
+not a banner. A task notification opens the ticket itself, so the report chip is one
+click away.
 
 ### Browsing and screenshots
 

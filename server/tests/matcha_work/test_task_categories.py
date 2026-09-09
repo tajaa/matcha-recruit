@@ -35,3 +35,19 @@ async def test_create_task_rejects_unknown_category_before_touching_the_db():
             title="Research how AWS Lambda works",
             category="reserch",
         )
+
+
+def test_the_espresso_draft_agent_is_told_about_every_category():
+    """Espresso's "Describe a task to draft" bar goes through the repo-grounded
+    agent, whose only category guidance is the tool declaration's description
+    string. An allowlist the model was never told about is one it never emits
+    (unknown falls back to "product"), so every allowed category has to appear
+    there — the web draft path already lists them in its prompt."""
+    from app.matcha.services.matcha_work.project_agent.tools import task_draft_declarations
+    from app.matcha.services.matcha_work.project_agent.task_draft_agent import _CATEGORIES
+
+    decl = next(d for d in task_draft_declarations() if d.name == "draft_ticket")
+    description = decl.parameters.properties["category"].description
+    for category in _CATEGORIES:
+        assert category in description, category
+    assert "report" in description  # the research rule, not just the word

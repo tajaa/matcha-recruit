@@ -8,12 +8,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_company_member
 from app.matcha.routes.matcha_work._shared import (
+    _can_edit_project,
     _parse_task_attachment_ids,
     _verify_project_access,
     _verify_task_belongs_to_project,
@@ -398,12 +400,16 @@ async def stage_autopr_actions_endpoint(
     actions = body.get("actions")
     if not isinstance(actions, list):
         raise HTTPException(status_code=400, detail="actions must be a list")
+    run_key = body.get("run_key")
+    if run_key is not None and not isinstance(run_key, str):
+        raise HTTPException(status_code=400, detail="run_key must be a string")
     try:
         result = await pt_svc.stage_autopr_actions(
             project_id=project_id,
             task_id=task_id,
             actor_user_id=current_user.id,
             actions=actions,
+            run_key=run_key,
         )
     except pt_svc.AutoPRActorNotPermitted as exc:
         raise HTTPException(status_code=403, detail=str(exc))
@@ -445,7 +451,11 @@ async def send_autopr_staged_action_endpoint(
     from app.matcha.services.matcha_work import project_task_service as pt_svc
     from app.matcha.services.matcha_work.gmail_service import GmailService
 
-    await _verify_project_access(project_id, current_user)
+    _, role = await _verify_project_access(project_id, current_user)
+    # Approving is an outward act with the approver's own name on it; a
+    # read-only collaborator may see the proposal but not send it.
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="Viewers cannot approve outreach")
     await _verify_task_belongs_to_project(project_id, task_id)
 
     if not await board_has_autopr_capability(project_id, "outreach"):
@@ -459,20 +469,22 @@ async def send_autopr_staged_action_endpoint(
     )
     if action is None:
         raise HTTPException(status_code=404, detail="Staged action not found")
-    if action["state"] != "pending":
-        raise HTTPException(status_code=409, detail=f"This action was already {action['state']}")
     if action["kind"] not in pt_svc._SENDABLE_STAGED_ACTION_KINDS:
         raise HTTPException(
             status_code=400,
             detail=f"A {action['kind']} action is done by a person; mark it handled instead",
         )
-
-    recent = await pt_svc.count_recent_staged_sends(actor_user_id=current_user.id)
-    if recent >= pt_svc._STAGED_SEND_MAX_PER_HOUR:
+    # Ahead of the retryable check: an undeliverable recipient is reported as
+    # not-retryable so the card stops offering Send, and the generic
+    # "already <state>" message would then hide the actual reason.
+    if pt_svc.staged_recipient_is_reserved_test_domain(action["to"]):
         raise HTTPException(
-            status_code=429,
-            detail=f"Hourly limit reached ({pt_svc._STAGED_SEND_MAX_PER_HOUR} approved sends per person)",
+            status_code=400,
+            detail="That address is on a reserved test domain; nothing was sent",
         )
+    # `pending` and `failed` may send; a failed attempt is not a settled one.
+    if not action["retryable"]:
+        raise HTTPException(status_code=409, detail=f"This action was already {action['state']}")
 
     gmail = GmailService(current_user.id)
     await gmail.load_token()
@@ -483,6 +495,10 @@ async def send_autopr_staged_action_endpoint(
         )
 
     try:
+        # The hourly ceiling is enforced inside this call's transaction, under a
+        # per-approver lock. Read separately beforehand it bounded nothing:
+        # concurrent approvals of different actions share no lock, so they all
+        # saw the same pre-claim count.
         claimed = await pt_svc.resolve_autopr_staged_action(
             project_id=project_id,
             task_id=task_id,
@@ -490,7 +506,10 @@ async def send_autopr_staged_action_endpoint(
             actor_user_id=current_user.id,
             state="sending",
             detail=f"to {action['to']}",
+            max_recent_sends=pt_svc._STAGED_SEND_MAX_PER_HOUR,
         )
+    except pt_svc.AutoPRSendCeilingReached as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except pt_svc.AutoPRReconsiderationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     if claimed is None:
@@ -501,23 +520,35 @@ async def send_autopr_staged_action_endpoint(
             to=action["to"], subject=action["subject"], body=action["body"]
         )
     except Exception as exc:
-        # The claim is immutable, so the failure is its own row on top of it.
-        # Recording it is what keeps the card honest; if even that write fails
-        # the claim stands alone and reads as an interrupted send, which is
-        # still true and still not a claim that mail went out.
         logger.warning("Staged action %s failed to send: %s", action_id, exc, exc_info=True)
-        try:
-            await pt_svc.record_autopr_staged_send_outcome(
-                project_id=project_id,
-                task_id=task_id,
-                action_id=action_id,
-                actor_user_id=current_user.id,
-                state="failed",
-                detail=str(exc),
-            )
-        except Exception:
-            logger.exception("Could not record the failed send for staged action %s", action_id)
-        raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+        # A transport error is not evidence that nothing was sent. The request
+        # reached Gmail and the reply was lost, so the message may well have
+        # gone out; writing `failed` here would put a Retry button on a
+        # delivered email and mail the recipient twice from the approver's own
+        # mailbox. Leave the claim standing instead — that is exactly the
+        # "interrupted send" state, never one-click re-sent, closable by a
+        # person once they have checked their Sent folder.
+        delivery_unknown = isinstance(exc, httpx.TransportError)
+        if not delivery_unknown:
+            try:
+                await pt_svc.record_autopr_staged_send_outcome(
+                    project_id=project_id,
+                    task_id=task_id,
+                    action_id=action_id,
+                    actor_user_id=current_user.id,
+                    state="failed",
+                    detail=str(exc),
+                )
+            except Exception:
+                logger.exception("Could not record the failed send for staged action %s", action_id)
+            raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The mail server stopped responding mid-send, so it is unknown whether "
+                "this went out. Check your Sent folder, then mark it handled or dismissed."
+            ),
+        )
 
     recorded = await pt_svc.record_autopr_staged_send_outcome(
         project_id=project_id,
@@ -526,7 +557,21 @@ async def send_autopr_staged_action_endpoint(
         actor_user_id=current_user.id,
         state="sent",
         detail=f"to {action['to']}",
+        message_id=result.get("id"),
     )
+    # A real note on the timeline, in the approver's name: the outcome row is
+    # bookkeeping and renders nowhere, so without this nobody watching the
+    # ticket's discussion ever sees that mail went out.
+    try:
+        await pt_svc.log_task_activity(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            kind="email",
+            body=f"Sent to {action['to']} — {action['subject']}",
+        )
+    except Exception:
+        logger.exception("Could not post the sent note for staged action %s", action_id)
     return {
         "ok": True,
         "staged_action_id": str(action_id),
@@ -553,7 +598,9 @@ async def resolve_autopr_staged_action_endpoint(
     """
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
-    await _verify_project_access(project_id, current_user)
+    _, role = await _verify_project_access(project_id, current_user)
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="Viewers cannot close outreach")
     await _verify_task_belongs_to_project(project_id, task_id)
 
     state = str(body.get("state") or "").strip().lower()
@@ -583,12 +630,15 @@ async def list_autopr_board_capabilities_endpoint(
     """Which AutoPR capabilities each named board has been granted.
 
     The harness reads this once per pass and refuses to run a capability the
-    board was not granted. That refusal is a spend guard, not the security
-    boundary: the acts these capabilities describe — sending an email, driving
-    a browser — are each re-checked server-side at the moment they happen, so
-    a stale or tampered harness copy cannot widen its own reach.
+    board was not granted. For `outreach` that refusal is a spend guard, not
+    the security boundary: sending is re-checked server-side at the moment it
+    happens, so a stale or tampered harness copy cannot widen its own reach.
+    `research` and `browse` happen inside the sandbox and have no server-side
+    moment to re-check; there the harness's stamp plus what the bridge admits
+    back (an image allowlist with count and size caps) is the whole gate.
     """
     from app.core.services.platform_settings import get_autopr_board_capabilities
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     raw = [p.strip() for p in (project_ids or "").split(",") if p.strip()]
     if not raw or len(raw) > 20:
@@ -600,7 +650,13 @@ async def list_autopr_board_capabilities_endpoint(
     for project_id in parsed:
         await _verify_project_access(project_id, current_user)
     grants = await get_autopr_board_capabilities()
-    return {"capabilities": {str(p): grants.get(str(p), []) for p in parsed}}
+    return {
+        "capabilities": {str(p): grants.get(str(p), []) for p in parsed},
+        # A Research card only runs when it is assigned to this account;
+        # the compose sheet uses it to preselect the assignee.
+        "autopr_bot_user_id": pt_svc.KANBAN_AUTOPR_BOT_USER_ID,
+        "watched": {str(p): str(p) in pt_svc.KANBAN_AUTOPR_PROJECT_IDS for p in parsed},
+    }
 
 
 @router.post(
@@ -774,6 +830,8 @@ async def get_project_activity_endpoint(
 
     Newest-first, capped at `limit`.
     """
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
     await _verify_project_access(project_id, current_user)
     limit = max(1, min(int(limit), 100))
     async with get_connection() as conn:
@@ -791,6 +849,9 @@ async def get_project_activity_endpoint(
                 FROM mw_task_history h
                 LEFT JOIN mw_tasks t ON t.id = h.task_id
                 WHERE h.project_id = $1
+                  -- AutoPR's run-request / claim / staged-outreach rows are
+                  -- bookkeeping, not activity a person did.
+                  AND COALESCE(h.metadata->>'kind', '') <> ALL($3::text[])
 
                 UNION ALL
 
@@ -823,6 +884,6 @@ async def get_project_activity_endpoint(
             ORDER BY e.created_at DESC
             LIMIT $2
             """,
-            project_id, limit,
+            project_id, limit, list(pt_svc._AUTOPR_BOOKKEEPING_KINDS),
         )
     return [_serialize_activity_row(r) for r in rows]

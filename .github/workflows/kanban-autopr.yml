@@ -210,6 +210,11 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "id8=$(jq -r '.id8' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
             echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
+            # pull_request | artifact, from the kind registry. The PR-only
+            # steps below key on this rather than on a mode name, so a new
+            # artifact kind is a registry row plus a publisher and never
+            # falls through into branch creation or publish.sh.
+            echo "outcome=$(jq -r '.outcome // "pull_request"' "$RUNNER_TEMP/card.json")" >> "$GITHUB_OUTPUT"
           fi
 
       # Production resolution (SSH + two ECR lookups + a curl of the frontend
@@ -274,9 +279,9 @@ jobs:
 
       - name: Create or check out task branch
         id: branch
-        # Artifact kinds (research) own no branch: the run stays on main and
-        # the report is attached to the card instead of a PR.
-        if: steps.select.outputs.skip == 'false' && steps.select.outputs.mode != 'research'
+        # Artifact kinds own no branch: the run stays on main and the
+        # deliverable is attached to the card instead of a PR.
+        if: steps.select.outputs.skip == 'false' && steps.select.outputs.outcome != 'artifact'
         env:
           MODE: ${{ steps.select.outputs.mode }}
           ID8: ${{ steps.select.outputs.id8 }}
@@ -379,7 +384,7 @@ jobs:
 
       - name: Check whether an open PR already covers this task
         id: coverage
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework' && steps.select.outputs.mode != 'research'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
@@ -409,7 +414,7 @@ jobs:
 
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.mode != 'research'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 8
         run: |
           "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
@@ -417,12 +422,12 @@ jobs:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
       - name: Record verification deferred for questions or no-safe-action
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.mode != 'research'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.outcome != 'artifact'
         run: |
           printf '%s\n' '## Verification' '' 'Not run: this result contains no product diff and is awaiting requirements or a human-only action.' > "$RUNNER_TEMP/verification.md"
 
       - name: Write commit subject and card note
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.mode != 'research'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 5
         env:
           AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
@@ -434,7 +439,7 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Publish PR, question draft, or no-spec marker
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.mode != 'research'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
@@ -445,7 +450,7 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Publish research report
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.select.outputs.mode == 'research'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.select.outputs.outcome == 'artifact'
         timeout-minutes: 5
         run: |
           # The default shell here is `bash -e`, not `bash -eo pipefail`: piping

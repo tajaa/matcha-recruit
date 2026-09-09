@@ -1732,6 +1732,26 @@ cap_file_rc=$?
 check "the run-scoped bot PR snapshot feeds the cap without another GitHub call" \
     $([ "$cap_file_rc" = 3 ] && echo 0 || echo 1)
 
+# A per-card GitHub read that fails is still a fail-closed skip for that card,
+# but a pass where every card skipped that way is an outage, not an empty
+# queue: reporting NOTHING_TO_DO there rendered a dead token as a green
+# "Nothing to build this run." every minute, with nothing red anywhere.
+mkdir -p "$TMP_DIR/outage-bin"
+cat > "$TMP_DIR/outage-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--head bot/task-"* ]]; then exit 1; fi
+printf '[]\n'
+EOF
+chmod +x "$TMP_DIR/outage-bin/gh"
+PATH="$TMP_DIR/outage-bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/outage-cache" "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards.json" \
+    > "$TMP_DIR/outage-select.json" 2> "$TMP_DIR/outage-select.err"
+outage_rc=$?
+check "a pass where GitHub could not be read for any card dies instead of reporting an empty queue" \
+    $([ "$outage_rc" = 1 ] && [ ! -s "$TMP_DIR/outage-select.json" ] \
+      && grep -q 'could not read GitHub' "$TMP_DIR/outage-select.err" \
+      && echo 0 || echo 1)
+
 check "implementation PR cap defaults to ten and workflow pins it" \
     $(grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"' "$AUTOPR_DIR/select.sh" \
       && grep -qF 'MAX_OPEN_IMPLEMENTATION_PRS: 10' "$REPO_ROOT/.github/workflows/kanban-autopr.yml" \

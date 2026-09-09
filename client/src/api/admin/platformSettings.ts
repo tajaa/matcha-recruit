@@ -47,6 +47,10 @@ export type AutoPRBoardCapabilities = {
   capabilities: Record<string, string[]>
   known_capabilities: string[]
   watched_project_ids: string[]
+  /** Same ids with their board titles; `title` is null for a deleted board. */
+  watched_projects?: { id: string; title: string | null }[]
+  /** Grants stored for boards the harness no longer watches — dropped on save. */
+  orphaned_project_ids?: string[]
 }
 
 export type BetaInviteResult = {

@@ -176,8 +176,16 @@ render_pr() {
     [ "${AUTOPR_DASHBOARD_ONCE:-0}" = 1 ] || clear
     pr_header "$(TZ="$PACIFIC_TZ" date '+%I:%M:%S %p %Z' | sed 's/^0//')"
     if [ -z "$branch" ]; then
-        printf 'No bot/task-* worktree or open Kanban AutoPR was found.\n'
-        printf 'This pane will populate after the workflow selects a card.\n'
+        if [ "$workflow_active" = true ]; then
+            # An artifact kind (research) owns no branch and no PR, so a run
+            # can be well under way with nothing for this pane to key on.
+            printf 'KANBAN RUN IN PROGRESS · NO BRANCH\n'
+            printf 'This run is an artifact kind (research): the deliverable is attached to the card,\n'
+            printf 'so there is no bot/task-* branch or PR to show. Follow it in the live log pane.\n'
+        else
+            printf 'No bot/task-* worktree or open Kanban AutoPR was found.\n'
+            printf 'This pane will populate after the workflow selects a card.\n'
+        fi
         return 0
     fi
 

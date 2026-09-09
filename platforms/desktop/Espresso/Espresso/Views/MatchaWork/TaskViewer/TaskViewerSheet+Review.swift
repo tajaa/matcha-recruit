@@ -114,7 +114,9 @@ extension TaskViewerSheet {
                 if roundIndex(forCreatedAt: e.createdAt) == currentRound,
                    let t = e.metadata?["title"] { completed.append(t) }
             case "activity":
-                if roundIndex(forCreatedAt: e.createdAt) == currentRound { comments += 1 }
+                // Bookkeeping rows are not comments; see GraphGeom.bookkeepingKinds.
+                if !GraphGeom.isBookkeeping(e),
+                   roundIndex(forCreatedAt: e.createdAt) == currentRound { comments += 1 }
             default:
                 break
             }

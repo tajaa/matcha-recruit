@@ -57,9 +57,6 @@ struct MWElementNote: Codable, Identifiable, Hashable {
     }
 }
 
-/// One row from `mw_task_history` — appears in the TaskViewerSheet
-/// timeline. `eventType` is one of: created | column_change |
-/// assignee_change | deleted.
 /// Outreach a research run PROPOSED. Nothing here has been sent: the harness
 /// never sends, and `state` stays `pending` until a person approves or closes
 /// this exact item. An approved email goes out from the approver's own
@@ -78,27 +75,45 @@ struct MWStagedAction: Codable, Identifiable, Hashable {
     /// the claim the server writes before handing mail to Gmail; seeing it
     /// means no outcome row followed, so the send was interrupted.
     let state: String
+    /// The provider's error for a failed send, or "to <address>" otherwise.
     let detail: String?
+    /// Gmail's id for the message that actually left, on a `sent` row.
+    let messageId: String?
+    /// Server-decided: may this still be sent (pending or failed)?
+    let retryable: Bool?
+    /// Server-decided: may this still be marked handled / dismissed? True for
+    /// pending, failed, and a `sending` claim old enough to be presumed dead.
+    let closable: Bool?
     let resolvedAt: String?
     let resolvedByName: String?
     let createdAt: String
 
     var isPending: Bool { state == "pending" }
+    var isFailed: Bool { state == "failed" }
     /// Claimed but unresolved. Not pending (the buttons are gone — a second
     /// approval is refused server-side) and emphatically not sent.
     var isInterrupted: Bool { state == "sending" }
     /// `sent` is reserved for mail this system actually delivered; `handled`
     /// means a person did it themselves. Keeping them apart is the point.
     var isSendable: Bool { kind == "email" }
+    var canRetry: Bool { retryable ?? isPending }
+    var canClose: Bool { closable ?? isPending }
+    /// Anything a person can still do with it — drives whether the row is
+    /// drawn as live or as history.
+    var isOpen: Bool { canRetry || canClose }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, to, subject, body, why, state, detail
+        case id, kind, to, subject, body, why, state, detail, retryable, closable
+        case messageId = "message_id"
         case resolvedAt = "resolved_at"
         case resolvedByName = "resolved_by_name"
         case createdAt = "created_at"
     }
 }
 
+/// One row from `mw_task_history` — appears in the TaskViewerSheet
+/// timeline. `eventType` is one of: created | column_change |
+/// assignee_change | deleted.
 struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
     let id: String
     let taskId: String?

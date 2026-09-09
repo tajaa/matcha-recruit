@@ -132,11 +132,19 @@ export default function Settings() {
     boardGrantsKey(pendingBoards) !== boardGrantsKey(boards.data.capabilities ?? {})
 
   const handleSaveBoards = async () => {
-    if (!pendingBoards) return
+    if (!pendingBoards || !boards.data) return
     setBoardsSaving(true)
     setBoardsError(null)
     try {
-      const saved = await adminSettingsApi.setAutoPRBoardCapabilities(pendingBoards)
+      // Submit only the boards the harness watches. The server refuses any
+      // other key, and a grant left behind by a board that was later dropped
+      // from the watched set is invisible here — resubmitting it would make
+      // every save fail on a board the admin cannot see or clear.
+      const watched = new Set(boards.data.watched_project_ids)
+      const submitted = Object.fromEntries(
+        Object.entries(pendingBoards).filter(([id]) => watched.has(id)),
+      )
+      const saved = await adminSettingsApi.setAutoPRBoardCapabilities(submitted)
       // Adopt the server's normalized map, not the local draft: it deduped and
       // ordered the grants, and the dirty check compares against it.
       boards.setData({ ...(boards.data as AutoPRBoardCapabilities), capabilities: saved.capabilities })
@@ -322,11 +330,21 @@ export default function Settings() {
           <p className="py-4 text-sm text-zinc-500">AutoPR is not watching any board.</p>
         ) : (
           <div className="space-y-3">
+            {(boards.data.orphaned_project_ids?.length ?? 0) > 0 && (
+              <p className="text-xs text-amber-400">
+                {boards.data.orphaned_project_ids!.length} grant(s) belong to boards AutoPR no longer
+                watches and will be dropped on the next save.
+              </p>
+            )}
             {boards.data.watched_project_ids.map((projectId) => {
               const granted = pendingBoards?.[projectId] ?? []
+              const title = boards.data?.watched_projects?.find((p) => p.id === projectId)?.title
               return (
                 <Card key={projectId} className="p-4">
-                  <p className="font-mono text-xs text-zinc-400 mb-3 break-all">{projectId}</p>
+                  <p className="text-sm text-zinc-100 mb-0.5">
+                    {title ?? <span className="text-zinc-500 italic">(board not found)</span>}
+                  </p>
+                  <p className="font-mono text-[11px] text-zinc-500 mb-3 break-all">{projectId}</p>
                   <div className="space-y-2">
                     {(boards.data?.known_capabilities ?? []).map((cap) => {
                       const copy = AUTOPR_CAPABILITY_COPY[cap]

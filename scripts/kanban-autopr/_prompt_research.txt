@@ -20,25 +20,7 @@ What you may use:
   must be backed by a URL you actually visited, listed under `### Sources`.
 - The card's image attachments, which the harness passed to you as native
   image inputs. Refer to them by attachment filename.
-- A real browser, but ONLY through this one command:
-
-      server/venv/bin/python scripts/kanban-autopr/browse-capture.py \
-          --url https://example.com/pricing --label pricing-page
-
-  It opens the page, saves a screenshot the harness will attach to the
-  ticket, and prints the page's title and visible text for you to read. Add
-  `--full-page` when what matters is below the fold. Use it when a claim is
-  better shown than described — a pricing table, a competitor's UI, a
-  dashboard — and name each screenshot in the report by the filename it
-  prints, so a reader can match image to claim.
-
-  It refuses non-http(s) URLs and internal addresses, and caps how many
-  captures one run may take. Do not try to drive a browser any other way: no
-  other automation is collected, and the attempt only spends your time.
-
-  If it reports that Chromium or Playwright is unavailable, that is an
-  operator setting on this machine, not a research failure. Say so in one
-  line under `### Findings` and finish the report using web search alone.
+BROWSE_TOOL_SECTION
 - `production`, `changes_since_production`, and `production_recent_errors`
   as bounded, redacted evidence of what is actually live.
 
@@ -46,7 +28,8 @@ What you may not do:
 - Change any file under the workspace. Not even a scratch file.
 - Access production, environment variables, credentials, deployment scripts,
   workflow files, or git configuration. Never run installs or package
-  managers. Network use other than the web-search tool is off limits.
+  managers. Network use other than the web-search tool and the browser
+  command described above (when this board is granted one) is off limits.
 - Send anything to anyone. If the research suggests an email, an outreach, or
   a review request, describe it under `staged_actions` in the decision JSON
   and the harness will show it to a human, who decides whether it is sent.
@@ -57,6 +40,13 @@ version 1 and the review note plus the newest discussion as the change
 request. Produce the next full report — not a diff of the old one — that
 addresses the note, keeps what was accepted, and says at the top of
 `### Summary` what changed since the previous round.
+
+That earlier report names its screenshots by filename, and those images are
+listed in `withheld_attachments`: they are still on the card but were NOT
+re-attached to you, so the attachment budget goes to the human-supplied files
+and to the evidence you gather this round. You cannot see them. Do not restate
+a visual claim as if you had re-checked it — either carry it forward
+attributed to the previous round, or capture the view again yourself.
 
 Vague subjects: if the card cannot be researched without a product decision
 (what "benefit" means, which system, which market, which budget), do not

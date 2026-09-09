@@ -63,6 +63,18 @@ struct TaskViewerSheet: View {
     /// double tap cannot fire two sends before the first returns.
     @State var resolvingActionId: String?
     @State var stagedActionError: String?
+    /// Who the last approved send went to — the confirmation line under the
+    /// section, cleared by the next action.
+    @State var stagedActionSentTo: String?
+    /// nil = not asked yet / unknown. Asked only when a sendable proposal is
+    /// open; false swaps the Send button for Connect Gmail.
+    @State var gmailConnected: Bool?
+    @State var connectingGmail = false
+    /// For a Research card: is this board granted `research`? nil = unknown
+    /// (not asked, or the call failed) — the button stays enabled and the
+    /// server / harness answer as before. false disables it with the reason.
+    @State var researchGranted: Bool?
+    @State var boardWatchedByAutoPR: Bool?
     @FocusState var isNoteFieldFocused: Bool
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -123,9 +135,13 @@ struct TaskViewerSheet: View {
     }
     var subtaskDoneCount: Int { subtasks.filter { $0.isDone }.count }
 
-    /// Free-form notes/comments — the `activity` rows from the task history.
+    /// Free-form notes/comments — the `activity` rows from the task history,
+    /// minus AutoPR's bookkeeping rows (run requests, claims, staged outreach
+    /// and its outcomes), which ride the same event type but are not
+    /// discussion. A staged email draft in particular must not appear here as
+    /// a bot comment: it is rendered, with its buttons, by `outreachSection`.
     var notes: [MWTaskHistoryEntry] {
-        history.filter { $0.eventType == "activity" }
+        history.filter { $0.eventType == "activity" && !GraphGeom.isBookkeeping($0) }
     }
 
     /// `round_started` timestamps, ascending. Anything created at/after the
@@ -446,6 +462,10 @@ struct TaskViewerSheet: View {
             // ask on every ticket: the answer is an empty list and the section
             // renders nothing.
             await loadStagedActions()
+            // A Research card can only run on a board granted `research`;
+            // find out now rather than letting the user press a button whose
+            // answer arrives as a comment several minutes later.
+            if task.category == "research" { await loadResearchGrant() }
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)

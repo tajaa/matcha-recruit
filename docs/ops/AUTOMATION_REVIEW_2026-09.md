@@ -300,3 +300,11 @@ least-privilege IAM profile is still not done.
 11. Least-privilege IAM profile for the sandbox (F26).
 12. Snapshot `agent-sandbox.sh` + compose + `scripts/msandbox` into the control
     root once it can take an explicit runtime root (F2 remainder).
+13. Web `/work` ticket parity with Espresso for research cards: a Proposed
+    Outreach section (send / handled / dismiss), Run research now, and rendered
+    `.md` attachments (`react-markdown` + `remark-gfm` are already deps;
+    `TaskAttachments.tsx` downloads them today).
+14. Delete `TaskHistoryTimeline.swift` — no callers, and it would render
+    "AutoPR: <email body>" for a staged row (pbxproj edit, so its own PR).
+15. Research round numbering has three derivations (publisher filename count,
+    `investigate.sh` round_started count, server `round_index`); unify on one.

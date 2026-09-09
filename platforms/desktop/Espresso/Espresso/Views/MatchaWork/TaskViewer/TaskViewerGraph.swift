@@ -25,11 +25,17 @@ enum GraphGeom {
         "subtask_rejected", "review_approved",
     ]
 
-    /// AutoPR's run-request / run-claim rows ride `activity` but carry no body,
-    /// so `NoteRow` renders nothing for them. A node with nothing behind it is
-    /// worse than no node — filter them out rather than drawing dead comments.
+    /// AutoPR's own rows ride `activity` but are not discussion: run requests
+    /// and claims carry no body, a staged outreach proposal is rendered by the
+    /// PROPOSED OUTREACH section (its draft lives under `action_body`, never
+    /// `body`), and the result row that closes one carries nothing either. A
+    /// node with nothing behind it is worse than no node, and a draft nobody
+    /// approved must never read as a comment — so every consumer of activity
+    /// rows (graph, discussion thread, review delta) filters through this.
+    /// Mirror of the server's `_AUTOPR_BOOKKEEPING_KINDS`.
     static let bookkeepingKinds: Set<String> = [
         "autopr_run_request", "autopr_run_claim",
+        "autopr_staged_action", "autopr_staged_action_result",
     ]
 
     static func isBookkeeping(_ entry: MWTaskHistoryEntry) -> Bool {

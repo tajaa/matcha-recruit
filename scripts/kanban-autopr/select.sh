@@ -46,15 +46,29 @@ count="$(jq 'length' "$CARDS_FILE")"
 # left this empty, `[ "" -ge 10 ]` errored (exit 2, no match), and the cap
 # never fired.
 BOT_PRS_FILE="${AUTOPR_BOT_PRS_FILE:-}"
-if [ -n "$BOT_PRS_FILE" ] && [ -s "$BOT_PRS_FILE" ]; then
-    open_implementation_prs="$(jq '[.[] | select((.labels | index("autopr")) and ((.labels | index("autopr-awaiting-input")) | not))] | length' "$BOT_PRS_FILE")" \
-        || die "could not read the open implementation PR count from $BOT_PRS_FILE"
-else
-    open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')" \
-        || die "could not read the open implementation PR count"
-fi
-[[ "$open_implementation_prs" =~ ^[0-9]+$ ]] \
-    || die "open implementation PR count is not a number: $open_implementation_prs"
+# Resolved lazily, the first time a card would open a NEW PR: a pass whose
+# only eligible cards are artifact kinds (research) touches no GitHub resource,
+# so a gh outage or rate limit must not block it. Still fails CLOSED once it is
+# actually needed. Sets the global rather than printing it: called inside
+# `$(...)`, `die` would only end the subshell and the cap check would run
+# against an empty string — the exact silent-cap failure this once had.
+open_implementation_prs=""
+# Set when a card was passed over because a GitHub read failed rather than
+# because it was genuinely ineligible. Checked once the loop finds nothing.
+github_unavailable=false
+ensure_open_implementation_pr_count() {
+    if [ -z "$open_implementation_prs" ]; then
+        if [ -n "$BOT_PRS_FILE" ] && [ -s "$BOT_PRS_FILE" ]; then
+            open_implementation_prs="$(jq '[.[] | select((.labels | index("autopr")) and ((.labels | index("autopr-awaiting-input")) | not))] | length' "$BOT_PRS_FILE")" \
+                || die "could not read the open implementation PR count from $BOT_PRS_FILE"
+        else
+            open_implementation_prs="$(gh pr list --repo "$REPO" --state open --label autopr --limit 100 --json labels --jq '[.[] | select(([.labels[].name] | index("autopr-awaiting-input")) | not)] | length')" \
+                || die "could not read the open implementation PR count"
+        fi
+        [[ "$open_implementation_prs" =~ ^[0-9]+$ ]] \
+            || die "open implementation PR count is not a number: $open_implementation_prs"
+    fi
+}
 
 feedback_snapshot() {
     local pr_number="$1"
@@ -130,6 +144,43 @@ note_ungranted_capability() {
         || printf 'kanban-autopr: warning: could not post the ungranted-capability note for %s\n' \
             "$task_id" >&2
 }
+
+# note_ungranted_hint ID8 CAPABILITY
+# Queue {id8, capability} for $CACHE_DIR/ungranted.json. Queue, not write: a
+# pass visits every held card, and writing per card spent five process spawns
+# (cat, two jq, date, mv) on each one — every minute, forever, on any board
+# whose capability is ungranted, which is the default state. Tab-separated
+# because a capability is a registry identifier and never contains one.
+ungranted_pending=""
+note_ungranted_hint() {
+    local id8="$1" capability="$2"
+    [ -n "$capability" ] || return 0
+    ungranted_pending+="$id8"$'\t'"$capability"$'\n'
+}
+
+# flush_ungranted_hints
+# The single read-modify-write for everything this pass queued, still bounded
+# to the last 50 so dashboard.sh can name the cards a grant would unblock.
+# Runs from an EXIT trap, not after the loop: the loop `exit 0`s the moment it
+# finds a runnable card, and a flush below it would be skipped on exactly that
+# path. Every hint of this pass shares one timestamp; the dashboard reads `ts`
+# only through a one-hour cutoff, so per-card precision buys nothing.
+flush_ungranted_hints() {
+    [ -n "$ungranted_pending" ] || return 0
+    local hint_file="$CACHE_DIR/ungranted.json" existing
+    mkdir -p "$CACHE_DIR" 2>/dev/null || return 0
+    existing="$(cat "$hint_file" 2>/dev/null || printf '[]')"
+    printf '%s' "$existing" | jq -e 'type == "array"' >/dev/null 2>&1 || existing='[]'
+    printf '%s' "$existing" | jq -c --arg pending "$ungranted_pending" \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        ($pending | rtrimstr("\n") | split("\n")
+            | map(split("\t") | {id8: .[0], capability: .[1], ts: $ts})) as $new
+        | ($new | map(.id8)) as $ids
+        | map(select(.id8 as $i | ($ids | index($i)) == null)) + $new
+        | .[-50:]' \
+        > "$hint_file.tmp" 2>/dev/null && mv "$hint_file.tmp" "$hint_file" || rm -f "$hint_file.tmp"
+}
+trap flush_ungranted_hints EXIT
 
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
@@ -250,7 +301,7 @@ already_handled() {
     if [[ "$progress_note" == "🤖 AUTO SETUP · ALREADY SCOPED"* ]] && [[ "$pr_number" =~ ^[0-9]+$ ]]; then
         local linked_pr linked_state
         if ! linked_pr="$(gh pr view "$pr_number" --repo "$REPO" --json state)"; then
-            echo skip
+            echo skip_github_unavailable
             return
         fi
         linked_state="$(printf '%s' "$linked_pr" | jq -r '.state // empty')"
@@ -286,7 +337,7 @@ already_handled() {
         # `[ -gt ]` as silent no-ops, which read as "no PR exists yet" and
         # proceeded to `investigate`, risking a duplicate PR the failed call
         # simply couldn't see.
-        echo skip
+        echo skip_github_unavailable
         return
     fi
     n="$(printf '%s' "$prs" | jq 'length' 2>/dev/null)" || n=0
@@ -317,7 +368,7 @@ already_handled() {
                 if ! snapshot="$(feedback_snapshot "$pr_number")"; then
                     # If GitHub feedback cannot be read, do not treat the
                     # waiting card as eligible; a blind rework would spin.
-                    echo skip
+                    echo skip_github_unavailable
                 elif awaiting_input_has_new_feedback "$body" "$snapshot"; then
                     echo rework
                 else
@@ -386,18 +437,33 @@ for ((i = 0; i < n; i++)); do
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
         "$capabilities")"
+    if [ "$decision" = skip_github_unavailable ]; then
+        # Per card this is still a fail-closed skip: a read we could not make
+        # is never evidence that no PR exists. But a pass where EVERY card
+        # skipped for that reason is a GitHub outage, not an empty queue, and
+        # must not exit NOTHING_TO_DO — the workflow reports that as a green
+        # "Nothing to build this run." and the whole lane stalls silently.
+        github_unavailable=true
+        decision=skip
+    fi
     if [ "$decision" = skip_ungranted ]; then
+        # Leave a hint for the tmux dashboard, which runs this selector
+        # read-only and otherwise cannot tell "held: needs a grant" from
+        # "cooling down". A hint file, not a cooldown marker: written on the
+        # read-only path too, and never consulted by selection.
+        ungranted_capability="$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+        note_ungranted_hint "$id8" "$ungranted_capability"
         # Still consume the request — an unconsumed one re-dispatches every
         # minute forever — but never silently: without the note the operator
         # sees the button come back and no reason anywhere, and can loop on it
         # indefinitely (Espresso's run button does not know about grants).
         if [ -n "$run_requested_at" ]; then
-            note_ungranted_capability "$card" \
-                "$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+            note_ungranted_capability "$card" "$ungranted_capability"
             consume_run_request "$card"
         fi
         continue
     fi
+    [ "$decision" != investigate ] || ensure_open_implementation_pr_count
     if [ "$decision" = investigate ] && [ "$open_implementation_prs" -ge "$MAX_OPEN_IMPLEMENTATION_PRS" ]; then
         # A NEW PR would push past the cap — this specific card can't go,
         # but a later, lower-ranked card might be `rework` (no new PR) and
@@ -419,9 +485,24 @@ for ((i = 0; i < n; i++)); do
         # The tmux dashboard asks the same selector what would run next. Its
         # read-only probe must never create a cooldown marker or consume work.
         [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] || touch "$ATTEMPTS_DIR/$id8"
-        printf '%s' "$card" | jq -c --arg mode "$decision" '. + {mode: $mode}'
+        # `outcome` (pull_request | artifact) is what the workflow gates its
+        # PR-only steps on, so the registry stays the single place a kind's
+        # shape is declared.
+        printf '%s' "$card" | jq -c --arg mode "$decision" \
+            --arg outcome "$(autopr_kind_field "$decision" outcome)" \
+            '. + {mode: $mode, outcome: $outcome}'
         exit 0
     fi
 done
+
+# Nothing was selected. Say WHY: if any card was passed over because GitHub
+# could not be read, this pass proves nothing about the queue, and reporting
+# NOTHING_TO_DO would render a `gh` outage or an expired token as a green
+# "Nothing to build this run." every minute, indefinitely, with nothing red
+# anywhere. Fail loudly instead — the eager PR-count read used to do this, and
+# making it lazy (so an artifact-only pass needs no GitHub at all) silently
+# took the signal with it.
+[ "$github_unavailable" != true ] \
+    || die "could not read GitHub for any eligible card; not reporting an empty queue"
 
 exit "$NOTHING_TO_DO"

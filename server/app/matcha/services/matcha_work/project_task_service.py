@@ -257,6 +257,14 @@ class AutoPRActorNotPermitted(PermissionError):
     renders on the card as the bot's own work."""
 
 
+class AutoPRSendCeilingReached(Exception):
+    """This approver has claimed their hourly allowance of staged sends.
+
+    Raised from inside the claim transaction rather than from a check before
+    it: the count and the claim have to be one atomic step or N concurrent
+    approvals all read the same pre-claim number and all pass."""
+
+
 # History event types that count as a "viewable update" on a ticket — drives
 # the kanban card's unviewed-updates badge + the viewer's UPDATES checkoff list.
 # Keep in lock-step with the client's COUNTED_UPDATE_EVENTS (TicketUpdatesStore):
@@ -462,11 +470,25 @@ _AUTOPR_RUN_REQUEST_TTL = "30 minutes"
 _AUTOPR_BOOKKEEPING_KINDS = (
     "autopr_run_request",
     "autopr_run_claim",
-    # The result row for a staged action carries no body of its own — the
-    # action row above it is what a reader looks at — so it must not put an
-    # unviewed-updates chip on the card either.
+    # A staged proposal is rendered by the Proposed Outreach section, not the
+    # discussion thread, and the report note that arrives with it is what puts
+    # the unviewed-updates chip on the card. Its email text is stored under
+    # `action_body` (never `body`) so no reader of discussion notes — the
+    # ticket thread, the AI brief, the harness's own context — can mistake a
+    # draft nobody approved for something a person said.
+    "autopr_staged_action",
+    # The result row carries no body of its own either.
     "autopr_staged_action_result",
 )
+
+
+def is_autopr_bookkeeping_row(metadata: object) -> bool:
+    """True for the history rows the lane writes for itself: they ride
+    event_type='activity' but are not discussion. Every consumer that renders
+    or summarises activity rows should skip these."""
+    if not isinstance(metadata, dict):
+        return False
+    return metadata.get("kind") in _AUTOPR_BOOKKEEPING_KINDS
 
 
 async def request_autopr_run(
@@ -625,6 +647,49 @@ def _looks_like_email_address(value: str) -> bool:
     return bool(_EMAIL_ADDRESS_RE.match(value.strip()))
 
 
+# A `sending` claim with no outcome after this long means the process died
+# holding it. It may still have delivered, so it is never re-sent from here;
+# a person may close it as handled or dismissed once they have checked.
+_STAGED_SEND_STALE_AFTER = timedelta(minutes=10)
+
+
+def _staged_action_affordances(state: Optional[str], state_at) -> tuple[bool, bool]:
+    """(retryable, closable) for the newest outcome row of a staged action.
+
+    pending → send / handle / dismiss.  failed → the same three: a transient
+    provider error must not brick the proposal.  A stale `sending` claim →
+    handle / dismiss only.  Everything else is settled.
+    """
+    if state is None or state == "pending" or state == "failed":
+        return True, True
+    if state == "sending" and state_at is not None:
+        now = datetime.now(timezone.utc)
+        at = state_at if state_at.tzinfo else state_at.replace(tzinfo=timezone.utc)
+        if now - at >= _STAGED_SEND_STALE_AFTER:
+            return False, True
+    return False, False
+
+
+def _staged_action_is_undeliverable(action_kind: Optional[str], to: Optional[str]) -> bool:
+    """True when this proposal can never be sent, however many times it is tried.
+
+    The send route refuses a reserved test domain, so without this the card
+    keeps offering a Send button that 400s identically forever — the proposal
+    is neither sendable nor settled. Reported as not-retryable instead, which
+    leaves the row visible and closable: a person can still read what was
+    proposed and mark it handled or dismissed.
+    """
+    return action_kind == "email" and staged_recipient_is_reserved_test_domain(to or "")
+
+
+def staged_recipient_is_reserved_test_domain(to: str) -> bool:
+    """Same guard the transactional mailer applies: an RFC 2606 / 6761 address
+    is never handed to Gmail, even after a human approved it."""
+    from app.core.services.email._shared import _is_reserved_test_domain
+
+    return _is_reserved_test_domain(to or "")
+
+
 def _clean_staged_action(raw: object) -> Optional[dict]:
     """Shape one proposed action, or None if it cannot be trusted to render.
 
@@ -654,12 +719,18 @@ def _clean_staged_action(raw: object) -> Optional[dict]:
         value = value.strip()
         if not value or len(value) > limit:
             return None
-        cleaned[field] = value
+        # `body` is what every discussion renderer reads off an activity row.
+        # The draft is stored under `action_body` so it can never be shown as
+        # a comment; list/get read it back as `body` for the outreach section.
+        cleaned["action_body" if field == "body" else field] = value
     # contact / review_request name a person for a human to go and talk to, so
     # anything readable is fine there. Only `email` is ever handed to a sender.
     if kind == "email" and not _looks_like_email_address(cleaned["to"]):
         return None
     return cleaned
+
+
+_STAGED_RUN_KEY_LIMIT = 200
 
 
 async def stage_autopr_actions(
@@ -668,12 +739,16 @@ async def stage_autopr_actions(
     task_id: UUID,
     actor_user_id: Optional[UUID],
     actions: list[dict],
+    run_key: Optional[str] = None,
 ) -> Optional[dict]:
     """Record the actions a run proposed. Sends nothing.
 
-    Idempotent per run round is deliberately NOT attempted: a rerun produces a
-    new report and therefore new proposals, and an older round's staged rows
-    stay on the timeline as the record of what was proposed then.
+    `run_key` is the publisher's idempotency handle — the id of the report file
+    this batch belongs to. A publication that dies after staging and is retried
+    must not put a second set of one-click Send rows on the card, so a task
+    that already carries rows with this key returns them instead of inserting.
+    A genuinely new round has a new report and therefore a new key; its older
+    rows stay on the timeline as the record of what was proposed then.
     """
     if str(project_id) not in KANBAN_AUTOPR_PROJECT_IDS:
         raise AutoPRReconsiderationConflict(
@@ -693,6 +768,7 @@ async def stage_autopr_actions(
     if not cleaned:
         return {"ok": True, "staged": 0, "action_ids": []}
     cleaned = cleaned[:_MAX_STAGED_ACTIONS_PER_RUN]
+    run_key = (run_key or "").strip()[:_STAGED_RUN_KEY_LIMIT] or None
 
     action_ids: list[str] = []
     async with get_connection() as conn:
@@ -703,7 +779,32 @@ async def stage_autopr_actions(
         if not exists:
             return None
         async with conn.transaction():
+            if run_key:
+                # Serialize on the task row so two retries of the same
+                # publication cannot both find "nothing yet" and both insert.
+                await conn.execute(
+                    "SELECT 1 FROM mw_tasks WHERE id = $1 FOR UPDATE", task_id
+                )
+                already = await conn.fetch(
+                    """
+                    SELECT id FROM mw_task_history
+                    WHERE task_id = $1 AND event_type = 'activity'
+                      AND metadata->>'kind' = 'autopr_staged_action'
+                      AND metadata->>'run_key' = $2
+                    ORDER BY created_at
+                    """,
+                    task_id, run_key,
+                )
+                if already:
+                    ids = [str(r["id"]) for r in already]
+                    return {
+                        "ok": True, "staged": 0, "action_ids": ids,
+                        "already_staged": True,
+                    }
             for action in cleaned:
+                metadata = {"kind": "autopr_staged_action", **action}
+                if run_key:
+                    metadata["run_key"] = run_key
                 row = await conn.fetchrow(
                     """
                     INSERT INTO mw_task_history
@@ -713,7 +814,7 @@ async def stage_autopr_actions(
                     RETURNING id
                     """,
                     task_id, str(task_id), project_id, actor_user_id,
-                    json.dumps({"kind": "autopr_staged_action", **action}),
+                    json.dumps(metadata),
                 )
                 action_ids.append(str(row["id"]))
     return {"ok": True, "staged": len(action_ids), "action_ids": action_ids}
@@ -777,15 +878,28 @@ async def list_autopr_staged_actions(
             except json.JSONDecodeError:
                 result_meta = None
         state = (result_meta or {}).get("state") if isinstance(result_meta, dict) else None
+        retryable, closable = _staged_action_affordances(
+            state if state in _STAGED_ACTION_STATES else None, r["resolved_at"]
+        )
+        if retryable and _staged_action_is_undeliverable(meta.get("action_kind"), meta.get("to")):
+            retryable = False
         out.append({
             "id": str(r["id"]),
             "kind": meta.get("action_kind"),
             "to": meta.get("to"),
             "subject": meta.get("subject"),
-            "body": meta.get("body"),
+            # Rows staged before the rename carry the draft under `body`; the
+            # key moved to `action_body` so no discussion renderer could ever
+            # show an unapproved draft as a comment. Without this fallback an
+            # older row reads back as null, which fails the whole client-side
+            # decode of the list and blanks the outreach section.
+            "body": meta.get("action_body") or meta.get("body"),
             "why": meta.get("why"),
             "state": state if state in _STAGED_ACTION_STATES else "pending",
             "detail": (result_meta or {}).get("detail") if isinstance(result_meta, dict) else None,
+            "message_id": (result_meta or {}).get("message_id") if isinstance(result_meta, dict) else None,
+            "retryable": retryable,
+            "closable": closable,
             "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
             "resolved_by_name": r["resolved_by_name"],
             "created_at": r["created_at"].isoformat(),
@@ -801,6 +915,7 @@ async def resolve_autopr_staged_action(
     actor_user_id: UUID,
     state: str,
     detail: Optional[str] = None,
+    max_recent_sends: Optional[int] = None,
 ) -> Optional[dict]:
     """Write the one immutable outcome row for a staged action.
 
@@ -813,11 +928,33 @@ async def resolve_autopr_staged_action(
     record_autopr_staged_send_outcome. That ordering is what lets a crash
     between the two be visible as an interrupted send instead of silently
     reading as delivered.
+
+    `max_recent_sends` is the approver's hourly ceiling, enforced here rather
+    than by the caller: the per-action FOR UPDATE below serializes two
+    approvals of the SAME action but nothing about two approvals of different
+    ones, so a ceiling read in its own transaction lets N concurrent requests
+    all see the same pre-claim count and all pass. Counting under a
+    per-approver advisory lock, in the transaction that writes the claim,
+    is what actually bounds it.
     """
     if state not in _STAGED_ACTION_STATES:
         raise ValueError(f"Invalid staged action state: {state}")
     async with get_connection() as conn:
         async with conn.transaction():
+            if max_recent_sends is not None and state == "sending":
+                # Held to the end of this transaction, so the count below and
+                # the INSERT that follows it are one step per approver.
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+                    str(actor_user_id),
+                )
+                recent = await count_recent_staged_sends(
+                    actor_user_id=actor_user_id, project_id=project_id, conn=conn
+                )
+                if recent >= max_recent_sends:
+                    raise AutoPRSendCeilingReached(
+                        f"Hourly limit reached ({max_recent_sends} approved sends per person)"
+                    )
             action = await conn.fetchrow(
                 """
                 SELECT h.id, h.metadata
@@ -831,9 +968,10 @@ async def resolve_autopr_staged_action(
             )
             if not action:
                 return None
-            existing = await conn.fetchval(
+            existing = await conn.fetchrow(
                 """
-                SELECT r.metadata->>'state' FROM mw_task_history r
+                SELECT r.metadata->>'state' AS state, r.created_at
+                FROM mw_task_history r
                 WHERE r.task_id = $1
                   AND r.event_type = 'activity'
                   AND r.metadata->>'kind' = 'autopr_staged_action_result'
@@ -847,9 +985,21 @@ async def resolve_autopr_staged_action(
                 task_id, str(action_id),
             )
             if existing is not None:
-                raise AutoPRReconsiderationConflict(
-                    f"This action was already {existing}"
+                # Not "any row exists → refuse": a failed send may be retried
+                # or closed, and a claim the process died holding may be
+                # closed by a person who has checked their mailbox. Every
+                # other prior state is settled. The FOR UPDATE above is what
+                # makes this read-then-write safe against a concurrent one.
+                retryable, closable = _staged_action_affordances(
+                    existing["state"], existing["created_at"]
                 )
+                allowed = (state == "sending" and retryable) or (
+                    state in ("handled", "dismissed") and closable
+                )
+                if not allowed:
+                    raise AutoPRReconsiderationConflict(
+                        f"This action was already {existing['state']}"
+                    )
             metadata = {
                 "kind": "autopr_staged_action_result",
                 "staged_action_id": str(action_id),
@@ -876,21 +1026,44 @@ async def resolve_autopr_staged_action(
     }
 
 
-async def count_recent_staged_sends(*, actor_user_id: UUID) -> int:
-    """How many staged actions this person has actually sent in the last hour,
-    across every board. Bounded by the same one-hour window it reports."""
-    async with get_connection() as conn:
-        return await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM mw_task_history
-            WHERE actor_user_id = $1
-              AND event_type = 'activity'
-              AND created_at > now() - interval '1 hour'
-              AND metadata->>'kind' = 'autopr_staged_action_result'
-              AND metadata->>'state' = 'sent'
-            """,
-            actor_user_id,
-        ) or 0
+async def count_recent_staged_sends(
+    *,
+    actor_user_id: UUID,
+    project_id: Optional[UUID] = None,
+    conn=None,
+) -> int:
+    """How many sends this person has attempted in the last hour, across boards.
+
+    Counts the `sending` claim and nothing else. Every attempt writes exactly
+    one claim before the mail call, so one row is one attempt: a claim that
+    later fails still costs the hour (the approver retries once the window
+    moves), and a claim that succeeds is not billed a second time by its own
+    `sent` outcome — which is what counting `('sending', 'sent')` did, halving
+    the ceiling to ten.
+
+    Bounded to the watched boards so the query walks
+    `idx_mw_task_history_project_created` rather than scanning by actor (which
+    has no index). `project_id` widens that set by the board being sent from:
+    the send gate is the stored `outreach` grant, and a grant outlives its
+    board's membership in the watched set, so a board with a stale grant must
+    still count against the ceiling instead of escaping it entirely.
+    """
+    project_ids = {UUID(p) for p in KANBAN_AUTOPR_PROJECT_IDS}
+    if project_id is not None:
+        project_ids.add(project_id)
+    sql = """
+        SELECT COUNT(*) FROM mw_task_history
+        WHERE project_id = ANY($2::uuid[])
+          AND created_at > now() - interval '1 hour'
+          AND actor_user_id = $1
+          AND event_type = 'activity'
+          AND metadata->>'kind' = 'autopr_staged_action_result'
+          AND metadata->>'state' = 'sending'
+    """
+    if conn is not None:
+        return await conn.fetchval(sql, actor_user_id, list(project_ids)) or 0
+    async with get_connection() as own_conn:
+        return await own_conn.fetchval(sql, actor_user_id, list(project_ids)) or 0
 
 
 async def record_autopr_staged_send_outcome(
@@ -901,6 +1074,7 @@ async def record_autopr_staged_send_outcome(
     actor_user_id: UUID,
     state: str,
     detail: Optional[str] = None,
+    message_id: Optional[str] = None,
 ) -> Optional[dict]:
     """Append what actually happened to a send this request already claimed.
 
@@ -912,39 +1086,52 @@ async def record_autopr_staged_send_outcome(
 
     The claim is written moments earlier in the same request, so this appends
     rather than negotiating; `list_autopr_staged_actions` reads the newest row.
+
+    It still takes the same per-action FOR UPDATE that resolve_autopr_staged_action
+    takes, because "the newest row wins" is only true if every writer of a
+    result row queues behind the same lock. Without it, a person dismissing a
+    claim that had gone stale can commit AFTER a slow send finally returns, and
+    the later `dismissed` row then outranks the `sent` row that carries the
+    provider's message id — the card would deny a delivery that happened.
     """
     if state not in ("sent", "failed"):
         raise ValueError(f"Not a send outcome: {state}")
     async with get_connection() as conn:
-        owns = await conn.fetchval(
-            """
-            SELECT 1 FROM mw_task_history
-            WHERE id = $1 AND task_id = $2 AND project_id = $3
-              AND event_type = 'activity'
-              AND metadata->>'kind' = 'autopr_staged_action'
-            """,
-            action_id, task_id, project_id,
-        )
-        if not owns:
-            return None
-        metadata = {
-            "kind": "autopr_staged_action_result",
-            "staged_action_id": str(action_id),
-            "state": state,
-        }
-        if detail:
-            metadata["detail"] = str(detail)[:600]
-        row = await conn.fetchrow(
-            """
-            INSERT INTO mw_task_history
-                (task_id, task_id_text, project_id, actor_user_id,
-                 event_type, metadata)
-            VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
-            RETURNING id, created_at
-            """,
-            task_id, str(task_id), project_id, actor_user_id,
-            json.dumps(metadata),
-        )
+        async with conn.transaction():
+            owns = await conn.fetchval(
+                """
+                SELECT 1 FROM mw_task_history
+                WHERE id = $1 AND task_id = $2 AND project_id = $3
+                  AND event_type = 'activity'
+                  AND metadata->>'kind' = 'autopr_staged_action'
+                FOR UPDATE
+                """,
+                action_id, task_id, project_id,
+            )
+            if not owns:
+                return None
+            metadata = {
+                "kind": "autopr_staged_action_result",
+                "staged_action_id": str(action_id),
+                "state": state,
+            }
+            if detail:
+                metadata["detail"] = str(detail)[:600]
+            if message_id:
+                # The provider's id for what actually left — the one fact that
+                # ties this append-only trail to a real message in a real mailbox.
+                metadata["message_id"] = str(message_id)[:200]
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                RETURNING id, created_at
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                json.dumps(metadata),
+            )
     return {
         "ok": True,
         "staged_action_id": str(action_id),
@@ -968,15 +1155,18 @@ async def get_autopr_staged_action(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT h.id, h.metadata,
-                   (SELECT r.metadata->>'state' FROM mw_task_history r
-                     WHERE r.task_id = h.task_id
-                       AND r.event_type = 'activity'
-                       AND r.metadata->>'kind' = 'autopr_staged_action_result'
-                       AND r.metadata->>'staged_action_id' = h.id::text
-                     ORDER BY r.created_at DESC
-                     LIMIT 1) AS state
+            SELECT h.id, h.metadata, result.state, result.state_at
             FROM mw_task_history h
+            LEFT JOIN LATERAL (
+                SELECT r.metadata->>'state' AS state, r.created_at AS state_at
+                FROM mw_task_history r
+                WHERE r.task_id = h.task_id
+                  AND r.event_type = 'activity'
+                  AND r.metadata->>'kind' = 'autopr_staged_action_result'
+                  AND r.metadata->>'staged_action_id' = h.id::text
+                ORDER BY r.created_at DESC
+                LIMIT 1
+            ) result ON TRUE
             WHERE h.id = $1 AND h.task_id = $2 AND h.project_id = $3
               AND h.event_type = 'activity'
               AND h.metadata->>'kind' = 'autopr_staged_action'
@@ -991,15 +1181,21 @@ async def get_autopr_staged_action(
             meta = json.loads(meta)
         except json.JSONDecodeError:
             return None
-    state = row["state"]
+    state = row["state"] if row["state"] in _STAGED_ACTION_STATES else None
+    retryable, closable = _staged_action_affordances(state, row["state_at"])
+    if retryable and _staged_action_is_undeliverable(meta.get("action_kind"), meta.get("to")):
+        retryable = False
     return {
         "id": str(row["id"]),
         "kind": meta.get("action_kind"),
         "to": meta.get("to"),
         "subject": meta.get("subject"),
-        "body": meta.get("body"),
+        # Legacy rows stored the draft under `body` — see list_autopr_staged_actions.
+        "body": meta.get("action_body") or meta.get("body"),
         "why": meta.get("why"),
-        "state": state if state in _STAGED_ACTION_STATES else "pending",
+        "state": state or "pending",
+        "retryable": retryable,
+        "closable": closable,
     }
 
 

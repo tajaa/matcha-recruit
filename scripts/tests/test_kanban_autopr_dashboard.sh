@@ -152,6 +152,27 @@ AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
   AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache" \
   AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
   "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard.out"
+# A research pick is labelled as such, and a card the selector held for a
+# missing board grant is named under NEXT rather than lumped into "held".
+mkdir -p "$TMP_DIR/research-view" "$TMP_DIR/select-cache"
+cp "$VIEW_DIR"/*.sh "$VIEW_DIR/plan.py" "$TMP_DIR/research-view/"
+cat > "$TMP_DIR/research-view/select.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"id8":"cccc0000","project_title":"MATCHA","title":"Research Lambda","board_column":"todo","mode":"research","outcome":"artifact"}'
+EOF
+chmod +x "$TMP_DIR/research-view/select.sh"
+printf '%s\n' "[{\"id8\":\"dddd0000\",\"capability\":\"research\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]" \
+  > "$TMP_DIR/select-cache/ungranted.json"
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/dashboard-cache-research" \
+  AUTOPR_CACHE_DIR="$TMP_DIR/select-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot-research.json" \
+  "$TMP_DIR/research-view/dashboard.sh" > "$TMP_DIR/dashboard-research.out"
+check "control board labels a research pick and names cards held for a missing grant" \
+  $(grep -q 'research report · task cccc0000' "$TMP_DIR/dashboard-research.out" \
+    && grep -q 'held: task dddd0000 needs the `research` board grant' "$TMP_DIR/dashboard-research.out" \
+    && echo 0 || echo 1)
+
 check "control board shows cross-queue plan, exact next, PR timing, and Pacific history" \
   $(grep -q 'MATCHA AUTOPR CONTROL BOARD' "$TMP_DIR/dashboard.out" \
     && grep -q 'NOW · INVESTIGATING · 1h 30m' "$TMP_DIR/dashboard.out" \

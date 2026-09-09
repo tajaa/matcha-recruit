@@ -193,8 +193,16 @@ enum JournalBlockParser {
         var paragraphBuffer: [String] = []
         var inFence = false
         var fenceBuffer: [String] = []
+        var tableBuffer: [String] = []
         var todoCounter = 0
         var numberedRun = 0
+
+        func flushTable() {
+            if !tableBuffer.isEmpty {
+                out.append(.codeBlock(tableBuffer.joined(separator: "\n")))
+                tableBuffer.removeAll()
+            }
+        }
 
         func flushParagraph() {
             if !paragraphBuffer.isEmpty {
@@ -215,6 +223,14 @@ enum JournalBlockParser {
                     fenceBuffer.removeAll()
                     inFence = false
                 } else {
+                    // The table branch below relies on `flushTable()` being
+                    // reached by every non-table line, and this branch
+                    // `continue`s before it. Without this, a fence opened
+                    // straight after a pipe table emits its code block while
+                    // the table is still buffered, so the table renders BELOW
+                    // the code that follows it — and `table / fence / table`
+                    // merges both tables into one block after the code.
+                    flushTable()
                     flushParagraph()
                     numberedRun = 0
                     inFence = true
@@ -225,6 +241,15 @@ enum JournalBlockParser {
                 fenceBuffer.append(line)
                 continue
             }
+
+            // Pipe tables: collect the run, emit it as one monospaced block.
+            if isTableRow(trimmed) {
+                flushParagraph()
+                numberedRun = 0
+                tableBuffer.append(trimmed)
+                continue
+            }
+            flushTable()
 
             // Divider.
             if trimmed == "---" || trimmed == "***" {
@@ -297,6 +322,7 @@ enum JournalBlockParser {
 
         // Flush trailing buffers.
         flushParagraph()
+        flushTable()
         if inFence, !fenceBuffer.isEmpty {
             out.append(.codeBlock(fenceBuffer.joined(separator: "\n")))
         }
@@ -304,10 +330,24 @@ enum JournalBlockParser {
     }
 
     private static func parseHeading(_ trimmed: String) -> (Int, String)? {
-        if trimmed.hasPrefix("### ") { return (3, String(trimmed.dropFirst(4))) }
-        if trimmed.hasPrefix("## ")  { return (2, String(trimmed.dropFirst(3))) }
-        if trimmed.hasPrefix("# ")   { return (1, String(trimmed.dropFirst(2))) }
+        // `####`–`######` render at the smallest heading size rather than as
+        // literal hashes; reports from the research lane use them freely.
+        // Bail before the loop on the common case: this is called for every
+        // non-fence line of the document on every reparse, and reparse fires
+        // on each keystroke, so a plain paragraph line must not pay for six
+        // prefix strings it can never match.
+        guard trimmed.hasPrefix("#") else { return nil }
+        for level in stride(from: 6, through: 1, by: -1) {
+            let prefix = String(repeating: "#", count: level) + " "
+            if trimmed.hasPrefix(prefix) { return (min(level, 3), String(trimmed.dropFirst(prefix.count))) }
+        }
         return nil
+    }
+
+    /// A GitHub-style pipe table row. There is no table renderer; a run of
+    /// these becomes one monospaced block so the columns at least line up.
+    private static func isTableRow(_ trimmed: String) -> Bool {
+        trimmed.hasPrefix("|") && trimmed.hasSuffix("|") && trimmed.count > 2
     }
 
     private static func parseTodo(_ trimmed: String) -> (Bool, String)? {
