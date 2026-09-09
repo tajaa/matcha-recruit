@@ -166,9 +166,12 @@ async def test_changed_schedule_retry_hits_per_turn_schedule_cap(monkeypatch):
 @pytest.mark.asyncio
 async def test_matching_confirm_call_is_not_blocked_by_schedule_cap(monkeypatch):
     confirm_id = "cc33dd44"
-    responses = [_fake_response(calls=[_fake_call(
-        "propose_schedule_change", {"kind": "assign", "confirm_id": confirm_id},
-    )])]
+    responses = [_fake_response(calls=[
+        _fake_call(
+            "propose_schedule_change", {"kind": "assign", "confirm_id": confirm_id},
+        ),
+        _fake_call("finish", {"message": "model summary must not replace the receipt"}),
+    ])]
     frames, client = await _run_turn(
         monkeypatch,
         responses,
@@ -191,7 +194,14 @@ async def test_matching_confirm_call_is_not_blocked_by_schedule_cap(monkeypatch)
     assert result["message"] == "Schedule updated."
     assert result["token_usage"]["schedule_proposal_attempts"] == 0
     assert result["token_usage"]["stop_reason"] == "schedule_execution_verified"
-    assert result["steps"][-1]["status"] == "ok"
+    assert any(
+        step["tool"] == "propose_schedule_change" and step["status"] == "ok"
+        for step in result["steps"]
+    )
+    assert any(
+        step["label"] == "Finish deferred (other tools pending)"
+        for step in result["steps"]
+    )
 
 
 @pytest.mark.asyncio

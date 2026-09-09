@@ -6,7 +6,7 @@ an overlap Huume itself created. Fakes only; no DB.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 from uuid import UUID, uuid4
 
@@ -404,6 +404,35 @@ def _resolved_create(jurisdiction):
 
 
 class TestCreateJurisdictionGate:
+    def test_create_builders_forward_named_only_mode(self):
+        persist = mock.AsyncMock(return_value=uuid4())
+        standalone_resolver = mock.AsyncMock(return_value=_resolved_create(CURATED))
+        with (
+            mock.patch.object(schedule_chat, "_resolve_create_shifts", standalone_resolver),
+            mock.patch.object(schedule_chat, "_persist_proposal", persist),
+        ):
+            _run(schedule_chat.build_proposal(
+                _PersistConn(), company_id=COMPANY, channel_id=None,
+                source_message_id=None, created_by=USER, parsed={"ack": "OK"},
+                today=date(2026, 8, 20), original_content="create",
+                auto_assign_unpinned=False,
+            ))
+        assert standalone_resolver.await_args.kwargs["auto_assign_unpinned"] is False
+
+        batch_resolver = mock.AsyncMock(return_value=_resolved_create(CURATED))
+        with (
+            mock.patch.object(schedule_chat, "_resolve_create_shifts", batch_resolver),
+            mock.patch.object(schedule_chat, "_persist_proposal", persist),
+        ):
+            _run(schedule_chat.build_batch_proposal(
+                _PersistConn(), company_id=COMPANY, channel_id=None,
+                source_message_id=None, created_by=USER, edit_requests=[],
+                shift_requests=[{}], location_hint=None, ack="OK",
+                today=date(2026, 8, 20), original_content="create",
+                auto_assign_unpinned=False,
+            ))
+        assert batch_resolver.await_args.kwargs["auto_assign_unpinned"] is False
+
     @pytest.mark.parametrize("jurisdiction", [UNAVAILABLE, UNMAPPED])
     def test_standalone_create_refuses_unavailable_but_stages_unmapped(self, jurisdiction):
         persist = mock.AsyncMock(return_value=uuid4())

@@ -59,9 +59,9 @@ function appliedActionKey(response: MWSendResponse): string | null {
   const record = action as Record<string, unknown>
   const status = String(record.status)
   const applied = ['applied', 'created', 'updated'].includes(status)
-  // A failed confirmed schedule attempt may still have applied a subset of a
-  // batch, or committed successfully before its verification read failed.
-  // Reconcile the board for both outcomes; the confirm id keeps this one-shot.
+  // A failed confirmed schedule attempt can still have an unknown outcome if
+  // the durable receipt could not be read after a connection failure. Reconcile
+  // the board for that recovery case; the confirm id keeps this one-shot.
   const scheduleAttemptSettled = record.type === 'schedule_change' && status === 'failed'
   if (!applied && !scheduleAttemptSettled) return null
   const confirmId = record.confirm_id

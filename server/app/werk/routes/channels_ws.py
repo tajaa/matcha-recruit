@@ -1999,6 +1999,13 @@ async def _bg_schedule_reply(
                             conn, proposal_row={**claimed, "proposal": proposal},
                             confirmed_by=sender_uuid, features=features,
                         )
+                    except schedule_chat.ProposalScopeError as exc:
+                        # A stale proposal can fall outside its original
+                        # schedule window. Preserve the actionable scope
+                        # message; nothing was claimed or written.
+                        sys_row = await _insert_system_message(
+                            conn, channel_id_str, str(exc),
+                        )
                     except Exception:
                         logger.exception(
                             "schedule chat execute_proposal failed for proposal %s", claimed["id"],
