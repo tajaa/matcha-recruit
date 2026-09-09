@@ -31,10 +31,10 @@ CODEX_MODEL="${AUTOPR_CODEX_MODEL:-gpt-5.6-sol}"
 CODEX_REASONING_EFFORT="${AUTOPR_CODEX_REASONING_EFFORT:-medium}"
 REQUIRE_EMPTY_PATCH="${AUTOPR_CODEX_REQUIRE_EMPTY_PATCH:-0}"
 RESUME_PATCH="${AUTOPR_RESUME_PATCH:-}"
-# Research runs only (see the kind registry in lib.sh). Live web search
-# executes on OpenAI's side, so the container's network posture is unchanged;
-# image inputs hand the card's screenshots to the model natively instead of as
-# opaque files. Both default off: the PR lanes behave exactly as before.
+# Implementation and research kinds opt into live web search via lib.sh.
+# Search executes on OpenAI's side; the container's network posture is unchanged.
+# Image inputs remain a separate research-kind switch. Other callers (such as
+# publication copy) opt into neither capability by default.
 WEB_SEARCH="${AUTOPR_CODEX_WEB_SEARCH:-0}"
 IMAGE_INPUTS="${AUTOPR_CODEX_IMAGE_INPUTS:-0}"
 # Screenshots the model captured with browse-capture.py. They come back the

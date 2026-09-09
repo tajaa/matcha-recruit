@@ -309,7 +309,7 @@ extension TaskViewerSheet {
             return "Keep --extend-runtime in this reply to approve 10 more minutes. AutoPR will continue from its saved work."
         }
         if autoPRIsAwaitingAnswers {
-            return "Enter numbered answers to the questions above (for example: 1-a, 2-b), plus any context or screenshots AutoPR should use."
+            return "Answer in your own words, add context, or tell AutoPR what to research. It will use that guidance to continue the work. Numbered choices are optional."
         }
         return "Explain what AutoPR missed or attach evidence. Use --draft-pr to require a draft, --trust-still-broken to reject another already-fixed result, and --test-route=/app/... for a test-tenant replay."
     }

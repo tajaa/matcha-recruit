@@ -100,6 +100,25 @@ _autopr_decision_schema_ok() {
     ' "$file" >/dev/null
 }
 
+# Fresh PR investigations must explain why a remaining blocker needs the human.
+# Kept separate from the v1 schema so old saved decisions/research artifacts can
+# still be rendered and published; the kind registry selects normalize-grounded
+# for every new investigate/rework pass, including the corrective retry.
+_autopr_grounding_ok() {
+    jq -e '
+      def text: type == "string" and test("\\S") and length <= 2000;
+      def resolution:
+        type == "object"
+        and (.kind | IN("product_decision", "private_context", "source_unavailable", "explicit_approval"))
+        and (.evidence | type == "array" and length >= 1 and length <= 12
+             and all(.[]; text))
+        and (.why_user_needed | text);
+      (.questions | type == "array" and all(.[]; .resolution | resolution))
+      and (if .no_safe_action_reason | IN("policy_blocked", "external_dependency")
+           then (.blocker_resolution | resolution) else true end)
+    ' "$1" >/dev/null
+}
+
 _autopr_directive_policy_ok() {
     local decision_file="$1" directive_file="${2:-}"
     [ -n "$directive_file" ] && [ -s "$directive_file" ] || return 0
@@ -339,9 +358,16 @@ autopr_render_questions() {
           ((.key + 1) | tostring) + ". " + .value.question + "\n" +
           (.value.options | map("   - " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
           "   - Suggested default: " + .value.default_assumption + "\n" +
-          "   - Why this blocks implementation: " + .value.why_blocking
+          "   - Why this blocks implementation: " + .value.why_blocking +
+          (if ((.value.resolution | type) == "object"
+                   and (.value.resolution.why_user_needed | type) == "string"
+                   and (.value.resolution.evidence | type) == "array"
+                   and (.value.resolution.evidence | all(.[]; type == "string"))) then
+            "\n   - Why your input is needed: " + .value.resolution.why_user_needed +
+            "\n   - Already checked: " + (.value.resolution.evidence | join("; "))
+           else "" end)
         ] | join("\n\n")) +
-        "\n\nAnswer in the linked Kanban ticket with **Add additional context**, or reply on this PR. The next local cycle will ingest either answer and update this same draft."
+        "\n\nAnswer in the linked Kanban ticket with **Add additional context**, or reply on this PR. You can answer in plain language, add context, or tell AutoPR what to research; numbered choices are optional. The next local cycle will ingest that guidance and update this same draft."
       end
     ' "$decision_file"
 }
@@ -366,6 +392,7 @@ autopr_render_card_questions() {
     jq -r '
       if (.questions | length) == 0 then empty else
         "Answers needed — reply below with the numbered choices:\n" +
+        "Or answer in your own words, add context, or tell AutoPR what to research.\n\n" +
         ([.questions | to_entries[] |
           ((.key + 1) | tostring) + ". " + .value.question + "\n" +
           (.value.options | map("   " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
@@ -377,6 +404,16 @@ autopr_render_card_questions() {
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
+        grounding-ok)
+            [ "$#" -eq 2 ] || die "usage: decision.sh grounding-ok raw-decision.json"
+            _autopr_grounding_ok "$2"
+            ;;
+        normalize-grounded)
+            { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
+                || die "usage: decision.sh normalize-grounded raw-decision.json decision.json [directive-policy.json]"
+            _autopr_grounding_ok "$2" || die "triage decision lacks context/research resolution evidence for its blockers"
+            autopr_normalize_decision "$2" "$3" "${4:-}"
+            ;;
         normalize)
             { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
                 || die "usage: decision.sh normalize raw-decision.json decision.json [directive-policy.json]"
@@ -401,7 +438,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
             autopr_normalize_research_decision "$2" "$3"
             ;;
         *)
-            die "usage: decision.sh normalize raw-decision.json decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
+            die "usage: decision.sh normalize[-grounded] raw-decision.json decision.json | decision.sh grounding-ok raw-decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
             ;;
     esac
 fi

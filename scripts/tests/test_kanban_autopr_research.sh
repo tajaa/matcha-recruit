@@ -44,7 +44,13 @@ check "research sandbox switches enforce an empty patch and enable search + imag
       [[ "$switches" == *AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1* ]] \
       && [[ "$switches" == *AUTOPR_CODEX_WEB_SEARCH=1* ]] \
       && [[ "$switches" == *AUTOPR_CODEX_IMAGE_INPUTS=1* ]] \
-      && [ -z "$(autopr_kind_field investigate sandbox)" ] \
+      && echo 0 || echo 1)
+check "both PR lanes enable search and validate grounded blockers without requiring a research-card grant" \
+    $([ "$(autopr_kind_field investigate sandbox)" = AUTOPR_CODEX_WEB_SEARCH=1 ] \
+      && [ "$(autopr_kind_field rework sandbox)" = AUTOPR_CODEX_WEB_SEARCH=1 ] \
+      && [ "$(autopr_kind_field investigate decision)" = normalize-grounded ] \
+      && [ "$(autopr_kind_field rework decision)" = normalize-grounded ] \
+      && [ -z "$(autopr_kind_field investigate capability)" ] \
       && echo 0 || echo 1)
 check "an unknown mode is refused by the registry" \
     $(! autopr_kind_field shortlist model >/dev/null 2>&1 && echo 0 || echo 1)
@@ -266,7 +272,7 @@ check "the image input path is the workspace path codex runs in, not the host at
 
 run_bridge env > "$TMP_DIR/bridge-off.log" 2>&1
 bridge_off_rc=$?
-check "with the switches off (every PR lane), neither web search nor image inputs are passed" \
+check "with no kind switches (publication helpers), neither web search nor image inputs are passed" \
     $([ "$bridge_off_rc" = 0 ] \
       && ! grep -q 'web_search' "$TMP_DIR/codex-args" \
       && ! grep -qx -- '-i' "$TMP_DIR/codex-args" \

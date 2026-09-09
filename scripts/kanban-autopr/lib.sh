@@ -385,9 +385,9 @@ autopr_kind_field() {
                 prompt) [ "$mode" = rework ] && printf '_prompt_rework.txt' || printf '_prompt_todo.txt' ;;
                 model) printf 'gpt-5.6-sol' ;;
                 effort) printf 'medium' ;;
-                sandbox) printf '' ;;
+                sandbox) printf 'AUTOPR_CODEX_WEB_SEARCH=1' ;;
                 headings) printf '### Summary\n### Changes\n### Blast radius\n### Confidence\n' ;;
-                decision) printf 'normalize' ;;
+                decision) printf 'normalize-grounded' ;;
                 publisher) printf 'publish.sh' ;;
                 outcome) printf 'pull_request' ;;
                 # Drafting code PRs is what this lane has always done on every

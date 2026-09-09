@@ -493,6 +493,9 @@ elif [ -s "$DIRECTIVE_FILE" ] \
     && ! "$SCRIPT_DIR/decision.sh" directive-ok "$RAW_DECISION_FILE" "$DIRECTIVE_FILE" 2>/dev/null; then
     CORRECTION_KIND="directive_violation"
     CORRECTION_INSTRUCTION="The authorized card owner issued the directives above and the trusted harness REJECTED the decision you just returned. Investigate again and return a decision that honors them. Under draft_pr you may not return already_fixed: implement the repo-local change, and when it needs a schema change, author a new server/alembic/versions/*.py version file for human review and never run it against any database. A needed migration is never a reason to refuse. questions_only is allowed when a specific missing product decision blocks even a partial implementation, and when the card or send-back cites a page, label, control, or behavior that exists nowhere in the repository. no_safe_action with acceptance_criteria_met is allowed when every acceptance criterion on the card is already satisfied on this branch, and it must carry acceptance_evidence with the criterion text plus path, line, and commit for each one; the harness verifies every citation and requires the commit to be HEAD or an ancestor of it, the line to be non-blank there, and the path to still exist at HEAD. Do not satisfy this directive with a change you would not make if the card did not exist. policy_blocked and external_dependency remain available only for a genuine safety or third-party blocker."
+elif ! "$SCRIPT_DIR/decision.sh" grounding-ok "$RAW_DECISION_FILE" 2>/dev/null; then
+    CORRECTION_KIND="unresolved_researchable_context"
+    CORRECTION_INSTRUCTION="The trusted harness REJECTED an unexplained blocker. Read the latest additional context as plain-language answers or research guidance, not just numbered choices. Use live web search and primary sources for missing public facts, then draft the safe repo-local work through the existing catalog and consumer path. Do not invent a counsel-approval requirement. Preserve actual review/approval gates and never write production data or apply migrations. Every remaining question needs resolution.kind (product_decision, private_context, source_unavailable, or explicit_approval), resolution.evidence (nonempty array of context/paths checked, attempted queries/sources/errors, or the exact existing approval rule), and resolution.why_user_needed. A policy_blocked/external_dependency refusal needs the same object as blocker_resolution. Record only work actually done; if research tools fail, report the failure accurately. Prefer partial_implementation when safe independent work is possible."
 elif [ "$(jq -r '.no_safe_action_reason // ""' "$RAW_DECISION_FILE" 2>/dev/null)" = migration_required ]; then
     # The single most common refusal, and it never protected anything: the
     # operator applies every migration by hand, so authoring the version file
@@ -544,7 +547,9 @@ if [ -n "$CORRECTION_KIND" ]; then
         '{kind: $kind,
           directive_policy: ($policy[0] // null),
           rejected_decision: {outcome: $rejected[0].outcome,
-                              no_safe_action_reason: $rejected[0].no_safe_action_reason},
+                              no_safe_action_reason: $rejected[0].no_safe_action_reason,
+                              questions: $rejected[0].questions,
+                              blocker_resolution: $rejected[0].blocker_resolution},
           instruction: $instruction}' \
         > "$CORRECTION_FILE"
     ATTACH_ARGS+=(-f "$CORRECTION_FILE")
@@ -559,12 +564,15 @@ stop_inflight_snapshots
 # Codex's JSON is data, not authority. Keep the normalized result outside
 # the repository too: publish.sh is the only script permitted to decide what
 # reaches GitHub or the board.
-"$SCRIPT_DIR/decision.sh" "$KIND_DECISION" "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE"
+"$SCRIPT_DIR/decision.sh" "$KIND_DECISION" "$RAW_DECISION_FILE" "$RAW_DECISION_FILE.normalized" "$DIRECTIVE_FILE" \
+    || die "investigation decision rejected; publication is blocked"
 jq --argjson checkpoint "$FEEDBACK_CHECKPOINT" \
     '. + {feedback_checkpoint: $checkpoint}' \
-    "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback"
-mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized"
-mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE"
+    "$RAW_DECISION_FILE.normalized" > "$RAW_DECISION_FILE.with-feedback" \
+    || die "could not attach the validated feedback checkpoint"
+mv "$RAW_DECISION_FILE.with-feedback" "$RAW_DECISION_FILE.normalized" \
+    && mv "$RAW_DECISION_FILE.normalized" "$RAW_DECISION_FILE" \
+    || die "could not install the validated investigation decision"
 # Screenshots ride to the publisher through a stable directory rather than the
 # decision JSON: the model names them, but only files the trusted bridge
 # actually admitted are here.

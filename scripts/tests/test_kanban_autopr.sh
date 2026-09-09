@@ -531,6 +531,11 @@ case "$url" in
         printf '[{"id":"sub-1","title":"Fix current label","is_done":false,"position":0,"round_index":6}]' > "$output_file"
         ;;
     */history)
+        if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
+            printf '%s' '[{"id":"event-ny","event_type":"activity","metadata":{"kind":"autopr_additional_context","body":"Use grounding to research NY data and wire it through our codified compliance catalog and scheduling like CA and WA. I am giving you context, not numbered answers."}}]' > "$output_file"
+            [ "$write_status" = "0" ] || printf 200
+            exit 0
+        fi
         printf '[{"id":"event-1","event_type":"activity","metadata":{"body":"The screenshot still says note","attachment_ids":["file-1"]},"created_at":"2026-08-27T00:00:00Z"},{"id":"event-2","event_type":"review_rejected","metadata":{},"created_at":"2026-08-27T00:01:00Z"}]' > "$output_file"
         ;;
     */files)
@@ -606,6 +611,21 @@ cat > "$decision_path" <<'DECISION'
   "no_safe_action_reason": null
 }
 DECISION
+if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
+    count=0
+    [ ! -f "$CODEX_STUB_COUNTER" ] || count="$(cat "$CODEX_STUB_COUNTER")"
+    count=$((count + 1)); printf '%s' "$count" > "$CODEX_STUB_COUNTER"
+    if [ "$count" = 1 ] || [ "$CODEX_STUB_QUESTION" = always ]; then
+        jq '.outcome="questions_only" | .safe_changes_present=false |
+            .questions=[{id:"q1",question:"What counsel-approved NY record should be activated?",
+              why_blocking:"Counsel must supply the authority and effective date",
+              default_assumption:"Defer NY activation",
+              options:[{key:"a",label:"Supply counsel record",impact:"Encode NY"},
+                       {key:"b",label:"Defer NY",impact:"Keep unmapped"}]}]' \
+            "$decision_path" > "$decision_path.next"
+        mv "$decision_path.next" "$decision_path"
+    fi
+fi
 EOF
 chmod +x "$TMP_DIR/bin/codex"
 
@@ -696,6 +716,53 @@ check "live tee preserves a failing Codex exit status" \
     $([ "$failed_codex_rc" != 0 ] \
       && grep -q '\[FAILED\] Codex exited 17' "$TMP_DIR/live-failed.log" \
       && echo 0 || echo 1)
+
+# End-to-end NY regression: plain context reaches the model; a recycled counsel
+# question gets one correction. A repeated refusal never becomes publishable.
+GROUNDING_REPO="$TMP_DIR/grounding-repo"
+mkdir -p "$GROUNDING_REPO"
+git -C "$GROUNDING_REPO" init -q
+git -C "$GROUNDING_REPO" config user.name test
+git -C "$GROUNDING_REPO" config user.email test@example.com
+printf 'fixture\n' > "$GROUNDING_REPO/README.md"
+git -C "$GROUNDING_REPO" add README.md
+git -C "$GROUNDING_REPO" commit -qm initial
+git -C "$GROUNDING_REPO" branch -M main
+for scenario in once always; do
+    mode=rework; [ "$scenario" != always ] || mode=investigate
+    jq --arg mode "$mode" '.mode=$mode | .title="Support jurisdiction-aware break and scheduling-law rules" |
+        .autopr_reconsideration_pending=true | .autopr_reconsideration_event_id="event-ny"' \
+        "$TMP_DIR/card.json" > "$TMP_DIR/ny-card.json"
+    CODEX_STUB_QUESTION="$scenario" CODEX_STUB_COUNTER="$TMP_DIR/grounding-count-$scenario" \
+    AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+    GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/grounding-files" \
+    CODEX_STUB_CONTEXT="$TMP_DIR/grounding-context.json" CODEX_STUB_ARGS="$TMP_DIR/grounding-args" \
+    AUTOPR_WORKSPACE_ROOT="$GROUNDING_REPO" AUTOPR_SANDBOX_REPO_ROOT="$GROUNDING_REPO" \
+    AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/grounding-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+        "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/ny-card.json" "$TMP_DIR/ny-report-$scenario.md" \
+        "$TMP_DIR/ny-decision-$scenario.json" > "$TMP_DIR/ny-run-$scenario.log" 2>&1
+    ny_rc=$?
+    expected=0; [ "$scenario" != always ] || expected=1
+    check "$mode researches NY context with one bounded correction ($scenario)" \
+        $([ "$ny_rc" = "$expected" ] \
+          && [ "$(cat "$TMP_DIR/grounding-count-$scenario" 2>/dev/null)" = 2 ] \
+          && grep -q 'unresolved_researchable_context' "$TMP_DIR/ny-run-$scenario.log" \
+          && grep -qxF 'web_search="live"' "$TMP_DIR/grounding-args" \
+          && grep -qF 'counsel-approval prerequisite' "$TMP_DIR/grounding-args" \
+          && jq -e '.history[0].metadata.body | contains("not numbered answers")' "$TMP_DIR/grounding-context.json" >/dev/null \
+          && echo 0 || echo 1)
+    [ "$ny_rc" = "$expected" ] || tail -35 "$TMP_DIR/ny-run-$scenario.log"
+    if [ "$scenario" = once ]; then
+        check "a corrected NY-context decision reaches normalization" \
+            $(jq -e '.outcome == "implementation" and .confidence_score == 100' "$TMP_DIR/ny-decision-once.json" >/dev/null && echo 0 || echo 1)
+    else
+        check "a second ungrounded NY refusal stops before publication preparation" \
+            $([ "$ny_rc" != 0 ] \
+              && grep -qF 'publication is blocked' "$TMP_DIR/ny-run-always.log" \
+              && [ ! -e "$TMP_DIR/ny-decision-always.json.with-feedback" ] \
+              && echo 0 || echo 1)
+    fi
+done
 
 ################################################################################
 # The msandbox bridge operates on a tracked-only clone and returns one patch.
@@ -1411,6 +1478,45 @@ check "question drafts are numbered and expose an in-ticket answer path" \
       | grep -qF '2. Second choice?' \
       && printf '%s' "$question_pr_copy" | grep -qF 'Add additional context' \
       && printf '%s' "$question_card_copy" | grep -qF 'reply below with the numbered choices' \
+      && echo 0 || echo 1)
+
+# Old decisions still render/normalize; every NEW PR pass needs blocker evidence.
+jq '.outcome="questions_only" | .safe_changes_present=false' \
+    "$TMP_DIR/question-render-decision.json" > "$TMP_DIR/ungrounded.json"
+check "fresh question decisions cannot recycle unexplained blockers" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/ungrounded.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 \
+      && "$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/ungrounded.json" "$TMP_DIR/legacy-out.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+for kind in product_decision private_context source_unavailable explicit_approval; do
+    jq --arg kind "$kind" '.questions |= map(. + {resolution:{kind:$kind,
+        evidence:["Checked current context and repository; consulted primary sources or observed a search failure"],
+        why_user_needed:"The remaining fact or decision is not available to this run"}})' \
+        "$TMP_DIR/ungrounded.json" > "$TMP_DIR/grounded.json"
+    check "an evidenced $kind question remains available" \
+        $("$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounded.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 && echo 0 || echo 1)
+done
+jq '.outcome="partial_implementation" | .safe_changes_present=true' \
+    "$TMP_DIR/grounded.json" > "$TMP_DIR/grounded-partial.json"
+check "safe partial implementation can retain an evidenced human question" \
+    $("$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounded-partial.json" "$TMP_DIR/partial-out.json" >/dev/null 2>&1 && echo 0 || echo 1)
+for invalid in 'null' '{kind:"public_research",evidence:["Not attempted"],why_user_needed:"Find it for me"}' '{kind:"private_context",evidence:[],why_user_needed:"Unknown"}' '{kind:"explicit_approval",evidence:["   "],why_user_needed:"Unknown"}'; do
+    jq ".questions[1].resolution=$invalid" "$TMP_DIR/grounded.json" > "$TMP_DIR/grounding-invalid.json"
+    check "every question needs a nonempty supported resolution ($invalid)" \
+        $(! "$AUTOPR_DIR/decision.sh" grounding-ok "$TMP_DIR/grounding-invalid.json" >/dev/null 2>&1 && echo 0 || echo 1)
+done
+for reason in policy_blocked external_dependency; do
+    jq --arg reason "$reason" '.outcome="no_safe_action" | .questions=[] | .safe_changes_present=false | .no_safe_action_reason=$reason' \
+        "$TMP_DIR/publication-decision.json" > "$TMP_DIR/ungrounded-blocker.json"
+    jq --slurpfile grounded "$TMP_DIR/grounded.json" '.blocker_resolution=$grounded[0].questions[0].resolution' \
+        "$TMP_DIR/ungrounded-blocker.json" > "$TMP_DIR/grounded-blocker.json"
+    check "$reason cannot bypass grounding by moving the question to a refusal" \
+        $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/ungrounded-blocker.json" "$TMP_DIR/blocker-out.json" >/dev/null 2>&1 \
+          && "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounded-blocker.json" "$TMP_DIR/blocker-out.json" >/dev/null 2>&1 \
+          && echo 0 || echo 1)
+done
+check "rendered questions accept research guidance and plain-language answers" \
+    $(printf '%s' "$question_pr_copy" | grep -qF 'numbered choices are optional' \
+      && printf '%s' "$question_card_copy" | grep -qF 'tell AutoPR what to research' \
       && echo 0 || echo 1)
 
 jq '.production_verification = {

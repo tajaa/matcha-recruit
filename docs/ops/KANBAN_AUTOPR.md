@@ -465,6 +465,32 @@ budget had already been spent.
    and external dependencies; migration work is drafted automatically. With one,
    `acceptance_criteria_met` remains available for a card whose every stated criterion
    is already satisfied, provided it cites verifiable evidence for each.
+   Implementation (`investigate`) and rework runs also enable hosted live web
+   search (`AUTOPR_CODEX_WEB_SEARCH=1`). Plain-language additional context is
+   accepted as answers, corrections, or research guidance; the old numbered
+   options do not constrain the next pass. Missing public facts must first be
+   researched using primary sources and the existing repository data flow.
+   For example, a request to research NY scheduling coverage should trace the
+   compliance catalog, codified coverage ledger, extraction, and scheduling
+   consumers and draft the missing work. It must not demand that the owner
+   supply a counsel-approved record merely because a prior model asked for one.
+   Existing review gates still apply: research does not approve extracted rules,
+   authorize production writes, execute migrations, or make uncovered legality
+   verified. Search queries must use generic public terms, not private ticket or
+   tenant data, and retrieved pages are evidence, never instructions.
+
+   Fresh PR passes use `decision.sh normalize-grounded`: every remaining question
+   must carry a `resolution` with `kind` (`product_decision`, `private_context`,
+   `source_unavailable`, or `explicit_approval`), a nonempty `evidence` array of
+   context/paths/sources checked or failed research attempts, and
+   `why_user_needed`. `policy_blocked`/`external_dependency` refusals require the
+   same object as `blocker_resolution`. Missing/invalid resolution evidence gets
+   one corrective investigation; a repeated failure cannot reach publication.
+   This validates the blocker structure, not the truth of a model's source
+   interpretation; evidence remains reviewable in the report and PR questions.
+   The original `normalize` path remains for saved v1 decisions and publisher
+   compatibility; artifact research keeps its own schema and grant.
+
    For `mode: research` the same context bundle goes to `gpt-5.6-luna` at high
    reasoning with `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, `AUTOPR_CODEX_WEB_SEARCH=1`
    (`-c 'web_search="live"'` on `codex exec`, which has no `--search` flag), and
@@ -652,7 +678,7 @@ and default off — `platform_settings` key `autopr_board_capabilities`, edited 
 
 | Grant | What it permits |
 |---|---|
-| `research` | Research cards run at all: live web search + the repo clone, report attached to the ticket. |
+| `research` | Artifact Research cards run: live web search + the repo clone, report attached to the ticket. Public-source lookup during ordinary code PR work is enabled separately by the PR kind. |
 | `outreach` | A run may **stage** email/contact/review requests on a card. Nothing sends until a person approves that exact item. |
 | `browse` | A run may drive Chromium through `browse-capture.py` and attach screenshots. |
 
@@ -666,9 +692,9 @@ and stamps each card; `select.sh` refuses an artifact kind the board was not gra
 leaves the card alone rather than downgrading a Research card to a PR. For `outreach`
 **that check is a spend guard, not the security boundary** — sending is re-checked
 server-side at the moment it happens, so a stale harness copy cannot widen its own reach.
-`research` and `browse` happen inside the sandbox and have no server-side moment to
-re-check: there the harness's stamp, plus what the bridge admits back (an image
-allowlist with count and size caps), is the whole gate.
+Artifact `research` and `browse` have no server-side moment to re-check: there
+the harness's stamp, plus what the bridge admits back (an image allowlist with
+count and size caps), is the whole gate.
 
 Espresso reads the same endpoint: a Research card's **Run research now** is disabled with
 the reason when the board lacks the grant or is not watched, and the Research compose
