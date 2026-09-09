@@ -329,6 +329,12 @@ budget had already been spent.
    reject Unqueue and the app will retain the queued state and show the error.
    Espresso keeps the native multiline answer editor below the scrolling questions;
    Return inserts a newline, ⌘Return submits, and failed submissions retain drafts.
+   New Research tickets open an optional eight-step brief wizard with examples,
+   required title/subject/questions, optional scope/sources/output, and a review
+   screen. The editor's Research wizard also preserves custom sections and fenced
+   examples. Applying the wizard only changes the local form; creating/saving is
+   still explicit. Ticket details separate the automation summary and question
+   blocks from expandable original run details across ticket categories.
    A failed attempt otherwise cools down
    for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation

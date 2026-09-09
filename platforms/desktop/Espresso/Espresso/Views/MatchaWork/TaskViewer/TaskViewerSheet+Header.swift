@@ -81,42 +81,42 @@ extension TaskViewerSheet {
     var autoSetupBanner: some View {
         if let note = autoSetupProgressNote {
             let status = autoSetupStatus
-            if appState.isGraphite {
-                VStack(alignment: .leading, spacing: 6) {
-                    asciiRule("AUTO SETUP · \(status.label)")
-                    Text(note)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(appState.themeText)
+            let paragraphs = note.components(separatedBy: "\n\n").filter { !$0.isEmpty }
+            let first = paragraphs.first ?? note
+            let summary = first.range(of: " · note: ").map { String(first[$0.upperBound...]) } ?? first
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    Image(systemName: status.icon).foregroundColor(status.color)
+                    Text(autoPRIsAwaitingAnswers ? "Your input is needed" : status.label.capitalized)
+                        .font(.system(size: 16, weight: .semibold))
+                    Spacer()
+                    Text("AutoPR").font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
+                }
+                Text(summary)
+                    .font(.system(size: 13)).lineSpacing(4)
+                    .foregroundColor(appState.themeTextSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                autoPRReconsiderationControl
+                ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { _, paragraph in
+                    Text(paragraph)
+                        .font(.system(size: 14)).lineSpacing(5)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                    autoPRReconsiderationControl
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(appState.themeText.opacity(0.04)).cornerRadius(10)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: status.icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(status.color)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("AUTO SETUP · \(status.label)")
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundColor(status.color)
-                        Text(note)
-                            .font(.system(size: 11))
-                            .foregroundColor(appState.themeText.opacity(0.8))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        autoPRReconsiderationControl
-                    }
+                DisclosureGroup("Run details & original message") {
+                    Text(note).font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled).padding(.top, 8)
                 }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(status.color.opacity(0.08))
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.24), lineWidth: 1))
+                .font(.system(size: 11)).foregroundColor(.secondary)
             }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(status.color.opacity(0.05)).cornerRadius(14)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(status.color.opacity(0.18), lineWidth: 1))
         }
     }
 
@@ -493,15 +493,11 @@ extension TaskViewerSheet {
     /// `── LABEL ─────────` monospace rule — the graphite ASCII section header,
     /// stretching to fill the row. Used by the hero + collapsibles in graphite.
     func asciiRule(_ label: String) -> some View {
-        HStack(spacing: 8) {
-            Text("──")
-                .font(.system(size: 11, design: .monospaced))
+        HStack(spacing: 10) {
+            Text(label.capitalized)
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(appState.themeTextSecondary)
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(appState.themeTextSecondary)
-                .tracking(1).fixedSize()
-            Rectangle().fill(appState.themeBorder).frame(height: 1)
+            Rectangle().fill(appState.themeBorder.opacity(0.6)).frame(height: 1)
         }
     }
 
@@ -512,8 +508,8 @@ extension TaskViewerSheet {
         if appState.isGraphite {
             VStack(alignment: .leading, spacing: 6) {
                 asciiRule(label)
-                Text(text)
-                    .font(.system(size: 13))
+                TicketBriefText(text: text)
+                    .font(.system(size: 14))
                     .foregroundColor(appState.themeText)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -528,8 +524,8 @@ extension TaskViewerSheet {
                         Text(label).font(.system(size: 10, weight: .bold)).tracking(0.6)
                     }
                     .foregroundColor(color)
-                    Text(text)
-                        .font(.system(size: 13))
+                    TicketBriefText(text: text)
+                        .font(.system(size: 14))
                         .foregroundColor(appState.themeText)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -616,6 +612,26 @@ extension TaskViewerSheet {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(color.opacity(0.06)).cornerRadius(8)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
+        }
+    }
+}
+
+
+/// Render existing Markdown section boundaries without changing the stored brief.
+struct TicketBriefText: View {
+    let text: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(text.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, block in
+                if block.hasPrefix("## ") {
+                    let lines = block.components(separatedBy: "\n")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(String((lines.first ?? "").dropFirst(3)))
+                            .font(.system(size: 13, weight: .semibold))
+                        if lines.count > 1 { Text(lines.dropFirst().joined(separator: "\n")).lineSpacing(4) }
+                    }
+                } else { Text(block).lineSpacing(4) }
+            }
         }
     }
 }
