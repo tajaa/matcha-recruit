@@ -116,16 +116,12 @@ if [ -n "$prior_checkpoint" ]; then
     done
 fi
 
-# Consume any "run now" request as soon as this card is actually picked up.
-# The claim is what stops the one-minute watcher re-dispatching for a card
-# whose run then crashes, is capped, or produces no PR. Non-fatal: losing the
-# claim must never abandon an investigation that is otherwise ready to go.
-if [ "$(jq -r '.autopr_run_requested_at // empty' "$CARD_FILE")" != "" ]; then
-    mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/run-claim" '{}' \
-        >/dev/null 2>&1 \
-        || printf 'kanban-autopr: warning: could not claim the run request for %s\n' \
-            "$TASK_ID" >&2
-fi
+# Recheck every selected card against the live hold before starting work.
+# A cached candidate or failed API request must never bypass an unqueue.
+claim="$(mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/run-claim" '{}')" \
+    || die "could not verify the AutoPR queue state for $TASK_ID"
+[ "$(printf '%s' "$claim" | jq -r '.ok')" = true ] \
+    || die "ticket $TASK_ID was unqueued or left the queue before investigation"
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist

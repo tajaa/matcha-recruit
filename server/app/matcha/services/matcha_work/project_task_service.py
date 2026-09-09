@@ -408,8 +408,8 @@ async def request_autopr_reconsideration(
                 """
                 INSERT INTO mw_task_history
                     (task_id, task_id_text, project_id, actor_user_id,
-                     event_type, metadata)
-                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                     event_type, metadata, created_at)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
                 RETURNING id, created_at
                 """,
                 task_id, str(task_id), project_id, actor_user_id,
@@ -470,6 +470,7 @@ _AUTOPR_RUN_REQUEST_TTL = "30 minutes"
 _AUTOPR_BOOKKEEPING_KINDS = (
     "autopr_run_request",
     "autopr_run_claim",
+    "autopr_run_cancel",
     # A staged proposal is rendered by the Proposed Outreach section, not the
     # discussion thread, and the report note that arrives with it is what puts
     # the unviewed-updates chip on the card. Its email text is stored under
@@ -489,6 +490,56 @@ def is_autopr_bookkeeping_row(metadata: object) -> bool:
     if not isinstance(metadata, dict):
         return False
     return metadata.get("kind") in _AUTOPR_BOOKKEEPING_KINDS
+
+
+# A hold survives scheduled sweeps and expires only on an explicit new run or
+# answer submission. Claims are deliberately absent: a stale worker cannot
+# undo a human's hold. The correlated query uses the task/history index.
+_AUTOPR_HOLD_SQL = """
+COALESCE((
+    SELECT h.metadata->>'kind' = 'autopr_run_cancel'
+    FROM mw_task_history h
+    WHERE h.task_id = t.id AND h.event_type = 'activity'
+      AND h.metadata->>'kind' IN (
+          'autopr_run_cancel', 'autopr_run_request', 'autopr_additional_context')
+    ORDER BY h.created_at DESC, (h.metadata->>'kind' = 'autopr_run_cancel') DESC
+    LIMIT 1
+), FALSE)
+"""
+
+
+async def cancel_autopr_run(
+    *, project_id: UUID, task_id: UUID, actor_user_id: UUID,
+) -> Optional[dict]:
+    """Hold future AutoPR runs without moving the card or discarding answers.
+
+    An investigation already claimed is not interrupted. The task lock orders
+    this event with run requests, reconsiderations, and investigation claims.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                "SELECT id, board_column, status FROM mw_tasks "
+                "WHERE id = $1 AND project_id = $2 FOR UPDATE",
+                task_id, project_id,
+            )
+            if not task:
+                return None
+            if task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
+                raise AutoPRReconsiderationConflict(
+                    "This ticket has left the queue. Refresh to see its current state."
+                )
+            await conn.execute(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata, created_at)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                json.dumps({"kind": "autopr_run_cancel"}),
+            )
+    return {"ok": True, "autopr_paused": True}
 
 
 async def request_autopr_run(
@@ -537,7 +588,7 @@ async def request_autopr_run(
                         SELECT MAX(c.created_at) FROM mw_task_history c
                         WHERE c.task_id = $1
                           AND c.event_type = 'activity'
-                          AND c.metadata->>'kind' = 'autopr_run_claim'
+                          AND c.metadata->>'kind' IN ('autopr_run_claim', 'autopr_run_cancel')
                       ), '-infinity'::timestamptz)
                 """,
                 task_id,
@@ -552,8 +603,8 @@ async def request_autopr_run(
                 """
                 INSERT INTO mw_task_history
                     (task_id, task_id_text, project_id, actor_user_id,
-                     event_type, metadata)
-                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
+                     event_type, metadata, created_at)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
                 RETURNING id, created_at
                 """,
                 task_id, str(task_id), project_id, actor_user_id,
@@ -581,23 +632,31 @@ async def claim_autopr_run(
     crashed or unselectable card cannot make the watcher dispatch forever.
     """
     async with get_connection() as conn:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM mw_tasks WHERE id = $1 AND project_id = $2",
-            task_id, project_id,
-        )
-        if not exists:
-            return None
-        row = await conn.fetchrow(
-            """
-            INSERT INTO mw_task_history
-                (task_id, task_id_text, project_id, actor_user_id,
-                 event_type, metadata)
-            VALUES ($1, $2, $3, $4, 'activity', $5::jsonb)
-            RETURNING id, created_at
-            """,
-            task_id, str(task_id), project_id, actor_user_id,
-            json.dumps({"kind": "autopr_run_claim"}),
-        )
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                "SELECT id, board_column, status FROM mw_tasks "
+                "WHERE id = $1 AND project_id = $2 FOR UPDATE",
+                task_id, project_id,
+            )
+            if not task:
+                return None
+            held = await conn.fetchval(
+                f"SELECT {_AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = $1",
+                task_id,
+            )
+            if held or task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
+                return {"ok": False, "reason": "Ticket is held or no longer queued"}
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata, created_at)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
+                RETURNING id, created_at
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                json.dumps({"kind": "autopr_run_claim"}),
+            )
     return {"ok": True, "claimed_at": row["created_at"].isoformat()}
 
 
@@ -1231,7 +1290,7 @@ async def list_autopr_run_requests(project_ids: list[UUID]) -> list[dict]:
                     WHERE c.task_id = h.task_id
                       AND c.created_at > now() - interval '{_AUTOPR_RUN_REQUEST_TTL}'
                       AND c.event_type = 'activity'
-                      AND c.metadata->>'kind' = 'autopr_run_claim'
+                      AND c.metadata->>'kind' IN ('autopr_run_claim', 'autopr_run_cancel')
                   ), '-infinity'::timestamptz)
             GROUP BY t.id, t.project_id, t.board_column
             ORDER BY MAX(h.created_at)
@@ -1436,7 +1495,8 @@ async def list_project_tasks(
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
-                   (autopr_ctx.id IS NOT NULL) AS autopr_reconsideration_pending,
+                   ({_AUTOPR_HOLD_SQL}) AS autopr_paused,
+                   (autopr_ctx.id IS NOT NULL AND NOT ({_AUTOPR_HOLD_SQL})) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
                    -- "Run AutoPR now" on the card. Pending until the harness
@@ -1537,7 +1597,7 @@ async def list_project_tasks(
                         SELECT MAX(h7.created_at) FROM mw_task_history h7
                         WHERE h7.task_id = t.id
                           AND h7.event_type = 'activity'
-                          AND h7.metadata->>'kind' = 'autopr_run_claim'
+                          AND h7.metadata->>'kind' IN ('autopr_run_claim', 'autopr_run_cancel')
                       ), '-infinity'::timestamptz)
                 ORDER BY h6.created_at DESC
                 LIMIT 1

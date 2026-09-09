@@ -433,6 +433,7 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"66666666-0000-4000-8000-000000000006","title":"Consumed directive answered with a migration stop","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: MIGRATION REQUIRED · [autopr:no-spec 2026-09-02T01:00:00Z] migration_required"},
     {"id":"77777777-0000-4000-8000-000000000007","title":"Queued by hand from the card","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
     {"id":"88888888-0000-4000-8000-000000000008","title":"Blocked on a vendor that used the words","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY · [autopr:no-spec 2026-09-02T01:00:00Z] external_dependency · note: the vendor said it was already_fixed upstream"},
+    {"id":"bbbbbbbb-0000-4000-8000-00000000000b","title":"Unqueued assigned card","assigned_email":"owner@example.com","board_column":"todo","status":"pending","autopr_paused":true,"autopr_reconsideration_pending":true,"autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
     {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"}
   ]
 }
@@ -484,6 +485,9 @@ check "an already_fixed mention in another verdict's note starts no recovery pro
       && grep -q '/tasks/55555555-0000-4000-8000-000000000005/history' "$TMP_DIR/collect-urls" \
       && echo 0 || echo 1)
 
+check "collector excludes unqueued work even with assignment and stale queue signals" \
+    $(printf '%s' "$collected" | jq -e 'all(.id8 != "bbbbbbbb")' >/dev/null && echo 0 || echo 1)
+
 check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
       && [ "$(printf '%s' "$collected" | jq 'length')" = "4" ] \
@@ -520,6 +524,9 @@ if [[ "$url" == */auth/login ]]; then
     exit 0
 fi
 case "$url" in
+    */autopr/run-claim)
+        printf '{"ok":%s}' "${AUTOPR_TEST_CLAIM_OK:-true}" > "$output_file"
+        ;;
     */subtasks)
         printf '[{"id":"sub-1","title":"Fix current label","is_done":false,"position":0,"round_index":6}]' > "$output_file"
         ;;
@@ -665,6 +672,15 @@ check "investigation accepts a card with no attachments on macOS Bash" \
       && echo 0 || echo 1)
 [ "$no_files_rc" != 0 ] || [ "$no_files_count" = 1 ] \
     || printf 'Expected one Codex input without attachments, got %s\n' "$no_files_count"
+
+AUTOPR_TEST_CLAIM_OK=false PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_ARGS="$TMP_DIR/held-codex-args" \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/held-report.md" \
+    "$TMP_DIR/held-decision.json" > "$TMP_DIR/held-investigation.log" 2>&1
+held_rc=$?
+check "a card unqueued after collection never reaches the model" \
+    $([ "$held_rc" != 0 ] && [ ! -e "$TMP_DIR/held-codex-args" ] \
+      && grep -q 'was unqueued' "$TMP_DIR/held-investigation.log" && echo 0 || echo 1)
 
 CODEX_STUB_FAIL=1 AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" \
 MATCHA_AUTOPR_ENV="$env_file" GITHUB_REPOSITORY="tajaa/matcha-recruit" \

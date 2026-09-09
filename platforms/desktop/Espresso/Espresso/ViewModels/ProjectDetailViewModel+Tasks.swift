@@ -269,6 +269,7 @@ extension ProjectDetailViewModel {
         guard let i = tasks.firstIndex(where: { $0.id == updated.id }) else { return }
         let previous = tasks[i]
         var merged = updated
+        if merged.autoprPaused == nil { merged.autoprPaused = previous.autoprPaused }
         if merged.reviewCycleCount == nil { merged.reviewCycleCount = previous.reviewCycleCount }
         if merged.subtaskTotal == nil { merged.subtaskTotal = previous.subtaskTotal }
         if merged.subtaskDone == nil { merged.subtaskDone = previous.subtaskDone }

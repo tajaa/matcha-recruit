@@ -110,25 +110,30 @@ extension TaskViewerSheet {
             } else if let replying = replyingToNote {
                 replyingToBanner(replying)
             }
-            HStack(spacing: 6) {
-                TextField(
-                    isAddingAutoPRContext
-                        ? (autoPRNeedsRuntimeApproval
-                            ? "Keep --extend-runtime to approve 10 more minutes…"
-                            : (autoPRIsAwaitingAnswers
-                                ? "Enter numbered answers (1-a, 2-b, …)…"
-                                : "Add evidence or explain what AutoPR missed…"))
-                        : (replyingToNote == nil ? "Add a note…" : "Write a reply…"),
-                    text: $newNote
-                )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundColor(appState.themeText)
-                    .padding(7)
-                    .background(appState.themeText.opacity(0.07))
-                    .cornerRadius(5)
-                    .focused($isNoteFieldFocused)
-                    .onSubmit { Task { await submitNote() } }
+            ComposerTextView(
+                text: $newNote,
+                placeholder: isAddingAutoPRContext
+                    ? "Write your numbered answers and additional context…"
+                    : (replyingToNote == nil ? "Add a note…" : "Write a reply…"),
+                font: .systemFont(ofSize: 13),
+                textColor: appState.themeText,
+                minLines: isAddingAutoPRContext ? 4 : 2,
+                maxLines: 10,
+                submitKey: .commandReturnSends,
+                onSubmit: { Task { await submitNote() } },
+                onPasteImage: { attachImageFromClipboard() },
+                focusRequested: $isNoteFieldFocused
+            )
+            .padding(8)
+            .background(appState.themeText.opacity(0.07))
+            .cornerRadius(6)
+            .disabled(addingNote)
+
+            HStack(spacing: 10) {
+                Text("Return for a new line · ⌘Return to submit")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
                 Button {
                     attachFileFromDisk()
                 } label: {
@@ -162,6 +167,8 @@ extension TaskViewerSheet {
                 .disabled(!canSubmitNote || addingNote)
             }
 
+            .disabled(addingNote)
+
             // Self-check: people often type an actionable to-do as a note. When
             // the text reads like a task, offer to capture it as a subtask instead.
             if !isAddingAutoPRContext && looksLikeSubtask(newNote) {
@@ -180,6 +187,7 @@ extension TaskViewerSheet {
                     HStack(spacing: 6) {
                         ForEach(pendingAttachments) { att in
                             PendingAttachmentChip(attachment: att) {
+                                guard !addingNote else { return }
                                 pendingAttachments.removeAll { $0.id == att.id }
                             }
                         }
@@ -214,6 +222,7 @@ extension TaskViewerSheet {
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
+            .disabled(addingNote)
             .help("Cancel additional context")
         }
         .padding(.horizontal, 7)

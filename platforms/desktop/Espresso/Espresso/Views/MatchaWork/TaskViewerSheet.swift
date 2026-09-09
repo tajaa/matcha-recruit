@@ -50,6 +50,7 @@ struct TaskViewerSheet: View {
     @State var isAddingAutoPRContext = false
     @State var didSubmitAutoPRContext = false
     @State var autoPRContextError: String?
+    @State var autoPRContextExpectedNote: String?
     /// "Run AutoPR now": optimistic local state so the control flips the
     /// instant the request lands, before the next task-list refresh carries
     /// the server's `autopr_run_requested_at` back.
@@ -75,7 +76,7 @@ struct TaskViewerSheet: View {
     /// server / harness answer as before. false disables it with the reason.
     @State var researchGranted: Bool?
     @State var boardWatchedByAutoPR: Bool?
-    @FocusState var isNoteFieldFocused: Bool
+    @State var isNoteFieldFocused = false
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
     @State var replyingToNote: MWTaskHistoryEntry?
@@ -433,6 +434,19 @@ struct TaskViewerSheet: View {
             }
         }
         .padding(16)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isAddingAutoPRContext {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(autoPRContextInstructions)
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                    noteComposer
+                }
+                .padding(16)
+                .background(Color.appBackground)
+                .overlay(alignment: .top) { Divider() }
+            }
         }
         .frame(width: viewMode == .graph ? 820 : 600)
         .frame(maxHeight: 760)

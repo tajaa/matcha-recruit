@@ -197,8 +197,8 @@ extension TaskViewerSheet {
         let pending = pendingAttachments
         guard canSubmitNote,
               let pid = viewModel.project?.id,
-              let expectedNote = autoSetupProgressNote,
-              !addingNote else { return }
+              let expectedNote = autoPRContextExpectedNote,
+              !addingNote, !requestingAutoPRRun else { return }
         addingNote = true
         autoPRContextError = nil
         defer { addingNote = false }
@@ -257,6 +257,26 @@ extension TaskViewerSheet {
             // flag set would pin "Queued for AutoPR" for the life of the sheet,
             // so the button never returns once the harness claims the request.
             didRequestAutoPRRun = false
+        } catch {
+            autoPRRunError = error.localizedDescription
+        }
+    }
+
+    func cancelAutoPRRun() async {
+        guard let pid = viewModel.project?.id, !requestingAutoPRRun, !addingNote else { return }
+        requestingAutoPRRun = true
+        autoPRRunError = nil
+        defer { requestingAutoPRRun = false }
+        do {
+            _ = try await MatchaWorkService.shared.cancelAutoPRRun(projectId: pid, taskId: task.id)
+            didRequestAutoPRRun = false
+            didSubmitAutoPRContext = false
+            if let index = viewModel.tasks.firstIndex(where: { $0.id == task.id }) {
+                viewModel.tasks[index].autoprPaused = true
+                viewModel.tasks[index].autoprRunRequestedAt = nil
+                viewModel.tasks[index].autoprReconsiderationPending = false
+            }
+            await viewModel.loadTasks()
         } catch {
             autoPRRunError = error.localizedDescription
         }

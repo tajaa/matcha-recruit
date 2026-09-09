@@ -255,6 +255,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     /// yet claimed the card. The scheduled lane only sweeps every twenty
     /// minutes; this is what jumps the queue.
     var autoprRunRequestedAt: String? = nil
+    var autoprPaused: Bool? = nil
 
     // ── Pipeline position (independent of kanban board_column) ──
     // Defaults to "lead" on the server; nil until the migration runs.
@@ -308,6 +309,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case autoprReconsiderationEventId = "autopr_reconsideration_event_id"
         case autoprReconsiderationAt = "autopr_reconsideration_at"
         case autoprRunRequestedAt = "autopr_run_requested_at"
+        case autoprPaused = "autopr_paused"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"

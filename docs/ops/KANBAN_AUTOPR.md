@@ -316,6 +316,19 @@ budget had already been spent.
    (defined once in `project_task_service.py`, shared with the PR webhook's board check),
    and any request older than 30 minutes stops counting as pending everywhere — the
    watcher's poll, the card chip, and the idempotency check all read the same window.
+   **Unqueue** in Espresso records `autopr_run_cancel` and holds the card without
+   changing its column, assignment, question text, or saved answers. The task list
+   exposes `autopr_paused`; collection excludes held cards even from the scheduled
+   sweep. A new explicit Run or additional-context submission releases the hold.
+   Run-request reads treat cancellation like consumption. Every investigation now
+   claims against live state and fails closed if the card was held after collection
+   or the API is unavailable. Unqueue does not interrupt an already claimed run.
+   Queue/hold/claim writes serialize on the task row and use post-lock wall-clock
+   timestamps. No schema migration is needed. Deploy the backend and update the
+   runner control snapshot before shipping the desktop action; an old server will
+   reject Unqueue and the app will retain the queued state and show the error.
+   Espresso keeps the native multiline answer editor below the scrolling questions;
+   Return inserts a newline, ⌘Return submits, and failed submissions retain drafts.
    A failed attempt otherwise cools down
    for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation

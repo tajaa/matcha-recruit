@@ -137,7 +137,8 @@ extension TaskViewerSheet {
         let liveTask = liveAutoPRTask
         let submittedDecisionIsCurrent = didSubmitAutoPRContext
             && liveTask.progressNote == task.progressNote
-        return submittedDecisionIsCurrent || liveTask.autoprReconsiderationPending == true
+        return liveTask.autoprPaused != true
+            && (submittedDecisionIsCurrent || liveTask.autoprReconsiderationPending == true)
     }
 
     // MARK: - Run AutoPR now
@@ -205,7 +206,13 @@ extension TaskViewerSheet {
     var autoPRRunNowControl: some View {
         if canRequestAutoPRRun {
             HStack(spacing: 8) {
-                if autoPRRunIsQueued {
+                if liveAutoPRTask.autoprPaused == true {
+                    Label("AutoPR paused", systemImage: "pause.circle")
+                        .font(.system(size: 10, weight: .semibold))
+                    Button("Run again") { Task { await requestAutoPRRun() } }
+                        .buttonStyle(.plain)
+                        .disabled(requestingAutoPRRun || addingNote)
+                } else if autoPRRunIsQueued || autoPRReconsiderationIsPending {
                     Label("Queued for AutoPR", systemImage: "bolt.horizontal.circle.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.mwInkStrong)
@@ -230,8 +237,17 @@ extension TaskViewerSheet {
                         .foregroundColor(.mwInkStrong)
                     }
                     .buttonStyle(.plain)
-                    .disabled(requestingAutoPRRun)
+                    .disabled(requestingAutoPRRun || addingNote)
                     .help("Queue this ticket for the next AutoPR tick instead of the twenty-minute sweep")
+                }
+                if (autoPRRunIsQueued || autoPRReconsiderationIsPending) && liveAutoPRTask.autoprPaused != true {
+                    Button(requestingAutoPRRun ? "Unqueueing…" : "Unqueue") {
+                        Task { await cancelAutoPRRun() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .disabled(requestingAutoPRRun || addingNote)
+                    .help("Hold future runs while you edit. An investigation already started will continue.")
                 }
                 if let error = autoPRRunError {
                     Text(Self.stripHTTPPrefix(error))
@@ -257,13 +273,9 @@ extension TaskViewerSheet {
                 .foregroundColor(.mwInkStrong)
                 .padding(.top, 3)
             } else if isAddingAutoPRContext {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(autoPRContextInstructions)
-                        .font(.system(size: 10))
-                        .foregroundColor(appState.themeTextSecondary)
-                    noteComposer
-                }
-                .padding(.top, 3)
+                Text("Answer below — you can scroll the questions while writing.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
             } else {
                 Button {
                     replyingToNote = nil
@@ -271,6 +283,7 @@ extension TaskViewerSheet {
                     if autoPRNeedsRuntimeApproval {
                         newNote = "--extend-runtime"
                     }
+                    autoPRContextExpectedNote = autoSetupProgressNote
                     isAddingAutoPRContext = true
                     Task { @MainActor in isNoteFieldFocused = true }
                 } label: {

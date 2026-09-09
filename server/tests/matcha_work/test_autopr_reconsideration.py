@@ -409,6 +409,8 @@ class _RunRequestConn:
         raise AssertionError(f"Unexpected query: {query}")
 
     async def fetchval(self, query, *args):
+        if "SELECT h.metadata" in query:
+            return getattr(self, "held", False)
         if "autopr_run_request" in query:
             return self.pending_at
         if "SELECT 1 FROM mw_tasks" in query:
@@ -506,3 +508,76 @@ async def test_run_now_rejects_a_board_autopr_does_not_watch(monkeypatch):
             project_id=unwatched, task_id=uuid4(), actor_user_id=uuid4()
         )
     assert conn.insert_args is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exists,column,status", [
+    (True, "todo", "pending"), (True, "changes_requested", "pending"),
+    (False, "todo", "pending"), (True, "in_progress", "pending"),
+    (True, "todo", "cancelled"),
+])
+async def test_unqueue_preserves_card_and_records_hold(monkeypatch, exists, column, status):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn(exists=exists, board_column=column, status=status)
+    conn.execute = AsyncMock()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    if exists and (column == "in_progress" or status == "cancelled"):
+        with pytest.raises(svc.AutoPRReconsiderationConflict):
+            await svc.cancel_autopr_run(project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4())
+        conn.execute.assert_not_called()
+        return
+    result = await svc.cancel_autopr_run(project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4())
+    if not exists:
+        assert result is None
+        conn.execute.assert_not_called()
+    else:
+        assert result == {"ok": True, "autopr_paused": True}
+        args = conn.execute.call_args.args
+        assert "INSERT INTO mw_task_history" in args[0]
+        assert "clock_timestamp()" in args[0]
+        assert json.loads(args[-1]) == {"kind": "autopr_run_cancel"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("held,column,status,exists", [
+    (True, "todo", "pending", True), (False, "in_progress", "pending", True),
+    (False, "todo", "cancelled", True), (False, "todo", "pending", False),
+])
+async def test_stale_investigation_cannot_claim_unqueued_card(monkeypatch, held, column, status, exists):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn(exists=exists, board_column=column, status=status)
+    conn.held = held
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+    assert result is None if not exists else result["ok"] is False
+    assert conn.insert_args is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,code", [(None, 404), ({"ok": True}, None), ("conflict", 409), ("forbidden", 403)])
+async def test_unqueue_route_checks_access_and_results(monkeypatch, outcome, code):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.matcha.routes.matcha_work import task_history as route
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    access = AsyncMock()
+    if outcome == "forbidden":
+        access.side_effect = HTTPException(status_code=403, detail="Forbidden")
+    monkeypatch.setattr(route, "_verify_project_access", access)
+    cancel = AsyncMock(return_value=outcome)
+    if outcome == "conflict":
+        cancel.side_effect = svc.AutoPRReconsiderationConflict("Already started")
+    monkeypatch.setattr(svc, "cancel_autopr_run", cancel)
+    if code:
+        with pytest.raises(HTTPException) as exc:
+            await route.cancel_autopr_run_endpoint(uuid4(), uuid4(), SimpleNamespace(id=uuid4()))
+        assert exc.value.status_code == code
+    else:
+        assert await route.cancel_autopr_run_endpoint(uuid4(), uuid4(), SimpleNamespace(id=uuid4())) == outcome
+    if outcome == "forbidden":
+        cancel.assert_not_called()
