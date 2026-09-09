@@ -95,6 +95,16 @@ class PortSet:
     chat: int
 
 
+def port_lines(ports: PortSet | None) -> tuple[str, ...]:
+    """Render one consistent human-readable view of published session ports."""
+    if ports is None:
+        return ("No published development ports.",)
+    return tuple(
+        f"{name}: http://127.0.0.1:{value} (configured publication)"
+        for name, value in vars(ports).items()
+    )
+
+
 @dataclass
 class ValidationReference:
     mode: str

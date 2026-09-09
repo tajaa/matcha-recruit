@@ -8,7 +8,6 @@ import sys
 import tempfile
 import termios
 import tty
-from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Sequence, TextIO, TypeVar
 
@@ -21,9 +20,9 @@ from .capabilities import (
     report_is_stale,
 )
 from .docker_gc import collect_garbage
-from .errors import RECOVERABLE_ERRORS
 from .docker_runtime import ensure_container, exec_in_session, session_home
-from .models import SessionRecord, SessionSpec
+from .errors import RECOVERABLE_ERRORS
+from .models import SessionRecord, SessionSpec, port_lines
 from .session_auth import refresh_github_auth
 from .sessions import (
     create_session,
@@ -380,7 +379,9 @@ def _new_session(
     )
     print(f"\nCreated {record.name}: {record.worktree_path}", file=output)
     if record.ports:
-        print(f"Ports: {asdict(record.ports)}", file=output)
+        print("Ports:", file=output)
+        for line in port_lines(record.ports):
+            print(f"  {line}", file=output)
     report = ensure_capability_report(record)
     print("", file=output)
     print(render_report_text(report, name=record.name), file=output)
@@ -455,6 +456,80 @@ def _session_menu_title(record: SessionRecord) -> str:
     return "\n".join([header, f"Branch: {record.target_branch or 'not selected'}", body, *notes])
 
 
+_PRESERVED_OUTPUT_UNREAD = object()
+
+
+def _perform_session_action(
+    record: SessionRecord,
+    action: str,
+    *,
+    reader: Reader,
+    output: TextIO,
+    preserved_output: str | None | object = _PRESERVED_OUTPUT_UNREAD,
+) -> SessionRecord:
+    """Run one session action without constructing a menu the caller does not show."""
+    if (
+        action in ("open", "harness-output")
+        and preserved_output is _PRESERVED_OUTPUT_UNREAD
+    ):
+        preserved_output = exited_agent_output(record)
+    if action == "open" and preserved_output is not None:
+        action = choose(
+            "Harness exited. Restart replaces its preserved output.",
+            [
+                ("View exited output", "harness-output"),
+                ("Restart harness", "open"),
+                ("Cancel", "back"),
+            ],
+            reader=reader,
+            output=output,
+        )
+    if action == "back":
+        return record
+    if action in ("switch", "environment", "browser", "files", "tools", "publish"):
+        from .manager import manage
+
+        manage(action, record, reader=reader, output=output)
+    elif action == "harness-output":
+        from .manager import show
+
+        show(
+            preserved_output or "The exited harness produced no captured output.",
+            reader=reader,
+            output=output,
+        )
+    elif action == "open":
+        # A running agent already read its context at startup; remeasuring here
+        # cannot reach it and would block attach behind the complete probe suite.
+        if record.phase != "running" or preserved_output is not None:
+            start_session(record, replace_exited=preserved_output is not None)
+        attach_agent(record)
+    elif action == "shell":
+        refresh_github_auth(record)
+        ensure_container(record)
+        shell_handoff = _install_session_shell_handoff(record)
+        exec_in_session(record, ["bash", "--rcfile", shell_handoff], tty=True)
+    elif action == "validate":
+        _run_validation(record, reader=reader, output=output)
+    elif action == "stop":
+        stop_session(record)
+    elif action == "release":
+        confirmed = choose(
+            "Release removes a clean worktree whose HEAD is published.\n"
+            "Export wanted generated files first; unexported files are removed with it.",
+            (("Cancel", False), ("Release", True)),
+            reader=reader,
+            output=output,
+        )
+        if confirmed:
+            released = release_session(record)
+            print(released.reason, file=output)
+            _acknowledge(reader, output)
+    else:
+        raise ValueError(f"unknown session action: {action}")
+    return reconcile_session(record)
+
+
 def _open_session(
     record: SessionRecord,
     *,
@@ -512,49 +587,13 @@ def _open_session(
         )
         if action == "back":
             return
-        if action in ("switch", "environment", "browser", "files", "tools", "publish"):
-            from .manager import manage
-
-            manage(action, record, reader=reader, output=output)
-        if action == "harness-output":
-            from .manager import show
-
-            show(
-                preserved_output or "The exited harness produced no captured output.",
-                reader=reader,
-                output=output,
-            )
-        elif action == "open":
-            # A running session's agent already read its context at startup;
-            # rewriting the report cannot reach that process, and remeasuring
-            # would block the attach behind the whole probe suite.
-            if record.phase != "running" or preserved_output is not None:
-                start_session(record, replace_exited=preserved_output is not None)
-            attach_agent(record)
-        elif action == "shell":
-            refresh_github_auth(record)
-            ensure_container(record)
-            shell_handoff = _install_session_shell_handoff(record)
-            exec_in_session(
-                record,
-                ["bash", "--rcfile", shell_handoff],
-                tty=True,
-            )
-        elif action == "validate":
-            _run_validation(record, reader=reader, output=output)
-        elif action == "stop":
-            stop_session(record)
-        elif action == "release":
-            confirmed = choose(
-                "Release removes a clean worktree whose HEAD is published.\nExport wanted generated files first; unexported files are removed with it.",
-                (("Cancel", False), ("Release", True)),
-                reader=reader,
-                output=output,
-            )
-            if confirmed:
-                released = release_session(record)
-                print(released.reason, file=output)
-        record = reconcile_session(record)
+        record = _perform_session_action(
+            record,
+            action,
+            reader=reader,
+            output=output,
+            preserved_output=preserved_output,
+        )
 
 
 def _cleanup(repo: Path, *, reader: Reader, output: TextIO) -> None:
@@ -590,6 +629,12 @@ def run_wizard(
     output: TextIO = sys.stdout,
 ) -> int:
     repo = repo.resolve()
+    if _can_use_terminal_menu(reader, output) and os.environ.get("MSANDBOX_UI") != "classic":
+        from .dashboard import run_dashboard
+
+        result = run_dashboard(repo, output=output)
+        if result is not None:
+            return result
     while True:
         try:
             records = []

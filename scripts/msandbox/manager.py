@@ -17,7 +17,7 @@ from .capabilities import load_report, render_report_text, report_is_stale
 from .errors import RECOVERABLE_ERRORS
 from .files import export_file, list_files, read_file, text_preview
 from .inspection import inspect_session
-from .models import Attachment, SessionRecord
+from .models import Attachment, SessionRecord, port_lines
 from .publication import apply_draft, generate_draft, load_draft, save_draft
 from .sessions import ensure_capability_report, submit_session, switch_session
 from .terminal_ui import plain
@@ -134,14 +134,7 @@ def _manage(
             if selected is None:
                 return
             if selected == "details":
-                ports = (
-                    "\n".join(
-                        f"{name}: http://127.0.0.1:{value} (configured publication)"
-                        for name, value in vars(record.ports).items()
-                    )
-                    if record.ports
-                    else "No published development ports."
-                )
+                ports = "\n".join(port_lines(record.ports))
                 view("\n".join(snapshot.lines) + "\n\n" + ports)
             elif selected != "refresh":
                 view(tool_action(record, selected))

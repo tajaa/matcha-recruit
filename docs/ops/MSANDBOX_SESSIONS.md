@@ -167,6 +167,44 @@ Endpoint inspection reads `HOST_DEV_BACKEND_URL` and
 gateway on ports 8001 and 5174; host `HOST_DEV_BACKEND_PORT` and
 `HOST_DEV_FRONTEND_PORT` overrides flow through Compose interpolation.
 
+### Terminal dashboard
+
+`msandbox` and `msandbox wizard` open a split-pane dashboard in an interactive
+terminal. The left sidebar selects a session; the right side has Overview,
+Processes, Tools & access, Files, Testing, and Branch & PR tabs. The harness,
+shell, browser, attachment, validation, and publication controls open the same
+guarded workflows as the classic manager. Prompts and harnesses take over the
+terminal temporarily, then return to the selected session and tab.
+
+- Click a session or action, or use arrows and Enter. Tab / Shift-Tab moves
+  focus between the sidebar, tabs, and actions. Keys 1–6 select a detail tab.
+- Page Up / Page Down scroll details. Terminals whose curses library reports
+  both wheel directions can also scroll the detail pane with the mouse wheel.
+  Arrow keys scroll the sidebar through all sessions and global actions.
+- `r` reloads saved records and refreshes the selected session's process and
+  connection snapshot. Entering Processes also starts its first read-only
+  inspection in the background; navigation remains available while Docker
+  responds. Measurements show their timestamp and partial/unavailable state.
+- `n` creates a session; Escape returns focus to the sidebar; `q` closes the
+  dashboard while running sessions continue. Inside a harness, press Ctrl-b,
+  then d to detach back to the dashboard. Ctrl-c interrupts that harness.
+- Start checks for preserved exit output and offers inspection or confirmation
+  before replacing it. Release results wait for dismissal before returning.
+
+The header and sidebar show **saved** session state, not a health guarantee.
+Tool and validation reports are historical; publication still validates the
+current commit. Unexpected access and missing required capabilities are marked
+as warnings in Tools & access. Every dashboard reload reconciles all saved
+sessions and surfaces per-session repair failures without hiding healthy ones.
+Cached capability reports and file indexes load in the background when their
+tabs open. AutoPR health is available through the AutoPR dashboard action.
+No browser, Electron, Python package download, or daemon is required for the UI;
+it uses Python's standard `curses` module on macOS/Linux. A 256-color terminal
+gets the green palette; basic color and monochrome terminals remain usable.
+Resize to at least 73 columns × 20 rows, or press `c` for the classic menu.
+`MSANDBOX_UI=classic msandbox wizard` explicitly selects the classic menu;
+redirected/custom-reader usage keeps the numbered prompt behavior.
+
 Controller changes are picked up by `msandbox install` from the checkout that
 contains them. No terminal GUI dependency or database migration is required.
 Unit coverage runs through `bash scripts/tests/test_msandbox_sessions.sh`.
