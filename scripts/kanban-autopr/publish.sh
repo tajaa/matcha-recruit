@@ -181,7 +181,11 @@ reject_cosmetic_diff() {
 
 existing_feedback_checkpoint() {
     local body="$1" kind="$2"
-    printf '%s' "$body" | sed -nE "s/.*<!-- matcha-feedback-${kind}-id: ([^ ]+) -->.*/\\1/p" | tail -1
+    # The trusted checkpoint is part of the fixed header at the top of the
+    # body. Model-authored report and question text follows it and may repeat
+    # an HTML marker verbatim, so only the first exact marker is authoritative.
+    printf '%s' "$body" | sed -nE "s/^<!-- matcha-feedback-${kind}-id: ([^ ]+) -->$/\\1/p" \
+        | sed -n '1p'
 }
 
 render_body() {
@@ -211,12 +215,12 @@ render_body() {
             echo
         fi
         if [ -n "$DESCRIPTION" ]; then
-            echo "$DESCRIPTION"
+            printf '%s\n' "$DESCRIPTION" | autopr_bound_text 12000 "ticket description"
             echo
         fi
-        cat "$REPORT_FILE"
+        autopr_bound_text 18000 "investigation report" < "$REPORT_FILE"
         echo
-        cat "$VERIFICATION_FILE"
+        autopr_bound_text 6000 "verification report" < "$VERIFICATION_FILE"
         echo
         echo "## Production verification"
         jq -r '
@@ -236,6 +240,9 @@ render_body() {
         echo
         echo "_Built by [this workflow run]($RUN_URL)._"
     } > "$output_file"
+    local max_body_bytes="${AUTOPR_MAX_PR_BODY_BYTES:-64000}"
+    [ "$(wc -c < "$output_file" | tr -d '[:space:]')" -le "$max_body_bytes" ] \
+        || die "rendered PR body exceeds the $max_body_bytes-byte safety cap"
 }
 
 replace_triage_labels() {
@@ -463,6 +470,11 @@ if [ "$AWAITING_HUMAN" = true ] && [ -z "$existing_open_pr" ]; then
         || die "awaiting-input draft cap reached ($open_awaiting/$max_awaiting)"
 fi
 
+BODY_FILE="$(mktemp)"
+render_body "$BODY_FILE" "$consumed_comment_id" "$consumed_review_id"
+
+# Render and bound the complete body before creating a commit or pushing the
+# branch. A body rejected by GitHub must not leave a remote branch behind.
 if [ "$has_diff" = true ]; then
     git commit -m "$COMMIT_SUBJECT" >/dev/null
     git push --force-with-lease --set-upstream origin "$BRANCH"
@@ -472,9 +484,6 @@ elif [ -z "$existing_open_pr" ]; then
     git commit --allow-empty -m "$COMMIT_SUBJECT" >/dev/null
     git push --force-with-lease --set-upstream origin "$BRANCH"
 fi
-
-BODY_FILE="$(mktemp)"
-render_body "$BODY_FILE" "$consumed_comment_id" "$consumed_review_id"
 
 if [ -n "$existing_open_pr" ]; then
     gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE_LINE" --body-file "$BODY_FILE"

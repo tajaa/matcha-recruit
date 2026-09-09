@@ -88,8 +88,10 @@ feedback_snapshot() {
 
 awaiting_input_has_new_feedback() {
     local body="$1" snapshot="$2" old_comment old_review new_comment new_review
-    old_comment="$(printf '%s' "$body" | sed -nE 's/.*<!-- matcha-feedback-comment-id: ([^ ]+) -->.*/\1/p' | tail -1)"
-    old_review="$(printf '%s' "$body" | sed -nE 's/.*<!-- matcha-feedback-review-id: ([^ ]+) -->.*/\1/p' | tail -1)"
+    # render_body writes the trusted checkpoint in its fixed header. Later PR
+    # prose is model-authored and cannot override it by echoing another marker.
+    old_comment="$(printf '%s' "$body" | sed -nE 's/^<!-- matcha-feedback-comment-id: ([^ ]+) -->$/\1/p' | sed -n '1p')"
+    old_review="$(printf '%s' "$body" | sed -nE 's/^<!-- matcha-feedback-review-id: ([^ ]+) -->$/\1/p' | sed -n '1p')"
     new_comment="$(printf '%s' "$snapshot" | jq -r '.comment_id // ""')"
     new_review="$(printf '%s' "$snapshot" | jq -r '.review_id // ""')"
     { [ -n "$new_comment" ] && [ "$new_comment" != "$old_comment" ]; } \

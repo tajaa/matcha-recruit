@@ -28,7 +28,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const AUTOPR_CAPABILITY_COPY: Record<string, { label: string; description: string }> = {
   research: {
     label: 'Research',
-    description: 'Research cards run: live web search + the repo, report attached to the ticket. No PR, no code change.',
+    description: 'Allows live web search for Research tickets and implementation/rework PRs. Research tickets attach a report without changing code.',
   },
   outreach: {
     label: 'Outreach',

@@ -465,15 +465,14 @@ budget had already been spent.
    and external dependencies; migration work is drafted automatically. With one,
    `acceptance_criteria_met` remains available for a card whose every stated criterion
    is already satisfied, provided it cites verifiable evidence for each.
-   Implementation (`investigate`) and rework runs also enable hosted live web
-   search (`AUTOPR_CODEX_WEB_SEARCH=1`). Plain-language additional context is
-   accepted as answers, corrections, or research guidance; the old numbered
-   options do not constrain the next pass. Missing public facts must first be
-   researched using primary sources and the existing repository data flow.
-   For example, a request to research NY scheduling coverage should trace the
-   compliance catalog, codified coverage ledger, extraction, and scheduling
-   consumers and draft the missing work. It must not demand that the owner
-   supply a counsel-approved record merely because a prior model asked for one.
+   Implementation (`investigate`) and rework runs accept plain-language
+   additional context as answers, corrections, or research guidance; the old
+   numbered options do not constrain the next pass. On a board with the
+   `research` grant, those code runs also receive hosted live web search
+   (`AUTOPR_CODEX_WEB_SEARCH=1`) and must investigate missing public facts using
+   primary sources and the existing repository data flow before asking the
+   owner. On an ungranted board the context says search is unavailable, and the
+   model may neither claim a search nor send private evidence to one.
    Existing review gates still apply: research does not approve extracted rules,
    authorize production writes, execute migrations, or make uncovered legality
    verified. Search queries must use generic public terms, not private ticket or
@@ -483,13 +482,29 @@ budget had already been spent.
    must carry a `resolution` with `kind` (`product_decision`, `private_context`,
    `source_unavailable`, or `explicit_approval`), a nonempty `evidence` array of
    context/paths/sources checked or failed research attempts, and
-   `why_user_needed`. `policy_blocked`/`external_dependency` refusals require the
-   same object as `blocker_resolution`. Missing/invalid resolution evidence gets
-   one corrective investigation; a repeated failure cannot reach publication.
+   `why_user_needed`. Resolution evidence is bounded to five 300-character
+   entries plus a 600-character explanation. `policy_blocked` and
+   `external_dependency` refusals require the same object as
+   `blocker_resolution`; `already_fixed` requires repository-verified
+   `acceptance_evidence`. Before spending the single corrective investigation,
+   the harness collects every detected directive, grounding, cosmetic-diff,
+   and migration-draft failure into the same correction. A safe partial patch
+   is restored inside the retry sandbox rather than discarded for a metadata
+   omission. If the corrected pass still fails schema, directive, grounding,
+   cosmetic-diff, or migration-draft validation, it is parked visibly in
+   Changes Requested with a no-spec marker and a context request, so it cannot
+   publish or spin on every cooldown.
    This validates the blocker structure, not the truth of a model's source
    interpretation; evidence remains reviewable in the report and PR questions.
-   The original `normalize` path remains for saved v1 decisions and publisher
-   compatibility; artifact research keeps its own schema and grant.
+   All new PR decisions use this one normalization path; artifact research
+   keeps its own schema and grant.
+
+   PR question details, the ticket description, the model report, and the
+   verification report each have UTF-8-safe byte budgets. The complete body is
+   rendered and checked against a 64,000-byte safety cap before the bot commits
+   or pushes a branch. Feedback checkpoints are read only from the first exact
+   marker in the trusted body header, so model-authored prose cannot replace
+   the comment or review id used by the next rework pass.
 
    For `mode: research` the same context bundle goes to `gpt-5.6-luna` at high
    reasoning with `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, `AUTOPR_CODEX_WEB_SEARCH=1`
@@ -678,7 +693,7 @@ and default off — `platform_settings` key `autopr_board_capabilities`, edited 
 
 | Grant | What it permits |
 |---|---|
-| `research` | Artifact Research cards run: live web search + the repo clone, report attached to the ticket. Public-source lookup during ordinary code PR work is enabled separately by the PR kind. |
+| `research` | Live web search: Artifact Research cards can run and ordinary code PR runs can research public facts. |
 | `outreach` | A run may **stage** email/contact/review requests on a card. Nothing sends until a person approves that exact item. |
 | `browse` | A run may drive Chromium through `browse-capture.py` and attach screenshots. |
 

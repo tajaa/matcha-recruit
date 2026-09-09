@@ -236,8 +236,9 @@ check "a versions/__init__.py the loader skips is rejected by the shared helper"
 rm -f "$draft_repo/server/alembic/versions/__init__.py"
 
 check "investigate.sh turns an unpublishable migration draft into one retry" \
-    $(grep -qF 'CORRECTION_KIND="migration_draft_invalid"' "$AUTOPR_DIR/investigate.sh" \
+    $(grep -qF 'append_correction migration_draft_invalid' "$AUTOPR_DIR/investigate.sh" \
       && grep -qF 'autopr_migration_draft_errors "$REPO_ROOT"' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'still produced an invalid migration draft' "$AUTOPR_DIR/investigate.sh" \
       && echo 0 || echo 1)
 
 check "both prompts state the migration rules the publisher enforces" \
@@ -509,11 +510,15 @@ cat > "$TMP_DIR/bin/curl" <<'EOF'
 output_file=""
 write_status=0
 url=""
+method=""
+payload=""
 [ -z "${AUTOPR_TEST_CURL_ARGS:-}" ] || printf '%s\n' "$*" >> "$AUTOPR_TEST_CURL_ARGS"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o) output_file="$2"; shift 2 ;;
         -w) write_status=1; shift 2 ;;
+        -X) method="$2"; shift 2 ;;
+        -d) payload="$2"; shift 2 ;;
         http://*|https://*) url="$1"; shift ;;
         *) shift ;;
     esac
@@ -532,7 +537,11 @@ case "$url" in
         ;;
     */history)
         if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
-            printf '%s' '[{"id":"event-ny","event_type":"activity","metadata":{"kind":"autopr_additional_context","body":"Use grounding to research NY data and wire it through our codified compliance catalog and scheduling like CA and WA. I am giving you context, not numbered answers."}}]' > "$output_file"
+            if [ -n "${CODEX_STUB_COMBINED:-}" ]; then
+                printf '%s' '[{"id":"event-ny","event_type":"activity","metadata":{"kind":"autopr_additional_context","autopr_directives":"draft_pr,trust_still_broken","body":"Go ahead and implement this. -- trust still broken"}}]' > "$output_file"
+            else
+                printf '%s' '[{"id":"event-ny","event_type":"activity","metadata":{"kind":"autopr_additional_context","body":"Use grounding to research NY data and wire it through our codified compliance catalog and scheduling like CA and WA. I am giving you context, not numbered answers."}}]' > "$output_file"
+            fi
             [ "$write_status" = "0" ] || printf 200
             exit 0
         fi
@@ -547,6 +556,17 @@ case "$url" in
         ;;
     https://files.invalid/screen.png)
         printf 'png-stub' > "$output_file"
+        ;;
+    */autopr/context-request)
+        [ -z "${AUTOPR_TEST_CONTEXT_REQUEST:-}" ] \
+            || printf '%s' "$payload" > "$AUTOPR_TEST_CONTEXT_REQUEST"
+        printf '{"ok":true}' > "$output_file"
+        ;;
+    */tasks/*)
+        if [ "$method" = PATCH ] && [ -n "${AUTOPR_TEST_CARD_PATCH:-}" ]; then
+            printf '%s' "$payload" > "$AUTOPR_TEST_CARD_PATCH"
+        fi
+        printf '{"ok":true}' > "$output_file"
         ;;
     *)
         printf '{}' > "$output_file"
@@ -569,6 +589,7 @@ cat > "$TMP_DIR/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 printf 'Codex: inspecting card context\n'
 printf '%s\n' "$@" > "$CODEX_STUB_ARGS"
+[ -z "${CODEX_STUB_CALL_LOG:-}" ] || printf 'call\n' >> "$CODEX_STUB_CALL_LOG"
 prompt="${!#}"
 printf '%s\n' "$prompt" | sed -n \
     '/^AUTOPR_INPUTS_BEGIN$/,/^AUTOPR_INPUTS_END$/ { s/^- //p; }' > "$CODEX_STUB_FILES"
@@ -579,6 +600,15 @@ while IFS= read -r input_path; do
 done < "$CODEX_STUB_FILES"
 report_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/report\.md' | head -1)"
 decision_path="$(printf '%s\n' "$prompt" | grep -oE '/[^ ]+/\.git/autopr-io/output/decision\.json' | head -1)"
+workspace=""
+previous=""
+for argument in "$@"; do
+    if [ "$previous" = -C ]; then
+        workspace="$argument"
+        break
+    fi
+    previous="$argument"
+done
 if [ "${CODEX_STUB_FAIL:-0}" = 1 ]; then
     printf 'Codex: simulated failure\n'
     exit 17
@@ -611,6 +641,9 @@ cat > "$decision_path" <<'DECISION'
   "no_safe_action_reason": null
 }
 DECISION
+if [ -n "${CODEX_STUB_INVALID_JSON:-}" ]; then
+    printf '{not-json\n' > "$decision_path"
+fi
 if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
     count=0
     [ ! -f "$CODEX_STUB_COUNTER" ] || count="$(cat "$CODEX_STUB_COUNTER")"
@@ -624,6 +657,18 @@ if [ -n "${CODEX_STUB_QUESTION:-}" ]; then
                        {key:"b",label:"Defer NY",impact:"Keep unmapped"}]}]' \
             "$decision_path" > "$decision_path.next"
         mv "$decision_path.next" "$decision_path"
+        if [ "${CODEX_STUB_PARTIAL_PATCH:-0}" = 1 ] && [ "$count" = 1 ]; then
+            printf 'partial work retained\n' >> "$workspace/README.md"
+            jq '.outcome="partial_implementation" | .safe_changes_present=true' \
+                "$decision_path" > "$decision_path.next"
+            mv "$decision_path.next" "$decision_path"
+        fi
+        if [ -n "${CODEX_STUB_COMBINED:-}" ] && [ "$count" = 1 ]; then
+            jq '.outcome="no_safe_action" | .safe_changes_present=false |
+                .no_safe_action_reason="already_fixed"' \
+                "$decision_path" > "$decision_path.next"
+            mv "$decision_path.next" "$decision_path"
+        fi
     fi
 fi
 EOF
@@ -658,7 +703,9 @@ fi
 check "rework investigation receives discussion, checklist, PR feedback, and screenshot" "$context_ok"
 
 check "investigation context reserves bounded production diagnostics" \
-    $(jq -e '.production == null and .production_recent_errors == [] and .production_log_signals == "" and .changes_since_production == []' "$TMP_DIR/context.json" >/dev/null && echo 0 || echo 1)
+    $(jq -e '.production == null and .production_recent_errors == [] and .production_log_signals == "" and .changes_since_production == [] and .grounding.web_search_available == false' "$TMP_DIR/context.json" >/dev/null \
+      && ! grep -q 'web_search="live"' "$TMP_DIR/codex-args" \
+      && echo 0 || echo 1)
 
 check "investigation normalizes validated confidence and triage" \
     $(jq -e '.confidence_score == 100 and .confidence_band == "high" and .awaiting_human == false and .feedback_checkpoint.review_id == "review-44"' "$TMP_DIR/decision.json" >/dev/null && echo 0 || echo 1)
@@ -717,6 +764,22 @@ check "live tee preserves a failing Codex exit status" \
       && grep -q '\[FAILED\] Codex exited 17' "$TMP_DIR/live-failed.log" \
       && echo 0 || echo 1)
 
+CODEX_STUB_INVALID_JSON=1 CODEX_STUB_CALL_LOG="$TMP_DIR/invalid-json-calls" \
+AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/invalid-json-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/invalid-json-context.json" CODEX_STUB_ARGS="$TMP_DIR/invalid-json-args" \
+AUTOPR_LIVE_LOG="$TMP_DIR/invalid-json-live.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/invalid-json-report.md" \
+    "$TMP_DIR/invalid-json-decision.json" > "$TMP_DIR/invalid-json-run.log" 2>&1
+invalid_json_rc=$?
+check "malformed decisions fail schema validation without a grounding retry" \
+    $([ "$invalid_json_rc" != 0 ] \
+      && [ "$(wc -l < "$TMP_DIR/invalid-json-calls" | tr -d '[:space:]')" = 1 ] \
+      && grep -qF 'schema or safety validation' "$TMP_DIR/invalid-json-run.log" \
+      && ! grep -qF 'unresolved_researchable_context' "$TMP_DIR/invalid-json-run.log" \
+      && echo 0 || echo 1)
+
 # End-to-end NY regression: plain context reaches the model; a recycled counsel
 # question gets one correction. A repeated refusal never becomes publishable.
 GROUNDING_REPO="$TMP_DIR/grounding-repo"
@@ -729,15 +792,22 @@ git -C "$GROUNDING_REPO" add README.md
 git -C "$GROUNDING_REPO" commit -qm initial
 git -C "$GROUNDING_REPO" branch -M main
 for scenario in once always; do
+    git -C "$GROUNDING_REPO" restore README.md
     mode=rework; [ "$scenario" != always ] || mode=investigate
     jq --arg mode "$mode" '.mode=$mode | .title="Support jurisdiction-aware break and scheduling-law rules" |
+        .autopr_capabilities=["research"] |
         .autopr_reconsideration_pending=true | .autopr_reconsideration_event_id="event-ny"' \
         "$TMP_DIR/card.json" > "$TMP_DIR/ny-card.json"
-    CODEX_STUB_QUESTION="$scenario" CODEX_STUB_COUNTER="$TMP_DIR/grounding-count-$scenario" \
+    partial_patch=0; [ "$scenario" != once ] || partial_patch=1
+    CODEX_STUB_QUESTION="$scenario" CODEX_STUB_PARTIAL_PATCH="$partial_patch" \
+    CODEX_STUB_COUNTER="$TMP_DIR/grounding-count-$scenario" \
     AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
     GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/grounding-files" \
     CODEX_STUB_CONTEXT="$TMP_DIR/grounding-context.json" CODEX_STUB_ARGS="$TMP_DIR/grounding-args" \
     AUTOPR_WORKSPACE_ROOT="$GROUNDING_REPO" AUTOPR_SANDBOX_REPO_ROOT="$GROUNDING_REPO" \
+    AUTOPR_LIVE_LOG="$TMP_DIR/grounding-live-$scenario.log" \
+    AUTOPR_TEST_CARD_PATCH="$TMP_DIR/grounding-card-$scenario.json" \
+    AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/grounding-request-$scenario.json" \
     AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/grounding-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
         "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/ny-card.json" "$TMP_DIR/ny-report-$scenario.md" \
         "$TMP_DIR/ny-decision-$scenario.json" > "$TMP_DIR/ny-run-$scenario.log" 2>&1
@@ -753,16 +823,50 @@ for scenario in once always; do
           && echo 0 || echo 1)
     [ "$ny_rc" = "$expected" ] || tail -35 "$TMP_DIR/ny-run-$scenario.log"
     if [ "$scenario" = once ]; then
-        check "a corrected NY-context decision reaches normalization" \
-            $(jq -e '.outcome == "implementation" and .confidence_score == 100' "$TMP_DIR/ny-decision-once.json" >/dev/null && echo 0 || echo 1)
+        check "a corrected NY-context decision retains its safe partial patch" \
+            $(jq -e '.outcome == "implementation" and .confidence_score == 100' "$TMP_DIR/ny-decision-once.json" >/dev/null \
+              && grep -qF 'partial work retained' "$GROUNDING_REPO/README.md" \
+              && echo 0 || echo 1)
     else
-        check "a second ungrounded NY refusal stops before publication preparation" \
+        check "a second ungrounded NY refusal parks the card before publication" \
             $([ "$ny_rc" != 0 ] \
-              && grep -qF 'publication is blocked' "$TMP_DIR/ny-run-always.log" \
+              && grep -qF 'card parked for context' "$TMP_DIR/ny-run-always.log" \
+              && jq -e '.board_column == "changes_requested"
+                   and (.progress_note | contains("[autopr:no-spec "))
+                   and (.progress_note | contains("needs_clarification"))' \
+                   "$TMP_DIR/grounding-card-always.json" >/dev/null \
+              && jq -e '.reason | contains("could not justify its remaining questions")' \
+                   "$TMP_DIR/grounding-request-always.json" >/dev/null \
               && [ ! -e "$TMP_DIR/ny-decision-always.json.with-feedback" ] \
               && echo 0 || echo 1)
     fi
 done
+
+# A single pass can violate several independent contracts. The one corrective
+# run must receive all of them instead of whichever elif arm happened first.
+jq '.mode="rework" | .autopr_capabilities=["research"] |
+    .autopr_reconsideration_pending=true | .autopr_reconsideration_event_id="event-ny"' \
+    "$TMP_DIR/card.json" > "$TMP_DIR/combined-card.json"
+CODEX_STUB_QUESTION=once CODEX_STUB_COMBINED=1 \
+CODEX_STUB_COUNTER="$TMP_DIR/combined-count" CODEX_STUB_CALL_LOG="$TMP_DIR/combined-calls" \
+AUTOPR_TEST_NO_FILES=1 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
+GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/combined-files" \
+CODEX_STUB_CONTEXT="$TMP_DIR/combined-context.json" CODEX_STUB_ARGS="$TMP_DIR/combined-args" \
+AUTOPR_WORKSPACE_ROOT="$GROUNDING_REPO" AUTOPR_SANDBOX_REPO_ROOT="$GROUNDING_REPO" \
+AUTOPR_LIVE_LOG="$TMP_DIR/combined-live.log" \
+AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/combined-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+    "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/combined-card.json" "$TMP_DIR/combined-report.md" \
+    "$TMP_DIR/combined-decision.json" > "$TMP_DIR/combined-run.log" 2>&1
+combined_rc=$?
+combined_correction="$(grep 'directive-correction.json$' "$TMP_DIR/combined-files" | tail -1)"
+check "one correction includes every independently detected decision defect" \
+    $([ "$combined_rc" = 0 ] \
+      && [ "$(wc -l < "$TMP_DIR/combined-calls" | tr -d '[:space:]')" = 2 ] \
+      && jq -e '.kind | contains("already_fixed_requires_evidence")
+          and contains("directive_violation")
+          and contains("unresolved_researchable_context")' \
+          "$combined_correction" >/dev/null \
+      && echo 0 || echo 1)
 
 ################################################################################
 # The msandbox bridge operates on a tracked-only clone and returns one patch.
@@ -1460,13 +1564,13 @@ cp "$TMP_DIR/publication-decision.json" "$TMP_DIR/invalid-decision.json"
 jq '.outcome = "questions_only" | .questions = [] | .safe_changes_present = false' \
     "$TMP_DIR/invalid-decision.json" > "$TMP_DIR/invalid-decision.next.json"
 mv "$TMP_DIR/invalid-decision.next.json" "$TMP_DIR/invalid-decision.json"
-"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/invalid-decision.json" "$TMP_DIR/invalid-decision.normalized.json" >/dev/null 2>&1
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/invalid-decision.json" "$TMP_DIR/invalid-decision.normalized.json" >/dev/null 2>&1
 invalid_decision_rc=$?
 check "questions-only decisions require actionable questions" \
     $([ "$invalid_decision_rc" != 0 ] && echo 0 || echo 1)
 
 jq '.questions = [
-      {id:"q1",question:"First choice?",why_blocking:"Needed",default_assumption:"Choose A",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}]},
+      {id:"q1",question:"First choice?",why_blocking:"Needed",default_assumption:"Choose A",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}],resolution:{kind:"product_decision",evidence:["Both labels remain in active call sites."],why_user_needed:"The owner must select the canonical label."}},
       {id:"q2",question:"Second choice?",why_blocking:"Needed",default_assumption:"Choose B",options:[{key:"a",label:"A",impact:"First"},{key:"b",label:"B",impact:"Second"}]}
     ]' "$TMP_DIR/publication-decision.json" > "$TMP_DIR/question-render-decision.json"
 question_pr_copy="$(/bin/bash -c 'source "$1"; autopr_render_questions "$2"' _ \
@@ -1479,13 +1583,32 @@ check "question drafts are numbered and expose an in-ticket answer path" \
       && printf '%s' "$question_pr_copy" | grep -qF 'Add additional context' \
       && printf '%s' "$question_card_copy" | grep -qF 'reply below with the numbered choices' \
       && echo 0 || echo 1)
+check "question PR copy renders grounded resolution evidence" \
+    $(printf '%s' "$question_pr_copy" | grep -qF 'Why your input is needed: The owner must select the canonical label.' \
+      && printf '%s' "$question_pr_copy" | grep -qF 'Already checked: Both labels remain in active call sites.' \
+      && echo 0 || echo 1)
+bounded_question_copy="$(printf '%0200d☕' 0 \
+    | /bin/bash -c 'source "$1"; autopr_bound_text 128 "test text"' _ \
+        "$AUTOPR_DIR/decision.sh")"
+check "rendered model prose is byte-bounded without corrupting UTF-8" \
+    $([ "$(printf '%s' "$bounded_question_copy" | wc -c | tr -d '[:space:]')" -le 128 ] \
+      && printf '%s' "$bounded_question_copy" | grep -qF 'AutoPR test text truncated' \
+      && printf '%s' "$bounded_question_copy" | python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")' \
+      && [ "$(grep -n '^render_body \"\$BODY_FILE\"' "$AUTOPR_DIR/publish.sh" | tail -1 | cut -d: -f1)" -lt \
+           "$(grep -n 'git push --force-with-lease' "$AUTOPR_DIR/publish.sh" | tail -1 | cut -d: -f1)" ] \
+      && echo 0 || echo 1)
+check "the card preview reaches the first question before optional-answer guidance" \
+    $([ "$(printf '%s' "$question_card_copy" | sed -n '2p')" = '1. First choice?' ] \
+      && echo 0 || echo 1)
 
-# Old decisions still render/normalize; every NEW PR pass needs blocker evidence.
+# Every PR pass uses the one grounded normalization path.
 jq '.outcome="questions_only" | .safe_changes_present=false' \
     "$TMP_DIR/question-render-decision.json" > "$TMP_DIR/ungrounded.json"
 check "fresh question decisions cannot recycle unexplained blockers" \
     $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/ungrounded.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 \
-      && "$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/ungrounded.json" "$TMP_DIR/legacy-out.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+check "there is no weaker PR normalization command" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/ungrounded.json" "$TMP_DIR/legacy-out.json" >/dev/null 2>&1 \
       && echo 0 || echo 1)
 for kind in product_decision private_context source_unavailable explicit_approval; do
     jq --arg kind "$kind" '.questions |= map(. + {resolution:{kind:$kind,
@@ -1504,6 +1627,11 @@ for invalid in 'null' '{kind:"public_research",evidence:["Not attempted"],why_us
     check "every question needs a nonempty supported resolution ($invalid)" \
         $(! "$AUTOPR_DIR/decision.sh" grounding-ok "$TMP_DIR/grounding-invalid.json" >/dev/null 2>&1 && echo 0 || echo 1)
 done
+jq '.questions[0].resolution.evidence = ["a","b","c","d","e","f"]' \
+    "$TMP_DIR/grounded.json" > "$TMP_DIR/grounding-too-many.json"
+check "resolution evidence is bounded before PR rendering" \
+    $(! "$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/grounding-too-many.json" "$TMP_DIR/grounded-out.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
 for reason in policy_blocked external_dependency; do
     jq --arg reason "$reason" '.outcome="no_safe_action" | .questions=[] | .safe_changes_present=false | .no_safe_action_reason=$reason' \
         "$TMP_DIR/publication-decision.json" > "$TMP_DIR/ungrounded-blocker.json"
@@ -1526,7 +1654,7 @@ jq '.production_verification = {
       checks:[{path:"/app/jobs?tab=creds",expected_status:200}],
       steps:[]
     }' "$TMP_DIR/publication-decision.json" > "$TMP_DIR/invalid-production-check.json"
-"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/invalid-production-check.json" \
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/invalid-production-check.json" \
     "$TMP_DIR/invalid-production-check.normalized.json" >/dev/null 2>&1
 invalid_production_check_rc=$?
 check "decision and deploy verifier share the production HTTP allowlist" \
@@ -1542,7 +1670,7 @@ jq '.outcome = "no_safe_action"
     "$TMP_DIR/publication-decision.json" > "$TMP_DIR/already-fixed-decision.json"
 jq -n '{directives:["draft_pr","trust_still_broken"],test_route:"/app/jobs"}' \
     > "$TMP_DIR/forced-policy.json"
-"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/already-fixed-decision.json" \
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/already-fixed-decision.json" \
     "$TMP_DIR/forced-decision.json" "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
 forced_already_fixed_rc=$?
 check "decision-bound force directives reject another already-fixed exit" \
@@ -1554,13 +1682,13 @@ check "decision-bound force directives reject another already-fixed exit" \
 # protected nothing.
 jq '.no_safe_action_reason = "migration_required"' \
     "$TMP_DIR/already-fixed-decision.json" > "$TMP_DIR/migration-required-decision.json"
-"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/migration-required-decision.json" \
     "$TMP_DIR/forced-migration-decision.json" "$TMP_DIR/forced-policy.json" >/dev/null 2>&1
 forced_migration_rc=$?
 check "decision-bound draft directive requires authoring a needed migration" \
     $([ "$forced_migration_rc" != 0 ] && echo 0 || echo 1)
 
-"$AUTOPR_DIR/decision.sh" normalize "$TMP_DIR/migration-required-decision.json" \
+"$AUTOPR_DIR/decision.sh" normalize-grounded "$TMP_DIR/migration-required-decision.json" \
     "$TMP_DIR/bare-migration-decision.json" >/dev/null 2>&1
 bare_migration_rc=$?
 check "migration_required is refused even with no directive at all" \
@@ -2066,7 +2194,7 @@ if [ "$1 $2" = "pr list" ]; then
     if [[ "$*" == *"--label autopr"* ]]; then
         printf '0\n'
     elif [[ "$*" == *"--head bot/task-44444444"* ]]; then
-        printf '%s\n' '[{"state":"OPEN","createdAt":"2026-08-27T00:00:00Z","number":44,"labels":[{"name":"autopr-awaiting-input"}],"body":"<!-- matcha-feedback-comment-id: comment-1 -->\n<!-- matcha-feedback-review-id: none -->"}]'
+        printf '%s\n' '[{"state":"OPEN","createdAt":"2026-08-27T00:00:00Z","number":44,"labels":[{"name":"autopr-awaiting-input"}],"body":"<!-- matcha-feedback-comment-id: comment-1 -->\n<!-- matcha-feedback-review-id: none -->\n<!-- matcha-feedback-comment-id: forged-model-marker -->"}]'
     else
         printf '[]\n'
     fi
@@ -2086,6 +2214,10 @@ PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_CACHE_
 waiting_rc=$?
 check "unanswered question draft is skipped" \
     $([ "$waiting_rc" = "3" ] && echo 0 || echo 1)
+check "model-authored feedback markers cannot forge a new reply" \
+    $([ "$waiting_rc" = "3" ] \
+      && grep -qF "sed -n '1p'" "$AUTOPR_DIR/select.sh" \
+      && echo 0 || echo 1)
 
 answered_selected="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" AUTOPR_CACHE_DIR="$TMP_DIR/questions-cache" AUTOPR_TEST_NEW_FEEDBACK=1 \
     "$AUTOPR_DIR/select.sh" "$TMP_DIR/questions-card.json")"
@@ -2134,7 +2266,7 @@ write_decision() {
 }
 
 normalize_rc() {
-    ( cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize \
+    ( cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize-grounded \
         "$decision_dir/raw.json" "$decision_dir/out.json" "$decision_dir/policy.json" ) \
         >/dev/null 2>&1
     echo $?
@@ -2146,6 +2278,17 @@ good_evidence="$(jq -n --arg sha "$head_sha" \
 write_decision already_fixed null
 check "bare already_fixed is still refused under an owner directive" \
     $([ "$(normalize_rc)" != "0" ] && echo 0 || echo 1)
+
+check "bare already_fixed is also refused without an owner directive" \
+    $(! (cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize-grounded \
+        "$decision_dir/raw.json" "$decision_dir/out.json") >/dev/null 2>&1 \
+      && echo 0 || echo 1)
+
+write_decision already_fixed "$good_evidence"
+check "already_fixed with verified evidence remains available without a force directive" \
+    $( (cd "$REPO_ROOT" && bash "$AUTOPR_DIR/decision.sh" normalize-grounded \
+        "$decision_dir/raw.json" "$decision_dir/out.json") >/dev/null 2>&1 \
+      && echo 0 || echo 1)
 
 write_decision acceptance_criteria_met null
 check "acceptance_criteria_met without evidence is refused" \

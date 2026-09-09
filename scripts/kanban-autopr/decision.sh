@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Validates the model's untrusted triage decision before it can drive a PR,
 # labels, or a card update. Source this file for the helpers or run
-# `decision.sh normalize raw.json decision.json`.
+# `decision.sh normalize-grounded raw.json decision.json`.
 set -euo pipefail
 _AUTOPR_DECISION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -59,7 +59,7 @@ _autopr_decision_schema_ok() {
       and .schema_version == 1
       and (.outcome | IN("implementation", "partial_implementation", "questions_only", "no_safe_action"))
       and (.safe_changes_present | type == "boolean")
-      and (.questions | type == "array" and all(.[]; valid_question))
+      and (.questions | type == "array" and length <= 10 and all(.[]; valid_question))
       and ([.questions[].id] | length == ([.[]] | unique | length))
       and (.criticality | type == "object")
       and (.criticality.level | IN("red", "orange", "yellow"))
@@ -86,12 +86,10 @@ _autopr_decision_schema_ok() {
           # review and the operator applies it. "This needs a migration" was
           # the single most common refusal and it never protected anything.
           and (.no_safe_action_reason | IN("already_fixed", "policy_blocked", "external_dependency", "acceptance_criteria_met"))
-          # acceptance_criteria_met is the one reason that survives an owner
-          # directive, so it has to carry its proof: every criterion the card
-          # asked for, and the path:line at a named commit that already
-          # satisfies it. Unevidenced, it is indistinguishable from the lazy
-          # "already fixed" the directives exist to refuse.
-          and (if .no_safe_action_reason == "acceptance_criteria_met" then
+          # Both "already fixed" verdicts need repository proof. The stricter
+          # acceptance_criteria_met path still requires one entry per stated
+          # criterion; already_fixed requires at least one concrete citation.
+          and (if .no_safe_action_reason | IN("already_fixed", "acceptance_criteria_met") then
                  (.acceptance_evidence | type == "array" and length >= 1 and length <= 40
                   and all(.[]; valid_acceptance_evidence))
                else true end)
@@ -101,18 +99,18 @@ _autopr_decision_schema_ok() {
 }
 
 # Fresh PR investigations must explain why a remaining blocker needs the human.
-# Kept separate from the v1 schema so old saved decisions/research artifacts can
-# still be rendered and published; the kind registry selects normalize-grounded
-# for every new investigate/rework pass, including the corrective retry.
+# This stays separate from the base schema so malformed JSON and schema errors
+# are diagnosed before grounding metadata is considered.
 _autopr_grounding_ok() {
     jq -e '
-      def text: type == "string" and test("\\S") and length <= 2000;
+      def evidence_text: type == "string" and test("\\S") and length <= 300;
+      def why_text: type == "string" and test("\\S") and length <= 600;
       def resolution:
         type == "object"
         and (.kind | IN("product_decision", "private_context", "source_unavailable", "explicit_approval"))
-        and (.evidence | type == "array" and length >= 1 and length <= 12
-             and all(.[]; text))
-        and (.why_user_needed | text);
+        and (.evidence | type == "array" and length >= 1 and length <= 5
+             and all(.[]; evidence_text))
+        and (.why_user_needed | why_text);
       (.questions | type == "array" and all(.[]; .resolution | resolution))
       and (if .no_safe_action_reason | IN("policy_blocked", "external_dependency")
            then (.blocker_resolution | resolution) else true end)
@@ -145,7 +143,13 @@ _autopr_directive_policy_ok() {
 # satisfied on main", not "was once written somewhere".
 _autopr_acceptance_evidence_ok() {
     local decision_file="$1" commit path line lines content
-    [ "$(jq -r '.no_safe_action_reason // ""' "$decision_file")" = acceptance_criteria_met ] || return 0
+    case "$(jq -r '.no_safe_action_reason // ""' "$decision_file")" in
+        already_fixed|acceptance_criteria_met) ;;
+        *) return 0 ;;
+    esac
+    jq -e '.acceptance_evidence | type == "array" and length >= 1 and length <= 40' \
+        "$decision_file" >/dev/null 2>&1 \
+        || { echo "autopr: existing-coverage verdict has no acceptance evidence" >&2; return 1; }
     while IFS=$'\t' read -r commit path line; do
         [ -n "$commit" ] || continue
         git cat-file -e "${commit}^{commit}" 2>/dev/null \
@@ -172,7 +176,7 @@ autopr_normalize_decision() {
     _autopr_directive_policy_ok "$raw_file" "$directive_file" \
         || die "triage decision violated the decision-bound AutoPR directive"
     _autopr_acceptance_evidence_ok "$raw_file" \
-        || die "triage decision claimed acceptance_criteria_met with unverifiable evidence"
+        || die "triage decision claimed existing coverage with unverifiable evidence"
     if [ -n "$directive_file" ] && [ -s "$directive_file" ]; then
         directive_policy="$(jq -c '{directives:(.directives // []),test_route:(.test_route // null)}' "$directive_file")"
     fi
@@ -349,6 +353,33 @@ autopr_title_marker() {
     printf '%s [C%s]%s' "$emoji" "$score" "$mode_marker"
 }
 
+# Keep model-authored prose inside the byte budgets of downstream APIs without
+# cutting a multibyte UTF-8 character in half. The caller still performs a
+# final whole-body check because several independently bounded sections are
+# composed together.
+autopr_bound_text() {
+    local max_bytes="$1" label="$2"
+    python3 -c '
+import sys
+
+limit = int(sys.argv[1])
+label = sys.argv[2]
+data = sys.stdin.buffer.read()
+if len(data) <= limit:
+    sys.stdout.buffer.write(data)
+    raise SystemExit(0)
+suffix = ("\n\n_[AutoPR " + label + " truncated to fit the PR body.]_\n").encode()
+prefix = data[:max(0, limit - len(suffix))]
+while True:
+    try:
+        prefix.decode("utf-8")
+        break
+    except UnicodeDecodeError:
+        prefix = prefix[:-1]
+sys.stdout.buffer.write(prefix.rstrip() + suffix)
+' "$max_bytes" "$label"
+}
+
 autopr_render_questions() {
     local decision_file="$1"
     jq -r '
@@ -361,15 +392,18 @@ autopr_render_questions() {
           "   - Why this blocks implementation: " + .value.why_blocking +
           (if ((.value.resolution | type) == "object"
                    and (.value.resolution.why_user_needed | type) == "string"
+                   and (.value.resolution.why_user_needed | test("\\S"))
                    and (.value.resolution.evidence | type) == "array"
-                   and (.value.resolution.evidence | all(.[]; type == "string"))) then
+                   and (.value.resolution.evidence | length > 0)
+                   and (.value.resolution.evidence
+                        | all(.[]; type == "string" and test("\\S")))) then
             "\n   - Why your input is needed: " + .value.resolution.why_user_needed +
             "\n   - Already checked: " + (.value.resolution.evidence | join("; "))
            else "" end)
         ] | join("\n\n")) +
         "\n\nAnswer in the linked Kanban ticket with **Add additional context**, or reply on this PR. You can answer in plain language, add context, or tell AutoPR what to research; numbered choices are optional. The next local cycle will ingest that guidance and update this same draft."
       end
-    ' "$decision_file"
+    ' "$decision_file" | autopr_bound_text 18000 "question details"
 }
 
 # Per-criterion proof, rendered for the card. This is the artifact that makes a
@@ -392,32 +426,38 @@ autopr_render_card_questions() {
     jq -r '
       if (.questions | length) == 0 then empty else
         "Answers needed — reply below with the numbered choices:\n" +
-        "Or answer in your own words, add context, or tell AutoPR what to research.\n\n" +
         ([.questions | to_entries[] |
           ((.key + 1) | tostring) + ". " + .value.question + "\n" +
           (.value.options | map("   " + .key + ": " + .label + " — " + .impact) | join("\n")) + "\n" +
           "   Suggested default: " + .value.default_assumption
-        ] | join("\n\n"))
+        ] | join("\n\n")) +
+        "\n\nYou may answer in your own words, add context, or tell AutoPR what to research."
       end
     ' "$decision_file"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
+        schema-ok)
+            [ "$#" -eq 2 ] || die "usage: decision.sh schema-ok raw-decision.json"
+            _autopr_decision_schema_ok "$2"
+            ;;
         grounding-ok)
             [ "$#" -eq 2 ] || die "usage: decision.sh grounding-ok raw-decision.json"
             _autopr_grounding_ok "$2"
             ;;
+        acceptance-ok)
+            [ "$#" -eq 2 ] || die "usage: decision.sh acceptance-ok raw-decision.json"
+            _autopr_acceptance_evidence_ok "$2"
+            ;;
         normalize-grounded)
             { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
                 || die "usage: decision.sh normalize-grounded raw-decision.json decision.json [directive-policy.json]"
-            _autopr_grounding_ok "$2" || die "triage decision lacks context/research resolution evidence for its blockers"
             autopr_normalize_decision "$2" "$3" "${4:-}"
-            ;;
-        normalize)
-            { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
-                || die "usage: decision.sh normalize raw-decision.json decision.json [directive-policy.json]"
-            autopr_normalize_decision "$2" "$3" "${4:-}"
+            if ! _autopr_grounding_ok "$2"; then
+                rm -f "$3"
+                die "triage decision lacks context/research resolution evidence for its blockers"
+            fi
             ;;
         directive-ok)
             # Directive check only, so a caller can distinguish "the model
@@ -438,7 +478,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
             autopr_normalize_research_decision "$2" "$3"
             ;;
         *)
-            die "usage: decision.sh normalize[-grounded] raw-decision.json decision.json | decision.sh grounding-ok raw-decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
+            die "usage: decision.sh normalize-grounded raw-decision.json decision.json | decision.sh schema-ok raw-decision.json | decision.sh grounding-ok raw-decision.json | decision.sh acceptance-ok raw-decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
             ;;
     esac
 fi

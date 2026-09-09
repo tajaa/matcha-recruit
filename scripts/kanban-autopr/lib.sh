@@ -385,7 +385,7 @@ autopr_kind_field() {
                 prompt) [ "$mode" = rework ] && printf '_prompt_rework.txt' || printf '_prompt_todo.txt' ;;
                 model) printf 'gpt-5.6-sol' ;;
                 effort) printf 'medium' ;;
-                sandbox) printf 'AUTOPR_CODEX_WEB_SEARCH=1' ;;
+                sandbox) printf '' ;;
                 headings) printf '### Summary\n### Changes\n### Blast radius\n### Confidence\n' ;;
                 decision) printf 'normalize-grounded' ;;
                 publisher) printf 'publish.sh' ;;

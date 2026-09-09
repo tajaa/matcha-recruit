@@ -53,6 +53,10 @@ BROWSE_SECTION_FILE=""
 if [ "$COLLECT_ARTIFACTS" = 1 ] && [ -f "$(dirname "$PROMPT_TEMPLATE")/_prompt_research_browse.txt" ]; then
     BROWSE_SECTION_FILE="$(dirname "$PROMPT_TEMPLATE")/_prompt_research_browse.txt"
 fi
+GROUNDING_SECTION_FILE=""
+if [ -f "$(dirname "$PROMPT_TEMPLATE")/_prompt_grounding.txt" ]; then
+    GROUNDING_SECTION_FILE="$(dirname "$PROMPT_TEMPLATE")/_prompt_grounding.txt"
+fi
 MAX_ARTIFACTS="${AUTOPR_SANDBOX_MAX_ARTIFACTS:-12}"
 MAX_ARTIFACT_BYTES="${AUTOPR_SANDBOX_MAX_ARTIFACT_BYTES:-4194304}"
 MAX_CHANGED_FILES="${AUTOPR_SANDBOX_MAX_CHANGED_FILES:-25}"
@@ -209,10 +213,19 @@ AUTOPR_INPUTS_END
 
 $(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
     -e "s#DECISION_PATH#$MODEL_DECISION#g" "$PROMPT_TEMPLATE" \
-    | awk -v section_file="$BROWSE_SECTION_FILE" '
+    | awk -v browse_file="$BROWSE_SECTION_FILE" \
+          -v grounding_file="$GROUNDING_SECTION_FILE" '
         /^BROWSE_TOOL_SECTION$/ {
-            if (section_file != "") { while ((getline line < section_file) > 0) print line }
+            if (browse_file != "") { while ((getline line < browse_file) > 0) print line }
             else print "- No browser. This board is not granted browsing: `browse-capture.py` is\n  not available to you, no screenshot would be collected, and the attempt\n  only spends your time. Use web search alone."
+            next
+        }
+        /^GROUNDING_CONTEXT_SECTION$/ {
+            if (grounding_file == "") {
+                print "Grounding instructions are unavailable; do not guess or claim web research."
+            } else {
+                while ((getline line < grounding_file) > 0) print line
+            }
             next
         }
         { print }')"
