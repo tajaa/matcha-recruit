@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Literal, Sequence
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -45,6 +45,21 @@ class BreakRule:
     minimum_age: int | None = None
     maximum_age: int | None = None
     citation: str = ""
+    effective_from: date | None = None
+    effective_to: date | None = None
+    authority_url: str | None = None
+    source_type: str | None = None
+    minimum_employees: int | None = None
+    maximum_employees: int | None = None
+    shift_start_window_from: time | None = None
+    shift_start_window_before: time | None = None
+    shift_spans_window_start: time | None = None
+    shift_spans_window_end: time | None = None
+    shift_starts_before: time | None = None
+    shift_ends_after: time | None = None
+    window_start: time | None = None
+    window_end: time | None = None
+    recommend_midpoint: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +84,10 @@ class BreakRequirement:
     waiver_attestation_id: UUID | None
     citation: str
     rule_set_id: UUID
+    effective_from: date | None = None
+    effective_to: date | None = None
+    authority_url: str | None = None
+    source_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +97,7 @@ class BreakPlan:
     advisories: tuple[dict[str, Any], ...]
     rule_set_ids: tuple[UUID, ...]
     rule_set_hash: str
+    employer_employee_count: int | None = None
 
 
 def reinterpret_schedule_wall_time(value: datetime, timezone: ZoneInfo) -> datetime:
@@ -99,15 +119,65 @@ def _rule_applies(rule: BreakRule, shift_minutes: int) -> bool:
     return shift_minutes > rule.trigger_after_minutes
 
 
+def _clock_in_window(value: time, start: time, end: time) -> bool:
+    """Half-open clock window, including windows that cross midnight."""
+
+    if start < end:
+        return start <= value < end
+    return value >= start or value < end
+
+
+def _rule_context_applies(
+    rule: BreakRule,
+    *,
+    starts_local: datetime,
+    ends_local: datetime,
+    employer_employee_count: int | None,
+) -> tuple[bool, bool]:
+    """Return ``(applies, context_missing)`` for non-duration conditions."""
+
+    if rule.minimum_employees is not None or rule.maximum_employees is not None:
+        if employer_employee_count is None:
+            return False, True
+        if rule.minimum_employees is not None and employer_employee_count < rule.minimum_employees:
+            return False, False
+        if rule.maximum_employees is not None and employer_employee_count > rule.maximum_employees:
+            return False, False
+
+    start_clock = starts_local.time().replace(tzinfo=None)
+    end_clock = ends_local.time().replace(tzinfo=None)
+    if rule.shift_start_window_from is not None and rule.shift_start_window_before is not None:
+        if not _clock_in_window(
+            start_clock, rule.shift_start_window_from, rule.shift_start_window_before,
+        ):
+            return False, False
+    if rule.shift_spans_window_start is not None and rule.shift_spans_window_end is not None:
+        window_start = datetime.combine(starts_local.date(), rule.shift_spans_window_start, starts_local.tzinfo)
+        window_end = datetime.combine(starts_local.date(), rule.shift_spans_window_end, starts_local.tzinfo)
+        if window_end <= window_start:
+            window_end += timedelta(days=1)
+        if not (starts_local <= window_start and ends_local >= window_end):
+            return False, False
+    if rule.shift_starts_before is not None and not start_clock < rule.shift_starts_before:
+        return False, False
+    if rule.shift_ends_after is not None and not end_clock > rule.shift_ends_after:
+        return False, False
+    return True, False
+
+
 def _stable_rule_value(rule: BreakRule) -> dict[str, Any]:
     value = asdict(rule)
     value["rule_set_id"] = str(rule.rule_set_id)
+    for key, item in tuple(value.items()):
+        if isinstance(item, (date, time)):
+            value[key] = item.isoformat()
     return value
 
 
 def _plan_hash(
     rules: Sequence[BreakRule],
     waiver: MealWaiverAttestation | None,
+    employer_employee_count: int | None,
 ) -> str:
     payload = {
         "rules": [_stable_rule_value(rule) for rule in rules],
@@ -116,6 +186,7 @@ def _plan_hash(
             "on_file": waiver.on_file,
             "effective_from": waiver.effective_from.isoformat(),
         } if waiver else None,
+        "employer_employee_count": employer_employee_count,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -145,6 +216,7 @@ def evaluate_break_plan(
     rules: Sequence[BreakRule],
     waiver: MealWaiverAttestation | None = None,
     employee_age: int | None = None,
+    employer_employee_count: int | None = None,
 ) -> BreakPlan:
     """Evaluate every applicable meal/rest rule for one scheduled shift.
 
@@ -156,6 +228,7 @@ def evaluate_break_plan(
 
     shift_minutes = _shift_minutes(starts_at, ends_at)
     starts_local = reinterpret_schedule_wall_time(starts_at, timezone)
+    ends_local = reinterpret_schedule_wall_time(ends_at, timezone)
     requirements: list[BreakRequirement] = []
     advisories: list[dict[str, Any]] = []
 
@@ -164,6 +237,23 @@ def evaluate_break_plan(
         if rule.minimum_age is not None and (employee_age is None or employee_age < rule.minimum_age):
             continue
         if rule.maximum_age is not None and (employee_age is None or employee_age > rule.maximum_age):
+            continue
+        context_applies, context_missing = _rule_context_applies(
+            rule,
+            starts_local=starts_local,
+            ends_local=ends_local,
+            employer_employee_count=employer_employee_count,
+        )
+        if context_missing:
+            advisories.append({
+                "check": "break_rules",
+                "code": "employer_context_unverified",
+                "severity": "advisory",
+                "message": "Employer headcount is unavailable; size-specific break rules require manual review.",
+                "statute": rule.citation or None,
+            })
+            continue
+        if not context_applies:
             continue
         if not _rule_applies(rule, shift_minutes):
             continue
@@ -194,26 +284,48 @@ def evaluate_break_plan(
         def _offset(value: int | None) -> datetime | None:
             return starts_local + timedelta(minutes=value) if value is not None else None
 
+        def _clock(value: time | None) -> datetime | None:
+            if value is None:
+                return None
+            candidate = datetime.combine(starts_local.date(), value, starts_local.tzinfo)
+            if candidate < starts_local and ends_local.date() > starts_local.date():
+                candidate += timedelta(days=1)
+            return candidate
+
+        earliest = _clock(rule.window_start) or _offset(rule.earliest_offset_minutes)
+        deadline = _clock(rule.window_end) or _offset(rule.deadline_offset_minutes)
+        recommended = _offset(rule.recommended_offset_minutes)
+        if rule.recommend_midpoint:
+            recommended = starts_local + timedelta(
+                minutes=max(0, (shift_minutes - rule.duration_minutes) // 2),
+            )
+
         requirements.append(BreakRequirement(
             kind=rule.kind,
             ordinal=rule.ordinal,
             duration_minutes=rule.duration_minutes,
             paid=rule.paid,
-            earliest_local=_offset(rule.earliest_offset_minutes),
-            recommended_local=_offset(rule.recommended_offset_minutes),
-            deadline_local=_offset(rule.deadline_offset_minutes),
+            earliest_local=earliest,
+            recommended_local=recommended,
+            deadline_local=deadline,
             waived=waived,
             waiver_attestation_id=waiver.id if waived and waiver else None,
             citation=rule.citation,
             rule_set_id=rule.rule_set_id,
+            effective_from=rule.effective_from,
+            effective_to=rule.effective_to,
+            authority_url=rule.authority_url,
+            source_type=rule.source_type,
         ))
 
     return BreakPlan(
-        status="complete" if rules else "unmapped",
+        status="error" if any(a.get("code") == "employer_context_unverified" for a in advisories)
+        else "complete" if rules else "unmapped",
         requirements=tuple(requirements),
         advisories=tuple(advisories),
         rule_set_ids=tuple(dict.fromkeys(rule.rule_set_id for rule in rules)),
-        rule_set_hash=_plan_hash(rules, waiver),
+        rule_set_hash=_plan_hash(rules, waiver, employer_employee_count),
+        employer_employee_count=employer_employee_count,
     )
 
 
@@ -283,6 +395,7 @@ def guidance_payload(plan: BreakPlan, *, timezone: str, evaluated_at: datetime) 
         "timezone": timezone,
         "rule_set_ids": [str(value) for value in plan.rule_set_ids],
         "rule_set_hash": plan.rule_set_hash,
+        "context": {"employer_employee_count": plan.employer_employee_count},
         "summary": render_break_plan(plan),
         "requirements": [
             {
@@ -297,6 +410,10 @@ def guidance_payload(plan: BreakPlan, *, timezone: str, evaluated_at: datetime) 
                 "waiver_attestation_id": str(requirement.waiver_attestation_id) if requirement.waiver_attestation_id else None,
                 "citation": requirement.citation or None,
                 "rule_set_id": str(requirement.rule_set_id),
+                "effective_from": requirement.effective_from.isoformat() if requirement.effective_from else None,
+                "effective_to": requirement.effective_to.isoformat() if requirement.effective_to else None,
+                "authority_url": requirement.authority_url,
+                "source_type": requirement.source_type,
             }
             for requirement in plan.requirements
         ],

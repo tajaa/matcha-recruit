@@ -45,6 +45,8 @@ class FakeConn:
             return self.industry
         if "SELECT state FROM business_locations" in query:
             return self.state
+        if "company_handbook_profiles" in query:
+            return 24
         raise AssertionError(query)
 
     async def fetch(self, query, *args):
@@ -93,6 +95,8 @@ def test_approved_structured_rule_beats_legacy_fallback():
         "industry_code": "retail",
         "effective_from": date(2026, 1, 1),
         "effective_to": None,
+        "authority_url": "https://example.gov/rule",
+        "source_type": "manual",
     }
     result = _run(resolve_break_rules(
         FakeConn(location, structured=[row]),
@@ -104,6 +108,10 @@ def test_approved_structured_rule_beats_legacy_fallback():
     assert result.rule_set_ids == (rule_id,)
     assert result.rules[0].duration_minutes == 45
     assert result.rules[0].trigger_after_minutes == 240
+    assert result.rules[0].effective_from == date(2026, 1, 1)
+    assert result.rules[0].authority_url == "https://example.gov/rule"
+    assert result.rules[0].source_type == "manual"
+    assert result.employer_employee_count == 24
 
 
 def test_approved_rule_preserves_reviewed_age_scope():
@@ -418,6 +426,34 @@ def test_import_rejects_rules_the_runtime_parser_cannot_enforce():
             rules={"meal_periods": [{
                 "trigger_after_minutes": 300,
                 "duration_minutes": "thirty",
+            }]},
+            citation="Authority", source_type="manual",
+        )
+
+
+def test_import_validates_clock_windows_and_employer_size_bounds():
+    item = BreakRuleSetImport(
+        jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
+        rules={"meal_periods": [{
+            "trigger_after_minutes": 360,
+            "duration_minutes": 30,
+            "minimum_employees": 50,
+            "shift_spans_window_start": "11:00",
+            "shift_spans_window_end": "14:00",
+            "window_start": "11:00",
+            "window_end": "14:00",
+        }]},
+        citation="Authority", source_type="manual",
+    )
+    assert item.rules["meal_periods"][0]["minimum_employees"] == 50
+
+    with pytest.raises(ValueError, match="supplied together"):
+        BreakRuleSetImport(
+            jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
+            rules={"meal_periods": [{
+                "trigger_after_minutes": 360,
+                "duration_minutes": 30,
+                "window_start": "11:00",
             }]},
             citation="Authority", source_type="manual",
         )

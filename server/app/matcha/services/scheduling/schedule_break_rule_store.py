@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from typing import Any
 from uuid import UUID, NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -41,6 +41,7 @@ class ResolvedBreakRules:
     industry_code: str | None
     source: str
     advisories: tuple[dict[str, Any], ...]
+    employer_employee_count: int | None = None
 
 
 def _uuid_for_legacy(state: str) -> UUID:
@@ -96,7 +97,30 @@ def _age_bounds(raw: dict[str, Any]) -> tuple[int | None, int | None]:
     return minimum, maximum
 
 
-def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[BreakRule]:
+def _as_time(value: Any, *, field: str) -> time | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an HH:MM string")
+    try:
+        parsed = time.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an HH:MM string") from exc
+    if parsed.second or parsed.microsecond or parsed.tzinfo is not None:
+        raise ValueError(f"{field} must be an HH:MM string")
+    return parsed
+
+
+def _rules_from_payload(
+    rule_set_id: UUID,
+    payload: Any,
+    citation: str,
+    *,
+    effective_from: date | None = None,
+    effective_to: date | None = None,
+    authority_url: str | None = None,
+    source_type: str | None = None,
+) -> list[BreakRule]:
     if isinstance(payload, str):
         payload = json.loads(payload)
     if not isinstance(payload, dict):
@@ -111,6 +135,33 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
             if not isinstance(raw, dict):
                 raise ValueError(f"{key} entries must be objects")
             minimum_age, maximum_age = _age_bounds(raw)
+            minimum_employees = _as_int(raw.get("minimum_employees"))
+            maximum_employees = _as_int(raw.get("maximum_employees"))
+            if minimum_employees is not None and minimum_employees < 0:
+                raise ValueError("minimum_employees cannot be negative")
+            if maximum_employees is not None and maximum_employees < 0:
+                raise ValueError("maximum_employees cannot be negative")
+            if (
+                minimum_employees is not None
+                and maximum_employees is not None
+                and minimum_employees > maximum_employees
+            ):
+                raise ValueError("minimum_employees cannot exceed maximum_employees")
+            clock_fields = {
+                key: _as_time(raw.get(key), field=key)
+                for key in (
+                    "shift_start_window_from", "shift_start_window_before",
+                    "shift_spans_window_start", "shift_spans_window_end",
+                    "shift_starts_before", "shift_ends_after", "window_start", "window_end",
+                )
+            }
+            for first, second in (
+                ("shift_start_window_from", "shift_start_window_before"),
+                ("shift_spans_window_start", "shift_spans_window_end"),
+                ("window_start", "window_end"),
+            ):
+                if (clock_fields[first] is None) != (clock_fields[second] is None):
+                    raise ValueError(f"{first} and {second} must be supplied together")
             duration = _as_int(raw.get("duration_minutes"))
             trigger = _as_int(raw.get("trigger_after_minutes"))
             ordinal = _as_int(raw.get("ordinal"), default=1)
@@ -174,6 +225,14 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                             minimum_age=minimum_age,
                             maximum_age=maximum_age,
                             citation=str(raw.get("citation") or citation),
+                            effective_from=effective_from,
+                            effective_to=effective_to,
+                            authority_url=authority_url,
+                            source_type=source_type,
+                            minimum_employees=minimum_employees,
+                            maximum_employees=maximum_employees,
+                            **clock_fields,
+                            recommend_midpoint=_as_bool(raw.get("recommend_midpoint"), default=False),
                         ))
                     previous_count = count
                 continue
@@ -194,6 +253,14 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                 minimum_age=minimum_age,
                 maximum_age=maximum_age,
                 citation=str(raw.get("citation") or citation),
+                effective_from=effective_from,
+                effective_to=effective_to,
+                authority_url=authority_url,
+                source_type=source_type,
+                minimum_employees=minimum_employees,
+                maximum_employees=maximum_employees,
+                **clock_fields,
+                recommend_midpoint=_as_bool(raw.get("recommend_midpoint"), default=False),
             ))
     # The public shift contract and editor both cap the aggregate planned
     # break at one day.  Check every possible employee age so overlapping
@@ -318,6 +385,7 @@ def _legacy_rules(
             deadline_offset_minutes=deadline_offset,
             earliest_offset_minutes=earliest_offset,
             citation=citation,
+            source_type="legacy_curated",
         ))
         second_after = _threshold(rules.get("second_meal_after_hours"))
         if second_after is not None:
@@ -330,6 +398,7 @@ def _legacy_rules(
                 paid=False,
                 deadline_offset_minutes=int(float(second_after) * 60),
                 citation=citation,
+                source_type="legacy_curated",
             ))
     return out, advisories
 
@@ -367,7 +436,8 @@ async def resolve_break_rules(
             JOIN jurisdiction_chain c ON c.parent_id = j.id
         )
         SELECT r.id, r.rules, r.citation, c.depth,
-               r.industry_code, r.effective_from, r.effective_to
+               r.industry_code, r.effective_from, r.effective_to,
+               r.authority_url, r.source_type
         FROM schedule_break_rule_sets r
         JOIN jurisdiction_chain c ON c.id = r.jurisdiction_id
         WHERE r.review_status = 'approved'
@@ -384,7 +454,13 @@ async def resolve_break_rules(
     if rows:
         chosen = rows[0]
         try:
-            rules = _rules_from_payload(chosen["id"], chosen["rules"], chosen["citation"])
+            rules = _rules_from_payload(
+                chosen["id"], chosen["rules"], chosen["citation"],
+                effective_from=chosen["effective_from"],
+                effective_to=chosen["effective_to"],
+                authority_url=chosen.get("authority_url"),
+                source_type=chosen.get("source_type"),
+            )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             return ResolvedBreakRules(
                 rules=(), rule_set_ids=(chosen["id"],),
@@ -399,6 +475,17 @@ async def resolve_break_rules(
                     "metadata": {"reason": str(exc)},
                 },),
             )
+        employer_employee_count = await conn.fetchval(
+            """
+            SELECT COALESCE(
+                (SELECT headcount FROM company_handbook_profiles
+                 WHERE company_id = $1 AND headcount IS NOT NULL),
+                (SELECT COUNT(*)::int FROM employees
+                 WHERE org_id = $1 AND termination_date IS NULL)
+            )
+            """,
+            company_id,
+        )
         return ResolvedBreakRules(
             rules=tuple(rules),
             rule_set_ids=(chosen["id"],),
@@ -406,6 +493,9 @@ async def resolve_break_rules(
             industry_code=readiness.industry_code,
             source="approved",
             advisories=(),
+            employer_employee_count=(
+                int(employer_employee_count) if employer_employee_count is not None else None
+            ),
         )
 
     # Preserve the current curated CA/federal behavior until structured rule
@@ -445,7 +535,15 @@ async def resolve_break_rules(
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
             source="catalog_extraction" if db_rules else "legacy_curated",
-            advisories=(*fallback_advisories, *legacy_advisories),
+            advisories=(*fallback_advisories, *legacy_advisories, {
+                "check": "break_rules",
+                "code": "break_rules_effective_date_unverified",
+                "severity": "advisory",
+                "message": (
+                    "The fallback break rule has a cited source but no reviewed "
+                    "effective date; verify current coverage manually."
+                ),
+            }),
         )
     return ResolvedBreakRules(
         rules=(), rule_set_ids=(),

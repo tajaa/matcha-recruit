@@ -109,6 +109,7 @@ async def resolve_shift_break_plan(
     plan = evaluate_break_plan(
         starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
         rules=resolved.rules, waiver=waiver, employee_age=employee_age,
+        employer_employee_count=resolved.employer_employee_count,
     )
     advisories = list(plan.advisories) + list(resolved.advisories)
     if age_unknown:
@@ -227,6 +228,7 @@ async def resolve_shift_break_plans_localized(
         plan = evaluate_break_plan(
             starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
             rules=resolved.rules, waiver=waivers.get(employee_id), employee_age=employee_age,
+            employer_employee_count=resolved.employer_employee_count,
         )
         advisories = list(plan.advisories) + list(resolved.advisories)
         if age_unknown:
@@ -358,6 +360,7 @@ async def resolve_week_break_plans(
                 starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
                 rules=resolved.rules, waiver=_waiver(employee_id, effective_date),
                 employee_age=employee_age,
+                employer_employee_count=resolved.employer_employee_count,
             )
             advisories = [*plan.advisories, *resolved.advisories]
             if age_unknown:
@@ -419,6 +422,7 @@ async def resolve_open_shift_break_plans(
         plan = evaluate_break_plan(
             starts_at=starts_at, ends_at=ends_at,
             timezone=effective_timezone, rules=resolved.rules,
+            employer_employee_count=resolved.employer_employee_count,
         )
         plans.append(replace(
             plan,
