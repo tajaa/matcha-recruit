@@ -460,6 +460,7 @@ def _open_session(
     *,
     reader: Reader,
     output: TextIO,
+    initial_action: str | None = None,
 ) -> None:
     while record.phase != "released":
         preserved_output = exited_agent_output(record)
@@ -504,12 +505,19 @@ def _open_session(
                     "harness-output",
                 ),
             )
-        action = choose(
+        action = initial_action or choose(
             title,
             choices,
             reader=reader,
             output=output,
         )
+        if initial_action == "open" and preserved_output is not None:
+            action = choose(
+                "Harness exited. Restart replaces its preserved output.",
+                [("View exited output", "harness-output"), ("Restart harness", "open"), ("Cancel", "back")],
+                reader=reader,
+                output=output,
+            )
         if action == "back":
             return
         if action in ("switch", "environment", "browser", "files", "tools", "publish"):
@@ -554,7 +562,11 @@ def _open_session(
             if confirmed:
                 released = release_session(record)
                 print(released.reason, file=output)
+                if initial_action is not None:
+                    _acknowledge(reader, output)
         record = reconcile_session(record)
+        if initial_action is not None:
+            return
 
 
 def _cleanup(repo: Path, *, reader: Reader, output: TextIO) -> None:
@@ -590,6 +602,12 @@ def run_wizard(
     output: TextIO = sys.stdout,
 ) -> int:
     repo = repo.resolve()
+    if _can_use_terminal_menu(reader, output) and os.environ.get("MSANDBOX_UI") != "classic":
+        from .dashboard import run_dashboard
+
+        result = run_dashboard(repo, output=output)
+        if result is not None:
+            return result
     while True:
         try:
             records = []
