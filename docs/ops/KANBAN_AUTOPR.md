@@ -319,12 +319,19 @@ budget had already been spent.
    **Unqueue** in Espresso records `autopr_run_cancel` and holds the card without
    changing its column, assignment, question text, or saved answers. The task list
    exposes `autopr_paused`; collection excludes held cards even from the scheduled
-   sweep. A new explicit Run or additional-context submission releases the hold.
+   sweep. A new explicit Run, additional-context submission, review rejection, or
+   manually started round releases the hold; publication and claims do not.
+   The card face shows a paused badge, including while an older run finishes.
    Run-request reads treat cancellation like consumption. Every investigation now
    claims against live state and fails closed if the card was held after collection
    or the API is unavailable. Unqueue does not interrupt an already claimed run.
    Queue/hold/claim writes serialize on the task row and use post-lock wall-clock
-   timestamps. No schema migration is needed. Deploy the backend and update the
+   timestamps. The `autoprrun02` migration adds a concurrent task-history index
+   covering holds, resumes, claims, and round boundaries, without changing the
+   original request-poll indexes. The list query resolves hold state once per task.
+   Claims preserve the selector's `in_progress` ALREADY SCOPED recovery lane for
+   linked PRs closed without merging, while continuing to reject held, cancelled,
+   and ordinary in-progress cards. Deploy the backend and update the
    runner control snapshot before shipping the desktop action; an old server will
    reject Unqueue and the app will retain the queued state and show the error.
    Espresso keeps the native multiline answer editor below the scrolling questions;

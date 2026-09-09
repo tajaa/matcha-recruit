@@ -402,7 +402,8 @@ class _RunRequestConn:
         if "SELECT id, board_column" in query:
             if not self.exists:
                 return None
-            return {"id": args[0], "board_column": self.board_column, "status": self.status}
+            return {"id": args[0], "board_column": self.board_column, "status": self.status,
+                    "progress_note": getattr(self, "progress_note", None)}
         if "INSERT INTO mw_task_history" in query:
             self.insert_args = args
             return {"id": self.activity_id, "created_at": self.created_at}
@@ -581,3 +582,102 @@ async def test_unqueue_route_checks_access_and_results(monkeypatch, outcome, cod
         assert await route.cancel_autopr_run_endpoint(uuid4(), uuid4(), SimpleNamespace(id=uuid4())) == outcome
     if outcome == "forbidden":
         cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("note,held,status,allowed", [
+    ("🤖 AUTO SETUP · ALREADY SCOPED · PR #42", False, "pending", True),
+    ("🤖 AUTO SETUP · ALREADY SCOPED · PR #42", True, "pending", False),
+    ("🤖 AUTO SETUP · ALREADY SCOPED · PR #42", False, "cancelled", False),
+    ("Ordinary manual work", False, "pending", False),
+    (None, False, "pending", False),
+])
+async def test_claim_preserves_scoped_recovery_lane(monkeypatch, note, held, status, allowed):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn(board_column="in_progress", status=status)
+    conn.progress_note = note
+    conn.held = held
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+    assert result["ok"] is allowed
+    assert (conn.insert_args is not None) is allowed
+
+
+def test_hold_sql_releases_only_for_new_work_or_review_round():
+    # Execute the production state query against an isolated in-memory SQL
+    # fixture. No application database, migrations, or external connections.
+    import sqlite3
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    with sqlite3.connect(":memory:") as db:
+        db.execute("CREATE TABLE mw_tasks (id TEXT)")
+        db.execute("CREATE TABLE mw_task_history (task_id TEXT, event_type TEXT, metadata TEXT, created_at INTEGER)")
+        db.execute("INSERT INTO mw_tasks VALUES ('ticket')")
+        query = f"SELECT {svc._AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = 'ticket'"
+
+        def add(at, kind=None, event="activity"):
+            db.execute("INSERT INTO mw_task_history VALUES (?, ?, ?, ?)",
+                       ("ticket", event, json.dumps({"kind": kind} if kind else {}), at))
+
+        def paused():
+            return bool(db.execute(query).fetchone()[0])
+
+        assert not paused()
+        add(1, "autopr_run_request")
+        add(2, "autopr_run_claim")
+        add(3, "autopr_run_cancel")
+        assert paused()
+        add(4, event="column_change")  # publish -> review does not resume
+        add(5, "autopr_run_claim")     # stale worker does not resume
+        assert paused()
+        add(6, event="review_rejected")
+        assert not paused()
+        add(7, "autopr_run_cancel")
+        add(8, event="round_started")
+        assert not paused()
+        add(9, "autopr_run_cancel")
+        add(10, "autopr_additional_context")
+        assert not paused()
+        add(11, "autopr_run_cancel")
+        add(12, "autopr_run_request")
+        assert not paused()
+        add(12, "autopr_run_cancel")  # conservative equal-time ordering
+        add(12, event="review_rejected")
+        assert paused()
+
+
+def test_hold_lookup_is_joined_once_per_task():
+    import inspect
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    query_source = inspect.getsource(svc.list_project_tasks)
+    assert query_source.count("{_AUTOPR_HOLD_QUERY}") == 1
+    assert "{_AUTOPR_HOLD_SQL}" not in query_source
+    assert "COALESCE(autopr_hold.paused, FALSE) AS autopr_paused" in query_source
+
+
+def test_hold_index_upgrade_and_downgrade_are_concurrent(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/autoprrun02_autopr_hold_state_index.py"
+    spec = importlib.util.spec_from_file_location("autopr_hold_index", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    op = MagicMock()
+    monkeypatch.setattr(migration, "op", op)
+    migration.upgrade()
+    statements = [call.args[0] for call in op.execute.call_args_list]
+    assert "DROP INDEX CONCURRENTLY" in statements[0]
+    assert "CREATE INDEX CONCURRENTLY" in statements[1]
+    assert "(task_id, created_at DESC)" in statements[1]
+    for kind in ("autopr_run_request", "autopr_run_claim", "autopr_run_cancel",
+                 "autopr_additional_context", "review_rejected", "round_started"):
+        assert f"'{kind}'" in statements[1]
+    assert migration.down_revision == "autoprrun01"
+    op.reset_mock()
+    migration.downgrade()
+    assert "DROP INDEX CONCURRENTLY" in op.execute.call_args.args[0]
+    op.get_context.return_value.autocommit_block.assert_called_once()

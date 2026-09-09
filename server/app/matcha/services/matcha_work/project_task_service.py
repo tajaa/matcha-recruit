@@ -492,20 +492,21 @@ def is_autopr_bookkeeping_row(metadata: object) -> bool:
     return metadata.get("kind") in _AUTOPR_BOOKKEEPING_KINDS
 
 
-# A hold survives scheduled sweeps and expires only on an explicit new run or
-# answer submission. Claims are deliberately absent: a stale worker cannot
-# undo a human's hold. The correlated query uses the task/history index.
-_AUTOPR_HOLD_SQL = """
-COALESCE((
-    SELECT h.metadata->>'kind' = 'autopr_run_cancel'
+# A hold applies to the current work round. Explicit new work or a new review
+# round releases it; publish/claim events do not. The same indexed lookup is
+# used by claims and, once per task, the list query's lateral join.
+_AUTOPR_HOLD_QUERY = """
+    SELECT h.metadata->>'kind' = 'autopr_run_cancel' AS paused
     FROM mw_task_history h
-    WHERE h.task_id = t.id AND h.event_type = 'activity'
-      AND h.metadata->>'kind' IN (
-          'autopr_run_cancel', 'autopr_run_request', 'autopr_additional_context')
-    ORDER BY h.created_at DESC, (h.metadata->>'kind' = 'autopr_run_cancel') DESC
+    WHERE h.task_id = t.id AND (
+        (h.event_type = 'activity' AND h.metadata->>'kind' IN (
+            'autopr_run_cancel', 'autopr_run_request', 'autopr_additional_context'))
+        OR h.event_type IN ('review_rejected', 'round_started')
+    )
+    ORDER BY h.created_at DESC, (h.metadata->>'kind' = 'autopr_run_cancel') DESC NULLS LAST
     LIMIT 1
-), FALSE)
 """
+_AUTOPR_HOLD_SQL = f"COALESCE(({_AUTOPR_HOLD_QUERY}), FALSE)"
 
 
 async def cancel_autopr_run(
@@ -634,7 +635,7 @@ async def claim_autopr_run(
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
-                "SELECT id, board_column, status FROM mw_tasks "
+                "SELECT id, board_column, status, progress_note FROM mw_tasks "
                 "WHERE id = $1 AND project_id = $2 FOR UPDATE",
                 task_id, project_id,
             )
@@ -644,7 +645,16 @@ async def claim_autopr_run(
                 f"SELECT {_AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = $1",
                 task_id,
             )
-            if held or task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
+            # collect/select also admit an ALREADY SCOPED in-progress card
+            # whose linked PR closed without merging. The selector verifies
+            # that PR state; recheck the live provenance here before claiming.
+            scoped_recovery = (
+                task["board_column"] == "in_progress"
+                and (task["progress_note"] or "").startswith("🤖 AUTO SETUP · ALREADY SCOPED")
+            )
+            if held or task["status"] == "cancelled" or (
+                task["board_column"] not in _AUTOPR_RUN_LANES and not scoped_recovery
+            ):
                 return {"ok": False, "reason": "Ticket is held or no longer queued"}
             row = await conn.fetchrow(
                 """
@@ -1495,8 +1505,8 @@ async def list_project_tasks(
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
-                   ({_AUTOPR_HOLD_SQL}) AS autopr_paused,
-                   (autopr_ctx.id IS NOT NULL AND NOT ({_AUTOPR_HOLD_SQL})) AS autopr_reconsideration_pending,
+                   COALESCE(autopr_hold.paused, FALSE) AS autopr_paused,
+                   (autopr_ctx.id IS NOT NULL AND NOT COALESCE(autopr_hold.paused, FALSE)) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
                    -- "Run AutoPR now" on the card. Pending until the harness
@@ -1570,6 +1580,7 @@ async def list_project_tasks(
             LEFT JOIN employees e2 ON e2.user_id = t.created_by
             LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
+            LEFT JOIN LATERAL ({_AUTOPR_HOLD_QUERY}) autopr_hold ON TRUE
             LEFT JOIN LATERAL (
                 SELECT h5.id, h5.created_at
                 FROM mw_task_history h5

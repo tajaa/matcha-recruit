@@ -35,6 +35,12 @@ CHECKS = r'''@main struct WizardSmoke {
   let fenced = "## Questions to answer\nKeep this example:\n```markdown\n## Subject\nnot a field\n```"
   precondition(ResearchBriefWizard.parse(fenced).values["subject"] == nil)
   precondition(ResearchBriefWizard.parse(fenced).values["questions"]?.contains("## Subject") == true)
+  precondition(ResearchBriefWizard.example(for: "new-field-with-no-example") == nil)
+  precondition(ResearchBriefWizard.example(for: "questions")?.hasPrefix("1.") == true)
+  let extendedFields = [KanbanTemplate.TicketField(key: "new-field", label: "New field", placeholder: "", kind: .multiLine)] + ResearchBriefWizard.fields.reversed()
+  let examples = extendedFields.map { ResearchBriefWizard.example(for: $0.key) }
+  precondition(examples.first! == nil)
+  precondition(examples.compactMap { $0 }.count == ResearchBriefWizard.fields.count)
   print("Research brief preservation and round-trip checks passed")
   guard CommandLine.arguments.count > 1 else { return }
   let app = NSApplication.shared

@@ -401,22 +401,35 @@ struct ResearchBriefWizard: View {
             .filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
     private var isReview: Bool { step == Self.fields.count + 1 }
+    private var isRequiredStep: Bool {
+        step == 0 || (!isReview && ["subject", "questions"].contains(Self.fields[step - 1].key))
+    }
     private var canContinue: Bool {
         if step == 0 { return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        if step <= 2 { return !(values[Self.fields[step - 1].key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if isRequiredStep { return !(values[Self.fields[step - 1].key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return true
     }
     private func binding(_ key: String) -> Binding<String> {
         Binding(get: { values[key] ?? "" }, set: { values[key] = $0 })
     }
-    private var examples: [String] {
-        ["Compare scheduling tools for a two-location coffee shop",
-         "Compare three scheduling tools for a coffee shop with 25 hourly employees.",
-         "1. Which supports shift swaps and break reminders?\n2. What does each cost for 25 employees?\n3. Which integrates with our POS?",
-         "Choose a tool to pilot next month and identify the trade-offs before we commit.",
-         "US products only. Budget: $150/month. Compare the current paid plans. Exclude payroll-only tools.",
-         "Use official pricing pages and product documentation. Link each source and note when pricing needs a quote.",
-         "A comparison table, a short recommendation, and a list of unknowns to verify during a demo."]
+    static let titleExample = "Compare scheduling tools for a two-location coffee shop"
+
+    /// Keyed by the same stable identities as the fields. A newly added field
+    /// simply has no example until one is supplied; reordering cannot swap it.
+    static func example(for key: String) -> String? {
+        let examples = [
+            "subject": "Compare three scheduling tools for a coffee shop with 25 hourly employees.",
+            "questions": "1. Which supports shift swaps and break reminders?\n2. What does each cost for 25 employees?\n3. Which integrates with our POS?",
+            "why": "Choose a tool to pilot next month and identify the trade-offs before we commit.",
+            "constraints": "US products only. Budget: $150/month. Compare the current paid plans. Exclude payroll-only tools.",
+            "sources": "Use official pricing pages and product documentation. Link each source and note when pricing needs a quote.",
+            "output": "A comparison table, a short recommendation, and a list of unknowns to verify during a demo."
+        ]
+        return examples[key]
+    }
+
+    private var currentExample: String? {
+        step == 0 ? Self.titleExample : Self.example(for: Self.fields[step - 1].key)
     }
     private var heading: String {
         if step == 0 { return "What are you researching?" }
@@ -459,7 +472,7 @@ struct ResearchBriefWizard: View {
                 Text("Apply returns to the ticket form. Review the assignee and priority there before saving.")
                     .font(.system(size: 12)).foregroundColor(.secondary)
             } else {
-                Text(step <= 2 ? "Required · Be specific enough that someone else can investigate this." : "Optional · Add what you know, or continue to skip this step.")
+                Text(isRequiredStep ? "Required · Be specific enough that someone else can investigate this." : "Optional · Add what you know, or continue to skip this step.")
                     .font(.system(size: 12)).foregroundColor(.secondary)
                 ComposerTextView(text: step == 0 ? $title : binding(Self.fields[step - 1].key),
                                  placeholder: step == 0 ? "Name your research ticket…" : Self.fields[step - 1].placeholder,
@@ -469,18 +482,20 @@ struct ResearchBriefWizard: View {
                     .id(step)
                     .padding(14)
                     .background(appState.themeText.opacity(0.06)).cornerRadius(10)
+                if let example = currentExample {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("EXAMPLE").font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
-                    Text(examples[step]).font(.system(size: 13)).lineSpacing(4)
+                    Text(example).font(.system(size: 13)).lineSpacing(4)
                     Button("Use this example") {
-                        if step == 0 { title = examples[step] }
-                        else { values[Self.fields[step - 1].key] = examples[step] }
+                        if step == 0 { title = example }
+                        else { values[Self.fields[step - 1].key] = example }
                     }
                     .buttonStyle(.borderless)
                     .disabled(step == 0 ? !title.isEmpty : !(values[Self.fields[step - 1].key] ?? "").isEmpty)
                 }
                 .padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 .background(appState.themeAccent.opacity(0.07)).cornerRadius(10)
+                }
                 Spacer(minLength: 0)
             }
             Divider()
