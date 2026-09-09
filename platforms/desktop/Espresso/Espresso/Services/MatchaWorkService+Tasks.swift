@@ -299,6 +299,16 @@ extension MatchaWorkService {
         )
     }
 
+    func cancelAutoPRRun(projectId: String, taskId: String) async throws -> AutoPRRunRequestResponse {
+        struct Req: Encodable {}
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/unqueue",
+            body: Req()
+        )
+    }
+
     // MARK: - AutoPR board capabilities
 
     /// What the AutoPR harness may do on a board, as granted in Admin →

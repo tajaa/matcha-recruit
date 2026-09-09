@@ -70,6 +70,7 @@ for project_id in "${PROJECT_IDS[@]}"; do
               )
             )
             and .status != "cancelled"
+            and (.autopr_paused // false | not)
           ))
         | map(
             . as $t

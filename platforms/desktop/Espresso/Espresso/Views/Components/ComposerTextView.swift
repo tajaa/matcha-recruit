@@ -37,6 +37,8 @@ struct ComposerTextView: View {
     /// and no plain text. `nil` leaves image pastes to the text view (dropped).
     var onPasteImage: (() -> Void)? = nil
 
+    var focusRequested: Binding<Bool> = .constant(false)
+
     @State private var contentHeight: CGFloat = 0
 
     private var lineHeight: CGFloat {
@@ -60,7 +62,8 @@ struct ComposerTextView: View {
             verticalInset: verticalInset,
             submitKey: submitKey,
             onSubmit: onSubmit,
-            onPasteImage: onPasteImage
+            onPasteImage: onPasteImage,
+            focusRequested: focusRequested
         )
         .frame(height: resolvedHeight)
         .overlay(alignment: .topLeading) {
@@ -77,6 +80,7 @@ struct ComposerTextView: View {
 }
 
 private struct ComposerTextViewRepresentable: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     @Binding var text: String
     @Binding var contentHeight: CGFloat
     let font: NSFont
@@ -85,6 +89,7 @@ private struct ComposerTextViewRepresentable: NSViewRepresentable {
     let submitKey: ComposerTextView.SubmitKey
     let onSubmit: () -> Void
     let onPasteImage: (() -> Void)?
+    @Binding var focusRequested: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -148,6 +153,14 @@ private struct ComposerTextViewRepresentable: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         applyStyle(to: textView)
         textView.onPasteImage = onPasteImage
+        if focusRequested {
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView, let window = textView.window else { return }
+                if window.makeFirstResponder(textView) {
+                    context.coordinator.parent.focusRequested = false
+                }
+            }
+        }
         // Only push the binding down when it changed externally (seed / clear /
         // hard cap). During normal typing the coordinator already wrote this
         // exact string up, and resetting it would move the caret to the end.
@@ -167,6 +180,7 @@ private struct ComposerTextViewRepresentable: NSViewRepresentable {
     }
 
     private func applyStyle(to textView: NSTextView) {
+        textView.isEditable = isEnabled
         if textView.font != font { textView.font = font }
         if textView.textColor != textColor {
             textView.textColor = textColor
@@ -189,6 +203,7 @@ private struct ComposerTextViewRepresentable: NSViewRepresentable {
         }
 
         func handleReturn(_ flags: NSEvent.ModifierFlags) -> Bool {
+            guard parent.isEnabled else { return true }
             switch parent.submitKey {
             case .returnSends:
                 // ⇧↵ (and ⌥↵) fall through so the newline lands at the caret.

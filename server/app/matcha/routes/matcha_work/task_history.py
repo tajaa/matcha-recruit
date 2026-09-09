@@ -308,6 +308,27 @@ async def request_autopr_run_endpoint(
     return result
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/autopr/unqueue")
+async def cancel_autopr_run_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """Hold future AutoPR work while a member edits the ticket."""
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    try:
+        result = await pt_svc.cancel_autopr_run(
+            project_id=project_id, task_id=task_id, actor_user_id=current_user.id,
+        )
+    except pt_svc.AutoPRReconsiderationConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
 @router.post(
     "/projects/{project_id}/tasks/{task_id}/autopr/run-claim",
     status_code=201,

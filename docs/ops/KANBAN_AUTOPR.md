@@ -316,6 +316,32 @@ budget had already been spent.
    (defined once in `project_task_service.py`, shared with the PR webhook's board check),
    and any request older than 30 minutes stops counting as pending everywhere — the
    watcher's poll, the card chip, and the idempotency check all read the same window.
+   **Unqueue** in Espresso records `autopr_run_cancel` and holds the card without
+   changing its column, assignment, question text, or saved answers. The task list
+   exposes `autopr_paused`; collection excludes held cards even from the scheduled
+   sweep. A new explicit Run, additional-context submission, review rejection, or
+   manually started round releases the hold; publication and claims do not.
+   The card face shows a paused badge, including while an older run finishes.
+   Run-request reads treat cancellation like consumption. Every investigation now
+   claims against live state and fails closed if the card was held after collection
+   or the API is unavailable. Unqueue does not interrupt an already claimed run.
+   Queue/hold/claim writes serialize on the task row and use post-lock wall-clock
+   timestamps. The `autoprrun02` migration adds a concurrent task-history index
+   covering holds, resumes, claims, and round boundaries, without changing the
+   original request-poll indexes. The list query resolves hold state once per task.
+   Claims preserve the selector's `in_progress` ALREADY SCOPED recovery lane for
+   linked PRs closed without merging, while continuing to reject held, cancelled,
+   and ordinary in-progress cards. Deploy the backend and update the
+   runner control snapshot before shipping the desktop action; an old server will
+   reject Unqueue and the app will retain the queued state and show the error.
+   Espresso keeps the native multiline answer editor below the scrolling questions;
+   Return inserts a newline, ⌘Return submits, and failed submissions retain drafts.
+   New Research tickets open an optional eight-step brief wizard with examples,
+   required title/subject/questions, optional scope/sources/output, and a review
+   screen. The editor's Research wizard also preserves custom sections and fenced
+   examples. Applying the wizard only changes the local form; creating/saving is
+   still explicit. Ticket details separate the automation summary and question
+   blocks from expandable original run details across ticket categories.
    A failed attempt otherwise cools down
    for 15 minutes, so later ticks can work other cards instead of repeatedly
    starving the queue on one broken task. Caps at 10 open implementation
