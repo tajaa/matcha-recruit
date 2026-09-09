@@ -2586,8 +2586,9 @@ class CapabilityTests(MsandboxTestCase):
             title = _session_menu_title(record)
         measured.assert_not_called()
         self.assertIn("test — codex / standard / created", title)
-        self.assertIn("✅ GitHub CLI", title)
-        self.assertIn("❌ Production admin/secrets", title)
+        self.assertIn("available at last check", title)
+        self.assertIn("Tools & access", title)
+        self.assertNotIn("invoke:", title)
         # The report was measured with the container up; this session is not.
         self.assertIn("measured while the container was running", title)
 
@@ -2625,11 +2626,11 @@ class CapabilityTests(MsandboxTestCase):
         report, _ = self.collect(record)
         output = io.StringIO()
         with mock.patch(
-            "scripts.msandbox.wizard.choose", side_effect=["capabilities", "back"]
+            "scripts.msandbox.wizard.choose", side_effect=["tools", "refresh", None, "back"]
         ), mock.patch(
             "scripts.msandbox.wizard.reconcile_session", side_effect=lambda item: item
         ), mock.patch(
-            "scripts.msandbox.wizard.ensure_capability_report", return_value=report
+            "scripts.msandbox.manager.ensure_capability_report", return_value=report
         ) as measured:
             _open_session(record, reader=lambda prompt: "", output=output)
         self.assertEqual(measured.call_args.kwargs, {"refresh": True})

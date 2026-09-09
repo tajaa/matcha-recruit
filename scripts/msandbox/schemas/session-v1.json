@@ -75,6 +75,10 @@
         "null"
       ]
     },
+    "managed_local_branch": {
+      "type": "boolean",
+      "default": false
+    },
     "last_capability_check_at": {
       "type": [
         "string",

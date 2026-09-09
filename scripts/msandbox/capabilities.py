@@ -30,10 +30,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-from .docker_runtime import attachment_dir, compose_command, exec_in_session, session_home
-from .models import CapabilityReport, CapabilityResult, CapabilityStatus, SessionRecord, utc_now
+from .docker_runtime import (
+    attachment_dir,
+    compose_command,
+    exec_in_session,
+    session_home,
+)
+from .models import (
+    CapabilityReport,
+    CapabilityResult,
+    CapabilityStatus,
+    SessionRecord,
+    utc_now,
+)
 from .state import config_root, state_root
-
 
 CAPABILITY_SCHEMA_VERSION = 1
 REPORT_DIRECTORY = ".msandbox"
@@ -996,6 +1006,10 @@ def render_markdown(report: CapabilityReport, *, name: str) -> str:
         "invocation before claiming the capability is absent.",
         "",
         f"Measured at {report.checked_at}.",
+        "Save generated screenshots, PDFs, and other deliverables under "
+        "`/workspace/.msandbox/outputs/`. The operator can browse and export them "
+        "from Files & attachments before releasing the worktree. Uploaded inputs "
+        "remain read-only under `/attachments`.",
         "",
         "## Available",
         "",
