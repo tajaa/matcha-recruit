@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import secrets
@@ -7,9 +8,9 @@ import shutil
 import stat
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from .docker_runtime import session_home
 from .git_worktrees import session_git_dir
@@ -44,7 +45,9 @@ def switching_agent_auth(record: SessionRecord) -> Iterator[None]:
                     _private_directory(session_home(record), *relative.parts[:-1])
                 )
                 files.append(
-                    (agent, fd, relative.name, _read_private_regular_file(fd, relative.name))
+                    (agent, fd, relative.name, stack.enter_context(
+                        _credential_backup(fd, relative.name)
+                    ))
                 )
         try:
             for agent, fd, name, _ in files:
@@ -57,6 +60,7 @@ def switching_agent_auth(record: SessionRecord) -> Iterator[None]:
         except BaseException:
             for _, fd, name, payload in files:
                 if payload is not None:
+                    payload.seek(0)
                     _atomic_private_write(fd, name, payload)
                 else:
                     try:
@@ -132,7 +136,27 @@ def _read_private_regular_file(directory_fd: int, name: str) -> bytes | None:
             os.close(descriptor)
 
 
-def _atomic_private_write(directory_fd: int, name: str, payload: bytes) -> None:
+@contextmanager
+def _credential_backup(directory_fd: int, name: str):
+    """Keep rollback copies outside the mounted home without a memory-size cap."""
+    try:
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+    except OSError as exc:
+        if exc.errno not in (errno.ENOENT, errno.ELOOP):
+            raise
+        yield None
+        return
+    with os.fdopen(descriptor, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            yield None
+            return
+        with tempfile.TemporaryFile() as backup:
+            shutil.copyfileobj(source, backup, length=1024 * 1024)
+            backup.seek(0)
+            yield backup
+
+
+def _atomic_private_write(directory_fd: int, name: str, payload) -> None:
     if not name or name in (".", "..") or "/" in name:
         raise SessionAuthError("invalid private credential filename")
     temporary = f".{name}.{secrets.token_hex(8)}"
@@ -144,7 +168,10 @@ def _atomic_private_write(directory_fd: int, name: str, payload: bytes) -> None:
             dir_fd=directory_fd,
         )
         with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
+            if isinstance(payload, bytes):
+                handle.write(payload)
+            else:
+                shutil.copyfileobj(payload, handle, length=1024 * 1024)
             handle.flush()
             os.fsync(handle.fileno())
             os.fchmod(handle.fileno(), 0o600)
@@ -163,16 +190,29 @@ def _atomic_private_write(directory_fd: int, name: str, payload: bytes) -> None:
             pass
 
 
-def _copy_agent_auth(record: SessionRecord) -> None:
+def _copy_agent_auth(record: SessionRecord, *, require_login: bool = False) -> None:
     """Seed only the selected agent's login; never copy histories or logs."""
     home = session_home(record)
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    copied_login = False
     for path in AGENT_AUTH_FILES[record.agent]:
         source = Path.home() / path
         if source.is_file() and not source.is_symlink():
             relative = Path(path)
             with _private_directory(home, *relative.parts[:-1]) as directory_fd:
-                _atomic_private_write(directory_fd, relative.name, source.read_bytes())
+                fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, "rb") as stream:
+                    metadata = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise SessionAuthError("login source is not a regular file")
+                    _atomic_private_write(directory_fd, relative.name, stream)
+                    if path != ".claude.json" and metadata.st_size:
+                        copied_login = True
+    if require_login and not copied_login:
+        raise SessionAuthError(
+            f"No host {record.agent} login file is available. Authenticate with "
+            f"{record.agent} on the host, then retry Change harness. Previous login is preserved."
+        )
 
 
 def _github_origin(record: SessionRecord) -> bool:
@@ -300,6 +340,6 @@ def refresh_github_auth(record: SessionRecord) -> None:
     _configure_github_git(record)
 
 
-def provision_session_auth(record: SessionRecord) -> None:
-    _copy_agent_auth(record)
+def provision_session_auth(record: SessionRecord, *, require_login: bool = False) -> None:
+    _copy_agent_auth(record, require_login=require_login)
     refresh_github_auth(record)

@@ -47,7 +47,10 @@ Opening an existing session always shows its controls before attaching:
   must succeed before the new harness is saved. Switching removes the other
   harnesses' login files (including Claude's `.claude.json` login/settings file),
   while retaining conversation history. Failed provisioning or saving restores
-  the previous login files. Start it from the session menu.
+  the previous login files. A missing target login produces a host-authentication
+  instruction and rolls back the switch. Credential rollback uses private disk
+  snapshots, so large Claude configuration files do not exceed a memory cap.
+  Start it from the session menu.
 - **Environment & processes** measures Docker state, harness terminals,
   container executable names/PIDs/uptime, `dev-remote.sh` panes, host development
   endpoints, session endpoints, and database/Redis TCP reachability. Start/stop
@@ -60,6 +63,7 @@ Opening an existing session always shows its controls before attaching:
   Workspace discovery filters Docker's exact Compose `workspace` service; session
   names cannot cause database or Redis containers to be selected. Malformed probe
   output is shown as an unreliable measurement instead of closing the manager.
+  Missing or malformed endpoint URLs are never probed as loopback addresses.
 - **Browser** enables the browser image (stopping current workspace processes),
   starts/stops a managed headless Chromium, or captures a URL into a viewport PNG.
   Managed Chromium's CDP endpoint is `http://127.0.0.1:9222` **inside** the container,
@@ -77,9 +81,14 @@ Opening an existing session always shows its controls before attaching:
   `~/.local/share/matcha-msandbox/exports/<id>`, outside the releasable worktree.
   **Export wanted generated files before releasing or submitting a session.**
   Generated output is ignored by Git and otherwise disappears with the worktree.
-  Creation and reconciliation install `/.msandbox/outputs/` in host and isolated
-  Git `info/exclude`, including sessions based on older commits. The host rule is
-  shared by the repository's linked worktrees; existing rules are preserved.
+  Creation and explicit lifecycle repair install `/.msandbox/outputs/` in isolated
+  Git `info/exclude`. A host exclusion is added only when Git does not already
+  ignore outputs, to protect sessions based on older commits. That fallback rule
+  is shared by linked worktrees; existing rules are preserved. Routine menu
+  redraws do not repeat this repair.
+  Binary previews use file type, signatures, and UTF-8 validation. Exports stream
+  from the validated file descriptor without buffering the whole file or making
+  an intermediate temporary copy.
   Controller commits also exclude `.msandbox` and refuse forcibly staged sandbox files.
   Files with Unicode control-category characters in any path component are hidden
   and cannot be delivered. Harness delivery uses bracketed paste so a pasted path
@@ -108,6 +117,9 @@ Opening an existing session always shows its controls before attaching:
   it has no commits outside the published session and has not moved concurrently.
   A stale, remote-deleted local ref with no unique commits can be safely adopted
   by a later session and receives the same cleanup protection.
+  If optional local-branch cleanup fails after the worktree is removed, release
+  still finalizes the session and frees its ports; the result names the retained
+  branch cleanup warning.
   Existing PR sessions retain their
   branch. Run **Validate full PR**, then **Publish draft pull request**; the existing
   exact-commit validation, push lease, and release checks still apply. The helper
@@ -120,6 +132,11 @@ Opening an existing session always shows its controls before attaching:
   confirmation names that PR and the fields being replaced. A failed or interrupted
   push/GitHub step returns the session to `stopped`; proven pushed state is retained
   so publishing can retry with the correct remote lease.
+
+Submenu loading failures offer Back and Retry. A broken session remains visible
+with a repair notice while healthy sessions stay selectable. Testing → Back
+returns directly. Terminal headings retain trailing notices, and incomplete mouse
+reports time out instead of blocking input.
 
 Equivalent navigation commands:
 

@@ -17,7 +17,7 @@ from .git_worktrees import (
     remote_branch_sha,
     resolve_worktree_owner,
 )
-from .models import SessionRecord
+from .models import UNAVAILABLE_PHASES, SessionRecord
 from .state import list_sessions, load_session, save_session, session_dir, state_lock
 
 
@@ -106,12 +106,7 @@ def generate_draft(record: SessionRecord) -> PublicationDraft:
 
     with state_lock(f"session-{record.id}"):
         current = load_session(record.id)
-        if current.phase in (
-            "released",
-            "orphaned",
-            "submitting",
-            "submitted_needs_release",
-        ):
+        if current.phase in UNAVAILABLE_PHASES:
             raise RuntimeError("Session is not available for drafting")
         stop_session(current, _lock_held=True)
         record.__dict__.update(current.__dict__)
@@ -283,12 +278,7 @@ def apply_draft(
 
     with state_lock("publication-branches"), state_lock(f"session-{record.id}"):
         current = load_session(record.id)
-        if current.phase in (
-            "released",
-            "orphaned",
-            "submitting",
-            "submitted_needs_release",
-        ):
+        if current.phase in UNAVAILABLE_PHASES:
             raise RuntimeError("Session is not available for branch changes")
         stop_session(current, _lock_held=True)
         if (

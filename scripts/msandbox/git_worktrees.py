@@ -91,13 +91,18 @@ def session_git_head(session_id: str) -> str:
 def exclude_generated_outputs(worktree: Path, session_id: str) -> None:
     """Ignore generated outputs in both host and isolated Git, even on old bases.
 
-    Host info/exclude is shared by linked worktrees. Append one anchored rule,
-    preserving existing rules, without modifying any versioned .gitignore.
+    Host info/exclude is shared by linked worktrees; touch it only when existing
+    ignore rules do not cover outputs (old-base sessions). Preserve other rules.
     """
-    raw = Path(_git(worktree, "rev-parse", "--git-path", "info/exclude").stdout.strip())
-    host_exclude = raw if raw.is_absolute() else worktree / raw
+    paths = [session_git_dir(session_id) / "info/exclude"]
+    ignored = _git(worktree, "check-ignore", "--quiet", ".msandbox/outputs/probe", check=False)
+    if ignored.returncode not in (0, 1):
+        raise GitError("Could not inspect generated-output exclusion")
+    if ignored.returncode == 1:
+        raw = Path(_git(worktree, "rev-parse", "--git-path", "info/exclude").stdout.strip())
+        paths.append(raw if raw.is_absolute() else worktree / raw)
     with state_lock("generated-output-excludes"):
-        for path in (host_exclude, session_git_dir(session_id) / "info/exclude"):
+        for path in paths:
             directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
                 fd = os.open(

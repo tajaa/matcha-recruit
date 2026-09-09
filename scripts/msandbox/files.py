@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import mimetypes
 import os
 import stat
-import tempfile
 import unicodedata
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,7 +77,8 @@ def list_files(record: SessionRecord) -> list[SandboxFile]:
     return result
 
 
-def read_file(item: SandboxFile, limit: int) -> bytes:
+@contextmanager
+def open_file(item: SandboxFile):
     path = item.root.absolute() / item.relative
     if ".." in path.parts:
         raise ValueError("unsafe file path")
@@ -97,8 +99,7 @@ def read_file(item: SandboxFile, limit: int) -> bytes:
                 raise ValueError(
                     "Only regular files up to 50 MiB can be opened/exported"
                 )
-            with os.fdopen(source, "rb", closefd=False) as stream:
-                payload = stream.read(limit)
+            yield source
             after = os.fstat(source)
             if (before.st_size, before.st_mtime_ns) != (
                 after.st_size,
@@ -107,23 +108,43 @@ def read_file(item: SandboxFile, limit: int) -> bytes:
                 raise ValueError(
                     "File changed while reading; retry after its writer finishes"
                 )
-            return payload
         finally:
             os.close(source)
     finally:
         os.close(fd)
 
 
+def read_file(item: SandboxFile, limit: int) -> bytes:
+    with open_file(item) as source, os.fdopen(source, "rb", closefd=False) as stream:
+        return stream.read(limit)
+
+
+def text_preview(item: SandboxFile, payload: bytes) -> str | None:
+    mime = mimetypes.guess_type(item.relative.name)[0]
+    if mime and not (mime.startswith("text/") or mime in ("application/json", "application/xml", "application/javascript")):
+        return None
+    if payload.startswith((b"%PDF-", b"PK\x03\x04", b"\x89PNG", b"\x1f\x8b", b"GIF8", b"\xff\xd8")):
+        return None
+    try:
+        # A bounded read may end within a valid UTF-8 character.
+        import codecs
+
+        text = codecs.getincrementaldecoder("utf-8")().decode(payload, final=len(payload) >= item.size)
+    except UnicodeDecodeError:
+        return None
+    if any(unicodedata.category(c) == "Cc" and c not in "\n\r\t" for c in text):
+        return None
+    return text
+
+
 def export_file(record: SessionRecord, item: SandboxFile) -> Path:
-    payload = read_file(item, DEFAULT_MAX_BYTES + 1)
-    with tempfile.TemporaryDirectory(prefix="msandbox-export-") as temporary:
-        source = Path(temporary) / item.relative.name
-        source.write_bytes(payload)
+    with open_file(item) as source:
         exported = import_files_to_inbox(
-            [source],
+            [item.relative],
             inbox=data_root() / "exports" / record.id,
             container_dir=Path("/exports"),
             lock_name=f"exports-{record.id}",
             session_max_bytes=1024 * 1024 * 1024,
+            source_fd=source,
         )
     return exported[0].host_path

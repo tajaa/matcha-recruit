@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from .docker_runtime import ensure_container, exec_in_session
-from .models import SessionRecord
+from .models import UNAVAILABLE_PHASES, SessionRecord
 from .state import load_session, save_session, state_lock
 
 BROWSER_START = """
@@ -60,12 +60,7 @@ else: raise RuntimeError('Managed browser did not become ready')
 def tool_action(record: SessionRecord, action: str, *, url: str = "") -> str:
     with state_lock(f"session-{record.id}", timeout_s=30):
         current = load_session(record.id)
-        if current.phase in (
-            "released",
-            "orphaned",
-            "submitting",
-            "submitted_needs_release",
-        ):
+        if current.phase in UNAVAILABLE_PHASES:
             raise RuntimeError("This session is not available for tool actions")
         if action == "browser-enable":
             # Recreating a workspace to change images interrupts every process.

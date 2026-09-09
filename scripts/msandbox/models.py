@@ -20,6 +20,8 @@ SessionPhase = Literal[
 ValidationStatus = Literal["pass", "fail", "unavailable", "skip"]
 CapabilityStatus = Literal["available", "unavailable", "denied"]
 
+UNAVAILABLE_PHASES = frozenset(("released", "orphaned", "submitting", "submitted_needs_release"))
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()

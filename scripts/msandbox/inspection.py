@@ -88,6 +88,8 @@ def tcp(host, port):
 def endpoint(label, raw):
     try:
         u = urlsplit(raw)
+        if u.scheme not in ('http', 'https', 'postgresql', 'postgres', 'redis') or not u.hostname:
+            return [label, False]
         default = {'https': 443, 'postgresql': 5432, 'postgres': 5432, 'redis': 6379}.get(u.scheme, 80)
         return [label, tcp(u.hostname, u.port or default)]
     except (ValueError, TypeError): return [label, False]

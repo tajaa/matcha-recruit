@@ -49,6 +49,7 @@ from .git_worktrees import (
     sync_session_git_to_host,
 )
 from .models import (
+    UNAVAILABLE_PHASES,
     CapabilityReport,
     PullRequest,
     ReleaseResult,
@@ -239,9 +240,10 @@ def create_session(repo: Path, spec: SessionSpec, extra_agent_args: Sequence[str
         return record
 
 
-def _ensure_isolated_git(record: SessionRecord) -> None:
+def _ensure_isolated_git(record: SessionRecord, *, repair: bool = True) -> None:
     if session_git_dir(record.id).is_dir():
-        exclude_generated_outputs(record.worktree, record.id)
+        if repair:
+            exclude_generated_outputs(record.worktree, record.id)
         return
     head = current_head(record.worktree)
     initialize_session_git(record.repo_path, record.worktree, record.id, head)
@@ -355,7 +357,7 @@ def switch_session(record: SessionRecord, agent: str) -> SessionRecord:
         raise SessionError("unsupported harness")
     with state_lock(f"session-{record.id}"):
         current = load_session(record.id)
-        if current.phase in ("released", "orphaned", "submitting", "submitted_needs_release"):
+        if current.phase in UNAVAILABLE_PHASES:
             raise SessionError("this session cannot switch harnesses in its current state")
         stop_session(current, _lock_held=True)
         if current.phase == "orphaned":
@@ -366,7 +368,7 @@ def switch_session(record: SessionRecord, agent: str) -> SessionRecord:
         # A failed copy/save restores previous login files and leaves the old
         # harness stopped and retryable. Only login files change, not history.
         with switching_agent_auth(proposed):
-            provision_session_auth(proposed)
+            provision_session_auth(proposed, require_login=True)
             save_session(proposed)
         record.__dict__.update(proposed.__dict__)
         return record
@@ -381,7 +383,7 @@ def reconcile_session(record: SessionRecord, *, _lock_held: bool = False) -> Ses
     if not record.worktree.exists():
         record.phase = "orphaned"
     else:
-        _ensure_isolated_git(record)
+        _ensure_isolated_git(record, repair=False)
         ensure_agent_pane_controls(record)
         if container_running(record) and tmux_running(record):
             record.phase = "running"
@@ -590,21 +592,14 @@ def release_session(
                     "worktree is absent but the managed branch is not published",
                     record.worktree,
                 )
-            branch_error = remove_managed_local_branch(
-                record.repo_path, record.target_branch, published_head
-            )
-            if branch_error:
-                return ReleaseResult(
-                    False,
-                    f"worktree is absent but {branch_error}",
-                    record.worktree,
-                )
-            record.managed_local_branch = False
+            branch_error = _release_local_branch(record, published_head)
+        else:
+            branch_error = None
         remove_session_git(record.id)
         record.phase = "released"
         record.ports = None
         save_session(record)
-        return ReleaseResult(True, "worktree already absent", record.worktree)
+        return ReleaseResult(True, "worktree already absent" + (f"; local branch retained: {branch_error}" if branch_error else ""), record.worktree)
     stop_session(record, _lock_held=True)
     if keep_worktree:
         return ReleaseResult(True, "session stopped; worktree retained", record.worktree)
@@ -619,18 +614,24 @@ def release_session(
     result = remove_session_worktree(record.repo_path, record.worktree, record.target_branch)
     if result.released:
         if record.managed_local_branch:
-            branch_error = remove_managed_local_branch(
-                record.repo_path, record.target_branch, publish_state.head_sha
-            )
+            branch_error = _release_local_branch(record, publish_state.head_sha)
             if branch_error:
-                return ReleaseResult(
-                    False,
-                    f"worktree removed, but {branch_error}",
-                    record.worktree,
+                result = ReleaseResult(
+                    True, f"worktree released; local branch retained: {branch_error}", record.worktree
                 )
-            record.managed_local_branch = False
         remove_session_git(record.id)
         record.phase = "released"
         record.ports = None
         save_session(record)
     return result
+
+
+def _release_local_branch(record: SessionRecord, published_head: str) -> str | None:
+    """Optional ref cleanup must not block finalizing a removed workspace."""
+    try:
+        error = remove_managed_local_branch(record.repo_path, record.target_branch, published_head)
+    except (OSError, GitError) as exc:
+        error = str(exc)
+    if error is None:
+        record.managed_local_branch = False
+    return error

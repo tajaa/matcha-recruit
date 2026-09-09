@@ -162,9 +162,12 @@ def _tmux_exists(record: SessionRecord) -> bool:
     )
 
 
+_configured_panes: set[str] = set()
+
+
 def ensure_agent_pane_controls(record: SessionRecord) -> None:
     """Install lifecycle controls on both new and pre-control-center panes."""
-    if not _tmux_exists(record):
+    if record.tmux_session in _configured_panes or not _tmux_exists(record):
         return
     subprocess.run(
         ["tmux", "set-option", "-t", record.tmux_session, "remain-on-exit", "on"],
@@ -200,6 +203,7 @@ def ensure_agent_pane_controls(record: SessionRecord) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    _configured_panes.add(record.tmux_session)
 
 
 def exited_agent_output(record: SessionRecord) -> str | None:
@@ -244,6 +248,7 @@ def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
 
 
 def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
+    _configured_panes.discard(record.tmux_session)
     subprocess.run(
         ["tmux", "kill-session", "-t", record.tmux_session],
         check=False,

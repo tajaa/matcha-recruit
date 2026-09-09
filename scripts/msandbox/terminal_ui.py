@@ -54,9 +54,12 @@ def frame(
 ) -> tuple[str, dict[int, int]]:
     """Render a bounded viewport and return its clickable row -> choice map."""
     width, height = max(20, width - 1), max(10, height)
-    heading = plain(title).splitlines()
+    heading = plain(title).splitlines() or ["Sandbox"]
+    limit = max(1, height - 7)
+    if len(heading) > limit:
+        heading = [heading[0], *heading[-(limit - 1):]] if limit > 1 else [heading[-1]]
     lines = ["\x1b[1;36m" + clip(heading[0], width) + "\x1b[0m"]
-    for line in heading[1:5]:
+    for line in heading[1:]:
         lines.append("\x1b[2m" + clip(line, width) + "\x1b[0m")
     lines.append("─" * width)
     available = max(1, height - len(lines) - 5)

@@ -50,6 +50,124 @@ from scripts.tests.test_msandbox_v2 import MsandboxTestCase, git
 
 
 class ManagerTests(MsandboxTestCase):
+    def test_submenu_load_failure_has_a_back_choice(self):
+        with (
+            mock.patch("scripts.msandbox.manager.list_files", side_effect=OSError("offline")),
+            mock.patch("scripts.msandbox.wizard.choose", return_value=False) as choose,
+        ):
+            manage("files", self.record(), reader=lambda _: "", output=io.StringIO())
+        self.assertEqual(choose.call_args.args[1][0], ("Back", False))
+
+    def test_frame_empty_title_and_sixth_line_notice(self):
+        screen, _ = frame("", ["Back"], 0, 100, 24)
+        self.assertIn("Sandbox", screen)
+        screen, _ = frame("one\ntwo\nthree\nfour\nfive\nHarness exited", ["Back"], 0, 100, 24)
+        self.assertIn("Harness exited", screen)
+
+    def test_truncated_mouse_report_does_not_block(self):
+        from scripts.msandbox.wizard import _read_terminal_key
+
+        read, write = os.pipe()
+        try:
+            os.write(write, b"\x1b[M")
+            before = time.monotonic()
+            self.assertEqual(_read_terminal_key(read), "ignore")
+            self.assertLess(time.monotonic() - before, 0.5)
+        finally:
+            os.close(read)
+            os.close(write)
+
+    def test_validation_back_does_not_acknowledge(self):
+        from scripts.msandbox.wizard import _run_validation
+
+        reader = mock.Mock()
+        with mock.patch("scripts.msandbox.wizard.choose", return_value=None):
+            _run_validation(self.record(), reader=reader, output=io.StringIO())
+        reader.assert_not_called()
+
+    def test_unconfigured_probe_never_connects_to_loopback(self):
+        namespace = {}
+        with (
+            mock.patch("socket.create_connection") as connect,
+            mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 1)),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            exec(PROBE, namespace)  # noqa: S102 — execute the fixed probe with network mocked
+            connect.reset_mock()
+            for raw in ("", "postgresql:///db", "redis://", "localhost:5432"):
+                self.assertEqual(namespace["endpoint"]("Database", raw), ["Database", False])
+            connect.assert_not_called()
+
+    def test_binary_preview_rejects_pdf_without_nuls_and_invalid_utf8(self):
+        from scripts.msandbox.files import text_preview
+
+        item = SandboxFile(self.root, Path("report.pdf"), "/report.pdf", 100)
+        self.assertIsNone(text_preview(item, b"%PDF-1.4\nplain header"))
+        item = replace(item, relative=Path("unknown"))
+        self.assertIsNone(text_preview(item, b"%PDF-1.4\nplain header"))
+        self.assertIsNone(text_preview(item, b"\xffbad"))
+        self.assertEqual(text_preview(item, b"valid text"), "valid text")
+
+    def test_export_streams_validated_descriptor_without_read_file(self):
+        record = self.record()
+        path = record.worktree / ".msandbox/outputs/report.txt"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"abc" * 400000)
+        item = list_files(record)[0]
+        with mock.patch("scripts.msandbox.files.read_file", side_effect=AssertionError("buffered")):
+            exported = export_file(record, item)
+        self.assertEqual(exported.read_bytes(), path.read_bytes())
+
+    def test_release_finalizes_despite_local_branch_cleanup_failure(self):
+        record = create_session(self.repo, SessionSpec("release-warning", "codex", "main", start=False))
+        record.managed_local_branch = True
+        save_session(record)
+        git(record.worktree, "push", "origin", f"HEAD:refs/heads/{record.target_branch}")
+        with (
+            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("scripts.msandbox.sessions.remove_container_project"),
+            mock.patch("scripts.msandbox.sessions.remove_managed_local_branch", return_value="ref moved"),
+        ):
+            result = release_session(record)
+        self.assertTrue(result.released)
+        self.assertIn("local branch retained", result.reason)
+        self.assertEqual(load_session(record.id).phase, "released")
+        self.assertIsNone(load_session(record.id).ports)
+        from scripts.msandbox.git_worktrees import session_git_dir
+        self.assertFalse(session_git_dir(record.id).exists())
+
+    def test_reconcile_skips_exclusion_repair(self):
+        record = create_session(self.repo, SessionSpec("redraw", "codex", "main", start=False))
+        with (
+            mock.patch("scripts.msandbox.sessions.exclude_generated_outputs") as repair,
+            mock.patch("scripts.msandbox.sessions.ensure_agent_pane_controls"),
+            mock.patch("scripts.msandbox.sessions.container_running", return_value=False),
+        ):
+            reconcile_session(record)
+        repair.assert_not_called()
+
+    def test_picker_keeps_healthy_sessions_when_one_reconcile_fails(self):
+        from scripts.msandbox.wizard import run_wizard
+
+        broken, healthy = self.record(), self.record("session-2")
+        with (
+            mock.patch("scripts.msandbox.wizard.list_sessions", return_value=[broken, healthy]),
+            mock.patch("scripts.msandbox.wizard.reconcile_session", side_effect=[RuntimeError("broken git"), healthy]),
+            mock.patch("scripts.msandbox.wizard.choose", return_value=("exit", None)) as choose,
+        ):
+            run_wizard(self.repo, reader=lambda _: "", output=io.StringIO())
+        self.assertIn("broken git", choose.call_args.args[0])
+        self.assertIn(("session", healthy.id), [value for _, value in choose.call_args.args[1]])
+
+    def test_tracked_ignore_leaves_shared_exclude_untouched(self):
+        (self.repo / ".gitignore").write_text(".msandbox/outputs/\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-m", "ignore outputs")
+        exclude = self.repo / ".git/info/exclude"
+        before = exclude.read_bytes()
+        create_session(self.repo, SessionSpec("ignored", "codex", "main", start=False))
+        self.assertEqual(exclude.read_bytes(), before)
+
     def _check_pager_exit(self, key):
         if not shutil.which("less"):
             self.skipTest("less unavailable")
@@ -425,6 +543,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         record = self.record()
         completed = subprocess.CompletedProcess([], 0, "", "")
         with (
+            mock.patch("scripts.msandbox.agent_adapters._configured_panes", set()),
             mock.patch(
                 "scripts.msandbox.agent_adapters._tmux_exists", return_value=True
             ),
@@ -434,6 +553,9 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             ) as run,
         ):
             ensure_agent_pane_controls(record)
+            first_count = run.call_count
+            ensure_agent_pane_controls(record)
+            self.assertEqual(run.call_count, first_count)
         commands = [call.args[0] for call in run.call_args_list]
         self.assertTrue(any("remain-on-exit" in command for command in commands))
         self.assertTrue(any("pane-died" in command for command in commands))
@@ -1208,7 +1330,7 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             apply_draft(record, draft, commit=True)
         self.assertEqual(git(self.repo, "rev-parse", draft.branch), external)
 
-    def test_oversized_login_snapshot_fails_before_removing_credentials(self):
+    def test_oversized_login_snapshot_rolls_back_on_missing_target_login(self):
         record = self.record()
         save_session(record)
         old = session_home(record) / ".codex/auth.json"
@@ -1216,11 +1338,32 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         old.write_bytes(b"x" * (1024 * 1024 + 1))
         with (
             mock.patch("scripts.msandbox.sessions.stop_session"),
-            self.assertRaisesRegex(RuntimeError, "exceeds"),
+            mock.patch("scripts.msandbox.session_auth.Path.home", return_value=self.root),
+            self.assertRaisesRegex(RuntimeError, "No host claude login"),
         ):
             switch_session(record, "claude")
         self.assertTrue(old.exists())
+        self.assertEqual(old.read_bytes(), b"x" * (1024 * 1024 + 1))
         self.assertEqual(load_session(record.id).agent, "codex")
+
+    def test_large_claude_configuration_can_switch_and_return(self):
+        record = self.record()
+        save_session(record)
+        config = self.root / ".claude.json"
+        config.write_bytes(b"x" * (2 * 1024 * 1024))
+        for name in (".claude/.credentials.json", ".codex/auth.json"):
+            path = self.root / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("synthetic-login")
+        with (
+            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("scripts.msandbox.session_auth.Path.home", return_value=self.root),
+        ):
+            switch_session(record, "claude")
+            self.assertEqual((session_home(record) / ".claude.json").stat().st_size, config.stat().st_size)
+            switch_session(record, "codex")
+            switch_session(record, "claude")
+        self.assertEqual((session_home(record) / ".claude.json").read_bytes(), config.read_bytes())
 
     def test_failed_commit_can_redraft_and_update_existing_local_branch(self):
         from scripts.msandbox.publication import git as publication_git

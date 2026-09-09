@@ -14,7 +14,8 @@ from pathlib import Path
 from .agent_adapters import deliver_attachments
 from .attachments import import_clipboard, import_files
 from .capabilities import load_report, render_report_text, report_is_stale
-from .files import export_file, list_files, read_file
+from .errors import RECOVERABLE_ERRORS
+from .files import export_file, list_files, read_file, text_preview
 from .inspection import inspect_session
 from .models import Attachment, SessionRecord
 from .publication import apply_draft, generate_draft, load_draft, save_draft
@@ -48,15 +49,6 @@ def show(text: str, *, reader, output) -> None:
         reader("\nEnter to return...")
 
 
-MANAGED_ERRORS = (
-    KeyError,
-    OSError,
-    RuntimeError,
-    ValueError,
-    subprocess.SubprocessError,
-)
-
-
 def manage(
     action: str, record: SessionRecord, *, reader=input, output=sys.stdout
 ) -> None:
@@ -64,13 +56,19 @@ def manage(
     while True:
         try:
             return _manage(action, record, reader=reader, output=output, state=state)
-        except MANAGED_ERRORS as exc:
+        except RECOVERABLE_ERRORS as exc:
             show(
                 f"Could not complete that action: {exc}\n"
                 "You are still in this submenu; correct the input or go Back.",
                 reader=reader,
                 output=output,
             )
+            if not state.get("picked", False):
+                from .wizard import choose
+
+                if not choose("This submenu could not load.", [("Back", False), ("Retry", True)], reader=reader, output=output):
+                    return
+            state["picked"] = False
 
 
 def _manage(
@@ -85,7 +83,9 @@ def _manage(
     from .wizard import choose
 
     def pick(title, choices, default=1):
-        return choose(title, choices, reader=reader, output=output, default=default)
+        result = choose(title, choices, reader=reader, output=output, default=default)
+        state["picked"] = True
+        return result
 
     def view(text):
         show(text, reader=reader, output=output)
@@ -280,9 +280,10 @@ def _manage(
             )
             if operation == "preview":
                 payload = read_file(item, 16384)
+                preview = text_preview(item, payload)
                 view(
-                    payload.decode("utf-8", errors="replace")
-                    if b"\0" not in payload
+                    preview
+                    if preview is not None
                     else f"Binary file · {item.size:,} bytes\nExport a copy to view it on the host."
                 )
             elif operation == "export":

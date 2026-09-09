@@ -21,6 +21,7 @@ from .capabilities import (
     report_is_stale,
 )
 from .docker_gc import collect_garbage
+from .errors import RECOVERABLE_ERRORS
 from .docker_runtime import ensure_container, exec_in_session, session_home
 from .models import SessionRecord, SessionSpec
 from .session_auth import refresh_github_auth
@@ -31,7 +32,6 @@ from .sessions import (
     release_session,
     start_session,
     stop_session,
-    submit_session,
 )
 from .state import list_sessions, save_session
 from .terminal_ui import frame, mouse_key, plain
@@ -88,6 +88,8 @@ def _read_terminal_key(descriptor: int) -> str | None:
             # its three payload bytes as one event so coordinates such as "q"
             # or digits can never become navigation keystrokes.
             while len(data) < 6:
+                if not select.select([descriptor], [], [], 0.04)[0]:
+                    return "ignore"
                 chunk = os.read(descriptor, 6 - len(data))
                 if not chunk:
                     break
@@ -419,6 +421,7 @@ def _run_validation(
     for result in report.results:
         print(f"  [{result.status.upper():11}] {result.title}", file=output)
     print(f"Report: {report.result_path}", file=output)
+    _acknowledge(reader, output)
 
 
 def _session_menu_title(record: SessionRecord) -> str:
@@ -539,25 +542,8 @@ def _open_session(
             )
         elif action == "validate":
             _run_validation(record, reader=reader, output=output)
-            _acknowledge(reader, output)
-        elif action == "capabilities":
-            print("\nMeasuring capabilities...", file=output)
-            report = ensure_capability_report(record, refresh=True)
-            print(render_report_text(report, name=record.name), file=output)
-            _acknowledge(reader, output)
         elif action == "stop":
             stop_session(record)
-        elif action == "submit":
-            confirmed = choose(
-                "Submission validates the exact commit and publishes its PR branch.",
-                (("Submit as draft", True), ("Cancel", False)),
-                reader=reader,
-                output=output,
-                default=2,
-            )
-            if confirmed:
-                pull_request = submit_session(record, draft=True)
-                print(f"PR #{pull_request.number}: {pull_request.url}", file=output)
         elif action == "release":
             confirmed = choose(
                 "Release removes a clean worktree whose HEAD is published.\nExport wanted generated files first; unexported files are removed with it.",
@@ -606,7 +592,14 @@ def run_wizard(
     repo = repo.resolve()
     while True:
         try:
-            records = [reconcile_session(record) for record in list_sessions()]
+            records = []
+            failures = []
+            for record in list_sessions():
+                try:
+                    records.append(reconcile_session(record))
+                except RECOVERABLE_ERRORS as exc:
+                    records.append(record)
+                    failures.append(f"{record.name}: {exc}")
             choices: list[tuple[str, tuple[str, str | None]]] = [
                 (
                     f"{record.name} [{record.phase}] · {record.agent} — {record.permission_mode} permissions; open session controls",
@@ -624,7 +617,7 @@ def run_wizard(
                 ]
             )
             action, value = choose(
-                "Matcha Sandbox",
+                "Matcha Sandbox" + ("\nSessions needing repair: " + "; ".join(failures) if failures else ""),
                 choices,
                 reader=reader,
                 output=output,
@@ -647,6 +640,6 @@ def run_wizard(
             return 0
         except KeyboardInterrupt:
             print('\nReturned to Sandbox. Check process status for interrupted actions.', file=output)
-        except (KeyError, RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
+        except RECOVERABLE_ERRORS as exc:
             print(f"\nCould not complete that action: {exc}", file=output)
             _acknowledge(reader, output)
