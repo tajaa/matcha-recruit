@@ -186,15 +186,18 @@ fi
 # time, its RUNNER_TEMP) is regenerated before the comparison and can never
 # match. The durable key is the card itself.
 #
-# A publication that finished moved the card to Review, so a card still in Todo
-# carrying a report means the pass that uploaded it did not finish: that report
-# is an orphan and this run continues it rather than starting a round on top.
-# From Changes Requested the reading flips — a human read a finished report and
-# sent it back — so there the report is an orphan only while its own summary
-# note is missing, i.e. the crash happened before the announcement.
+# The report's own summary note names it ("Report attached: <file>"), and that
+# note is posted only after the upload succeeded. So the newest report on the
+# card with NO such line in the discussion is the upload of a pass that died
+# before announcing it: an orphan, and this run continues it rather than
+# starting a round on top. An announced report is a finished round, whatever
+# column the card sits in — a person can drag a reviewed card back to Todo to
+# ask for a fresh round, and reading "Todo + report" as a crash there would
+# reuse the old file, skip the upload of the new report, and move the card to
+# Review with the new work silently discarded.
 #
-# Residual gap, stated rather than papered over: a revision pass that dies in
-# the window between posting its note and moving the card still produces one
+# Residual gap, stated rather than papered over: a pass that dies in the
+# window between posting its note and moving the card still produces one
 # extra round on the retry. Closing that needs a publication marker written to
 # the card before the upload, which is a bigger change than this fix.
 STAGE_DIR="$(mktemp -d)"
@@ -217,12 +220,11 @@ announced_reports="$(printf '%s' "$history_json" | jq -c '
 # upload as the latest attachment. An older one is a finished round, and
 # reusing it would overwrite work a human has already read.
 orphan_report="$(printf '%s' "$existing_files" \
-    | jq -c --arg id8 "$ID8" --arg column "$BOARD_COLUMN" \
-        --argjson announced "$announced_reports" '
+    | jq -c --arg id8 "$ID8" --argjson announced "$announced_reports" '
     ([.[] | select((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"))]
      | sort_by(.created_at) | last) as $newest
     | if $newest == null then empty
-      elif $column == "changes_requested" and ($newest.filename | IN($announced[])) then empty
+      elif ($newest.filename | IN($announced[])) then empty
       else $newest end')"
 
 if [ -n "$orphan_report" ]; then

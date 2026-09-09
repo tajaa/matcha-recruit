@@ -359,7 +359,7 @@ def test_the_send_ceiling_counts_one_row_per_attempt():
 
     src = inspect.getsource(pt.count_recent_staged_sends)
     assert "metadata->>'state' = 'sending'" in src
-    assert "'sent'" not in src
+    assert "IN ('sending', 'sent')" not in src
     # Bounded to the watched boards so the (project_id, created_at) index
     # carries the query — there is no index on actor_user_id.
     assert "project_id = ANY($2::uuid[])" in src

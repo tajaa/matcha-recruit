@@ -573,6 +573,9 @@ export RESEARCH_TEST_CURL_LOG="$TMP_DIR/curl.log" RESEARCH_TEST_ACTIVITY="$TMP_D
     RESEARCH_TEST_UPLOADED="$TMP_DIR/uploaded.md" RESEARCH_TEST_UPLOADED_NAME="$TMP_DIR/uploaded-name" \
     RESEARCH_TEST_STAGED="$TMP_DIR/staged-actions.json"
 export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md"},{"id":"file-shot","filename":"shot.png"}]'
+# Round 1 was announced on the card, so it is a finished round and this pass
+# writes round 2 rather than mistaking it for a crashed upload.
+export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h0","event_type":"activity","metadata":{"kind":"note","body":"Report attached: research-report-aaaa0000-r1.md"}}]'
 
 run_publisher "$TMP_DIR/card.json" "$TMP_DIR/research-decision.json" > "$TMP_DIR/publish.log" 2>&1
 publish_rc=$?
@@ -680,11 +683,12 @@ check "a staging refusal is reported on the card note and never discards a compl
 # A publication that died after the upload is retried by the NEXT scheduled
 # pass -- a fresh workflow run on a fresh runner, which is the only retry path
 # that exists. Nothing derived from a run (its start time, its RUNNER_TEMP)
-# survives that, so the key is the card: still in Todo carrying a report means
-# the pass that uploaded it never finished. No AUTOPR_RUN_STARTED_AT is set
-# here, deliberately -- that is what the previous key needed and could not have.
+# survives that, so the key is the card: the newest report with no
+# "Report attached:" line in the discussion was uploaded by a pass that died
+# before announcing it. No AUTOPR_RUN_STARTED_AT is set here, deliberately --
+# that is what the previous key needed and could not have.
 export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md","created_at":"2026-09-01T00:00:00+00:00"},{"id":"file-mine","filename":"research-report-aaaa0000-r2.md","created_at":"2026-09-08T10:00:05.123456+00:00"},{"id":"file-shot-mine","filename":"research-aaaa0000-r2-01-pricing.png","created_at":"2026-09-08T10:00:06+00:00"}]'
-export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h1","event_type":"activity","metadata":{"kind":"note","body":"Lambda suits bursty…\n\nReport attached: research-report-aaaa0000-r2.md"}}]'
+export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h0","event_type":"activity","metadata":{"kind":"note","body":"Report attached: research-report-aaaa0000-r1.md"}}]'
 : > "$RESEARCH_TEST_CURL_LOG"
 rm -f "$RESEARCH_TEST_ACTIVITY" "$RESEARCH_TEST_CARD_PATCH" "$RESEARCH_TEST_UPLOADED" "$RESEARCH_TEST_STAGED"
 PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR/runner" \
@@ -692,14 +696,35 @@ PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR
     "$TMP_DIR/research-decision.json" "$TMP_DIR/publish-shots" > "$TMP_DIR/publish-retry.log" 2>&1
 retry_rc=$?
 [ "$retry_rc" = 0 ] || sed -n '1,40p' "$TMP_DIR/publish-retry.log"
-check "a later pass reuses the orphaned report and screenshot, uploads only what is missing, and posts no second note" \
+check "a later pass reuses the orphaned report and screenshot, uploads only what is missing, and announces it once" \
   $([ "$retry_rc" = 0 ] \
     && [ ! -e "$RESEARCH_TEST_UPLOADED" ] \
     && [ "$(grep -c 'POST https://example.invalid/api/matcha-work/projects/.*/files' "$RESEARCH_TEST_CURL_LOG")" = 1 ] \
-    && [ ! -e "$RESEARCH_TEST_ACTIVITY" ] \
+    && jq -e '.attachment_ids == ["file-mine", "file-shot-mine", "file-research-aaaa0000-r2-02-docs.png"]
+             and (.body | contains("Report attached: research-report-aaaa0000-r2.md"))' \
+        "$RESEARCH_TEST_ACTIVITY" >/dev/null \
     && jq -e '.run_key == "file-mine"' "$RESEARCH_TEST_STAGED" >/dev/null \
     && jq -e '.board_column == "review"' "$RESEARCH_TEST_CARD_PATCH" >/dev/null \
     && grep -q 'reusing it' "$TMP_DIR/publish-retry.log" \
+    && echo 0 || echo 1)
+
+# The crash-after-note case: the report is announced, so it is a finished
+# round and the retry writes the next one. That is the documented residual
+# gap (one extra round), and it must never read as an orphan -- the same
+# shape is also a person dragging a reviewed card back to Todo for a fresh
+# run, where reusing the announced file would discard the new report.
+export RESEARCH_TEST_EXISTING_FILES='[{"id":"file-old","filename":"research-report-aaaa0000-r1.md","created_at":"2026-09-01T00:00:00+00:00"}]'
+export RESEARCH_TEST_EXISTING_HISTORY='[{"id":"h1","event_type":"activity","metadata":{"kind":"note","body":"Report attached: research-report-aaaa0000-r1.md"}}]'
+jq '.board_column = "todo"' "$TMP_DIR/card.json" > "$TMP_DIR/card-todo.json"
+run_publisher "$TMP_DIR/card-todo.json" "$TMP_DIR/research-decision.json" \
+    > "$TMP_DIR/publish-dragback.log" 2>&1
+dragback_rc=$?
+check "an announced report on a Todo card is a finished round, so a fresh run writes the next one" \
+  $([ "$dragback_rc" = 0 ] \
+    && [ "$(cat "$RESEARCH_TEST_UPLOADED_NAME" 2>/dev/null)" = "research-report-aaaa0000-r2.md" ] \
+    && jq -e '.body | contains("Report attached: research-report-aaaa0000-r2.md")' \
+        "$RESEARCH_TEST_ACTIVITY" >/dev/null \
+    && ! grep -q 'reusing it' "$TMP_DIR/publish-dragback.log" \
     && echo 0 || echo 1)
 
 # The mirror image: a human read a finished report and sent the card back, so

@@ -547,17 +547,20 @@ kind is a registry row plus a publisher, not another branch in the PR path.
    until 2026-09-08, which the investigate step re-stamps every job, so it never matched
    and the duplicate it described still happened; the env var is gone.
 
-   The key is the card. A finished publication moved it to Review, so a card still in
-   **Todo** carrying a `research-report-<id8>-rN.md` means the pass that uploaded it did
-   not finish: that report is an orphan and this run continues it, reusing its file id
-   (so the server's `run_key` short-circuit matches and the Send rows are not restaged),
-   its round number, and any screenshot already uploaded under that round's name. From
-   **Changes Requested** the reading flips — a human read a finished report and sent it
-   back — so there the newest report is an orphan only while its own `Report attached:`
-   line is missing from the discussion. That discussion read is fatal if it fails: without
-   it the publisher cannot tell a crashed pass from a finished one, and either guess
-   duplicates or loses a round. Known residual: a revision pass dying between its note and
-   the card move still produces one extra round. `update_project_task` then emails and
+   The key is the card. The report's own summary note names it (`Report attached:
+   <file>`) and is posted only after the upload succeeded, so the newest
+   `research-report-<id8>-rN.md` on the card with no such line in the discussion was
+   uploaded by a pass that died before announcing it: an orphan, which this run
+   continues — reusing its file id (so the server's `run_key` short-circuit matches and
+   the Send rows are not restaged), its round number, and any screenshot already
+   uploaded under that round's name. An announced report is a finished round in **any**
+   column: a person can drag a reviewed card back to Todo to ask for a fresh run, and
+   reading "Todo + report" as a crash there would reuse the old file, skip the new
+   upload, and move the card to Review with the new work silently discarded. That
+   discussion read is fatal if it fails: without it the publisher cannot tell a crashed
+   pass from a finished one, and either guess duplicates or loses a round. Known
+   residual: a pass dying between its note and the card move still produces one extra
+   round on the retry. `update_project_task` then emails and
    bells every collaborator ("Ready for review") and broadcasts to Espresso — there is
    no extra notification code. `needs_clarification` instead writes
    `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · … · [autopr:no-spec <ts>]
