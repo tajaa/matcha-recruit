@@ -73,3 +73,92 @@ AUTOPR_SCOPE_DEDUPE_MODE=off PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
   --report "$TMP_DIR/report.md" --output "$TMP_DIR/off-result.json"
 jq -e '.decision == "no_match" and .mode == "off"' "$TMP_DIR/off-result.json" >/dev/null
 printf 'PASS: off mode bypasses GitHub and model comparison\n'
+
+# The kanban lane executes this script from $RUNNER_TEMP/autopr-control, a
+# `git archive` extraction with no .git of its own. Deriving REPO_ROOT from
+# SCRIPT_DIR there pointed every git call at that directory and failed the run
+# after investigate.sh had already spent the model budget (run 34203466947).
+# Created outside the repo tree on purpose: $RUNNER_TEMP is outside the
+# checkout, and a control root nested under this repo would let `git` walk up
+# and find matcha's own .git, so the negative case below would never fire.
+CONTROL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/autopr-scope-control-XXXXXX")"
+trap 'rm -rf "$TMP_DIR" "$CONTROL_DIR"' EXIT
+CONTROL_ROOT="$CONTROL_DIR/scripts"
+mkdir -p "$CONTROL_ROOT"
+cp -R "$REPO_ROOT/scripts/autopr-scope" "$CONTROL_ROOT/autopr-scope"
+chmod +x "$CONTROL_ROOT/autopr-scope/check-open-prs.sh"
+git -C "$CONTROL_DIR" rev-parse --git-dir >/dev/null 2>&1 && exit 1
+
+printf 'value = 2\n' > "$TEST_REPO/app.py"
+PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
+  AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
+  AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane kanban --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --output "$TMP_DIR/control-result.json"
+jq -e '.decision == "covered" and .confidence == "high" and .covering_pr == 334' \
+  "$TMP_DIR/control-result.json" >/dev/null
+git -C "$TEST_REPO" diff --quiet --cached
+printf 'PASS: control-plane copy reads the workspace named by AUTOPR_WORKSPACE_ROOT\n'
+
+# Without the override the root resolves outside any repository. That must be
+# reported as its own cause, not as the generic capture failure.
+set +e
+control_err="$(PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
+  AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane kanban --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --output "$TMP_DIR/control-unset.json" 2>&1)"
+control_status=$?
+set -e
+[ "$control_status" -ne 0 ]
+printf '%s' "$control_err" | grep -qF 'repo root is not a git repository'
+printf '%s' "$control_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT'
+printf 'PASS: a non-repo root names its own cause instead of a generic capture failure\n'
+
+# The --proposal-diff path (reconcile.sh) never reaches the capture helper, but
+# it still reads the root at `git -C "$REPO_ROOT" branch --show-current`. That
+# call sits in an argument position, so its failure does not trip errexit: the
+# branch name came back empty, the lane's own PR stopped being filtered out of
+# the candidate set, and an exact patch-id match against itself reported
+# `covered` with exit 0. The root check must run for this path too.
+set +e
+proposal_err="$(PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
+  AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane error --identity draft-334 --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --proposal-diff "$TMP_DIR/exact.diff" \
+  --output "$TMP_DIR/proposal-unset.json" 2>&1)"
+proposal_status=$?
+set -e
+[ "$proposal_status" -ne 0 ]
+printf '%s' "$proposal_err" | grep -qF 'repo root is not a git repository'
+[ ! -s "$TMP_DIR/proposal-unset.json" ]
+printf 'PASS: --proposal-diff refuses a non-repo root instead of matching itself\n'
+
+# `rev-parse --git-dir` alone would accept any directory *inside* a repository
+# and then read that parent's tree. $RUNNER_TEMP is outside the checkout today,
+# but the failure would be silent and wrong rather than loud, so require the
+# root to be the top level itself.
+mkdir -p "$TEST_REPO/nested/dir"
+set +e
+nested_err="$(PATH="$TMP_DIR/bin:$PATH" GH_TOKEN=secret GITHUB_REPOSITORY=x/x \
+  AUTOPR_WORKSPACE_ROOT="$TEST_REPO/nested/dir" \
+  AUTOPR_TEST_CANDIDATE_DIFF="$TMP_DIR/exact.diff" \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane kanban --identity abc123abc123 --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --output "$TMP_DIR/nested.json" 2>&1)"
+nested_status=$?
+set -e
+[ "$nested_status" -ne 0 ]
+printf '%s' "$nested_err" | grep -qF 'sits inside'
+printf 'PASS: a root nested inside a repository is rejected, not silently promoted\n'
+
+# The kill switch must never be the thing that fails: `off` short-circuits
+# before the root is ever validated.
+AUTOPR_SCOPE_DEDUPE_MODE=off PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY=x/x \
+  bash "$CONTROL_ROOT/autopr-scope/check-open-prs.sh" \
+  --lane kanban --identity task-id --evidence "$TMP_DIR/evidence.json" \
+  --report "$TMP_DIR/report.md" --output "$TMP_DIR/off-control.json"
+jq -e '.decision == "no_match" and .mode == "off"' "$TMP_DIR/off-control.json" >/dev/null
+printf 'PASS: off mode still bypasses the root check from a non-repo control root\n'

@@ -8,7 +8,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# The kanban lane runs this from the trusted control-plane snapshot
+# ($RUNNER_TEMP/autopr-control), which is a `git archive` extraction and not a
+# repository — deriving the root from SCRIPT_DIR there points every git call at
+# a directory with no .git and kills the run after the model has already spent
+# its budget. Same env override the other control-root scripts use; the
+# fallback keeps in-workspace callers (silent-error-autofix.yml,
+# error-autofix/reconcile.sh) unchanged.
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
@@ -53,6 +60,16 @@ if [ "$MODE" = off ]; then
     emit_none no_match "Cross-lane deduplication is disabled."
     exit 0
 fi
+
+# Every path below reads $REPO_ROOT with git: the proposal capture, and the
+# `branch --show-current` that keeps this lane's own PR out of the candidate
+# set. That second call sits in an argument position, so a `fatal: not a git
+# repository` there does not trip errexit -- it just yields an empty branch
+# name, stops excluding our own PR, and can let the lane declare itself
+# already covered by itself. Validate the root once, for both paths, before
+# any of it runs. Deliberately after the `off` short-circuit above: the kill
+# switch must never be the thing that fails.
+autopr_scope_require_repo "$REPO_ROOT"
 
 proposal="$WORK_DIR/proposal.diff"
 if [ -n "$PROPOSAL_DIFF" ]; then

@@ -199,6 +199,44 @@ The self-audit implementation and its sealed model allowlist are documented in
 `msandbox audit --draft`; they use the same workflow rather than creating a
 second scheduler.
 
+## Trusted control plane and repo roots
+
+Everything that runs **after** the model has touched the workspace executes from a
+snapshot of `main`, never from the checkout. The `Snapshot trusted AutoPR control plane`
+step extracts `git archive main scripts/kanban-autopr scripts/error-autofix
+scripts/autopr-scope scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
+`$RUNNER_TEMP/autopr-control` and exports three variables:
+
+| Variable | Value | Means |
+|---|---|---|
+| `AUTOPR_CONTROL_ROOT` | `$RUNNER_TEMP/autopr-control/scripts` | Where the post-model scripts are executed from. **Not a git repository** — the archive carries no `.git`. |
+| `AUTOPR_WORKSPACE_ROOT` | `$GITHUB_WORKSPACE` | The checkout the model edited and `publish.sh` commits from. Anything reading the proposal or the task branch wants this one. |
+| `AUTOPR_SANDBOX_REPO_ROOT` | `$GITHUB_WORKSPACE` | The repo `run-codex-sandboxed.sh` clones into the sandbox and applies the returned patch back into. |
+
+The contract for any script the lane runs from the control root, **including ones it
+only reaches transitively through `$SCRIPT_DIR`**:
+
+- A repo root must come from the environment: `REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd
+  "$SCRIPT_DIR/../.." && pwd)}"` (or `AUTOPR_SANDBOX_REPO_ROOT` for the sandbox bridge).
+  The fallback keeps in-workspace callers — `silent-error-autofix.yml`,
+  `error-autofix/reconcile.sh` — working unchanged; that lane exports neither variable.
+- Sibling *tooling* may stay `$SCRIPT_DIR`-relative, because it is in the archive too
+  (`lib.sh` → `../alembic_graph_snapshot.py`, `cosmetic_diff.py`, the prompt templates).
+- `git rev-parse --show-toplevel` is fine where it is resolved from the working
+  directory: the workflow declares no `working-directory:`, so every `run:` step starts
+  in `$GITHUB_WORKSPACE` (`leave-task-checkout.sh` relies on this).
+- A new reference must also be **inside an archived path**. Adding
+  `"$AUTOPR_CONTROL_ROOT/foo/bar.sh"` without adding `scripts/foo` to the `git archive`
+  line produces a run that dies at that step.
+
+Both halves are enforced by case 10 of `scripts/tests/test_ci_guards.sh`, which walks
+the `$AUTOPR_CONTROL_ROOT` references in the workflow plus their `$SCRIPT_DIR` closure.
+This has failed twice in production: once with the scope checker and the migration-graph
+helper referenced before they were archived, and once (2026-09-06 → 2026-09-08) with
+`autopr-scope/check-open-prs.sh` resolving `$SCRIPT_DIR/../..` from the control root, so
+every run died at the scope check with `fatal: not a git repository` — after the model
+budget had already been spent.
+
 ## Pipeline (`scripts/kanban-autopr/`)
 
 1. **Production freshness** — the trusted local runner records the exact active frontend
