@@ -105,6 +105,12 @@ def _add_session_subcommands(parent: argparse._SubParsersAction) -> None:
             command.add_argument("--force", action="store_true")
         else:
             command.add_argument("session")
+            if name == "start":
+                command.add_argument(
+                    "--replace-exited",
+                    action="store_true",
+                    help="discard preserved output from an exited harness and restart it",
+                )
         if name == "release":
             command.add_argument("--keep-worktree", action="store_true")
     execute = commands.add_parser("exec")
@@ -275,8 +281,12 @@ def run(argv: list[str] | None = None) -> int:
         if args.session_command == 'ps':
             from .inspection import inspect_session
             snapshot = inspect_session(record)
-            print(json.dumps(asdict(snapshot)) if args.json else '\n'.join(snapshot.lines))
-            return 0
+            print(
+                json.dumps(snapshot.to_dict(), sort_keys=True)
+                if args.json
+                else '\n'.join(snapshot.lines)
+            )
+            return 0 if snapshot.reliable else 1
         if args.session_command == "attach":
             return attach_agent(record)
         if args.session_command == "shell":
@@ -294,7 +304,7 @@ def run(argv: list[str] | None = None) -> int:
             stop_session(record, force=args.force)
             return 0
         if args.session_command == "start":
-            start_session(record)
+            start_session(record, replace_exited=args.replace_exited)
             return 0
         if args.session_command == "submit":
             pull_request = submit_session(record, draft=args.draft, title=args.title)

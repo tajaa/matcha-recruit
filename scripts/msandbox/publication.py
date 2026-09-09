@@ -323,8 +323,6 @@ def apply_draft(
                 ],
                 check=False,
             )
-            if exists.returncode == 0 and branch != current.target_branch:
-                raise RuntimeError("Local branch already exists; choose another name")
             if exists.returncode not in (0, 1):
                 raise RuntimeError("Could not inspect local branch")
             if resolve_worktree_owner(current.repo_path, branch):
@@ -335,16 +333,27 @@ def apply_draft(
                 previous_branch_head = git(current, "rev-parse", f"refs/heads/{branch}")
                 # A retry can have a newer detached HEAD after a failed commit/ref
                 # update. Never overwrite a local ref that moved independently.
-                git(
-                    current,
-                    "merge-base",
-                    "--is-ancestor",
-                    previous_branch_head,
-                    draft.head,
-                )
+                try:
+                    git(
+                        current,
+                        "merge-base",
+                        "--is-ancestor",
+                        previous_branch_head,
+                        draft.head,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    if exc.returncode == 1:
+                        raise RuntimeError(
+                            "Local branch contains work outside this session; choose another name"
+                        ) from exc
+                    raise RuntimeError("Could not compare the local branch") from exc
+                # A remote-deleted branch with no unique commits is safe to
+                # adopt. Track it so release cleans it like a newly created ref.
+                current.managed_local_branch = True
             else:
                 git(current, "branch", branch, draft.head)
                 previous_branch_head = draft.head
+                current.managed_local_branch = True
             current.target_branch = branch
             current.expected_remote_sha = None
             save_session(current)

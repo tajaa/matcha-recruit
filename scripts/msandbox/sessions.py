@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Sequence
 
 from .agent_adapters import (
+    ensure_agent_pane_controls,
+    exited_agent_output,
     launch_agent,
     refresh_capability_context,
     stop_agent,
@@ -37,6 +39,7 @@ from .git_worktrees import (
     merge_base,
     push_detached_head,
     remote_branch_sha,
+    remove_managed_local_branch,
     remove_session_git,
     remove_session_worktree,
     resolve_ref,
@@ -314,11 +317,22 @@ def start_session(
     record: SessionRecord,
     extra_agent_args: Sequence[str] = (),
     *,
+    replace_exited: bool = False,
     _lock_held: bool = False,
 ) -> SessionRecord:
     if not _lock_held:
         with state_lock(f"session-{record.id}"):
-            return start_session(record, extra_agent_args, _lock_held=True)
+            return start_session(
+                record,
+                extra_agent_args,
+                replace_exited=replace_exited,
+                _lock_held=True,
+            )
+    if exited_agent_output(record) is not None and not replace_exited:
+        raise SessionError(
+            "the previous harness exited and its output is preserved; "
+            "view it in the manager or restart with --replace-exited"
+        )
     _reconcile_isolated_git(record)
     refresh_github_auth(record)
     ensure_container(record)
@@ -344,6 +358,10 @@ def switch_session(record: SessionRecord, agent: str) -> SessionRecord:
         if current.phase in ("released", "orphaned", "submitting", "submitted_needs_release"):
             raise SessionError("this session cannot switch harnesses in its current state")
         stop_session(current, _lock_held=True)
+        if current.phase == "orphaned":
+            raise SessionError(
+                "the session became orphaned while stopping; restore its worktree before switching"
+            )
         proposed = replace(current, agent=agent, agent_session_id=None, phase="stopped")
         # A failed copy/save restores previous login files and leaves the old
         # harness stopped and retryable. Only login files change, not history.
@@ -364,6 +382,7 @@ def reconcile_session(record: SessionRecord, *, _lock_held: bool = False) -> Ses
         record.phase = "orphaned"
     else:
         _ensure_isolated_git(record)
+        ensure_agent_pane_controls(record)
         if container_running(record) and tmux_running(record):
             record.phase = "running"
         elif record.phase == "running":
@@ -551,6 +570,7 @@ def release_session(
     if not record.worktree.exists():
         stop_agent(record)
         remove_orphaned_container_project(record)
+        published_head = record.remote_head_sha
         if session_git_dir(record.id).is_dir():
             isolated_head = session_git_head(record.id)
             if remote_branch_sha(record.repo_path, record.target_branch) != isolated_head:
@@ -559,6 +579,27 @@ def release_session(
                     "worktree is absent but isolated Git HEAD is not published to origin",
                     record.worktree,
                 )
+            published_head = isolated_head
+        if record.managed_local_branch:
+            published_head = published_head or remote_branch_sha(
+                record.repo_path, record.target_branch
+            )
+            if published_head is None:
+                return ReleaseResult(
+                    False,
+                    "worktree is absent but the managed branch is not published",
+                    record.worktree,
+                )
+            branch_error = remove_managed_local_branch(
+                record.repo_path, record.target_branch, published_head
+            )
+            if branch_error:
+                return ReleaseResult(
+                    False,
+                    f"worktree is absent but {branch_error}",
+                    record.worktree,
+                )
+            record.managed_local_branch = False
         remove_session_git(record.id)
         record.phase = "released"
         record.ports = None
@@ -577,6 +618,17 @@ def release_session(
     remove_container_project(record, volumes=True)
     result = remove_session_worktree(record.repo_path, record.worktree, record.target_branch)
     if result.released:
+        if record.managed_local_branch:
+            branch_error = remove_managed_local_branch(
+                record.repo_path, record.target_branch, publish_state.head_sha
+            )
+            if branch_error:
+                return ReleaseResult(
+                    False,
+                    f"worktree removed, but {branch_error}",
+                    record.worktree,
+                )
+            record.managed_local_branch = False
         remove_session_git(record.id)
         record.phase = "released"
         record.ports = None

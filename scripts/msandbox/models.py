@@ -135,6 +135,7 @@ class SessionRecord:
     last_validation: ValidationReference | None = None
     last_capability_check_at: str | None = None
     capability_report_path: str | None = None
+    managed_local_branch: bool = False
 
     @property
     def repo_path(self) -> Path:
@@ -156,6 +157,9 @@ class SessionRecord:
         data.setdefault("permission_mode", "autonomous")
         if data["permission_mode"] not in ("standard", "autonomous"):
             raise ValueError(f"invalid permission mode: {data['permission_mode']!r}")
+        data.setdefault("managed_local_branch", False)
+        if not isinstance(data["managed_local_branch"], bool):
+            raise ValueError("invalid managed local branch marker")
         ports = data.get("ports")
         if ports:
             data["ports"] = PortSet(**ports)

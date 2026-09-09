@@ -103,7 +103,11 @@ Opening an existing session always shows its controls before attaching:
   commit** to stop the running harness/workspace and commit all shown changes;
   both the action label and confirmation disclose that stop. The controller rejects stale drafts,
   colliding branches, and invalid model output. Repeated applies advance the local
-  branch with a compare-and-swap update; checked-out branches are refused.
+  branch with a compare-and-swap update; checked-out branches are refused. A local
+  branch created by the controller is removed during successful release only when
+  it has no commits outside the published session and has not moved concurrently.
+  A stale, remote-deleted local ref with no unique commits can be safely adopted
+  by a later session and receives the same cleanup protection.
   Existing PR sessions retain their
   branch. Run **Validate full PR**, then **Publish draft pull request**; the existing
   exact-commit validation, push lease, and release checks still apply. The helper
@@ -125,6 +129,26 @@ msandbox session start payroll-fix
 msandbox session ps payroll-fix
 msandbox session ps payroll-fix --json
 ```
+
+If a harness exits, the manager preserves and offers up to its last 120 lines before
+showing a restart action that explicitly replaces them. Opening the manager also
+installs this pane lifecycle hook on still-running sessions created by an older
+controller. The CLI protects preserved output by default; use `session start
+SESSION --replace-exited` only after inspecting it in the manager.
+
+`session ps` exits nonzero whenever its snapshot is unreliable. With `--json`,
+the versioned object contains `schema_version`, `checked_at`, `reliable`,
+`container_id`, `containers`, `harness_terminals`, `dev_remote_running`,
+`connections`, `ssh_process_observed`, `processes`, and stable error-code values
+in `errors` (`docker_unavailable`, `connection_probe_unavailable`,
+`process_inventory_unavailable`, or `inspection_failed`); it does not expose
+the human-readable display lines.
+
+Endpoint inspection reads `HOST_DEV_BACKEND_URL` and
+`HOST_DEV_FRONTEND_URL` inside the workspace. They are inherited from
+`docker-compose.sandbox.yml` by every session overlay and default to the host
+gateway on ports 8001 and 5174; host `HOST_DEV_BACKEND_PORT` and
+`HOST_DEV_FRONTEND_PORT` overrides flow through Compose interpolation.
 
 Controller changes are picked up by `msandbox install` from the checkout that
 contains them. No terminal GUI dependency or database migration is required.

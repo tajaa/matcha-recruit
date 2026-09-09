@@ -344,6 +344,50 @@ def remove_session_worktree(repo: Path, worktree: Path, branch: str) -> ReleaseR
     return ReleaseResult(True, "clean published worktree removed", worktree)
 
 
+def remove_managed_local_branch(
+    repo: Path, branch: str, published_head: str
+) -> str | None:
+    """Delete an msandbox-created ref only when it has no unpublished commits.
+
+    The ancestry check permits a ref left behind at an earlier session commit,
+    while update-ref's expected value prevents overwriting a concurrent move.
+    A missing ref is already clean.
+    """
+    reference = f"refs/heads/{branch}"
+    exists = _git(repo, "show-ref", "--verify", "--quiet", reference, check=False)
+    if exists.returncode == 1:
+        return None
+    if exists.returncode:
+        return "could not inspect the managed local branch"
+    local_head = resolve_ref(repo, reference)
+    owner = resolve_worktree_owner(repo, branch)
+    if owner is not None:
+        return f"managed local branch is checked out at {owner.path}"
+    ancestor = _git(
+        repo,
+        "merge-base",
+        "--is-ancestor",
+        local_head,
+        published_head,
+        check=False,
+    )
+    if ancestor.returncode == 1:
+        return "managed local branch contains commits outside the published session"
+    if ancestor.returncode:
+        return "could not compare the managed local branch with the published session"
+    deleted = _git(
+        repo,
+        "update-ref",
+        "-d",
+        reference,
+        local_head,
+        check=False,
+    )
+    if deleted.returncode:
+        return "managed local branch moved while it was being released"
+    return None
+
+
 def prune_stale_worktree_metadata(repo: Path, *, apply: bool = False) -> list[Path]:
     stale = [item.path for item in list_worktrees(repo) if not item.path.exists()]
     if apply and stale:

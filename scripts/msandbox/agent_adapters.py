@@ -162,6 +162,61 @@ def _tmux_exists(record: SessionRecord) -> bool:
     )
 
 
+def ensure_agent_pane_controls(record: SessionRecord) -> None:
+    """Install lifecycle controls on both new and pre-control-center panes."""
+    if not _tmux_exists(record):
+        return
+    subprocess.run(
+        ["tmux", "set-option", "-t", record.tmux_session, "remain-on-exit", "on"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # Preserve output from a failed CLI, but release the attached terminal so
+    # the manager can offer inspection/restart instead of trapping the client.
+    subprocess.run(
+        [
+            "tmux",
+            "set-hook",
+            "-t",
+            record.tmux_session,
+            "pane-died",
+            f"detach-client -s {shlex.quote('=' + record.tmux_session)}",
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        [
+            "tmux",
+            "set-option",
+            "-t",
+            record.tmux_session,
+            "status-right",
+            "Ctrl-b d: Sandbox menu | Ctrl-c: interrupt | %H:%M",
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def exited_agent_output(record: SessionRecord) -> str | None:
+    """Return preserved output only when the harness pane has exited."""
+    if not _tmux_exists(record) or tmux_running(record):
+        return None
+    captured = subprocess.run(
+        ["tmux", "capture-pane", "-pt", record.tmux_session, "-S", "-120"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if captured.returncode:
+        return "Harness exited, but its pane output could not be captured."
+    return captured.stdout.strip()[-4000:]
+
+
 def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
     """Start one durable TUI per session; other sessions are never inspected or blocked."""
     if not shutil.which("tmux"):
@@ -236,32 +291,7 @@ def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
     )
     if result.returncode:
         raise AgentError(result.stderr.strip() or "tmux could not start the agent")
-    subprocess.run(
-        ["tmux", "set-option", "-t", record.tmux_session, "remain-on-exit", "on"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    # Preserve output from a failed CLI, but release the attached terminal so
-    # the manager can offer restart/switch instead of trapping it on a dead pane.
-    subprocess.run(
-        ["tmux", "set-hook", "-t", record.tmux_session, "pane-died",
-         f"detach-client -s {shlex.quote('=' + record.tmux_session)}"],
-        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        [
-            "tmux",
-            "set-option",
-            "-t",
-            record.tmux_session,
-            "status-right",
-            "Ctrl-b d: Sandbox menu | Ctrl-c: interrupt | %H:%M",
-        ],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    ensure_agent_pane_controls(record)
     # Catch immediate failures such as a missing login, executable, or native
     # renderer instead of recording a dead pane as a running session.
     deadline = time.monotonic() + 1.0
@@ -280,6 +310,7 @@ def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
 
 def attach_agent(record: SessionRecord) -> int:
     refresh_github_auth(record)
+    ensure_agent_pane_controls(record)
     if not tmux_running(record):
         raise AgentError(f"agent session is not running: {record.name}")
     # The PTY proxy preserves arbitrary input while rewriting a complete

@@ -12,11 +12,62 @@ from .terminal_ui import plain
 
 
 @dataclass(frozen=True)
+class ContainerObservation:
+    name: str
+    state: str
+    status: str
+    id: str | None
+
+
+@dataclass(frozen=True)
+class HarnessObservation:
+    state: str
+    command: str
+
+
+@dataclass(frozen=True)
+class ConnectionObservation:
+    name: str
+    reachable: bool
+
+
+@dataclass(frozen=True)
+class ProcessObservation:
+    pid: str
+    parent_pid: str
+    elapsed: str
+    executable: str
+
+
+@dataclass(frozen=True)
 class Snapshot:
     checked_at: str
     container_id: str | None
     lines: tuple[str, ...]
     reliable: bool = True
+    containers: tuple[ContainerObservation, ...] = ()
+    harness_terminals: tuple[HarnessObservation, ...] = ()
+    dev_remote_running: bool | None = None
+    connections: tuple[ConnectionObservation, ...] = ()
+    ssh_process_observed: bool | None = None
+    processes: tuple[ProcessObservation, ...] = ()
+    errors: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        """Stable machine-readable contract; human prose stays out of JSON."""
+        return {
+            "schema_version": 1,
+            "checked_at": self.checked_at,
+            "reliable": self.reliable,
+            "container_id": self.container_id,
+            "containers": [vars(item) for item in self.containers],
+            "harness_terminals": [vars(item) for item in self.harness_terminals],
+            "dev_remote_running": self.dev_remote_running,
+            "connections": [vars(item) for item in self.connections],
+            "ssh_process_observed": self.ssh_process_observed,
+            "processes": [vars(item) for item in self.processes],
+            "errors": list(self.errors),
+        }
 
 
 def run(argv: list[str], timeout: int = 8) -> subprocess.CompletedProcess:
@@ -57,6 +108,30 @@ print(json.dumps({'connections': rows, 'dev_remote': dev}))
 def inspect_session(record: SessionRecord) -> Snapshot:
     lines: list[str] = []
     container_id = None
+    containers_seen: list[ContainerObservation] = []
+    harnesses: list[HarnessObservation] = []
+    connections: list[ConnectionObservation] = []
+    processes_seen: list[ProcessObservation] = []
+    dev_remote_running = None
+    ssh_process_observed = None
+    errors: list[str] = []
+    reliable = True
+
+    def result() -> Snapshot:
+        return Snapshot(
+            utc_now(),
+            container_id,
+            tuple(plain(line) for line in lines),
+            reliable,
+            tuple(containers_seen),
+            tuple(harnesses),
+            dev_remote_running,
+            tuple(connections),
+            ssh_process_observed,
+            tuple(processes_seen),
+            tuple(errors),
+        )
+
     try:
         containers = run(
             [
@@ -72,17 +147,24 @@ def inspect_session(record: SessionRecord) -> Snapshot:
             ]
         )
         if containers.returncode:
-            return Snapshot(
-                utc_now(), None, ("Docker unavailable; live state is unknown.",), False
-            )
+            lines.append("Docker unavailable; live state is unknown.")
+            errors.append("docker_unavailable")
+            reliable = False
+            return result()
         for line in containers.stdout.splitlines()[:30]:
             item = json.loads(line)
             name = item.get("Names", "container")
-            lines.append(
-                f"{name}: {item.get('State', 'unknown')} · {item.get('Status', '')}"
+            state = item.get("State", "unknown")
+            status = item.get("Status", "")
+            observed_id = item.get("ID")
+            containers_seen.append(
+                ContainerObservation(name, state, status, observed_id)
             )
-            if item.get("State") == "running":
-                container_id = item["ID"]
+            lines.append(
+                f"{name}: {state} · {status}"
+            )
+            if state == "running":
+                container_id = observed_id
         if not lines:
             lines.append("No session containers exist.")
         panes = run(
@@ -95,10 +177,11 @@ def inspect_session(record: SessionRecord) -> Snapshot:
                 "#{pane_dead} #{pane_current_command}",
             ]
         )
-        lines += [
-            f"Harness terminal: {'exited' if row.startswith('1 ') else 'running'}"
-            for row in panes.stdout.splitlines()[:5]
-        ]
+        for row in panes.stdout.splitlines()[:5]:
+            dead, _, command = row.partition(" ")
+            state = "exited" if dead == "1" else "running"
+            harnesses.append(HarnessObservation(state, command))
+            lines.append(f"Harness terminal: {state}")
         if container_id:
             probe = run(
                 [
@@ -115,35 +198,43 @@ def inspect_session(record: SessionRecord) -> Snapshot:
             )
             if probe.returncode == 0:
                 measured = json.loads(probe.stdout)
+                dev_remote_running = bool(measured["dev_remote"])
                 lines.append(
                     "dev-remote.sh: "
                     + (
                         "running inside this sandbox"
-                        if measured["dev_remote"]
+                        if dev_remote_running
                         else "not running inside this sandbox"
                     )
                 )
-                lines.extend(
-                    f"{name}: {'TCP reachable' if ok else 'unreachable'}"
-                    for name, ok in measured["connections"]
-                )
+                for name, reachable in measured["connections"]:
+                    observation = ConnectionObservation(name, bool(reachable))
+                    connections.append(observation)
+                    lines.append(
+                        f"{name}: {'TCP reachable' if observation.reachable else 'unreachable'}"
+                    )
             else:
                 lines.append("Connection probes unavailable; reachability unknown.")
+                errors.append("connection_probe_unavailable")
+                reliable = False
             processes = run(
                 ["docker", "top", container_id, "-eo", "pid,ppid,etime,comm"]
             )
             if processes.returncode == 0:
                 rows = processes.stdout.splitlines()
-                ssh = any(
-                    row.split()[-1] in ("ssh", "autossh", "sshd")
-                    for row in rows[1:]
-                    if row.split()
+                for row in rows[1:81]:
+                    fields = row.split(maxsplit=3)
+                    if len(fields) == 4:
+                        processes_seen.append(ProcessObservation(*fields))
+                ssh_process_observed = any(
+                    item.executable in ("ssh", "autossh", "sshd")
+                    for item in processes_seen
                 )
                 lines.append(
                     "SSH: "
                     + (
                         "process observed; tunnel health unverified"
-                        if ssh
+                        if ssh_process_observed
                         else "no SSH process observed in this sandbox"
                     )
                 )
@@ -154,6 +245,8 @@ def inspect_session(record: SessionRecord) -> Snapshot:
                 ]
             else:
                 lines.append("Process inventory unavailable.")
+                errors.append("process_inventory_unavailable")
+                reliable = False
         else:
             lines.append(
                 "Workspace stopped; in-container connections and processes are not measured."
@@ -167,7 +260,7 @@ def inspect_session(record: SessionRecord) -> Snapshot:
         subprocess.TimeoutExpired,
     ):
         lines.append("Some probes unavailable or timed out; refresh to retry.")
-        return Snapshot(
-            utc_now(), container_id, tuple(plain(line) for line in lines), False
-        )
-    return Snapshot(utc_now(), container_id, tuple(plain(line) for line in lines))
+        errors.append("inspection_failed")
+        reliable = False
+        return result()
+    return result()

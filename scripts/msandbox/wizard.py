@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Sequence, TextIO, TypeVar
 
-from .agent_adapters import attach_agent
+from .agent_adapters import attach_agent, exited_agent_output
 from .capabilities import (
     leaks,
     load_report,
@@ -459,22 +459,51 @@ def _open_session(
     output: TextIO,
 ) -> None:
     while record.phase != "released":
-        action = choose(
-            _session_menu_title(record),
+        preserved_output = exited_agent_output(record)
+        title = _session_menu_title(record)
+        choices = [
             (
-                (f"{'Resume' if record.phase == 'running' else 'Start'} {record.agent} — Open this harness; Ctrl-b d returns here", "open"),
-                ("Change harness — Keep files and commits; start a different conversation", "switch"),
-                ("Open shell — Terminal in this workspace; exit returns here", "shell"),
-                ("Environment & processes — Connections, dev-remote.sh, SSH and running tools", "environment"),
-                ("Browser — Enable Chromium, check it, or capture a screenshot", "browser"),
-                ("Files & attachments — Import, inspect, deliver and export sandbox files", "files"),
-                ("Testing — Changed files, full PR, browser and Xcode validation", "validate"),
-                ("Tools & access — Measured capabilities and configuration requirements", "tools"),
-                ("Branch & pull request — Luna high drafts branch, commit and PR copy", "publish"),
-                ("Stop session — Stop its harness and container; preserve files", "stop"),
-                ("Release published session — Free a clean, published worktree", "release"),
-                ("Back", "back"),
+                (
+                    f"Restart {record.agent} — Replaces the preserved exit output"
+                    if preserved_output is not None
+                    else f"{'Resume' if record.phase == 'running' else 'Start'} {record.agent} — Open this harness; Ctrl-b d returns here"
+                ),
+                "open",
             ),
+            (
+                (
+                    "Change harness — Replaces preserved exit output; keeps files and commits"
+                    if preserved_output is not None
+                    else "Change harness — Keep files and commits; start a different conversation"
+                ),
+                "switch",
+            ),
+            ("Open shell — Terminal in this workspace; exit returns here", "shell"),
+            ("Environment & processes — Connections, dev-remote.sh, SSH and running tools", "environment"),
+            ("Browser — Enable Chromium, check it, or capture a screenshot", "browser"),
+            ("Files & attachments — Import, inspect, deliver and export sandbox files", "files"),
+            ("Testing — Changed files, full PR, browser and Xcode validation", "validate"),
+            ("Tools & access — Measured capabilities and configuration requirements", "tools"),
+            ("Branch & pull request — Luna high drafts branch, commit and PR copy", "publish"),
+            ("Stop session — Stop its harness and container; preserve files", "stop"),
+            ("Release published session — Free a clean, published worktree", "release"),
+            ("Back", "back"),
+        ]
+        if preserved_output is not None:
+            title += (
+                "\nHarness exited; its last output is preserved below until restart, "
+                "harness switch, or stop."
+            )
+            choices.insert(
+                0,
+                (
+                    "View exited harness output — Inspect up to 120 lines without replacing them",
+                    "harness-output",
+                ),
+            )
+        action = choose(
+            title,
+            choices,
             reader=reader,
             output=output,
         )
@@ -484,12 +513,20 @@ def _open_session(
             from .manager import manage
 
             manage(action, record, reader=reader, output=output)
-        if action == "open":
+        if action == "harness-output":
+            from .manager import show
+
+            show(
+                preserved_output or "The exited harness produced no captured output.",
+                reader=reader,
+                output=output,
+            )
+        elif action == "open":
             # A running session's agent already read its context at startup;
             # rewriting the report cannot reach that process, and remeasuring
             # would block the attach behind the whole probe suite.
-            if record.phase != "running":
-                start_session(record)
+            if record.phase != "running" or preserved_output is not None:
+                start_session(record, replace_exited=preserved_output is not None)
             attach_agent(record)
         elif action == "shell":
             refresh_github_auth(record)

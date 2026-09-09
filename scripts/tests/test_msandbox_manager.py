@@ -13,11 +13,17 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from scripts.msandbox.agent_adapters import AgentError, deliver_attachments
-from scripts.msandbox.docker_runtime import session_home
+from scripts.msandbox.agent_adapters import (
+    AgentError,
+    deliver_attachments,
+    ensure_agent_pane_controls,
+    exited_agent_output,
+)
+from scripts.msandbox.cli import run as run_cli
+from scripts.msandbox.docker_runtime import compose_command, session_home
 from scripts.msandbox.files import SandboxFile, export_file, list_files, read_file
 from scripts.msandbox.git_worktrees import dirty_fingerprint
-from scripts.msandbox.inspection import inspect_session
+from scripts.msandbox.inspection import PROBE, Snapshot, inspect_session
 from scripts.msandbox.manager import manage
 from scripts.msandbox.models import Attachment, SessionSpec
 from scripts.msandbox.publication import (
@@ -28,10 +34,18 @@ from scripts.msandbox.publication import (
     save_draft,
     validate_copy,
 )
-from scripts.msandbox.sessions import create_session, submit_session, switch_session
+from scripts.msandbox.sessions import (
+    create_session,
+    reconcile_session,
+    release_session,
+    start_session,
+    submit_session,
+    switch_session,
+)
 from scripts.msandbox.state import load_session, save_session
 from scripts.msandbox.terminal_ui import clip, frame, mouse_key, plain
 from scripts.msandbox.tool_actions import tool_action
+from scripts.msandbox.wizard import _open_session
 from scripts.tests.test_msandbox_v2 import MsandboxTestCase, git
 
 
@@ -291,6 +305,41 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             snapshot = inspect_session(self.record())
         self.assertIn("unknown", snapshot.lines[0])
         self.assertNotIn("secret", str(snapshot))
+        self.assertFalse(snapshot.reliable)
+        self.assertEqual(snapshot.errors, ("docker_unavailable",))
+
+    def test_session_ps_json_is_structured_and_unreliable_exits_nonzero(self):
+        record = self.record()
+        save_session(record)
+        snapshot = Snapshot(
+            "2026-09-09T00:00:00+00:00",
+            None,
+            ("Docker unavailable; live state is unknown.",),
+            False,
+            errors=("docker_unavailable",),
+        )
+        output = io.StringIO()
+        with (
+            mock.patch(
+                "scripts.msandbox.inspection.inspect_session", return_value=snapshot
+            ),
+            mock.patch("sys.stdout", output),
+        ):
+            status = run_cli(["--repo", str(self.repo), "session", "ps", record.id, "--json"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(status, 1)
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertFalse(payload["reliable"])
+        self.assertEqual(payload["errors"], ["docker_unavailable"])
+        self.assertNotIn("lines", payload)
+
+    def test_session_inspection_inherits_documented_host_endpoints(self):
+        command = compose_command(self.record(), "config")
+        files = [command[index + 1] for index, value in enumerate(command) if value == "--file"]
+        self.assertTrue(files[0].endswith("docker-compose.sandbox.yml"))
+        self.assertTrue(files[1].endswith("docker-compose.sandbox-session.yml"))
+        self.assertIn("HOST_DEV_BACKEND_URL", PROBE)
+        self.assertIn("HOST_DEV_FRONTEND_URL", PROBE)
 
     def test_files_skip_symlinks_and_export_survives_source_removal(self):
         record = self.record()
@@ -372,6 +421,90 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             read_file(item, 100)
         self.assertEqual(list_files(record), [])
 
+    def test_existing_agent_panes_receive_exit_preservation_controls(self):
+        record = self.record()
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            mock.patch(
+                "scripts.msandbox.agent_adapters._tmux_exists", return_value=True
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.subprocess.run",
+                return_value=completed,
+            ) as run,
+        ):
+            ensure_agent_pane_controls(record)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertTrue(any("remain-on-exit" in command for command in commands))
+        self.assertTrue(any("pane-died" in command for command in commands))
+
+    def test_exited_agent_output_reads_preserved_dead_pane(self):
+        record = self.record()
+        with (
+            mock.patch(
+                "scripts.msandbox.agent_adapters._tmux_exists", return_value=True
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.tmux_running", return_value=False
+            ),
+            mock.patch(
+                "scripts.msandbox.agent_adapters.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    [], 0, "fatal: login expired\n", ""
+                ),
+            ),
+        ):
+            self.assertEqual(exited_agent_output(record), "fatal: login expired")
+
+    def test_exited_harness_output_is_visible_before_restart(self):
+        record = self.record()
+        choices = iter(("harness-output", "back"))
+        menus = []
+
+        def choose(title, options, **_kwargs):
+            menus.append((title, [label for label, _ in options]))
+            return next(choices)
+
+        output = io.StringIO()
+        with (
+            mock.patch(
+                "scripts.msandbox.wizard.exited_agent_output",
+                return_value="fatal: login expired",
+            ),
+            mock.patch("scripts.msandbox.wizard.choose", side_effect=choose),
+            mock.patch(
+                "scripts.msandbox.wizard.reconcile_session", return_value=record
+            ),
+        ):
+            _open_session(record, reader=lambda _prompt: "", output=output)
+        self.assertIn("fatal: login expired", output.getvalue())
+        labels = [label for _, options in menus for label in options]
+        self.assertTrue(any(label.startswith("View exited harness output") for label in labels))
+        self.assertTrue(any(label.startswith("Restart codex") for label in labels))
+
+    def test_start_protects_preserved_harness_output_by_default(self):
+        record = self.record()
+        with (
+            mock.patch(
+                "scripts.msandbox.sessions.exited_agent_output", return_value="failure"
+            ),
+            self.assertRaisesRegex(RuntimeError, "output is preserved"),
+        ):
+            start_session(record)
+
+    def test_reconcile_retrofits_controls_on_existing_agent_pane(self):
+        record = self.record()
+        save_session(record)
+        with (
+            mock.patch("scripts.msandbox.sessions._ensure_isolated_git"),
+            mock.patch(
+                "scripts.msandbox.sessions.ensure_agent_pane_controls"
+            ) as controls,
+            mock.patch("scripts.msandbox.sessions.container_running", return_value=False),
+        ):
+            reconcile_session(record, _lock_held=True)
+        controls.assert_called_once_with(record)
+
     def test_harness_switch_preserves_workspace_and_explicit_permissions(self):
         record = self.record()
         record.permission_mode = "autonomous"
@@ -389,6 +522,26 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         self.assertIsNone(saved.agent_session_id)
         self.assertEqual(saved.phase, "stopped")
         auth.assert_called_once()
+
+    def test_switch_preserves_orphaned_phase_discovered_while_stopping(self):
+        record = self.record()
+        record.phase = "running"
+        save_session(record)
+
+        def orphan(current, **_kwargs):
+            current.phase = "orphaned"
+            save_session(current)
+
+        with (
+            mock.patch("scripts.msandbox.sessions.stop_session", side_effect=orphan),
+            mock.patch("scripts.msandbox.sessions.provision_session_auth") as provision,
+            self.assertRaisesRegex(RuntimeError, "became orphaned"),
+        ):
+            switch_session(record, "claude")
+        current = load_session(record.id)
+        self.assertEqual(current.phase, "orphaned")
+        self.assertEqual(current.agent, "codex")
+        provision.assert_not_called()
 
     def test_harness_auth_failure_keeps_old_record(self):
         record = self.record()
@@ -798,6 +951,112 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
             git(record.worktree, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD"
         )
         self.assertEqual(load_session(record.id).target_branch, draft.branch)
+        self.assertTrue(load_session(record.id).managed_local_branch)
+
+    def test_release_removes_managed_local_branch_for_future_sessions(self):
+        record = create_session(
+            self.repo, SessionSpec("first", "codex", "main", start=False)
+        )
+        head = git(record.worktree, "rev-parse", "HEAD")
+        draft = PublicationDraft(
+            "codex/reusable",
+            "fix: reusable",
+            "Reusable",
+            "Tests pending",
+            head,
+            "clean",
+        )
+        with mock.patch("scripts.msandbox.sessions.stop_session"):
+            apply_draft(record, draft, commit=False)
+        git(record.worktree, "push", "origin", f"HEAD:refs/heads/{draft.branch}")
+        with (
+            mock.patch("scripts.msandbox.sessions.stop_session"),
+            mock.patch("scripts.msandbox.sessions.remove_container_project"),
+        ):
+            released = release_session(record)
+        self.assertTrue(released.released)
+        local_ref = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{draft.branch}",
+            ],
+            check=False,
+        )
+        self.assertEqual(local_ref.returncode, 1)
+
+        git(self.remote, "update-ref", "-d", f"refs/heads/{draft.branch}")
+        next_record = create_session(
+            self.repo, SessionSpec("second", "codex", "main", start=False)
+        )
+        next_draft = replace(
+            draft,
+            head=git(next_record.worktree, "rev-parse", "HEAD"),
+            fingerprint="clean",
+        )
+        with mock.patch("scripts.msandbox.sessions.stop_session"):
+            apply_draft(next_record, next_draft, commit=False)
+        self.assertEqual(load_session(next_record.id).target_branch, draft.branch)
+
+    def test_apply_adopts_safe_remote_deleted_local_branch(self):
+        git(self.repo, "branch", "codex/legacy-clean", "main")
+        record = create_session(
+            self.repo, SessionSpec("different-name", "codex", "main", start=False)
+        )
+        draft = PublicationDraft(
+            "codex/legacy-clean",
+            "fix: reuse branch",
+            "Reuse branch",
+            "Tests pending",
+            git(record.worktree, "rev-parse", "HEAD"),
+            "clean",
+        )
+        with mock.patch("scripts.msandbox.sessions.stop_session"):
+            apply_draft(record, draft, commit=False)
+        saved = load_session(record.id)
+        self.assertEqual(saved.target_branch, draft.branch)
+        self.assertTrue(saved.managed_local_branch)
+
+    def test_apply_refuses_local_branch_with_unpublished_commits(self):
+        tree = git(self.repo, "rev-parse", "main^{tree}")
+        parent = git(self.repo, "rev-parse", "main")
+        unique = git(
+            self.repo,
+            "commit-tree",
+            tree,
+            "-p",
+            parent,
+            "-m",
+            "local-only",
+        )
+        git(self.repo, "branch", "codex/local-only", unique)
+        record = create_session(
+            self.repo, SessionSpec("different-name", "codex", "main", start=False)
+        )
+        draft = PublicationDraft(
+            "codex/local-only",
+            "fix: do not overwrite",
+            "Do not overwrite",
+            "Tests pending",
+            git(record.worktree, "rev-parse", "HEAD"),
+            "clean",
+        )
+        with (
+            mock.patch("scripts.msandbox.sessions.stop_session"),
+            self.assertRaisesRegex(RuntimeError, "outside this session"),
+        ):
+            apply_draft(record, draft, commit=False)
+        self.assertEqual(git(self.repo, "rev-parse", draft.branch), unique)
+
+    def test_old_records_default_to_no_managed_local_branch(self):
+        raw = self.record().to_dict()
+        raw.pop("managed_local_branch")
+        restored = type(self.record()).from_dict(raw)
+        self.assertFalse(restored.managed_local_branch)
 
     def test_capability_details_use_same_report_without_refresh(self):
         record = self.record()

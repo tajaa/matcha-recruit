@@ -163,24 +163,6 @@ def _atomic_private_write(directory_fd: int, name: str, payload: bytes) -> None:
             pass
 
 
-def _atomic_secret_copy(source: Path, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    destination.parent.chmod(0o700)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{destination.name}.", dir=destination.parent
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(source.read_bytes())
-            handle.flush()
-            os.fsync(handle.fileno())
-        temporary.chmod(0o600)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 def _copy_agent_auth(record: SessionRecord) -> None:
     """Seed only the selected agent's login; never copy histories or logs."""
     home = session_home(record)
