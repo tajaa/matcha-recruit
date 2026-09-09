@@ -22,6 +22,10 @@
   --color-tu-paper-dim: #e6ddc9;
   --color-tu-ink: #17140f;
 
+  /* Corkboard — contained Regulars board surface only. */
+  --color-tu-cork: #5b3f2a;
+  --color-tu-cork-dark: #46301f;
+
   --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
@@ -41,10 +45,9 @@ body {
   box-sizing: border-box;
 }
 
-/* Perforated ticket-tear — the page's signature connective motif.
-   .tu-tear-edge notches the BOTTOM of a bounded panel (hero ticket, step
-   stubs). .tu-tear-edge-divider notches BOTH edges of a thin full-bleed
-   strip, reading as a strip torn off a roll (section dividers, footer top). */
+/* Perforated ticket-tear — bounded panels keep the signature paper edge.
+   Full-width dividers use a quiet perforated rule so they do not compete with
+   the studio layout. */
 :root {
   --tu-tear-depth: 10px;
 }
@@ -67,20 +70,116 @@ body {
 }
 
 .tu-tear-edge-divider {
-  height: 20px;
-  background: var(--color-tu-border);
-  clip-path: polygon(
-    0 var(--tu-tear-depth), 5% 0, 10% var(--tu-tear-depth), 15% 0, 20% var(--tu-tear-depth), 25% 0,
-    30% var(--tu-tear-depth), 35% 0, 40% var(--tu-tear-depth), 45% 0, 50% var(--tu-tear-depth), 55% 0,
-    60% var(--tu-tear-depth), 65% 0, 70% var(--tu-tear-depth), 75% 0, 80% var(--tu-tear-depth), 85% 0,
-    90% var(--tu-tear-depth), 95% 0, 100% var(--tu-tear-depth),
-    100% calc(100% - var(--tu-tear-depth)), 95% 100%, 90% calc(100% - var(--tu-tear-depth)), 85% 100%,
-    80% calc(100% - var(--tu-tear-depth)), 75% 100%, 70% calc(100% - var(--tu-tear-depth)), 65% 100%,
-    60% calc(100% - var(--tu-tear-depth)), 55% 100%, 50% calc(100% - var(--tu-tear-depth)), 45% 100%,
-    40% calc(100% - var(--tu-tear-depth)), 35% 100%, 30% calc(100% - var(--tu-tear-depth)), 25% 100%,
-    20% calc(100% - var(--tu-tear-depth)), 15% 100%, 10% calc(100% - var(--tu-tear-depth)), 5% 100%,
-    0 calc(100% - var(--tu-tear-depth))
-  );
+  position: relative;
+  height: 24px;
+  background: transparent;
+  clip-path: none;
+}
+
+.tu-tear-edge-divider::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, var(--color-tu-border) 0 3px, transparent 3px 9px);
+  content: '';
+}
+
+/* Landing studio surface. The authenticated Tell-Us app keeps its dark
+   product chrome; only the marketing page gets this paper-and-ink treatment. */
+.tu-studio {
+  --color-tu-bg: #f6f1e8;
+  --color-tu-panel: #fffaf1;
+  --color-tu-panel2: #eee7dc;
+  --color-tu-border: #d8d0c3;
+  --color-tu-text: #292722;
+  --color-tu-dim: #686259;
+  --color-tu-faint: #948b7e;
+  --color-tu-accent: #b86612;
+  --color-tu-accent-soft: #d98525;
+  --color-tu-good: #397255;
+  --color-tu-bad: #b95743;
+  --color-tu-paper: #fffaf1;
+  --color-tu-paper-dim: #eee3d2;
+  --color-tu-ink: #292722;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--color-tu-bg);
+  background-image:
+    radial-gradient(circle at 10% 0%, rgba(217, 133, 37, 0.12), transparent 30rem),
+    radial-gradient(circle at 92% 26%, rgba(117, 103, 81, 0.08), transparent 26rem),
+    linear-gradient(rgba(105, 94, 78, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(105, 94, 78, 0.035) 1px, transparent 1px);
+  background-size: auto, auto, 42px 42px, 42px 42px;
+}
+
+.tu-studio .tu-tear-edge-divider {
+  background: transparent;
+  box-shadow: none;
+}
+
+.tu-studio .tu-tear-edge-divider::before {
+  background: repeating-linear-gradient(90deg, #d1c5b5 0 3px, transparent 3px 9px);
+}
+
+.tu-studio .tu-cork {
+  background-color: #70583f;
+  background-image: radial-gradient(rgba(255, 239, 206, 0.12) 0.8px, transparent 0.8px), radial-gradient(rgba(38, 20, 8, 0.16) 0.7px, transparent 0.7px);
+  box-shadow: inset 0 0 70px rgba(34, 18, 8, 0.32), 0 24px 55px rgba(76, 55, 29, 0.16);
+}
+
+.tu-studio .tu-stamp {
+  letter-spacing: 0.12em;
+}
+
+.tu-studio .tu-gradient-text {
+  background-image: linear-gradient(100deg, var(--color-tu-text), var(--color-tu-accent), var(--color-tu-text));
+}
+
+.tu-cork {
+  background-color: var(--color-tu-cork);
+  background-image: radial-gradient(rgba(255, 235, 194, 0.09) 0.8px, transparent 0.8px), radial-gradient(rgba(38, 20, 8, 0.15) 0.7px, transparent 0.7px);
+  background-position: 0 0, 7px 9px;
+  background-size: 13px 13px, 17px 17px;
+  box-shadow: inset 0 0 70px rgba(34, 18, 8, 0.45);
+}
+
+.tu-pushpin::before {
+  content: '';
+  position: absolute;
+  top: 0.55rem;
+  left: 50%;
+  z-index: 2;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fff1c7 0 12%, #e7a84e 27%, #9b541f 72%, #663315 100%);
+  box-shadow: 0 2px 3px rgba(34, 18, 8, 0.45), 0 0 0 1px rgba(70, 38, 16, 0.25);
+  transform: translateX(-50%);
+}
+
+.tu-leader {
+  flex: 1 1 auto;
+  align-self: baseline;
+  border-bottom: 1px dotted currentColor;
+  opacity: 0.35;
+}
+
+.tu-stamp {
+  display: inline-block;
+  border-width: 2px;
+  border-radius: 4px;
+  padding: 0.25rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(-8deg);
 }
 
 /* Marquee — pure CSS loop; the track renders its content twice back-to-back
