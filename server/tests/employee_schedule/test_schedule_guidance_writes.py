@@ -111,6 +111,7 @@ def _resolved(rules):
     return SimpleNamespace(
         rules=tuple(rules), source="catalog", advisories=(),
         timezone=None, rule_set_ids=(), rule_set_hash="hash",
+        employer_employee_count=None,
     )
 
 
