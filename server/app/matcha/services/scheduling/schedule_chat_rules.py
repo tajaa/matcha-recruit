@@ -407,6 +407,26 @@ def match_template(
     return None
 
 
+def template_for_request(req: dict, templates: list[dict]) -> Optional[dict]:
+    """The template a create request should adopt, or None to build it ad hoc.
+
+    A template is shorthand for hours the manager did not state. `match_
+    template` matches on a name stem OR A ROLE STEM, so "add a Barista shift
+    from 2pm to 8:30pm" matched an "Opening Barista" template and the
+    template's 06:30-14:30 replaced the hours the manager had just given.
+    Asking Huume to correct it matched the same template and produced the same
+    wrong shift again (reported 2026-09-10).
+
+    Stated hours therefore outrank a template outright, rather than the
+    template being adopted for its role/headcount with its times overridden:
+    that would leave `template_id` pointing at a template the shift does not
+    follow, and `days_of_week` restricting dates the manager named explicitly.
+    """
+    if req.get("start_time") and req.get("end_time"):
+        return None
+    return match_template(req.get("template_hint"), req.get("label"), templates)
+
+
 def match_week_template(hint: Optional[str], templates: list[dict]) -> Optional[dict]:
     """Name-only sibling of match_template: exact case-insensitive name, then
     name-token stem overlap, deterministic ties broken by (name, id). A week

@@ -51,13 +51,13 @@ from .schedule_chat_rules import (
     apply_channel_default_location,
     build_adhoc_spec,
     match_location,
-    match_template,
     match_week_template,
     parse_time_hint,
     rank_candidates,
     resolve_dates,
     resolve_day_hint,
     resolve_week,
+    template_for_request,
 )
 from .assignment_guard import ProposedAssignment, ProposedRemoval, build_ledgers, evaluate_batch
 from .schedule_batch import net_per_day
@@ -800,7 +800,9 @@ async def _resolve_create_shifts(
     resolved_shifts: list[dict] = []
 
     for req in parsed["shift_requests"]:
-        template = match_template(req.get("template_hint"), req.get("label"), templates)
+        # Hours the manager stated outrank a template that merely shares the
+        # role name — see `template_for_request`.
+        template = template_for_request(req, templates)
         template_days: Optional[list[int]] = None
         if template:
             days_field = template.get("days_of_week")

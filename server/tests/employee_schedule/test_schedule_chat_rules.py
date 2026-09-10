@@ -24,6 +24,7 @@ from app.matcha.services.scheduling.schedule_chat_rules import (
     resolve_day_hint,
     resolve_week,
     snapped_to_option,
+    template_for_request,
 )
 
 LOCATIONS = [
@@ -323,6 +324,57 @@ class TestMatchTemplate:
 
     def test_no_templates_returns_none(self):
         assert match_template("opener", None, []) is None
+
+
+# The reported shape: a location whose Barista templates are named for the
+# part of day they cover, so ANY "Barista" request matches one on the role
+# stem even when the manager gave their own hours.
+BARISTA_TEMPLATES = [
+    {"id": "b1", "name": "Opening Barista", "role": "Barista",
+     "start_time": "06:30", "end_time": "14:30", "required_staff": 1},
+]
+
+
+class TestTemplateForRequest:
+    """Reported 2026-09-10: "lets add a shift from 2pm to 830pm on sunday",
+    role Barista, was created as 06:30-14:30 — the Opening Barista template's
+    hours. Asking Huume to correct it produced the same shift again."""
+
+    def _request(self, **over):
+        req = {"label": "Barista", "template_hint": None, "role": "Barista",
+               "start_time": "14:00", "end_time": "20:30", "count": 1}
+        req.update(over)
+        return req
+
+    def test_stated_hours_are_not_replaced_by_a_role_matched_template(self):
+        assert template_for_request(self._request(), BARISTA_TEMPLATES) is None
+        # …and the template really would have matched, which is the bug.
+        assert match_template(None, "Barista", BARISTA_TEMPLATES)["id"] == "b1"
+
+    def test_the_correction_request_is_not_recaptured_by_the_same_template(self):
+        # Second time around the manager says the same thing; nothing about
+        # the retry may re-adopt the template that produced the wrong shift.
+        correction = self._request(label="Barista", template_hint=None)
+        assert template_for_request(correction, BARISTA_TEMPLATES) is None
+
+    def test_an_explicit_template_hint_still_loses_to_stated_hours(self):
+        assert template_for_request(
+            self._request(template_hint="Opening Barista"), BARISTA_TEMPLATES,
+        ) is None
+
+    def test_a_request_with_no_hours_still_adopts_its_template(self):
+        req = self._request(start_time=None, end_time=None)
+        adopted = template_for_request(req, BARISTA_TEMPLATES)
+        assert (adopted["start_time"], adopted["end_time"]) == ("06:30", "14:30")
+
+    def test_a_half_stated_window_still_adopts_the_template(self):
+        # One bound is not a shift; the template is still the only complete
+        # answer, and the create branch needs both times or it clarifies.
+        for half in (self._request(end_time=None), self._request(start_time=None)):
+            assert template_for_request(half, BARISTA_TEMPLATES)["id"] == "b1"
+
+    def test_stated_hours_with_no_matching_template_are_unaffected(self):
+        assert template_for_request(self._request(), []) is None
 
 
 WEEK_TEMPLATES = [
