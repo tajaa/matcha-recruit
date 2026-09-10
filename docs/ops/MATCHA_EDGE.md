@@ -173,8 +173,89 @@ aws wafv2 delete-regex-pattern-set --scope CLOUDFRONT --region us-east-1 \
       --query LockToken --output text)"
 ```
 
+## Origin-Side Banning — Incident 2026-09-10
+
+**The origin must never ban its own CDN.** It did, and it cost a 13-minute
+partial outage.
+
+The host runs fail2ban. Its `nginx-404` jail read `/var/log/nginx/access.log`,
+matched `^<HOST> -.*" (404|444) .*$`, and banned the **connecting** address with
+an iptables REJECT on 80/443 for an hour. Since the CloudFront cutover, that
+address is always a CloudFront edge server. A burst of 404s from WAF-rule
+testing tripped it:
+
+```text
+06:12:38  POST /api/sym/testtoken123/unlock  → 404   (via CloudFront edge 130.176.22.74)
+06:12:39  fail2ban.actions [nginx-404] Ban 130.176.22.74
+06:26:03  fail2ban.actions [nginx-404] Unban 130.176.22.74   (manual)
+```
+
+Every viewer routed through the PHX52 POP got `504 Gateway Timeout` for those 13
+minutes; other POPs were unaffected, which is what made it look client-specific.
+It is not: an EC2 host on a completely different IP saw the same 504 through that
+POP, while the origin access log showed unrelated users being served 200s
+through other edges the entire time.
+
+Scale of the false-positive problem, measured against AWS `ip-ranges.json`:
+
+| Addresses the jail had ever banned | Count |
+|---|---|
+| Inside AWS CloudFront ranges | 140 |
+| Everything else | 15 |
+
+All 15 of the non-CloudFront bans are dated on or before **2026-08-21** — the day
+the origin gates were installed. The jail caught nothing real in the ~20 days
+after, and could not: its filter only matches 404/444, and the gate 403s a
+direct-to-origin scanner before it can produce a 404.
+
+**Resolution.** `[nginx-404]` is `enabled = false` in `/etc/fail2ban/jail.local`
+as of 2026-09-10, with the reasoning inline in that file. `sshd` (port 22, sees
+real client IPs) and `nginx-http-auth` are untouched and still run.
+
+**The coupling this creates.** Disabling the jail costs us protection against
+direct-to-origin 404 scanners. That is real, but currently worth zero, because
+the gate already 403s them. It only regains value if the gate is ever turned off.
+So a change that disables, bypasses, or fails to reinstall
+`/etc/nginx/snippets/{matcha,cappe}-cloudfront-origin-gate.conf` must replace the
+protection in the same change — re-enable the jail *with* CloudFront ranges in
+`ignoreip`, or cover it at the WAF. Root `CLAUDE.md` carries the short form of
+this warning next to the blue-green rule.
+
+**If it happens again** (symptom: 504 from some POPs, 200 from others, origin
+healthy):
+
+```bash
+sudo fail2ban-client status nginx-404          # is anything banned?
+sudo iptables -L f2b-nginx-404 -n              # the REJECT rules
+sudo fail2ban-client set nginx-404 unbanip <CLOUDFRONT_IP>
+```
+
+Anything in `3.172.*`, `18.68.*`, `15.158.*`, `52.46.*`, `130.176.*` is a
+CloudFront edge, not an attacker. Confirm with
+`https://ip-ranges.amazonaws.com/ip-ranges.json`, service `CLOUDFRONT`.
+
+Three other jails (`nginx-noscript`, `nginx-badbots`, `nginx-noproxy`) are marked
+enabled but have never run — their filter files were never installed on this
+host, so fail2ban skips them at startup. Do not count them as protection.
+
 ## Known Gaps
 
+- **The oversized-body rules do not actually fire, and never have.** Verified
+  2026-09-10 against live traffic: 12 KB and 30 KB POSTs (with `Expect:
+  100-continue` disabled so the body is really transmitted) to
+  `/api/sym/<token>/unlock` and to both IR chat paths all reached the origin
+  instead of being blocked, while control requests carrying a Log4j signature or
+  hitting `/web-inf/web.xml` returned 403 instantly — so the ACL is definitely
+  evaluating the traffic. No per-rule CloudWatch metric has ever existed for any
+  of the four body/rate rules on this ACL, which fits: none has ever matched.
+  The shared three-clause AND shape (`uri regex` ∧ `SizeConstraint Body > 8192`
+  ∧ `Method EXACTLY POST`) is wrong somewhere, and it is wrong for the Cappe and
+  IR rules too, not just the sym-link one. To isolate it, add two temporary
+  **Count**-mode rules — one matching the URI regex alone, one the body size
+  alone — send a test request, read `get-sampled-requests` to see which clause
+  fails, then remove them. Count blocks nothing, so this is safe on the live ACL.
+  Until that is resolved, treat the 8 KiB ceilings as unenforced and rely on the
+  application's own body caps.
 - **IR public writes are edge-uncovered.** Only the two chat-turn endpoints are
   in `matcha-ir-chat-path`. `POST /api/report/{token}`, `POST /api/intake/{token}`,
   and both `/voice/parse` endpoints have no targeted rule — and voice-parse takes
