@@ -8,6 +8,8 @@ import termios
 import threading
 from pathlib import Path
 
+from .autopr_ui import AutoPRFeed
+from .autopr_ui import rows as autopr_rows
 from .capabilities import leaks, load_report, missing_required, report_is_stale
 from .dashboard_view import GLOBALS, TABS, Row, ViewState, build_layout, overview
 from .errors import RECOVERABLE_ERRORS
@@ -393,17 +395,22 @@ def _screen(window, records, state, observations, details=None):
                 pass
         window.bkgd(" ", colors.get("text", 0))
     details = details or LocalDetails()
+    autopr = AutoPRFeed()
     while True:
         observations.poll()
         details.poll()
         record = next((r for r in records if r.id == state.session_id), None)
         if record and state.tab == 1:
             observations.ensure(record)
-        if record:
+        if record and state.tab != 6:
             details.ensure(record, state.tab)
         local = details.for_record(record)
-        rows = session_rows(record, state.tab, observations, local)
-        rows += [Row(error, tone="warning") for error in local.get("errors", [])]
+        if state.tab == 6:
+            autopr.refresh(state.autopr_id)
+            rows = autopr_rows(autopr, state.autopr_id)
+        else:
+            rows = session_rows(record, state.tab, observations, local)
+            rows += [Row(error, tone="warning") for error in local.get("errors", [])]
         height, width = window.getmaxyx()
         layout = build_layout(records, state, rows, width, height)
         window.erase()
@@ -442,7 +449,7 @@ def _screen(window, records, state, observations, details=None):
             state.region = (state.region - 1) % 3
         elif key == "\x1b":
             state.region = 0
-        elif isinstance(key, str) and key in "123456":
+        elif isinstance(key, str) and key in "1234567":
             state.tab, state.scroll, state.cursor = int(key) - 1, 0, 0
             state.region = 1
         elif key in (curses.KEY_LEFT, curses.KEY_RIGHT) and state.region == 1:
@@ -519,6 +526,12 @@ def _screen(window, records, state, observations, details=None):
         elif command and command.startswith("tab:"):
             state.tab, state.region = int(command.partition(":")[2]), 1
             state.scroll = state.cursor = 0
+        elif command == "autopr":
+            state.tab, state.region, state.scroll, state.cursor = 6, 2, 0, 0
+        elif command and command.startswith("autopr:select:"):
+            state.autopr_id = command.rsplit(":", 1)[1]
+            state.scroll = state.cursor = 0
+            autopr.refresh(state.autopr_id, force=True)
         elif command == "refresh":
             if record:
                 observations.request(record)
@@ -611,7 +624,7 @@ def run_dashboard(repo: Path, *, output=sys.stdout):
             return None
         try:
             if command == "reload":
-                if state.session_id:
+                if state.session_id and state.tab != 6:
                     record = load_session(state.session_id)
                     observations.request(record)
                     details.invalidate(record.id)
@@ -625,6 +638,14 @@ def run_dashboard(repo: Path, *, output=sys.stdout):
             elif command == "cleanup":
                 wizard._cleanup(repo, reader=input, output=output)
                 wizard._acknowledge(input, output)
+            elif command.startswith("autopr:"):
+                from .autopr_ui import manage as manage_autopr
+
+                _, action, run_id = command.split(":", 2)
+                state.notice = manage_autopr(
+                    action, run_id, repo, reader=input, output=output
+                )
+                continue
             elif state.session_id:
                 record = reconcile_session(load_session(state.session_id))
                 wizard._perform_session_action(

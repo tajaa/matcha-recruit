@@ -21,7 +21,18 @@ cat > "$TMP_DIR/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -eu
 [ "$1" != info ] || exit 0
+if [ "$1" = ps ]; then
+    [ ! -f "$AUTOPR_TEST_ROOT/matcha-autopr-manual-abcdef012345.running" ] \
+        || printf '%s\n' matcha-autopr-manual-abcdef012345
+    printf '%s\n' another-users-project matcha-autopr-manual-not-managed
+    exit 0
+fi
 if [ "$1" = exec ]; then
+    if [ "${AUTOPR_TEST_MANUAL_AGENT:-0}" = 1 ] \
+        && [ "${2:-}" = matcha-autopr-manual-abcdef012345-container ]; then
+        printf '%s\n' 'codex codex resume --last'
+        exit 0
+    fi
     if [ "${AUTOPR_TEST_PRIMARY_AGENT:-0}" = 1 ] \
         && [ "${2:-}" = matcha-agent-sandbox-container ]; then
         printf '%s\n' 'codex codex --sandboxed'
@@ -166,6 +177,11 @@ check "dedicated AutoPR lane starts while the master switch is on" \
 
 : > "$TMP_DIR/matcha-error-autofix-sandbox.running"
 : > "$TMP_DIR/matcha-autopr-self-audit-sandbox.running"
+: > "$TMP_DIR/matcha-autopr-manual-abcdef012345.running"
+: > "$TMP_DIR/matcha-autopr-manual-not-managed.running"
+manual_activity="$(AUTOPR_TEST_MANUAL_AGENT=1 run_msandbox status)"
+check "activity detection includes operator-owned AutoPR sandboxes" \
+    $(printf '%s' "$manual_activity" | grep -q 'ACTIVE — an AutoPR coding agent is running' && echo 0 || echo 1)
 audit_activity="$(AUTOPR_TEST_AUDIT_AGENT=1 run_msandbox status)"
 check "activity detection includes the error and self-audit worker sandboxes" \
     $(printf '%s' "$audit_activity" | grep -q \
@@ -199,6 +215,9 @@ check "msandbox stop refuses to interrupt active AutoPR work" \
       && echo 0 || echo 1)
 
 AUTOPR_TEST_ACTIVE=1 run_msandbox stop --force >/dev/null
+check "forced shutdown stops managed takeovers but not similarly named external projects" \
+    $([ ! -f "$TMP_DIR/matcha-autopr-manual-abcdef012345.running" ] \
+      && [ -f "$TMP_DIR/matcha-autopr-manual-not-managed.running" ] && echo 0 || echo 1)
 check "forced stop disables timer/dashboard/runner and stops both sandboxes" \
     $([ ! -e "$TMP_DIR/state/autopr-enabled" ] \
       && [ ! -e "$TMP_DIR/launchagent.loaded" ] \

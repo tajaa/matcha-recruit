@@ -122,6 +122,30 @@ changes.
 
 ## Local tmux dashboard
 
+The terminal `msandbox` manager additionally has an **AutoPR** tab (key **7**,
+or **AutoPR runs** in its sidebar) for local Kanban investigation output and
+operator takeover. See [takeover and handback](MSANDBOX_SESSIONS.md#take-over-an-autopr-task).
+The observer below still covers all AutoPR lanes and overall scheduler health.
+
+The trusted bridge supervises the model process and writes host-only records to
+`~/.local/state/matcha-autopr/runs/` (`AUTOPR_CONTROL_STATE_DIR` overrides this for
+tests or a shared controller/runner configuration). The desktop controller and
+runner must use the same host user and state directory. No ownership files are
+mounted in the model container. Takeover stops the exact Compose project before
+transferring its clone to a unique manual project; `select.sh` and the investigation
+claim both refuse operator-held tasks. A failed transfer protects the source
+checkout from the bridge's normal replacement cleanup.
+
+Handback stores a bounded immutable patch through a private trusted Git index,
+plus an operator note and model/effort, before using the existing `run-now` API.
+The next investigation requires the patch to apply (no checkpoint fallback that
+discards operator edits). Normal path, board-grant, patch, validation, and publication
+guards remain authoritative. Workflow cleanup releases the handback only after
+success, preserving a recovery archive before removing its managed clone. Failed
+continuations retain a retryable handback; canceled workflows can be reclaimed
+after the controller verifies they have stopped. Installing this version does not
+adopt already-running, unsupervised investigations.
+
 While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
 `matcha-autopr` session on its next tick if the session is missing. Detaching
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
@@ -210,7 +234,7 @@ second scheduler.
 Everything that runs **after** the model has touched the workspace executes from a
 snapshot of `main`, never from the checkout. The `Snapshot trusted AutoPR control plane`
 step extracts `git archive main scripts/kanban-autopr scripts/error-autofix
-scripts/autopr-scope scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
+scripts/autopr-scope scripts/msandbox scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
 `$RUNNER_TEMP/autopr-control` and exports three variables:
 
 | Variable | Value | Means |

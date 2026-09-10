@@ -260,7 +260,7 @@ jobs:
           rm -rf "$control_root"
           mkdir -p "$control_root"
           git archive main scripts/kanban-autopr scripts/error-autofix scripts/autopr-scope \
-              scripts/alembic_graph_snapshot.py scripts/alembic_graph.py \
+              scripts/msandbox scripts/alembic_graph_snapshot.py scripts/alembic_graph.py \
             | tar -x -C "$control_root"
           echo "AUTOPR_CONTROL_ROOT=$control_root/scripts" >> "$GITHUB_ENV"
           echo "AUTOPR_WORKSPACE_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
@@ -473,4 +473,12 @@ jobs:
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/leave-task-checkout.sh"
+          cleanup_rc=0
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/leave-task-checkout.sh" || cleanup_rc=$?
+          # Publication completed before releasing operator ownership. On any
+          # failure the immutable hand-back remains available for an explicit retry.
+          handoff_result=()
+          if [ "${{ job.status }}" = success ]; then handoff_result=(--success); fi
+          python3 "$AUTOPR_CONTROL_ROOT/msandbox/autopr_control.py" finish \
+            "$(jq -r '.task_id' "$RUNNER_TEMP/card.json")" "${handoff_result[@]}"
+          exit "$cleanup_rc"

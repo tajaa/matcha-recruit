@@ -8,10 +8,18 @@ from dataclasses import dataclass, field
 from .models import SessionRecord, port_lines
 from .terminal_ui import clip, plain
 
-TABS = ("Overview", "Processes", "Tools & access", "Files", "Testing", "Branch & PR")
+TABS = (
+    "Overview",
+    "Processes",
+    "Tools & access",
+    "Files",
+    "Testing",
+    "Branch & PR",
+    "AutoPR",
+)
 GLOBALS = (
     ("+ New session", "new"),
-    ("AutoPR dashboard", "dashboard"),
+    ("AutoPR runs", "autopr"),
     ("Legacy workspace", "legacy"),
     ("Clean up resources", "cleanup"),
     ("Exit manager", "exit"),
@@ -34,6 +42,7 @@ class ViewState:
     cursor: int = 0
     scroll: int = 0
     notice: str = "Select a session. Saved status is not a live measurement."
+    autopr_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -174,11 +183,23 @@ def build_layout(
         and [r.action for r in rows[:3]] == ["open", "switch", "shell"]
     )
     header_width = content_width - 26 if pinned_actions else content_width
-    layout.put(x, 4, record.name if record else "Your sandbox", "title", header_width)
+    layout.put(
+        x,
+        4,
+        "AutoPR activity & handoff"
+        if state.tab == 6
+        else record.name
+        if record
+        else "Your sandbox",
+        "title",
+        header_width,
+    )
     layout.put(
         x,
         5,
-        f"{record.agent} · {record.permission_mode} · saved: {record.phase}"
+        "View a run, take over, then hand your edits back."
+        if state.tab == 6
+        else f"{record.agent} · {record.permission_mode} · saved: {record.phase}"
         if record
         else "Create a session to get started.",
         "muted",
@@ -263,7 +284,7 @@ def build_layout(
     layout.put(
         2,
         height - 2,
-        "Tab: focus  ↑↓: select  Enter/click: open  1–6: tab  r: refresh  q: quit",
+        "Tab: focus  ↑↓: select  Enter/click: open  1–7: tab  r: refresh  q: quit",
         "accent",
     )
     layout.put(

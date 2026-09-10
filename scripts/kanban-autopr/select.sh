@@ -15,6 +15,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
+[ ! -f "$SCRIPT_DIR/autopr_control.py" ] || HANDOFF_CONTROL="$SCRIPT_DIR/autopr_control.py"
 
 CARDS_FILE="${1:?usage: select.sh cards.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
@@ -196,6 +198,12 @@ already_handled() {
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
     local run_requested_at="${8:-}" category="${9:-}" capabilities="${10:-}"
     local branch="bot/task-$id8"
+    # Local ownership is independent of card edits or queue signals. The
+    # operator's held checkout must never compete with a scheduled writer.
+    local ownership
+    ownership="$(python3 "$HANDOFF_CONTROL" held "${CURRENT_TASK_ID:-}")" \
+        || { echo ownership_unavailable; return; }
+    [ "$ownership" != held ] || { echo skip; return; }
     # An explicit "run now" from the card is the same class of authorization as
     # decision-bound context: it overrides the cooldown, the durable no-spec
     # ledger, and (in Todo) the historical PR ledger.
@@ -428,6 +436,7 @@ for ((i = 0; i < n; i++)); do
     last_moved="$(printf '%s' "$card" | jq -r '.last_moved_at // .created_at')"
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
     pr_number="$(printf '%s' "$card" | jq -r '.pr_number // empty')"
+    CURRENT_TASK_ID="$(printf '%s' "$card" | jq -r '.task_id // empty')"
     reconsideration_pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
     run_requested_at="$(printf '%s' "$card" | jq -r '.autopr_run_requested_at // empty')"
@@ -439,6 +448,8 @@ for ((i = 0; i < n; i++)); do
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
         "$capabilities")"
+    [ "$decision" != ownership_unavailable ] \
+        || die "could not read AutoPR ownership; refusing to select a possible operator-held task"
     if [ "$decision" = skip_github_unavailable ]; then
         # Per card this is still a fail-closed skip: a read we could not make
         # is never evidence that no PR exists. But a pass where EVERY card

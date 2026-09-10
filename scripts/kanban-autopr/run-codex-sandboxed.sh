@@ -72,6 +72,7 @@ MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
 # harness, narrows this to CI/deploy/secrets via AUTOPR_SANDBOX_PATH_DENY_RE.
 PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
 
 die() {
     printf 'kanban-autopr sandbox: %s\n' "$1" >&2
@@ -101,6 +102,10 @@ else
     cp "$HOST_CODEX_AUTH_FILE" "$SANDBOX_CODEX_AUTH_FILE"
     chmod 600 "$SANDBOX_CODEX_AUTH_FILE"
 fi
+
+# Refuse to overwrite a checkout whose takeover was interrupted. This guard
+# also covers writing-only callers that share the lane's runtime directory.
+python3 "$HANDOFF_CONTROL" protect-workspace "$SANDBOX_WORKSPACE"
 
 # Stop only the dedicated AutoPR container before replacing its bind-mounted
 # clone. Named tool/dependency volumes remain intact between runs; the auth
@@ -147,12 +152,17 @@ printf '%s\n' "$MODEL_BASE_SHA" > "$IO_DIR/model-base-sha"
 # Apply saved model work only in the disposable clone. Later patch checks still
 # decide whether it may reach the trusted checkout.
 if [ -n "$RESUME_PATCH" ]; then
-    if [ -f "$RESUME_PATCH" ] \
+    if [ -f "$RESUME_PATCH" ] && [ ! -s "$RESUME_PATCH" ] \
+        && [ "${AUTOPR_REQUIRE_RESUME_PATCH:-0}" = 1 ]; then
+        printf 'Restored operator hand-back with instructions only (no file changes)\n'
+    elif [ -f "$RESUME_PATCH" ] \
         && [ "$(wc -c < "$RESUME_PATCH" | tr -d '[:space:]')" -le "$MAX_PATCH_BYTES" ] \
         && git -C "$SANDBOX_WORKSPACE" apply --check --binary "$RESUME_PATCH"; then
         git -C "$SANDBOX_WORKSPACE" apply --binary "$RESUME_PATCH"
         printf 'Restored interrupted AutoPR patch inside msandbox\n'
     else
+        [ "${AUTOPR_REQUIRE_RESUME_PATCH:-0}" != 1 ] \
+            || die "operator hand-back no longer applies; preserved checkout needs conflict resolution"
         printf 'Saved AutoPR patch no longer applies; continuing with its textual checkpoint only\n' >&2
     fi
 fi
@@ -252,14 +262,22 @@ run_codex_cli() {
     if [ "${AUTOPR_SANDBOX_TEST_DIRECT:-0}" = 1 ]; then
         codex "${CODEX_ARGS[@]}" 2>&1 | tee "$CODEX_TRANSCRIPT"
     else
-        env -u GH_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
+        local -a supervised=()
+        if [ -n "${AUTOPR_HANDOFF_CARD:-}" ]; then
+            supervised=(python3 "$HANDOFF_CONTROL" supervise
+                --card "$AUTOPR_HANDOFF_CARD" --workspace "$SANDBOX_WORKSPACE"
+                --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT" --)
+        fi
+        env -u GH_TOKEN -u GITHUB_TOKEN -u MATCHA_BOT_PASSWORD -u SSH_KEY -u EC2_SSH_KEY \
             -u AUTOPR_TEST_TENANT_EMAIL -u AUTOPR_TEST_TENANT_PASSWORD \
             AGENT_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
             AGENT_SANDBOX_AUTOPR=1 \
             SANDBOX_WORKSPACE_DIR="$SANDBOX_WORKSPACE" \
             SANDBOX_AWS_DIR="$EMPTY_AWS_DIR" \
             SANDBOX_CODEX_AUTH_FILE="$SANDBOX_CODEX_AUTH_FILE" \
-            "$MSANDBOX_BIN" exec \
+            AUTOPR_MSANDBOX_BIN="$MSANDBOX_BIN" \
+            AUTOPR_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+            ${supervised[@]+"${supervised[@]}"} "$MSANDBOX_BIN" exec \
             codex "${CODEX_ARGS[@]}" 2>&1 | tee "$CODEX_TRANSCRIPT"
     fi
     return "${PIPESTATUS[0]}"

@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/lib.sh"
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"
 RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.json}"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
@@ -51,6 +52,10 @@ _investigate_cleanup() {
         || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
         || true
     rm -rf "$WORK_DIR"
+    # A failed continuation releases its claim, never its saved operator edits.
+    if [ "$status" -ne 0 ] && [ -n "${TASK_ID:-}" ]; then
+        python3 "$HANDOFF_CONTROL" finish "$TASK_ID" || true
+    fi
 }
 trap _investigate_cleanup EXIT
 
@@ -128,6 +133,16 @@ claim="$(mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/ru
     || die "could not verify the AutoPR queue state for $TASK_ID"
 [ "$(printf '%s' "$claim" | jq -r '.ok')" = true ] \
     || die "ticket $TASK_ID was unqueued or left the queue before investigation"
+
+handoff="$(python3 "$HANDOFF_CONTROL" continue "$TASK_ID")" \
+    || die "could not acquire this task's operator hand-back"
+if [ "$(jq 'length' <<< "$handoff")" -gt 0 ]; then
+    RESUME_PATCH="$(jq -r '.patch' <<< "$handoff")"
+    ATTACH_ARGS+=(-f "$(jq -r '.note' <<< "$handoff")")
+    KIND_MODEL="$(jq -r '.model' <<< "$handoff")"
+    KIND_EFFORT="$(jq -r '.effort' <<< "$handoff")"
+    export AUTOPR_REQUIRE_RESUME_PATCH=1
+fi
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist
@@ -399,6 +414,7 @@ run_codex() {
         AUTOPR_CODEX_MODEL="$KIND_MODEL"
         AUTOPR_CODEX_REASONING_EFFORT="$KIND_EFFORT"
         AUTOPR_TASK_ID="$TASK_ID"
+        AUTOPR_HANDOFF_CARD="$CARD_FILE"
     )
     # Kind-specific sandbox switches (empty-patch enforcement, web search,
     # image inputs): space-separated KEY=VALUE from the registry.
