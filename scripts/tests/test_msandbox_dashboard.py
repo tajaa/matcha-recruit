@@ -82,6 +82,18 @@ class Window:
 
 
 class DashboardTests(unittest.TestCase):
+    def test_autopr_tab_opens_without_an_independent_session(self):
+        with mock.patch("scripts.msandbox.dashboard.AutoPRFeed") as feed:
+            feed.return_value.runs = []
+            feed.return_value.error = ""
+            result, state, window = self.screen(["7", "q"], records=[])
+        self.assertEqual(result, "exit")
+        self.assertEqual(state.tab, 6)
+        self.assertIn(
+            "AutoPR activity & handoff", " ".join(item[2] for item in window.drawn)
+        )
+        self.assertIn("AutoPR", TABS)
+
     def screen(self, keys, state=None, records=None, mouse=None):
         state = state or ViewState(session_id="414")
         window = Window(keys)

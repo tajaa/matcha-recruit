@@ -15,6 +15,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
+[ ! -f "$SCRIPT_DIR/autopr_control.py" ] || HANDOFF_CONTROL="$SCRIPT_DIR/autopr_control.py"
 
 CARDS_FILE="${1:?usage: select.sh cards.json}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
@@ -32,6 +34,12 @@ ATTEMPT_COOLDOWN_MINUTES="${AUTOPR_ATTEMPT_COOLDOWN_MINUTES:-15}"
 
 count="$(jq 'length' "$CARDS_FILE")"
 [ "$count" -gt 0 ] || exit "$NOTHING_TO_DO"
+# One host-state scan per board sweep, not one interpreter and history scan
+# per card. The investigation repeats the ownership check at claim time.
+HELD_TASKS="$(python3 "$HANDOFF_CONTROL" held-tasks)" \
+    || die "could not read AutoPR ownership"
+jq -e 'type == "array" and all(.[]; type == "string")' <<< "$HELD_TASKS" >/dev/null \
+    || die "invalid AutoPR ownership snapshot"
 
 # Backstop: never let a bad batch of cards produce an unbounded number of
 # NEW open bot PRs. Checked per-decision below, not here — rework pushes a
@@ -195,7 +203,14 @@ already_handled() {
     local id8="$1" column="$2" last_moved="$3" progress_note="$4" pr_number="${5:-}"
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
     local run_requested_at="${8:-}" category="${9:-}" capabilities="${10:-}"
-    local branch="bot/task-$id8"
+    local branch="bot/task-$id8" task_id="${11:?task identity required}"
+    # Local ownership is independent of card edits or queue signals. The
+    # operator's held checkout must never compete with a scheduled writer.
+    [ -n "$task_id" ] || { echo ownership_unavailable; return; }
+    if jq -e --arg task "$task_id" 'index($task) != null' <<< "$HELD_TASKS" >/dev/null; then
+        echo skip
+        return
+    fi
     # An explicit "run now" from the card is the same class of authorization as
     # decision-bound context: it overrides the cooldown, the durable no-spec
     # ledger, and (in Todo) the historical PR ledger.
@@ -420,6 +435,12 @@ ranked="$(jq -c '
     )
 ' "$CARDS_FILE")"
 
+if [ -n "${AUTOPR_REQUESTED_TASK_ID:-}" ]; then
+    [[ "$AUTOPR_REQUESTED_TASK_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || die "invalid requested task ID"
+    ranked="$(printf '%s' "$ranked" | jq -c --arg task "$AUTOPR_REQUESTED_TASK_ID" \
+        'map(select(.task_id == $task and (.autopr_run_requested_at // null) != null))')"
+fi
+
 n="$(printf '%s' "$ranked" | jq 'length')"
 for ((i = 0; i < n; i++)); do
     card="$(printf '%s' "$ranked" | jq -c ".[$i]")"
@@ -428,6 +449,7 @@ for ((i = 0; i < n; i++)); do
     last_moved="$(printf '%s' "$card" | jq -r '.last_moved_at // .created_at')"
     progress_note="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
     pr_number="$(printf '%s' "$card" | jq -r '.pr_number // empty')"
+    task_id="$(printf '%s' "$card" | jq -r '.task_id // empty')"
     reconsideration_pending="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_pending // false')"
     reconsideration_at="$(printf '%s' "$card" | jq -r '.autopr_reconsideration_at // empty')"
     run_requested_at="$(printf '%s' "$card" | jq -r '.autopr_run_requested_at // empty')"
@@ -438,7 +460,9 @@ for ((i = 0; i < n; i++)); do
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
-        "$capabilities")"
+        "$capabilities" "$task_id")"
+    [ "$decision" != ownership_unavailable ] \
+        || die "could not read AutoPR ownership; refusing to select a possible operator-held task"
     if [ "$decision" = skip_github_unavailable ]; then
         # Per card this is still a fail-closed skip: a read we could not make
         # is never evidence that no PR exists. But a pass where EVERY card

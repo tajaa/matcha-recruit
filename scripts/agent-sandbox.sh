@@ -508,6 +508,11 @@ autopr_sandbox_projects() {
         "$ERROR_AUTOPR_SANDBOX_PROJECT_NAME" \
         "$AUDIT_AUTOPR_SANDBOX_PROJECT_NAME" \
         | awk 'NF && !seen[$0]++'
+    # Operator takeovers are separate projects, but still obey the same
+    # master switch and active-work shutdown guard as autonomous sandboxes.
+    docker ps --filter label=com.docker.compose.service=workspace \
+        --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null \
+        | LC_ALL=C grep -E '^matcha-autopr-manual-[0-9a-f]{12}$' || true
 }
 
 workspace_state() {

@@ -63,6 +63,7 @@ touch "$TMP_DIR/autopr-enabled"
 cat > "$TMP_DIR/run-request-probe" <<'EOF'
 #!/usr/bin/env bash
 [ -z "${AUTOPR_TEST_PROBE_CALLS:-}" ] || printf 'probe\n' >> "$AUTOPR_TEST_PROBE_CALLS"
+printf '%s\n' '[{"task_id":"11111111-1111-4111-8111-111111111111","requested_at":"2026-09-07T10:00:00Z"}]'
 exit "${AUTOPR_TEST_PROBE_EXIT:-3}"
 EOF
 chmod +x "$TMP_DIR/run-request-probe"
@@ -76,6 +77,8 @@ EOF
 chmod +x "$TMP_DIR/ensure-dashboard"
 
 run_dispatcher() {
+  # Most cases represent independent clock ticks, not concurrent dispatches.
+  [ "${AUTOPR_TEST_KEEP_LEASE:-0}" = 1 ] || rm -f "$TMP_DIR/state/last-dispatch"
   AUTOPR_GH_BIN="$TMP_DIR/gh" AUTOPR_DISPATCH_LOG="$TMP_DIR/log.jsonl" \
     AUTOPR_DOCKER_BIN="$TMP_DIR/docker" AUTOPR_ENABLE_FILE="$TMP_DIR/autopr-enabled" \
     AUTOPR_DISPATCH_LOCK_DIR="$TMP_DIR/lock" AUTOPR_TEST_DISPATCHES="$TMP_DIR/dispatches" \
@@ -160,13 +163,13 @@ recent_audit="[{\"databaseId\":8,\"status\":\"completed\",\"event\":\"workflow_d
 
 AUTOPR_TEST_ERROR_RUNS="$recent_error" AUTOPR_TEST_AUDIT_RUNS="$recent_audit" \
   AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher
-check "a Kanban pass inside the twenty-minute window does not re-dispatch" \
+check "a Kanban pass inside the five-minute window does not re-dispatch" \
   $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'kanban-not-due' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_TEST_ERROR_RUNS="$recent_error" AUTOPR_TEST_AUDIT_RUNS="$recent_audit" \
   AUTOPR_TEST_KANBAN_RUNS="$stale_kanban" run_dispatcher
-check "the Kanban lane still runs once its twenty minutes are up" \
+check "the Kanban lane runs once its five minutes are up" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches" "$TMP_DIR/probe.log" "$TMP_DIR/watch-gh.log"
@@ -213,15 +216,15 @@ rm -f "$TMP_DIR/dispatches"
 rm -rf "$TMP_DIR/state"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --if-requested
-check "a queued card inside the workflow's five-minute floor waits without burning the request" \
-  $([ ! -e "$TMP_DIR/dispatches" ] \
-    && grep -q 'kanban-hot-redispatch-floor' "$TMP_DIR/log.jsonl" \
-    && [ ! -f "$TMP_DIR/state/last-forced-request-set" ] && echo 0 || echo 1)
+check "a verified queued card bypasses the routine workflow floor" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
+    && [ -f "$TMP_DIR/state/last-forced-request-set" ] && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/dispatches"
+rm -rf "$TMP_DIR/state"
 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS="$mid_kanban" run_dispatcher --if-requested
-check "a queued card jumps the twenty-minute wait and the other lanes" \
+check "a queued card jumps the routine wait and the other lanes" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
     && grep -q 'kanban-run-request' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
 
@@ -310,7 +313,7 @@ cat > "$TMP_DIR/run-request-probe" <<'EOF'
 [ -z "${AUTOPR_TEST_PROBE_CALLS:-}" ] || printf 'probe\n' >> "$AUTOPR_TEST_PROBE_CALLS"
 [ "${AUTOPR_TEST_PROBE_EXIT:-3}" = 0 ] || exit "${AUTOPR_TEST_PROBE_EXIT:-3}"
 requests="${AUTOPR_TEST_PROBE_REQUESTS:-}"
-[ -n "$requests" ] || requests='[{"task_id":"t1","project_id":"p","requested_at":"2026-09-07T10:00:00Z"}]'
+[ -n "$requests" ] || requests='[{"task_id":"11111111-1111-4111-8111-111111111111","project_id":"p","requested_at":"2026-09-07T10:00:00Z"}]'
 printf '%s\n' "$requests"
 EOF
 chmod +x "$TMP_DIR/run-request-probe"
@@ -319,21 +322,21 @@ AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]'
   AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
 check "a pending request is dispatched once and its request set is remembered" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] \
-    && grep -q 't1@2026-09-07T10:00:00Z' "$TMP_DIR/state/last-forced-request-set" && echo 0 || echo 1)
+    && grep -q '11111111-1111-4111-8111-111111111111@2026-09-07T10:00:00Z' "$TMP_DIR/state/last-forced-request-set" && echo 0 || echo 1)
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
   AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
 check "the same unclaimed request set is not re-dispatched after the five-minute floor" \
   $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
 rm -f "$TMP_DIR/dispatches"
-AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"t1","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"t2","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
+AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"11111111-1111-4111-8111-111111111111","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"22222222-2222-4222-8222-222222222222","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
   AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' \
   AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
 check "a new button press (different request set) dispatches again" \
   $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
 rm -f "$TMP_DIR/dispatches"
 AUTOPR_FORCED_REQUEST_TTL_SECONDS=0 AUTOPR_FORCED_MIN_INTERVAL_SECONDS=0 \
-  AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"t1","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"t2","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
+  AUTOPR_TEST_PROBE_REQUESTS='[{"task_id":"11111111-1111-4111-8111-111111111111","project_id":"p","requested_at":"2026-09-07T10:00:00Z"},{"task_id":"22222222-2222-4222-8222-222222222222","project_id":"p","requested_at":"2026-09-07T10:05:00Z"}]' \
   AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' \
   AUTOPR_TEST_KANBAN_RUNS='[]' run_dispatcher --if-requested
 check "once the request TTL passes the same set may be forced again" \
@@ -380,6 +383,39 @@ check "the Kanban workflow runs the guard before any board or production read" \
     && echo 0 || echo 1)
 check "installer ships the backoff helper next to the dispatcher" \
   $(grep -q 'codex-backoff.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+
+# Explicit dashboard starts carry the exact ticket, bypass only the routine
+# spend floor, and remain deduplicated through GitHub's visibility lag.
+rm -rf "$TMP_DIR/state"
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/start-gh.log"
+task=11111111-1111-4111-8111-111111111111
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_GH_CALLS="$TMP_DIR/start-gh.log" \
+  AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --start "$task"
+check "Start now dispatches the exact queued ticket and publishes timing status" \
+  $(grep -q "inputs\[requested_task_id\]=$task" "$TMP_DIR/start-gh.log" \
+    && jq -e --arg task "$task" '.requested_task_id == $task and .next_check_at > .checked_at and .routine_seconds == 300' "$TMP_DIR/state/status.json" >/dev/null \
+    && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_KEEP_LEASE=1 AUTOPR_TEST_ERROR_RUNS='[]' run_dispatcher
+check "the cross-lane dispatch lease closes the GitHub visibility race" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_KANBAN_RUNS='[{"status":"in_progress","databaseId":7}]' \
+  run_dispatcher --start "$task"
+check "explicit retry still refuses an active workflow" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && echo 0 || echo 1)
+AUTOPR_TEST_PROBE_EXIT=0 AUTOPR_TEST_KANBAN_RUNS="$recent_kanban" run_dispatcher --start "$task"
+check "explicit Start can retry an unclaimed request after its old workflow finished" \
+  $([ "$(cat "$TMP_DIR/dispatches")" = "kanban-autopr.yml" ] && echo 0 || echo 1)
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_PROBE_EXIT=0 run_dispatcher --start 33333333-3333-4333-8333-333333333333
+check "a missing requested ticket never falls back to a different card" \
+  $([ ! -e "$TMP_DIR/dispatches" ] && grep -q 'requested-ticket-no-longer-pending' "$TMP_DIR/log.jsonl" && echo 0 || echo 1)
+AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x \
+  AUTOPR_REQUESTED_TASK_ID="$task" \
+  AUTOPR_TEST_GUARD_RUNS="[{\"databaseId\":1,\"updatedAt\":\"$just_now\"}]" \
+  "$GUARD" >/dev/null 2>&1 && explicit_rc=0 || explicit_rc=$?
+check "the workflow floor admits the exact-ticket operator dispatch" \
+  $([ "$explicit_rc" = 0 ] && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

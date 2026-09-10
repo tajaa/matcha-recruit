@@ -13,6 +13,9 @@ source "$SCRIPT_DIR/lib.sh"
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"
 RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.json}"
+HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py"
+export AUTOPR_INVOCATION_ID="${AUTOPR_INVOCATION_ID:-local-$$-$(date +%s)}"
+export AUTOPR_CONTINUATION_PID=$$
 REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
@@ -51,6 +54,10 @@ _investigate_cleanup() {
         || printf '%s\n' "$status" > "$INVESTIGATION_EXIT_FILE" 2>/dev/null \
         || true
     rm -rf "$WORK_DIR"
+    # A failed continuation releases its claim, never its saved operator edits.
+    if [ "$status" -ne 0 ] && [ -n "${TASK_ID:-}" ]; then
+        python3 "$HANDOFF_CONTROL" finish "$TASK_ID" || true
+    fi
 }
 trap _investigate_cleanup EXIT
 
@@ -98,6 +105,7 @@ mkdir -p "$ARTIFACTS_DIR"
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
 RESUME_PATCH=""
+REQUIRE_RESUME_PATCH=0
 PRIOR_CHECKPOINT_FILE="$WORK_DIR/prior-checkpoint.json"
 printf 'null\n' > "$PRIOR_CHECKPOINT_FILE"
 
@@ -128,6 +136,16 @@ claim="$(mw_api POST "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/autopr/ru
     || die "could not verify the AutoPR queue state for $TASK_ID"
 [ "$(printf '%s' "$claim" | jq -r '.ok')" = true ] \
     || die "ticket $TASK_ID was unqueued or left the queue before investigation"
+
+handoff="$(python3 "$HANDOFF_CONTROL" continue "$TASK_ID")" \
+    || die "could not acquire this task's operator hand-back"
+if [ "$(jq 'length' <<< "$handoff")" -gt 0 ]; then
+    RESUME_PATCH="$(jq -r '.patch' <<< "$handoff")"
+    ATTACH_ARGS+=(-f "$(jq -r '.note' <<< "$handoff")")
+    KIND_MODEL="$(jq -r '.model' <<< "$handoff")"
+    KIND_EFFORT="$(jq -r '.effort' <<< "$handoff")"
+    REQUIRE_RESUME_PATCH=1
+fi
 
 # Fetch the same evidence the task detail UI uses. In particular, the history
 # endpoint carries discussion notes, review boundaries, rejected-checklist
@@ -399,6 +417,7 @@ run_codex() {
         AUTOPR_CODEX_MODEL="$KIND_MODEL"
         AUTOPR_CODEX_REASONING_EFFORT="$KIND_EFFORT"
         AUTOPR_TASK_ID="$TASK_ID"
+        AUTOPR_HANDOFF_CARD="$CARD_FILE"
     )
     # Kind-specific sandbox switches (empty-patch enforcement, web search,
     # image inputs): space-separated KEY=VALUE from the registry.
@@ -422,6 +441,7 @@ run_codex() {
         )
     fi
     [ -z "$RESUME_PATCH" ] || runner_env+=(AUTOPR_RESUME_PATCH="$RESUME_PATCH")
+    runner_env+=(AUTOPR_REQUIRE_RESUME_PATCH="$REQUIRE_RESUME_PATCH")
     "${runner_env[@]}" "$SANDBOX_RUNNER" "$PROMPT_FILE" "$REPORT_FILE" "$RAW_DECISION_FILE" \
         "${ATTACH_ARGS[@]}"
 }
@@ -433,6 +453,13 @@ codex_pass() {
     else
         run_codex
         codex_rc=$?
+    fi
+    if [ "$codex_rc" -eq 75 ]; then
+        stop_inflight_snapshots
+        [ -z "${GITHUB_OUTPUT:-}" ] || printf 'paused=true\n' >> "$GITHUB_OUTPUT"
+        [ -z "${GITHUB_STEP_SUMMARY:-}" ] || printf '## Operator takeover\nThe checkout is preserved under manual control. No autonomous timeout applies to the manual session.\n' >> "$GITHUB_STEP_SUMMARY"
+        printf 'AutoPR handed off to the operator; manual work has no time limit.\n'
+        exit 0
     fi
     if [ "$codex_rc" -ne 0 ]; then
         [ "$live_log_ready" != true ] || printf '\n[FAILED] Codex exited %s at %s\n' \
@@ -588,7 +615,10 @@ if [ -n "$CORRECTION_KIND" ]; then
                 grounding_patch="$WORK_DIR/grounding-resume.patch"
                 git -C "$REPO_ROOT" diff HEAD > "$grounding_patch" 2>/dev/null \
                     || : > "$grounding_patch"
-                [ ! -s "$grounding_patch" ] || RESUME_PATCH="$grounding_patch"
+                if [ -s "$grounding_patch" ]; then
+                    RESUME_PATCH="$grounding_patch"
+                    REQUIRE_RESUME_PATCH=0
+                fi
             fi
             ;;
     esac

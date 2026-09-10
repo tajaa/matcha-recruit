@@ -171,13 +171,13 @@ gateway on ports 8001 and 5174; host `HOST_DEV_BACKEND_PORT` and
 
 `msandbox` and `msandbox wizard` open a split-pane dashboard in an interactive
 terminal. The left sidebar selects a session; the right side has Overview,
-Processes, Tools & access, Files, Testing, and Branch & PR tabs. The harness,
+Processes, Tools & access, Files, Testing, Branch & PR, and AutoPR tabs. The harness,
 shell, browser, attachment, validation, and publication controls open the same
 guarded workflows as the classic manager. Prompts and harnesses take over the
 terminal temporarily, then return to the selected session and tab.
 
 - Click a session or action, or use arrows and Enter. Tab / Shift-Tab moves
-  focus between the sidebar, tabs, and actions. Keys 1–6 select a detail tab.
+  focus between the sidebar, tabs, and actions. Keys 1–7 select a detail tab.
 - Page Up / Page Down scroll details. Terminals whose curses library reports
   both wheel directions can also scroll the detail pane with the mouse wheel.
   Arrow keys scroll the sidebar through all sessions and global actions.
@@ -197,13 +197,61 @@ current commit. Unexpected access and missing required capabilities are marked
 as warnings in Tools & access. Every dashboard reload reconciles all saved
 sessions and surfaces per-session repair failures without hiding healthy ones.
 Cached capability reports and file indexes load in the background when their
-tabs open. AutoPR health is available through the AutoPR dashboard action.
+tabs open. AutoPR activity and takeover are available through **AutoPR runs**
+in the sidebar or tab **7**. That tab also links to the full observer dashboard.
 No browser, Electron, Python package download, or daemon is required for the UI;
 it uses Python's standard `curses` module on macOS/Linux. A 256-color terminal
 gets the green palette; basic color and monochrome terminals remain usable.
 Resize to at least 73 columns × 20 rows, or press `c` for the classic menu.
 `MSANDBOX_UI=classic msandbox wizard` explicitly selects the classic menu;
 redirected/custom-reader usage keeps the numbered prompt behavior.
+
+### Take over an AutoPR task
+
+The AutoPR tab lists supervised **Kanban investigations** on this host with their
+task, PR/branch, model, effort, ownership, and recent output. Reads refresh in the
+background without a GitHub call on every redraw. Runs started before the runner
+uses this release cannot be taken over retroactively. Error-autofix and self-audit
+lanes remain viewable through the full observer dashboard, not takeover controls.
+After merging, update both installed components from the updated checkout with
+`./scripts/agent-sandbox.sh install` and
+`./scripts/kanban-autopr/install-launch-agent.sh`. The latter preserves the
+existing master-switch state; installation is not permission to start AutoPR.
+
+1. Select a run and click **Take over / correct course**. Wait for ownership to
+   become **you**: the controller stops that model's container before moving the
+   checkout to a preserved, per-run location. The interrupted investigation ends;
+   it does not retain a workflow slot while you work.
+2. Click **Open your Codex session** or **Open sandbox shell**. The manual session
+   uses a unique container and tmux session, with no published ports or credentials
+   from the broader interactive sandbox. Its initial conversation reads the
+   prior task input/report and current edits; it is not the original autonomous
+   conversation. Subsequent opens resume the manual conversation. Ctrl-b then d
+   returns to the manager without stopping it.
+3. **Change model / effort** stops this run's harness and shell; reopen Codex to
+   resume with the selected settings. Those settings also carry into handback.
+   Model availability and supported efforts still depend on your Codex account.
+4. **Hand back to AutoPR** asks for continuation instructions, stops your writers,
+   and saves the tracked/new-file diff before requesting the next normal AutoPR
+   pass. A queue failure leaves a retry button and the preserved checkout. You can
+   reclaim a queued handback before a workflow claims it; an active continuation
+   must be taken over through its new live entry.
+
+AutoPR's Actions checkout is already separate from your primary checkout. Manual
+takeover uses a managed clone, not a branch checked out on your local `main`.
+Ordinary sandbox sessions stay usable throughout. You never merge that clone:
+the normal AutoPR publisher updates the PR. After a successful continuation, the
+controller archives the saved clone (including Git history and ignored outputs)
+as `checkout-recovery.tar.gz` and removes that exact clone. The recovery archive
+remains under `~/.local/state/matcha-autopr/runs/<run-id>/`.
+
+Only one owner may write at a time. Paused tasks are skipped even if another queue
+signal arrives. A crashed supervisor exposes **Recover interrupted run**; an
+unrecognized checkout is never overwritten. Handback patches are limited to
+5 MiB and must apply cleanly to the next run's base. Conflicts, forbidden paths,
+validation failures, and publication failures keep the saved handback available;
+they do not silently drop it or bypass AutoPR's normal guards. Research tasks
+retain their existing no-code-change policy. No merge or deployment is implied.
 
 Controller changes are picked up by `msandbox install` from the checkout that
 contains them. No terminal GUI dependency or database migration is required.

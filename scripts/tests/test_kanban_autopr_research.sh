@@ -854,7 +854,7 @@ check "select.sh stamps the registry outcome on the card it picks" \
 check "workflow publishes research from the trusted control root without a GitHub token" \
     $(grep -qF 'name: Publish research report' "$workflow" \
       && grep -qF '"$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh"' "$workflow" \
-      && grep -qF "steps.investigate.outcome == 'success' && steps.select.outputs.outcome == 'artifact'" "$workflow" \
+      && grep -qF "steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.select.outputs.outcome == 'artifact'" "$workflow" \
       && ! grep -qF 'AUTOPR_RUN_STARTED_AT' "$workflow" \
       && ! awk '/name: Publish research report/,/name: Cleanup/' "$workflow" | grep -qE '^[[:space:]]*GH_TOKEN:' \
       && echo 0 || echo 1)

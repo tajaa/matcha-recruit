@@ -7,15 +7,15 @@ clock, and both dispatch only when no AutoPR lane is queued or active. The sched
 ticks every five minutes: a production-error pass gets the next slot when its last
 completion is at least ten minutes old; then a self-audit gets one when its last
 completion is at least six hours old; then Kanban advances **only if its own last pass
-is at least twenty minutes old**, otherwise the tick is a logged `kanban-not-due` skip.
+is at least five minutes old**, otherwise the tick is a logged `kanban-not-due` skip.
 The second agent (`com.matcha.kanban-autopr-request-watch`, one minute, the same
-`dispatch-if-idle.sh --if-requested`) exists so a human never waits on that twenty
-minutes: pressing **Run AutoPR now** on a card queues a request, the watcher sees it via
+`dispatch-if-idle.sh --if-requested`) handles explicit requests ahead of routine work:
+pressing **Run AutoPR now** on a card queues a request, the watcher sees it via
 one bounded query against our own API (`GET /matcha-work/autopr/run-requests`), and
 dispatches Kanban immediately. An idle watch tick makes no GitHub API call at all,
 starts no observer panes, takes no dispatch lock, and writes no line to the shared
 dispatch log — it costs one bounded, timeout-capped board query and a heartbeat file.
-A probe failure never forces a run, and a five-minute floor between forced dispatches
+A probe failure never forces a run, and a one-minute floor between forced dispatches
 (burned only once a dispatch actually lands) keeps a card that cannot be selected from
 spinning the runner. Three bounds make "cannot be selected" terminal rather than
 permanent: `select.sh` consumes the request of any run-requested card the pass declines
@@ -122,6 +122,56 @@ changes.
 
 ## Local tmux dashboard
 
+The terminal `msandbox` manager additionally has an **AutoPR** tab (key **7**,
+or **AutoPR runs** in its sidebar) for local Kanban investigation output and
+operator takeover. See [takeover and handback](MSANDBOX_SESSIONS.md#take-over-an-autopr-task).
+It also lists queued tickets with **Start now** and **Refresh queued tickets**.
+Refresh reads the board in the background; cached ticket age is always shown.
+Start now records the normal board request then immediately asks the dispatcher
+to start that exact ticket. It bypasses the routine five-minute spend floor, not
+master-off, active workflows, ownership, usage backoff, board grants or PR caps.
+An active run leaves the request queued for the one-minute watcher.
+An explicit Start now can retry a still-pending request after a failed dispatch's
+workflow has finished; automatic ticks remain deduplicated and the short dispatch
+lease prevents double clicks from queueing duplicates. The tab shows
+the next scheduler check and routine eligibility countdown, not a guaranteed
+pickup deadline. Missing or stale `dispatch/status.json` means pickup is unknown.
+Update the installed dispatcher with the normal installer after this change is
+merged; the workflow input must also be available on its configured dispatch ref.
+The observer below still covers all AutoPR lanes and overall scheduler health.
+
+The trusted bridge supervises the model process and writes host-only records to
+`~/.local/state/matcha-autopr/runs/` (`AUTOPR_CONTROL_STATE_DIR` overrides this for
+tests or a shared controller/runner configuration). The desktop controller and
+runner must use the same host user and state directory. No ownership files are
+mounted in the model container. Takeover stops the exact Compose project before
+transferring its clone to a unique manual project; `select.sh` and the investigation
+claim both refuse operator-held tasks. A failed transfer protects the source
+checkout from the bridge's normal replacement cleanup.
+Dead supervisors are recovered before the shared runtime is reused, with unknown
+owners preserved separately. Cross-volume transfers publish a complete copy before
+removing the source. Corrupt records are reported individually without hiding other
+runs. Docker stop/copy work does not hold the global ownership lock.
+
+An acknowledged takeover ends the timed investigation successfully; subsequent
+validation/publication steps are skipped. **Manual work has no autonomous time
+limit** and requires no ten-minute extension approvals. Handing back starts a new
+bounded autonomous investigation; normal 20-minute / approved-extension limits
+still apply to that new workflow.
+
+Handback stores a bounded immutable patch through a private trusted Git index,
+plus an operator note and model/effort, before using the existing `run-now` API.
+The next investigation requires the patch to apply (no checkpoint fallback that
+discards operator edits). Normal path, board-grant, patch, validation, and publication
+guards remain authoritative. Workflow cleanup releases the handback only after
+confirmed product PR publication, preserving a recovery archive before removing
+its managed clone and exact per-run Docker containers, network and dependency
+volumes. Cleanup failures retain the checkout and offer a retry. Questions-only,
+no-safe-action and failed
+continuations retain a retryable handback; canceled workflows can be reclaimed
+after the controller verifies they have stopped. Installing this version does not
+adopt already-running, unsupervised investigations.
+
 While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
 `matcha-autopr` session on its next tick if the session is missing. Detaching
 the dashboard does not stop work; `msandbox stop` does. A session name alone is not
@@ -210,7 +260,7 @@ second scheduler.
 Everything that runs **after** the model has touched the workspace executes from a
 snapshot of `main`, never from the checkout. The `Snapshot trusted AutoPR control plane`
 step extracts `git archive main scripts/kanban-autopr scripts/error-autofix
-scripts/autopr-scope scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
+scripts/autopr-scope scripts/msandbox scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
 `$RUNNER_TEMP/autopr-control` and exports three variables:
 
 | Variable | Value | Means |

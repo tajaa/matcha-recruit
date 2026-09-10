@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Mac-owned clock for the scheduled AutoPR lanes. Production errors get the
 # first slot whenever their last completed pass is stale; otherwise the clock
-# advances self-audit, then Kanban — and the Kanban lane is held to one pass
-# every twenty minutes so routine board sweeps stop dominating the runner.
+# advances self-audit, then Kanban, with a five-minute routine cadence.
 # `--if-requested` is the human's way past that clock: the one-minute watcher
 # LaunchAgent asks the board whether a card pressed "Run AutoPR now" and
 # dispatches Kanban immediately when one has, without touching the GitHub API
@@ -17,13 +16,13 @@ AUDIT_WORKFLOW="${AUTOPR_AUDIT_WORKFLOW:-autopr-self-audit.yml}"
 ADMIN_UPDATES_WORKFLOW="${AUTOPR_ADMIN_UPDATES_WORKFLOW:-admin-updates-autopublish.yml}"
 ERROR_MAX_AGE_SECONDS="${AUTOPR_ERROR_MAX_AGE_SECONDS:-600}"
 AUDIT_MAX_AGE_SECONDS="${AUTOPR_AUDIT_MAX_AGE_SECONDS:-21600}"
-# The Kanban lane is the slow one: a scheduled pass every twenty minutes, not
-# every tick. A human who wants a card now presses "Run AutoPR now" on it,
+# The Kanban lane becomes eligible five minutes after its last completed pass.
+# A human who wants a card now presses "Run AutoPR now" on it,
 # which the one-minute watcher below turns into an immediate dispatch.
-KANBAN_MAX_AGE_SECONDS="${AUTOPR_KANBAN_MAX_AGE_SECONDS:-1200}"
+KANBAN_MAX_AGE_SECONDS="${AUTOPR_KANBAN_MAX_AGE_SECONDS:-300}"
 # Floor between two request-driven dispatches, so a card that cannot actually
 # be selected (capped queue, wrong lane, crashed run) cannot spin the runner.
-FORCED_MIN_INTERVAL_SECONDS="${AUTOPR_FORCED_MIN_INTERVAL_SECONDS:-300}"
+FORCED_MIN_INTERVAL_SECONDS="${AUTOPR_FORCED_MIN_INTERVAL_SECONDS:-60}"
 REF="${AUTOPR_REF:-main}"
 GH_BIN="${AUTOPR_GH_BIN:-/opt/homebrew/bin/gh}"
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
@@ -45,10 +44,26 @@ FORCED_MARKER="$STATE_DIR/last-forced-kanban"
 FORCED_REQUEST_SET="$STATE_DIR/last-forced-request-set"
 FORCED_REQUEST_TTL_SECONDS="${AUTOPR_FORCED_REQUEST_TTL_SECONDS:-1800}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
-# Must match hot-redispatch-guard.sh's floor: the workflow skips every step of
-# a run whose predecessor completed less recently than this.
-HOT_REDISPATCH_FLOOR_SECONDS="${AUTOPR_HOT_REDISPATCH_FLOOR_SECONDS:-300}"
 LOG_MAX_BYTES="${AUTOPR_DISPATCH_LOG_MAX_BYTES:-5242880}"
+START_TASK=""
+REQUESTED_TASK=""
+NEXT_ELIGIBLE_AT=0
+POLL_SECONDS=300
+PREFERRED_TASK_FILE="$STATE_DIR/preferred-task"
+
+write_status() {
+    local action="$1" reason="$2" now temporary
+    now="$(date +%s)"
+    mkdir -p "$STATE_DIR"
+    temporary="$(mktemp "$STATE_DIR/.status.XXXXXX")" || return 1
+    jq -cn --arg action "$action" --arg reason "$reason" --arg task "$REQUESTED_TASK" \
+        --argjson checked "$now" --argjson poll "$POLL_SECONDS" \
+        --argjson eligible "$NEXT_ELIGIBLE_AT" --argjson routine "$KANBAN_MAX_AGE_SECONDS" \
+        '{action:$action,reason:$reason,requested_task_id:$task,checked_at:$checked,next_check_at:($checked+$poll),eligible_at:$eligible,routine_seconds:$routine}' > "$temporary"
+    chmod 600 "$temporary"
+    mv "$temporary" "$STATE_DIR/status.json"
+    [ -z "$START_TASK" ] || cat "$STATE_DIR/status.json"
+}
 
 log_event() {
     local action="$1" reason="$2" runs="${3:-[]}" size
@@ -62,6 +77,7 @@ log_event() {
     jq -cn --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg action "$action" \
         --arg reason "$reason" --argjson runs "$runs" \
         '{timestamp:$ts,action:$action,reason:$reason,runs:$runs}' >> "$LOG_FILE"
+    write_status "$action" "$reason"
 }
 
 acquire_dispatch_lock() {
@@ -91,8 +107,13 @@ has_active_workflow_run() {
 }
 
 dispatch_workflow() {
-    "$GH_BIN" api --method POST \
-        "repos/$REPO/actions/workflows/$1/dispatches" -f "ref=$REF"
+    if [ -n "$REQUESTED_TASK" ] && [ "$1" = "$KANBAN_WORKFLOW" ]; then
+        "$GH_BIN" api --method POST "repos/$REPO/actions/workflows/$1/dispatches" \
+            -f "ref=$REF" -f "inputs[requested_task_id]=$REQUESTED_TASK"
+    else
+        "$GH_BIN" api --method POST \
+            "repos/$REPO/actions/workflows/$1/dispatches" -f "ref=$REF"
+    fi
 }
 
 iso_to_epoch() {
@@ -151,9 +172,18 @@ run_request_pending() {
     rc=$?
     case "$rc" in
         0)
+            printf '%s' "$requests" | jq -e 'type == "array" and length > 0 and all(.[]; (.task_id | type == "string") and (.task_id | test("^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")))' >/dev/null \
+                || { log_event error invalid-run-requests; return 1; }
+            local preferred="$START_TASK"
+            [ -n "$preferred" ] || preferred="$(cat "$PREFERRED_TASK_FILE" 2>/dev/null || true)"
+            REQUESTED_TASK="$(printf '%s' "$requests" | jq -r --arg preferred "$preferred" 'sort_by((if .task_id == $preferred then 0 else 1 end), .requested_at // "") | .[0].task_id')"
+            if [ -n "$START_TASK" ] && [ "$REQUESTED_TASK" != "$START_TASK" ]; then
+                log_event skip requested-ticket-no-longer-pending
+                return 1
+            fi
             PENDING_REQUEST_SET="$(printf '%s' "$requests" \
                 | jq -r '[.[] | "\(.task_id // "")@\(.requested_at // "")"] | sort | join(",")' 2>/dev/null \
-                || printf 'unparseable-%s' "$(date +%s)")"
+                )"
             return 0 ;;
         3) return 1 ;;
         *) log_event error run-request-probe-failed; return 1 ;;
@@ -169,16 +199,6 @@ forced_request_set_already_dispatched() {
     [ "$(cat "$FORCED_REQUEST_SET" 2>/dev/null)" = "$PENDING_REQUEST_SET" ]
 }
 
-# The Kanban workflow runs hot-redispatch-guard.sh first and skips every step
-# — including claiming the card — when its predecessor completed inside the
-# floor. Dispatching into that window still burns FORCED_REQUEST_SET, so one
-# button press would be swallowed for the whole request TTL while the card was
-# never touched. The two floors are measured from different events (last forced
-# dispatch here, last completed run there), so check both before forcing.
-kanban_inside_hot_redispatch_floor() {
-    ! workflow_pass_due "$1" "$HOT_REDISPATCH_FLOOR_SECONDS"
-}
-
 # Every lane shares one Codex login. After a usage-limit exit, a dispatched
 # run pays its whole prelude and then dies in seconds; hold all lanes instead.
 codex_backoff_active() {
@@ -189,6 +209,18 @@ codex_backoff_active() {
 main() {
     local requested_mode=false
     [ "${1:-}" != "--if-requested" ] || requested_mode=true
+    if [ "${1:-}" = --start ]; then
+        START_TASK="${2:?task ID required}"
+        [[ "$START_TASK" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || { echo 'invalid task ID' >&2; exit 2; }
+        requested_mode=true
+    fi
+    if [ "$requested_mode" = true ]; then
+        POLL_SECONDS=60
+        touch_watch_heartbeat
+    else
+        mkdir -p "$STATE_DIR"
+        : > "$STATE_DIR/last-scheduler-tick"
+    fi
     [ -x "$GH_BIN" ] || { log_event error "gh-not-executable"; exit 1; }
     # `msandbox` remains the authoritative kill switch: it alone creates and
     # removes ENABLE_FILE. A persistent marker alone is insufficient after a
@@ -198,7 +230,7 @@ main() {
         exit 0
     fi
     if codex_backoff_active; then
-        [ "$requested_mode" = true ] || log_event skip codex-usage-limit-backoff
+        log_event skip codex-usage-limit-backoff
         exit 0
     fi
     # The watcher lane asks the board first and gives up before doing anything
@@ -208,7 +240,7 @@ main() {
     # stalled request must not hold the lock the five-minute scheduler needs,
     # nor re-prime the GitHub-reading observer panes sixty times an hour.
     if [ "$requested_mode" = true ]; then
-        if [ "$(marker_age_seconds "$FORCED_MARKER")" -lt "$FORCED_MIN_INTERVAL_SECONDS" ]; then
+        if [ -z "$START_TASK" ] && [ "$(marker_age_seconds "$FORCED_MARKER")" -lt "$FORCED_MIN_INTERVAL_SECONDS" ]; then
             exit 0
         fi
         if ! run_request_pending; then
@@ -218,7 +250,7 @@ main() {
             touch_watch_heartbeat
             exit 0
         fi
-        if forced_request_set_already_dispatched; then
+        if [ -z "$START_TASK" ] && forced_request_set_already_dispatched; then
             touch_watch_heartbeat
             exit 0
         fi
@@ -234,10 +266,24 @@ main() {
         log_event skip local-lock
         exit 0
     fi
+    # Recheck after acquiring ownership: a watcher may have dispatched while
+    # this process was querying the board. Also bridge GitHub's visibility lag.
+    if [ -n "$START_TASK" ]; then
+        printf '%s' "$START_TASK" > "$PREFERRED_TASK_FILE"
+    fi
+    if [ "$requested_mode" = true ] && [ -z "$START_TASK" ] && forced_request_set_already_dispatched; then
+        log_event skip request-already-dispatched
+        exit 0
+    fi
+    if [ "$(marker_age_seconds "$STATE_DIR/last-dispatch")" -lt 60 ]; then
+        log_event skip recent-dispatch-pending
+        exit 0
+    fi
 
     local kanban_runs error_runs audit_runs all_runs workflow reason
     if [ ! -x "$RUN_SNAPSHOT" ] || ! all_runs="$(AUTOPR_REPO="$REPO" AUTOPR_REF="$REF" \
-        AUTOPR_GH_BIN="$GH_BIN" AUTOPR_GITHUB_SNAPSHOT_ALLOW_STALE=false "$RUN_SNAPSHOT")"; then
+        AUTOPR_GH_BIN="$GH_BIN" AUTOPR_GITHUB_SNAPSHOT_ALLOW_STALE=false \
+        AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS=0 "$RUN_SNAPSHOT")"; then
         # Fail closed: a blind dispatch could create a second queued coding job.
         log_event error run-snapshot-failed
         exit 1
@@ -245,18 +291,20 @@ main() {
     kanban_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "kanban")][0:20]')"
     error_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "errors")][0:20]')"
     audit_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "self-audit")][0:20]')"
+    local last_completed
+    last_completed="$(printf '%s' "$kanban_runs" | jq -r '[.[] | select(.status == "completed") | (.updatedAt // .createdAt)] | max // empty')"
+    if [ -n "$last_completed" ]; then
+        NEXT_ELIGIBLE_AT=$(( $(iso_to_epoch "$last_completed") + KANBAN_MAX_AGE_SECONDS ))
+    fi
     if has_active_workflow_run "$all_runs"; then
         log_event skip active-autopr-workflow "$all_runs"
         exit 0
     fi
 
     if [ "$requested_mode" = true ]; then
-        if kanban_inside_hot_redispatch_floor "$kanban_runs"; then
-            # Retry on a later tick with FORCED_REQUEST_SET untouched, so the
-            # press is honored once the workflow will actually act on it.
-            log_event skip kanban-hot-redispatch-floor
-            exit 0
-        fi
+        # A verified live request is passed as an exact workflow input. It
+        # bypasses the routine-only spend floor, never the active-run lock.
+        NEXT_ELIGIBLE_AT=0
         # An explicit card request outranks the other lanes' schedules: the
         # human is waiting on this specific ticket. The cooldown marker is
         # burned after the dispatch actually lands, not here — a failed
@@ -280,6 +328,7 @@ main() {
         log_event error "${workflow}-dispatch-failed"
         exit 1
     fi
+    : > "$STATE_DIR/last-dispatch"
     if [ "$requested_mode" = true ] \
         && ! { mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER" \
                && printf '%s' "$PENDING_REQUEST_SET" > "$FORCED_REQUEST_SET"; }; then
@@ -288,6 +337,7 @@ main() {
         # no trace of why the watcher stopped behaving.
         log_event error forced-marker-write-failed
     fi
+    [ -z "$REQUESTED_TASK" ] || rm -f "$PREFERRED_TASK_FILE"
     log_event dispatch "$reason"
 }
 

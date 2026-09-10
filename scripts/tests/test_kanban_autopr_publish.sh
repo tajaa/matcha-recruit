@@ -5,6 +5,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AUTOPR_SOURCE="$REPO_ROOT/scripts/kanban-autopr"
 TMP_DIR="$(mktemp -d)"
+export GITHUB_OUTPUT="$TMP_DIR/workflow-output"
 trap 'rm -rf "$TMP_DIR"' EXIT
 TEST_REPO="$TMP_DIR/repo"
 mkdir -p "$TEST_REPO/scripts"
@@ -176,6 +177,8 @@ check() {
 
 check "questions-only publication uses Luna's subject for an empty commit" \
   $([ "$(git -C "$TEST_REPO" log -1 --pretty=%s)" = 'fix: clarify canonical terminology' ] && echo 0 || echo 1)
+check "question drafts cannot release an operator checkout" \
+  $(! grep -q '^published_product=true$' "$GITHUB_OUTPUT" 2>/dev/null && echo 0 || echo 1)
 check "question draft body contains answers and feedback trailers" \
   $(grep -q '## Answers needed' "$TMP_DIR/pr-body.md" \
     && grep -q 'matcha-feedback-comment-id: none' "$TMP_DIR/pr-body.md" \
@@ -355,6 +358,8 @@ check "a migration version may be drafted with no directive at all" \
       | grep -qx 'server/alembic/versions/task_test.py' && echo 0 || echo 1)
 check "migration work is published as a GitHub draft PR" \
   $(grep -q -- '^pr create .*--draft' "$TMP_DIR/gh.log" && echo 0 || echo 1)
+check "product publication emits proof for hand-back cleanup" \
+  $(grep -qx 'published_product=true' "$GITHUB_OUTPUT" && grep -qx 'pr_number=501' "$GITHUB_OUTPUT" && echo 0 || echo 1)
 
 # A second draft may chain onto the first: it extends a head this same change
 # introduced, which is not the same thing as forking the graph.
