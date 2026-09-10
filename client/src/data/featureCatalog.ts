@@ -24,6 +24,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       osha_auto_report: 'OSHA Auto-Report (ITA electronic submission)',
       ir_magic_links: 'IR Magic Links (anonymous report + location + info-request links)',
       ir_copilot: 'IR Copilot & AI Analysis',
+      symlink: 'Sym-Link (guided task links — credential upload, manager review, info update)',
       time_off: 'Time Off',
       risk_assessment: 'Risk Assessment',
       training: 'Training',
