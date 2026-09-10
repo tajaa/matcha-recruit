@@ -475,13 +475,19 @@ async def run_schedule_change(
 
 
 def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
+    from app.matcha.services.scheduling.schedule_chat_rules import normalize_clock
+
     return {
         "label": args.get("label") or args.get("role") or "shift",
         # target_date fallback: same gotcha found in the thread skill's copy
         # of this coercer — the model reaches for the edit-kind field name
         # reflexively even on kind='create'.
         "template_hint": None, "date": args.get("date") or args.get("target_date"),
-        "weekdays": [], "start_time": args.get("start_time"), "end_time": args.get("end_time"),
+        # Same normalization as the thread skill's copy: an unparseable clock
+        # time must read as "no time given" and be asked for, never reach
+        # `_resolve_create_shifts`'s `time.fromisoformat`.
+        "weekdays": [], "start_time": normalize_clock(args.get("start_time")),
+        "end_time": normalize_clock(args.get("end_time")),
         "role": args.get("role"), "count": args.get("count") or 1,
         "employee_name_hints": [n for n in (args.get("employee_names") or []) if n],
     }

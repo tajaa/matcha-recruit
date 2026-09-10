@@ -369,6 +369,21 @@ Invariants:
   once; a row with no open day is genuinely unanswered and left for the
   interview. Skipping it does not fail loudly — it refuses every week build and
   flips `schedule_automation.generate_review_suggestion` to `not_ready`.
+- **A shift template never overrides hours the manager stated.**
+  `match_template` matches on a name stem OR A ROLE STEM, and
+  `_resolve_create_shifts` used to consult it before looking at the request's
+  own `start_time`/`end_time` — so "add a Barista shift from 2pm to 8:30pm on
+  Sunday" adopted the store's "Opening Barista" template and was created
+  06:30–14:30. Asking Huume to correct it re-matched the same template and
+  produced the same shift a second time (reported 2026-09-10). `template_for_
+  request` is the precedence: stated hours mean no template at all, so the
+  create takes the ad-hoc branch (`build_adhoc_spec`, `break_minutes=0` for the
+  meal advisory to tell the truth, `resolve_job_by_name` still linking the job).
+  Adopting the template for its role/headcount while overriding its times is
+  the wrong repair — `template_id` would point at a template the shift does not
+  follow, and `days_of_week` would still mask out a date the manager named.
+  It is the ONLY `match_template` caller, so this covers the editor, thread
+  Huume, the channel surface and the planning route at once.
 - **The default template is always location-scoped.** `_list_templates` also
   returns company-wide rows (`location_id IS NULL`); one of those as a store's
   default would let another store's edits rewrite this store's week. Both the

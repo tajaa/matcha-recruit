@@ -643,6 +643,66 @@ class _FakeScheduleChat:
         return dict(request)
 
 
+class TestRequestedTimesSurviveCoercion(unittest.TestCase):
+    """Reported 2026-09-10: "lets add a shift from 2pm to 830pm on sunday" →
+    Barista created 06:30-14:30, and "yes, correct it" produced the same shift
+    again. The hours were lost in `_resolve_create_shifts`, which matched the
+    location's "Opening Barista" template on the ROLE stem and took its times
+    (fixed by `template_for_request`). These two guard the leg before that: the
+    hours the manager stated must still be on the request when it gets there,
+    on the first ask AND on the correction."""
+
+    SUNDAY = "2026-09-13"
+
+    def test_the_initial_create_carries_the_requested_window(self):
+        edits, shifts, error = schedule_skill._coerce_tool_batch(
+            _FakeScheduleChat(),
+            {"kind": "create", "label": "Barista", "role": "Barista",
+             "date": self.SUNDAY, "start_time": "14:00", "end_time": "20:30"},
+        )
+        self.assertIsNone(error)
+        self.assertEqual(edits, [])
+        self.assertEqual(len(shifts), 1)
+        self.assertEqual(
+            (shifts[0]["date"], shifts[0]["start_time"], shifts[0]["end_time"]),
+            (self.SUNDAY, "14:00", "20:30"),
+        )
+
+    def test_the_correction_cancels_the_wrong_shift_and_recreates_the_window(self):
+        # What "yes, correct it" sends: cancel the 06:30-14:30 shift that was
+        # created, and create the one that was asked for. Both ride one
+        # confirmation, and the create still carries 14:00-20:30.
+        edits, shifts, error = schedule_skill._coerce_tool_batch(
+            _FakeScheduleChat(),
+            {"kind": "create", "changes": [
+                {"kind": "cancel", "target_shift_id": "1c6d234e-c1a0-43bc-af08-1cd08e458c78"},
+                {"kind": "create", "label": "Barista", "role": "Barista",
+                 "date": self.SUNDAY, "start_time": "14:00", "end_time": "20:30"},
+            ]},
+        )
+        self.assertIsNone(error)
+        self.assertEqual([e["kind"] for e in edits], ["cancel"])
+        self.assertEqual(len(shifts), 1)
+        self.assertEqual(
+            (shifts[0]["start_time"], shifts[0]["end_time"]), ("14:00", "20:30"),
+        )
+
+    def test_the_correction_does_not_stage_the_shift_twice(self):
+        # The flat copy of the same shift alongside the batch is absorbed, not
+        # appended — one confirmation must not produce two 14:00-20:30 shifts.
+        _, shifts, error = schedule_skill._coerce_tool_batch(
+            _FakeScheduleChat(),
+            {"kind": "create", "label": "Barista", "role": "Barista",
+             "date": self.SUNDAY, "start_time": "14:00", "end_time": "20:30",
+             "changes": [
+                 {"kind": "create", "label": "Barista", "role": "Barista",
+                  "date": self.SUNDAY, "start_time": "14:00", "end_time": "20:30"},
+             ]},
+        )
+        self.assertIsNone(error)
+        self.assertEqual(len(shifts), 1)
+
+
 class TestFlatCreateKindAlongsideABatch(unittest.TestCase):
     """The reported full-shift-editor dead end: the model sent a `changes`
     batch AND the legacy flat `kind='create'`, and the coercion refused with
