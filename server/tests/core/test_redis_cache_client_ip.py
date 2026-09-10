@@ -77,3 +77,20 @@ def test_both_origin_headers_still_add_exactly_one_hop(monkeypatch):
         matcha_secret="matcha-edge-secret",
     )
     assert redis_cache.client_ip(request) == "198.51.100.10"
+
+
+def test_non_ascii_origin_header_is_rejected_not_a_500(monkeypatch):
+    """Starlette decodes header values as latin-1, so a viewer can put any
+    codepoint in a header we read. `hmac.compare_digest` on two `str` raises
+    TypeError above 127, and this runs inside `client_ip()` on every
+    rate-limited route — it must fail the comparison, never crash the request."""
+    monkeypatch.setattr(redis_cache, "_TRUSTED_PROXY_COUNT", 1)
+    _clear_origin_secrets(monkeypatch)
+    monkeypatch.setenv("CAPPE_CLOUDFRONT_ORIGIN_SECRET", "edge-secret")
+    monkeypatch.setenv("MATCHA_CLOUDFRONT_ORIGIN_SECRET", "matcha-edge-secret")
+    request = _request(
+        "spoofed, 198.51.100.10, 203.0.113.5",
+        secret="caf\u00e9",
+        matcha_secret="\u00c3\u00a9",
+    )
+    assert redis_cache.client_ip(request) == "203.0.113.5"

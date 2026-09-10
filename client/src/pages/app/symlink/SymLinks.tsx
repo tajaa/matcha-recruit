@@ -454,13 +454,14 @@ function ChecklistEditor({ title, items, onChange, placeholder }: {
       </div>
       {items.map((item, i) => (
         <div key={i} className="mt-2 flex items-center gap-2">
-          <input
-            value={item.label}
-            onChange={(e) => onChange(items.map((it, j) => j === i ? { ...it, label: e.target.value } : it))}
-            maxLength={120}
-            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-zinc-500"
-            placeholder={placeholder}
-          />
+          <div className="flex-1">
+            <Input
+              value={item.label}
+              onChange={(e) => onChange(items.map((it, j) => j === i ? { ...it, label: e.target.value } : it))}
+              maxLength={120}
+              placeholder={placeholder}
+            />
+          </div>
           <label className="flex items-center gap-1 text-[11px] text-zinc-400">
             <input
               type="checkbox"

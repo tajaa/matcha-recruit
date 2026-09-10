@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 
 type Option = { value: string; label: string }
@@ -34,6 +34,10 @@ export function Select({
 }: SelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // See Input: an unassociated label is a caption, not a label.
+  const generated = useId()
+  const selectId = id ?? generated
 
   const all: Option[] = placeholder
     ? [{ value: '', label: placeholder }, ...options]
@@ -56,6 +60,15 @@ export function Select({
     }
   }, [open])
 
+  // The panel is absolutely positioned, so a scrollable ancestor (a modal body
+  // with `overflow-y-auto`, say) clips it — where a native <select> popup would
+  // have rendered above everything. Nudge the container so the open list is
+  // reachable instead of half-cut.
+  useLayoutEffect(() => {
+    // `?.()` on the method too: jsdom (and older WebViews) do not implement it.
+    if (open) panelRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [open])
+
   function pick(v: string) {
     setOpen(false)
     onChange?.({ target: { value: v } })
@@ -70,14 +83,14 @@ export function Select({
   return (
     <div className={className}>
       {label && (
-        <label htmlFor={id} className="block text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500 mb-1.5">
+        <label htmlFor={selectId} className="block text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500 mb-1.5">
           {label}{required && <span className="text-red-400 ml-1">*</span>}
         </label>
       )}
       <div ref={ref} className="relative" onBlur={handleBlur}>
         <button
           type="button"
-          id={id}
+          id={selectId}
           name={name}
           disabled={disabled}
           autoFocus={autoFocus}
@@ -90,7 +103,7 @@ export function Select({
           <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} strokeWidth={1.6} />
         </button>
         {open && (
-          <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-zinc-900 border border-white/10 rounded-lg shadow-2xl shadow-black/40 overflow-hidden max-h-[280px] overflow-y-auto">
+          <div ref={panelRef} className="absolute left-0 right-0 top-full mt-1 z-50 bg-zinc-900 border border-white/10 rounded-lg shadow-2xl shadow-black/40 overflow-hidden max-h-[280px] overflow-y-auto">
             {all.map((opt) => {
               const isSel = opt.value === selected?.value
               return (

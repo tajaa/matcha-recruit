@@ -121,65 +121,132 @@ def test_passcode_weekday_change_anchors_on_now(admin_router):
     assert "next_rotation(datetime.now(timezone.utc)" in src
 
 
+def _hourly(limit: int, window: int) -> float:
+    """A per-IP ceiling normalised to requests/hour so windows are comparable."""
+    return limit * 3600 / window
+
+
+def _effective_hourly(mod, kind: str) -> float:
+    """The binding per-IP rate for a kind: the tightest of its ceilings once
+    every window is expressed per hour. A 30/60s burst cap normalises to
+    1800/hr but can never outrun the 200/hr cap sitting beside it."""
+    rates = [
+        _hourly(limit, window)
+        for key, (limit, window) in mod.IP_LIMITS.items()
+        if key.startswith(f"symlink_{kind}_ip")
+    ]
+    assert rates, f"no per-IP limit for {kind}"
+    return min(rates)
+
+
 def test_per_ip_limits_are_a_flood_backstop_not_the_binding_constraint(public_router):
     """Per-link/per-company budgets are the cost governors; per-IP is a flood
-    backstop. A bulk send puts a whole office behind one NAT address, so if a
-    per-IP ceiling ever drops below the matching per-link budget it starts 429ing
-    legitimate recipients instead of bounding cost. See services/symlink/CLAUDE.md.
+    backstop. A bulk send puts a whole office behind one NAT address, so a
+    per-IP ceiling below the matching per-link budget 429s legitimate
+    recipients, and one above the per-company budget lets a single address
+    exhaust the tenant's whole hour. Every window is normalised before the
+    comparison — the burst caps are part of the invariant, not exempt from it.
+    See services/symlink/CLAUDE.md.
     """
-    import inspect
-    import re
     import sys
 
     mod = sys.modules["app.matcha.routes.intake.symlink_public"]
-    src = inspect.getsource(mod)
+    assert mod.LINK_BUDGETS == {"turn": (40, 240), "upload": (24, 200), "submit": (6, 120)}
 
-    # `_budget(token, company_id, "<kind>", <per_link>, <per_company>)`
-    per_link = {
-        m.group(1): int(m.group(2))
-        for m in re.finditer(r'_budget\(\s*token,\s*company_id,\s*"(\w+)",\s*(\d+),\s*(\d+)\)', src)
-    }
-    assert per_link == {"turn": 40, "upload": 24, "submit": 6}
-
-    hourly = {key: limit for key, (limit, window) in mod.IP_LIMITS.items() if window == 3600}
-    for kind, link_budget in per_link.items():
-        matching = [v for k, v in hourly.items() if k.startswith(f"symlink_{kind}_ip")]
-        assert matching, f"no hourly per-IP limit for {kind}"
-        assert min(matching) > link_budget, (
-            f"per-IP hourly limit for {kind} ({min(matching)}) must stay above the "
-            f"per-link budget ({link_budget}) or it becomes the binding constraint"
+    for kind, (per_link, per_company) in mod.LINK_BUDGETS.items():
+        effective = _effective_hourly(mod, kind)
+        assert effective > per_link, (
+            f"per-IP hourly rate for {kind} ({effective}) must stay above the per-link "
+            f"budget ({per_link}) or per-IP becomes the binding constraint"
+        )
+        assert effective < per_company, (
+            f"per-IP hourly rate for {kind} ({effective}) must stay below the per-company "
+            f"budget ({per_company}) or one address can exhaust the whole tenant's hour"
         )
 
-    # Unlock brute force is bounded per link, not per IP.
-    assert 'check_rate_limit(token, "symlink_unlock_link", 12, 3600)' in src
-    assert mod.IP_LIMITS["symlink_unlock_ip"][0] > 12
 
-
-def test_every_ip_limit_call_goes_through_the_table(public_router):
-    """No inline per-IP magic numbers — the table is the one place to tune them."""
-    import inspect
-    import re
+def test_unlock_is_bounded_per_link_and_has_no_company_budget(public_router):
+    """The passcode is company-wide, so a per-company unlock budget would let
+    one attacker lock every legitimate recipient of a tenant out for the hour.
+    Guessing is bounded per link and, across links, per IP."""
     import sys
 
-    src = inspect.getsource(sys.modules["app.matcha.routes.intake.symlink_public"])
-    inline = re.findall(r'check_rate_limit\(\s*(?:ip|client_ip\(request\))\s*,', src)
-    assert inline == [], "per-IP limits must call _ip_limit(), not check_rate_limit() directly"
+    mod = sys.modules["app.matcha.routes.intake.symlink_public"]
+    assert "unlock" not in mod.LINK_BUDGETS
+    assert mod.UNLOCK_PER_LINK_HOURLY == 12
+    assert _effective_hourly(mod, "unlock") > mod.UNLOCK_PER_LINK_HOURLY
+
+
+def test_every_public_endpoint_charges_a_per_ip_limit(public_router):
+    """The per-IP table is only a backstop if every public handler is behind it.
+    `DELETE /sym/{token}/attachments/{id}` was the one that wasn't: it ran a
+    token lookup (a DB round-trip) per request with nothing charged."""
+    import inspect
+
+    for route in public_router.routes:
+        src = inspect.getsource(route.endpoint)
+        assert "_ip_limit(" in src, f"{sorted(route.methods)} {route.path} charges no per-IP limit"
+
+
+def test_rate_limit_numbers_live_in_the_tables(public_router):
+    """No inline magic numbers: `check_rate_limit` is reached through `_ip_limit`
+    or `_budget` (which read IP_LIMITS / LINK_BUDGETS), and the one direct call
+    passes a named constant, not a literal."""
+    import ast
+    import inspect
+    import sys
+
+    mod = sys.modules["app.matcha.routes.intake.symlink_public"]
+    tree = ast.parse(inspect.getsource(mod))
+
+    callers: dict[str, list[ast.Call]] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for node in ast.walk(fn):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "check_rate_limit"
+            ):
+                callers.setdefault(fn.name, []).append(node)
+
+    assert set(callers) <= {"_ip_limit", "_budget", "unlock_symlink"}, (
+        f"per-IP/per-link limits must go through the tables, not {sorted(set(callers))}"
+    )
+    for call in callers.get("unlock_symlink", []):
+        limit_arg = call.args[2]  # check_rate_limit(key, action, limit, window)
+        assert not isinstance(limit_arg, ast.Constant), (
+            "the unlock per-link budget must be UNLOCK_PER_LINK_HOURLY, not a literal"
+        )
 
 
 def test_admin_router_is_company_admin_only(admin_router):
     """Sym-link is company-scoped: it needs a tenant, a roster and a company
     passcode. `individual` (personal matcha-work, no company) must not reach it,
     and neither must `employee` — the recipient side is the unauthenticated
-    /sym/{token} surface, not this router."""
+    /sym/{token} surface, not this router.
+
+    Asserted against the router object, not the module text: a new endpoint
+    added with the wrong dependency, or with none at all, has to fail here.
+    """
     import inspect
     import sys
 
     mod = sys.modules["app.matcha.routes.symlink"]
-    src = inspect.getsource(mod)
+    gate = mod.require_symlink_admin
 
-    assert 'require_roles("admin", "client")' in src
-    # Match the call, not the name — the module comment explains why the shared
-    # dep was dropped and legitimately mentions it.
-    assert "Depends(require_admin_or_client)" not in src, "shared dep also admits `individual`"
-    # Every authenticated endpoint goes through the narrowed gate.
-    assert src.count("Depends(require_symlink_admin)") >= 15
+    def _guarded(dependant) -> bool:
+        return any(
+            sub.call is gate or _guarded(sub)
+            for sub in dependant.dependencies
+        )
+
+    ungated = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in admin_router.routes
+        if not _guarded(route.dependant)
+    ]
+    assert ungated == [], f"endpoints not behind require_symlink_admin: {ungated}"
+    # And the gate is the narrowed one, not the shared dep that also admits `individual`.
+    assert "Depends(require_admin_or_client)" not in inspect.getsource(mod)

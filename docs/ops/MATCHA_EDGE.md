@@ -50,8 +50,54 @@ token:
 Per-IP ceilings are deliberately loose. A bulk send — 20 credential requests to
 one employer — puts a whole office behind a single NAT address, so a per-IP
 ceiling that binds before the per-link budget just 429s legitimate recipients.
-`tests/symlink/test_routes_smoke.py` asserts every hourly per-IP limit stays
-above the matching per-link budget. Do not "harden" it by tightening those.
+`tests/symlink/test_routes_smoke.py` asserts, with every window normalised to
+requests/hour, that each per-IP rate sits **between** the per-link and the
+per-company budget: below the per-link one it 429s an office, above the
+per-company one a single address can drain the whole tenant's hour. Do not
+"harden" it by tightening those.
+
+Unlock is the one kind with no per-company budget, on purpose: the passcode is
+company-wide, so a per-company unlock counter would let one attacker lock every
+legitimate recipient of a tenant out for the hour. Guessing is bounded per link
+(12/hr) and, across links, per IP — the code space (32^6 ≈ 1.07e9, rotated
+weekly) carries the rest.
+
+### nginx `limit_req` — the same CloudFront coupling as fail2ban
+
+`deploy/nginx/matcha.conf` rate-limits before the app ever sees the request:
+
+| Location | Zone | Rate |
+|---|---|---|
+| `/api/` | `matcha_api` | 20r/s, burst 40 |
+| `/api/auth/` | `matcha_auth` | 30r/m, burst 20 |
+| `/api/ws/` | `matcha_ws` | 8r/m, burst 10 |
+
+Every one of those zones is `limit_req_zone $binary_remote_addr` — and behind
+CloudFront `$remote_addr` is the **POP address**, not the viewer's. The host also
+sets `X-Real-IP $remote_addr`, so the frontend container's `real_ip_header`
+resolves to the same POP. Only the application layer recovers the true viewer
+address, via `client_ip()` reading `X-Forwarded-For` right-to-left past the
+trusted proxy count.
+
+So every matcha viewer routed through one edge location shares a single nginx
+bucket. This is exactly the coupling that caused the 2026-09-10 outage below,
+one layer down: **the origin must never treat its own CDN as a client.** The
+current rate (20r/s per POP) is far above real per-POP traffic, so nothing is
+tripping today — but it is shared-fate, and tightening it would blackhole a POP
+for every user on it.
+
+`limit_req_status 429` and an `@ratelimited` handler were added to the server
+block (2026-09-10) so that a trip returns a real 429 with a JSON body. Before
+that, `limit_req`'s default 503 landed in `error_page 502 503 504 = @maintenance`
+and every rate-limited user was told "Server is updating" — an outage
+misdiagnosis waiting to happen. **This file is hand-applied** (`scp` per
+`deploy/nginx/README.md`); the change is in the repo, confirm it is on the box.
+
+**Not yet fixed:** making the nginx zones key per-viewer needs
+`set_real_ip_from` for the CloudFront ranges plus `real_ip_header
+X-Forwarded-For` in the host `http` block. Do not add it blind — get the ranges
+from the managed prefix list, and verify on the box that a viewer cannot then
+spoof `X-Forwarded-For` and escape the limiter entirely.
 
 ## Rules Covering Matcha
 
@@ -109,18 +155,24 @@ Never hand-edit in the console — snapshot, edit JSON, update with the lock tok
 
 ```bash
 ACL_ARGS="--scope CLOUDFRONT --region us-east-1 --name cappe-public-edge --id 22a33df3-77c4-492b-8a21-9c6b054a17d7"
+# get-sampled-requests does NOT take --name/--id. It wants the ARN.
+ACL_ARN="arn:aws:wafv2:us-east-1:010438494410:global/webacl/cappe-public-edge/22a33df3-77c4-492b-8a21-9c6b054a17d7"
 
 # 1. Snapshot. Keep rules-before.json until the change is verified — it IS the rollback.
 aws wafv2 get-web-acl $ACL_ARGS --output json > acl-before.json
 python3 -c "import json;json.dump(json.load(open('acl-before.json'))['WebACL']['Rules'],open('rules-before.json','w'),indent=2)"
 
+# Carry the optional fields through verbatim rather than retyping them (see below).
+DESC="$(python3 -c "import json;print(json.load(open('acl-before.json'))['WebACL'].get('Description',''))")"
+VIS="$(python3 -c "import json;print(json.dumps(json.load(open('acl-before.json'))['WebACL']['VisibilityConfig']))")"
+
 # 2. Edit a copy into rules-after.json.
 
 # 3. Apply. The lock token must be re-read immediately before the update.
 aws wafv2 update-web-acl $ACL_ARGS \
-  --description "$(python3 -c "import json;print(json.load(open('acl-before.json'))['WebACL']['Description'])")" \
+  --description "$DESC" \
   --default-action '{"Allow":{}}' \
-  --visibility-config '{"SampledRequestsEnabled":true,"CloudWatchMetricsEnabled":true,"MetricName":"CappePublicEdge"}' \
+  --visibility-config "$VIS" \
   --rules file://rules-after.json \
   --lock-token "$(aws wafv2 get-web-acl $ACL_ARGS --query LockToken --output text)"
 ```
@@ -128,7 +180,10 @@ aws wafv2 update-web-acl $ACL_ARGS \
 `update-web-acl` **replaces** the ACL. Any optional field omitted from the call
 is dropped, so always carry `Description` (and `CustomResponseBodies`,
 `CaptchaConfig`, `ChallengeConfig`, `TokenDomains`, `AssociationConfig` if they
-are ever set) through from the snapshot.
+are ever set) through from the snapshot. `VisibilityConfig` is on that list and
+is the easiest one to get wrong by hand: retyping `MetricName` even slightly
+differently orphans every existing CloudWatch metric and dashboard for this ACL,
+so read it out of `acl-before.json` (`$VIS` above) instead of pasting a literal.
 
 ## Verification
 
@@ -137,9 +192,15 @@ are ever set) through from the snapshot.
 aws wafv2 get-web-acl $ACL_ARGS --query 'WebACL.Rules[].[Priority,Name]' --output text
 
 # Real traffic classification, per rule, last 3 hours.
-aws wafv2 get-sampled-requests $ACL_ARGS \
+# NOTE: --web-acl-arn, not the --name/--id in $ACL_ARGS. And `date -v` is
+# BSD-only, so the window is computed in python — this block has to run on the
+# Amazon Linux app EC2 as well as on a Mac.
+NOW=$(python3 -c "import time;print(int(time.time()))")
+aws wafv2 get-sampled-requests \
+  --scope CLOUDFRONT --region us-east-1 \
+  --web-acl-arn "$ACL_ARN" \
   --rule-metric-name BlockOversizedMatchaSymlinkJsonBodies \
-  --time-window StartTime=$(date -u -v-3H +%s),EndTime=$(date -u +%s) \
+  --time-window StartTime=$((NOW-10800)),EndTime=$NOW \
   --max-items 100
 ```
 
@@ -154,10 +215,12 @@ Then, end to end against a real link:
 ## Rollback
 
 ```bash
+# $DESC and $VIS come from acl-before.json exactly as in the apply block — a
+# rollback that retypes them does not actually restore the ACL.
 aws wafv2 update-web-acl $ACL_ARGS \
-  --description "<from snapshot>" \
+  --description "$DESC" \
   --default-action '{"Allow":{}}' \
-  --visibility-config '{"SampledRequestsEnabled":true,"CloudWatchMetricsEnabled":true,"MetricName":"CappePublicEdge"}' \
+  --visibility-config "$VIS" \
   --rules file://rules-before.json \
   --lock-token "$(aws wafv2 get-web-acl $ACL_ARGS --query LockToken --output text)"
 ```

@@ -100,10 +100,28 @@ IP_LIMITS: dict[str, tuple[int, int]] = {
     "symlink_validate": (300, 3600),
     "symlink_unlock_ip": (60, 600),      # per-link 12/hr is the brute-force guard
     "symlink_turn_ip": (30, 60),
-    "symlink_turn_ip_hr": (400, 3600),
+    "symlink_turn_ip_hr": (200, 3600),
     "symlink_upload_ip": (120, 3600),
     "symlink_submit_ip": (60, 3600),
+    "symlink_delete_ip": (120, 3600),
 }
+
+# The real governors, hourly: kind -> (per link, per company). Every number the
+# rate limiter uses lives in one of these two tables so the invariant
+# (per-link < per-IP-hourly < per-company) is a dict comparison in the tests
+# rather than a regex over call sites.
+LINK_BUDGETS: dict[str, tuple[int, int]] = {
+    "turn": (40, 240),
+    "upload": (24, 200),
+    "submit": (6, 120),
+}
+
+# Unlock is deliberately absent from LINK_BUDGETS: the passcode is company-wide,
+# so a per-company unlock budget would let one attacker lock every legitimate
+# recipient out of a tenant for the hour. Per-link (below) bounds guessing on any
+# one token and per-IP bounds it across tokens; the code space (32^6 ≈ 1.07e9,
+# rotated weekly) carries the rest.
+UNLOCK_PER_LINK_HOURLY = 12
 
 
 async def _ip_limit(addr: str, key: str) -> None:
@@ -111,8 +129,8 @@ async def _ip_limit(addr: str, key: str) -> None:
     await check_rate_limit(addr, key, limit, window)
 
 
-async def _budget(token: str, company_id: str, kind: str, per_link: int, per_company: int) -> None:
-    """The real governors: per-link and per-company, both hourly."""
+async def _budget(token: str, company_id: str, kind: str) -> None:
+    per_link, per_company = LINK_BUDGETS[kind]
     await check_rate_limit(token, f"symlink_{kind}_link", per_link, 3600)
     await check_rate_limit(company_id, f"symlink_{kind}_co", per_company, 3600)
 
@@ -175,16 +193,19 @@ async def validate_symlink(token: str, request: Request):
 
 @router.post("/sym/{token}/unlock")
 async def unlock_symlink(token: str, request: Request):
+    # Charged before the body is buffered: `_read_json_capped` awaits the whole
+    # payload into memory, so a limit charged after it is a limit an attacker
+    # pays only once they have already made us do the work.
+    ip = client_ip(request)
+    await _ip_limit(ip, "symlink_unlock_ip")
     body = await _read_json_capped(request, PublicUnlockRequest)
     if body.internal_ref:
         return {"unlock_token": "ok"}  # honeypot — look successful, do nothing
 
-    ip = client_ip(request)
-    await _ip_limit(ip, "symlink_unlock_ip")
     row = await _resolve(token)
     _check_open(row)
     # Charged after the link is known live so a dead token can't drain the bucket.
-    await check_rate_limit(token, "symlink_unlock_link", 12, 3600)
+    await check_rate_limit(token, "symlink_unlock_link", UNLOCK_PER_LINK_HOURLY, 3600)
 
     company_id = str(row["company_id"])
     async with get_connection(tenant_id=company_id) as conn:
@@ -211,17 +232,17 @@ async def unlock_symlink(token: str, request: Request):
 
 @router.post("/sym/{token}/chat/turn")
 async def symlink_chat_turn(token: str, request: Request):
-    body = await _read_json_capped(request, PublicTurnRequest)
     ip = client_ip(request)
     await _ip_limit(ip, "symlink_turn_ip")
     await _ip_limit(ip, "symlink_turn_ip_hr")
+    body = await _read_json_capped(request, PublicTurnRequest)
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])
 
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
-        await _budget(token, company_id, "turn", 40, 240)
+        await _budget(token, company_id, "turn")
         fresh = await links.fetch_by_id(conn, row["id"], row["company_id"])
         spec = links.spec_of(fresh)
         transcript = links.transcript_of(fresh)
@@ -284,7 +305,7 @@ async def upload_symlink_attachment(
 
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
-        await _budget(token, company_id, "upload", 24, 200)
+        await _budget(token, company_id, "upload")
         # No per-link file cap here: one live file per slot (insert_attachment
         # discards the previous one) and the spec caps slots at MAX_ATTACHMENT_SLOTS.
 
@@ -320,6 +341,7 @@ async def upload_symlink_attachment(
 
 @router.delete("/sym/{token}/attachments/{attachment_id}")
 async def delete_symlink_attachment(token: str, attachment_id: UUID, request: Request):
+    await _ip_limit(client_ip(request), "symlink_delete_ip")
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])
@@ -345,22 +367,26 @@ async def delete_symlink_attachment(token: str, attachment_id: UUID, request: Re
 
 @router.post("/sym/{token}/submit")
 async def submit_symlink(token: str, request: Request, background_tasks: BackgroundTasks):
+    ip = client_ip(request)
+    await _ip_limit(ip, "symlink_submit_ip")
     body = await _read_json_capped(request, PublicSubmitRequest)
     if body.internal_ref:
         return {"submitted": True}
 
-    ip = client_ip(request)
-    await _ip_limit(ip, "symlink_submit_ip")
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])
 
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
+        # Outside the transaction on purpose: a Redis INCR is not rolled back
+        # with the txn, so charging it inside would burn one of only 6 hourly
+        # attempts every time staging failed — and it would hold the row's
+        # FOR UPDATE lock across a network call.
+        await _budget(token, company_id, "submit")
         async with conn.transaction():
             fresh = await links.fetch_by_id(conn, row["id"], row["company_id"], for_update=True)
             _check_open(fresh)
-            await _budget(token, company_id, "submit", 6, 120)
             submission = await submissions.stage(conn, fresh, body.fields)
             await links.log_audit(
                 conn, row["id"], row["company_id"], None, "symlink_submitted",

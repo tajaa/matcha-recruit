@@ -89,13 +89,14 @@ export default function SymLinkDetail() {
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run(() => resendSymlink(linkId))}>
               <RefreshCw className="h-3.5 w-3.5" /> Resend
             </Button>
-            <button
+            <Button
+              variant="danger"
+              size="sm"
               disabled={busy}
               onClick={() => { if (window.confirm('Revoke this link? The recipient will no longer be able to open it.')) void run(() => revokeSymlink(linkId)) }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/25 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/[0.06] disabled:opacity-50"
             >
               <X className="h-3.5 w-3.5" /> Revoke
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -141,13 +142,9 @@ export default function SymLinkDetail() {
             </div>
             {submission.status === 'pending' && (
               <div className="flex shrink-0 gap-2">
-                <button
-                  disabled={busy}
-                  onClick={() => void run(() => applySubmission(submission.id))}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/[0.16] disabled:opacity-50"
-                >
+                <Button variant="success" size="sm" disabled={busy} onClick={() => void run(() => applySubmission(submission.id))}>
                   {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Apply
-                </button>
+                </Button>
                 <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run(() => rejectSubmission(submission.id, note))}>
                   <X className="h-3.5 w-3.5" /> Reject
                 </Button>

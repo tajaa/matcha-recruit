@@ -115,12 +115,21 @@ def _trusted_proxy_count(request: Request) -> int:
     """Count the nginx hop, plus ONE authenticated CloudFront hop when present.
 
     Both headers name the same hop — presenting both must never add two.
+
+    Compared as BYTES. Starlette decodes header values as latin-1, so a viewer
+    can put a non-ASCII character in a header we read; `hmac.compare_digest` on
+    two `str` raises TypeError for any codepoint above 127, and this runs inside
+    `client_ip()` on every rate-limited route — an attacker-supplied header must
+    fail the comparison, never 500 the request.
     """
     count = _TRUSTED_PROXY_COUNT
     for header, env_var in _ORIGIN_VERIFY_HEADERS:
         expected = os.getenv(env_var, "")
         provided = request.headers.get(header, "")
-        if expected and provided and hmac.compare_digest(expected, provided):
+        if not expected or not provided:
+            continue
+        if hmac.compare_digest(expected.encode("utf-8", "surrogateescape"),
+                               provided.encode("utf-8", "surrogateescape")):
             return count + 1
     return count
 

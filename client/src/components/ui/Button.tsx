@@ -8,6 +8,11 @@ const variants = {
   primary: 'bg-zinc-700 text-white hover:bg-zinc-600',
   secondary: 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700',
   ghost: 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900',
+  // Destructive and affirmative actions were being hand-rolled at call sites
+  // (each a divergent copy of the class string, so Apply and Reject rendered at
+  // different heights). They belong here.
+  danger: 'border border-red-500/25 text-red-300 hover:bg-red-500/[0.06]',
+  success: 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/[0.16]',
 } as const
 
 const sizes = {
