@@ -9,7 +9,12 @@ import pytest
 
 from app.core.models.schedule_break_rules import BreakRuleSetImport
 from app.core.services.schedule_break_rule_import import review_break_rule_set
-from app.matcha.services.scheduling.schedule_break_rule_store import resolve_break_rules
+from app.matcha.services.scheduling import schedule_break_rule_store
+from app.matcha.services.scheduling.schedule_break_rule_store import (
+    ResolvedBreakRules,
+    record_break_rule_applicability_decision,
+    resolve_break_rules,
+)
 from app.matcha.services.scheduling.shift_compliance import _DB_RULES_CACHE
 
 
@@ -24,7 +29,7 @@ def _clear_db_rules_cache():
 class FakeConn:
     def __init__(
         self, location, *, industry="retail", structured=None, state="CA",
-        extractions=None, extractions_fail=False,
+        extractions=None, extractions_fail=False, applicability_decision="confirmed",
     ):
         self.location = location
         self.industry = industry
@@ -32,6 +37,7 @@ class FakeConn:
         self.state = state
         self.extractions = extractions or []
         self.extractions_fail = extractions_fail
+        self.applicability_decision = applicability_decision
 
     async def fetchrow(self, query, *args):
         if "FROM business_locations" in query:
@@ -47,6 +53,8 @@ class FakeConn:
             return self.state
         if "company_handbook_profiles" in query:
             return 24
+        if "company_schedule_break_rule_confirmations" in query:
+            return self.applicability_decision
         raise AssertionError(query)
 
     async def fetch(self, query, *args):
@@ -104,7 +112,7 @@ def test_approved_structured_rule_beats_legacy_fallback():
         location_id=location["id"],
         shift_date=date(2026, 8, 21),
     ))
-    assert result.source == "approved"
+    assert result.source == "approved_and_organization_confirmed"
     assert result.rule_set_ids == (rule_id,)
     assert result.rules[0].duration_minutes == 45
     assert result.rules[0].trigger_after_minutes == 240
@@ -112,6 +120,65 @@ def test_approved_structured_rule_beats_legacy_fallback():
     assert result.rules[0].authority_url == "https://example.gov/rule"
     assert result.rules[0].source_type == "manual"
     assert result.employer_employee_count == 24
+
+
+def test_reviewed_expected_rule_requires_organization_confirmation():
+    location = _location()
+    rule_id = uuid4()
+    row = {
+        "id": rule_id,
+        "rules": {"meal_periods": [{
+            "trigger_after_minutes": 360,
+            "duration_minutes": 30,
+            "window_start": "11:00",
+            "window_end": "14:00",
+        }]},
+        "citation": "Expected authority",
+        "depth": 0,
+        "industry_code": "retail",
+        "effective_from": date(2026, 1, 1),
+        "effective_to": None,
+        "authority_url": "https://example.gov/rule",
+        "source_type": "api",
+        "review_status": "approved",
+        "jurisdiction_id": location["jurisdiction_id"],
+    }
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[row], applicability_decision=None), company_id=uuid4(),
+        location_id=location["id"], shift_date=date(2026, 8, 21),
+    ))
+    assert result.source == "confirmation_required"
+    assert result.rules == ()
+    assert result.expected_rules[0].rule_set_id == rule_id
+    advisory = result.advisories[0]
+    assert advisory["code"] == "break_rules_confirmation_required"
+    assert advisory["metadata"]["citation"] == "Expected authority"
+    assert len(advisory["metadata"]["context_hash"]) == 64
+
+
+def test_confirmed_expected_rule_operates_after_separate_source_review():
+    location = _location()
+    row = {
+        "id": uuid4(),
+        "rules": {"meal_periods": [{
+            "trigger_after_minutes": 360, "duration_minutes": 30,
+        }]},
+        "citation": "Expected authority", "depth": 0,
+        "industry_code": "retail", "effective_from": date(2026, 1, 1),
+        "effective_to": None, "authority_url": "https://example.gov/rule",
+        "source_type": "api", "review_status": "approved",
+        "jurisdiction_id": location["jurisdiction_id"],
+    }
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[row], applicability_decision="confirmed"),
+        company_id=uuid4(), location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.source == "approved_and_organization_confirmed"
+    assert len(result.rules) == 1
+    assert result.expected_rules == result.rules
+    assert result.advisories[0]["code"] == "break_rules_applicability_confirmed"
+    assert "reviewed rules apply" in result.advisories[0]["message"]
 
 
 def test_approved_rule_preserves_reviewed_age_scope():
@@ -431,6 +498,15 @@ def test_import_rejects_rules_the_runtime_parser_cannot_enforce():
         )
 
 
+def test_import_rejects_empty_rule_collections_before_confirmation_metadata():
+    with pytest.raises(ValueError, match="at least one rule"):
+        BreakRuleSetImport(
+            jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
+            rules={"meal_periods": [], "rest_periods": []},
+            citation="Authority", source_type="manual",
+        )
+
+
 def test_import_validates_clock_windows_and_employer_size_bounds():
     item = BreakRuleSetImport(
         jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
@@ -502,3 +578,50 @@ def test_rule_review_uses_commit_order_timestamp_for_recovery():
     source = inspect.getsource(review_break_rule_set)
     assert "lock_schedule_break_rule_guidance(conn, exclusive=True)" in source
     assert "updated_at = clock_timestamp()" in source
+
+
+def test_applicability_decision_rechecks_context_before_upsert(monkeypatch):
+    location_id = uuid4()
+    company_id = uuid4()
+    rule_id = uuid4()
+    expected_rule = schedule_break_rule_store._rules_from_payload(
+        rule_id,
+        {"meal_periods": [{"trigger_after_minutes": 360, "duration_minutes": 30}]},
+        "Authority",
+    )[0]
+
+    class Connection:
+        def __init__(self):
+            self.writes = []
+
+        async def fetchval(self, query, *_args):
+            assert "pg_advisory_xact_lock(" in query
+
+        async def execute(self, query, *args):
+            self.writes.append((query, args))
+
+    async def fake_resolve(*_args, **_kwargs):
+        return ResolvedBreakRules(
+            rules=(), rule_set_ids=(rule_id,), timezone=None, industry_code="retail",
+            source="confirmation_required", advisories=(),
+            expected_rules=(expected_rule,), applicability_context_hash="b" * 64,
+        )
+
+    monkeypatch.setattr(schedule_break_rule_store, "resolve_break_rules", fake_resolve)
+    conn = Connection()
+    _run(record_break_rule_applicability_decision(
+        conn, company_id=company_id, location_id=location_id,
+        shift_date=date(2026, 8, 21), rule_set_id=rule_id,
+        context_hash="b" * 64, decision="confirmed", actor_user_id=uuid4(),
+    ))
+    assert len(conn.writes) == 1
+    assert "ON CONFLICT (company_id, location_id, rule_set_id, context_hash)" in conn.writes[0][0]
+    assert "VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())" in conn.writes[0][0]
+    assert "confirmed_at = clock_timestamp()" in conn.writes[0][0]
+
+    with pytest.raises(LookupError, match="context changed"):
+        _run(record_break_rule_applicability_decision(
+            conn, company_id=company_id, location_id=location_id,
+            shift_date=date(2026, 8, 21), rule_set_id=rule_id,
+            context_hash="c" * 64, decision="confirmed", actor_user_id=uuid4(),
+        ))

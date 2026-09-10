@@ -129,6 +129,15 @@ export function fetchShiftBreakStagger(shiftId: string) {
   return api.get<ShiftBreakStagger>(`/employee-schedule/shifts/${shiftId}/break-stagger`)
 }
 
+export function decideShiftBreakRuleApplicability(
+  shiftId: string,
+  payload: { rule_set_id: string; context_hash: string; decision: 'confirmed' | 'rejected' },
+) {
+  return api.post<{ decision: 'confirmed' | 'rejected'; rule_set_id: string }>(
+    `/employee-schedule/shifts/${shiftId}/break-rule-applicability`, payload,
+  )
+}
+
 export function updateAssignmentBreakPlan(
   shiftId: string, employeeId: string, plannedBreaks: PlannedBreak[] | null,
 ) {

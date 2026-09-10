@@ -14,11 +14,13 @@ from fastapi import HTTPException
 
 from app.matcha.models.scheduling.employee_schedule import (
     AssignmentBreakPlanUpdate,
+    BreakRuleApplicabilityDecision,
     PlannedBreak,
 )
 from app.matcha.routes.employee_schedule import assignments as assignments_route
 from app.matcha.routes.employee_schedule import shifts as shifts_route
 from app.matcha.services.scheduling import schedule_guidance
+from app.workers.tasks import schedule_break_refresh
 from app.matcha.services.scheduling.schedule_breaks import BreakPlan, BreakRequirement
 from tests._helpers.routes import iter_api_routes
 
@@ -141,6 +143,49 @@ def test_stagger_route_returns_a_suggestion_per_assignee(monkeypatch):
     assert {result["status"] for result in payload["results"]} == {"suggested"}
     starts = sorted(result["suggested_start"] for result in payload["results"])
     assert starts[0] != starts[1], "two assignees must not be sent on break together"
+
+
+def test_break_rule_applicability_decision_is_tenant_and_context_scoped(monkeypatch):
+    class Connection:
+        def transaction(self):
+            return _Transaction()
+
+        async def fetchrow(self, query, *_args):
+            assert "company_id" in query
+            return {
+                "id": uuid4(), "location_id": uuid4(),
+                "starts_at": datetime(2026, 8, 21, 9, tzinfo=timezone.utc),
+            }
+
+    conn = Connection()
+    company_id = uuid4()
+    rule_set_id = uuid4()
+    calls = []
+
+    async def fake_require_company_id(_user):
+        return company_id
+
+    async def fake_record(_conn, **kwargs):
+        calls.append(kwargs)
+
+    recovery = []
+    monkeypatch.setattr(shifts_route, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(shifts_route, "get_connection", lambda: _ConnectionContext(conn))
+    monkeypatch.setattr(shifts_route, "record_break_rule_applicability_decision", fake_record)
+    monkeypatch.setattr(schedule_break_refresh, "enqueue_schedule_break_recovery", lambda: recovery.append(True))
+
+    result = _run(shifts_route.decide_shift_break_rule_applicability(
+        uuid4(),
+        BreakRuleApplicabilityDecision(
+            rule_set_id=rule_set_id, context_hash="a" * 64, decision="confirmed",
+        ),
+        current_user=_user(),
+    ))
+
+    assert result == {"decision": "confirmed", "rule_set_id": str(rule_set_id)}
+    assert calls[0]["company_id"] == company_id
+    assert calls[0]["context_hash"] == "a" * 64
+    assert recovery == [True]
 
 
 def test_stagger_route_treats_a_saved_time_as_fixed(monkeypatch):

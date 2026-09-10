@@ -5,10 +5,12 @@ import ShiftInspector from './ShiftInspector'
 
 const fetchShiftBreakStagger = vi.fn()
 const updateAssignmentBreakPlan = vi.fn().mockResolvedValue(undefined)
+const decideShiftBreakRuleApplicability = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('../../../api/employees/employeeSchedule', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchShiftBreakStagger: (...args: unknown[]) => fetchShiftBreakStagger(...args),
+  decideShiftBreakRuleApplicability: (...args: unknown[]) => decideShiftBreakRuleApplicability(...args),
   updateAssignmentBreakPlan: (...args: unknown[]) => updateAssignmentBreakPlan(...args),
   updateAssignmentNote: vi.fn().mockResolvedValue(undefined),
 }))
@@ -88,6 +90,8 @@ describe('ShiftInspector break staggering', () => {
     fetchShiftBreakStagger.mockReset()
     updateAssignmentBreakPlan.mockReset()
     updateAssignmentBreakPlan.mockResolvedValue(undefined)
+    decideShiftBreakRuleApplicability.mockReset()
+    decideShiftBreakRuleApplicability.mockResolvedValue(undefined)
   })
 
   it('seeds the editable time from the suggestion and saves what the manager keeps', async () => {
@@ -159,6 +163,46 @@ describe('ShiftInspector break staggering', () => {
     })
 
     expect(await screen.findByText(/no spare staffing above its required 1/)).toBeInTheDocument()
+  })
+
+  it('asks the organization to confirm system-expected rules before using them', async () => {
+    renderWith([assignment()], {
+      advisories: [{
+        check: 'break_rules', code: 'break_rules_confirmation_required', severity: 'advisory',
+        message: 'Matcha expects these rules may apply.',
+        metadata: {
+          rule_set_id: 'rule-1', context_hash: 'a'.repeat(64),
+          citation: 'N.Y. Lab. Law § 162', effective_from: '2026-01-01',
+          authority_url: 'https://example.gov/rule',
+        },
+      }],
+    })
+
+    expect(await screen.findByText('Confirm expected break-law coverage')).toBeInTheDocument()
+    expect(screen.getByText(/does not verify the source itself/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use these rules' }))
+    await waitFor(() => expect(decideShiftBreakRuleApplicability).toHaveBeenCalledWith(
+      'shift-1', { rule_set_id: 'rule-1', context_hash: 'a'.repeat(64), decision: 'confirmed' },
+    ))
+  })
+
+  it('lets the organization reverse a not-applicable decision', async () => {
+    renderWith([assignment()], {
+      advisories: [{
+        check: 'break_rules', code: 'break_rules_applicability_rejected', severity: 'advisory',
+        message: 'Your organization marked these rules as not applicable.',
+        metadata: {
+          rule_set_id: 'rule-1', context_hash: 'b'.repeat(64), decision: 'rejected',
+          citation: 'N.Y. Lab. Law § 162', effective_from: '2026-01-01',
+        },
+      }],
+    })
+
+    expect(await screen.findByText('Review expected break-law coverage')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use these rules' }))
+    await waitFor(() => expect(decideShiftBreakRuleApplicability).toHaveBeenCalledWith(
+      'shift-1', { rule_set_id: 'rule-1', context_hash: 'b'.repeat(64), decision: 'confirmed' },
+    ))
   })
 
   it('renders no stagger control for a waived requirement', async () => {

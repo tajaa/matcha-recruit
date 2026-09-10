@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date, time
@@ -42,6 +43,9 @@ class ResolvedBreakRules:
     source: str
     advisories: tuple[dict[str, Any], ...]
     employer_employee_count: int | None = None
+    expected_rules: tuple[BreakRule, ...] = ()
+    applicability_context_hash: str | None = None
+    applicability_decision: str | None = None
 
 
 def _uuid_for_legacy(state: str) -> UUID:
@@ -275,6 +279,8 @@ def _rules_from_payload(
         )
         if meal_total > MAX_SHIFT_BREAK_MINUTES:
             raise ValueError("aggregate meal break duration exceeds 1440 minutes")
+    if not parsed:
+        raise ValueError("break rule payload must contain at least one rule")
     return parsed
 
 
@@ -294,6 +300,92 @@ def _location_timezone(value: str | None) -> ZoneInfo | None:
         return ZoneInfo(value)
     except (ZoneInfoNotFoundError, ValueError):
         return None
+
+
+def _applicability_context_hash(
+    *,
+    company_id: UUID,
+    location_id: UUID,
+    rule_set_id: UUID,
+    jurisdiction_id: UUID,
+    industry_code: str | None,
+    employer_employee_count: int | None,
+    effective_from: date,
+    effective_to: date | None,
+    rules: Any,
+) -> str:
+    """Bind a tenant decision to the exact rule and applicability inputs."""
+
+    payload = {
+        "company_id": str(company_id),
+        "location_id": str(location_id),
+        "rule_set_id": str(rule_set_id),
+        "jurisdiction_id": str(jurisdiction_id),
+        "industry_code": industry_code,
+        "employer_employee_count": employer_employee_count,
+        "effective_from": effective_from.isoformat(),
+        "effective_to": effective_to.isoformat() if effective_to else None,
+        "rules": rules,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _expected_rules_metadata(
+    rules: list[BreakRule], *, context_hash: str, decision: str | None,
+) -> dict[str, Any]:
+    def summary(rule: BreakRule) -> str:
+        comparison = "at least" if rule.trigger_operator == "gte" else "over"
+        parts = [
+            f"{rule.duration_minutes}-minute {rule.kind} break for shifts "
+            f"{comparison} {rule.trigger_after_minutes / 60:g} hours"
+        ]
+        if rule.shift_start_window_from and rule.shift_start_window_before:
+            parts.append(
+                f"starting {rule.shift_start_window_from.strftime('%H:%M')}–"
+                f"{rule.shift_start_window_before.strftime('%H:%M')}"
+            )
+        if rule.shift_spans_window_start and rule.shift_spans_window_end:
+            parts.append(
+                f"spanning {rule.shift_spans_window_start.strftime('%H:%M')}–"
+                f"{rule.shift_spans_window_end.strftime('%H:%M')}"
+            )
+        if rule.shift_starts_before:
+            parts.append(f"starting before {rule.shift_starts_before.strftime('%H:%M')}")
+        if rule.shift_ends_after:
+            parts.append(f"ending after {rule.shift_ends_after.strftime('%H:%M')}")
+        if rule.window_start and rule.window_end:
+            parts.append(
+                f"taken {rule.window_start.strftime('%H:%M')}–"
+                f"{rule.window_end.strftime('%H:%M')}"
+            )
+        if rule.recommend_midpoint:
+            parts.append("placed around the shift midpoint")
+        if rule.minimum_employees is not None:
+            parts.append(f"for employers with at least {rule.minimum_employees} employees")
+        if rule.maximum_employees is not None:
+            parts.append(f"for employers with at most {rule.maximum_employees} employees")
+        return "; ".join(parts)
+
+    return {
+        "rule_set_id": str(rules[0].rule_set_id),
+        "context_hash": context_hash,
+        "decision": decision,
+        "citation": rules[0].citation,
+        "authority_url": rules[0].authority_url,
+        "effective_from": rules[0].effective_from.isoformat() if rules[0].effective_from else None,
+        "effective_to": rules[0].effective_to.isoformat() if rules[0].effective_to else None,
+        "requirements": [
+            {
+                "kind": rule.kind,
+                "ordinal": rule.ordinal,
+                "duration_minutes": rule.duration_minutes,
+                "trigger_after_minutes": rule.trigger_after_minutes,
+                "summary": summary(rule),
+            }
+            for rule in rules
+        ],
+    }
 
 
 def _threshold(value: Any) -> Any:
@@ -437,7 +529,8 @@ async def resolve_break_rules(
         )
         SELECT r.id, r.rules, r.citation, c.depth,
                r.industry_code, r.effective_from, r.effective_to,
-               r.authority_url, r.source_type
+               r.authority_url, r.source_type,
+               r.jurisdiction_id
         FROM schedule_break_rule_sets r
         JOIN jurisdiction_chain c ON c.id = r.jurisdiction_id
         WHERE r.review_status = 'approved'
@@ -486,16 +579,76 @@ async def resolve_break_rules(
             """,
             company_id,
         )
+        employee_count = (
+            int(employer_employee_count) if employer_employee_count is not None else None
+        )
+        context_hash = _applicability_context_hash(
+            company_id=company_id,
+            location_id=location_id,
+            rule_set_id=chosen["id"],
+            jurisdiction_id=chosen.get("jurisdiction_id") or readiness.jurisdiction_id,
+            industry_code=readiness.industry_code,
+            employer_employee_count=employee_count,
+            effective_from=chosen["effective_from"],
+            effective_to=chosen["effective_to"],
+            rules=chosen["rules"],
+        )
+        decision = await conn.fetchval(
+            """
+            SELECT decision
+            FROM company_schedule_break_rule_confirmations
+            WHERE company_id = $1 AND location_id = $2 AND rule_set_id = $3
+              AND context_hash = $4
+            """,
+            company_id, location_id, chosen["id"], context_hash,
+        )
+        metadata = _expected_rules_metadata(
+            rules, context_hash=context_hash, decision=decision,
+        )
+        if decision != "confirmed":
+            message = (
+                "Your organization marked these expected break rules as not applicable; "
+                "no alternative reviewed coverage is mapped."
+                if decision == "rejected"
+                else "Matcha expects these reviewed break rules may apply to this organization. "
+                     "Confirm or reject their applicability before Matcha uses them."
+            )
+            return ResolvedBreakRules(
+                rules=(), rule_set_ids=(chosen["id"],),
+                timezone=_location_timezone(readiness.timezone),
+                industry_code=readiness.industry_code,
+                source="rejected_expected" if decision == "rejected" else "confirmation_required",
+                advisories=({
+                    "check": "break_rules",
+                    "code": "break_rules_applicability_rejected"
+                    if decision == "rejected" else "break_rules_confirmation_required",
+                    "severity": "advisory",
+                    "message": message,
+                    "metadata": metadata,
+                },),
+                employer_employee_count=employee_count,
+                expected_rules=tuple(rules),
+                applicability_context_hash=context_hash,
+                applicability_decision=decision,
+            )
+
         return ResolvedBreakRules(
             rules=tuple(rules),
             rule_set_ids=(chosen["id"],),
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
-            source="approved",
-            advisories=(),
-            employer_employee_count=(
-                int(employer_employee_count) if employer_employee_count is not None else None
-            ),
+            source="approved_and_organization_confirmed",
+            advisories=({
+                "check": "break_rules",
+                "code": "break_rules_applicability_confirmed",
+                "severity": "advisory",
+                "message": "Your organization confirmed that these reviewed rules apply.",
+                "metadata": metadata,
+            },),
+            employer_employee_count=employee_count,
+            expected_rules=tuple(rules),
+            applicability_context_hash=context_hash,
+            applicability_decision=decision,
         )
 
     # Preserve the current curated CA/federal behavior until structured rule
@@ -557,3 +710,47 @@ async def resolve_break_rules(
             "message": "No approved break rules are mapped for this location and industry.",
         }),
     )
+
+
+async def record_break_rule_applicability_decision(
+    conn,
+    *,
+    company_id: UUID,
+    location_id: UUID,
+    shift_date: date,
+    rule_set_id: UUID,
+    context_hash: str,
+    decision: str,
+    actor_user_id: UUID,
+) -> ResolvedBreakRules:
+    """Record a tenant decision only when it matches the current expected context."""
+
+    if decision not in {"confirmed", "rejected"}:
+        raise ValueError("decision must be confirmed or rejected")
+    await lock_schedule_break_rule_guidance(conn, exclusive=True)
+    resolved = await resolve_break_rules(
+        conn,
+        company_id=company_id,
+        location_id=location_id,
+        shift_date=shift_date,
+    )
+    if (
+        not resolved.expected_rules
+        or resolved.expected_rules[0].rule_set_id != rule_set_id
+        or resolved.applicability_context_hash != context_hash
+    ):
+        raise LookupError("Expected break-rule context changed; review the current rules again")
+    await conn.execute(
+        """
+        INSERT INTO company_schedule_break_rule_confirmations
+            (company_id, location_id, rule_set_id, context_hash, decision,
+             confirmed_by, confirmed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
+        ON CONFLICT (company_id, location_id, rule_set_id, context_hash)
+        DO UPDATE SET decision = EXCLUDED.decision,
+                      confirmed_by = EXCLUDED.confirmed_by,
+                      confirmed_at = clock_timestamp()
+        """,
+        company_id, location_id, rule_set_id, context_hash, decision, actor_user_id,
+    )
+    return resolved

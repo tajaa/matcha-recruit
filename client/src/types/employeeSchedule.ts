@@ -63,7 +63,30 @@ export type ShiftBreakStagger = {
   schema_version: number
   max_concurrent_breaks: number
   results: BreakStaggerResult[]
-  advisories: { check: string; code: string; severity: string; message: string }[]
+  advisories: BreakRuleAdvisory[]
+}
+
+export type BreakRuleAdvisory = {
+  check: string
+  code: string
+  severity: string
+  message: string
+  metadata?: {
+    rule_set_id?: string
+    context_hash?: string
+    decision?: 'confirmed' | 'rejected' | null
+    citation?: string
+    authority_url?: string | null
+    effective_from?: string | null
+    effective_to?: string | null
+    requirements?: Array<{
+      kind: 'meal' | 'rest'
+      ordinal: number
+      duration_minutes: number
+      trigger_after_minutes: number
+      summary: string
+    }>
+  }
 }
 
 export type MealBreakWaiverAttestation = {

@@ -118,6 +118,13 @@ async def _stale_employee_facts() -> list[dict]:
                   OR (f.changed_at IS NOT NULL AND a.guidance_evaluated_at < f.changed_at)
                   OR EXISTS (
                       SELECT 1
+                      FROM company_schedule_break_rule_confirmations c
+                      WHERE c.company_id = a.company_id
+                        AND c.location_id = s.location_id
+                        AND c.confirmed_at > a.guidance_evaluated_at
+                  )
+                  OR EXISTS (
+                      SELECT 1
                       FROM schedule_break_rule_sets r
                       JOIN jurisdiction_descendants d
                         ON d.ancestor_id = r.jurisdiction_id
