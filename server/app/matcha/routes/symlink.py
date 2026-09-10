@@ -10,6 +10,7 @@ per call in `services/symlink/submissions.apply`.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -19,7 +20,6 @@ from app.core.feature_flags import merge_company_features
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.models.symlink import (
-    DEFAULT_EXPIRY_DAYS,
     PasscodeSettings,
     SubmissionReview,
     SymlinkCreate,
@@ -81,10 +81,12 @@ async def _company(conn, company_id):
 
 def _merged_features(company_row) -> dict:
     raw = safe_json_loads(company_row["enabled_features"], {}) or {}
-    try:
-        return merge_company_features(raw, company_row["signup_source"])
-    except TypeError:
-        return merge_company_features(raw)
+    return merge_company_features(raw, company_row["signup_source"])
+
+
+def _escape_like(text: str) -> str:
+    """Literalize LIKE metacharacters so a query of `%` or `_` doesn't match everything."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 async def _get_link_or_404(conn, link_id, company_id, *, for_update: bool = False):
@@ -217,8 +219,12 @@ async def resend_link(
         requested_by = await notify.requester_display_name(conn, current_user)
 
     new_token = links.new_token()
+    # Keep the sender's chosen window (derived from the row — a 2-day link
+    # stays a 2-day link on resend) and quote the *new* expiry in the email.
+    new_expires_at = datetime.now(timezone.utc) + timedelta(days=links.expiry_days_of(row))
     preview = dict(row)
     preview["token"] = new_token
+    preview["expires_at"] = new_expires_at
     sent = await notify.send_invite(
         preview, url=_build_public_link(request, new_token, PUBLIC_SEGMENT),
         company_name=company["name"] or "Your company", requested_by_name=requested_by,
@@ -230,7 +236,7 @@ async def resend_link(
     async with get_connection() as conn:
         async with conn.transaction():
             updated = await links.rotate_token(
-                conn, link_id, company_id, token=new_token, expires_in_days=DEFAULT_EXPIRY_DAYS,
+                conn, link_id, company_id, token=new_token, expires_at=new_expires_at,
             )
             if not updated:
                 raise HTTPException(status_code=409, detail="This sym-link was closed before the resend completed")
@@ -309,6 +315,20 @@ async def list_submissions(
     return {"submissions": out}
 
 
+_SUBMISSION_COLS = (
+    "id, symlink_id, company_id, fields, attachment_ids, submitted_at, status, "
+    "reviewed_by, reviewed_at, review_note, applied_ref"
+)
+
+
+async def _fetch_submission(conn, submission_id, company_id, *, for_update: bool):
+    return await conn.fetchrow(
+        f"""SELECT {_SUBMISSION_COLS} FROM symlink_submissions
+             WHERE id = $1 AND company_id = $2{" FOR UPDATE" if for_update else ""}""",
+        submission_id, company_id,
+    )
+
+
 @router.post("/submissions/{submission_id}/apply")
 async def apply_submission(
     submission_id: UUID,
@@ -316,30 +336,44 @@ async def apply_submission(
     current_user=Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
+    """Two-phase so the S3 copies a credential apply needs never run inside the
+    locked transaction (see services/symlink/submissions.py). If the write
+    phase raises, the copies are discarded — a rollback strands nothing."""
     async with get_connection() as conn:
         company = await _company(conn, company_id)
         features = _merged_features(company)
-        async with conn.transaction():
-            submission = await conn.fetchrow(
-                """SELECT id, symlink_id, company_id, fields, attachment_ids, submitted_at, status,
-                          reviewed_by, reviewed_at, review_note, applied_ref
-                     FROM symlink_submissions WHERE id = $1 AND company_id = $2 FOR UPDATE""",
-                submission_id, company_id,
-            )
-            if not submission:
-                raise HTTPException(status_code=404, detail="Submission not found")
-            link_row = await _get_link_or_404(conn, submission["symlink_id"], company_id, for_update=True)
-            row, post_commit = await submissions.apply(
-                conn, link_row, submission, current_user=current_user, features=features,
-            )
-            await links.log_audit(
-                conn, link_row["id"], company_id, current_user.id, "symlink_applied",
-                entity_type="symlink_submission", entity_id=str(submission_id),
-                details={"kind": link_row["kind"]},
-            )
+        submission = await _fetch_submission(conn, submission_id, company_id, for_update=False)
+        if not submission:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        link_row = await _get_link_or_404(conn, submission["symlink_id"], company_id)
+        attachment_rows = await submissions.prepare_apply(
+            conn, link_row, submission, current_user=current_user, features=features,
+        )
+
+    # No connection held across the S3 round-trips.
+    copied = await submissions.copy_credential_objects(link_row, attachment_rows)
+
+    try:
+        async with get_connection() as conn:
+            async with conn.transaction():
+                submission = await _fetch_submission(conn, submission_id, company_id, for_update=True)
+                if not submission:
+                    raise HTTPException(status_code=404, detail="Submission not found")
+                link_row = await _get_link_or_404(conn, submission["symlink_id"], company_id, for_update=True)
+                row, post_commit = await submissions.apply(
+                    conn, link_row, submission, current_user=current_user, features=features, copied=copied,
+                )
+                await links.log_audit(
+                    conn, link_row["id"], company_id, current_user.id, "symlink_applied",
+                    entity_type="symlink_submission", entity_id=str(submission_id),
+                    details={"kind": link_row["kind"]},
+                )
+    except Exception:
+        await submissions.discard_copies(copied)
+        raise
     document_type = links.spec_of(link_row).get("document_type") or "other"
-    for doc_id, content, mime in post_commit:
-        background_tasks.add_task(submissions.run_credential_extraction, doc_id, content, mime, document_type)
+    for doc_id, file_path, mime in post_commit:
+        background_tasks.add_task(submissions.run_credential_extraction, doc_id, file_path, mime, document_type)
     return submissions.serialize(row)
 
 
@@ -352,12 +386,7 @@ async def reject_submission(
 ):
     async with get_connection() as conn:
         async with conn.transaction():
-            submission = await conn.fetchrow(
-                """SELECT id, symlink_id, company_id, fields, attachment_ids, submitted_at, status,
-                          reviewed_by, reviewed_at, review_note, applied_ref
-                     FROM symlink_submissions WHERE id = $1 AND company_id = $2 FOR UPDATE""",
-                submission_id, company_id,
-            )
+            submission = await _fetch_submission(conn, submission_id, company_id, for_update=True)
             if not submission:
                 raise HTTPException(status_code=404, detail="Submission not found")
             link_row = await _get_link_or_404(conn, submission["symlink_id"], company_id, for_update=True)
@@ -423,8 +452,13 @@ async def update_passcode_settings(
             if not owned:
                 raise HTTPException(status_code=404, detail="Channel not found")
             channel_id = body.announce_channel_id
-        # Changing the weekday re-anchors the next rotation from the last one.
-        next_at = passcode.next_rotation(row["rotated_at"], weekday) if body.rotation_weekday is not None else row["next_rotation_at"]
+        # Changing the weekday re-anchors the next rotation from *now* — the
+        # last rotation may be weeks old, and anchoring there would schedule a
+        # rotation already in the past (fires the moment the worker is enabled).
+        next_at = (
+            passcode.next_rotation(datetime.now(timezone.utc), weekday)
+            if body.rotation_weekday is not None else row["next_rotation_at"]
+        )
         updated = await conn.fetchrow(
             f"""UPDATE symlink_passcodes
                    SET rotation_weekday = $2, announce_channel_id = $3, next_rotation_at = $4, updated_at = NOW()
@@ -458,13 +492,14 @@ async def search_employees(
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Small roster lookup for the create form's employee picker."""
-    like = f"%{q.strip()}%" if q.strip() else "%"
+    like = f"%{_escape_like(q.strip())}%" if q.strip() else "%"
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, first_name, last_name, email
                  FROM employees
                 WHERE org_id = $1
-                  AND (first_name ILIKE $2 OR last_name ILIKE $2 OR email ILIKE $2)
+                  AND (first_name ILIKE $2 ESCAPE '\\' OR last_name ILIKE $2 ESCAPE '\\'
+                       OR email ILIKE $2 ESCAPE '\\')
                 ORDER BY last_name, first_name
                 LIMIT 25""",
             company_id, like,

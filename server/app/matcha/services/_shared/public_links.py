@@ -17,3 +17,16 @@ def build_public_link(request: Any, token: str, segment: str) -> str:
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     return f"{proto}://{host}/{segment}/{token}"
+
+
+def public_link_from_settings(token: str, segment: str) -> str:
+    """Request-free counterpart of `build_public_link` for links that leave the
+    process in an email or a worker — composes off `settings.app_base_url`
+    (the setting every other emailed link uses) so an unauthenticated caller's
+    `X-Forwarded-Host` can never steer where a recipient or admin is sent.
+    Use the header-aware builder only for URLs echoed back to the same
+    authenticated request."""
+    from app.config import get_settings
+
+    base = (get_settings().app_base_url or "").rstrip("/")
+    return f"{base}/{segment}/{token}"

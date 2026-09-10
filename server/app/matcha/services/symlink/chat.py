@@ -95,6 +95,17 @@ def coerce_fields(raw: dict | None, known: dict | None, spec: dict) -> dict:
     return merged
 
 
+def coerce_submitted(raw: dict | None, spec: dict) -> dict:
+    """The human review-form counterpart of `coerce_fields`: what the recipient
+    sends IS the draft. A cleared input clears the field (the model may have
+    extracted a wrong phone number and the person is correcting it), so
+    nothing falls back to the previously known value. Required-ness is still
+    enforced afterwards by `is_complete`."""
+    fields = _field_map(spec)
+    raw = raw if isinstance(raw, dict) else {}
+    return {key: _coerce_value(raw.get(key), field) for key, field in fields.items()}
+
+
 def missing_items(fields: dict | None, present_slots: Iterable[str], spec: dict) -> list[dict]:
     """Required fields / attachment slots still empty, in spec order."""
     fields = fields or {}

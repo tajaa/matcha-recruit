@@ -54,12 +54,34 @@ class SpecFieldOverride(BaseModel):
         return cleaned or None
 
 
+# Every extension a recipient may upload, with the MIME the server stores it
+# under (the client's content_type is never trusted). Mirrors
+# routes/ir_incidents/_shared.py. A slot's `accept` list is a subset of this.
+ATTACHMENT_EXT_MIME: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".tiff": "image/tiff",
+    ".heic": "image/heic",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+}
+
+
 class SpecAttachmentOverride(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slot: str = Field(..., min_length=1, max_length=48, pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(..., min_length=1, max_length=120)
     required: bool = True
+    # Extensions the slot accepts (e.g. [".pdf", ".docx"]). Omitted ⇒ a
+    # sender-defined slot takes every supported type; a built-in slot keeps
+    # its own default.
+    accept: Optional[list[str]] = Field(None, max_length=len(ATTACHMENT_EXT_MIME))
 
 
 class SpecOverrides(BaseModel):

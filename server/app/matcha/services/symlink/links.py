@@ -12,6 +12,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from app.matcha.models.symlink import DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS
 from app.matcha.services._shared.jsonio import safe_json_loads
 
 LINK_COLS = (
@@ -179,14 +180,28 @@ async def mark_sent(conn, link_id, company_id):
     )
 
 
-async def rotate_token(conn, link_id, company_id, *, token: str, expires_in_days: int):
-    """Persist a pre-generated token + fresh expiry; only while the link is still
-    open. Callers generate the token first, send the email WITHOUT a connection
-    held, and call this only after the send succeeded (info_requests.py pattern)."""
-    expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+def expiry_days_of(row) -> int:
+    """The sender's chosen expiry window, recovered from the row: the distance
+    from the last send (or creation) to `expires_at`. Resend re-applies the
+    same window rather than widening every link to the default."""
+    anchor = row["last_sent_at"] or row["created_at"]
+    expires_at = row["expires_at"]
+    if not anchor or not expires_at:
+        return DEFAULT_EXPIRY_DAYS
+    days = round((expires_at - anchor).total_seconds() / 86400)
+    return max(1, min(MAX_EXPIRY_DAYS, int(days)))
+
+
+async def rotate_token(conn, link_id, company_id, *, token: str, expires_at: datetime):
+    """Persist a pre-generated token + the expiry the caller already quoted in
+    the email; only while the link is still open. Callers generate the token
+    first, send the email WITHOUT a connection held, and call this only after
+    the send succeeded (info_requests.py pattern). `reminder_sent_at` resets so
+    the 3-day nudge is measured from this send, not the first one."""
     return await conn.fetchrow(
         f"""UPDATE symlinks
                SET token = $3, expires_at = $4, last_sent_at = NOW(), sent_at = COALESCE(sent_at, NOW()),
+                   reminder_sent_at = NULL,
                    status = CASE WHEN status = 'expired' THEN 'pending' ELSE status END,
                    updated_at = NOW()
              WHERE id = $1 AND company_id = $2 AND status IN ('pending', 'in_progress', 'expired')

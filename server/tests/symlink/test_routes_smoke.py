@@ -91,3 +91,31 @@ def test_feature_flag_is_registered_default_off():
     from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
 
     assert DEFAULT_COMPANY_FEATURES["symlink"] is False
+
+
+def test_employee_search_escapes_like_metacharacters(admin_router):
+    import sys
+
+    mod = sys.modules["app.matcha.routes.symlink"]
+    assert mod._escape_like("50%_a\\b") == "50\\%\\_a\\\\b"
+    import inspect
+
+    src = inspect.getsource(mod.search_employees)
+    assert src.count("ESCAPE '\\\\'") == 3
+
+
+def test_merged_features_has_no_silent_fallback(admin_router):
+    import inspect
+    import sys
+
+    mod = sys.modules["app.matcha.routes.symlink"]
+    assert "except TypeError" not in inspect.getsource(mod._merged_features)
+
+
+def test_passcode_weekday_change_anchors_on_now(admin_router):
+    import inspect
+    import sys
+
+    src = inspect.getsource(sys.modules["app.matcha.routes.symlink"].update_passcode_settings)
+    assert 'next_rotation(row["rotated_at"]' not in src
+    assert "next_rotation(datetime.now(timezone.utc)" in src

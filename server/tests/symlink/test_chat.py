@@ -38,6 +38,21 @@ def test_coerce_never_blanks_a_known_value():
     assert merged["expires_on"] == "March 2027"
 
 
+def test_coerce_submitted_lets_the_review_form_clear_a_wrong_value():
+    """The human review step is authoritative: a cleared input clears the field
+    (the model may have mis-extracted it) — unlike a model turn, nothing falls
+    back to the previously known value. Unknown keys are still dropped."""
+    submitted = {"credential_name": "", "expires_on": None, "bogus": "x"}
+    out = chat.coerce_submitted(submitted, CRED)
+    assert out["credential_name"] is None
+    assert out["expires_on"] is None
+    assert "bogus" not in out
+    assert set(out) == {f["key"] for f in CRED["fields"]}
+    assert chat.coerce_submitted({"credential_name": "  RN  license "}, CRED)["credential_name"] == "RN license"
+    # …and completion still enforces the required set.
+    assert not chat.is_complete(out, {"document"}, CRED)
+
+
 def test_coerce_choice_matches_case_insensitively_and_by_unique_substring():
     assert chat.coerce_fields({"overall_rating": "meets expectations"}, {}, REVIEW)["overall_rating"] == "Meets expectations"
     assert chat.coerce_fields({"overall_rating": "needs"}, {}, REVIEW)["overall_rating"] == "Needs improvement"

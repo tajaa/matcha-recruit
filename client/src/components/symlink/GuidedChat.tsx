@@ -26,7 +26,7 @@ type Props = {
   onRemoveAttachment: (id: string) => void
   onReview: () => void
   onBackToChat: () => void
-  onSubmit: (fields: Record<string, unknown>) => void
+  onSubmit: (fields: Record<string, unknown>, honeypot: string) => void
   submitting: boolean
 }
 
@@ -152,7 +152,7 @@ function ReviewForm({ spec, fields, attachments, error, onBackToChat, onSubmit, 
       <input type="text" name="internal_ref" tabIndex={-1} autoComplete="off" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} className="hidden" aria-hidden="true" />
       {!ready && <p className="text-xs text-amber-300">Still needed: {[...missingFields.map((f) => f.label), ...missingFiles.map((a) => a.label)].join(', ')}</p>}
       {error && <p className="text-sm text-red-400">{error}</p>}
-      <button type="button" onClick={() => onSubmit(draft)} disabled={!ready || submitting} className="flex w-full items-center justify-center rounded bg-emerald-700 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : spec.submit_label || 'Send'}</button>
+      <button type="button" onClick={() => onSubmit(draft, honeypot)} disabled={!ready || submitting} className="flex w-full items-center justify-center rounded bg-emerald-700 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : spec.submit_label || 'Send'}</button>
       <button type="button" onClick={onBackToChat} className="w-full text-xs text-zinc-500 underline hover:text-zinc-300">Continue chat</button>
     </div>
   )

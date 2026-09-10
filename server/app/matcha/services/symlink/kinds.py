@@ -30,6 +30,7 @@ import copy
 from typing import Any
 
 from app.matcha.models.symlink import (
+    ATTACHMENT_EXT_MIME,
     MAX_ATTACHMENT_SLOTS,
     MAX_CUSTOM_ITEMS,
     SpecOverrides,
@@ -44,7 +45,11 @@ FIELD_MAX_LEN = {
     "choice": 80,
 }
 
+# Built-in credential/document slots: what the Gemini extraction can read.
 DOCUMENT_ACCEPT = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".tiff"]
+# Sender-defined slots default to everything the upload path supports — a
+# "Signed W-4" slot must not bounce a .docx.
+ANY_ACCEPT = sorted(ATTACHMENT_EXT_MIME)
 
 # Mirrors routes/employee_portal/credential_documents.py:_VALID_DOC_TYPES —
 # tests/symlink/test_kinds.py asserts the two sets stay equal so the service
@@ -84,6 +89,24 @@ def _f(key: str, label: str, type_: str = "text", *, required: bool = True,
 
 def _a(slot: str, label: str, *, required: bool = True, accept: list[str] | None = None) -> dict:
     return {"slot": slot, "label": label, "required": required, "accept": accept or DOCUMENT_ACCEPT}
+
+
+def _normalize_accept(slot: str, accept: list[str] | None) -> list[str] | None:
+    """Lower-case, dot-prefix, dedupe; reject anything the upload path can't store."""
+    if not accept:
+        return None
+    out: list[str] = []
+    for raw in accept:
+        ext = str(raw or "").strip().lower()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = "." + ext
+        if ext not in ATTACHMENT_EXT_MIME:
+            raise SpecError(f"Attachment '{slot}' accepts an unsupported file type: {ext}")
+        if ext not in out:
+            out.append(ext)
+    return out or None
 
 
 _BUILTIN: dict[str, dict[str, Any]] = {
@@ -225,12 +248,16 @@ def materialize_spec(kind: str, overrides: SpecOverrides | None = None) -> dict[
     if ov.attachments:
         by_slot = {a["slot"]: a for a in spec["attachments"]}
         for item in ov.attachments:
+            accept = _normalize_accept(item.slot, item.accept)
             existing = by_slot.get(item.slot)
             if existing:
                 existing["label"] = item.label.strip()[:120]
                 existing["required"] = bool(item.required)
+                if accept:
+                    existing["accept"] = accept
                 continue
-            new = _a(item.slot, item.label.strip()[:120], required=bool(item.required))
+            new = _a(item.slot, item.label.strip()[:120], required=bool(item.required),
+                     accept=accept or ANY_ACCEPT)
             spec["attachments"].append(new)
             by_slot[item.slot] = new
 

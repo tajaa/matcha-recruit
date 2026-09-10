@@ -72,7 +72,7 @@ export default function SymLink() {
         onRemoveAttachment={(id) => void s.removeAttachment(id)}
         onReview={() => { s.setError(null); s.setStage('review') }}
         onBackToChat={() => { s.setError(null); s.setStage('chat') }}
-        onSubmit={(fields) => void s.submit(fields, honeypot)}
+        onSubmit={(fields, reviewHoneypot) => void s.submit(fields, reviewHoneypot)}
         submitting={s.stage === 'submitting'}
       />
     </PublicPageShell>

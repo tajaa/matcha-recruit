@@ -13,29 +13,19 @@ from fastapi import HTTPException
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.core.services.storage import get_storage
+from app.matcha.models.symlink import ATTACHMENT_EXT_MIME
 from app.matcha.services._shared.uploads import read_upload_capped
 
 logger = logging.getLogger(__name__)
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
-MAX_FILES_PER_LINK = 8
 
 # Server-derived MIME per allowed extension — never trust the client's
 # content_type for storage (a .png sent as text/html is a stored XSS on any
-# later inline render). Mirrors routes/ir_incidents/_shared.py.
-_EXT_MIME = {
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".tiff": "image/tiff",
-    ".heic": "image/heic",
-    ".doc": "application/msword",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".txt": "text/plain",
-    ".csv": "text/csv",
-}
+# later inline render). The table lives in models/symlink.py so the pure spec
+# layer (kinds.py) can validate a sender's `accept` list without importing
+# storage.
+_EXT_MIME = ATTACHMENT_EXT_MIME
 
 
 def validate_name(filename: Optional[str], accept: Optional[list[str]]) -> tuple[str, str, str]:
@@ -52,9 +42,7 @@ def validate_name(filename: Optional[str], accept: Optional[list[str]]) -> tuple
 
 async def stage_upload(file: StarletteUploadFile, *, company_id, symlink_id, accept: Optional[list[str]]) -> dict:
     safe_name, _ext, mime = validate_name(file.filename, accept)
-    content = await read_upload_capped(file, MAX_FILE_BYTES)
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty file")
+    content = await read_upload_capped(file, MAX_FILE_BYTES)  # raises 400 on empty / over cap
     storage = get_storage()
     try:
         path = await storage.upload_private_file(

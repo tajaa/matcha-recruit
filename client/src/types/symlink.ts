@@ -61,6 +61,8 @@ export type SpecAttachmentOverride = {
   slot: string
   label: string
   required?: boolean
+  /** Extensions (".pdf", ".docx"…). Omitted ⇒ every supported type for a sender-defined slot. */
+  accept?: string[] | null
 }
 
 export type SpecOverrides = {

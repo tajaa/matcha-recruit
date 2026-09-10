@@ -84,7 +84,16 @@ export function useSymLinkSession(token: string | undefined) {
   useEffect(() => {
     if (!token) return  // initial stage is already 'invalid'
     let cancelled = false
-    fetch(`${API_BASE}/sym/${token}`, { headers: headers() })
+    // Re-seed from storage for *this* token: /sym/A → /sym/B is a param change
+    // on the same route element, not a remount, so the lazy useState above
+    // would otherwise send A's unlock token for B (and then wipe B's on the
+    // inevitable "not unlocked" answer).
+    const stored = readUnlock(token)
+    setUnlock(stored)
+    setStage('validating')
+    setError(null)
+    const initialHeaders: Record<string, string> = stored ? { [UNLOCK_HEADER]: stored } : {}
+    fetch(`${API_BASE}/sym/${token}`, { headers: initialHeaders })
       .then(async (res) => {
         if (cancelled) return
         if (!res.ok) {
@@ -105,7 +114,7 @@ export function useSymLinkSession(token: string | undefined) {
           setStage('chat')
         } else {
           // A stale unlock token (rotated link, revoked session) — drop it.
-          if (unlock) {
+          if (stored) {
             writeUnlock(token, null)
             setUnlock(null)
           }

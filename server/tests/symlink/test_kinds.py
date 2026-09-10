@@ -70,7 +70,35 @@ def test_custom_kind_requires_goal_and_at_least_one_required_item():
     )
     assert [f["key"] for f in spec["fields"]] == ["start_date"]
     assert spec["attachments"][0]["slot"] == "w4"
-    assert spec["attachments"][0]["accept"] == kinds.DOCUMENT_ACCEPT
+    # A sender-defined slot takes every supported type — "Signed W-4" must accept a .docx.
+    assert spec["attachments"][0]["accept"] == kinds.ANY_ACCEPT
+    assert ".docx" in spec["attachments"][0]["accept"]
+
+
+def test_attachment_accept_override_is_normalized_validated_and_applies_to_builtin_slots():
+    spec = kinds.materialize_spec(
+        "custom",
+        SpecOverrides(
+            goal="Send the signed form.",
+            attachments=[SpecAttachmentOverride(slot="form", label="Signed form", accept=["PDF", ".docx", "pdf"])],
+        ),
+    )
+    assert spec["attachments"][0]["accept"] == [".pdf", ".docx"]
+
+    with pytest.raises(kinds.SpecError):
+        kinds.materialize_spec(
+            "custom",
+            SpecOverrides(goal="x", attachments=[SpecAttachmentOverride(slot="form", label="F", accept=[".exe"])]),
+        )
+
+    # Built-in slot: no accept ⇒ keeps its extraction-friendly default; explicit accept narrows it.
+    default = kinds.materialize_spec("credential_upload")
+    assert default["attachments"][0]["accept"] == kinds.DOCUMENT_ACCEPT
+    narrowed = kinds.materialize_spec(
+        "credential_upload",
+        SpecOverrides(attachments=[SpecAttachmentOverride(slot=default["attachments"][0]["slot"], label="Doc", accept=[".pdf"])]),
+    )
+    assert narrowed["attachments"][0]["accept"] == [".pdf"]
 
 
 def test_override_updates_builtin_field_in_place_and_appends_new():

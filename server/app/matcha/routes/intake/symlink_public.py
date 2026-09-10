@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
@@ -34,7 +34,7 @@ from app.matcha.models.symlink import (
     PublicTurnRequest,
     PublicUnlockRequest,
 )
-from app.matcha.services._shared.public_links import build_public_link as _build_public_link
+from app.matcha.services._shared.public_links import public_link_from_settings
 from app.matcha.services._shared.jsonio import safe_json_loads
 from app.matcha.services.symlink import attachments as att
 from app.matcha.services.symlink import chat, kinds, links, notify, passcode, submissions
@@ -261,11 +261,8 @@ async def upload_symlink_attachment(
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
         await _budget(token, company_id, "upload", 24, 200)
-        live = await conn.fetchval(
-            "SELECT COUNT(*) FROM symlink_attachments WHERE symlink_id = $1 AND discarded_at IS NULL", row["id"],
-        )
-        if int(live or 0) >= att.MAX_FILES_PER_LINK:
-            raise HTTPException(status_code=422, detail="Too many attachments on this link")
+        # No per-link file cap here: one live file per slot (insert_attachment
+        # discards the previous one) and the spec caps slots at MAX_ATTACHMENT_SLOTS.
 
     # S3 round-trip happens with no connection held.
     staged = await att.stage_upload(file, company_id=company_id, symlink_id=row["id"], accept=slot_spec.get("accept"))
@@ -348,7 +345,9 @@ async def submit_symlink(token: str, request: Request, background_tasks: Backgro
         sender_email, sender_name = await notify.sender_contact(conn, fresh["created_by"], row["company_id"])
 
     if sender_email:
-        review_link = _build_public_link(request, str(row["id"]), "app/symlink")
+        # settings-based, not header-based: this endpoint is unauthenticated, so
+        # X-Forwarded-Host is recipient-controlled and must not reach an admin's inbox.
+        review_link = public_link_from_settings(str(row["id"]), "app/symlink")
         background_tasks.add_task(
             notify.send_submitted,
             to_email=sender_email, to_name=sender_name, company_name=row["company_name"] or "Your company",

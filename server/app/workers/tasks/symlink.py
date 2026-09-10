@@ -14,7 +14,8 @@ Pool-free: each task opens its own asyncpg connection via `get_db_connection`.
   symlink_sweep
       (a) open links past `expires_at` → status 'expired' + unlock rows revoked;
       (b) one-shot reminder email to recipients of links still open 3 days
-          after they were sent, claimed atomically on `reminder_sent_at`.
+          after the latest send (a resend resets the clock and clears
+          `reminder_sent_at`), claimed atomically on `reminder_sent_at`.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from app.matcha.services._shared.public_links import public_link_from_settings
 from app.matcha.services.symlink import passcode as pc
 from app.matcha.services.symlink.links import LINK_COLS
 
@@ -134,10 +136,6 @@ async def _expire_open_links(conn, now: datetime) -> int:
 
 async def _send_reminders(conn, now: datetime, limit: int) -> dict:
     from app.core.services.email import get_email_service
-    from app.config import get_settings
-
-    settings = get_settings()
-    base_url = (settings.app_base_url or "").rstrip("/")
 
     candidates = await conn.fetch(
         f"""
@@ -148,10 +146,10 @@ async def _send_reminders(conn, now: datetime, limit: int) -> dict:
          WHERE s.status IN ('pending', 'in_progress')
            AND s.reminder_sent_at IS NULL
            AND s.sent_at IS NOT NULL
-           AND s.sent_at <= $1
+           AND COALESCE(s.last_sent_at, s.sent_at) <= $1
            AND s.expires_at > $2
            AND COALESCE((c.enabled_features->>'symlink')::boolean, false) = true
-         ORDER BY s.sent_at ASC
+         ORDER BY COALESCE(s.last_sent_at, s.sent_at) ASC
          LIMIT $3
         """,
         now - REMINDER_AFTER, now, limit,
@@ -177,7 +175,7 @@ async def _send_reminders(conn, now: datetime, limit: int) -> dict:
                 to_email=row["recipient_email"], to_name=row["recipient_name"],
                 company_name=row["company_name"] or "Your company", requested_by_name=requested_by,
                 title=row["title"], instructions=row["instructions"],
-                link=f"{base_url}/sym/{row['token']}", expires_text=expires_text, reminder=True,
+                link=public_link_from_settings(row["token"], "sym"), expires_text=expires_text, reminder=True,
             )
         except Exception:
             logger.exception("[symlink] reminder send failed for %s", row["id"])
