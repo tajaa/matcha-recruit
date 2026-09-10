@@ -222,6 +222,20 @@ def _fake_response(calls=None, text=None):
     )
 
 
+def _assert_the_model_was_actually_called(recorded, frames):
+    """Guard against a vacuously-green tier test.
+
+    `run_huume_turn` never raises past itself (it logs the real cause to
+    `huume_runs.error` and yields a generic error frame), so a stub whose
+    signature has drifted is invisible unless the test checks both that the
+    call landed and that the turn did not error.
+    """
+    assert recorded, "the model was never called — check the stub's signature"
+    assert not [f for f in frames if f.get("type") == "error"], (
+        f"turn errored: {[f for f in frames if f.get('type') == 'error']}"
+    )
+
+
 class _NoopRateLimiter:
     async def check_limit(self, *a, **kw):
         return None
@@ -264,13 +278,17 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
         {"model": routing.LUNA, "thinking": None},
     ]
 
+    _assert_the_model_was_actually_called(recorded, frames)
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "deep"
 
 
 @pytest.mark.asyncio
 async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
-    async def _generate(*, model, contents, config, **_request_options):
+    recorded = []
+
+    async def _generate(*, model, **kwargs):
+        recorded.append(model)
         return _fake_response(calls=[], text="Sure, here you go.")
 
     client = MagicMock()
@@ -287,6 +305,11 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
         )
     ]
 
+    # The tier is resolved BEFORE the loop, so asserting it alone passes even
+    # when the model call never happens — a stale stub signature raises
+    # TypeError into run_huume_turn's catch-all and the turn still yields a
+    # result. This stub went stale in exactly that way and stayed green.
+    _assert_the_model_was_actually_called(recorded, frames)
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "standard"
 
@@ -313,6 +336,7 @@ async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
         )
     ]
 
+    _assert_the_model_was_actually_called(recorded, frames)
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "lite"
     assert recorded == [routing.LUNA]
