@@ -22,30 +22,16 @@ import httpx
 
 from app.config import get_settings
 from app.core.services.ai_usage import record_openai_response
+from app.core.services.openai_responses import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    RESPONSES_URL,
+    response_text as _openai_response_text,
+)
 
 logger = logging.getLogger(__name__)
 
-_OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-_OPENAI_REQUEST_TIMEOUT_SECONDS = 55.0
-
-
-def _openai_response_text(payload: dict[str, Any]) -> str:
-    """Extract the assistant text from an OpenAI Responses payload."""
-    if isinstance(payload.get("output_text"), str):
-        return payload["output_text"].strip()
-
-    parts: list[str] = []
-    for output in payload.get("output", []):
-        if not isinstance(output, dict) or output.get("type") != "message":
-            continue
-        for content in output.get("content", []):
-            if (
-                isinstance(content, dict)
-                and content.get("type") == "output_text"
-                and isinstance(content.get("text"), str)
-            ):
-                parts.append(content["text"])
-    return "\n".join(parts).strip()
+_OPENAI_RESPONSES_URL = RESPONSES_URL
+_OPENAI_REQUEST_TIMEOUT_SECONDS = DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 
 def _luna_credentials() -> tuple[str, str] | None:

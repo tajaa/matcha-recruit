@@ -3,22 +3,28 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from google.genai import types
 
 from app.core.services import ai_usage
+from app.matcha.services.huume.luna_client import LunaResponse
 from app.matcha.services.matcha_work.project_agent import agent
 
 
-def _response(*parts):
-    return SimpleNamespace(
-        candidates=[types.Candidate(content=types.Content(role="model", parts=list(parts)))],
-        usage_metadata=SimpleNamespace(
-            prompt_token_count=10,
-            candidates_token_count=5,
-            thoughts_token_count=2,
-            total_token_count=17,
-        ),
+def _response(*calls, text=None):
+    return LunaResponse(
+        response_id="resp_test",
+        text=text,
+        function_calls=list(calls),
+        usage={
+            "input_tokens": 10, "output_tokens": 5, "total_tokens": 17,
+            "output_tokens_details": {"reasoning_tokens": 2},
+        },
     )
+
+
+def _call(name, args):
+    """One Responses function call; `call_id` is what its result pairs back to."""
+    _call.counter = getattr(_call, "counter", 0) + 1
+    return {"call_id": f"call_{_call.counter}", "name": name, "arguments": args}
 
 
 class _FakeModels:
@@ -26,7 +32,7 @@ class _FakeModels:
         self.responses = list(responses)
         self.calls = []
 
-    async def generate_content(self, **kwargs):
+    async def create_response(self, **kwargs):
         self.calls.append({
             **kwargs,
             "feature": ai_usage._feature_override.get(),
@@ -45,16 +51,10 @@ def test_source_citation_must_name_a_file_the_agent_read():
 async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch):
     answer = "Use the Projects tab; the route is registered here (`client/src/App.tsx:42`)."
     models = _FakeModels([
-        _response(types.Part.from_function_call(
-            name="read_file",
-            args={"path": "client/src/App.tsx", "start_line": 35, "end_line": 50},
-        )),
-        _response(types.Part.from_function_call(
-            name="answer_question",
-            args={"answer": answer},
-        )),
+        _response(_call("read_file", {"path": "client/src/App.tsx", "start_line": 35, "end_line": 50})),
+        _response(_call("answer_question", {"answer": answer})),
     ])
-    fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    fake_client = models
     get_client = Mock(return_value=fake_client)
     monkeypatch.setattr(agent, "get_luna_client", get_client)
     monkeypatch.setattr(agent.store, "read_repo_file", AsyncMock(return_value={
@@ -90,11 +90,8 @@ async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch
     assert result["token_usage"]["model"] == "gpt-5.6-luna"
     assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
     assert all(call["feature"] == "matcha.espresso.repo_question" for call in models.calls)
-    assert all(
-        call["config"].tool_config.function_calling_config.mode
-        == types.FunctionCallingConfigMode.ANY
-        for call in models.calls
-    )
+    # This agent must call a tool; its answer only counts after a real read.
+    assert all(call["tool_choice"] == "required" for call in models.calls)
     get_client.assert_called_once_with()
     post_answer.assert_awaited_once_with(company_id, channel_id, answer)
     assert record_step.await_count == 2
@@ -105,8 +102,8 @@ async def test_repo_question_reads_source_then_posts_grounded_answer(monkeypatch
 
 @pytest.mark.asyncio
 async def test_repo_question_refuses_ungrounded_direct_answer(monkeypatch):
-    models = _FakeModels([_response(types.Part(text="It probably works this way."))])
-    fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    models = _FakeModels([_response(text="It probably works this way.")])
+    fake_client = models
     monkeypatch.setattr(agent, "get_luna_client", lambda: fake_client)
     monkeypatch.setattr(agent.store, "record_step", AsyncMock())
     monkeypatch.setattr(agent.chat, "post_as_espresso", AsyncMock())
@@ -131,12 +128,9 @@ async def test_repo_question_gives_up_after_repeated_finish_refusals(monkeypatch
     # Under tool_config=ANY the model can no longer end the run with prose, so a
     # model that keeps failing the finish preconditions must be cut off well
     # before _MAX_MODEL_CALLS rather than burning the whole wall-clock budget.
-    refusal = _response(types.Part.from_function_call(
-        name="answer_question",
-        args={"answer": "It probably works this way."},
-    ))
+    refusal = _response(_call("answer_question", {"answer": "It probably works this way."}))
     models = _FakeModels([refusal] * (agent._MAX_MODEL_CALLS + 1))
-    fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    fake_client = models
     monkeypatch.setattr(agent, "get_luna_client", lambda: fake_client)
     monkeypatch.setattr(agent.store, "record_step", AsyncMock())
     monkeypatch.setattr(agent.chat, "post_as_espresso", AsyncMock())
@@ -163,13 +157,9 @@ async def test_repo_question_refusal_streak_resets_after_a_successful_read(monke
     # A refused answer followed by new grounding is progress, not a loop: the
     # streak restarts so the model still gets its full retry budget afterwards.
     def refusal():
-        return _response(types.Part.from_function_call(
-            name="answer_question", args={"answer": "No citation here."},
-        ))
+        return _response(_call("answer_question", {"answer": "No citation here."}))
 
-    read = _response(types.Part.from_function_call(
-        name="read_file", args={"path": "client/src/App.tsx"},
-    ))
+    read = _response(_call("read_file", {"path": "client/src/App.tsx"}))
     answer = "Registered here (`client/src/App.tsx:42`)."
     models = _FakeModels([
         refusal(),
@@ -177,12 +167,10 @@ async def test_repo_question_refusal_streak_resets_after_a_successful_read(monke
         read,
         refusal(),
         refusal(),
-        _response(types.Part.from_function_call(
-            name="answer_question", args={"answer": answer},
-        )),
+        _response(_call("answer_question", {"answer": answer})),
     ])
     monkeypatch.setattr(
-        agent, "get_luna_client", lambda: SimpleNamespace(aio=SimpleNamespace(models=models)),
+        agent, "get_luna_client", lambda: models,
     )
     monkeypatch.setattr(agent.store, "read_repo_file", AsyncMock(return_value={
         "path": "client/src/App.tsx",

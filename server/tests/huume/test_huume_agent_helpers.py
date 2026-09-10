@@ -4,14 +4,13 @@ builder (no DB/Gemini).
     cd server && ./venv/bin/python -m pytest tests/huume/test_huume_agent_helpers.py -q
 
 Covers: `_cap_payload` truncation, `_StepRecorder` args capture, `is_sole_finish`
-(a batched `finish` must be deferred), `_to_contents` per-message text cap +
+(a batched `finish` must be deferred), `_to_input_items` per-message text cap +
 capped image-part attachment, and the onboarding plan builder carrying
 `employment_type` through from the offer.
 """
 
 from decimal import Decimal
 
-from google.genai import types
 
 from app.matcha.services.huume.agent import (
     _MAX_IMAGE_BYTES_TOTAL,
@@ -23,7 +22,7 @@ from app.matcha.services.huume.agent import (
     _json_safe,
     _rate_limit_disposition,
     _send_offer_confirming,
-    _to_contents,
+    _to_input_items,
     is_sole_finish,
 )
 from app.matcha.services.huume.onboarding_skill import build_onboarding_plan
@@ -97,41 +96,41 @@ class TestIsSoleFinish:
         assert is_sole_finish([]) is False
 
 
-class TestToContentsMessageCap:
+class TestToInputItemsMessageCap:
     def test_long_message_truncated(self):
         long_text = "y" * (_MAX_MESSAGE_CHARS + 1000)
-        contents = _to_contents([{"role": "user", "content": long_text}])
-        text = contents[-1].parts[-1].text
+        contents = _to_input_items([{"role": "user", "content": long_text}])
+        text = contents[-1]["content"][-1]["text"]
         assert len(text) < len(long_text)
         assert text.endswith("[truncated]")
 
     def test_short_message_unchanged(self):
-        contents = _to_contents([{"role": "user", "content": "hello"}])
-        assert contents[-1].parts[-1].text == "hello"
+        contents = _to_input_items([{"role": "user", "content": "hello"}])
+        assert contents[-1]["content"][-1]["text"] == "hello"
 
     def test_empty_history_gets_hello_fallback(self):
-        contents = _to_contents([])
-        assert contents[0].parts[0].text == "Hello."
+        contents = _to_input_items([])
+        assert contents[0]["content"][0]["text"] == "Hello."
 
 
-class TestToContentsImageParts:
+class TestToInputItemsImageParts:
     def test_image_bytes_attached_on_user_message(self):
         history = [{"role": "user", "content": "check this photo", "image_parts": [(b"fakejpeg", "image/jpeg")]}]
-        contents = _to_contents(history)
-        parts = contents[-1].parts
-        assert any(getattr(p, "inline_data", None) is not None for p in parts)
+        contents = _to_input_items(history)
+        parts = contents[-1]["content"]
+        assert any(p["type"] == "input_image" for p in parts)
 
     def test_images_not_attached_on_assistant_message(self):
         history = [{"role": "assistant", "content": "ok", "image_parts": [(b"fakejpeg", "image/jpeg")]}]
-        contents = _to_contents(history)
-        parts = contents[-1].parts
-        assert not any(getattr(p, "inline_data", None) is not None for p in parts)
+        contents = _to_input_items(history)
+        parts = contents[-1]["content"]
+        assert not any(p["type"] == "input_image" for p in parts)
 
     def test_image_count_capped(self):
         many_images = [(b"x", "image/jpeg")] * (_MAX_IMAGE_PARTS + 5)
         history = [{"role": "user", "content": "many photos", "image_parts": many_images}]
-        contents = _to_contents(history)
-        image_parts = [p for p in contents[-1].parts if getattr(p, "inline_data", None) is not None]
+        contents = _to_input_items(history)
+        image_parts = [p for p in contents[-1]["content"] if p["type"] == "input_image"]
         assert len(image_parts) == _MAX_IMAGE_PARTS
 
     def test_image_byte_budget_capped(self):
@@ -139,8 +138,8 @@ class TestToContentsImageParts:
         history = [{"role": "user", "content": "big photos", "image_parts": [
             (big_chunk, "image/jpeg"), (big_chunk, "image/jpeg"), (big_chunk, "image/jpeg"),
         ]}]
-        contents = _to_contents(history)
-        image_parts = [p for p in contents[-1].parts if getattr(p, "inline_data", None) is not None]
+        contents = _to_input_items(history)
+        image_parts = [p for p in contents[-1]["content"] if p["type"] == "input_image"]
         # Only one chunk fits under the total byte budget before the second
         # would exceed it.
         assert len(image_parts) == 1

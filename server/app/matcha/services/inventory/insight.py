@@ -15,7 +15,7 @@ import httpx
 from app.config import get_settings
 from app.core.services.ai_usage import record_openai_response
 from app.core.services.redis_cache import cache_get, cache_set, get_redis_cache
-from app.matcha.services.inventory.waste.agent import _response_text
+from app.core.services.openai_responses import response_text as _response_text
 
 _NUMERIC = re.compile(r"[$%]|\d")
 _ACTIONS = {"right_size_par", "review_handling", "check_rotation", "count_stock", "none"}

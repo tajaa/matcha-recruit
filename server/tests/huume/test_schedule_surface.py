@@ -7,7 +7,7 @@ from app.matcha.services.huume.scope import (
     SCHEDULE_LOOKUP_TOPICS,
     SCHEDULE_TOOLS,
 )
-from app.matcha.services.huume.tools import tool_declarations
+from app.matcha.services.huume.tools import tool_specs
 
 
 def _schedule_context() -> HuumeSurfaceContext:
@@ -22,7 +22,7 @@ def _schedule_context() -> HuumeSurfaceContext:
 
 
 def test_schedule_surface_declarations_are_scoped():
-    names = {declaration.name for declaration in tool_declarations(allowed_names=SCHEDULE_TOOLS)}
+    names = {spec["name"] for spec in tool_specs(allowed_names=SCHEDULE_TOOLS)}
     assert names == set(SCHEDULE_TOOLS)
     assert "send_offer" not in names
     assert "draft_discipline" not in names

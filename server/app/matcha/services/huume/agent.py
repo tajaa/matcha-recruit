@@ -41,7 +41,6 @@ from decimal import Decimal
 from typing import Any, AsyncIterator, Literal, Optional
 from uuid import UUID, uuid4
 
-from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
 from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
@@ -52,10 +51,10 @@ from . import (
     actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
     legal_skill, onboarding_skill, record_view, routing, store,
 )
-from .luna_client import get_luna_client
+from .luna_client import get_luna_client, image_item, text_item, tool_output_item
 from .prompt import build_state_block, build_system_prompt
 from .scope import HuumeSurfaceContext
-from .tools import TOOLS_BY_NAME, tool_declarations
+from .tools import TOOLS_BY_NAME, tool_specs
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +94,7 @@ def _turn_bound_reason(
 
 
 def _rate_limit_disposition(model_calls: int) -> str:
-    """Pure decision for a mid-loop RateLimitExceeded (platform-wide Gemini
+    """Pure decision for a mid-loop RateLimitExceeded (the platform-wide
     capacity, not tenant quota): "raise" before any model call this turn —
     nothing to lose, the turn is unbilled — else "force_finish" — partial
     work + accumulated usage must survive, same as a _MAX_MODEL_CALLS/wall-
@@ -177,18 +176,23 @@ def _cap_payload(value: Any) -> Any:
     return {"_truncated": True, "preview": encoded[:_STEP_PAYLOAD_CAP_CHARS]}
 
 
-def _accumulate_usage(total: dict[str, int], usage: Any) -> None:
-    """Fold one response's usage_metadata into the turn total. thoughts/cached
-    were silently dropped before 2026-07 — total_token_count includes thoughts,
-    so without them prompt+completion never equalled total in the stored blob."""
-    for key, attr in (
-        ("prompt_tokens", "prompt_token_count"),
-        ("completion_tokens", "candidates_token_count"),
-        ("total_tokens", "total_token_count"),
-        ("thinking_tokens", "thoughts_token_count"),
-        ("cached_tokens", "cached_content_token_count"),
+def _accumulate_usage(total: dict[str, int], usage: dict[str, Any]) -> None:
+    """Fold one response's usage block into the turn total.
+
+    thoughts/cached were silently dropped before 2026-07 — `output_tokens`
+    already includes reasoning tokens, so without them prompt+completion never
+    equalled total in the stored blob.
+    """
+    details_in = usage.get("input_tokens_details") or {}
+    details_out = usage.get("output_tokens_details") or {}
+    for key, value in (
+        ("prompt_tokens", usage.get("input_tokens")),
+        ("completion_tokens", usage.get("output_tokens")),
+        ("total_tokens", usage.get("total_tokens")),
+        ("thinking_tokens", details_out.get("reasoning_tokens")),
+        ("cached_tokens", details_in.get("cached_tokens")),
     ):
-        total[key] = total.get(key, 0) + (getattr(usage, attr, 0) or 0)
+        total[key] = total.get(key, 0) + (value or 0)
 
 
 def _tool_call_fingerprint(name: str, args: dict[str, Any]) -> str:
@@ -247,17 +251,30 @@ _MAX_IMAGE_PARTS = 6
 _MAX_IMAGE_BYTES_TOTAL = 4 * 1024 * 1024
 
 
-def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[str]] = None) -> list[types.Content]:
-    contents: list[types.Content] = []
+def _to_input_items(
+    history: list[dict[str, Any]], attachment_texts: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    """Thread history as Responses input items.
+
+    Two content rules are provider requirements, not preferences: assistant
+    turns carry `output_text` (sending them as `input_text` is a hard 400), and
+    images are valid only on user turns.
+
+    This builds the CONVERSATION only. Function calls and their outputs are
+    deliberately not replayed here — the state block in `prompt.py` is what
+    carries staged work across turns, and adding the tool trail would change
+    every prompt the model has ever been tuned against.
+    """
+    items: list[dict[str, Any]] = []
     image_budget = _MAX_IMAGE_PARTS
     image_bytes_used = 0
     for msg in history[-_MAX_HISTORY_MESSAGES:]:
-        role = "model" if msg.get("role") == "assistant" else "user"
+        role = "assistant" if msg.get("role") == "assistant" else "user"
         text = str(msg.get("content") or "").strip()
         if len(text) > _MAX_MESSAGE_CHARS:
             text = text[:_MAX_MESSAGE_CHARS] + "\n…[truncated]"
 
-        parts: list[types.Part] = []
+        content: list[dict[str, Any]] = []
         # Multimodal: attach any pre-fetched image bytes on user turns only
         # (messaging.py's fetch_image_parts_for_messages already fetched
         # these before dispatch — same convention as matcha_work_ai's
@@ -269,20 +286,22 @@ def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[
                     continue
                 if image_bytes_used + len(image_bytes) > _MAX_IMAGE_BYTES_TOTAL:
                     continue
-                parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime))
+                content.append(image_item(image_bytes, mime))
                 image_budget -= 1
                 image_bytes_used += len(image_bytes)
 
-        if not text and not parts:
+        if not text and not content:
             continue
-        if text or not parts:
-            parts.append(types.Part(text=text))
-        contents.append(types.Content(role=role, parts=parts))
-    if not contents:
-        contents.append(types.Content(role="user", parts=[types.Part(text="Hello.")]))
+        if text or not content:
+            content.append(
+                {"type": "output_text" if role == "assistant" else "input_text", "text": text}
+            )
+        items.append({"role": role, "content": content})
+    if not items:
+        items.append(text_item("user", "Hello."))
 
     # Attached file TEXT (from `messaging.py`'s file_context_parts, e.g. an
-    # uploaded PDF/doc's extracted text) rides as an extra Part on the final
+    # uploaded PDF/doc's extracted text) rides as an extra part on the final
     # user turn. Distinct from image_parts above, which is inline image
     # bytes on the messages that carried them, not just the last one.
     if attachment_texts:
@@ -296,12 +315,12 @@ def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[
                 "don't treat an attachment as answering a clarifying question you asked "
                 "unless the user says that's what it is).\n\n" + joined
             )
-            last = contents[-1]
-            if last.role == "user":
-                last.parts.append(types.Part(text=attached_block))
+            last = items[-1]
+            if last.get("role") == "user":
+                last["content"].append({"type": "input_text", "text": attached_block})
             else:
-                contents.append(types.Content(role="user", parts=[types.Part(text=attached_block)]))
-    return contents
+                items.append(text_item("user", attached_block))
+    return items
 
 
 def _last_user_text(history: list[dict[str, Any]]) -> str:
@@ -334,7 +353,7 @@ def _json_safe(value: Any) -> Any:
         # current_quantity/quantity fields are the first lookup_context
         # result to carry one through this path. json.dumps doesn't know
         # Decimal at all (unlike date/UUID, no `default=str` fallback saves
-        # it downstream at the Gemini function-response boundary), so this
+        # it downstream at the function_call_output boundary), so this
         # needs its own branch rather than falling through.
         return float(value)
     return value
@@ -1468,7 +1487,7 @@ async def run_huume_turn(
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label=f"{name.replace('_', ' ').title()} refused", status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
-                # Gemini can emit the same confirming call twice in one batch
+                # The model can emit the same confirming call twice in one batch
                 # (parallel function calls); pre_turn_action is frozen for the
                 # whole turn so both calls would otherwise see status=="proposed"
                 # and both execute, writing the record twice. One confirm_id
@@ -2174,17 +2193,12 @@ async def run_huume_turn(
         surface_context=surface_context,
         location_profile_block=_location_profile_block,
     )
-    _tools_arg = [types.Tool(function_declarations=tool_declarations(allowed_names=allowed_tool_names))]
-    # Two configs retain the planner/executor call boundary. Luna is pinned
-    # for both calls; the adapter converts the Gemini-shaped tool contract to
-    # Responses API function calls without sending any traffic to Gemini.
-    planner_config = types.GenerateContentConfig(
-        tools=_tools_arg, system_instruction=_system_instruction,
-    )
-    executor_config = types.GenerateContentConfig(
-        tools=_tools_arg, system_instruction=_system_instruction,
-    )
-    contents = _to_contents(history, attachment_texts)
+    _tools_arg = tool_specs(allowed_names=allowed_tool_names)
+    # The planner/executor call boundary is the tier's, not the request's —
+    # both calls send the same tools and instructions, and `routing` picks the
+    # model for each. Luna is pinned for both.
+    input_items = _to_input_items(history, attachment_texts)
+    pending_outputs: list[dict[str, Any]] = []
 
     if tier_name == "deep":
         yield {"type": "status", "message": "Thinking hard…"}
@@ -2213,14 +2227,17 @@ async def run_huume_turn(
             is_first_call = model_calls == 0
             model_calls += 1
             call_model = tier.planner_model if is_first_call else tier.executor_model
-            call_config = planner_config if is_first_call else executor_config
             call_timeout = min(_CALL_TIMEOUT, max(1.0, _WALL_CLOCK_SECONDS - elapsed()))
             with feature_scope("matcha.huume.loop"):
                 response = await asyncio.wait_for(
-                    client.aio.models.generate_content(
+                    client.create_response(
                         model=call_model,
-                        contents=contents,
-                        config=call_config,
+                        # First call sends the conversation; the follow-ups send
+                        # only tool outputs, with previous_response_id carrying
+                        # the rest server-side.
+                        input=input_items if is_first_call else pending_outputs,
+                        instructions=_system_instruction,
+                        tools=_tools_arg,
                         timeout_seconds=call_timeout,
                         before_request=lambda: rate_limiter.check_limit("huume", "agent"),
                         after_request=lambda: rate_limiter.record_call("huume", "agent"),
@@ -2228,32 +2245,27 @@ async def run_huume_turn(
                     timeout=call_timeout,
                 )
 
-            usage = getattr(response, "usage_metadata", None)
-            if usage:
-                _accumulate_usage(total_usage, usage)
+            if response.usage:
+                _accumulate_usage(total_usage, response.usage)
 
-            all_parts = [
-                part
-                for candidate in (response.candidates or [])
-                for part in (candidate.content.parts or [] if candidate.content else [])
-            ]
-            call_parts = [part for part in all_parts if getattr(part, "function_call", None)]
-            calls = [p.function_call for p in call_parts]
+            calls = response.function_calls
 
             if not calls:
                 # A reasoning-only response (no function call, no text) used
                 # to silently fall through to the generic "nothing was
                 # changed" string even when a tool called earlier this turn
                 # already explained exactly why — surface that instead.
-                final_message = (getattr(response, "text", None) or "").strip() or last_tool_issue or None
+                final_message = (response.text or "").strip() or last_tool_issue or None
+                if final_message is None and response.truncated:
+                    # A truncated or filtered reply is not an empty one, and
+                    # the generic copy blames the wrong thing.
+                    final_message = (
+                        "I ran out of room before I could answer that. Ask for a smaller "
+                        "piece of it and I'll pick this back up."
+                    )
                 break
 
-            # ALL parts, not just the function-call ones — a response mixing
-            # reasoning text with tool calls used to drop the text from
-            # history between iterations.
-            contents.append(types.Content(role="model", parts=all_parts))
-
-            response_parts: list[types.Part] = []
+            response_parts: list[dict[str, Any]] = []
             finished = False
             finish_message: Optional[str] = None
             # `finish` only ends the turn when it's the SOLE call in this
@@ -2261,11 +2273,11 @@ async def run_huume_turn(
             # tools still need to run and their results still need to reach
             # the model before it actually finishes — otherwise the summary
             # describes work whose outcome the model never saw.
-            sole_finish_call = is_sole_finish([c.name for c in calls])
+            sole_finish_call = is_sole_finish([c["name"] for c in calls])
 
             for call in calls:
-                name = call.name
-                args = dict(call.args or {})
+                name = call["name"]
+                args = dict(call["arguments"] or {})
                 # Enforce the surface allow-list before any control-flow or
                 # bookkeeping special case. `call_tool` keeps the same guard
                 # for direct callers, but an unlisted function must not be
@@ -2278,7 +2290,7 @@ async def run_huume_turn(
                     refusal = {"status": "refused", "message": "That capability is not available in this assistant."}
                     last_tool_issue = refusal["message"]
                     yield {"type": "step", "data": step}
-                    response_parts.append(types.Part.from_function_response(name=name, response=refusal))
+                    response_parts.append(tool_output_item(call["call_id"], refusal))
                     continue
                 if name == "finish":
                     if not sole_finish_call:
@@ -2286,14 +2298,11 @@ async def run_huume_turn(
                             tool="finish", kind="finish", label="Finish deferred (other tools pending)",
                             status="ok", args=args,
                         )
-                        response_parts.append(types.Part.from_function_response(
-                            name=name,
-                            response={
-                                "status": "deferred",
-                                "message": "Other tool calls this turn haven't reported back yet — "
-                                           "call finish again once you've reviewed their results.",
-                            },
-                        ))
+                        response_parts.append(tool_output_item(call["call_id"], {
+                            "status": "deferred",
+                            "message": "Other tool calls this turn haven't reported back yet — "
+                                       "call finish again once you've reviewed their results.",
+                        }))
                         continue
                     finish_message = str(args.get("message") or "").strip() or None
                     finished = True
@@ -2321,7 +2330,7 @@ async def run_huume_turn(
                         terminal_message = payload["message"]
                         stop_reason = "schedule_duplicate_blocked"
                         yield {"type": "step", "data": step}
-                        response_parts.append(types.Part.from_function_response(name=name, response=payload))
+                        response_parts.append(tool_output_item(call["call_id"], payload))
                         break
                     if schedule_proposal_attempts >= _MAX_SCHEDULE_PROPOSALS_PER_TURN:
                         tool_retry_limit_blocks += 1
@@ -2339,7 +2348,7 @@ async def run_huume_turn(
                         terminal_message = payload["message"]
                         stop_reason = "schedule_retry_limit"
                         yield {"type": "step", "data": step}
-                        response_parts.append(types.Part.from_function_response(name=name, response=payload))
+                        response_parts.append(tool_output_item(call["call_id"], payload))
                         break
                     schedule_proposal_attempts += 1
                     schedule_proposal_fingerprints.add(fingerprint)
@@ -2391,7 +2400,7 @@ async def run_huume_turn(
                             last_tool_issue = str(issue)
                 if step:
                     yield {"type": "step", "data": step}
-                response_parts.append(types.Part.from_function_response(name=name, response=payload))
+                response_parts.append(tool_output_item(call["call_id"], payload))
 
                 confirming_shift_change = (
                     name == "propose_schedule_change"
@@ -2433,7 +2442,18 @@ async def run_huume_turn(
                 final_message = finish_message
                 break
 
-            contents.append(types.Content(role="user", parts=response_parts))
+            # Every call in the batch must be answered: Responses rejects a
+            # follow-up that leaves one unpaired, and a silently dropped result
+            # would strand the model mid-turn.
+            answered = {item["call_id"] for item in response_parts}
+            missing = [c["call_id"] for c in calls if c["call_id"] not in answered]
+            if missing:
+                logger.error("huume loop left %d tool call(s) unanswered", len(missing))
+                response_parts.extend(
+                    tool_output_item(call_id, {"status": "refused", "message": "That step did not run."})
+                    for call_id in missing
+                )
+            pending_outputs = response_parts
 
     except RateLimitExceeded:
         # Platform-wide AI capacity (the shared rate limiter), not this

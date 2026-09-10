@@ -18,24 +18,27 @@ from app.matcha.services.huume.routing import LUNA
 
 
 class TestAccumulateUsage:
+    def _usage(self, prompt, completion, total, reasoning, cached):
+        return {
+            "input_tokens": prompt, "output_tokens": completion, "total_tokens": total,
+            "output_tokens_details": {"reasoning_tokens": reasoning},
+            "input_tokens_details": {"cached_tokens": cached},
+        }
+
     def test_folds_all_five_counters(self):
         total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
                  "thinking_tokens": 0, "cached_tokens": 0}
-        _accumulate_usage(total, SimpleNamespace(
-            prompt_token_count=100, candidates_token_count=20,
-            total_token_count=150, thoughts_token_count=30, cached_content_token_count=40))
-        _accumulate_usage(total, SimpleNamespace(
-            prompt_token_count=1, candidates_token_count=2,
-            total_token_count=6, thoughts_token_count=3, cached_content_token_count=4))
+        _accumulate_usage(total, self._usage(100, 20, 150, 30, 40))
+        _accumulate_usage(total, self._usage(1, 2, 6, 3, 4))
         assert total == {"prompt_tokens": 101, "completion_tokens": 22,
                          "total_tokens": 156, "thinking_tokens": 33, "cached_tokens": 44}
 
-    def test_missing_and_none_attrs_count_zero(self):
+    def test_missing_and_none_keys_count_zero(self):
         total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
                  "thinking_tokens": 0, "cached_tokens": 0}
-        _accumulate_usage(total, SimpleNamespace())                       # attrs absent
-        _accumulate_usage(total, SimpleNamespace(prompt_token_count=None,
-                                                 thoughts_token_count=None))
+        _accumulate_usage(total, {})                                      # keys absent
+        _accumulate_usage(total, {"input_tokens": None,
+                                  "output_tokens_details": {"reasoning_tokens": None}})
         assert all(v == 0 for v in total.values())
 
 

@@ -6,10 +6,9 @@ import logging
 import re
 from typing import Optional
 
-from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
-from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.luna_client import get_luna_client, text_item
 from app.matcha.services.huume.routing import LUNA
 
 from ._text import _clean_json_text
@@ -136,19 +135,17 @@ Request:
     # Task drafting is intentionally provider-pinned: the thread model picker
     # cannot route a draft back to Gemini, so this takes no model argument.
     with feature_scope(_AI_USAGE_FEATURE):
-        response = await get_luna_client().aio.models.generate_content(
+        response = await get_luna_client().create_response(
             model=LUNA,
-            contents=[types.Content(role="user", parts=[types.Part(text=instruction)])],
-            config=types.GenerateContentConfig(
-                # JSON mode is load-bearing, not decorative: the fallbacks below
-                # would otherwise turn an unparseable reply into a 200 OK ticket
-                # titled with the raw prompt and no description.
-                response_mime_type="application/json",
-                system_instruction=(
-                    "Return exactly one JSON object that satisfies the user's task-draft "
-                    "schema. Do not add Markdown fences or commentary."
-                ),
+            input=[text_item("user", instruction)],
+            instructions=(
+                "Return exactly one JSON object that satisfies the user's task-draft "
+                "schema. Do not add Markdown fences or commentary."
             ),
+            # JSON mode is load-bearing, not decorative: the fallbacks below
+            # would otherwise turn an unparseable reply into a 200 OK ticket
+            # titled with the raw prompt and no description.
+            response_format_json=True,
         )
     raw = response.text or ""
     try:
@@ -198,12 +195,12 @@ Request:
 
     # Surfaced so the route can meter this call against the workspace token
     # budget the same way the durable agent path does.
-    meta = getattr(response, "usage_metadata", None)
+    meta = response.usage or {}
     token_usage = {
         "model": LUNA,
-        "prompt_tokens": int(getattr(meta, "prompt_token_count", 0) or 0),
-        "completion_tokens": int(getattr(meta, "candidates_token_count", 0) or 0),
-        "total_tokens": int(getattr(meta, "total_token_count", 0) or 0),
+        "prompt_tokens": int(meta.get("input_tokens") or 0),
+        "completion_tokens": int(meta.get("output_tokens") or 0),
+        "total_tokens": int(meta.get("total_tokens") or 0),
     }
 
     return {

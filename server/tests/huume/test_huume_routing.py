@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from google.genai import types
 
 from app.matcha.services.huume import agent, routing
+from app.matcha.services.huume.luna_client import LunaResponse
 from app.matcha.services.huume.prompt import build_discovery_block, build_system_prompt
 from app.matcha.services.huume.tools import TOOLS
 
@@ -211,22 +211,29 @@ class TestTiersCatalog:
 
 
 def _fake_call(name, args):
-    return types.FunctionCall(name=name, args=args)
+    _fake_call.counter = getattr(_fake_call, "counter", 0) + 1
+    return {"call_id": f"call_{_fake_call.counter}", "name": name, "arguments": args}
 
 
-def _fake_part(function_call=None):
-    return types.Part(function_call=function_call)
+def _fake_response(calls=None, text=None):
+    return LunaResponse(
+        response_id="resp_test", text=text,
+        function_calls=list(calls or []), usage={},
+    )
 
 
-def _fake_response(parts=None, text=None):
-    resp = MagicMock()
-    resp.usage_metadata = None
-    resp.text = text
-    candidate = MagicMock()
-    candidate.content = MagicMock()
-    candidate.content.parts = parts or []
-    resp.candidates = [candidate]
-    return resp
+def _assert_the_model_was_actually_called(recorded, frames):
+    """Guard against a vacuously-green tier test.
+
+    `run_huume_turn` never raises past itself (it logs the real cause to
+    `huume_runs.error` and yields a generic error frame), so a stub whose
+    signature has drifted is invisible unless the test checks both that the
+    call landed and that the turn did not error.
+    """
+    assert recorded, "the model was never called — check the stub's signature"
+    assert not [f for f in frames if f.get("type") == "error"], (
+        f"turn errored: {[f for f in frames if f.get('type') == 'error']}"
+    )
 
 
 class _NoopRateLimiter:
@@ -245,14 +252,14 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
     """Planner and tool-result calls both remain pinned to Luna."""
     recorded = []
 
-    async def _generate(*, model, contents, config, **_request_options):
-        recorded.append({"model": model, "thinking": config.thinking_config})
+    async def _generate(*, model, **kwargs):
+        recorded.append({"model": model, "thinking": None})
         if len(recorded) == 1:
-            return _fake_response(parts=[_fake_part(_fake_call("check_offer_status", {"offer_id": "abc"}))])
-        return _fake_response(parts=[], text="Done.")
+            return _fake_response(calls=[_fake_call("check_offer_status", {"offer_id": "abc"})])
+        return _fake_response(calls=[], text="Done.")
 
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=_generate)
+    client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
     monkeypatch.setattr(
@@ -274,17 +281,21 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
         {"model": routing.LUNA, "thinking": None},
     ]
 
+    _assert_the_model_was_actually_called(recorded, frames)
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "deep"
 
 
 @pytest.mark.asyncio
 async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
-    async def _generate(*, model, contents, config, **_request_options):
-        return _fake_response(parts=[], text="Sure, here you go.")
+    recorded = []
+
+    async def _generate(*, model, **kwargs):
+        recorded.append(model)
+        return _fake_response(calls=[], text="Sure, here you go.")
 
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=_generate)
+    client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
 
@@ -297,6 +308,11 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
         )
     ]
 
+    # The tier is resolved BEFORE the loop, so asserting it alone passes even
+    # when the model call never happens — a stale stub signature raises
+    # TypeError into run_huume_turn's catch-all and the turn still yields a
+    # result. This stub went stale in exactly that way and stayed green.
+    _assert_the_model_was_actually_called(recorded, frames)
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "standard"
 
@@ -305,12 +321,12 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
 async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
     recorded = []
 
-    async def _generate(*, model, contents, config, **_request_options):
+    async def _generate(*, model, **kwargs):
         recorded.append(model)
-        return _fake_response(parts=[], text="Confirmed.")
+        return _fake_response(calls=[], text="Confirmed.")
 
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=_generate)
+    client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
 
@@ -323,6 +339,7 @@ async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
         )
     ]
 
+    _assert_the_model_was_actually_called(recorded, frames)
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "lite"
     assert recorded == [routing.LUNA]

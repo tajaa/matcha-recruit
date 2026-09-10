@@ -60,7 +60,18 @@ server/
 - Gmail API via OAuth2 (`app/core/services/email/`) for transactional. MailerSend for broker invites + a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.
 
 **AI**:
-- Gemini via `google.genai` SDK with `settings.gemini_api_key` (from the `LIVE_API` env var). Some services also honor a `GEMINI_API_KEY` env override. Native Google AI only — no Vertex.
+- **Two providers, and which one you are in matters.** Gemini via the `google.genai` SDK with
+  `settings.gemini_api_key` (from the `LIVE_API` env var; some services also honor a `GEMINI_API_KEY`
+  override) is the default and covers ~100 call sites. Native Google AI only — no Vertex.
+- **OpenAI (`gpt-5.6-luna`, Responses API) runs the bounded agent loops** — Huume
+  (`services/huume/agent.py`) and Espresso's project agents — through
+  `services/huume/luna_client.py`. There is no `openai` SDK dependency: every OpenAI call is
+  hand-rolled `httpx` against `POST /v1/responses`, with the shared pieces in
+  `core/services/openai_responses.py`. Until 2026-09-10 that client impersonated a `google.genai`
+  client, so OpenAI code READ as Gemini code — if a call site builds `types.Content`/`types.Part`,
+  check which client it reaches before assuming the provider.
+- Some Huume skills still call Gemini for real, and that is deliberate: `er_skill` owns its own call,
+  and `discipline`/`handbook`/`legal`/`ir` delegate to Gemini-backed pilot services.
 - Per-feature analyzer singletons (e.g. `get_ir_analyzer`, `get_er_analyzer`) cache the model handle; don't instantiate per request.
 - **Rate limiting is per PROVIDER** (`core/services/rate_limiter.py:ApiRateLimiter`). `ApiRateLimiter()`
   is the Gemini bucket (`gemini_hourly_limit`/`gemini_daily_limit`); the OpenAI agent loops construct

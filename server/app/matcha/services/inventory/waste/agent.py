@@ -16,26 +16,13 @@ import httpx
 
 from app.config import get_settings
 from app.core.services.ai_usage import record_openai_response
+from app.core.services.openai_responses import response_text as _response_text
 
 from . import lots, rollup
 
 
 logger = logging.getLogger(__name__)
 _NUMERIC_NARRATION = re.compile(r"[$%]|\d")
-
-
-def _response_text(payload: dict) -> str:
-    """Extract text from a Responses API payload without trusting its shape."""
-    if isinstance(payload.get("output_text"), str):
-        return payload["output_text"].strip()
-    parts: list[str] = []
-    for output in payload.get("output", []):
-        if not isinstance(output, dict) or output.get("type") != "message":
-            continue
-        for content in output.get("content", []):
-            if isinstance(content, dict) and content.get("type") == "output_text" and isinstance(content.get("text"), str):
-                parts.append(content["text"])
-    return "\n".join(parts).strip()
 
 
 async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:

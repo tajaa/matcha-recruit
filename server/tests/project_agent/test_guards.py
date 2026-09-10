@@ -51,7 +51,7 @@ def test_source_windows_are_numbered_and_bounded():
 
 
 def test_agent_surface_has_only_read_and_answer_tools():
-    names = {tool.name for tool in declarations()}
+    names = {tool["name"] for tool in declarations()}
     assert names == {"list_files", "search_repo", "read_file", "answer_question"}
     assert not names.intersection({"write_file", "delete_file", "open_pr", "run_command"})
 

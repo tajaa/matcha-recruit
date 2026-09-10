@@ -633,7 +633,7 @@ async def propose(
 
     ``clarify`` and ``refused`` are terminal for the current Huume turn. A
     thread has no channel pill-reply round trip, so the caller must relay the
-    message and wait for the admin's next turn rather than asking Gemini to
+    message and wait for the admin's next turn rather than asking the model to
     retry the same deterministic resolution.
     """
     from app.matcha.services.scheduling import schedule_chat

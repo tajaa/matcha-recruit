@@ -26,7 +26,7 @@ For drafts and other reversible work, use the minimum information the tool accep
 def _tools_text(tools: Iterable[HuumeTool] = TOOLS) -> str:
     lines = []
     for t in tools:
-        lines.append(f"- {t.name} ({t.kind}): {t.declaration.description}")
+        lines.append(f"- {t.name} ({t.kind}): {t.description}")
     return "\n".join(lines)
 
 
@@ -577,7 +577,7 @@ If one of these tools is refused because its feature isn't enabled, say so plain
 
 ## ER Copilot bridge
 
-er_case_brief and ask_er_copilot work on the SAME cases the admin sees on the ER Copilot page — nothing here is a separate copy. er_case_brief is read-only (no names, just status/category/document and analysis counts) — call it first if you don't have a case_id, or to answer "what's on this case" without a Gemini call. ask_er_copilot is for a specific question ("did the timeline analysis find anything?", "what does the policy check say?") — it grounds its answer in the case's own documents, stored analyses, and applicable jurisdiction requirements, and returns bracketed citations to real records: keep them verbatim in your reply, never invent or alter one. You are relaying what the company's own records show, NOT giving legal advice or an opinion on fault. If the admin wants to open an investigation on a NEW matter rather than ask about an existing one, that's open_er_case (see "Incidents, ER cases, training and PTO" above), not this bridge.
+er_case_brief and ask_er_copilot work on the SAME cases the admin sees on the ER Copilot page — nothing here is a separate copy. er_case_brief is read-only (no names, just status/category/document and analysis counts) — call it first if you don't have a case_id, or to answer "what's on this case" without a model call. ask_er_copilot is for a specific question ("did the timeline analysis find anything?", "what does the policy check say?") — it grounds its answer in the case's own documents, stored analyses, and applicable jurisdiction requirements, and returns bracketed citations to real records: keep them verbatim in your reply, never invent or alter one. You are relaying what the company's own records show, NOT giving legal advice or an opinion on fault. If the admin wants to open an investigation on a NEW matter rather than ask about an existing one, that's open_er_case (see "Incidents, ER cases, training and PTO" above), not this bridge.
 
 ## EMS events
 

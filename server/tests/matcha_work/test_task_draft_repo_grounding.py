@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.services import ai_usage
+from app.matcha.services.huume.luna_client import LunaResponse
 from app.matcha.services.matcha_work.matcha_work_ai import task_draft
 
 
@@ -13,12 +14,13 @@ class _Models:
     def __init__(self):
         self.contents = ""
 
-    async def generate_content(self, *, model, contents, config):
+    async def create_response(self, *, model, input, instructions, **kwargs):
         self.model = model
-        self.contents = contents
-        self.config = config
+        self.contents = input
+        self.instructions = instructions
+        self.kwargs = kwargs
         self.feature = ai_usage._feature_override.get()
-        return SimpleNamespace(text=json.dumps({
+        return LunaResponse(response_id="r", text=json.dumps({
             "title": "Add product editing",
             "description": "Use the existing product routes.",
             "priority": "medium",
@@ -33,7 +35,7 @@ class _Models:
 @pytest.mark.asyncio
 async def test_repository_context_is_fenced_and_sent_to_model(monkeypatch):
     models = _Models()
-    client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    client = models
     monkeypatch.setattr(task_draft, "get_luna_client", lambda: client)
 
     result = await task_draft.generate_task_draft(
@@ -47,7 +49,7 @@ async def test_repository_context_is_fenced_and_sent_to_model(monkeypatch):
         ),
     )
 
-    prompt = models.contents[0].parts[0].text
+    prompt = models.contents[0]["content"][0]["text"]
     assert models.model == "gpt-5.6-luna"
     assert models.feature == "matcha.espresso.task_draft"
     assert "<repository_context>" in prompt
@@ -56,17 +58,17 @@ async def test_repository_context_is_fenced_and_sent_to_model(monkeypatch):
     assert result["subtasks"] == ["Update server/app/products/routes.py"]
     # JSON mode is what keeps an unparseable reply from degrading into a
     # 200 OK ticket titled with the raw prompt.
-    assert models.config.response_mime_type == "application/json"
+    assert models.kwargs["response_format_json"] is True
 
 
 class _BadJSONModels:
-    async def generate_content(self, *, model, contents, config):
-        return SimpleNamespace(text="Sure! Here is the ticket you asked for.")
+    async def create_response(self, *, model, input, instructions, **kwargs):
+        return LunaResponse(response_id="r", text="Sure! Here is the ticket you asked for.")
 
 
 @pytest.mark.asyncio
 async def test_unparseable_model_output_raises_instead_of_silent_fallback(monkeypatch):
-    client = SimpleNamespace(aio=SimpleNamespace(models=_BadJSONModels()))
+    client = _BadJSONModels()
     monkeypatch.setattr(task_draft, "get_luna_client", lambda: client)
 
     with pytest.raises(RuntimeError):

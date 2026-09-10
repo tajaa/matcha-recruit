@@ -56,11 +56,11 @@ class TestRegistry:
         # Elena to one of them" when several shifts share a date — a real
         # transcript hit exactly that and staging refused outright.
         tool = TOOLS_BY_NAME["propose_schedule_change"]
-        assert "target_time_hint" in tool.declaration.parameters.properties
+        assert "target_time_hint" in tool.parameters["properties"]
 
     def test_schema_declares_second_time_hint(self):
         tool = TOOLS_BY_NAME["propose_schedule_change"]
-        assert "second_time_hint" in tool.declaration.parameters.properties
+        assert "second_time_hint" in tool.parameters["properties"]
 
     def test_intent_hints_are_multiword_only(self):
         # A bare "assign" substring-matched training/PTO assignment asks
@@ -81,9 +81,9 @@ class TestRegistry:
         # Two shifts can share the exact date AND time AND role (one
         # staffed, one open) — target_time_hint alone can't separate them.
         tool = TOOLS_BY_NAME["propose_schedule_change"]
-        props = tool.declaration.parameters.properties
+        props = tool.parameters["properties"]
         assert "target_staffing_hint" in props
-        assert set(props["target_staffing_hint"].enum) == {"staffed", "unstaffed"}
+        assert set(props["target_staffing_hint"]["enum"]) == {"staffed", "unstaffed"}
 
     def test_schema_declares_bounded_batch_with_creates(self):
         """The batch cap in the tool schema IS the domain constant — the
@@ -91,21 +91,21 @@ class TestRegistry:
         replacement shift (`kind: create`) rides the same array as the
         cancellations that make room for it."""
         tool = TOOLS_BY_NAME["propose_schedule_change"]
-        changes = tool.declaration.parameters.properties["changes"]
-        assert changes.min_items == 1
-        assert changes.max_items == MAX_BATCH_OPERATIONS
+        changes = tool.parameters["properties"]["changes"]
+        assert changes["minItems"] == 1
+        assert changes["maxItems"] == MAX_BATCH_OPERATIONS
         assert MAX_BATCH_OPERATIONS > 4
-        assert changes.items.required == ["kind"]
-        assert "create" in changes.items.properties["kind"].enum
+        assert changes["items"]["required"] == ["kind"]
+        assert "create" in changes["items"]["properties"]["kind"]["enum"]
         for create_field in ("label", "date", "start_time", "end_time", "count", "employee_names"):
-            assert create_field in changes.items.properties
+            assert create_field in changes["items"]["properties"]
         # The flat legacy fields keep their edit-only enum: a top-level
         # create still goes through build_proposal unchanged.
-        assert "create" in tool.declaration.parameters.properties["kind"].enum
+        assert "create" in tool.parameters["properties"]["kind"]["enum"]
 
     def test_confirm_call_does_not_require_irrelevant_kind(self):
         tool = TOOLS_BY_NAME["propose_schedule_change"]
-        assert "kind" not in (tool.declaration.parameters.required or [])
+        assert "kind" not in (tool.parameters.get("required") or [])
 
     def test_spec_fields_forward_target_staffing_hint(self):
         assert "target_staffing_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
@@ -1664,7 +1664,7 @@ class TestFillVacantShifts(unittest.TestCase):
         fields = set(_HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"])
         new = {"fill_vacant_shifts", "fill_job_name", "fill_shift_ids", "exclude_employee_names", "allow_split_shift"}
         assert new <= fields, new - fields
-        properties = TOOLS_BY_NAME["propose_schedule_change"].declaration.parameters.properties
+        properties = TOOLS_BY_NAME["propose_schedule_change"].parameters["properties"]
         assert new <= set(properties)
         hints = TOOLS_BY_NAME["propose_schedule_change"].intent_hints
         assert any("fill" in hint and "open" in hint for hint in hints)
