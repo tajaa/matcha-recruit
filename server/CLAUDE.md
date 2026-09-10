@@ -62,6 +62,15 @@ server/
 **AI**:
 - Gemini via `google.genai` SDK with `settings.gemini_api_key` (from the `LIVE_API` env var). Some services also honor a `GEMINI_API_KEY` env override. Native Google AI only — no Vertex.
 - Per-feature analyzer singletons (e.g. `get_ir_analyzer`, `get_er_analyzer`) cache the model handle; don't instantiate per request.
+- **Rate limiting is per PROVIDER** (`core/services/rate_limiter.py:ApiRateLimiter`). `ApiRateLimiter()`
+  is the Gemini bucket (`gemini_hourly_limit`/`gemini_daily_limit`); the OpenAI agent loops construct
+  `ApiRateLimiter(provider="openai")` and count against `openai_*_limit`. Before `ratelimit01` this
+  counted every row in `api_rate_limits` with no filter against the Gemini ceiling, so OpenAI traffic
+  spent the Gemini allowance and a Gemini sweep could 429 a Huume turn. A new provider needs a bucket
+  here and its own limits, not a share of someone else's.
+- Not every model call is limited: `huume/er_skill`, the legal/handbook pilot chats and the Espresso
+  project agents call their provider without going through the limiter at all, so the budget
+  understates real spend. Pre-existing; gating them changes behaviour and is deliberately separate.
 
 **Streaming**:
 - SSE for AI analysis runs (`StreamingResponse(event_stream(), media_type="text/event-stream")`).

@@ -27,7 +27,7 @@ from typing import Any, Optional
 from google.genai import types
 
 from ....core.services.genai_client import get_genai_client
-from ....core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from ....core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from ..design_gate import is_premium_plan
 from .catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
 
@@ -118,7 +118,7 @@ async def _classify(message: str, history_tail: Optional[str]) -> Optional[str]:
         prompt += f"\n\nEarlier in this conversation:\n{history_tail}"
     prompt += f"\n\nRequest: {message}"
 
-    limiter = GeminiRateLimiter()
+    limiter = ApiRateLimiter()
     try:
         await limiter.check_limit("cappe_merlin", "route")
     except RateLimitExceeded:

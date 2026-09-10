@@ -27,7 +27,7 @@ from google.genai import types
 
 from ....config import get_settings
 from ....core.services.genai_client import get_genai_client
-from ....core.services.rate_limiter import GeminiRateLimiter
+from ....core.services.rate_limiter import ApiRateLimiter
 from ..design_gate import is_premium_plan
 from .attachments import caption_lines
 from .catalog import (
@@ -70,13 +70,13 @@ _MAX_HISTORY_MESSAGES = 20
 _MAX_RETRY_PROMPT_TOKENS = 180_000
 _MAX_RETRY_TOTAL_TOKENS = 225_000
 
-_rate_limiter: Optional[GeminiRateLimiter] = None
+_rate_limiter: Optional[ApiRateLimiter] = None
 
 
-def _get_rate_limiter() -> GeminiRateLimiter:
+def _get_rate_limiter() -> ApiRateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
-        _rate_limiter = GeminiRateLimiter()
+        _rate_limiter = ApiRateLimiter()
     return _rate_limiter
 
 

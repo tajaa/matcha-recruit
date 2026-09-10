@@ -41,6 +41,9 @@ def _schedule_surface_context() -> HuumeSurfaceContext:
 
 
 class _NoopRateLimiter:
+    def __init__(self, *args, **kwargs):
+        pass
+
     async def check_limit(self, *args, **kwargs):
         return None
 
@@ -84,7 +87,7 @@ async def _run_turn(
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=responses)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
     _connection_context(monkeypatch, fetchval=fetchval, fetchrow=fetchrow)
     # The schedule prompt now embeds the location's saved profile; every test
     # here drives the tool loop, not that read.

@@ -18,6 +18,9 @@ from app.matcha.services.huume import agent, schedule_skill
 
 
 class _NoopRateLimiter:
+    def __init__(self, *args, **kwargs):
+        pass
+
     async def check_limit(self, *args, **kwargs):
         return None
 
@@ -66,7 +69,7 @@ async def _run_turn(
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=responses)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
     _connection_context(monkeypatch)
     if schedule_result is not None:
         monkeypatch.setattr(schedule_skill, "propose", AsyncMock(return_value=schedule_result))

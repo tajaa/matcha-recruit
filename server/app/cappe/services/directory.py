@@ -34,7 +34,7 @@ from uuid import UUID
 from google.genai import types
 
 from ...core.services.genai_client import get_genai_client
-from ...core.services.rate_limiter import GeminiRateLimiter
+from ...core.services.rate_limiter import ApiRateLimiter
 from ...database import get_connection
 
 logger = logging.getLogger(__name__)
@@ -73,13 +73,13 @@ MAX_BLURB_LEN = 200
 _MODEL = "gemini-3.7-flash-lite"
 _TIMEOUT_S = 30
 
-_rate_limiter: Optional[GeminiRateLimiter] = None
+_rate_limiter: Optional[ApiRateLimiter] = None
 
 
-def _get_rate_limiter() -> GeminiRateLimiter:
+def _get_rate_limiter() -> ApiRateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
-        _rate_limiter = GeminiRateLimiter()
+        _rate_limiter = ApiRateLimiter()
     return _rate_limiter
 
 

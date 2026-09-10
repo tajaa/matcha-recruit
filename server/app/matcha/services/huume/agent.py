@@ -44,7 +44,7 @@ from uuid import UUID, uuid4
 from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
-from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
 from app.matcha.services.scheduling.schedule_review import bounded_review_echo, compact_review
 
@@ -714,7 +714,10 @@ async def run_huume_turn(
     is an unchanged key then). Optional so existing test callers with no run
     row don't need updating; `opened_at` is simply absent in that case.
     """
-    rate_limiter = GeminiRateLimiter()
+    # This loop runs on OpenAI Luna (since 488d928), so it counts in the
+    # OpenAI bucket. Sharing Gemini's meant Huume turns spent the Gemini
+    # allowance and a Gemini-heavy sweep could 429 a Huume turn.
+    rate_limiter = ApiRateLimiter(provider="openai")
     recorder = _StepRecorder()
     state_updates: dict[str, Any] = {}
     final_message: Optional[str] = None

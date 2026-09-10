@@ -19,7 +19,7 @@ from google.genai import types
 from ...core.services.genai_client import get_genai_client
 from ...core.services.model_catalog import GEMINI_FLASH_LITE
 from ...core.services.model_json import clean_model_json
-from ...core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from ...core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,7 @@ async def extract_booking_preference(
     today: date,
 ) -> Optional[BookingPreference]:
     """Make the single bounded Gemini extraction call."""
-    limiter = GeminiRateLimiter()
+    limiter = ApiRateLimiter()
     try:
         await limiter.check_limit("cappe_booking_suggestions", "parse")
     except RateLimitExceeded:

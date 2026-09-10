@@ -112,7 +112,7 @@ def patched(monkeypatch):
     def _run(script, *, screenshot=b"PNG", screenshot_error=None, **overrides):
         fake = _FakeClient(script)
         monkeypatch.setattr(merlin_agent, "get_genai_client", lambda *a, **k: fake)
-        monkeypatch.setattr(merlin_agent, "GeminiRateLimiter", lambda: _NoopLimiter())
+        monkeypatch.setattr(merlin_agent, "ApiRateLimiter", lambda: _NoopLimiter())
 
         import app.cappe.services.browser_pool as bp
 
@@ -583,7 +583,7 @@ def test_a_model_error_still_yields_a_result_frame(patched, monkeypatch):
             self.aio = type("aio", (), {"models": _Boom()})()
 
     monkeypatch.setattr(merlin_agent, "get_genai_client", lambda *a, **k: _BoomClient())
-    monkeypatch.setattr(merlin_agent, "GeminiRateLimiter", lambda: _NoopLimiter())
+    monkeypatch.setattr(merlin_agent, "ApiRateLimiter", lambda: _NoopLimiter())
 
     import asyncio
 
@@ -620,7 +620,7 @@ def test_rate_limit_propagates_for_the_route_to_429(patched, monkeypatch):
             return None
 
     monkeypatch.setattr(merlin_agent, "get_genai_client", lambda *a, **k: _FakeClient([]))
-    monkeypatch.setattr(merlin_agent, "GeminiRateLimiter", lambda: _Limited())
+    monkeypatch.setattr(merlin_agent, "ApiRateLimiter", lambda: _Limited())
 
     import asyncio
 
@@ -775,7 +775,7 @@ def test_generate_image_failure_is_reported_not_raised(patched, monkeypatch):
 def test_generate_image_quota_exhausted_degrades_the_tool_not_the_turn(patched, monkeypatch):
     """`image_quota.check_and_record` raises `HTTPException(429)`, not
     `RateLimitExceeded` (that type belongs to a different budget,
-    `GeminiRateLimiter`). A prior regression caught the wrong exception here,
+    `ApiRateLimiter`). A prior regression caught the wrong exception here,
     so quota exhaustion escaped to the loop's outer handler and killed the
     WHOLE turn — including ops already applied earlier in it — instead of
     just failing this one tool call."""
