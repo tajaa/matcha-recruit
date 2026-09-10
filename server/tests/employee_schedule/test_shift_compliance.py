@@ -148,7 +148,8 @@ class TestJurisdictionRuleStatus:
         assert asyncio.run(shift_compliance.jurisdiction_rule_status(None, uuid4(), uuid4())) == {"state": "CA", "status": "curated"}
 
     def test_catalog_unmapped_unavailable_and_no_state(self, monkeypatch):
-        assert self._status(monkeypatch, state="NY", db_rules={"weekly_ot_hours": 40}) == {"state": "NY", "status": "catalog"}
+        # WA, not NY — NY is hand-curated now, so it never reaches the catalog.
+        assert self._status(monkeypatch, state="WA", db_rules={"weekly_ot_hours": 40}) == {"state": "WA", "status": "catalog"}
         assert self._status(monkeypatch, state="TX", db_rules=None) == {"state": "TX", "status": "unmapped"}
         assert self._status(monkeypatch, state="TX", db_rules=None, failed=True) == {"state": "TX", "status": "unavailable"}
         assert self._status(monkeypatch, state=None) == {"state": None, "status": "unmapped"}

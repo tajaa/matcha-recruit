@@ -246,7 +246,7 @@ def evaluate_break_plan(
     shift_minutes = _shift_minutes(starts_at, ends_at)
     starts_local = reinterpret_schedule_wall_time(starts_at, timezone)
     ends_local = reinterpret_schedule_wall_time(ends_at, timezone)
-    requirements: list[BreakRequirement] = []
+    ordered: list[tuple[datetime, str, int, BreakRequirement]] = []
     advisories: list[dict[str, Any]] = []
 
     ordered_rules = sorted(rules, key=lambda rule: (rule.trigger_after_minutes, rule.kind, rule.ordinal))
@@ -349,7 +349,14 @@ def evaluate_break_plan(
                 minutes=max(0, (shift_minutes - rule.duration_minutes) // 2),
             )
 
-        requirements.append(BreakRequirement(
+        # Order the plan by when each period may actually be taken, not by the
+        # shift length that triggers it: New York's extra evening period
+        # (§ 162(3)) is owed from minute one of a qualifying shift, so a
+        # trigger-ordered list renders it before the noon day meal it follows.
+        # Every requirement gets an anchor, so a rule with no times at all
+        # keeps its trigger-ordered place.
+        anchor = earliest or recommended or deadline or _offset(rule.trigger_after_minutes)
+        ordered.append((anchor, rule.kind, rule.ordinal, BreakRequirement(
             kind=rule.kind,
             ordinal=rule.ordinal,
             duration_minutes=rule.duration_minutes,
@@ -365,7 +372,10 @@ def evaluate_break_plan(
             effective_to=rule.effective_to,
             authority_url=rule.authority_url,
             source_type=rule.source_type,
-        ))
+        )))
+
+    ordered.sort(key=lambda item: item[:3])
+    requirements = [item[3] for item in ordered]
 
     return BreakPlan(
         status="error" if any(a.get("code") == "employer_context_unverified" for a in advisories)

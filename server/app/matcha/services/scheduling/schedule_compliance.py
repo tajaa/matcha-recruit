@@ -102,7 +102,176 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
             "minor_hours": "Cal. Lab. Code § 1391",
         },
     },
+    "NY": {
+        # New York legislates meal periods by TIME OF DAY, not by an
+        # hours-from-start deadline (N.Y. Lab. Law § 162 — a noon day period, a
+        # midway period for shifts starting in the afternoon/night, an extra
+        # evening period). None of that fits these scalar keys, so the real
+        # timing lives in `_CURATED_BREAK_PERIODS` below, which is what the
+        # break PLANNER reads. The two keys here are the coarse write-path
+        # floor only: a >6h shift scheduled with under 30 minutes is an
+        # advisory whichever § 162 subdivision turns out to govern it.
+        "meal_break_after_hours": 6,           # N.Y. Lab. Law § 162(2)
+        "meal_break_minutes": 30,
+        # § 162(3)'s additional 20-minute period is conditioned on clock times,
+        # not on shift length — it is NOT an "hours-based second meal", and
+        # inventing one here would double-count it against the planner.
+        "second_meal_after_hours": None,
+        "meal_break_earliest_after_hours": None,  # no statutory earliest
+        # No meal waiver by mutual consent: a shorter meal period needs a
+        # written permit from the Commissioner (§ 162(5)), so no
+        # `meal_waiver_max_hours` key — an attestation cannot waive § 162.
+        "daily_ot_hours": None,                # NY has no daily-overtime statute
+        "weekly_ot_hours": 40,                 # 12 NYCRR § 142-2.2
+        # No statewide right-to-rest between shifts. NYC's clopening premium is
+        # an ordinance, handled in `fair_workweek.py`, not a scheduling ban.
+        "min_rest_between_shifts_hours": None,
+        "minor_u16_day_hours": 8,              # N.Y. Lab. Law § 171 (non-school day)
+        "minor_u16_week_hours": 40,
+        "minor_16_17_day_hours": 8,            # N.Y. Lab. Law § 172 (non-school day)
+        "minor_16_17_week_hours": 48,
+        "citations": {
+            "meal_break": "N.Y. Lab. Law § 162",
+            "weekly_overtime": "12 NYCRR § 142-2.2",
+            "minor_hours": "N.Y. Lab. Law §§ 171-172",
+        },
+    },
 }
+
+# ── Curated break PERIODS (clock-window law the scalar table can't state) ──
+#
+# `_SCHEDULING_RULES` says "N minutes by hour H". New York says "at least 30
+# minutes between 11 a.m. and 2 p.m." — a window, not an offset — so its meal
+# periods are authored here instead, in the SAME JSON shape the reviewed
+# `schedule_break_rule_sets` import accepts (`schedule_break_rule_store.
+# _rules_from_payload` parses both). Moving a state from this table into the
+# compliance catalog is therefore a data move, not a rewrite; the catalog is
+# where all of this is headed (see SCHEDULING_CATALOG_RULES_PLAN.md).
+#
+# `industries` scopes an entry, matched against the location's NAICS code or
+# the company's canonical industry; an entry without `industries` is the
+# state's general rule. First match wins, industry-specific before general.
+#
+# Each period carries its OWN subdivision as `citation` and its own `ordinal`,
+# because two subdivisions can govern one shift and `(kind, ordinal)` is the
+# key the stagger and the saved planned-breaks rows use.
+#
+# ⚠️ Researched, not attorney-reviewed — same posture as the table above.
+_NY_STATUTE_URL = "https://www.nysenate.gov/legislation/laws/LAB/162"
+_NY_MIDWAY_CITE = (
+    "N.Y. Lab. Law § 162(4); a shorter meal period requires a written permit "
+    "from the Commissioner of Labor (§ 162(5))"
+)
+# "Noon day meal period" is not defined in § 162 itself; NYSDOL fixes it at
+# 11 a.m.–2 p.m. and applies subdivisions (1)-(2) to shifts of more than six
+# hours that extend over it. Both conditions come from that guidance, so they
+# are cited to it rather than to the bare statute.
+_NY_NOONDAY_GUIDANCE = "NYSDOL Meal Periods guidance (noon day period = 11 a.m.–2 p.m.)"
+
+_CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
+    "NY": (
+        {
+            "scope": "factory",
+            "industries": ("manufacturing", "31", "32", "33"),
+            "citation": "N.Y. Lab. Law § 162(1), (3), (4)",
+            "authority_url": _NY_STATUTE_URL,
+            "payload": {
+                "meal_periods": [
+                    {
+                        "ordinal": 1, "duration_minutes": 60, "paid": False,
+                        "trigger_after_minutes": 360, "trigger_operator": "gt",
+                        "shift_spans_window_start": "11:00", "shift_spans_window_end": "14:00",
+                        "window_start": "11:00", "window_end": "14:00",
+                        "citation": f"N.Y. Lab. Law § 162(1); {_NY_NOONDAY_GUIDANCE}",
+                    },
+                    {
+                        "ordinal": 2, "duration_minutes": 60, "paid": False,
+                        "trigger_after_minutes": 360, "trigger_operator": "gt",
+                        "shift_start_window_from": "13:00", "shift_start_window_before": "06:00",
+                        "recommend_midpoint": True,
+                        "citation": _NY_MIDWAY_CITE,
+                    },
+                    {
+                        "ordinal": 3, "duration_minutes": 20, "paid": False,
+                        "trigger_after_minutes": 0, "trigger_operator": "gte",
+                        "shift_starts_before": "11:00", "shift_ends_after": "19:00",
+                        "window_start": "17:00", "window_end": "19:00",
+                        "citation": "N.Y. Lab. Law § 162(3)",
+                    },
+                ],
+                # § 162 legislates meal periods only; New York has no adult
+                # rest-break statute. An explicit empty list is the researched
+                # answer "none", not a gap.
+                "rest_periods": [],
+            },
+        },
+        {
+            "scope": "general",
+            "citation": "N.Y. Lab. Law § 162(2), (3), (4)",
+            "authority_url": _NY_STATUTE_URL,
+            "payload": {
+                "meal_periods": [
+                    {
+                        "ordinal": 1, "duration_minutes": 30, "paid": False,
+                        "trigger_after_minutes": 360, "trigger_operator": "gt",
+                        "shift_spans_window_start": "11:00", "shift_spans_window_end": "14:00",
+                        "window_start": "11:00", "window_end": "14:00",
+                        "citation": f"N.Y. Lab. Law § 162(2); {_NY_NOONDAY_GUIDANCE}",
+                    },
+                    {
+                        "ordinal": 2, "duration_minutes": 45, "paid": False,
+                        "trigger_after_minutes": 360, "trigger_operator": "gt",
+                        "shift_start_window_from": "13:00", "shift_start_window_before": "06:00",
+                        "recommend_midpoint": True,
+                        "citation": _NY_MIDWAY_CITE,
+                    },
+                    {
+                        "ordinal": 3, "duration_minutes": 20, "paid": False,
+                        "trigger_after_minutes": 0, "trigger_operator": "gte",
+                        "shift_starts_before": "11:00", "shift_ends_after": "19:00",
+                        "window_start": "17:00", "window_end": "19:00",
+                        "citation": "N.Y. Lab. Law § 162(3)",
+                    },
+                ],
+                "rest_periods": [],
+            },
+        },
+    ),
+}
+
+
+def _industry_matches(scope: tuple[str, ...], industry_code: Optional[str]) -> bool:
+    """True when a location's industry falls in a curated entry's scope.
+
+    `industry_code` is whichever of the two the location resolved to — its own
+    NAICS code, or the company's canonical industry slug — so a scope entry is
+    matched as a whole slug OR as a NAICS prefix (31/32/33 = manufacturing).
+    """
+    code = (industry_code or "").strip().lower()
+    if not code:
+        return False
+    return any(
+        code == token or (token.isdigit() and code.startswith(token))
+        for token in scope
+    )
+
+
+def curated_break_periods(
+    state: Optional[str], industry_code: Optional[str] = None
+) -> Optional[dict[str, Any]]:
+    """This state's curated meal/rest PERIODS, or None to fall back to the
+    scalar thresholds. Industry-specific entries win over the general one."""
+    entries = _CURATED_BREAK_PERIODS.get((state or "").strip().upper())
+    if not entries:
+        return None
+    general: Optional[dict[str, Any]] = None
+    for entry in entries:
+        scope = entry.get("industries")
+        if not scope:
+            general = general or entry
+        elif _industry_matches(tuple(scope), industry_code):
+            return entry
+    return general
 
 # Codified catalog categories that carry scheduling law, for citation display.
 SCHEDULE_CATEGORIES = [
