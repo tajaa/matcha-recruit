@@ -393,6 +393,18 @@ render_dashboard() {
         printf '%b│%b %bSCHEDULER%b  last signal unavailable\n' \
             "$C_RAIL" "$C_RESET" "$C_MUTED$C_BOLD" "$C_RESET"
     fi
+    local timing_file timing_line
+    timing_file="${AUTOPR_DISPATCH_STATE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard/dispatch}/status.json"
+    timing_line="$(jq -r --argjson clock "$(date +%s)" '
+        if (.checked_at | type) != "number" or (.next_check_at | type) != "number" then
+            "Next check unknown (invalid scheduler status)"
+        elif $clock - .checked_at > 360 or .checked_at > $clock + 5 then
+            "Next check unknown (stale scheduler status)"
+        elif .next_check_at <= $clock then "Scheduler check due; awaiting heartbeat"
+        else "Next scheduler check in \((.next_check_at - $clock) | ceil)s (not a guaranteed pickup)" end
+    ' "$timing_file" 2>/dev/null || printf 'Next check unknown (update the dispatcher)')"
+    printf '%b│%b %s\n' "$C_RAIL" "$C_RESET" "$timing_line"
+    printf '%b│%b Start queued tickets: msandbox → AutoPR tab → Start now\n' "$C_RAIL" "$C_RESET"
     tui_rule
 
     active="$(printf '%s' "$runs" | jq -c \

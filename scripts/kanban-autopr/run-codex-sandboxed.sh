@@ -105,7 +105,7 @@ fi
 
 # Refuse to overwrite a checkout whose takeover was interrupted. This guard
 # also covers writing-only callers that share the lane's runtime directory.
-python3 "$HANDOFF_CONTROL" protect-workspace "$SANDBOX_WORKSPACE"
+python3 "$HANDOFF_CONTROL" protect-workspace "$SANDBOX_WORKSPACE" --repo "$REPO_ROOT" --project "$SANDBOX_PROJECT"
 
 # Stop only the dedicated AutoPR container before replacing its bind-mounted
 # clone. Named tool/dependency volumes remain intact between runs; the auth
@@ -255,6 +255,8 @@ CODEX_ARGS+=(-C "$MODEL_CONTAINER_ROOT" "$PROMPT_TEXT")
 # names an exhausted usage limit is a lane-wide condition, not a per-card one:
 # record it so the dispatcher stops launching runs until the quota returns.
 CODEX_TRANSCRIPT="$RUNTIME_ROOT/codex-last-run.log"
+PAUSE_RESULT="$RUNTIME_ROOT/operator-takeover.json"
+rm -f "$PAUSE_RESULT"
 # Called with errexit OFF (see below): `set` inside a function is global, so
 # toggling it here would re-arm errexit before the non-zero return reached
 # the caller and the script would die without recording anything.
@@ -277,6 +279,7 @@ run_codex_cli() {
             SANDBOX_CODEX_AUTH_FILE="$SANDBOX_CODEX_AUTH_FILE" \
             AUTOPR_MSANDBOX_BIN="$MSANDBOX_BIN" \
             AUTOPR_SANDBOX_PROJECT_NAME="$SANDBOX_PROJECT" \
+            AUTOPR_PAUSE_RESULT_FILE="$PAUSE_RESULT" \
             ${supervised[@]+"${supervised[@]}"} "$MSANDBOX_BIN" exec \
             codex "${CODEX_ARGS[@]}" 2>&1 | tee "$CODEX_TRANSCRIPT"
     fi
@@ -286,6 +289,11 @@ set +e
 run_codex_cli
 codex_rc=$?
 set -e
+if [ "$codex_rc" -eq 75 ]; then
+    [ -s "$PAUSE_RESULT" ] || die "model exited 75 without an acknowledged operator takeover"
+    printf 'Operator takeover acknowledged; checkout preserved outside this workflow.\n'
+    exit 75
+fi
 if [ "$codex_rc" -ne 0 ]; then
     if [ -x "$CODEX_BACKOFF" ]; then
         "$CODEX_BACKOFF" record "$CODEX_TRANSCRIPT" || true

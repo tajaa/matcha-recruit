@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from . import autopr_control as control
+from . import autopr_queue
 from .capabilities import redact
 from .dashboard_view import Row
 from .terminal_ui import plain
@@ -27,16 +28,21 @@ class AutoPRFeed:
         self.pending = False
         self.last_read = 0
         self.completed = queue.SimpleQueue()
+        self.cards = []
+        self.queue_note = "Choose Refresh queued tickets to load the board."
 
     def refresh(self, selected: str | None, *, force=False):
         try:
-            runs, activity, activity_id, error = self.completed.get_nowait()
+            runs, activity, activity_id, error, cards, queue_note = (
+                self.completed.get_nowait()
+            )
         except queue.Empty:
             pass
         else:
             self.runs, self.activity, self.error = runs, activity, error
             self.activity_id = activity_id
             self.pending = False
+            self.cards, self.queue_note = cards, queue_note
         if self.pending or (not force and time.monotonic() - self.last_read < 1):
             return
         self.pending = True
@@ -45,7 +51,9 @@ class AutoPRFeed:
         def read():
             runs, activity, error, activity_id = [], "", "", None
             try:
-                runs = control.list_runs()
+                warnings = []
+                runs = control.list_runs(warnings)
+                error = "\n".join(warnings)
                 run = next(
                     (item for item in runs if item.id == selected),
                     runs[0] if runs else None,
@@ -66,7 +74,10 @@ class AutoPRFeed:
             except (OSError, ValueError, TypeError) as exc:
                 error = str(exc)
             finally:
-                self.completed.put((runs, activity, activity_id, error))
+                cards, queue_note = autopr_queue.read_cards()
+                self.completed.put(
+                    (runs, activity, activity_id, error, cards, queue_note)
+                )
 
         threading.Thread(target=read, daemon=True, name="autopr-activity").start()
 
@@ -79,6 +90,28 @@ def rows(feed: AutoPRFeed, selected: str | None) -> list[Row]:
         ),
         Row("Open full AutoPR observer dashboard", "dashboard"),
     ]
+    result += [Row(line) for line in autopr_queue.scheduler_lines()]
+    result += [
+        Row(""),
+        Row("QUEUED TICKETS", tone="accent"),
+        Row(feed.queue_note),
+        Row("Refresh queued tickets", "autopr:refresh:queue"),
+    ]
+    held = {
+        item.task_id
+        for item in feed.runs
+        if item.status in control.HOLD_STATES and item.status != "ready"
+    }
+    for card in feed.cards:
+        title = plain(str(card.get("title", "Untitled")))
+        task_id = card["task_id"]
+        result.append(
+            Row(f"{title} · held by an existing run")
+            if task_id in held
+            else Row(f"Start now · {title}", f"autopr:start:{task_id}")
+        )
+    if not feed.cards:
+        result.append(Row("No queued tickets in the current snapshot."))
     if feed.error:
         result.append(Row(feed.error, tone="warning"))
     if not feed.runs:
@@ -103,6 +136,9 @@ def rows(feed: AutoPRFeed, selected: str | None) -> list[Row]:
         Row(run.title, tone="accent"),
         Row(f"Owner: {'you' if run.status == 'manual' else 'AutoPR / ' + run.status}"),
         Row(f"Model: {run.model} · effort: {run.effort}"),
+        Row("Time limit: none — manual takeover is outside the workflow timer")
+        if run.status == "manual"
+        else Row("Autonomous limits apply only while AutoPR owns the run"),
         Row(
             f"PR: #{run.pr_number}"
             if run.pr_number
@@ -113,9 +149,16 @@ def rows(feed: AutoPRFeed, selected: str | None) -> list[Row]:
     ]
     if run.error:
         result.append(Row(run.error, tone="warning"))
-    if run.status in ("running", "pausing", "blocked") and not control.supervisor_alive(
-        run
-    ):
+        if run.status == "returned":
+            result.append(
+                Row("Retry cleanup of this completed run", f"autopr:cleanup:{run.id}")
+            )
+    if run.status in (
+        "running",
+        "pausing",
+        "blocked",
+        "recovering",
+    ) and not control.supervisor_alive(run):
         result.append(
             Row(
                 "Recover interrupted run  ·  verify ownership and preserve its checkout",
@@ -198,6 +241,7 @@ def open_manual(run_id: str, repo: Path, *, shell=False):
         )
         if not exists:
             env = control.manual_environment(run, repo)
+            control.update_manual(run_id, runtime_created=True)
             control.command(
                 [str(repo / "scripts/agent-sandbox.sh"), "start"], env=env, timeout=300
             )
@@ -252,8 +296,7 @@ def open_manual(run_id: str, repo: Path, *, shell=False):
                 ["tmux", "new-session", "-d", "-s", target, shlex.join(argv)]
             )
             if not shell:
-                run.manual_started = True
-                control.save(run)
+                control.update_manual(run_id, manual_started=True)
     subprocess.run(["tmux", "attach-session", "-t", "=" + target], check=False)
 
 
@@ -281,6 +324,27 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
     from .manager import show
     from .wizard import choose
 
+    if action == "refresh":
+        return autopr_queue.refresh(repo)
+    if action == "cleanup":
+        with control.runtime_locked(run_id):
+            run = control.load(run_id)
+            if run.status != "returned":
+                raise ValueError("Only completed hand-backs can be cleaned up.")
+            control.archive_checkout(run)
+            return (
+                control.load(run_id).error
+                or "Cleanup complete; recovery archive retained."
+            )
+    if action == "start":
+        if not choose(
+            "Request immediate pickup of this queued ticket? Active runs and usage limits still apply.",
+            [("Cancel", False), ("Start ticket", True)],
+            reader=reader,
+            output=output,
+        ):
+            return "Ticket unchanged."
+        return autopr_queue.start(run_id, repo)
     if action == "take":
         control.request_takeover(run_id)
         return "Takeover requested. The run will appear as yours once its model has stopped."
@@ -314,14 +378,7 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
         )
         if effort is None:
             return "Model unchanged."
-        control.model_settings(model, effort)
-        with control.runtime_locked(run_id):
-            current = control.load(run_id)
-            if current.status != "manual":
-                raise ValueError("This run is no longer yours to configure.")
-            control.stop_manual(current, repo)
-            current.model, current.effort = model, effort
-            control.save(current)
+        control.configure(run_id, model, effort, repo)
         return "Model saved. Open your Codex session to continue with it."
     elif action == "return":
         note = reader("What should AutoPR do next? ").strip()
@@ -356,33 +413,40 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
                 if current.status != "preparing":
                     raise ValueError("Hand-back advanced; refresh its state first.")
                 control.stop_manual(current, repo)
-                current.status = "manual"
-                control.save(current)
+                with control.locked():
+                    current = control.load(run_id)
+                    if current.status != "preparing":
+                        raise ValueError("Hand-back advanced; refresh its state first.")
+                    current.status = "manual"
+                    control.save(current)
             return "Interrupted hand-back recovered; your checkout is yours again."
         if current.status == "resuming":
             if not current.resumed_by.isdigit():
-                raise ValueError(
-                    "A local continuation must finish before manual recovery."
-                )
+                if control.process_alive(current.continuation_pid):
+                    raise ValueError("The local continuation is still running.")
             # A crashed job may never reach its finalizer. Consult the actual
             # workflow before allowing another writer into the saved checkout.
             state = (
-                control.command(
-                    [
-                        "gh",
-                        "run",
-                        "view",
-                        current.resumed_by,
-                        "--repo",
-                        "tajaa/matcha-recruit",
-                        "--json",
-                        "status",
-                        "--jq",
-                        ".status",
-                    ]
+                "completed"
+                if not current.resumed_by.isdigit()
+                else (
+                    control.command(
+                        [
+                            "gh",
+                            "run",
+                            "view",
+                            current.resumed_by,
+                            "--repo",
+                            "tajaa/matcha-recruit",
+                            "--json",
+                            "status",
+                            "--jq",
+                            ".status",
+                        ]
+                    )
+                    .decode()
+                    .strip()
                 )
-                .decode()
-                .strip()
             )
             if state != "completed":
                 raise ValueError(

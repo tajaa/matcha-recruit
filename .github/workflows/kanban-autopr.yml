@@ -2,6 +2,11 @@ name: Kanban autopr
 
 on:
   workflow_dispatch:
+    inputs:
+      requested_task_id:
+        description: Explicit queued ticket to start (normal ownership and board gates still apply)
+        type: string
+        default: ''
 
 # This must run on Finch's Mac. The trusted job owns board/prod/GitHub access,
 # while Codex runs with broad permissions only inside a dedicated msandbox
@@ -28,6 +33,7 @@ concurrency:
 # `select.sh` carries the same value as its safe local/dashboard default.
 env:
   MAX_OPEN_IMPLEMENTATION_PRS: 10
+  AUTOPR_REQUESTED_TASK_ID: ${{ inputs.requested_task_id }}
 
 jobs:
   build:
@@ -59,7 +65,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # The Mac dispatcher is supposed to hold this lane to one pass per
-          # twenty minutes; a stale installed copy re-fired it every 66 s for
+          # five minutes; a stale installed copy re-fired it every 66 s for
           # hours. This floor lives on GitHub's side so no local clock bug can
           # spin the runner again. API failure proceeds (spend guard only).
           set +e
@@ -374,7 +380,7 @@ jobs:
 
       - name: Read validated triage decision
         id: triage
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true'
         run: |
           outcome="$(jq -r '.outcome' "$RUNNER_TEMP/decision.json")"
           safe_changes="$(jq -r '.safe_changes_present' "$RUNNER_TEMP/decision.json")"
@@ -384,7 +390,7 @@ jobs:
 
       - name: Check whether an open PR already covers this task
         id: coverage
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework' && steps.select.outputs.outcome != 'artifact'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes == 'true' && steps.select.outputs.mode != 'rework' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
@@ -414,7 +420,7 @@ jobs:
 
       - name: Verify (baseline vs branch)
         id: verify
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 8
         run: |
           "$AUTOPR_CONTROL_ROOT/error-autofix/verify.sh" > "$RUNNER_TEMP/verification.md"
@@ -422,12 +428,12 @@ jobs:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
       - name: Record verification deferred for questions or no-safe-action
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.outcome != 'artifact'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.triage.outputs.safe_changes != 'true' && steps.select.outputs.outcome != 'artifact'
         run: |
           printf '%s\n' '## Verification' '' 'Not run: this result contains no product diff and is awaiting requirements or a human-only action.' > "$RUNNER_TEMP/verification.md"
 
       - name: Write commit subject and card note
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         timeout-minutes: 5
         env:
           AUTOPR_MSANDBOX_BIN: ${{ github.workspace }}/scripts/agent-sandbox.sh
@@ -439,7 +445,8 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Publish PR, question draft, or no-spec marker
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
+        id: publish
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.coverage.outputs.covered != 'true' && steps.select.outputs.outcome != 'artifact'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
@@ -450,7 +457,7 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Publish research report
-        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.select.outputs.outcome == 'artifact'
+        if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.select.outputs.outcome == 'artifact'
         timeout-minutes: 5
         run: |
           # The default shell here is `bash -e`, not `bash -eo pipefail`: piping
@@ -469,6 +476,9 @@ jobs:
 
       - name: Cleanup
         if: always() && steps.select.outputs.skip == 'false'
+        env:
+          PUBLISHED_PRODUCT: ${{ steps.publish.outputs.published_product }}
+          PUBLISHED_PR: ${{ steps.publish.outputs.pr_number }}
         run: |
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
@@ -478,7 +488,9 @@ jobs:
           # Publication completed before releasing operator ownership. On any
           # failure the immutable hand-back remains available for an explicit retry.
           handoff_result=()
-          if [ "${{ job.status }}" = success ]; then handoff_result=(--success); fi
+          if [ "$PUBLISHED_PRODUCT" = true ] && [[ "$PUBLISHED_PR" =~ ^[0-9]+$ ]]; then
+            handoff_result=(--published-pr "$PUBLISHED_PR")
+          fi
           python3 "$AUTOPR_CONTROL_ROOT/msandbox/autopr_control.py" finish \
             "$(jq -r '.task_id' "$RUNNER_TEMP/card.json")" "${handoff_result[@]}"
           exit "$cleanup_rc"

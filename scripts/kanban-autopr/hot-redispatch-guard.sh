@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # GitHub-side floor between two Kanban runs, independent of the Mac dispatcher.
 #
-# The dispatcher is supposed to hold the scheduled Kanban lane to one pass per
-# twenty minutes and forced runs to one per five. A stale installed copy of it
+# The dispatcher holds routine Kanban passes to five-minute eligibility.
+# Explicit ticket requests bypass this spend floor. A stale installed copy
 # re-fired a 35-second no-op run every 66 seconds for hours (2026-09-06); the
 # workflow had no defense of its own. This runs first in the job and answers:
 #
@@ -20,6 +20,12 @@ FLOOR_SECONDS="${AUTOPR_HOT_REDISPATCH_FLOOR_SECONDS:-300}"
 NOW="${AUTOPR_GUARD_NOW:-$(date +%s)}"
 GH_BIN="${AUTOPR_GH_BIN:-gh}"
 HOT=3
+
+# Explicit operator requests bypass only this routine spend floor. Selection
+# still requires the exact card's live pending request and all ownership gates.
+if [[ "${AUTOPR_REQUESTED_TASK_ID:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+    exit 0
+fi
 
 iso_to_epoch() {
     local iso="${1%%.*}"

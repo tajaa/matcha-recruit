@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import errno
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ from unittest import mock
 
 from scripts.msandbox import autopr_control as control
 from scripts.msandbox import autopr_ui
+from scripts.msandbox import autopr_queue
 
 
 class AutoPRTests(unittest.TestCase):
@@ -198,7 +200,12 @@ class AutoPRTests(unittest.TestCase):
         stop.write_text("#!/bin/sh\nexit 0\n")
         stop.chmod(0o755)
         child = "import pathlib,time; pathlib.Path('new.py').write_text('partial'); time.sleep(30)"
-        env = {**os.environ, "AUTOPR_MSANDBOX_BIN": str(stop)}
+        acknowledgment = self.path / "takeover.json"
+        env = {
+            **os.environ,
+            "AUTOPR_MSANDBOX_BIN": str(stop),
+            "AUTOPR_PAUSE_RESULT_FILE": str(acknowledgment),
+        }
         with (self.path / "output").open("wb") as output:
             process = subprocess.Popen(
                 [
@@ -233,6 +240,9 @@ class AutoPRTests(unittest.TestCase):
             self.assertEqual(process.wait(timeout=5), control.PAUSED_EXIT)
         current = control.load(run.id)
         self.assertEqual(current.status, "manual")
+        self.assertEqual(
+            json.loads(acknowledgment.read_text()), {"run_id": run.id, "paused": True}
+        )
         self.assertEqual((Path(current.workspace) / "new.py").read_text(), "partial")
         self.assertFalse(workspace.exists())
         self.assertEqual((self.repo / "code.py").read_text(), "original\n")
@@ -602,6 +612,196 @@ class AutoPRTests(unittest.TestCase):
             )
             stop.assert_called_once()
         self.assertEqual(control.load(run.id).status, "manual")
+
+    def test_corrupt_entry_is_reported_without_hiding_healthy_runs(self):
+        run = self.run_record()
+        (control.root() / "runs/stray").mkdir()
+        warnings = []
+        self.assertEqual([item.id for item in control.list_runs(warnings)], [run.id])
+        self.assertIn("stray", warnings[0])
+
+    def test_protection_normalizes_path_aliases(self):
+        run = self.run_record(status="running")
+        with self.assertRaises(ValueError):
+            control.protect_workspace(run.workspace + "//./")
+
+    def test_dead_owner_is_preserved_and_frees_shared_path_without_global_lock(self):
+        run = self.run_record(status="running")
+        destination = Path(run.workspace)
+        source = self.path / "runtime"
+        destination.rename(source)
+        run.workspace = str(source)
+        control.save(run)
+        control.atomic(
+            source / ".git/autopr-io/control-run.json", json.dumps({"run_id": run.id})
+        )
+
+        def stopped(*args, **kwargs):
+            # Reentrant acquisition uses another FD and would fail if recovery
+            # still held the global flock across Docker.
+            with control.locked():
+                self.assertEqual(control.load(run.id).status, "recovering")
+
+        with mock.patch.object(control, "command", side_effect=stopped):
+            control.protect_workspace(str(source), self.repo, run.project)
+        self.assertFalse(source.exists())
+        self.assertTrue(destination.exists())
+        self.assertEqual(control.load(run.id).status, "manual")
+
+    def test_cross_filesystem_transfer_preserves_symlinks_and_copy_failure_source(self):
+        source = self.path / "source"
+        source.mkdir()
+        (source / "file").write_text("edits")
+        (source / "link").symlink_to("file")
+        destination = self.path / "destination"
+        rename = Path.rename
+
+        def cross_volume(path, target):
+            if path == source:
+                raise OSError(errno.EXDEV, "different volume")
+            return rename(path, target)
+
+        with (
+            mock.patch.object(Path, "rename", cross_volume),
+            mock.patch.object(
+                control.shutil, "copytree", side_effect=OSError("disk full")
+            ),
+        ):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                control.transfer_checkout(source, destination)
+        self.assertTrue(source.exists())
+        self.assertFalse(destination.exists())
+        with mock.patch.object(Path, "rename", cross_volume):
+            control.transfer_checkout(source, destination)
+        self.assertFalse(source.exists())
+        self.assertTrue((destination / "link").is_symlink())
+        self.assertEqual((destination / "file").read_text(), "edits")
+
+    def test_manual_update_rejects_stale_ownership_and_preserves_other_fields(self):
+        run = self.run_record()
+        run.note = "latest operator note"
+        control.save(run)
+        with control.runtime_locked(run.id):
+            control.update_manual(run.id, manual_started=True)
+        self.assertEqual(control.load(run.id).note, run.note)
+        run.status = "resuming"
+        control.save(run)
+        with self.assertRaises(ValueError):
+            control.configure(run.id, "gpt-5.6-luna", "high")
+        self.assertEqual(control.load(run.id).status, "resuming")
+
+    def test_local_identity_and_dead_local_continuation_reclaim(self):
+        with mock.patch.dict(
+            os.environ, {"GITHUB_RUN_ID": "", "AUTOPR_INVOCATION_ID": "local-test"}
+        ):
+            self.assertEqual(control.workflow_identity(), "local-test")
+        run = self.run_record(status="resuming")
+        run.resumed_by = "local-test"
+        control.save(run)
+        with mock.patch.object(control, "command") as command:
+            autopr_ui.manage(
+                "reclaim", run.id, self.repo, reader=None, output=io.StringIO()
+            )
+        command.assert_not_called()
+        self.assertEqual(control.load(run.id).status, "manual")
+
+    def test_no_publication_keeps_checkout_and_cleanup_targets_only_exact_project(self):
+        run = self.run_record()
+        with mock.patch.object(control, "stop_manual"):
+            control.prepare_return(run.id, self.repo, "continue")
+        control.continuation(run.task_id, "local-test")
+        control.finish_return(run.task_id, "local-test", False)
+        self.assertTrue(Path(run.workspace).exists())
+        self.assertEqual(control.load(run.id).status, "ready")
+        run = control.load(run.id)
+        run.runtime_created = False  # legacy shell-only takeover
+        run.project = f"matcha-autopr-manual-{run.id[:12]}"
+        control.save(run)
+        with mock.patch.object(control, "command") as command:
+            control.cleanup_resources(run)
+        args = command.call_args.args[0]
+        self.assertEqual(args[-2:], ["down", "--volumes"])
+        self.assertIn(run.project, args)
+        self.assertEqual(
+            command.call_args.kwargs["env"]["SANDBOX_SERVER_VENV_VOLUME"],
+            run.project + "_server_venv",
+        )
+        self.assertTrue(control.load(run.id).resources_cleaned)
+
+    def test_queue_countdown_reports_stale_and_blocked_without_network(self):
+        with mock.patch.dict(
+            os.environ, {"AUTOPR_DISPATCH_STATE_DIR": str(self.path / "dispatch")}
+        ):
+            status = self.path / "dispatch/status.json"
+            control.atomic(
+                status,
+                json.dumps(
+                    dict(
+                        checked_at=1000,
+                        next_check_at=1060,
+                        eligible_at=1200,
+                        action="skip",
+                        reason="active-autopr-workflow",
+                    )
+                ),
+            )
+            self.assertIn("00:30", autopr_queue.scheduler_lines(now=1030)[0])
+            self.assertIn("another AutoPR", autopr_queue.scheduler_lines(now=1030)[1])
+            self.assertIn("stale", autopr_queue.scheduler_lines(now=1500)[0])
+            control.atomic(status, "[]")
+            self.assertIn("unknown", autopr_queue.scheduler_lines(now=1030)[0])
+
+    def test_queue_start_uses_exact_validated_identity_and_rejects_held_task(self):
+        run = self.run_record()
+        card = {
+            "task_id": run.task_id,
+            "project_id": run.project_id,
+            "title": "test",
+            "board_column": "todo",
+        }
+        with mock.patch.dict(
+            os.environ, {"AUTOPR_CARD_SNAPSHOT": str(self.path / "cards.json")}
+        ):
+            control.atomic(
+                self.path / "cards.json", json.dumps([card, {"task_id": "bad"}])
+            )
+            self.assertEqual(autopr_queue.read_cards()[0], [card])
+            with mock.patch.object(
+                control, "command", return_value=b"queued"
+            ) as command:
+                with self.assertRaisesRegex(ValueError, "operator control"):
+                    autopr_queue.start(run.task_id, self.repo)
+                command.assert_not_called()
+                run.status = "ready"
+                control.save(run)
+                autopr_queue.start(run.task_id, self.repo)
+                self.assertEqual(
+                    command.call_args.args[0][-2:], [run.project_id, run.task_id]
+                )
+
+    def test_acknowledged_pause_skips_report_validation_and_emits_workflow_output(self):
+        script = Path(__file__).resolve().parents[1] / "kanban-autopr/investigate.sh"
+        function = script.read_text().split("codex_pass() {", 1)[1].split("\n}\n", 1)[0]
+        output = self.path / "workflow-output"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "run_codex() { return 75; }; stop_inflight_snapshots() { :; }; live_log_ready=false; codex_pass() {"
+                + function
+                + "\n}; codex_pass; exit 19",
+            ],
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_STEP_SUMMARY": str(self.path / "summary"),
+            },
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output.read_text(), "paused=true\n")
+        self.assertIn("no time limit", result.stdout)
 
     def test_conflicting_handback_never_runs_model_or_modifies_source(self):
         result = self.bridge(b"not a patch\n")

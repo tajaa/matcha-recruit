@@ -523,3 +523,10 @@ fi
 post_reconsideration_reply "$published_pr" "$origin_note"
 
 echo "Published PR #$published_pr for task $TASK_ID ($MODE, $OUTCOME)"
+if [ -n "${GITHUB_OUTPUT:-}" ] && [ "$has_diff" = true ]; then
+    case "$OUTCOME" in
+        implementation|partial_implementation)
+            printf 'published_product=true\npr_number=%s\n' "$published_pr" >> "$GITHUB_OUTPUT"
+            ;;
+    esac
+fi

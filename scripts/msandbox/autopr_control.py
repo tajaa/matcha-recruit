@@ -8,9 +8,11 @@ a private trusted Git index; the normal AutoPR patch/publish guards still apply.
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -29,7 +31,16 @@ from pathlib import Path
 PAUSED_EXIT = 75
 MAX_PATCH = 5 * 1024 * 1024
 MAX_NOTE = 16000
-HOLD_STATES = {"pausing", "manual", "preparing", "ready", "resuming", "blocked"}
+HOLD_STATES = {
+    "running",
+    "pausing",
+    "manual",
+    "preparing",
+    "ready",
+    "resuming",
+    "blocked",
+    "recovering",
+}
 EFFORTS = ("low", "medium", "high", "xhigh")
 MODEL_CHOICES = ("gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5")
 
@@ -59,14 +70,77 @@ def read_json(path: Path):
     return json.loads(payload)
 
 
-def protect_workspace(workspace: str):
-    if any(
-        run.workspace == workspace and run.status in HOLD_STATES | {"running"}
-        for run in list_runs()
-    ):
-        raise ValueError(
-            "This checkout has an active or interrupted owner. Recover it before replacing it."
+def normalized_path(path: str | Path) -> Path:
+    return Path(path).resolve()
+
+
+def protect_workspace(
+    workspace: str, repo: Path | None = None, project: str | None = None
+):
+    """Recover dead owners before reuse; never delete an unknown owner's files."""
+    source = normalized_path(workspace)
+    warnings = []
+    matches = [
+        run
+        for run in list_runs(warnings)
+        if normalized_path(run.workspace) == source and run.status in HOLD_STATES
+    ]
+    for run in matches:
+        if supervisor_alive(run) or repo is None:
+            raise ValueError(
+                "This checkout has an active or interrupted owner. Recover it before replacing it."
+            )
+        recover(run.id, repo)
+    # An unreadable host record cannot make the source safe to erase. Its
+    # diagnostic marker is not authority to stop a different Compose project.
+    marker = source / ".git/autopr-io/control-run.json"
+    if not source.exists() or (not marker.exists() and not warnings):
+        return
+    try:
+        owner = load(read_json(marker)["run_id"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        if (
+            repo is None
+            or not project
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,80}", project)
+        ):
+            raise ValueError(
+                "Unknown checkout owner; exact sandbox identity is required for preservation."
+            )
+        ids = (
+            command(
+                [
+                    "docker",
+                    "ps",
+                    "-aq",
+                    "--filter",
+                    f"label=com.docker.compose.project={project}",
+                    "--filter",
+                    "label=com.docker.compose.service=workspace",
+                ]
+            )
+            .decode()
+            .split()
         )
+        if ids:
+            command(["docker", "stop", *ids])
+        destination = source.with_name(f"preserved-unknown-{uuid.uuid4().hex}")
+        source.rename(destination)
+        print(
+            f"AutoPR: preserved unknown owner's checkout at {destination}",
+            file=sys.stderr,
+        )
+    else:
+        if owner.status in HOLD_STATES and normalized_path(owner.workspace) == source:
+            raise ValueError("This checkout is still held; refusing replacement.")
+
+
+def workflow_identity() -> str:
+    return (
+        os.environ.get("GITHUB_RUN_ID")
+        or os.environ.get("AUTOPR_INVOCATION_ID")
+        or "local"
+    )
 
 
 def atomic(path: Path, payload: str | bytes):
@@ -136,6 +210,9 @@ class Run:
     patch_sha256: str = ""
     resumed_by: str = ""
     manual_started: bool = False
+    runtime_created: bool = False
+    resources_cleaned: bool = False
+    continuation_pid: int = 0
 
 
 def load(run_id: str) -> Run:
@@ -147,6 +224,28 @@ def load(run_id: str) -> Run:
         raise ValueError("invalid AutoPR run metadata")
     uuid.UUID(run.task_id)
     uuid.UUID(run.project_id)
+    for key in (
+        "workspace",
+        "repo",
+        "status",
+        "project",
+        "title",
+        "model",
+        "effort",
+        "workflow_id",
+        "resumed_by",
+        "error",
+    ):
+        if not isinstance(getattr(run, key), str):
+            raise ValueError(f"invalid run {key}")
+    if not isinstance(run.updated_at, (int, float)) or not math.isfinite(
+        run.updated_at
+    ):
+        raise ValueError("invalid run timestamp")
+    if not isinstance(run.supervisor_pid, int) or not isinstance(
+        run.continuation_pid, int
+    ):
+        raise ValueError("invalid run process identity")
     return run
 
 
@@ -157,13 +256,22 @@ def save(run: Run):
     )
 
 
-def list_runs() -> list[Run]:
+def list_runs(warnings: list[str] | None = None) -> list[Run]:
     directory = root() / "runs"
     if not directory.exists():
         return []
-    result = [
-        load(path.name) for path in directory.iterdir() if not path.name.startswith(".")
-    ]
+    result = []
+    for path in directory.iterdir():
+        if path.name.startswith("."):
+            continue
+        try:
+            result.append(load(path.name))
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            warning = f"Unreadable AutoPR entry {path.name}: {type(exc).__name__}; checkout preservation guards remain active."
+            if warnings is not None:
+                warnings.append(warning)
+            else:
+                print(warning, file=sys.stderr)
     return sorted(result, key=lambda run: run.updated_at, reverse=True)
 
 
@@ -196,10 +304,14 @@ def request_takeover(run_id: str):
 
 
 def supervisor_alive(run: Run) -> bool:
-    if run.supervisor_pid <= 0:
+    return process_alive(run.supervisor_pid)
+
+
+def process_alive(pid: int) -> bool:
+    if pid <= 0:
         return False
     try:
-        os.kill(run.supervisor_pid, 0)
+        os.kill(pid, 0)
     except ProcessLookupError:
         return False
     return True
@@ -214,14 +326,27 @@ def model_settings(model: str, effort: str):
         raise ValueError("Unsupported reasoning effort")
 
 
-def configure(run_id: str, model: str, effort: str):
-    model_settings(model, effort)
-    with runtime_locked(run_id), locked():
+def update_manual(run_id: str, **changes) -> Run:
+    """Call while holding runtime_locked; re-read at the ownership boundary."""
+    with locked():
         run = load(run_id)
         if run.status != "manual":
-            raise ValueError("Take over the run before changing its model.")
-        run.model, run.effort = model, effort
+            raise ValueError("This run is no longer under manual control.")
+        for key, value in changes.items():
+            if key not in {"manual_started", "runtime_created", "model", "effort"}:
+                raise ValueError("Unsupported manual setting")
+            setattr(run, key, value)
         save(run)
+        return run
+
+
+def configure(run_id: str, model: str, effort: str, repo: Path | None = None):
+    model_settings(model, effort)
+    with runtime_locked(run_id):
+        run = update_manual(run_id)
+        if repo is not None:
+            stop_manual(run, repo)
+        update_manual(run_id, model=model, effort=effort)
 
 
 def command(argv, *, env=None, timeout=60):
@@ -258,7 +383,7 @@ def supervisor(
         project,
         os.environ.get("AUTOPR_CODEX_MODEL", "gpt-5.6-sol"),
         os.environ.get("AUTOPR_CODEX_REASONING_EFFORT", "medium"),
-        workflow_id=os.environ.get("GITHUB_RUN_ID", ""),
+        workflow_id=workflow_identity(),
         pr_number=card.get("pr_number"),
         supervisor_pid=os.getpid(),
     )
@@ -288,11 +413,16 @@ def supervisor(
                 if chunk:
                     sys.stdout.buffer.write(chunk)
                     sys.stdout.buffer.flush()
-                with locked():
-                    run = load(run.id)
-                    stopping = run.status == "pausing"
-                    done = proc.poll()
-                    if not stopping and done is not None:
+                # State is atomically replaced by writers. Reading it needs
+                # no global lock; acquire that only for the terminal CAS.
+                run = load(run.id)
+                stopping = run.status == "pausing"
+                done = proc.poll()
+                if not stopping and done is not None:
+                    with locked():
+                        run = load(run.id)
+                        if run.status == "pausing":
+                            continue
                         run.status = "model_done" if done == 0 else "failed"
                         run.error = "" if done == 0 else f"Model exited {done}"
                         save(run)
@@ -312,7 +442,7 @@ def supervisor(
                         os.killpg(proc.pid, signal.SIGTERM)
                     proc.wait(timeout=15)
                     destination = run_dir(run.id) / "workspace"
-                    workspace.rename(destination)
+                    transfer_checkout(workspace, destination)
                     with locked():
                         for prior in list_runs():
                             if (
@@ -328,12 +458,18 @@ def supervisor(
                         run.status = "manual"
                         run.supervisor_pid = 0
                         save(run)
+                    if os.environ.get("AUTOPR_PAUSE_RESULT_FILE"):
+                        atomic(
+                            Path(os.environ["AUTOPR_PAUSE_RESULT_FILE"]),
+                            json.dumps({"run_id": run.id, "paused": True}),
+                        )
                     print(
                         f"\nAutoPR paused. Checkout preserved for operator takeover ({run.id}).",
                         flush=True,
                     )
                     return PAUSED_EXIT
-                time.sleep(0.2)
+                if not chunk:
+                    time.sleep(0.2)
     except BaseException as exc:
         with locked():
             run = load(run.id)
@@ -405,22 +541,38 @@ def manual_environment(
     return env
 
 
+def transfer_checkout(source: Path, destination: Path):
+    """Publish a complete copy before removing the source across filesystems."""
+    if destination.exists():
+        raise ValueError(
+            "Transfer destination already exists; refusing to overwrite it"
+        )
+    try:
+        source.rename(destination)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        temporary = Path(tempfile.mkdtemp(prefix=".transfer-", dir=destination.parent))
+        try:
+            shutil.copytree(source, temporary / "workspace", symlinks=True)
+            (temporary / "workspace").rename(destination)
+            shutil.rmtree(source)
+        finally:
+            shutil.rmtree(temporary)
+
+
 def recover(run_id: str, repo: Path):
-    with locked():
-        run = load(run_id)
-        if run.status not in ("blocked", "running", "pausing") or supervisor_alive(run):
-            raise ValueError(
-                "Recovery requires an interrupted supervisor; a live run must acknowledge takeover."
-            )
-        source = Path(run.workspace)
-        destination = run_dir(run.id) / "workspace"
-        # A shared runtime may now belong to a different card. Never stop that
-        # card's container or mistake its files for this interrupted run.
-        if source != destination and not destination.exists():
-            stamp = source / ".git/autopr-io/control-run.json"
-            if read_json(stamp) != {"run_id": run.id}:
+    with runtime_locked(run_id):
+        with locked():
+            run = load(run_id)
+            if run.status not in (
+                "blocked",
+                "running",
+                "pausing",
+                "recovering",
+            ) or supervisor_alive(run):
                 raise ValueError(
-                    "This runtime belongs to another run. Its files were not touched."
+                    "Recovery requires an interrupted supervisor; a live run must acknowledge takeover."
                 )
             if any(
                 other.id != run.id
@@ -430,15 +582,53 @@ def recover(run_id: str, repo: Path):
                 for other in list_runs()
             ):
                 raise ValueError("Another live run owns this container.")
+            source = normalized_path(run.workspace)
+            destination = run_dir(run.id) / "workspace"
+            run.status = "recovering"
+            save(run)
+        try:
+            if source != destination and not destination.exists():
+                if read_json(source / ".git/autopr-io/control-run.json") != {
+                    "run_id": run.id
+                }:
+                    raise ValueError(
+                        "This runtime belongs to another run. Its files were not touched."
+                    )
             command(
                 [str(repo / "scripts/agent-sandbox.sh"), "stop"],
                 env=manual_environment(run, repo, transferred=False, stopping=True),
             )
-            source.rename(destination)
-        run.workspace = str(destination)
-        run.project = f"matcha-autopr-manual-{run.id[:12]}"
-        run.status, run.error, run.supervisor_pid = "manual", "", 0
-        save(run)
+            if source != destination and not destination.exists():
+                # Free the shared runtime with a same-filesystem rename first.
+                # Even a later copy failure cannot wedge unrelated tickets.
+                preserved = source.with_name(f"preserved-{run.id}")
+                if source != preserved:
+                    source.rename(preserved)
+                    source = preserved
+                    with locked():
+                        run = load(run_id)
+                        run.workspace = str(source)
+                        save(run)
+                transfer_checkout(source, destination)
+            with locked():
+                run = load(run_id)
+                run.workspace = str(destination)
+                run.project = f"matcha-autopr-manual-{run.id[:12]}"
+                run.status, run.error, run.supervisor_pid = (
+                    "manual",
+                    "Recovered interrupted run; no manual time limit.",
+                    0,
+                )
+                save(run)
+        except BaseException as exc:
+            with locked():
+                run = load(run_id)
+                run.status, run.error = (
+                    "blocked",
+                    f"Recovery stopped: {exc}. Files preserved.",
+                )
+                save(run)
+            raise
 
 
 def tmux_name(run: Run) -> str:
@@ -582,11 +772,14 @@ def continuation(task_id: str, workflow_id: str) -> Run | None:
                 "Saved hand-back patch changed; refusing automatic continuation."
             )
         run.status, run.resumed_by = "resuming", workflow_id
+        run.continuation_pid = int(os.environ.get("AUTOPR_CONTINUATION_PID", "0"))
         save(run)
         return run
 
 
-def finish_return(task_id: str, workflow_id: str, success: bool):
+def finish_return(
+    task_id: str, workflow_id: str, success: bool, pr_number: int | None = None
+):
     if not (root() / "runs").exists():
         return
     with locked():
@@ -596,21 +789,25 @@ def finish_return(task_id: str, workflow_id: str, success: bool):
                 and item.workflow_id == workflow_id
                 and item.status == "model_done"
             ):
-                item.status = "completed" if success else "failed"
+                item.status = "completed" if success else "needs_attention"
+                if pr_number:
+                    item.pr_number = pr_number
                 item.error = (
                     ""
                     if success
-                    else "The workflow did not complete publication. View its run for details."
+                    else "No product PR publication was confirmed. View the workflow outcome."
                 )
                 save(item)
         run = held_task(task_id)
         if not run or run.status != "resuming" or run.resumed_by != workflow_id:
             return
         run.status = "returned" if success else "ready"
+        if pr_number:
+            run.pr_number = pr_number
         run.error = (
             ""
             if success
-            else "Continuation did not finish. Saved edits remain available; retry hand-back."
+            else "No product PR publication was confirmed. Saved edits remain available for manual work or another hand-back."
         )
         save(run)
     if success:
@@ -642,7 +839,12 @@ def archive_checkout(run: Run):
             backup.add(workspace, arcname="workspace")
         os.chmod(temporary, 0o600)
         os.replace(temporary, archive)
+        cleanup_resources(run)
         shutil.rmtree(workspace)
+        with locked():
+            current = load(run.id)
+            current.error = ""
+            save(current)
     except (
         OSError,
         ValueError,
@@ -660,6 +862,38 @@ def archive_checkout(run: Run):
         temporary.unlink(missing_ok=True)
 
 
+def cleanup_resources(run: Run):
+    if run.resources_cleaned:
+        return
+    if run.project != f"matcha-autopr-manual-{run.id[:12]}":
+        if not (run.runtime_created or run.manual_started):
+            return
+        raise ValueError("Refusing cleanup outside this run's exact managed namespace")
+    # Old shell-only takeovers predate runtime_created. Their deterministic
+    # namespace is still ours; down is harmless when it contains no resources.
+    env = manual_environment(run, Path(run.repo), stopping=True)
+    command(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            run.project,
+            "--file",
+            str(Path(run.repo) / "docker-compose.sandbox.yml"),
+            "--file",
+            str(Path(run.repo) / "docker-compose.autopr-sandbox.yml"),
+            "down",
+            "--volumes",
+        ],
+        env=env,
+        timeout=90,
+    )
+    with locked():
+        current = load(run.id)
+        current.resources_cleaned = True
+        save(current)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="action", required=True)
@@ -671,13 +905,17 @@ def main() -> int:
     p.add_argument("argv", nargs=argparse.REMAINDER)
     p = sub.add_parser("held")
     p.add_argument("task")
+    sub.add_parser("held-tasks")
     p = sub.add_parser("continue")
     p.add_argument("task")
     p = sub.add_parser("finish")
     p.add_argument("task")
     p.add_argument("--success", action="store_true")
+    p.add_argument("--published-pr", type=int)
     p = sub.add_parser("protect-workspace")
     p.add_argument("workspace")
+    p.add_argument("--repo", type=Path)
+    p.add_argument("--project")
     args = parser.parse_args()
     if args.action == "supervise":
         return supervisor(
@@ -686,8 +924,20 @@ def main() -> int:
     if args.action == "held":
         run = held_task(args.task)
         print("held" if run and run.status != "ready" else "available")
+    elif args.action == "held-tasks":
+        print(
+            json.dumps(
+                sorted(
+                    {
+                        run.task_id
+                        for run in list_runs()
+                        if run.status in HOLD_STATES - {"ready"}
+                    }
+                )
+            )
+        )
     elif args.action == "continue":
-        run = continuation(args.task, os.environ.get("GITHUB_RUN_ID", "local"))
+        run = continuation(args.task, workflow_identity())
         print(
             json.dumps(
                 {
@@ -701,9 +951,13 @@ def main() -> int:
             )
         )
     elif args.action == "protect-workspace":
-        protect_workspace(args.workspace)
+        protect_workspace(args.workspace, args.repo, args.project)
     else:
-        finish_return(args.task, os.environ.get("GITHUB_RUN_ID", "local"), args.success)
+        if args.published_pr is not None and args.published_pr <= 0:
+            raise ValueError("Invalid published PR number")
+        finish_return(
+            args.task, workflow_identity(), bool(args.published_pr), args.published_pr
+        )
     return 0
 
 
