@@ -218,7 +218,7 @@ def _fake_call(name, args):
 def _fake_response(calls=None, text=None):
     return LunaResponse(
         response_id="resp_test", text=text,
-        function_calls=list(calls or []), output_items=[], usage={},
+        function_calls=list(calls or []), usage={},
     )
 
 

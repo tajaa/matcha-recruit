@@ -140,10 +140,6 @@ class LunaResponse:
     # re-paired on the tool NAME, which mispairs two concurrent calls to the
     # same tool with no warning.
     function_calls: list[dict[str, Any]] = field(default_factory=list)
-    # Every output item verbatim — including `reasoning` — because the loop
-    # feeds the assistant turn back as history and dropping items there lost
-    # text that accompanied a tool call.
-    output_items: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     status: str | None = None
     incomplete_details: dict[str, Any] | None = None
@@ -257,6 +253,15 @@ class LunaSession:
             before_request=before_request, after_request=after_request,
         )
 
+        # Record FIRST. The call is billed the moment it returns, and the
+        # validation below can raise — a malformed function call must not also
+        # cost a missing ledger row, which is the one invariant every exit path
+        # in `_post` already keeps.
+        await record_openai_response(
+            model=model,
+            latency_ms=int((time.monotonic() - attempt_started) * 1000),
+            response=data,
+        )
         # An id-less response keeps the existing chain rather than resetting it.
         self._previous_response_id = data.get("id") or self._previous_response_id
         calls = []
@@ -281,16 +286,10 @@ class LunaSession:
                 ) from exc
             calls.append({"call_id": call_id, "name": name, "arguments": arguments})
 
-        await record_openai_response(
-            model=model,
-            latency_ms=int((time.monotonic() - attempt_started) * 1000),
-            response=data,
-        )
         return LunaResponse(
             response_id=data.get("id"),
             text=_response_text(data),
             function_calls=calls,
-            output_items=[item for item in data.get("output", []) or [] if isinstance(item, dict)],
             usage=data.get("usage") or {},
             status=data.get("status"),
             incomplete_details=data.get("incomplete_details"),

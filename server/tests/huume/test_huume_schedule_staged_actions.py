@@ -69,7 +69,6 @@ def _fake_response(*, calls=None, text=None):
             {"call_id": c["call_id"], "name": c["name"], "arguments": json.loads(c["arguments"])}
             for c in (calls or [])
         ],
-        output_items=list(calls or []),
         usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
     )
 

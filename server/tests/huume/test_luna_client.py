@@ -276,8 +276,13 @@ async def test_json_response_format_is_opt_in(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_function_call_without_a_call_id_is_refused_not_deferred(monkeypatch):
     """The adapter used to let this through and fail one round later, on a
-    different turn's watch, because it re-paired results by tool name."""
+    different turn's watch, because it re-paired results by tool name.
+
+    The refusal must not also cost the usage row: the call is billed the moment
+    it returns, whatever the payload turns out to contain.
+    """
     sent = {}
+    recorded = []
 
     class Client:
         async def __aenter__(self):
@@ -295,8 +300,8 @@ async def test_a_function_call_without_a_call_id_is_refused_not_deferred(monkeyp
                 ]},
             )
 
-    async def record(**_kwargs):
-        return None
+    async def record(**kwargs):
+        recorded.append(kwargs)
 
     monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="k"))
     monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
@@ -306,11 +311,15 @@ async def test_a_function_call_without_a_call_id_is_refused_not_deferred(monkeyp
         await LunaSession().create_response(
             model="gpt-5.6-luna", input=[text_item("user", "hi")], instructions="",
         )
+    assert len(recorded) == 1 and recorded[0]["response"]["id"] == "resp_1"
 
 
 @pytest.mark.asyncio
 async def test_unparsable_tool_arguments_are_refused_not_silently_emptied(monkeypatch):
-    """`{}` reads to the loop as a deliberate no-argument call."""
+    """`{}` reads to the loop as a deliberate no-argument call. Billed either
+    way, so the ledger row still has to be written."""
+    recorded = []
+
     class Client:
         async def __aenter__(self):
             return self
@@ -327,8 +336,8 @@ async def test_unparsable_tool_arguments_are_refused_not_silently_emptied(monkey
                 ]},
             )
 
-    async def record(**_kwargs):
-        return None
+    async def record(**kwargs):
+        recorded.append(kwargs)
 
     monkeypatch.setattr(luna_client, "get_settings", lambda: SimpleNamespace(openai_api_key="k"))
     monkeypatch.setattr(luna_client.httpx, "AsyncClient", lambda **_kwargs: Client())
@@ -338,6 +347,7 @@ async def test_unparsable_tool_arguments_are_refused_not_silently_emptied(monkey
         await LunaSession().create_response(
             model="gpt-5.6-luna", input=[text_item("user", "hi")], instructions="",
         )
+    assert len(recorded) == 1 and recorded[0]["response"]["id"] == "resp_1"
 
 
 @pytest.mark.asyncio
