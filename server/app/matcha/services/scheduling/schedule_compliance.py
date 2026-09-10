@@ -168,22 +168,37 @@ _NY_MIDWAY_CITE = (
 # are cited to it rather than to the bare statute.
 _NY_NOONDAY_GUIDANCE = "NYSDOL Meal Periods guidance (noon day period = 11 a.m.–2 p.m.)"
 
-# START TIME PARTITIONS THE TWO PRIMARY MEAL RULES, and the partition is what
-# keeps a >6h shift from falling between them. § 162(4) names "six o'clock in
-# the morning" as its own lower bound, so the noonday rule takes [06:00, 11:01)
-# and the midway rule takes [11:01, 06:00) — `_clock_in_window` wraps midnight,
-# so together they cover the clock exactly once, with no gap and no overlap.
+# THE TWO PRIMARY MEAL RULES EACH CARRY THEIR OWN SUBDIVISION'S CONDITION, and
+# between them no >6h shift is left without a meal period.
 #
-# The 11 a.m.–1 p.m. slice is ours, not the statute's: subdivision (4) begins
-# at one o'clock and subdivision (2) speaks only of "the noon day meal", so a
-# shift starting at 12:30 is unassigned by the text. It goes to (4), because an
-# employee who clocks in after the noonday period has begun cannot take the
-# noon day meal at any sensible hour — a 30-minute break half an hour into an
-# eight-hour shift is what the earlier containment model produced, and it is
-# not what either subdivision is for. Confirmed against a live schedule review;
-# verify with counsel before this reaches a paying New York tenant.
-_NY_NOONDAY_START_FROM = "06:00"
+#   (1)/(2) noonday — starts before 11:01 AND is still working at 11:00, i.e.
+#           the shift overlaps the 11 a.m.–2 p.m. noon day period. Overlap, not
+#           containment: 07:00–13:30 is working through part of that period and
+#           is owed the meal, with the 2 p.m. deadline clamped to shift end.
+#   (4)     midway  — starts in [11:01, 06:00), the subdivision's own window
+#           ("between one o'clock in the afternoon and six o'clock in the
+#           morning"), widened at its head as described below.
+#
+# The two conditions OVERLAP on purpose for a shift starting before 6 a.m. that
+# works through midday: 05:00–20:00 satisfies (2) on its own terms and (4) on
+# its own terms, so it is owed both (30 + 45), plus (3)'s additional 20. Making
+# them mutually exclusive by start time is what dropped the primary meal from
+# those shifts. The cost of the same reading is that a shorter early shift also
+# stacks — 05:00–13:00 is 30 + 45 — which is more meal time than a single
+# subdivision would give; both are flagged for counsel with the note below.
+#
+# The 11 a.m.–1 p.m. start slice is ours, not the statute's: subdivision (4)
+# begins at one o'clock and subdivision (2) speaks only of "the noon day meal",
+# so a shift starting at 12:30 is unassigned by the text. It goes to (4) alone,
+# because an employee who clocks in after the noonday period has begun cannot
+# take the noon day meal at any sensible hour — a 30-minute break half an hour
+# into an eight-hour shift is what the earlier containment model produced, and
+# it is not what either subdivision is for. Confirmed against a live schedule
+# review; verify with counsel before this reaches a paying New York tenant.
 _NY_NOONDAY_START_BEFORE = "11:01"   # exclusive, so an 11:00 start is a noonday start
+_NY_NOONDAY_PERIOD_START = "11:00"   # NYSDOL noon day period; the shift must reach it
+_NY_MIDWAY_START_FROM = "11:01"
+_NY_MIDWAY_START_BEFORE = "06:00"    # § 162(4)'s "six o'clock in the morning"
 
 _CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
     "NY": (
@@ -197,16 +212,16 @@ _CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
                     {
                         "ordinal": 1, "duration_minutes": 60, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_start_window_from": _NY_NOONDAY_START_FROM,
-                        "shift_start_window_before": _NY_NOONDAY_START_BEFORE,
+                        "shift_starts_before": _NY_NOONDAY_START_BEFORE,
+                        "shift_ends_after": _NY_NOONDAY_PERIOD_START,
                         "window_start": "11:00", "window_end": "14:00",
                         "citation": f"N.Y. Lab. Law § 162(1); {_NY_NOONDAY_GUIDANCE}",
                     },
                     {
                         "ordinal": 2, "duration_minutes": 60, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_start_window_from": _NY_NOONDAY_START_BEFORE,
-                        "shift_start_window_before": _NY_NOONDAY_START_FROM,
+                        "shift_start_window_from": _NY_MIDWAY_START_FROM,
+                        "shift_start_window_before": _NY_MIDWAY_START_BEFORE,
                         "recommend_midpoint": True,
                         "citation": _NY_MIDWAY_CITE,
                     },
@@ -233,16 +248,16 @@ _CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
                     {
                         "ordinal": 1, "duration_minutes": 30, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_start_window_from": _NY_NOONDAY_START_FROM,
-                        "shift_start_window_before": _NY_NOONDAY_START_BEFORE,
+                        "shift_starts_before": _NY_NOONDAY_START_BEFORE,
+                        "shift_ends_after": _NY_NOONDAY_PERIOD_START,
                         "window_start": "11:00", "window_end": "14:00",
                         "citation": f"N.Y. Lab. Law § 162(2); {_NY_NOONDAY_GUIDANCE}",
                     },
                     {
                         "ordinal": 2, "duration_minutes": 45, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_start_window_from": _NY_NOONDAY_START_BEFORE,
-                        "shift_start_window_before": _NY_NOONDAY_START_FROM,
+                        "shift_start_window_from": _NY_MIDWAY_START_FROM,
+                        "shift_start_window_before": _NY_MIDWAY_START_BEFORE,
                         "recommend_midpoint": True,
                         "citation": _NY_MIDWAY_CITE,
                     },

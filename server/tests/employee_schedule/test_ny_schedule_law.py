@@ -5,8 +5,8 @@ threshold table cannot say — so these tests drive the curated period payloads
 through the same parser the reviewed import path uses, then through the break
 evaluator, and assert the three scenarios the ticket names:
 
-  (2) >6h shift spanning 11:00–14:00        → 30 minutes inside that window
-  (4) >6h shift starting 13:00–06:00        → 45 minutes around the midpoint
+  (2) >6h shift overlapping 11:00–14:00     → 30 minutes inside that window
+  (4) >6h shift starting 11:01–06:00        → 45 minutes around the midpoint
   (3) shift starting before 11:00 and
       ending after 19:00                    → an extra 20 minutes, 17:00–19:00
 
@@ -339,12 +339,14 @@ def test_reviewer_case_1230_to_2030_gets_the_forty_five_minute_midway_meal():
     assert _suggested(_ny_rules().rules, 12, 30, 20, 30) == [(45, "16:07")]
 
 
-def test_every_start_time_lands_on_exactly_one_primary_meal_rule():
+def test_no_start_time_falls_between_the_two_primary_meal_rules():
     """No >6h shift may fall between § 162(2) and § 162(4), at any start time.
 
-    The two are partitioned by start clock time, and this is the guard on that
-    partition: a gap is the bug the reviewer found, an overlap would double-bill
-    the meal and collide on the `(kind, ordinal)` key the stagger persists.
+    A gap is the bug the reviewer found. The rules are NOT mutually exclusive:
+    a shift starting before 6 a.m. that works through midday meets both
+    subdivisions on their own terms and is owed both meals. What must never
+    happen is zero primary meals, or a `(kind, ordinal)` collision on the key
+    the stagger and `planned_breaks` persist.
     """
     rules = _ny_rules().rules
     for minutes in range(0, 24 * 60, 30):
@@ -352,9 +354,55 @@ def test_every_start_time_lands_on_exactly_one_primary_meal_rule():
         end = minutes + 8 * 60
         plan = _plan(
             rules, start_hour, start_minute, (end // 60) % 24, end % 60,
-            end_day=14 + (end // (24 * 60)) + (1 if end % (24 * 60) < minutes else 0),
+            end_day=14 + (1 if end >= 24 * 60 else 0),
         )
+        where = f"{start_hour:02d}:{start_minute:02d}"
+        assert plan.requirements, f"{where} → no meal period at all"
         primary = [r for r in plan.requirements if r.ordinal in (1, 2)]
-        assert len(primary) == 1, f"{start_hour:02d}:{start_minute:02d} → {primary}"
+        assert primary, f"{where} → only add-on periods {plan.requirements}"
+        if len(primary) == 2:
+            # Both only ever apply together to an early start that reaches the
+            # noon day period; every other start time gets exactly one.
+            assert start_hour < 6, f"{where} → unexpected stacking {primary}"
         keys = [(r.kind, r.ordinal) for r in plan.requirements]
-        assert len(keys) == len(set(keys)), f"{start_hour:02d}:{start_minute:02d} → {keys}"
+        assert len(keys) == len(set(keys)), f"{where} → {keys}"
+
+
+def test_the_walked_shifts_are_actually_eight_hours_long():
+    """Guard on the walk above: an off-by-one in `end_day` silently turns the
+    afternoon half of the clock into 32-hour shifts, which tests nothing."""
+    for minutes in range(0, 24 * 60, 30):
+        start_hour, start_minute = divmod(minutes, 60)
+        end = minutes + 8 * 60
+        start = datetime(2026, 9, 14, start_hour, start_minute, tzinfo=dt_timezone.utc)
+        finish = datetime(
+            2026, 9, 14 + (1 if end >= 24 * 60 else 0),
+            (end // 60) % 24, end % 60, tzinfo=dt_timezone.utc,
+        )
+        assert finish - start == timedelta(hours=8), f"{start} → {finish}"
+
+
+# ── (2) and (4) stack for a shift that satisfies both ─────────────────────
+
+def test_an_early_shift_through_midday_is_owed_both_primary_meals():
+    """05:00 starts "between one o'clock in the afternoon and six o'clock in
+    the morning" (§ 162(4)) AND extends over the noon day period (§ 162(2)).
+    Keying the two rules off start time alone dropped the noonday meal here."""
+    plan = _plan(_ny_rules().rules, 5, 0, 20, 0)
+
+    by_ordinal = {r.ordinal: r for r in plan.requirements}
+    assert sorted(by_ordinal) == [1, 2, 3]
+    assert by_ordinal[1].duration_minutes == 30 and "162(2)" in by_ordinal[1].citation
+    assert by_ordinal[2].duration_minutes == 45 and "162(4)" in by_ordinal[2].citation
+    assert by_ordinal[3].duration_minutes == 20 and "162(3)" in by_ordinal[3].citation
+    assert minimum_meal_break_minutes(plan) == 95
+
+
+def test_a_pre_six_shift_that_never_reaches_eleven_gets_only_the_midway_meal():
+    # 02:00–10:00 is clear of the noon day period, so § 162(2) does not attach.
+    assert [r.ordinal for r in _plan(_ny_rules().rules, 2, 0, 10, 0).requirements] == [2]
+
+
+def test_the_factory_early_shift_stacks_at_factory_durations():
+    plan = _plan(_ny_rules(naics="311811").rules, 5, 0, 20, 0)
+    assert [r.duration_minutes for r in sorted(plan.requirements, key=lambda r: r.ordinal)] == [60, 60, 20]

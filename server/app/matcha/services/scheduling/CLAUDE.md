@@ -724,18 +724,26 @@ Invariants, each of which has a regression test in
   17:00–19:00 when the shift starts before 11:00 and ends after 19:00 — each
   carrying its own subdivision as `citation` and its own `ordinal`, because
   `(kind, ordinal)` is the key the stagger and `planned_breaks` use.
-- **START TIME PARTITIONS (2) FROM (4), and the partition is load-bearing.**
-  The noon day rule takes starts in `[06:00, 11:01)` and the midway rule takes
-  `[11:01, 06:00)`; `_clock_in_window` wraps midnight, so together they cover
-  the clock exactly once. A gap is a >6h shift owed NO meal period — modelling
-  (2) as CONTAINMENT of 11:00–14:00 left 11:00–13:00 starts unassigned, and a
-  12:30–20:30 shift came back with nothing (found in review, 2026-09-09). An
-  overlap is the same shift billed for two meals and two rows fighting over one
-  `(kind, ordinal)` key. `test_every_start_time_lands_on_exactly_one_primary_
-  meal_rule` walks the whole clock as the guard. The 11 AM–1 PM slice is ours,
-  not the statute's — (4) begins at one o'clock, (2) speaks only of "the noon
-  day meal" — and it goes to (4) because someone clocking in after the noon day
-  period has begun cannot take the noon day meal at a sensible hour. NY's scalar row keeps
+- **(2) AND (4) EACH CARRY THEIR OWN SUBDIVISION'S CONDITION — they are not a
+  partition.** The noon day rule attaches when the shift starts before 11:01
+  AND is still working at 11:00 (`shift_starts_before` + `shift_ends_after`,
+  i.e. OVERLAP of the 11:00–14:00 period, not containment of it); the midway
+  rule attaches to starts in `[11:01, 06:00)`, § 162(4)'s own window. Two ways
+  to get this wrong, both shipped and both caught in review (2026-09-09/10):
+  modelling (2) as CONTAINMENT left 11:00–13:00 starts unassigned and a
+  12:30–20:30 shift came back with NO meal period; then keying the two off
+  start time alone as a clean partition silently dropped the primary meal from
+  shifts starting before 6 a.m. — 05:00–20:00 fell from 30+45+20 to 45+20,
+  granting (3)'s *additional* period with no primary. Those early shifts meet
+  both subdivisions on their own terms and are owed both; the same reading also
+  stacks a shorter early shift (05:00–13:00 → 30+45), which is flagged in the
+  code comment for counsel. `test_no_start_time_falls_between_the_two_primary_
+  meal_rules` walks the whole clock asserting never-zero primaries, stacking
+  only below 06:00, and no duplicate `(kind, ordinal)` — the key the stagger and
+  `planned_breaks` persist. The 11 AM–1 PM slice is ours, not the statute's —
+  (4) begins at one o'clock, (2) speaks only of "the noon day meal" — and it
+  goes to (4) alone because someone clocking in after the noon day period has
+  begun cannot take the noon day meal at a sensible hour. NY's scalar row keeps
   only the coarse write-path floor (6h/30min) plus its OT and minor caps;
   `second_meal_after_hours` is an explicit `None` so (3) is not double-counted
   as an hours-based second meal, and there is no `meal_waiver_max_hours` (a
