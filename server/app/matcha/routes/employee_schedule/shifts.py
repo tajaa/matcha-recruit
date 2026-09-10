@@ -15,6 +15,7 @@ from app.core.feature_flags import get_company_features
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange, DuplicateShift,
+    BreakRuleApplicabilityDecision,
 )
 from ...services.scheduling.schedule_rules import (
     build_patch, compliance_relevant_patch, job_changed,
@@ -32,6 +33,9 @@ from ...services.scheduling.schedule_guidance import (
     resolve_shift_break_plan, resolve_shift_break_plans, resolve_shift_stagger_plan,
 )
 from ...services.scheduling.schedule_break_stagger import stagger_payload
+from ...services.scheduling.schedule_break_rule_store import (
+    record_break_rule_applicability_decision,
+)
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
@@ -232,6 +236,70 @@ async def get_shift_break_stagger(shift_id: UUID, current_user=Depends(require_a
     if plan is None:
         raise HTTPException(status_code=404, detail="Shift not found")
     return stagger_payload(plan)
+
+
+@router.post("/shifts/{shift_id}/break-rule-applicability")
+async def decide_shift_break_rule_applicability(
+    shift_id: UUID,
+    body: BreakRuleApplicabilityDecision,
+    current_user=Depends(require_admin_or_client),
+):
+    """Confirm or reject the system's current expected rule for this location."""
+
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        async with conn.transaction():
+            shift = await conn.fetchrow(
+                """
+                SELECT id, location_id, starts_at
+                FROM schedule_shifts
+                WHERE id = $1 AND company_id = $2
+                FOR SHARE
+                """,
+                shift_id, company_id,
+            )
+            if not shift:
+                raise HTTPException(status_code=404, detail="Shift not found")
+            if shift["location_id"] is None:
+                raise HTTPException(status_code=409, detail="Shift has no location-scoped break rules")
+            try:
+                await record_break_rule_applicability_decision(
+                    conn,
+                    company_id=company_id,
+                    location_id=shift["location_id"],
+                    shift_date=shift["starts_at"].date(),
+                    rule_set_id=body.rule_set_id,
+                    context_hash=body.context_hash,
+                    decision=body.decision,
+                    actor_user_id=current_user.id,
+                )
+            except LookupError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            await log_audit(
+                conn,
+                company_id,
+                "break_rule_set",
+                body.rule_set_id,
+                current_user.id,
+                "break_rule.applicability_decision",
+                {
+                    "shift_id": str(shift_id),
+                    "location_id": str(shift["location_id"]),
+                    "shift_date": shift["starts_at"].date().isoformat(),
+                    "decision": body.decision,
+                    "context_hash": body.context_hash,
+                },
+            )
+    from app.workers.tasks.schedule_break_refresh import (
+        enqueue_location_schedule_break_refresh,
+    )
+    enqueue_location_schedule_break_refresh(
+        company_id=company_id,
+        location_id=shift["location_id"],
+        actor_user_id=current_user.id,
+        source="break_rule_applicability_decision",
+    )
+    return {"decision": body.decision, "rule_set_id": str(body.rule_set_id)}
 
 
 @router.get("/week")

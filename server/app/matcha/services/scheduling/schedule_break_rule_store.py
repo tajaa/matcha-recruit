@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from typing import Any
-from uuid import UUID, NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from . import schedule_compliance
-from . import shift_compliance
+from . import schedule_compliance, shift_compliance
 from .schedule_breaks import BreakRule
 from .schedule_location_readiness import get_schedule_location_readiness
 
 MAX_SHIFT_BREAK_MINUTES = 1440
 _GUIDANCE_RULE_LOCK_KEY = "schedule-break-rules:guidance:v1"
+_EMPLOYER_EMPLOYEE_COUNT_UNSET = object()
 
 
 async def lock_schedule_break_rule_guidance(conn, *, exclusive: bool) -> None:
@@ -41,6 +42,10 @@ class ResolvedBreakRules:
     industry_code: str | None
     source: str
     advisories: tuple[dict[str, Any], ...]
+    employer_employee_count: int | None = None
+    expected_rules: tuple[BreakRule, ...] = ()
+    applicability_context_hash: str | None = None
+    applicability_decision: str | None = None
 
 
 def _uuid_for_legacy(state: str) -> UUID:
@@ -96,7 +101,30 @@ def _age_bounds(raw: dict[str, Any]) -> tuple[int | None, int | None]:
     return minimum, maximum
 
 
-def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[BreakRule]:
+def _as_time(value: Any, *, field: str) -> time | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an HH:MM string")
+    try:
+        parsed = time.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an HH:MM string") from exc
+    if parsed.second or parsed.microsecond or parsed.tzinfo is not None:
+        raise ValueError(f"{field} must be an HH:MM string")
+    return parsed
+
+
+def _rules_from_payload(
+    rule_set_id: UUID,
+    payload: Any,
+    citation: str,
+    *,
+    effective_from: date | None = None,
+    effective_to: date | None = None,
+    authority_url: str | None = None,
+    source_type: str | None = None,
+) -> list[BreakRule]:
     if isinstance(payload, str):
         payload = json.loads(payload)
     if not isinstance(payload, dict):
@@ -111,6 +139,33 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
             if not isinstance(raw, dict):
                 raise ValueError(f"{key} entries must be objects")
             minimum_age, maximum_age = _age_bounds(raw)
+            minimum_employees = _as_int(raw.get("minimum_employees"))
+            maximum_employees = _as_int(raw.get("maximum_employees"))
+            if minimum_employees is not None and minimum_employees < 0:
+                raise ValueError("minimum_employees cannot be negative")
+            if maximum_employees is not None and maximum_employees < 0:
+                raise ValueError("maximum_employees cannot be negative")
+            if (
+                minimum_employees is not None
+                and maximum_employees is not None
+                and minimum_employees > maximum_employees
+            ):
+                raise ValueError("minimum_employees cannot exceed maximum_employees")
+            clock_fields = {
+                key: _as_time(raw.get(key), field=key)
+                for key in (
+                    "shift_start_window_from", "shift_start_window_before",
+                    "shift_spans_window_start", "shift_spans_window_end",
+                    "shift_starts_before", "shift_ends_after", "window_start", "window_end",
+                )
+            }
+            for first, second in (
+                ("shift_start_window_from", "shift_start_window_before"),
+                ("shift_spans_window_start", "shift_spans_window_end"),
+                ("window_start", "window_end"),
+            ):
+                if (clock_fields[first] is None) != (clock_fields[second] is None):
+                    raise ValueError(f"{first} and {second} must be supplied together")
             duration = _as_int(raw.get("duration_minutes"))
             trigger = _as_int(raw.get("trigger_after_minutes"))
             ordinal = _as_int(raw.get("ordinal"), default=1)
@@ -174,6 +229,14 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                             minimum_age=minimum_age,
                             maximum_age=maximum_age,
                             citation=str(raw.get("citation") or citation),
+                            effective_from=effective_from,
+                            effective_to=effective_to,
+                            authority_url=authority_url,
+                            source_type=source_type,
+                            minimum_employees=minimum_employees,
+                            maximum_employees=maximum_employees,
+                            **clock_fields,
+                            recommend_midpoint=_as_bool(raw.get("recommend_midpoint"), default=False),
                         ))
                     previous_count = count
                 continue
@@ -194,6 +257,14 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
                 minimum_age=minimum_age,
                 maximum_age=maximum_age,
                 citation=str(raw.get("citation") or citation),
+                effective_from=effective_from,
+                effective_to=effective_to,
+                authority_url=authority_url,
+                source_type=source_type,
+                minimum_employees=minimum_employees,
+                maximum_employees=maximum_employees,
+                **clock_fields,
+                recommend_midpoint=_as_bool(raw.get("recommend_midpoint"), default=False),
             ))
     # The public shift contract and editor both cap the aggregate planned
     # break at one day.  Check every possible employee age so overlapping
@@ -214,8 +285,9 @@ def _rules_from_payload(rule_set_id: UUID, payload: Any, citation: str) -> list[
 def validate_break_rule_payload(payload: Any, citation: str = "") -> None:
     """Validate persisted/imported rules with the runtime parser.
 
-    Keeping one parser for import, approval, and resolution prevents an
-    approved payload from silently degrading to an empty rule set at runtime.
+    Keeping one parser for import, approval, and resolution prevents shape or
+    bounds accepted at one boundary from failing at another. An explicitly
+    empty meal/rest collection remains a valid reviewed no-rule result.
     """
     _rules_from_payload(UUID(int=0), payload, citation)
 
@@ -227,6 +299,121 @@ def _location_timezone(value: str | None) -> ZoneInfo | None:
         return ZoneInfo(value)
     except (ZoneInfoNotFoundError, ValueError):
         return None
+
+
+def _applicability_context_hash(
+    *,
+    company_id: UUID,
+    location_id: UUID,
+    rule_set_id: UUID,
+    jurisdiction_id: UUID,
+    industry_code: str | None,
+    effective_from: date,
+    effective_to: date | None,
+    rules: Any,
+) -> str:
+    """Bind a tenant decision to the reviewed rule and stable scope inputs.
+
+    Headcount deliberately is not part of this identity. Employer-size bounds
+    are evaluated against the current count on every plan; routine hiring and
+    termination must not revoke the organization's rule-set decision.
+    """
+
+    if isinstance(rules, str):
+        rules = json.loads(rules)
+
+    payload = {
+        "company_id": str(company_id),
+        "location_id": str(location_id),
+        "rule_set_id": str(rule_set_id),
+        "jurisdiction_id": str(jurisdiction_id),
+        "industry_code": industry_code,
+        "effective_from": effective_from.isoformat(),
+        "effective_to": effective_to.isoformat() if effective_to else None,
+        "rules": rules,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+async def get_employer_employee_count(conn, company_id: UUID) -> int | None:
+    """Return declared headcount, else a known non-empty active roster count.
+
+    Zero active employee rows cannot distinguish an employer with no workers
+    from a tenant that has not imported its roster yet. Preserve that case as
+    ``None`` so size-scoped rules fail visibly instead of being dropped as if
+    the organization had affirmatively declared zero employees.
+    """
+
+    value = await conn.fetchval(
+        """
+        SELECT COALESCE(
+            (SELECT headcount FROM company_handbook_profiles
+             WHERE company_id = $1 AND headcount IS NOT NULL),
+            (SELECT NULLIF(COUNT(*)::int, 0) FROM employees
+             WHERE org_id = $1 AND termination_date IS NULL)
+        )
+        """,
+        company_id,
+    )
+    return int(value) if value is not None else None
+
+
+def _expected_rules_metadata(
+    rules: list[BreakRule], *, context_hash: str, decision: str | None,
+) -> dict[str, Any]:
+    def summary(rule: BreakRule) -> str:
+        comparison = "at least" if rule.trigger_operator == "gte" else "over"
+        parts = [
+            f"{rule.duration_minutes}-minute {rule.kind} break for shifts "
+            f"{comparison} {rule.trigger_after_minutes / 60:g} hours"
+        ]
+        if rule.shift_start_window_from and rule.shift_start_window_before:
+            parts.append(
+                f"starting {rule.shift_start_window_from.strftime('%H:%M')}–"
+                f"{rule.shift_start_window_before.strftime('%H:%M')}"
+            )
+        if rule.shift_spans_window_start and rule.shift_spans_window_end:
+            parts.append(
+                f"spanning {rule.shift_spans_window_start.strftime('%H:%M')}–"
+                f"{rule.shift_spans_window_end.strftime('%H:%M')}"
+            )
+        if rule.shift_starts_before:
+            parts.append(f"starting before {rule.shift_starts_before.strftime('%H:%M')}")
+        if rule.shift_ends_after:
+            parts.append(f"ending after {rule.shift_ends_after.strftime('%H:%M')}")
+        if rule.window_start and rule.window_end:
+            parts.append(
+                f"taken {rule.window_start.strftime('%H:%M')}–"
+                f"{rule.window_end.strftime('%H:%M')}"
+            )
+        if rule.recommend_midpoint:
+            parts.append("placed around the shift midpoint")
+        if rule.minimum_employees is not None:
+            parts.append(f"for employers with at least {rule.minimum_employees} employees")
+        if rule.maximum_employees is not None:
+            parts.append(f"for employers with at most {rule.maximum_employees} employees")
+        return "; ".join(parts)
+
+    return {
+        "rule_set_id": str(rules[0].rule_set_id),
+        "context_hash": context_hash,
+        "decision": decision,
+        "citation": rules[0].citation,
+        "authority_url": rules[0].authority_url,
+        "effective_from": rules[0].effective_from.isoformat() if rules[0].effective_from else None,
+        "effective_to": rules[0].effective_to.isoformat() if rules[0].effective_to else None,
+        "requirements": [
+            {
+                "kind": rule.kind,
+                "ordinal": rule.ordinal,
+                "duration_minutes": rule.duration_minutes,
+                "trigger_after_minutes": rule.trigger_after_minutes,
+                "summary": summary(rule),
+            }
+            for rule in rules
+        ],
+    }
 
 
 def _threshold(value: Any) -> Any:
@@ -318,6 +505,7 @@ def _legacy_rules(
             deadline_offset_minutes=deadline_offset,
             earliest_offset_minutes=earliest_offset,
             citation=citation,
+            source_type="legacy_curated",
         ))
         second_after = _threshold(rules.get("second_meal_after_hours"))
         if second_after is not None:
@@ -330,6 +518,7 @@ def _legacy_rules(
                 paid=False,
                 deadline_offset_minutes=int(float(second_after) * 60),
                 citation=citation,
+                source_type="legacy_curated",
             ))
     return out, advisories
 
@@ -340,6 +529,7 @@ async def resolve_break_rules(
     company_id: UUID,
     location_id: UUID,
     shift_date: date,
+    employer_employee_count: int | None | object = _EMPLOYER_EMPLOYEE_COUNT_UNSET,
 ) -> ResolvedBreakRules:
     await lock_schedule_break_rule_guidance(conn, exclusive=False)
     readiness = await get_schedule_location_readiness(conn, company_id, location_id)
@@ -367,7 +557,9 @@ async def resolve_break_rules(
             JOIN jurisdiction_chain c ON c.parent_id = j.id
         )
         SELECT r.id, r.rules, r.citation, c.depth,
-               r.industry_code, r.effective_from, r.effective_to
+               r.industry_code, r.effective_from, r.effective_to,
+               r.authority_url, r.source_type,
+               r.jurisdiction_id
         FROM schedule_break_rule_sets r
         JOIN jurisdiction_chain c ON c.id = r.jurisdiction_id
         WHERE r.review_status = 'approved'
@@ -384,7 +576,13 @@ async def resolve_break_rules(
     if rows:
         chosen = rows[0]
         try:
-            rules = _rules_from_payload(chosen["id"], chosen["rules"], chosen["citation"])
+            rules = _rules_from_payload(
+                chosen["id"], chosen["rules"], chosen["citation"],
+                effective_from=chosen["effective_from"],
+                effective_to=chosen["effective_to"],
+                authority_url=chosen.get("authority_url"),
+                source_type=chosen.get("source_type"),
+            )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             return ResolvedBreakRules(
                 rules=(), rule_set_ids=(chosen["id"],),
@@ -399,13 +597,99 @@ async def resolve_break_rules(
                     "metadata": {"reason": str(exc)},
                 },),
             )
+        # An approved empty collection explicitly records that this catalog
+        # scope has no meal/rest periods. It needs no organization decision and
+        # retains the pre-confirmation runtime contract.
+        if not rules:
+            return ResolvedBreakRules(
+                rules=(), rule_set_ids=(chosen["id"],),
+                timezone=_location_timezone(readiness.timezone),
+                industry_code=readiness.industry_code,
+                source="approved", advisories=(),
+            )
+        employee_count = (
+            await get_employer_employee_count(conn, company_id)
+            if employer_employee_count is _EMPLOYER_EMPLOYEE_COUNT_UNSET
+            else (
+                int(employer_employee_count)
+                if employer_employee_count is not None
+                else None
+            )
+        )
+        context_hash = _applicability_context_hash(
+            company_id=company_id,
+            location_id=location_id,
+            rule_set_id=chosen["id"],
+            jurisdiction_id=chosen.get("jurisdiction_id") or readiness.jurisdiction_id,
+            # The selected rule set's own industry is the stable scope input.
+            # A generic rule remains the same rule if the company industry is
+            # corrected, while a different industry-specific set has a new id.
+            industry_code=chosen.get("industry_code"),
+            effective_from=chosen["effective_from"],
+            effective_to=chosen["effective_to"],
+            rules=chosen["rules"],
+        )
+        decision = await conn.fetchval(
+            """
+            SELECT decision
+            FROM company_schedule_break_rule_confirmations
+            WHERE company_id = $1 AND location_id = $2 AND rule_set_id = $3
+              AND (
+                  context_hash = $4
+                  OR (decision = 'grandfathered' AND context_hash IS NULL)
+              )
+            ORDER BY CASE WHEN context_hash = $4 THEN 0 ELSE 1 END
+            LIMIT 1
+            """,
+            company_id, location_id, chosen["id"], context_hash,
+        )
+        if decision not in {"confirmed", "grandfathered"}:
+            metadata = _expected_rules_metadata(
+                rules, context_hash=context_hash, decision=decision,
+            )
+            message = (
+                "Your organization marked these expected break rules as not applicable; "
+                "no alternative reviewed coverage is mapped."
+                if decision == "rejected"
+                else "Matcha expects these reviewed break rules may apply to this organization. "
+                     "Confirm or reject their applicability before Matcha uses them."
+            )
+            return ResolvedBreakRules(
+                rules=(), rule_set_ids=(chosen["id"],),
+                timezone=_location_timezone(readiness.timezone),
+                industry_code=readiness.industry_code,
+                source="rejected_expected" if decision == "rejected" else "confirmation_required",
+                advisories=({
+                    "check": "break_rules",
+                    "code": "break_rules_applicability_rejected"
+                    if decision == "rejected" else "break_rules_confirmation_required",
+                    "severity": "advisory",
+                    "message": message,
+                    "metadata": metadata,
+                },),
+                employer_employee_count=employee_count,
+                expected_rules=tuple(rules),
+                applicability_context_hash=context_hash,
+                applicability_decision=decision,
+            )
+
         return ResolvedBreakRules(
             rules=tuple(rules),
             rule_set_ids=(chosen["id"],),
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
-            source="approved",
+            source=(
+                "approved"
+                if decision == "grandfathered"
+                else "approved_and_organization_confirmed"
+            ),
+            # Confirmation is the normal success state, not an advisory to
+            # duplicate into every assignment's persisted guidance.
             advisories=(),
+            employer_employee_count=employee_count,
+            expected_rules=tuple(rules),
+            applicability_context_hash=context_hash,
+            applicability_decision=decision,
         )
 
     # Preserve the current curated CA/federal behavior until structured rule
@@ -445,7 +729,15 @@ async def resolve_break_rules(
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
             source="catalog_extraction" if db_rules else "legacy_curated",
-            advisories=(*fallback_advisories, *legacy_advisories),
+            advisories=(*fallback_advisories, *legacy_advisories, {
+                "check": "break_rules",
+                "code": "break_rules_effective_date_unverified",
+                "severity": "advisory",
+                "message": (
+                    "The fallback break rule has a cited source but no reviewed "
+                    "effective date; verify current coverage manually."
+                ),
+            }),
         )
     return ResolvedBreakRules(
         rules=(), rule_set_ids=(),
@@ -459,3 +751,47 @@ async def resolve_break_rules(
             "message": "No approved break rules are mapped for this location and industry.",
         }),
     )
+
+
+async def record_break_rule_applicability_decision(
+    conn,
+    *,
+    company_id: UUID,
+    location_id: UUID,
+    shift_date: date,
+    rule_set_id: UUID,
+    context_hash: str,
+    decision: str,
+    actor_user_id: UUID,
+) -> ResolvedBreakRules:
+    """Record a tenant decision only when it matches the current expected context."""
+
+    if decision not in {"confirmed", "rejected"}:
+        raise ValueError("decision must be confirmed or rejected")
+    await lock_schedule_break_rule_guidance(conn, exclusive=True)
+    resolved = await resolve_break_rules(
+        conn,
+        company_id=company_id,
+        location_id=location_id,
+        shift_date=shift_date,
+    )
+    if (
+        not resolved.expected_rules
+        or resolved.expected_rules[0].rule_set_id != rule_set_id
+        or resolved.applicability_context_hash != context_hash
+    ):
+        raise LookupError("Expected break-rule context changed; review the current rules again")
+    await conn.execute(
+        """
+        INSERT INTO company_schedule_break_rule_confirmations
+            (company_id, location_id, rule_set_id, context_hash, decision,
+             confirmed_by, confirmed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
+        ON CONFLICT (company_id, location_id, rule_set_id, context_hash)
+        DO UPDATE SET decision = EXCLUDED.decision,
+                      confirmed_by = EXCLUDED.confirmed_by,
+                      confirmed_at = clock_timestamp()
+        """,
+        company_id, location_id, rule_set_id, context_hash, decision, actor_user_id,
+    )
+    return resolved

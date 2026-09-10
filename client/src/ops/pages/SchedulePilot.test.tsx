@@ -8,7 +8,7 @@ const {
   useMeMock, useEditorMock, useLocationScopeMock, useScheduleJobsMock,
   getSessionMock, listSessionsMock, adoptProposalMock, suggestionStatusMock,
   fetchLocationProfileMock, planningInputsMock, previewFillMock, applyFillMock, cancelFillMock,
-  sendMessageStreamMock, reloadMock, reloadLocationsMock,
+  fetchShiftBreakStaggerMock, sendMessageStreamMock, reloadMock, reloadLocationsMock,
 } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useEditorMock: vi.fn(),
@@ -23,6 +23,7 @@ const {
   previewFillMock: vi.fn(),
   applyFillMock: vi.fn(),
   cancelFillMock: vi.fn(),
+  fetchShiftBreakStaggerMock: vi.fn(),
   sendMessageStreamMock: vi.fn(),
   reloadMock: vi.fn().mockResolvedValue(undefined),
   reloadLocationsMock: vi.fn().mockResolvedValue(undefined),
@@ -52,6 +53,7 @@ vi.mock('../../api/employees/employeeSchedule', () => ({
   previewFillVacant: previewFillMock,
   applyFillVacant: applyFillMock,
   cancelFillVacant: cancelFillMock,
+  fetchShiftBreakStagger: fetchShiftBreakStaggerMock,
 }))
 vi.mock('../../work/api/matchaWork/messaging', () => ({ sendMessageStream: sendMessageStreamMock }))
 vi.mock('../../components/employees/schedule-editor/ScheduleJobsTab', () => ({
@@ -139,6 +141,9 @@ beforeEach(() => {
   previewFillMock.mockReset()
   applyFillMock.mockReset()
   cancelFillMock.mockReset().mockResolvedValue(undefined)
+  fetchShiftBreakStaggerMock.mockReset().mockResolvedValue({
+    schema_version: 1, max_concurrent_breaks: 1, results: [], advisories: [],
+  })
   fetchLocationProfileMock.mockReset().mockResolvedValue({
     location_id: 'loc1', profile_exists: true,
     week_rules: { established: true, missing: [] },

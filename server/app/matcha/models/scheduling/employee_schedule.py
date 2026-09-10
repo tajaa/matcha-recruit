@@ -161,6 +161,12 @@ class AssignmentBreakPlanUpdate(BaseModel):
     planned_breaks: Optional[List[PlannedBreak]] = Field(None, max_length=20)
 
 
+class BreakRuleApplicabilityDecision(BaseModel):
+    rule_set_id: UUID
+    context_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    decision: Literal["confirmed", "rejected"]
+
+
 class MealWaiverAttestationUpdate(BaseModel):
     on_file: bool
     effective_from: Optional[date] = None

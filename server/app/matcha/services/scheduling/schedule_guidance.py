@@ -11,7 +11,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.database import decode_jsonb
-from .schedule_break_rule_store import resolve_break_rules
+from .schedule_break_rule_store import get_employer_employee_count, resolve_break_rules
 from .schedule_breaks import (
     BreakPlan,
     MealWaiverAttestation,
@@ -31,6 +31,8 @@ from .schedule_break_stagger import (
 )
 from .shift_compliance import _age_on
 
+_EMPLOYER_EMPLOYEE_COUNT_UNSET = object()
+
 
 async def resolve_shift_break_plan(
     conn,
@@ -40,6 +42,7 @@ async def resolve_shift_break_plan(
     starts_at: datetime,
     ends_at: datetime,
     employee_id: UUID | None = None,
+    employer_employee_count: int | None | object = _EMPLOYER_EMPLOYEE_COUNT_UNSET,
 ) -> BreakPlan:
     """Evaluate the approved plan for an open shift or one assignee."""
     if location_id is None:
@@ -59,9 +62,20 @@ async def resolve_shift_break_plan(
     # Schedule timestamps are UTC-tagged wall-clock values.  Converting them
     # as real instants can move an early shift onto the previous legal day.
     shift_date = reinterpret_schedule_wall_time(starts_at, location_timezone).date()
-    resolved = await resolve_break_rules(
-        conn, company_id=company_id, location_id=location_id, shift_date=shift_date,
-    )
+    rule_kwargs: dict[str, Any] = {
+        "company_id": company_id,
+        "location_id": location_id,
+        "shift_date": shift_date,
+    }
+    if employer_employee_count is not _EMPLOYER_EMPLOYEE_COUNT_UNSET:
+        rule_kwargs["employer_employee_count"] = employer_employee_count
+    resolved = await resolve_break_rules(conn, **rule_kwargs)
+    effective_employer_employee_count = resolved.employer_employee_count
+    if (
+        effective_employer_employee_count is None
+        and employer_employee_count is not _EMPLOYER_EMPLOYEE_COUNT_UNSET
+    ):
+        effective_employer_employee_count = employer_employee_count
     effective_timezone = resolved.timezone or location_timezone
     effective_date = reinterpret_schedule_wall_time(starts_at, effective_timezone).date()
 
@@ -109,6 +123,7 @@ async def resolve_shift_break_plan(
     plan = evaluate_break_plan(
         starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
         rules=resolved.rules, waiver=waiver, employee_age=employee_age,
+        employer_employee_count=effective_employer_employee_count,
     )
     advisories = list(plan.advisories) + list(resolved.advisories)
     if age_unknown:
@@ -227,6 +242,7 @@ async def resolve_shift_break_plans_localized(
         plan = evaluate_break_plan(
             starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
             rules=resolved.rules, waiver=waivers.get(employee_id), employee_age=employee_age,
+            employer_employee_count=resolved.employer_employee_count,
         )
         advisories = list(plan.advisories) + list(resolved.advisories)
         if age_unknown:
@@ -253,8 +269,9 @@ async def resolve_week_break_plans(
     The per-shift resolvers above are the right shape for one shift and the
     wrong one for a week: ``resolve_break_rules`` takes a Postgres advisory
     lock on every call, and the DOB/waiver reads are per shift.  A 40-shift
-    week through those would be 40 locked rule resolutions and 80 queries; this
-    is at most 7 (one per local date) plus two batched reads.
+    week through those would be 40 locked rule resolutions and repeated fact
+    reads; this is at most 7 rule resolutions (one per local date), one shared
+    employer-count read, and two batched employee-fact reads.
 
     ``shifts`` is ``(shift_key, starts_at, ends_at, employee_ids)``.  Returns
     the effective zone, the plans keyed by shift then employee, and the local
@@ -331,6 +348,7 @@ async def resolve_week_break_plans(
                 )
         return None
 
+    employer_employee_count = await get_employer_employee_count(conn, company_id)
     resolved_by_date: dict[date, Any] = {}
     plans: dict[str, dict[UUID, BreakPlan]] = {}
     effective_timezone = location_timezone
@@ -341,9 +359,12 @@ async def resolve_week_break_plans(
             resolved = await resolve_break_rules(
                 conn, company_id=company_id, location_id=location_id,
                 shift_date=shift_date,
+                employer_employee_count=employer_employee_count,
             )
             resolved_by_date[shift_date] = resolved
-            if resolved.source in ("unmapped", "error"):
+            if resolved.source in (
+                "unmapped", "error", "confirmation_required", "rejected_expected",
+            ):
                 unmapped_dates.add(shift_date)
         effective_timezone = resolved.timezone or location_timezone
         effective_date = reinterpret_schedule_wall_time(starts_at, effective_timezone).date()
@@ -358,6 +379,11 @@ async def resolve_week_break_plans(
                 starts_at=starts_at, ends_at=ends_at, timezone=effective_timezone,
                 rules=resolved.rules, waiver=_waiver(employee_id, effective_date),
                 employee_age=employee_age,
+                employer_employee_count=(
+                    resolved.employer_employee_count
+                    if resolved.employer_employee_count is not None
+                    else employer_employee_count
+                ),
             )
             advisories = [*plan.advisories, *resolved.advisories]
             if age_unknown:
@@ -404,6 +430,7 @@ async def resolve_open_shift_break_plans(
     except (ZoneInfoNotFoundError, ValueError):
         location_timezone = ZoneInfo("UTC")
 
+    employer_employee_count = await get_employer_employee_count(conn, company_id)
     resolved_by_date = {}
     plans: list[BreakPlan] = []
     for starts_at, ends_at in windows:
@@ -413,17 +440,23 @@ async def resolve_open_shift_break_plans(
             resolved = await resolve_break_rules(
                 conn, company_id=company_id, location_id=location_id,
                 shift_date=shift_date,
+                employer_employee_count=employer_employee_count,
             )
             resolved_by_date[shift_date] = resolved
         effective_timezone = resolved.timezone or location_timezone
         plan = evaluate_break_plan(
             starts_at=starts_at, ends_at=ends_at,
             timezone=effective_timezone, rules=resolved.rules,
+            employer_employee_count=(
+                resolved.employer_employee_count
+                if resolved.employer_employee_count is not None
+                else employer_employee_count
+            ),
         )
         plans.append(replace(
             plan,
             status="error" if resolved.source == "error" else plan.status,
-            advisories=tuple((*plan.advisories, *resolved.advisories)),
+            advisories=(*plan.advisories, *resolved.advisories),
         ))
     return plans
 
@@ -439,12 +472,14 @@ async def refresh_assignment_break_guidance(
     ends_at: datetime,
     plan: BreakPlan | None = None,
     timezone_name: str | None = None,
+    employer_employee_count: int | None | object = _EMPLOYER_EMPLOYEE_COUNT_UNSET,
 ) -> BreakPlan:
     """Evaluate and store the break instructions shown for one assignment."""
     if plan is None:
         plan = await resolve_shift_break_plan(
             conn, company_id, location_id=location_id, starts_at=starts_at,
             ends_at=ends_at, employee_id=employee_id,
+            employer_employee_count=employer_employee_count,
         )
     if location_id is None:
         return plan
@@ -504,6 +539,7 @@ async def refresh_assignment_break_guidance_and_minimum(
     employee_id: UUID,
     actor_user_id: UUID | None,
     source: str,
+    employer_employee_count: int | None | object = _EMPLOYER_EMPLOYEE_COUNT_UNSET,
 ) -> BreakPlan | None:
     """Refresh guidance and atomically preserve/enforce the shift minimum.
 
@@ -526,6 +562,7 @@ async def refresh_assignment_break_guidance_and_minimum(
         conn, company_id, shift_id=shift_id, employee_id=employee_id,
         location_id=shift["location_id"], starts_at=shift["starts_at"],
         ends_at=shift["ends_at"],
+        employer_employee_count=employer_employee_count,
     )
     generated_minimum = minimum_meal_break_minutes(plan)
     current_break = int(shift["break_minutes"] or 0)
@@ -764,4 +801,32 @@ async def resolve_shift_stagger_plan(
             and result.suggested_start is not None
         )
 
-    return target_plan
+    if target_plan is None:
+        return None
+
+    target_break_plans = plans_by_shift.get(str(shift_id), {})
+    if target_break_plans:
+        rule_advisories = [
+            advisory
+            for break_plan in target_break_plans.values()
+            for advisory in break_plan.advisories
+        ]
+    else:
+        # An empty shift still needs to expose an applicability decision before
+        # assignments are made.  The weekly resolver intentionally skips rule
+        # resolution when there are no employees, so resolve the open window
+        # once for this read-only inspector response.
+        open_plan = await resolve_shift_break_plan(
+            conn,
+            company_id,
+            location_id=shift["location_id"],
+            starts_at=shift["starts_at"],
+            ends_at=shift["ends_at"],
+        )
+        rule_advisories = list(open_plan.advisories)
+
+    merged_advisories = list(target_plan.advisories)
+    for advisory in rule_advisories:
+        if advisory not in merged_advisories:
+            merged_advisories.append(advisory)
+    return replace(target_plan, advisories=tuple(merged_advisories))

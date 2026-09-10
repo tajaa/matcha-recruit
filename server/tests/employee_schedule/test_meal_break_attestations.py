@@ -40,6 +40,8 @@ def test_waiver_endpoint_scopes_to_company_and_returns_only_effective_attestatio
     assert "recover_stale_employee_schedule_breaks" in worker_source
     assert "jurisdiction_descendants" in worker_source
     assert "r.updated_at > a.guidance_evaluated_at" in worker_source
+    assert "FROM company_schedule_break_rule_confirmations c" in worker_source
+    assert "c.confirmed_at > a.guidance_evaluated_at" in worker_source
     assert "refresh_assignment_break_guidance_and_minimum" in worker_source
 
 

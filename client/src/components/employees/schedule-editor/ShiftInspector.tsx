@@ -1,9 +1,9 @@
 import { Check, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { fetchShiftBreakStagger, updateAssignmentBreakPlan, updateAssignmentNote } from '../../../api/employees/employeeSchedule'
+import { decideShiftBreakRuleApplicability, fetchShiftBreakStagger, updateAssignmentBreakPlan, updateAssignmentNote } from '../../../api/employees/employeeSchedule'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import { Card, useToast } from '../../ui'
-import type { AssignmentNotePayload, BreakStaggerResult, PlannedBreak, ShiftAssignment, RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
+import type { AssignmentNotePayload, BreakRuleAdvisory, BreakStaggerResult, PlannedBreak, ShiftAssignment, RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
 import { addDays, errorMessage, fmtTime } from '../../../types/employeeSchedule'
 import { MAX_BREAK_MINUTES, MAX_REQUIRED_STAFF, validateShiftFields } from './shiftValidation'
 import {
@@ -65,7 +65,9 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   const [validationError, setValidationError] = useState<string | null>(null)
   const [roleMissing, setRoleMissing] = useState(false)
   const [stagger, setStagger] = useState<BreakStaggerResult[]>([])
-  const [staggerAdvisories, setStaggerAdvisories] = useState<string[]>([])
+  const [staggerAdvisories, setStaggerAdvisories] = useState<BreakRuleAdvisory[]>([])
+  const [savingApplicability, setSavingApplicability] = useState(false)
+  const { toast } = useToast()
   const [breakRevision, setBreakRevision] = useState(0)
   const persistedBreakMinutes = shift?.break_minutes
   const shiftId = shift?.id ?? ''
@@ -91,7 +93,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   // rather than read off the shift payload. A failure leaves the legally
   // required guidance below untouched — it never blocks editing the shift.
   useEffect(() => {
-    if (!shiftId || assignmentKey === '') {
+    if (!shiftId) {
       setStagger([])
       setStaggerAdvisories([])
       return
@@ -101,7 +103,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       .then((plan) => {
         if (cancelled) return
         setStagger(plan.results)
-        setStaggerAdvisories(plan.advisories.map((advisory) => advisory.message))
+        setStaggerAdvisories(plan.advisories)
       })
       .catch(() => {
         if (cancelled) return
@@ -115,6 +117,28 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
 
   const overnight = end <= start
   const assignments = shift?.assignments ?? []
+  const expectedRule = staggerAdvisories.find(
+    (advisory) => advisory.code === 'break_rules_confirmation_required'
+      || advisory.code === 'break_rules_applicability_rejected',
+  )
+
+  async function decideExpectedRule(decision: 'confirmed' | 'rejected') {
+    const ruleSetId = expectedRule?.metadata?.rule_set_id
+    const contextHash = expectedRule?.metadata?.context_hash
+    if (readOnly || !shift || !ruleSetId || !contextHash) return
+    setSavingApplicability(true)
+    try {
+      await decideShiftBreakRuleApplicability(shift.id, {
+        rule_set_id: ruleSetId, context_hash: contextHash, decision,
+      })
+      setBreakRevision((value) => value + 1)
+      await onAssignmentUpdated()
+    } catch (error) {
+      toast(errorMessage(error), 'error')
+    } finally {
+      setSavingApplicability(false)
+    }
+  }
 
   function payload(requiredStaffValue: number, breakMinutesValue: number | undefined): ShiftPayload {
     const endDate = overnight ? addDays(date, 1) : date
@@ -187,7 +211,18 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         {!editing && trainingEnabled && kind === 'training' && <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Training requirement<select value={requirementId} onChange={(event) => setRequirementId(event.target.value)} disabled={readOnly} className={input}><option value="">Select requirement...</option>{requirements.map((requirement) => <option key={requirement.id} value={requirement.id}>{requirement.title}</option>)}</select></label>}
       </div>
       {validationError && <p id={roleMissing ? 'shift-role-error' : undefined} role="alert" className="mt-3 text-xs text-red-400">{validationError}</p>}
-      {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} shiftStartsAt={shift!.starts_at} stagger={stagger.filter((result) => result.employee_id === assignment.employee_id)} readOnly={readOnly} onNoteSaved={onAssignmentUpdated} onBreaksSaved={async () => { setBreakRevision((value) => value + 1); await onAssignmentUpdated() }} />)}</span>}{staggerAdvisories.map((message) => <span key={message} className="mt-2 block text-amber-300">{message}</span>)}</div>}
+      {editing && <div className="mt-3 rounded-lg bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">Assigned: {assignments.length === 0 ? <span className="text-zinc-300">Nobody yet</span> : <span className="block space-y-2 text-zinc-300">{assignments.map((assignment) => <AssignmentSummary key={assignment.employee_id} shiftId={shift!.id} assignment={assignment} shiftStartsAt={shift!.starts_at} stagger={stagger.filter((result) => result.employee_id === assignment.employee_id)} readOnly={readOnly} onNoteSaved={onAssignmentUpdated} onBreaksSaved={async () => { setBreakRevision((value) => value + 1); await onAssignmentUpdated() }} />)}</span>}{staggerAdvisories.map((advisory) => <span key={`${advisory.code}:${advisory.message}`} className="mt-2 block text-amber-300">{advisory.message}</span>)}</div>}
+      {expectedRule?.metadata?.rule_set_id && expectedRule.metadata.context_hash && <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] text-amber-100">
+        <p className="font-medium">{expectedRule.code === 'break_rules_applicability_rejected' ? 'Review expected break-law coverage' : 'Confirm expected break-law coverage'}</p>
+        <p className="mt-1 text-amber-200/80">{expectedRule.metadata.citation || 'Source citation pending'}{expectedRule.metadata.effective_from ? ` · effective ${expectedRule.metadata.effective_from}` : ''}</p>
+        {expectedRule.metadata.authority_url && <a className="mt-1 block text-sky-300 underline" href={expectedRule.metadata.authority_url} target="_blank" rel="noreferrer">Open authority source</a>}
+        {expectedRule.metadata.requirements?.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-100/90">{expectedRule.metadata.requirements.map((requirement) => <li key={`${requirement.kind}:${requirement.ordinal}`}>{requirement.summary}</li>)}</ul> : null}
+        <p className="mt-2 text-amber-200/80">Confirm that Matcha should use these reviewed rules for this organization. Your confirmation records applicability; it does not verify the source itself.</p>
+        <div className="mt-2 flex gap-3">
+          <button type="button" disabled={readOnly || savingApplicability} onClick={() => void decideExpectedRule('confirmed')} className="text-emerald-300 hover:text-emerald-200 disabled:opacity-50">Use these rules</button>
+          <button type="button" disabled={readOnly || savingApplicability} onClick={() => void decideExpectedRule('rejected')} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-50">Not applicable</button>
+        </div>
+      </div>}
       <div className="mt-4 flex items-center gap-2">
         {!readOnly && <button onClick={save} disabled={saving || noRolesAvailable} title={noRolesAvailable ? NO_ROLES_MESSAGE : undefined} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}{editing ? 'Save changes' : 'Create draft'}</button>}
         {editing && !readOnly && <button onClick={onDelete} disabled={saving} className="ml-auto rounded-lg p-2 text-zinc-600 hover:bg-red-500/10 hover:text-red-400" aria-label="Delete shift"><Trash2 className="h-4 w-4" /></button>}

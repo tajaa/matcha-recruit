@@ -111,6 +111,7 @@ def _resolved(rules):
     return SimpleNamespace(
         rules=tuple(rules), source="catalog", advisories=(),
         timezone=None, rule_set_ids=(), rule_set_hash="hash",
+        employer_employee_count=None,
     )
 
 
@@ -123,6 +124,10 @@ def test_a_missing_date_of_birth_says_so_on_the_week_plan(
     monkeypatch.setattr(
         schedule_guidance, "resolve_break_rules",
         AsyncMock(return_value=_resolved([_age_rule()])),
+    )
+    monkeypatch.setattr(
+        schedule_guidance, "get_employer_employee_count",
+        AsyncMock(return_value=None),
     )
     conn = _WeekConn(date_of_birth=date_of_birth)
     shifts = [(
@@ -142,3 +147,111 @@ def test_a_missing_date_of_birth_says_so_on_the_week_plan(
     # The date itself mapped fine — this is one person, not the jurisdiction.
     assert unmapped == set()
     assert (plan.status == "error") is expect_advisory
+
+
+@pytest.mark.parametrize("source", ["confirmation_required", "rejected_expected"])
+def test_week_rule_decisions_without_active_rules_are_fail_visible(monkeypatch, source):
+    resolved = _resolved([])
+    resolved.source = source
+    resolved.advisories = ({
+        "check": "break_rules",
+        "code": "break_rules_confirmation_required",
+        "severity": "advisory",
+        "message": "Review expected rules.",
+    },)
+    resolver = AsyncMock(return_value=resolved)
+    count_lookup = AsyncMock(return_value=42)
+    monkeypatch.setattr(schedule_guidance, "resolve_break_rules", resolver)
+    monkeypatch.setattr(
+        schedule_guidance, "get_employer_employee_count", count_lookup,
+    )
+    conn = _WeekConn(date_of_birth=date(1990, 5, 1))
+    shift_date = date(2026, 9, 2)
+    shifts = [(
+        "shift-1",
+        datetime(2026, 9, 2, 9, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, 17, tzinfo=timezone.utc),
+        [EMPLOYEE_ID],
+    )]
+
+    _tz, plans, unresolved_dates = asyncio.run(
+        schedule_guidance.resolve_week_break_plans(
+            conn, uuid4(), location_id=uuid4(), shifts=shifts,
+        )
+    )
+
+    assert unresolved_dates == {shift_date}
+    assert plans["shift-1"][EMPLOYEE_ID].requirements == ()
+    count_lookup.assert_awaited_once()
+    assert resolver.await_args.kwargs["employer_employee_count"] == 42
+
+
+def test_week_and_open_shift_resolvers_hoist_headcount_outside_date_loops(monkeypatch):
+    count_lookup = AsyncMock(return_value=42)
+    resolver = AsyncMock(return_value=_resolved([]))
+    monkeypatch.setattr(
+        schedule_guidance, "get_employer_employee_count", count_lookup,
+    )
+    monkeypatch.setattr(schedule_guidance, "resolve_break_rules", resolver)
+    conn = _WeekConn(date_of_birth=date(1990, 5, 1))
+    company_id = uuid4()
+    location_id = uuid4()
+    windows = [
+        (
+            datetime(2026, 9, day, 9, tzinfo=timezone.utc),
+            datetime(2026, 9, day, 17, tzinfo=timezone.utc),
+        )
+        for day in (2, 3)
+    ]
+    shifts = [
+        (f"shift-{day}", starts_at, ends_at, [EMPLOYEE_ID])
+        for day, (starts_at, ends_at) in zip((2, 3), windows)
+    ]
+
+    asyncio.run(schedule_guidance.resolve_week_break_plans(
+        conn, company_id, location_id=location_id, shifts=shifts,
+    ))
+    assert count_lookup.await_count == 1
+    assert resolver.await_count == 2
+    assert all(
+        call.kwargs["employer_employee_count"] == 42
+        for call in resolver.await_args_list
+    )
+
+    count_lookup.reset_mock()
+    resolver.reset_mock()
+    asyncio.run(schedule_guidance.resolve_open_shift_break_plans(
+        conn, company_id, location_id=location_id, windows=windows,
+    ))
+    assert count_lookup.await_count == 1
+    assert resolver.await_count == 2
+    assert all(
+        call.kwargs["employer_employee_count"] == 42
+        for call in resolver.await_args_list
+    )
+
+
+def test_single_shift_resolver_accepts_a_preloaded_headcount(monkeypatch):
+    captured = {}
+
+    class Connection:
+        async def fetchval(self, *_args):
+            return "America/Los_Angeles"
+
+    async def resolve_rules(_conn, **kwargs):
+        captured.update(kwargs)
+        return _resolved([])
+
+    monkeypatch.setattr(schedule_guidance, "resolve_break_rules", resolve_rules)
+
+    plan = asyncio.run(schedule_guidance.resolve_shift_break_plan(
+        Connection(),
+        uuid4(),
+        location_id=uuid4(),
+        starts_at=datetime(2026, 9, 2, 9, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 9, 2, 17, tzinfo=timezone.utc),
+        employer_employee_count=42,
+    ))
+
+    assert captured["employer_employee_count"] == 42
+    assert plan.employer_employee_count == 42
