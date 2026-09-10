@@ -119,3 +119,48 @@ def test_passcode_weekday_change_anchors_on_now(admin_router):
     src = inspect.getsource(sys.modules["app.matcha.routes.symlink"].update_passcode_settings)
     assert 'next_rotation(row["rotated_at"]' not in src
     assert "next_rotation(datetime.now(timezone.utc)" in src
+
+
+def test_per_ip_limits_are_a_flood_backstop_not_the_binding_constraint(public_router):
+    """Per-link/per-company budgets are the cost governors; per-IP is a flood
+    backstop. A bulk send puts a whole office behind one NAT address, so if a
+    per-IP ceiling ever drops below the matching per-link budget it starts 429ing
+    legitimate recipients instead of bounding cost. See services/symlink/CLAUDE.md.
+    """
+    import inspect
+    import re
+    import sys
+
+    mod = sys.modules["app.matcha.routes.intake.symlink_public"]
+    src = inspect.getsource(mod)
+
+    # `_budget(token, company_id, "<kind>", <per_link>, <per_company>)`
+    per_link = {
+        m.group(1): int(m.group(2))
+        for m in re.finditer(r'_budget\(\s*token,\s*company_id,\s*"(\w+)",\s*(\d+),\s*(\d+)\)', src)
+    }
+    assert per_link == {"turn": 40, "upload": 24, "submit": 6}
+
+    hourly = {key: limit for key, (limit, window) in mod.IP_LIMITS.items() if window == 3600}
+    for kind, link_budget in per_link.items():
+        matching = [v for k, v in hourly.items() if k.startswith(f"symlink_{kind}_ip")]
+        assert matching, f"no hourly per-IP limit for {kind}"
+        assert min(matching) > link_budget, (
+            f"per-IP hourly limit for {kind} ({min(matching)}) must stay above the "
+            f"per-link budget ({link_budget}) or it becomes the binding constraint"
+        )
+
+    # Unlock brute force is bounded per link, not per IP.
+    assert 'check_rate_limit(token, "symlink_unlock_link", 12, 3600)' in src
+    assert mod.IP_LIMITS["symlink_unlock_ip"][0] > 12
+
+
+def test_every_ip_limit_call_goes_through_the_table(public_router):
+    """No inline per-IP magic numbers — the table is the one place to tune them."""
+    import inspect
+    import re
+    import sys
+
+    src = inspect.getsource(sys.modules["app.matcha.routes.intake.symlink_public"])
+    inline = re.findall(r'check_rate_limit\(\s*(?:ip|client_ip\(request\))\s*,', src)
+    assert inline == [], "per-IP limits must call _ip_limit(), not check_rate_limit() directly"

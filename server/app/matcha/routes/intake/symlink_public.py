@@ -88,7 +88,31 @@ async def _require_unlock(conn, row: Any, request: Request) -> None:
         raise HTTPException(status_code=401, detail="Enter the passcode to continue")
 
 
+# Per-IP is a FLOOD BACKSTOP, not the cost governor — see
+# services/symlink/CLAUDE.md. Only the sender can mint a token, `chat.MAX_TURNS`
+# caps a conversation absolutely, and `_budget` bounds every link and company by
+# the hour. A bulk send (20 credential requests to one office) lands a whole
+# team on one NAT address, so per-IP ceilings that bind before the per-link ones
+# just 429 legitimate recipients. Keep every per-hour value here comfortably
+# above the matching `_budget` per-link value; tests/symlink asserts it.
+IP_LIMITS: dict[str, tuple[int, int]] = {
+    # key: (limit, window_seconds)
+    "symlink_validate": (300, 3600),
+    "symlink_unlock_ip": (60, 600),      # per-link 12/hr is the brute-force guard
+    "symlink_turn_ip": (30, 60),
+    "symlink_turn_ip_hr": (400, 3600),
+    "symlink_upload_ip": (120, 3600),
+    "symlink_submit_ip": (60, 3600),
+}
+
+
+async def _ip_limit(addr: str, key: str) -> None:
+    limit, window = IP_LIMITS[key]
+    await check_rate_limit(addr, key, limit, window)
+
+
 async def _budget(token: str, company_id: str, kind: str, per_link: int, per_company: int) -> None:
+    """The real governors: per-link and per-company, both hourly."""
     await check_rate_limit(token, f"symlink_{kind}_link", per_link, 3600)
     await check_rate_limit(company_id, f"symlink_{kind}_co", per_company, 3600)
 
@@ -128,7 +152,7 @@ def _public_summary(row: Any) -> dict:
 @router.get("/sym/{token}")
 async def validate_symlink(token: str, request: Request):
     """Link summary; plus the resumable conversation when the unlock header is valid."""
-    await check_rate_limit(client_ip(request), "symlink_validate", 60, 3600)
+    await _ip_limit(client_ip(request), "symlink_validate")
     row = await _resolve(token)
     out = _public_summary(row)
     status = out["status"]
@@ -156,7 +180,7 @@ async def unlock_symlink(token: str, request: Request):
         return {"unlock_token": "ok"}  # honeypot — look successful, do nothing
 
     ip = client_ip(request)
-    await check_rate_limit(ip, "symlink_unlock_ip", 8, 600)
+    await _ip_limit(ip, "symlink_unlock_ip")
     row = await _resolve(token)
     _check_open(row)
     # Charged after the link is known live so a dead token can't drain the bucket.
@@ -189,8 +213,8 @@ async def unlock_symlink(token: str, request: Request):
 async def symlink_chat_turn(token: str, request: Request):
     body = await _read_json_capped(request, PublicTurnRequest)
     ip = client_ip(request)
-    await check_rate_limit(ip, "symlink_turn_ip", 10, 60)
-    await check_rate_limit(ip, "symlink_turn_ip_hr", 60, 3600)
+    await _ip_limit(ip, "symlink_turn_ip")
+    await _ip_limit(ip, "symlink_turn_ip_hr")
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])
@@ -249,7 +273,7 @@ async def upload_symlink_attachment(
     file: UploadFile = File(...),
 ):
     ip = client_ip(request)
-    await check_rate_limit(ip, "symlink_upload_ip", 20, 3600)
+    await _ip_limit(ip, "symlink_upload_ip")
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])
@@ -326,7 +350,7 @@ async def submit_symlink(token: str, request: Request, background_tasks: Backgro
         return {"submitted": True}
 
     ip = client_ip(request)
-    await check_rate_limit(ip, "symlink_submit_ip", 10, 3600)
+    await _ip_limit(ip, "symlink_submit_ip")
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])

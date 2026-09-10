@@ -99,13 +99,29 @@ _rl_attempts: dict[str, list[float]] = defaultdict(list)
 _TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", "1"))
 
 
+# One CloudFront distribution fronts both product families (gummfit.com +
+# hey-matcha.com share E2DR5ZV7O32BE), and it injects BOTH origin-verify
+# headers. Either one authenticates the same single edge hop, so matcha's rate
+# limits keep working if the distributions are ever split apart — without this,
+# every matcha per-IP limit would silently start keying on the CloudFront POP
+# address the moment the Cappe header stopped arriving.
+_ORIGIN_VERIFY_HEADERS = (
+    ("x-cappe-origin-verify", "CAPPE_CLOUDFRONT_ORIGIN_SECRET"),
+    ("x-matcha-origin-verify", "MATCHA_CLOUDFRONT_ORIGIN_SECRET"),
+)
+
+
 def _trusted_proxy_count(request: Request) -> int:
-    """Count the nginx hop and an authenticated CloudFront hop when present."""
+    """Count the nginx hop, plus ONE authenticated CloudFront hop when present.
+
+    Both headers name the same hop — presenting both must never add two.
+    """
     count = _TRUSTED_PROXY_COUNT
-    expected = os.getenv("CAPPE_CLOUDFRONT_ORIGIN_SECRET", "")
-    provided = request.headers.get("x-cappe-origin-verify", "")
-    if expected and provided and hmac.compare_digest(expected, provided):
-        count += 1
+    for header, env_var in _ORIGIN_VERIFY_HEADERS:
+        expected = os.getenv(env_var, "")
+        provided = request.headers.get(header, "")
+        if expected and provided and hmac.compare_digest(expected, provided):
+            return count + 1
     return count
 
 
