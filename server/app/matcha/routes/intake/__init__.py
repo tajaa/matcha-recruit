@@ -7,8 +7,10 @@ re-exports them under their historical names.
 
 from .inbound_email import router as anonymous_report_router
 from .external import router as external_intake_router
+from .symlink_public import router as symlink_public_router
 
 __all__ = [
     "anonymous_report_router",
     "external_intake_router",
+    "symlink_public_router",
 ]

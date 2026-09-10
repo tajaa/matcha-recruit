@@ -101,18 +101,17 @@ ANALYSIS_TYPES = Literal[
 from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
     _detect_osha_reportable_keywords,
 )
+from app.matcha.services._shared.public_links import build_public_link  # noqa: E402
 
 
 def _build_public_link(request: Request, token: str, segment: str) -> str:
     """Build a public token URL under the given path ``segment``.
 
-    Honors the X-Forwarded-Proto / Host pair set by nginx so links work
-    behind the prod proxy as well as in local dev. Falls back to the
-    request's own scheme/host if those headers aren't present.
+    Thin alias over `services/_shared/public_links.build_public_link` (moved
+    there 2026-09-09 so non-IR features can mint public URLs without booting
+    this package). Every IR submodule keeps importing this name.
     """
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    return f"{proto}://{host}/{segment}/{token}"
+    return build_public_link(request, token, segment)
 
 
 # Voice dictation upload validation — shared by the authed endpoint (voice.py)

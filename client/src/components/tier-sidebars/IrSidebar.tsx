@@ -15,6 +15,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
+  { to: '/app/symlink', icon: Link2, label: 'Sym-links', feature: 'symlink' },
   // { to: '/app', icon: LayoutDashboard, label: 'Command Center' },
   // { to: '/app/ask-expert', icon: MessageCircleQuestion, label: 'Ask an Expert' },
   // { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
@@ -40,7 +41,9 @@ export default function IrSidebar() {
       return { ...item, badge: badges.ir || undefined, onSeen: () => markSeen('ir') }
     }
     if (isEssentials && ESSENTIALS_LOCKED.has(item.to)) {
-      const { feature: _feature, ...rest } = item
+      // Drop `feature` so SidebarShell renders the locked carrot instead of hiding it.
+      const rest: NavItem = { ...item }
+      delete rest.feature
       return { ...rest, locked: true, onLockedClick: () => setUpgradeNudge((n) => n + 1) }
     }
     return item

@@ -54,6 +54,9 @@ import { LegacyOpsRedirect } from '../work/pages/LegacySurfaceRedirect'
 import SafetyMeetings from '../pages/app/safety-meetings/SafetyMeetings'
 import SafetyMeetingRecord from '../pages/app/safety-meetings/SafetyMeetingRecord'
 import SafetyMeetingDetail from '../pages/app/safety-meetings/SafetyMeetingDetail'
+import SymLinks from '../pages/app/symlink/SymLinks'
+import SymLinkDetail from '../pages/app/symlink/SymLinkDetail'
+import SymLinkSettings from '../pages/app/symlink/SymLinkSettings'
 
 export default function AppRoutes() {
   return (
@@ -86,6 +89,9 @@ export default function AppRoutes() {
         <Route path="safety-meetings" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetings /></FeatureGate>} />
         <Route path="safety-meetings/:meetingId/record" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetingRecord /></FeatureGate>} />
         <Route path="safety-meetings/:meetingId" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetingDetail /></FeatureGate>} />
+        <Route path="symlink" element={<FeatureGate feature="symlink" label="Sym-links"><SymLinks /></FeatureGate>} />
+        <Route path="symlink/settings" element={<FeatureGate feature="symlink" label="Sym-links"><SymLinkSettings /></FeatureGate>} />
+        <Route path="symlink/:linkId" element={<FeatureGate feature="symlink" label="Sym-links"><SymLinkDetail /></FeatureGate>} />
         <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="benefits" element={<FeatureGate feature="benefits_admin" label="Benefits"><Benefits /></FeatureGate>} />

@@ -283,6 +283,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `inventory_forecasting` | ❌ | Deterministic demand forecast and advisory replenishment recommendations over committed sales imports, with Square finalized-order ingestion and a rate-limited, parse-only AI scenario draft. Requires `inventory` + `sales_intake`; saves immutable forecast snapshots and never autonomously creates or approves orders—managers may stage a queued order from the plan for the existing approval flow. → `server/app/matcha/services/inventory/CLAUDE.md` |
 | `inventory_waste` | ❌ | Waste & shrinkage — a `waste` movement kind + reason-code taxonomy (spoilage/expired/prep_error/overproduction/breakage/contamination/comp/recall/theft/unknown), dollarized rollups, theoretical-vs-actual usage variance, perishable lots, and guarded predictive pars. Chat capture via `@huume` never auto-creates an item and always coerces a reported `theft` to `unknown` — a personnel accusation is never minted from a Slack-style aside. Requires `inventory`; default off; admin-toggle; NOT bundled. → `server/app/matcha/services/inventory/CLAUDE.md` |
 | `safety_meetings` | ❌ | AI-powered toolbox-talk records — chunked WAV transcription, Gemini summary, manager review/edit, private audio retention, and typed-name sign-off. Gates `/safety-meetings` + `/app/safety-meetings`; default off; admin-toggle; NOT bundled. |
+| `symlink` | ❌ | Sym-link — bounded, guided task links (credential/document upload, manager review, info update, custom checklist). Per-task `/sym/{token}` + company-wide weekly-rotating passcode; a Gemini "tunnel chat" collects every required field + attachment (completion is deterministic, never the model's call); submit STAGES a record the sender applies (confirm-first). Gates `/symlink` + `/app/symlink*`; public routes read the raw stored flag (missing ⇒ off). Default off; admin-toggle; NOT bundled. → `server/app/matcha/services/symlink/CLAUDE.md` |
 `incidents` and `employees` are not in the defaults — they're flipped on by tier-specific flows (Matcha-lite Stripe webhook, IR-only signup) or admin toggle.
 
 **Tier bundles** (read-time via `TIER_REQUIRED_FEATURES` overlay in `feature_flags.py`, except Pro which stores at signup):
@@ -309,6 +310,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Risk Assessment** (`matcha/routes/risk_assessment.py`).
 - **Interviews** (`matcha/services/`) — voice interviews via Gemini Live API.
 - **Inventory** (`matcha/services/inventory/` + `matcha/routes/inventory.py`) — channel-driven stock tracking via `@huume` (auto-created items, append-only movement ledger, internal order queue with in-channel confirm). WS dispatch in `werk/routes/channels_ws.py:_bg_inventory_request`/`_bg_inventory_reply`, intent classification in `services/ems/intent.py`'s `INVENTORY` case. → full spec: `server/app/matcha/services/inventory/CLAUDE.md`
+- **Sym-link** (`matcha/routes/symlink.py` + `matcha/routes/intake/symlink_public.py` + `matcha/services/symlink/`) — guided task links: per-task token + weekly company passcode → stateless-turn Gemini chat driven by a per-link *spec* → staged submission the sender applies. Reuses the IR chat-intake engine shape and public-route hardening; `services/_shared/public_links.build_public_link` is the shared URL builder (IR's `_build_public_link` now aliases it). → `server/app/matcha/services/symlink/CLAUDE.md`
 - **Safety meetings** (`matcha/routes/safety_meetings.py` + `matcha/services/safety_meetings/`) — chunked WAV toolbox-talk transcription, Gemini summary, manager review/edit, private audio retention, and signed record storage. The signed record is locked after typed-name confirmation; gated by `safety_meetings`.
 - **Huume code** (`matcha/services/huume_code/` + `workers/tasks/huume_code.py`) — `@huume` in an eligible business collab chat runs a bounded repo-grounded agent that stages files only in memory and opens a single draft PR through the GitHub REST API.
 - **Espresso project agent** (`matcha/services/matcha_work/project_agent/` + `workers/tasks/project_agent.py`) — `@espresso` in a repo-connected project discussion queues a durable, read-only repository question and posts a source-linked answer back to chat. Espresso's "Describe a task to draft" bar uses the same run/step audit lifecycle with `kind='task_draft'`, but its repository grounding is intentionally limited to the root `CLAUDE.md` or `AGENTS.md`: the server preloads one guide, the model only receives the structured finish tool, and the human still reviews/edits before the normal task-create call. Neither task kind has mutation tools or writes GitHub.
@@ -327,6 +329,7 @@ Scheduling model: no celery-beat. Worker container runs continuously (`restart: 
 - `onboarding_reminders` — new-hire task chases
 - `discipline_expiry` — auto-close stale discipline records
 - `ir_deadline_alerts` — IR deadline/SLA nudges; dedup via `reminder_sent_at` + `ir_deadline_alert_log`. Detail: `server/app/workers/CLAUDE.md`
+- `symlink_passcode_rotation`, `symlink_sweep` — weekly sym-link passcode rotation (+ Ops-channel announcement) and open-link expiry / one-shot reminder. Detail: `server/app/matcha/services/symlink/CLAUDE.md`
 - `hr_proactive_push` — opens pre-briefed HR Pilot threads (leave returns, discipline review dates, stuck signatures); deterministic briefings, one-shot-ever dedupe (`hrpush01`). Detail: `server/app/workers/CLAUDE.md`
 - `handbook_freshness` — re-evaluate handbooks against current law
 - `pattern_recognition` — cross-incident analysis
@@ -486,6 +489,7 @@ This repo is configured for Claude Code with subtree docs, hooks, and project sl
 | `server/app/werk/CLAUDE.md` | werk import boundary + werk_lite/werk_lite_calls_all_members specs |
 | `server/app/matcha/services/benefits/CLAUDE.md` | benefits_admin feature spec |
 | `server/app/matcha/services/inventory/CLAUDE.md` | inventory feature spec |
+| `server/app/matcha/services/symlink/CLAUDE.md` | symlink feature spec |
 
 Subtree docs compose with this root file. When working in a subtree, the nearer doc has the specific conventions; this root has the cross-cutting product/database/test-data rules.
 

@@ -109,6 +109,7 @@ const OfferSign = lazy(() => import("./pages/shared/OfferSign"));
 const LocationIntake = lazy(() => import("./pages/shared/LocationIntake"));
 const ExternalIntake = lazy(() => import("./pages/shared/ExternalIntake"));
 const RequestInfoForm = lazy(() => import("./pages/shared/RequestInfoForm"));
+const SymLink = lazy(() => import("./pages/shared/SymLink"));
 const SignPolicy = lazy(() => import("./pages/shared/SignPolicy"));
 const SignEmployeeDocument = lazy(
   () => import("./pages/shared/SignEmployeeDocument"),
@@ -247,6 +248,7 @@ export default function App() {
         <Route path="/intake/:token" element={<LocationIntake />} />
         <Route path="/intake/external/:token" element={<ExternalIntake />} />
         <Route path="/request-info/:token" element={<RequestInfoForm />} />
+        <Route path="/sym/:token" element={<SymLink />} />
         <Route path="/sign/:token" element={<SignPolicy />} />
         <Route
           path="/sign-document/:token"

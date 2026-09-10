@@ -3,7 +3,7 @@ import {
   IconPeople, IconSeal, IconSetup, IconShield,
   IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
-import { CalendarClock, HeartPulse, Sparkles, LayoutDashboard, Radio } from 'lucide-react'
+import { CalendarClock, HeartPulse, Link2, Sparkles, LayoutDashboard, Radio } from 'lucide-react'
 import SidebarShell from '../sidebars/SidebarShell'
 import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -51,6 +51,7 @@ const nav: (NavItem | NavGroup)[] = [
     defaultOpen: true,
     items: [
       { to: '/app/employees', icon: IconPeople, label: 'Employees', feature: 'employees' },
+      { to: '/app/symlink', icon: Link2, label: 'Sym-links', feature: 'symlink' },
       { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
       { to: '/app/training', icon: IconTraining, label: 'Training', feature: 'training' },
       { to: '/app/credential-templates', icon: IconSeal, label: 'Credential Templates', feature: 'credential_templates' },
