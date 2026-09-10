@@ -31,7 +31,9 @@ from ...models.scheduling.employee_schedule import FillVacantPreviewRequest
 from ...services.scheduling import schedule_chat
 from ...services.scheduling.planning_inputs import build_planning_inputs
 from ...services.scheduling.schedule_assistant_session import assert_manager_location
-from ...services.scheduling.week_builder import plan_vacant_fill, vacant_fill_edit_requests
+from ...services.scheduling.week_builder import (
+    explain_unfilled, plan_vacant_fill, vacant_fill_edit_requests,
+)
 from ._shared import require_company_id
 
 router = APIRouter()
@@ -89,9 +91,16 @@ async def preview_fill_vacant(
                 "unfilled": unfilled, "jurisdiction": plan.get("jurisdiction"),
             }
         if not plan["assignments"]:
+            # Same explanation the thread gets: a scenario chip that only says
+            # "nothing could be filled" disagrees with the Huume answer beside
+            # it, and neither tells the manager what to fix.
             return {
                 "status": "empty",
-                "message": "No open shift could be filled under the staffing rules.",
+                "message": (
+                    "No open position could be filled under the staffing rules. "
+                    + explain_unfilled(unfilled)
+                ).strip() if unfilled else
+                "No open position could be filled under the staffing rules.",
                 "unfilled": unfilled, "jurisdiction": plan.get("jurisdiction"),
             }
         edit_requests, error = vacant_fill_edit_requests(plan["assignments"])

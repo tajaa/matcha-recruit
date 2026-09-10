@@ -264,6 +264,29 @@ class TestScheduleChangeReviewInStateBlock:
         assert "Compliance: NOT verified — Legality was NOT verified for TX" in block
         assert "Never describe this change as compliant" in block
 
+    def test_the_open_seats_carry_their_blockers_not_just_a_count(self):
+        """A count is not relayable. Told only "12 open seats", the model
+        reconstructed a reason from the roster and contradicted the fill it
+        had just run — the reported failure."""
+        sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        state = {"huume_action": {
+            "type": "schedule_change", "status": "proposed", "confirm_id": "ab12cd34",
+            "operation_count": 0,
+            "review": {
+                "assignments": [], "rejected": [], "employees": [],
+                "unfilled": [
+                    {"shift_id": "a", "exclusions": {sentence: 4}},
+                    {"shift_id": "b", "exclusions": {"not qualified for the shift job": 6}},
+                ],
+                "compliance_status": "verified",
+                "jurisdiction": {"state": "CA", "status": "curated", "message": "on file"},
+            },
+        }}
+        block = build_state_block(state)
+        assert "Unfilled: 2 open seat(s)" in block
+        assert "Blocker: not qualified for the shift job (6 seat(s))" in block
+        assert f"Blocker: {sentence} (4 seat(s))" in block
+
     def test_verified_batch_adds_no_compliance_caveat(self):
         state = {"huume_action": {
             "type": "schedule_change", "status": "proposed", "confirm_id": "ab12cd34", "operation_count": 2,
@@ -272,6 +295,12 @@ class TestScheduleChangeReviewInStateBlock:
         }}
         block = build_state_block(state)
         assert "Compliance:" not in block and "Not staged" not in block
+
+
+def test_the_schedule_prompt_forbids_a_reconstructed_fill_reason():
+    prompt = _schedule_prompt()
+    assert "explain it ONLY with the reasons that fill returned" in prompt
+    assert "Never reconstruct a blocker by counting the roster" in prompt
 
 
 def _schedule_prompt():

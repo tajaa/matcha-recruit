@@ -610,7 +610,7 @@ def _propose_env(monkeypatch, conn, *, demand, employees=None, profile=None, bre
         week_builder, "_planning_snapshot", AsyncMock(return_value=(snapshot, demand, None)),
     )
     monkeypatch.setattr(
-        week_builder, "_preflight_compliance", AsyncMock(return_value=(set(), {})),
+        week_builder, "_preflight_compliance", AsyncMock(return_value=(set(), {}, {})),
     )
     monkeypatch.setattr(
         week_builder, "jurisdiction_rule_status",
@@ -1145,7 +1145,9 @@ def test_a_second_shift_the_same_day_is_a_policy_refusal_with_its_reason():
     assert plan["metrics"]["filled_positions"] == 1
     assert plan["unfilled"] == [{
         "shift_key": "close", "starts_at": "2026-08-24T14:00:00+00:00", "role": "Shift Lead",
-        "reason": "policy: second shift that day", "exclusions": {"policy: second shift that day": 1},
+        "reason": "policy: second shift that day", "reason_code": "second_shift_same_day",
+        "exclusions": {"policy: second shift that day": 1},
+        "exclusion_codes": {"second_shift_same_day": 1},
     }]
     assert plan["hours_by_employee"] == {"e1": 480}
 
@@ -1439,7 +1441,7 @@ async def test_statutory_advisories_reach_the_assignment_the_findings_and_the_re
 
     async def every_pair_has_the_flsa_line(conn_, *, company_id, location_id, plan):
         return set(), {(shift["key"], a["employee_id"]): [FLSA]
-                       for shift in plan["shifts"] for a in shift["proposed_assignments"]}
+                       for shift in plan["shifts"] for a in shift["proposed_assignments"]}, {}
 
     monkeypatch.setattr(week_builder, "_preflight_compliance", every_pair_has_the_flsa_line)
     result = await _propose_now()
@@ -1468,7 +1470,7 @@ async def test_the_advisory_list_is_capped_but_the_count_is_not(monkeypatch):
 
     async def flsa_everywhere(conn_, *, company_id, location_id, plan):
         return set(), {(shift["key"], a["employee_id"]): [FLSA]
-                       for shift in plan["shifts"] for a in shift["proposed_assignments"]}
+                       for shift in plan["shifts"] for a in shift["proposed_assignments"]}, {}
 
     monkeypatch.setattr(week_builder, "_preflight_compliance", flsa_everywhere)
     result = await _propose_now()
@@ -1489,7 +1491,11 @@ async def test_a_block_that_survives_the_replan_budget_is_stripped_not_shown_fil
     async def block_whoever_was_picked(conn_, *, company_id, location_id, plan):
         pairs = {(s["key"], a["employee_id"]) for s in plan["shifts"] for a in s["proposed_assignments"]}
         calls.append(pairs)
-        return pairs, {}
+        return pairs, {}, {
+            pair: {"code": "credential_expired", "policy": False,
+                   "message": "Food Handler Card expired 2026-08-01 and blocks new scheduling"}
+            for pair in pairs
+        }
 
     monkeypatch.setattr(week_builder, "_preflight_compliance", block_whoever_was_picked)
     result = await _propose_now()
@@ -1500,11 +1506,15 @@ async def test_a_block_that_survives_the_replan_budget_is_stripped_not_shown_fil
     proposal, metrics = _persisted_proposal(conn)
     assert proposal["shifts"][0]["proposed_assignments"] == []           # the last pick was refused too
     assert metrics == {**metrics, "proposed_positions": 0, "filled_positions": 0, "open_positions": 1}
+    # The seat the budget could not route around now names the block that
+    # caused it, instead of the category the manager can do nothing with.
+    blocked_sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
     assert result["unfilled"] == [{"shift_key": "s1", "starts_at": "2026-08-24T08:00:00+00:00", "role": "Barista",
-                                   "reason": "compliance or eligibility block",
-                                   "exclusions": {"compliance or eligibility block": 1}}]
+                                   "reason": blocked_sentence, "reason_code": "credential_expired",
+                                   "exclusions": {blocked_sentence: 1},
+                                   "exclusion_codes": {"credential_expired": 1}}]
     assert set(proposal["hours_by_employee"].values()) == {0}
-    assert result["review"]["assignments"] == [] and result["review"]["unfilled"][0]["reason"] == "compliance or eligibility block"
+    assert result["review"]["assignments"] == [] and result["review"]["unfilled"][0]["reason"] == blocked_sentence
 
 
 @pytest.mark.asyncio
@@ -1592,12 +1602,24 @@ async def test_the_preflight_keeps_advisories_batches_lapses_and_fails_closed(mo
     monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(return_value={"training": True, "credential_templates": False}))
     monkeypatch.setattr(week_builder, "fetch_lapse_items", lapse)
 
-    blocked, advisories = await week_builder._preflight_compliance(
+    blocked, advisories, block_reasons = await week_builder._preflight_compliance(
         None, company_id=COMPANY_ID, location_id=LOCATION_ID, plan=_checked_plan(),
     )
 
     assert blocked == {("s2", BEA_ID), ("s3", CID_ID)}          # the crash AND the block, both closed
     assert advisories == {("s1", AMY_ID): [FLSA]}                # a blocked pair's advisories are moot
+    # The block's own words survive now — a bare category is something the
+    # manager cannot act on. The crash says it could not check, not that the
+    # person is ineligible.
+    assert block_reasons[("s3", CID_ID)] == {
+        # A statutory block carries no `code` of its own, so the category is
+        # the code — but its SENTENCE survives, which is the whole point.
+        "code": "eligibility_block", "message": "minor cap", "policy": False,
+    }
+    assert block_reasons[("s2", BEA_ID)] == {
+        "code": "check_failed", "policy": False,
+        "message": "eligibility could not be verified for this employee just now",
+    }
     lapse.assert_awaited_once()
     assert lapse.await_args.args[2] == sorted([UUID(AMY_ID), UUID(BEA_ID), UUID(CID_ID)], key=str)
     assert lapse.await_args.kwargs == {"credential_templates_enabled": False, "training_enabled": True}
@@ -1618,10 +1640,10 @@ async def test_a_failed_lapse_prefetch_falls_back_to_per_call_lookup(monkeypatch
 
     monkeypatch.setattr(week_builder, "check_shift_compliance", fake_check)
     monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(side_effect=RuntimeError("no pool")))
-    blocked, advisories = await week_builder._preflight_compliance(
+    blocked, advisories, block_reasons = await week_builder._preflight_compliance(
         None, company_id=COMPANY_ID, location_id=LOCATION_ID, plan=_checked_plan(),
     )
-    assert blocked == set() and advisories == {}
+    assert blocked == set() and advisories == {} and block_reasons == {}
     assert all(k["lapse_items"] is None for k in seen)
 
 
@@ -1630,7 +1652,7 @@ async def test_an_empty_plan_skips_the_preflight_entirely(monkeypatch):
     check = AsyncMock()
     monkeypatch.setattr(week_builder, "check_shift_compliance", check)
     monkeypatch.setattr(week_builder, "get_company_features", AsyncMock(side_effect=AssertionError("not called")))
-    assert await week_builder._preflight_compliance(None, company_id=COMPANY_ID, location_id=LOCATION_ID, plan={"shifts": []}) == (set(), {})
+    assert await week_builder._preflight_compliance(None, company_id=COMPANY_ID, location_id=LOCATION_ID, plan={"shifts": []}) == (set(), {}, {})
     check.assert_not_awaited()
 
 

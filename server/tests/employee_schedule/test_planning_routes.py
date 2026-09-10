@@ -199,6 +199,28 @@ def test_preview_with_nothing_fillable_is_empty_not_a_proposal(monkeypatch):
     assert captured["build"] is None
 
 
+def test_an_empty_preview_says_why_the_same_way_the_thread_does(monkeypatch):
+    """A scenario chip that only says "nothing could be filled" disagrees
+    with the Huume answer beside it and tells the manager nothing to fix."""
+    sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+    plan = _plan([], [{"shift_id": "s1", "role": "Shift Lead",
+                       "starts_at": datetime(2026, 8, 24, 6, tzinfo=UTC),
+                       "ends_at": datetime(2026, 8, 24, 14, tzinfo=UTC),
+                       "reason": sentence, "reason_code": "credential_expired",
+                       "exclusions": {sentence: 2},
+                       "exclusion_codes": {"credential_expired": 2}}])
+    result, _captured, _ = _preview(monkeypatch, plan=plan)
+    assert result["status"] == "empty"
+    assert sentence in result["message"]
+    assert "Update that employee's credential record" in result["message"]
+
+
+def test_an_empty_preview_with_no_open_seats_keeps_the_plain_sentence(monkeypatch):
+    result, _captured, _ = _preview(monkeypatch, plan=_plan([], []))
+    assert result["status"] == "empty"
+    assert result["message"] == "No open position could be filled under the staffing rules."
+
+
 def test_preview_maps_a_guard_refusal_to_refused_and_strips_the_channel_tail(monkeypatch):
     build = schedule_chat.ProposalBuild(
         kind="clarify", proposal_id=None, clarify_kind="refused",

@@ -1527,14 +1527,99 @@ class TestFillVacantShifts(unittest.TestCase):
 
     def test_nothing_fillable_is_a_clarify_that_names_the_reasons(self):
         plan = _fill_plan([], [
-            {"shift_id": "a", "role": "Shift Lead", "reason": "policy: second shift that day", "exclusions": {}},
-            {"shift_id": "b", "role": "Opener", "reason": "not qualified for the shift job", "exclusions": {}},
+            {"shift_id": "a", "role": "Shift Lead", "reason": "policy: second shift that day",
+             "reason_code": "second_shift_same_day",
+             "exclusions": {"policy: second shift that day": 1},
+             "exclusion_codes": {"second_shift_same_day": 1}},
+            {"shift_id": "b", "role": "Opener", "reason": "not qualified for the shift job",
+             "reason_code": "not_qualified",
+             "exclusions": {"not qualified for the shift job": 2},
+             "exclusion_codes": {"not_qualified": 2}},
         ])
         result, captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
         assert result["status"] == "clarify"
-        assert result["message"].startswith("I couldn't fill any of those shifts: Shift Lead 2026-08-23 14:00 — policy: second shift that day; Opener 2026-08-23 14:00 — not qualified for the shift job.")
-        assert "allow a split shift" in result["message"]
+        assert result["message"].startswith(
+            "I couldn't fill any of the 2 open positions. "
+            "Shift Lead 2026-08-23 14:00 — second shift that day (store policy); "
+            "Opener 2026-08-23 14:00 — not qualified for the shift job."
+        )
+        # Each established blocker brings its own next step, in one fixed order.
+        assert "Add qualified employees to that job" in result["message"]
+        assert "Allow a split shift" in result["message"]
         assert captured["build"] is None
+
+    def test_a_missing_credential_is_named_with_the_record_to_fix(self):
+        """The reported case: the fill refused every seat and said only
+        "compliance or eligibility block", so the manager had nothing to act
+        on and Huume invented a roster explanation on the next turn."""
+        blocker = "Food Handler Card requires an approved credential document before scheduling"
+        plan = _fill_plan([], [
+            {"shift_id": "a", "role": "Barista", "reason": blocker,
+             "reason_code": "credential_missing",
+             "exclusions": {blocker: 3}, "exclusion_codes": {"credential_missing": 3}},
+        ])
+        result, _captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
+        assert result["status"] == "clarify"
+        assert blocker in result["message"]
+        assert "Update that employee's credential record" in result["message"]
+        # Never the category the checker's own sentence replaced.
+        assert "compliance or eligibility block" not in result["message"]
+
+    def test_an_expired_credential_keeps_the_checkers_own_date(self):
+        blocker = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        plan = _fill_plan([], [
+            {"shift_id": "a", "role": "Barista", "reason": blocker,
+             "reason_code": "credential_expired",
+             "exclusions": {blocker: 1}, "exclusion_codes": {"credential_expired": 1}},
+        ])
+        result, _captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
+        assert blocker in result["message"]
+
+    def test_several_blockers_on_one_seat_all_reach_the_manager(self):
+        blocker = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        plan = _fill_plan([], [
+            {"shift_id": "a", "role": "Barista", "reason": "not qualified for the shift job",
+             "reason_code": "not_qualified",
+             "exclusions": {"not qualified for the shift job": 6, blocker: 4,
+                            "policy: less than 8h rest": 1},
+             "exclusion_codes": {"not_qualified": 6, "credential_expired": 4, "rest_gap": 1}},
+        ])
+        result, _captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
+        message = result["message"]
+        # Heaviest first, so the same plan always reads the same way.
+        assert message.index("not qualified for the shift job") < message.index(blocker)
+        assert message.index(blocker) < message.index("less than 8h rest (store policy)")
+        assert "Update that employee's credential record" in message
+        assert "Add qualified employees to that job" in message
+        assert "Allow a split shift" in message
+
+    def test_a_blocker_with_no_detail_says_so_instead_of_inventing_one(self):
+        plan = _fill_plan([], [
+            {"shift_id": "a", "role": "Barista",
+             "reason": "eligibility could not be verified for this employee just now",
+             "reason_code": "check_failed",
+             "exclusions": {"eligibility could not be verified for this employee just now": 1},
+             "exclusion_codes": {"check_failed": 1}},
+        ])
+        result, _captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
+        assert "that is not an all-clear" in result["message"]
+        assert "credential" not in result["message"]
+
+    def test_the_explanation_is_written_as_copy_not_as_a_log_line(self):
+        """This string IS the manager's reply on the terminal path, so it may
+        not quote a tool argument, a code, or a stored field prefix."""
+        blocker = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        plan = _fill_plan([], [
+            {"shift_id": "a", "role": "Barista", "reason": blocker, "reason_code": "credential_expired",
+             "exclusions": {blocker: 1, "policy: less than 8h rest": 1},
+             "exclusion_codes": {"credential_expired": 1, "rest_gap": 1}},
+        ])
+        message, _captured = self._propose({"fill_vacant_shifts": True}, plan=plan)
+        text = message["message"]
+        assert "`" not in text
+        assert "policy: " not in text
+        for code in ("credential_expired", "rest_gap", "exclusion_codes", "fill_vacant_shifts"):
+            assert code not in text
 
     def test_a_planner_clarify_or_refusal_is_relayed_verbatim(self):
         result, captured = self._propose(

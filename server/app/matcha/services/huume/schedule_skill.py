@@ -155,6 +155,9 @@ class ScheduleProposalResult(TypedDict):
     # the SAME turn; the state block re-renders a summary on later turns.
     review: NotRequired[dict[str, Any]]
     rejected_count: NotRequired[int]
+    # Open seats the planner could not staff. `propose` has always returned
+    # it; it was simply never declared here.
+    unfilled_count: NotRequired[int]
     compliance_status: NotRequired[str]
 
 
@@ -519,7 +522,9 @@ async def _fill_vacant_requests(
     the result becomes plain `assign` edit requests so the SAME
     `build_edit_proposal` (guard, pill, confirm) stages them. Returns
     ``(edit_requests, unfilled, error)``."""
-    from app.matcha.services.scheduling.week_builder import plan_vacant_fill, vacant_fill_edit_requests
+    from app.matcha.services.scheduling.week_builder import (
+        explain_unfilled, plan_vacant_fill, vacant_fill_edit_requests,
+    )
 
     if location_id is None or week_start is None:
         return [], [], "Filling open shifts requires a scoped schedule workspace."
@@ -567,10 +572,19 @@ async def _fill_vacant_requests(
     if plan.get("status") != "ready":
         return [], unfilled, str(plan.get("message") or "I couldn't plan those shifts.")
     if not plan["assignments"]:
-        reasons = _unfilled_summary(unfilled)
+        # Terminal: this text IS the manager's reply (`_TERMINAL_SCHEDULE_TOOLS`),
+        # so it has to carry the blockers the scheduler actually established
+        # and what to do about them — a category name is something nobody can
+        # act on, and the model then invents a reason to fill the silence.
+        if not unfilled:
+            return [], unfilled, (
+                "I couldn't fill any of those shifts, and the scheduler didn't report a reason "
+                "for any of them. Try again, or assign by hand."
+            )
+        count = len(unfilled)
         return [], unfilled, (
-            "I couldn't fill any of those shifts: " + reasons
-            + " Loosen the request (another job, allow a split shift, or exclude nobody) or assign by hand."
+            f"I couldn't fill any of the {count} open "
+            f"position{'s' if count != 1 else ''}. " + explain_unfilled(unfilled)
         )
     edit_requests, error = vacant_fill_edit_requests(plan["assignments"])
     return edit_requests, unfilled, error
@@ -578,15 +592,6 @@ async def _fill_vacant_requests(
 
 def _iso(value: Any) -> Any:
     return value.isoformat() if hasattr(value, "isoformat") else value
-
-
-def _unfilled_summary(unfilled: list[dict[str, Any]], limit: int = 5) -> str:
-    parts = []
-    for item in unfilled[:limit]:
-        when = str(item.get("starts_at") or "")[:16].replace("T", " ")
-        parts.append(f"{(item.get('role') or 'shift')} {when} — {item.get('reason') or 'no eligible employees'}")
-    more = f"; …and {len(unfilled) - limit} more" if len(unfilled) > limit else ""
-    return "; ".join(parts) + more + "."
 
 
 async def find_coverage(

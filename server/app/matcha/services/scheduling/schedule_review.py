@@ -26,6 +26,7 @@ NOT evaluate this state's law and the output must never be called compliant.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from typing import Any, Optional
 
@@ -363,11 +364,41 @@ def summarize_review(review: dict[str, Any]) -> dict[str, Any]:
         "staged": int(staged),
         "rejected": int(rejected),
         "unfilled": int(unfilled),
+        # Already summarized when the review came back through `compact_review`
+        # (the state-block path); recomputed for a full review.
+        "unfilled_reasons": (
+            list(review.get("unfilled_reasons") or []) or unfilled_reason_summary(review)
+        ),
         "advisories": int(advisories),
         "warnings": warnings,
         "compliance_status": review.get("compliance_status"),
         "jurisdiction_message": (review.get("jurisdiction") or {}).get("message"),
     }
+
+
+def unfilled_reason_summary(
+    review: dict[str, Any], *, limit: int = 3,
+) -> list[dict[str, Any]]:
+    """The distinct blockers behind the open seats, heaviest first.
+
+    A COUNT is not an explanation: on the turn after a fill, the state block
+    is all the model has, and "12 open seats" is a number it cannot turn into
+    anything actionable — which is how a fabricated reason ("only two people
+    are qualified") reaches the manager. Bounded, because the state block
+    must not carry the week twice.
+    """
+    counted: Counter = Counter()
+    for item in review.get("unfilled") or []:
+        exclusions = item.get("exclusions") or {}
+        if exclusions:
+            for message, count in exclusions.items():
+                counted[str(message)] += int(count or 0)
+        elif item.get("reason"):
+            counted[str(item["reason"])] += 1
+    return [
+        {"reason": message, "seats": count}
+        for message, count in sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))[:limit]
+    ]
 
 
 def compact_review(review: dict[str, Any]) -> dict[str, Any]:
@@ -397,6 +428,7 @@ def compact_review(review: dict[str, Any]) -> dict[str, Any]:
         ]),
         "rejected_count": len(review.get("rejected") or []),
         "unfilled_count": len(review.get("unfilled") or []),
+        "unfilled_reasons": unfilled_reason_summary(review),
         "advisory_count": len(review.get("advisories") or []),
         "finding_count": len(review.get("findings") or []),
         "employees": warnings,

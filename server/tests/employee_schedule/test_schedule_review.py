@@ -140,7 +140,7 @@ class TestHelpers:
         })
         summary = summarize_review(review)
         assert summary == {
-            "staged": 2, "rejected": 1, "unfilled": 0, "advisories": 0,
+            "staged": 2, "rejected": 1, "unfilled": 0, "unfilled_reasons": [], "advisories": 0,
             "warnings": ["only 2h rest"],
             "compliance_status": "unmapped", "jurisdiction_message": review["jurisdiction"]["message"],
         }
