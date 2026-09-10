@@ -2,7 +2,7 @@
 
     cd server && ./venv/bin/python -m pytest tests/compliance_pilot -q
 
-No DB, no Gemini: `get_connection`, `core.load_actions`, `GeminiRateLimiter` and
+No DB, no Gemini: `get_connection`, `core.load_actions`, `ApiRateLimiter` and
 `get_genai_client` are all substituted on the `agent` module (the module that
 DEFINES the caller — patching a facade that re-exports them is a silent no-op,
 see server/CLAUDE.md).
@@ -94,7 +94,7 @@ def _client_returning(responses: list):
 
 def _install(monkeypatch, *, limiter, responses):
     monkeypatch.setattr(agent_mod, "get_connection", lambda: _FakeConnCtx())
-    monkeypatch.setattr(agent_mod, "GeminiRateLimiter", lambda: limiter)
+    monkeypatch.setattr(agent_mod, "ApiRateLimiter", lambda: limiter)
     monkeypatch.setattr(agent_mod, "get_genai_client", lambda: _client_returning(responses))
 
     async def _load_actions(conn, session_id):

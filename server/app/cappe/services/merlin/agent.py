@@ -45,7 +45,7 @@ from google.genai import types
 
 from ....core.services.ai_usage import feature_scope
 from ....core.services.genai_client import get_genai_client
-from ....core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from ....core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from ....core.services.storage import get_storage
 from ..browser_pool import SHOT_EXT, SHOT_MIME
 from ..design_gate import is_premium_plan
@@ -479,7 +479,7 @@ async def run_merlin_agent(
     tier_cfg = MODEL_TIERS[tier]
     premium = is_premium_plan(plan)
     theme_intent = has_theme_intent(message)
-    rate_limiter = GeminiRateLimiter()
+    rate_limiter = ApiRateLimiter()
     atts = attachments or []
 
     # The working copy. Ops fold onto this so a screenshot shows the cumulative
@@ -783,7 +783,7 @@ async def run_merlin_agent(
             except HTTPException:
                 # `check_and_record` is `redis_cache.check_rate_limit`, which
                 # raises HTTPException(429) — not RateLimitExceeded (that type
-                # is GeminiRateLimiter's, a different budget). Catch the real
+                # is ApiRateLimiter's, a different budget). Catch the real
                 # one so quota exhaustion degrades this ONE tool call rather
                 # than escaping to the loop's outer handler and killing the
                 # whole turn (including ops already applied this turn).

@@ -203,6 +203,11 @@ class Settings:
     # Gemini API Rate Limits (research at scale needs higher ceilings)
     gemini_hourly_limit: int = 200
     gemini_daily_limit: int = 5000
+    # The OpenAI agent loops (Huume, Espresso) count in their own bucket. They
+    # used to spend the Gemini allowance above, which meant a compliance sweep
+    # could 429 a Huume turn. Same starting ceiling; tune independently.
+    openai_hourly_limit: int = 200
+    openai_daily_limit: int = 5000
 
     # Government APIs
     openstates_api_key: Optional[str] = None  # OpenStates legislative tracking (free key)
@@ -411,6 +416,8 @@ def load_settings() -> Settings:
         grounding_llm_verifier_enabled=os.getenv("GROUNDING_LLM_VERIFIER_ENABLED", "false").lower() in ("true", "1", "yes"),
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "200")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
+        openai_hourly_limit=int(os.getenv("OPENAI_HOURLY_LIMIT", "200")),
+        openai_daily_limit=int(os.getenv("OPENAI_DAILY_LIMIT", "5000")),
         openstates_api_key=os.getenv("OPENSTATES_API_KEY"),
         courtlistener_api_token=os.getenv("COURTLISTENER_API_TOKEN"),
         saml_sp_entity_id=os.getenv("SAML_SP_ENTITY_ID", "https://hey-matcha.com/api/sso/metadata"),

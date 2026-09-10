@@ -58,7 +58,7 @@ from google.genai import types
 from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_catalog import GEMINI_FLASH
-from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from app.database import get_connection
 
 from app.core.services.compliance_pilot import actions as actions_mod
@@ -252,7 +252,7 @@ async def run_pilot_turn(
          "proposal_action_ids": [...], "token_usage": {...},
          "model_calls": int, "error"?: str}
     """
-    rate_limiter = GeminiRateLimiter()
+    rate_limiter = ApiRateLimiter()
     recorder = _StepRecorder()
     final_message: Optional[str] = None
     turn_error: Optional[str] = None

@@ -20,7 +20,7 @@ _WINDOW_SECONDS = 86_400
 async def check_and_record(account_id: str, *, premium: bool) -> None:
     """Raises `fastapi.HTTPException(429)` (via `check_rate_limit`) once the
     account's daily allowance is spent — NOT `RateLimitExceeded` (that type
-    belongs to `GeminiRateLimiter`, a different budget); callers must catch
+    belongs to `ApiRateLimiter`, a different budget); callers must catch
     HTTPException. Call BEFORE generating — a failed generation still counts,
     same as Merlin's Gemini call accounting."""
     daily = DAILY_PAID if premium else DAILY_FREE

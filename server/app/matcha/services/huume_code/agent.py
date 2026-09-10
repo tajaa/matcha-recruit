@@ -12,7 +12,7 @@ from google.genai import types
 
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_catalog import GEMINI_FLASH
-from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from app.database import connection_or_direct
 from app.matcha.services.matcha_work import github_write
 from . import chat, store
@@ -42,7 +42,7 @@ async def run_huume_code(*, run_id: UUID, company_id: UUID, project_id: UUID, ch
     mutation is its single, non-force commit and draft PR.
     """
     started = time.monotonic()
-    limiter = GeminiRateLimiter()
+    limiter = ApiRateLimiter()
     working = WorkingSet()
     tree: list[dict] | None = None
     ticket: dict | None = None

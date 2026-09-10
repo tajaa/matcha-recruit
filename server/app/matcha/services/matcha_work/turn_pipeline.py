@@ -577,7 +577,7 @@ async def _run_quota_gate(company_id: UUID, current_user: CurrentUser) -> None:
     than raising, and nothing re-checks mid-turn. Do not "fix" this into a
     mid-turn check: killing an agent turn partway strands half-executed
     tool writes with no user-visible result. The only thing allowed to stop
-    a turn mid-flight is the platform-wide GeminiRateLimiter (see
+    a turn mid-flight is the platform-wide ApiRateLimiter (see
     huume/agent.py's RateLimitExceeded handling), and even that force-
     finishes rather than discarding partial work once a call has run."""
     if current_user.role != "admin":
@@ -922,8 +922,8 @@ async def _run_huume_dispatch(tc: TurnContext):
 
     from app.matcha.services.huume import agent as huume_agent, store as huume_store
 
-    # Per-company turn cap — GeminiRateLimiter guards the platform's Gemini
-    # quota, not a tenant's own usage. A Huume turn costs up to 8 model calls
+    # Per-company turn cap — ApiRateLimiter guards the platform's provider
+    # quota (the OpenAI bucket, for this loop), not a tenant's own usage. A Huume turn costs up to 8 model calls
     # plus whatever the pilot tools spend, and (unlike handbook_pilot_chat's
     # 40/hr) previously had no tenant limit at all. Raised 60->120/hr
     # 2026-07-31: real usage was hitting the cap in normal daily use, not a
