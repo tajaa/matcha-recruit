@@ -224,6 +224,54 @@ proposal so the guard, the pill, the confirm turn and the audit row are the ones
   `also_suggested_for`), `test_schedule_assistant_context.py` (`roster_load`, built once, never fails
   the overview), and the `fill_vacant_shifts` cases in `tests/huume/`.
 
+### Why an open seat stayed open (2026-09-10) — the blocker, not its category
+
+Why: a manager asked Huume to fill 35 seats and got "Barista 2026-09-13 06:30 — compliance or
+eligibility block" thirty-five times. That is the CATEGORY of a blocker whose real text the planner
+had thrown away — and asked "why can't you fill the roles?", the model then reconstructed a reason
+from the roster and contradicted its own previous message. The reason already existed and was already
+user-safe: `schedule_eligibility._credential_problem` writes "Food Handler Card expired 2026-08-01 and
+blocks new scheduling" with a stable `code`.
+
+- **`_preflight_compliance` returns `(blocked, advisories, block_reasons)`.** The advisories stopped
+  being discarded in the 2026-09-07 hardening; `block_reasons` is the same fix for the blocks, which
+  that pass left collapsing into `blocked.add(pair)`. `describe_block` picks the pair's reason:
+  eligibility (credential / permit) violations first — those are what a manager can act on — the
+  checker's own sentence verbatim, at most two joined, `(+N more)` beyond that, and
+  `GENERIC_BLOCK_REASON` ONLY when no violation carried a message. The fail-closed exception arm gets
+  its own `check_failed` reason, so "we could not check" never reads as "this person is ineligible".
+- **`_plan_with_preflight` accumulates `block_reasons` across replan rounds** and feeds them into the
+  next `build(blocked_pairs, block_reasons)`. It has to: a pair blocked in round 1 is excluded from
+  round 2 and never re-checked, so the round that learned the reason is the only one that will have it.
+- **`build_plan.refusal` returns `{code, message, policy}`** — the `assignment_guard._reason` shape, so
+  the two vocabularies converge instead of forking a third; four codes (`second_shift_same_day`,
+  `rest_gap`, `consecutive_days`, `weekly_cap`) are literally that module's. `message` is unchanged
+  from the old free strings and is still what `unfilled[].exclusions` keys on, so the client and the
+  persisted proposals are untouched; `reason_code` / `exclusion_codes` ride alongside so remediation
+  and capping switch on a code and never on English.
+- **`explain_unfilled` + `BLOCK_REMEDIES` are the ONE renderer**, used by thread Huume and by the REST
+  fill preview — a scenario chip and the thread must not disagree about why the week could not be
+  staffed. Per seat: the exclusions by count desc then alphabetically (deterministic, or a retry reads
+  differently), capped at 3 with `+N other reasons`. Truncation to 5 seats prefers the
+  eligibility-blocked ones; a plain prefix slice hides exactly the seat a manager could fix.
+  `plan_vacant_fill` deliberately does NOT `_cap_unfilled` — `unfilled_count` is read off that list,
+  and "12 seats" when 35 are open is worse than a long list.
+- **The stored `policy: ` prefix is a data marker, not copy.** The renderer says
+  "second shift that day (store policy)"; the exclusions key keeps the prefix, because that key is
+  what the client renders and what the existing tests pin.
+- **A remedy never names a credential type.** The checker's message already names the one it knows
+  about; inferring "they need a food handler card" from a bare `credential_missing` is the invention
+  this exists to stop. The generic remedy survives, for the case where no code was recognised.
+- **`compact_review`/`summarize_review` carry `unfilled_reasons`** (top 3 distinct blockers + seat
+  counts) so the Huume state block can name them on a LATER turn. A count is not relayable — that gap
+  is what the fabricated "only two employees are qualified" filled.
+- Tests: `test_fill_vacant.py` (credential block end to end, no-message fallback, unqualified roster,
+  determinism, scope), `test_week_builder.py` (`_preflight_compliance`'s third return, the
+  budget-spent strip naming its blocker), `test_planning_routes.py` (REST parity),
+  `tests/huume/test_huume_schedule_skill.py` (the reported case, multiple blockers, no-detail
+  fallback, the copy guard, successful-fill regression), `tests/huume/test_huume_prompt.py`
+  (state block + the prompt rule).
+
 ### Batched schedule corrections (`schedule_chat_proposals.proposal.kind='batch'`, 2026-09-06)
 
 One clarified correction is one confirmation. `propose_schedule_change`'s
@@ -511,8 +559,8 @@ preflight exception as "fine", never validated the `fixed_employee_ids` it inher
   `plan_vacant_fill` use: build → preflight → replan around blocks, up to `_MAX_COMPLIANCE_REPLANS`
   more times, and **the plan handed back was always checked**. When the budget runs out with a block
   still in it, `_strip_blocked_pairs` removes that pair, books it as `unfilled` with reason
-  `compliance or eligibility block`, and fixes `metrics`/`hours_by_employee` — a manager is never shown
-  a seat filled by someone the gate refused.
+  that pair's OWN blocker (see below), and fixes `metrics`/`hours_by_employee` — a manager is never
+  shown a seat filled by someone the gate refused.
 - **New findings** (`_attach_findings_core`, same `make_finding` shape, counted in full in
   `finding_counts`):
   - `staffing_concentration` (advisory) — one person on ≥ `_CONCENTRATION_MIN_SHIFTS` (7: more shifts

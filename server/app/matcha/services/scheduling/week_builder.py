@@ -247,6 +247,28 @@ def _is_unavailable(employee_id: str, shift_date: date, ranges: dict[str, list[t
     return any(start <= shift_date <= end for start, end in ranges.get(employee_id, []))
 
 
+# The planner's refusal vocabulary. Codes are shared with
+# `assignment_guard._reason` wherever the two describe the same rule, so law,
+# operational policy and eligibility stay machine-distinguishable without a
+# third spelling of the same thing. `message` is what the manager reads and
+# what `unfilled[].exclusions` keys on — it must stay stable.
+GENERIC_BLOCK_REASON = "compliance or eligibility block"
+
+# Codes that mean "this person cannot lawfully take the shift as their record
+# stands" — credentials, permits, statute. `_cap_unfilled` keeps these seats
+# ahead of the rest, and the remediation map points at the record to fix.
+ELIGIBILITY_BLOCK_CODES = frozenset({
+    "eligibility_block", "check_failed",
+    "credential_missing", "credential_expiration_unconfirmed", "credential_expired",
+    "minor_work_permit_expired", "minor_work_permit_missing",
+})
+
+
+def _refusal(code: str, message: str, *, policy: bool = False) -> dict[str, Any]:
+    """Same shape as `assignment_guard._reason` — one vocabulary, not two."""
+    return {"code": code, "message": message, "policy": policy}
+
+
 def _job_qualified(
     employee: dict[str, Any], job_id: str | None, shift_date: date,
     gated_job_ids: set[str],
@@ -292,6 +314,7 @@ def build_plan(
     exclude_employee_ids: set[str], employee_hour_caps: dict[str, int],
     gated_job_ids: set[str],
     blocked_pairs: set[tuple[str, str]] | None = None,
+    blocked_reasons: dict[tuple[str, str], dict[str, Any]] | None = None,
     allow_split_shift: bool = False,
     adjacent_assignments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -318,6 +341,7 @@ def build_plan(
     stopped being enforced.
     """
     blocked_pairs = blocked_pairs or set()
+    blocked_reasons = blocked_reasons or {}
     by_id = {employee["id"]: employee for employee in employees}
     busy: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
     minutes: dict[str, int] = defaultdict(int)
@@ -338,28 +362,38 @@ def build_plan(
         shifts_by_day[employee_id][assignment["starts_at"].date()] += 1
         shift_count[employee_id] += 1
 
-    def refusal(employee: dict[str, Any], shift: dict[str, Any]) -> str | None:
+    def refusal(employee: dict[str, Any], shift: dict[str, Any]) -> dict[str, Any] | None:
+        """Why this person cannot take this shift, as `{code, message, policy}`.
+
+        `message` is the manager-facing string and the `exclusions` key; the
+        code is what remediation and capping switch on, so neither has to
+        match English. A pair the compliance preflight refused carries THAT
+        checker's own sentence when it is known (an expired credential names
+        itself) and only falls back to the category when it is not.
+        """
         employee_id = employee["id"]
         shift_key = shift["key"]
         shift_date = shift["starts_at"].date()
         if employee_id in exclude_employee_ids:
-            return "manager exclusion"
+            return _refusal("manager_exclusion", "manager exclusion")
         if (shift_key, employee_id) in blocked_pairs:
-            return "compliance or eligibility block"
+            return blocked_reasons.get((shift_key, employee_id)) or _refusal(
+                "eligibility_block", GENERIC_BLOCK_REASON,
+            )
         if employee.get("availability_state") == "unconfirmed":
-            return "availability unconfirmed"
+            return _refusal("availability_unconfirmed", "availability unconfirmed")
         if not _job_qualified(employee, shift.get("job_id"), shift_date, gated_job_ids):
-            return "not qualified for the shift job"
+            return _refusal("not_qualified", "not qualified for the shift job")
         if _is_unavailable(employee_id, shift_date, unavailable_ranges):
-            return "approved time away"
+            return _refusal("approved_time_away", "approved time away")
         if availability_violations(
             availability.get(employee_id, {}), shift["starts_at"], shift["ends_at"],
         ):
-            return "outside confirmed availability"
+            return _refusal("outside_availability", "outside confirmed availability")
         if any(_overlaps(window, (shift["starts_at"], shift["ends_at"])) for window in busy[employee_id]):
-            return "overlapping assignment"
+            return _refusal("existing_overlap", "overlapping assignment")
         if not allow_split_shift and shifts_by_day[employee_id][shift_date] >= POLICY_MAX_SHIFTS_PER_DAY:
-            return "policy: second shift that day"
+            return _refusal("second_shift_same_day", "policy: second shift that day", policy=True)
         rest_windows = busy[employee_id]
         if allow_split_shift:
             # The manager allowed doubles: the rest rule still holds between
@@ -367,21 +401,23 @@ def build_plan(
             rest_windows = [window for window in rest_windows if window[0].date() != shift_date]
         rest_gap = _min_rest_gap_hours(rest_windows, shift["starts_at"], shift["ends_at"])
         if rest_gap is not None and rest_gap < POLICY_MIN_REST_HOURS:
-            return f"policy: less than {POLICY_MIN_REST_HOURS:g}h rest"
+            return _refusal(
+                "rest_gap", f"policy: less than {POLICY_MIN_REST_HOURS:g}h rest", policy=True,
+            )
         max_days = employee.get("max_consecutive_days")
         if max_days is None:
             max_days = POLICY_MAX_CONSECUTIVE_DAYS
         if _consecutive_day_count(scheduled_days[employee_id], shift_date) > max_days:
-            return "maximum consecutive days"
+            return _refusal("consecutive_days", "maximum consecutive days", policy=True)
         new_minutes = minutes[employee_id] + shift["worked_minutes"]
         explicit_cap = employee_hour_caps.get(employee_id)
         stored_cap = employee.get("max_weekly_minutes")
         cap = min(value for value in (explicit_cap, stored_cap) if value is not None) \
             if explicit_cap is not None or stored_cap is not None else None
         if cap is not None and new_minutes > cap:
-            return "weekly hour cap"
+            return _refusal("weekly_cap", "weekly hour cap", policy=True)
         if not employee.get("allow_overtime") and new_minutes > 2400:
-            return "overtime not allowed"
+            return _refusal("weekly_overtime_policy", "overtime not allowed", policy=True)
         return None
 
     def candidate_score(employee: dict[str, Any], shift: dict[str, Any]) -> tuple[Any, ...]:
@@ -429,13 +465,15 @@ def build_plan(
             item["employee_id"] for item in proposed_by_shift[shift["key"]]
         }
         reasons = Counter()
+        reason_codes = Counter()
         candidates = []
         for employee in employees:
             if employee["id"] in already:
                 continue
             reason = refusal(employee, shift)
             if reason:
-                reasons[reason] += 1
+                reasons[reason["message"]] += 1
+                reason_codes[reason["code"]] += 1
             else:
                 candidates.append(employee)
         if not candidates:
@@ -444,7 +482,9 @@ def build_plan(
                 "starts_at": shift["starts_at"].isoformat(),
                 "role": shift.get("role"),
                 "reason": reasons.most_common(1)[0][0] if reasons else "no eligible employees",
+                "reason_code": reason_codes.most_common(1)[0][0] if reason_codes else None,
                 "exclusions": dict(sorted(reasons.items())),
+                "exclusion_codes": dict(sorted(reason_codes.items())),
             })
             continue
         candidates.sort(key=lambda employee: candidate_score(employee, shift))
@@ -498,16 +538,57 @@ def build_plan(
     }
 
 
+def describe_block(violations: list[dict[str, Any]]) -> dict[str, Any]:
+    """One manager-facing reason from the checker's own blocking violations.
+
+    The checker already writes user-safe sentences that name the credential
+    and its date ("Food Handler Card expired 2026-08-01 and blocks new
+    scheduling"). Nothing here re-words them, adds a statute they did not
+    cite, or guesses which credential a bare code refers to — the whole point
+    is that the manager reads what the gate actually established. Eligibility
+    (credential / permit) violations come first: they are the ones a manager
+    can act on directly.
+    """
+    ranked = sorted(
+        (item for item in violations if str(item.get("message") or "").strip()),
+        key=lambda item: 0 if item.get("check") == "schedule_eligibility" else 1,
+    )
+    if not ranked:
+        return _refusal("eligibility_block", GENERIC_BLOCK_REASON)
+    messages = []
+    for item in ranked[:2]:
+        text = str(item["message"]).strip()
+        # One sentence is what fits a per-seat line; the rest is detail the
+        # employee's own record carries.
+        text = text.split(". ")[0].strip().rstrip(".")
+        if text:
+            messages.append(text)
+    if not messages:
+        return _refusal("eligibility_block", GENERIC_BLOCK_REASON)
+    message = "; ".join(messages)
+    extra = len(ranked) - len(messages)
+    if extra > 0:
+        message += f" (+{extra} more)"
+    return _refusal(str(ranked[0].get("code") or "eligibility_block"), message)
+
+
 async def _preflight_compliance(
     conn, *, company_id: UUID, location_id: UUID, plan: dict[str, Any],
-) -> tuple[set[tuple[str, str]], dict[tuple[str, str], list[dict[str, Any]]]]:
+) -> tuple[
+    set[tuple[str, str]],
+    dict[tuple[str, str], list[dict[str, Any]]],
+    dict[tuple[str, str], dict[str, Any]],
+]:
     """Run the shared statutory/credential gate over every proposed pair.
 
-    Returns ``(blocked, advisories)``: the pairs that hit a hard block (a
-    replan routes around them) and the advisory violations per pair —
-    verbatim, so they are persisted on the assignment, become
-    `compliance_advisory` findings and reach the review. Nothing the checker
-    said is discarded any more; the planner used to keep only the blocks.
+    Returns ``(blocked, advisories, block_reasons)``: the pairs that hit a
+    hard block (a replan routes around them), the advisory violations per
+    pair, and each blocked pair's own reason — all verbatim, so they are
+    persisted on the assignment, become `compliance_advisory` findings and
+    reach the review. Nothing the checker said is discarded: the advisories
+    stopped being dropped in 2026-09, and `block_reasons` is the same fix for
+    the blocks, which until then collapsed into a bare category string a
+    manager could do nothing with.
 
     Fails CLOSED per pair: a checker that raises for one person/shift marks
     that pair blocked (and logs) instead of letting it through unchecked —
@@ -521,8 +602,9 @@ async def _preflight_compliance(
     ]
     blocked: set[tuple[str, str]] = set()
     advisories: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    block_reasons: dict[tuple[str, str], dict[str, Any]] = {}
     if not pairs:
-        return blocked, advisories
+        return blocked, advisories, block_reasons
     lapse_map: dict[str, list[dict[str, Any]]] | None = None
     try:
         features = await get_company_features(company_id, conn=conn)
@@ -568,23 +650,33 @@ async def _preflight_compliance(
                 shift.get("key"), assignment.get("employee_id"),
             )
             blocked.add(pair)
+            block_reasons[pair] = _refusal(
+                "check_failed",
+                "eligibility could not be verified for this employee just now",
+            )
             continue
-        if any(item.get("severity") == "block" for item in violations):
+        blocking = [dict(item) for item in violations if item.get("severity") == "block"]
+        if blocking:
             blocked.add(pair)
+            block_reasons[pair] = describe_block(blocking)
             continue
         kept = [dict(item) for item in violations if item.get("severity") != "block"]
         if kept:
             advisories[pair] = kept
-    return blocked, advisories
+    return blocked, advisories, block_reasons
 
 
-def _strip_blocked_pairs(plan: dict[str, Any], pairs: set[tuple[str, str]]) -> None:
+def _strip_blocked_pairs(
+    plan: dict[str, Any], pairs: set[tuple[str, str]],
+    reasons: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> None:
     """Remove known-blocked assignments from a plan IN PLACE and account for
     them as open seats. Used only when the replan budget is spent: the last
     plan was checked, still carries a pair the preflight refused, and a
     manager must never be shown a seat filled by someone who cannot take it."""
     if not pairs:
         return
+    reasons = reasons or {}
     removed = 0
     hours = plan.get("hours_by_employee") or {}
     for shift in plan.get("shifts") or []:
@@ -599,10 +691,14 @@ def _strip_blocked_pairs(plan: dict[str, Any], pairs: set[tuple[str, str]]) -> N
             employee_id = assignment["employee_id"]
             if employee_id in hours:
                 hours[employee_id] = max(0, int(hours[employee_id]) - int(shift.get("worked_minutes") or 0))
+            reason = reasons.get((shift["key"], employee_id)) or _refusal(
+                "eligibility_block", GENERIC_BLOCK_REASON,
+            )
             plan["unfilled"].append({
                 "shift_key": shift["key"], "starts_at": shift["starts_at"], "role": shift.get("role"),
-                "reason": "compliance or eligibility block",
-                "exclusions": {"compliance or eligibility block": 1},
+                "reason": reason["message"], "reason_code": reason["code"],
+                "exclusions": {reason["message"]: 1},
+                "exclusion_codes": {reason["code"]: 1},
             })
     metrics = plan["metrics"]
     metrics["proposed_positions"] -= removed
@@ -617,20 +713,27 @@ async def _plan_with_preflight(
     `_MAX_COMPLIANCE_REPLANS` more times. The plan handed back was ALWAYS
     checked: when the budget runs out with a block still in it, that pair
     is stripped and reported as an open seat instead of shown as filled
-    (the old loop's final rebuild went out unchecked)."""
+    (the old loop's final rebuild went out unchecked).
+
+    `block_reasons` accumulates ACROSS rounds and is fed back into the next
+    build: a pair blocked in round 1 is excluded before round 2 and so is
+    never re-checked, so the round that learned its reason is the only one
+    that will ever have it."""
     blocked_pairs: set[tuple[str, str]] = set()
+    block_reasons: dict[tuple[str, str], dict[str, Any]] = {}
     plan: dict[str, Any] = {}
     blocked: set[tuple[str, str]] = set()
     advisories: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for _attempt in range(_MAX_COMPLIANCE_REPLANS + 1):
-        plan = build(blocked_pairs)
-        blocked, advisories = await _preflight_compliance(
+        plan = build(blocked_pairs, block_reasons)
+        blocked, advisories, reasons = await _preflight_compliance(
             conn, company_id=company_id, location_id=location_id, plan=plan,
         )
+        block_reasons.update(reasons)
         if not blocked - blocked_pairs:
             return plan, advisories
         blocked_pairs |= blocked
-    _strip_blocked_pairs(plan, blocked)
+    _strip_blocked_pairs(plan, blocked, block_reasons)
     return plan, advisories
 
 
@@ -708,7 +811,8 @@ def _cap_unfilled(
         return list(unfilled)
     priority_indexes = [
         index for index, item in enumerate(unfilled)
-        if item.get("reason") == "compliance or eligibility block"
+        if item.get("reason_code") in ELIGIBILITY_BLOCK_CODES
+        or item.get("reason") == GENERIC_BLOCK_REASON
     ]
     priority = set(priority_indexes[:limit])
     for index in range(len(unfilled)):
@@ -1505,7 +1609,10 @@ async def plan_vacant_fill(
             "assignments": [], "unfilled": [], "jurisdiction": jurisdiction,
         }
 
-    def _build(blocked_pairs: set[tuple[str, str]]) -> dict[str, Any]:
+    def _build(
+        blocked_pairs: set[tuple[str, str]],
+        blocked_reasons: dict[tuple[str, str], dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         return build_plan(
             demand=demand, employees=employees, availability=roster["availability"],
             existing_assignments=roster["existing_assignments"],
@@ -1513,6 +1620,7 @@ async def plan_vacant_fill(
             unavailable_ranges=roster["unavailable_ranges"],
             exclude_employee_ids=set(), employee_hour_caps={},
             gated_job_ids=roster["gated_job_ids"], blocked_pairs=blocked_pairs,
+            blocked_reasons=blocked_reasons,
             allow_split_shift=allow_split_shift,
         )
 
@@ -1537,8 +1645,13 @@ async def plan_vacant_fill(
             "shift_id": item["shift_key"], "role": item.get("role"),
             "starts_at": item["starts_at"],
             "ends_at": _iso(by_key[item["shift_key"]]["ends_at"]) if item["shift_key"] in by_key else None,
-            "reason": item["reason"], "exclusions": item.get("exclusions") or {},
+            "reason": item["reason"], "reason_code": item.get("reason_code"),
+            "exclusions": item.get("exclusions") or {},
+            "exclusion_codes": item.get("exclusion_codes") or {},
         }
+        # NOT capped: `unfilled_count` is read off this list and a manager
+        # told "12 seats" when 35 are open is worse than a long list. The
+        # RENDERER truncates, and prioritises the blocked seats when it does.
         for item in plan["unfilled"]
     ]
     return {
@@ -1551,6 +1664,125 @@ async def plan_vacant_fill(
         "demand_size": len(demand),
         "jurisdiction": jurisdiction,
     }
+
+
+# Remediation, keyed on the refusal CODE and never on the English. Order is
+# fixed so a seat blocked several ways always reads the same way twice.
+# A remedy never names a credential type: the checker's own message already
+# names the one it knows about, and inferring "they need a food handler card"
+# from a bare `credential_missing` is exactly the invention this exists to stop.
+BLOCK_REMEDIES: tuple[tuple[frozenset[str], str], ...] = (
+    (
+        frozenset({
+            "credential_missing", "credential_expiration_unconfirmed", "credential_expired",
+            "minor_work_permit_expired", "minor_work_permit_missing", "eligibility_block",
+        }),
+        "Update that employee's credential record, or pick someone whose credential is current.",
+    ),
+    (
+        frozenset({"not_qualified"}),
+        "Add qualified employees to that job, or assign someone already on its list.",
+    ),
+    (
+        frozenset({
+            "second_shift_same_day", "rest_gap", "consecutive_days",
+            "weekly_cap", "weekly_overtime_policy",
+        }),
+        "Allow a split shift, or spread the week across more people.",
+    ),
+    (
+        frozenset({"approved_time_away", "outside_availability", "availability_unconfirmed"}),
+        "Adjust availability or time off for that week, or choose another employee.",
+    ),
+    (
+        frozenset({"check_failed"}),
+        "Eligibility couldn't be checked for some people just now — that is not an all-clear. "
+        "Try again, or assign by hand.",
+    ),
+)
+
+GENERIC_REMEDY = (
+    "Loosen the request (another job, allow a split shift, or exclude nobody) or assign by hand."
+)
+
+_POLICY_PREFIX = "policy: "
+
+
+def _reason_phrase(message: str) -> str:
+    """The stored `policy: ` prefix is a data marker, not copy.
+
+    It exists so law and operational default stay distinguishable in
+    `exclusions`; the manager gets the same distinction in words. Rewriting
+    the stored key instead would change what the client renders and what the
+    existing tests pin.
+    """
+    text = str(message or "").strip()
+    if text.startswith(_POLICY_PREFIX):
+        return f"{text[len(_POLICY_PREFIX):]} (store policy)"
+    return text
+
+
+def _seat_reasons(item: dict[str, Any], limit: int) -> str:
+    counted = item.get("exclusions") or {}
+    if not counted:
+        return _reason_phrase(item.get("reason") or "no eligible employees")
+    ordered = sorted(counted.items(), key=lambda pair: (-int(pair[1]), pair[0]))
+    shown = [_reason_phrase(message) for message, _count in ordered[:limit]]
+    text = "; ".join(shown)
+    extra = len(ordered) - len(shown)
+    if extra > 0:
+        text += f"; +{extra} other reason{'s' if extra > 1 else ''}"
+    return text
+
+
+def unfilled_remedies(unfilled: list[dict[str, Any]]) -> list[str]:
+    """Every corrective action the established blockers actually support."""
+    codes: set[str] = set()
+    for item in unfilled:
+        codes.update(item.get("exclusion_codes") or {})
+        if item.get("reason_code"):
+            codes.add(str(item["reason_code"]))
+    remedies = [text for group, text in BLOCK_REMEDIES if codes & group]
+    return remedies or [GENERIC_REMEDY]
+
+
+def explain_unfilled(
+    unfilled: list[dict[str, Any]], *, limit: int = 5, reason_limit: int = 3,
+) -> str:
+    """Why each open seat stayed open, plus what to do about it.
+
+    Every string here reaches the manager verbatim — on the Huume schedule
+    surface a fill that staffs nobody is a TERMINAL refusal, so this text IS
+    the reply, with no model turn to soften or expand it. So: no tool
+    arguments, no codes, no field names; the blockers are the ones the
+    scheduler established and the remedy is derived from them.
+
+    Truncation prefers the eligibility-blocked seats — those are the ones a
+    manager can fix — rather than whichever five sort earliest.
+    """
+    if not unfilled:
+        return ""
+    ordered = sorted(
+        enumerate(unfilled),
+        key=lambda pair: (
+            0 if (
+                pair[1].get("reason_code") in ELIGIBILITY_BLOCK_CODES
+                or pair[1].get("reason") == GENERIC_BLOCK_REASON
+            ) else 1,
+            pair[0],
+        ),
+    )
+    shown = sorted(ordered[:limit], key=lambda pair: pair[0])
+    lines = []
+    for _index, item in shown:
+        when = str(item.get("starts_at") or "")[:16].replace("T", " ")
+        role = item.get("role") or "shift"
+        lines.append(f"{role} {when} — {_seat_reasons(item, reason_limit)}".strip())
+    text = "; ".join(lines)
+    remaining = len(unfilled) - len(shown)
+    if remaining > 0:
+        text += f"; \u2026and {remaining} more"
+    return text.rstrip(".") + ". " + " ".join(unfilled_remedies(unfilled))
 
 
 def vacant_fill_edit_requests(assignments: list[dict[str, Any]]) -> tuple[list[dict], str | None]:
@@ -2031,7 +2263,10 @@ async def propose_week_draft(
                     "location's active roster. Check readiness again and use its employee ids."
                 ),
             }
-        def _build(blocked_pairs: set[tuple[str, str]]) -> dict[str, Any]:
+        def _build(
+            blocked_pairs: set[tuple[str, str]],
+            blocked_reasons: dict[tuple[str, str], dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
             return build_plan(
                 demand=demand, employees=snapshot["employees"], availability=snapshot["availability"],
                 existing_assignments=snapshot["existing_assignments"],
@@ -2041,6 +2276,7 @@ async def propose_week_draft(
                 employee_hour_caps=constraints["employee_hour_caps"],
                 gated_job_ids=snapshot["gated_job_ids"],
                 blocked_pairs=blocked_pairs,
+                blocked_reasons=blocked_reasons,
             )
 
         plan, advisories = await _plan_with_preflight(

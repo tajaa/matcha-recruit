@@ -248,6 +248,22 @@ the prompt tells the model to read it before naming anyone in an explicit edit �
 on the schedule surface sees draft shifts and tags candidates with `also_suggested_for`. Full mechanics:
 `services/scheduling/CLAUDE.md` §"Fill vacant shifts".
 
+**A failed fill says WHY, in words the manager can act on (2026-09-10).** `_unfilled_summary` is gone;
+`_fill_vacant_requests` renders through `week_builder.explain_unfilled`, so a fill that staffs nobody
+answers with each seat's established blocker plus the corrective action that blocker supports —
+"Food Handler Card expired 2026-08-01 and blocks new scheduling. Update that employee's credential
+record, or pick someone whose credential is current." — instead of the category
+`compliance or eligibility block`, which named nothing. Three rules this path lives under: it is
+TERMINAL (`_TERMINAL_SCHEDULE_TOOLS`), so the string IS the reply and must read as product copy — no
+backticks, no tool arguments, no codes, no stored `policy: ` prefix, guarded by
+`test_the_explanation_is_written_as_copy_not_as_a_log_line`; the blockers are the scheduler's own verdict and nothing is invented,
+with the generic fallback kept for the case where no reason was established and made explicit when
+eligibility could not be checked at all; and a successful or partial fill stages exactly as before.
+`compact_review` carries `unfilled_reasons` so the state block names the top three blockers on later
+turns, and the schedule prompt now forbids reconstructing a blocker by counting the roster — the
+model contradicting its own fill is the second half of the reported bug. Full mechanics:
+`services/scheduling/CLAUDE.md` §"Why an open seat stayed open".
+
 **Adopting a scenario into the thread (2026-09-07).** The Schedule Pilot workspace can run fill
 scenarios over REST without Huume. "Stage this" then hands one to the thread:
 `POST /employee-schedule/assistant/sessions/{session_id}/adopt-proposal` writes that

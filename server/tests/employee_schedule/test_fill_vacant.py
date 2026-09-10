@@ -56,7 +56,7 @@ def _roster(employees, *, existing=()):
             "unavailable_ranges": {}, "gated_job_ids": {"lead"}}
 
 
-def _fill(*, demand, roster, preflight=None, advisories=None,
+def _fill(*, demand, roster, preflight=None, advisories=None, block_reasons=None,
           jurisdiction=CURATED, job_match=None, **kwargs):
     calls = {"demand": [], "job": [], "preflight": 0}
 
@@ -72,7 +72,9 @@ def _fill(*, demand, roster, preflight=None, advisories=None,
 
     async def fake_preflight(conn, *, company_id, location_id, plan):
         calls["preflight"] += 1
-        return (preflight(plan) if preflight else set()), dict(advisories or {})
+        blocked = preflight(plan) if preflight else set()
+        reasons = block_reasons(plan) if callable(block_reasons) else dict(block_reasons or {})
+        return blocked, dict(advisories or {}), reasons
 
     async def fake_job(conn, company_id, name, *, location_id=None):
         calls["job"].append(name)
@@ -146,6 +148,140 @@ class TestPlanVacantFill:
         result, calls = _fill(demand=demand, roster=_roster([_employee(ANA, "Ana"), _employee(BEN, "Ben")]), preflight=block_ana)
         assert _who(result) == {"a": "Ben"}
         assert calls["preflight"] == 2
+
+    def test_a_credential_block_reaches_the_seat_with_the_checkers_own_words(self):
+        """The reported case. Every candidate is refused by the credential
+        gate, so no replan can rescue the seat — and the manager used to be
+        told only "compliance or eligibility block", which names nothing to
+        fix. The checker's own sentence is what survives now."""
+        sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+
+        def block_everyone(plan):
+            return {(shift["key"], item["employee_id"])
+                    for shift in plan["shifts"] for item in shift["proposed_assignments"]}
+
+        def why(plan):
+            return {
+                (shift["key"], item["employee_id"]): {
+                    "code": "credential_expired", "message": sentence, "policy": False,
+                }
+                for shift in plan["shifts"] for item in shift["proposed_assignments"]
+            }
+
+        result, _calls = _fill(
+            demand=[_open("a", 23, 6, 14)],
+            roster=_roster([_employee(ANA, "Ana"), _employee(BEN, "Ben")]),
+            preflight=block_everyone, block_reasons=why,
+        )
+        assert result["assignments"] == []
+        seat = result["unfilled"][0]
+        assert seat["reason"] == sentence and seat["reason_code"] == "credential_expired"
+        assert seat["exclusions"] == {sentence: 2}
+        assert seat["exclusion_codes"] == {"credential_expired": 2}
+        assert week_builder.explain_unfilled(result["unfilled"]).startswith(
+            f"Shift Lead 2026-08-23 06:00 — {sentence}."
+        )
+        assert "Update that employee's credential record" in week_builder.explain_unfilled(result["unfilled"])
+
+    def test_a_block_with_no_message_keeps_the_category_and_says_nothing_more(self):
+        """The fallback is still there, and it is the ONLY place the bare
+        category survives — never a stand-in for a reason that exists."""
+        def block_everyone(plan):
+            return {(shift["key"], item["employee_id"])
+                    for shift in plan["shifts"] for item in shift["proposed_assignments"]}
+
+        result, _calls = _fill(
+            demand=[_open("a", 23, 6, 14)], roster=_roster([_employee(ANA, "Ana")]),
+            preflight=block_everyone,
+        )
+        seat = result["unfilled"][0]
+        assert seat["reason"] == week_builder.GENERIC_BLOCK_REASON
+        assert seat["reason_code"] == "eligibility_block"
+
+    def test_an_unqualified_roster_names_the_job_not_a_credential(self):
+        result, _calls = _fill(
+            demand=[_open("a", 23, 6, 14)],
+            roster=_roster([_employee(ANA, "Ana", lead=False)]),
+        )
+        assert result["assignments"] == []
+        seat = result["unfilled"][0]
+        assert seat["reason_code"] == "not_qualified"
+        text = week_builder.explain_unfilled(result["unfilled"])
+        assert "not qualified for the shift job" in text
+        assert "Add qualified employees to that job" in text
+        assert "credential" not in text
+
+    def test_the_same_plan_explains_itself_the_same_way_twice(self):
+        sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        unfilled = [{
+            "shift_id": "a", "role": "Barista", "starts_at": "2026-08-23T06:00:00+00:00",
+            "reason": sentence, "reason_code": "credential_expired",
+            # Two reasons on the same count: the tie breaks alphabetically, or
+            # the manager gets a different sentence on every retry.
+            "exclusions": {sentence: 2, "approved time away": 2},
+            "exclusion_codes": {"credential_expired": 2, "approved_time_away": 2},
+        }]
+        first = week_builder.explain_unfilled(unfilled)
+        assert first == week_builder.explain_unfilled(list(unfilled))
+        assert first.index("Food Handler") < first.index("approved time away")
+
+    def test_the_explanation_only_ever_describes_the_seats_it_was_given(self):
+        """Scope: the reply is built from this plan's own rows and nothing
+        else. The planner's open seats carry no employee identity at all, so
+        a refusal cannot name who was considered — only the shift, the time
+        and the blocker."""
+        result, _calls = _fill(
+            demand=[_open("a", 23, 6, 14)],
+            roster=_roster([_employee(ANA, "Ana"), _employee(BEN, "Ben", lead=False)]),
+            preflight=lambda plan: {(s["key"], i["employee_id"])
+                                    for s in plan["shifts"] for i in s["proposed_assignments"]},
+        )
+        text = week_builder.explain_unfilled(result["unfilled"])
+        for leaked in ("Ana", "Ben", ANA, BEN, str(LOCATION), str(COMPANY)):
+            assert leaked not in text
+        assert set(result["unfilled"][0]) == {
+            "shift_id", "role", "starts_at", "ends_at", "reason", "reason_code",
+            "exclusions", "exclusion_codes",
+        }
+
+    def test_a_long_refusal_truncates_but_keeps_the_blocked_seats(self):
+        sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        seats = [
+            {"shift_id": f"s{i}", "role": "Barista", "starts_at": f"2026-08-2{i}T06:00:00+00:00",
+             "reason": "not qualified for the shift job", "reason_code": "not_qualified",
+             "exclusions": {"not qualified for the shift job": 1},
+             "exclusion_codes": {"not_qualified": 1}}
+            for i in range(8)
+        ]
+        seats.append({
+            "shift_id": "lead", "role": "Shift Lead", "starts_at": "2026-08-29T06:00:00+00:00",
+            "reason": sentence, "reason_code": "credential_expired",
+            "exclusions": {sentence: 1}, "exclusion_codes": {"credential_expired": 1},
+        })
+        text = week_builder.explain_unfilled(seats)
+        # The one seat a manager could actually fix outranks calendar order.
+        assert sentence in text
+        assert "\u2026and 4 more" in text
+        assert text.count("Barista") == 4
+
+    def test_more_reasons_than_fit_are_counted_not_dropped(self):
+        seat = {
+            "shift_id": "s1", "role": "Barista", "starts_at": "2026-08-23T06:00:00+00:00",
+            "reason": "manager exclusion", "reason_code": "manager_exclusion",
+            "exclusions": {"manager exclusion": 5, "approved time away": 4,
+                           "overlapping assignment": 3, "weekly hour cap": 2,
+                           "outside confirmed availability": 1},
+            "exclusion_codes": {"manager_exclusion": 5, "approved_time_away": 4,
+                                "existing_overlap": 3, "weekly_cap": 2, "outside_availability": 1},
+        }
+        text = week_builder.explain_unfilled([seat])
+        assert "+2 other reasons" in text
+        single = week_builder.explain_unfilled([{**seat, "exclusions": {"a": 2, "b": 1, "c": 1, "d": 1},
+                                                 "exclusion_codes": {"manager_exclusion": 5}}])
+        assert "+1 other reason" in single and "+1 other reasons" not in single
+
+    def test_no_open_seats_renders_nothing_rather_than_a_bare_remedy(self):
+        assert week_builder.explain_unfilled([]) == ""
 
     def test_statutory_advisories_are_attached_to_the_preview_assignment(self):
         advisory = {

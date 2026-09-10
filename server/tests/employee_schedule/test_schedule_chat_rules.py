@@ -367,11 +367,16 @@ class TestTemplateForRequest:
         adopted = template_for_request(req, BARISTA_TEMPLATES)
         assert (adopted["start_time"], adopted["end_time"]) == ("06:30", "14:30")
 
-    def test_a_half_stated_window_still_adopts_the_template(self):
-        # One bound is not a shift; the template is still the only complete
-        # answer, and the create branch needs both times or it clarifies.
+    def test_a_half_stated_window_suppresses_the_template_too(self):
+        # Tightened in the review-gaps pass: ANY stated bound suppresses the
+        # hours, not just a complete window. A template's other bound next to
+        # the manager's one bound is a shift nobody described — "a barista
+        # shift starting at 2pm" against an 06:30-14:30 template is half an
+        # hour long. With no template the half-stated request clarifies, which
+        # is the honest answer; the template match was the only thing turning
+        # that question into a wrong shift.
         for half in (self._request(end_time=None), self._request(start_time=None)):
-            assert template_for_request(half, BARISTA_TEMPLATES)["id"] == "b1"
+            assert template_for_request(half, BARISTA_TEMPLATES) is None
 
     def test_stated_hours_with_no_matching_template_are_unaffected(self):
         assert template_for_request(self._request(), []) is None
