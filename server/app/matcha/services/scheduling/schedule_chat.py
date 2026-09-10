@@ -52,12 +52,15 @@ from .schedule_chat_rules import (
     build_adhoc_spec,
     match_location,
     match_week_template,
+    named_template_for_request,
+    normalize_clock,
     parse_time_hint,
     rank_candidates,
     resolve_dates,
     resolve_day_hint,
     resolve_week,
     template_for_request,
+    template_weekdays,
 )
 from .assignment_guard import ProposedAssignment, ProposedRemoval, build_ledgers, evaluate_batch
 from .schedule_batch import net_per_day
@@ -800,25 +803,22 @@ async def _resolve_create_shifts(
     resolved_shifts: list[dict] = []
 
     for req in parsed["shift_requests"]:
+        # The tool surfaces (Huume threads, the EMS channel path) build their
+        # requests without `_coerce_shift_request`, so a clock time arrives
+        # exactly as the model spelled it. Normalize here: "9:00" is 09:00,
+        # and anything that is not a clock time at all reads as "no time
+        # given" — `time.fromisoformat` below raises on it otherwise, and the
+        # caller's broad except turns one bad string into a refused proposal.
+        req = {
+            **req,
+            "start_time": normalize_clock(req.get("start_time")),
+            "end_time": normalize_clock(req.get("end_time")),
+        }
         # Hours the manager stated outrank a template that merely shares the
         # role name — see `template_for_request`.
         template = template_for_request(req, templates)
-        template_days: Optional[list[int]] = None
+        template_days: Optional[list[int]] = template_weekdays(template)
         if template:
-            days_field = template.get("days_of_week")
-            if isinstance(days_field, str):
-                try:
-                    days_field = json.loads(days_field)
-                except json.JSONDecodeError:
-                    days_field = []
-            template_days = []
-            for d in (days_field or []):
-                try:
-                    di = int(d)
-                except (TypeError, ValueError):
-                    continue
-                if 0 <= di <= 6:
-                    template_days.append(di)
             start_time_v = template["start_time"]
             end_time_v = template["end_time"]
             break_minutes = template["break_minutes"] or 0
@@ -832,32 +832,63 @@ async def _resolve_create_shifts(
             template_id = template["id"]
             job_id = template.get("job_id")
         elif req.get("start_time") and req.get("end_time"):
+            # Their hours, but everything a template the manager NAMED still
+            # has to say — headcount, break, job link, role, and the
+            # `days_of_week` fallback below. See `named_template_for_request`.
+            named = named_template_for_request(req, templates)
+            template_days = template_weekdays(named)
             spec = build_adhoc_spec(
                 req["label"], time.fromisoformat(req["start_time"]),
                 time.fromisoformat(req["end_time"]), req.get("role"),
             )
             start_time_v, end_time_v = spec["start_time"], spec["end_time"]
-            break_minutes = spec["break_minutes"]
-            required_staff = req["count"]
+            # `build_adhoc_spec` zeroes the break deliberately so the §512
+            # advisory doesn't report one nobody mentioned — but a named
+            # template's break is the store's own configuration, not us
+            # inventing it.
+            break_minutes = (named["break_minutes"] or 0) if named else spec["break_minutes"]
+            # Same reasoning as the template branch: `_coerce_shift_request`
+            # clamps a missing count to 1, so a named template configured for
+            # more people must not be quietly staged as one.
+            required_staff = (named["required_staff"] or req["count"] or 1) if named else req["count"]
             # Fall back to the manager's own label ("opener", "closer") when
             # they named no explicit role. Without this the label is lost at
             # the DB boundary — `role` lands NULL — and nothing downstream can
             # find the shift again by what the manager actually called it
             # (`_resolve_shift_ref`'s role hint, the schedule page's role
             # column, `find_shift_coverage`'s role filter).
-            role = spec["role"] or req["label"]
+            role = spec["role"] or (named.get("role") if named else None) or req["label"]
+            # Still None even with a named template: the row would otherwise
+            # point at a template whose hours this shift does not keep.
             template_id = None
             # When the manager's own label names a real job, carry the job —
             # a conversational create should not keep producing the ungated,
             # free-text rows the REST route refuses. No match stays free text.
-            matched_job = await resolve_job_by_name(
-                conn, company_id, role, location_id=location_id,
-            )
-            job_id = matched_job["id"] if matched_job else None
-            if matched_job:
-                role = matched_job["name"]
+            job_id = named.get("job_id") if named else None
+            if not job_id:
+                matched_job = await resolve_job_by_name(
+                    conn, company_id, role, location_id=location_id,
+                )
+                job_id = matched_job["id"] if matched_job else None
+                if matched_job:
+                    role = matched_job["name"]
         else:
-            return await _clarify(f"What hours should the {req['label']} run?")
+            # Half a window is not a shift, but it is also not nothing — ask
+            # for the bound that's missing and hand back the one they gave,
+            # rather than making them restate both.
+            if req.get("start_time"):
+                question = (
+                    f"What time should the {req['label']} end? "
+                    f"I have it starting at {req['start_time']}."
+                )
+            elif req.get("end_time"):
+                question = (
+                    f"What time should the {req['label']} start? "
+                    f"I have it ending at {req['end_time']}."
+                )
+            else:
+                question = f"What hours should the {req['label']} run?"
+            return await _clarify(question)
 
         dates_or_clarify = resolve_dates(
             req, resolved_week_start, today, template_days=template_days,

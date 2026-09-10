@@ -43,6 +43,7 @@ from app.matcha.services.scheduling.schedule_batch import (
     MAX_BATCH_OPERATIONS, BatchItem, item_day, plan_batches, split_plan_message,
     summarize_operations,
 )
+from app.matcha.services.scheduling.schedule_chat_rules import normalize_clock
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,14 @@ def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
         # either rather than making "which days?" the answer to a date it did
         # provide, just under the wrong key.
         "template_hint": None, "date": args.get("date") or args.get("target_date"),
-        "weekdays": [], "start_time": args.get("start_time"), "end_time": args.get("end_time"),
+        # Normalized, not passed through: this path has no `_coerce_shift_
+        # request` behind it, and `_resolve_create_shifts` feeds these to
+        # `time.fromisoformat`. A model spelling like "2pm" raised there and
+        # `propose`'s except turned the whole correction into "that failed
+        # just now"; as None it falls out as the create's own "needs a date,
+        # start time, and end time" clarify, which the model can answer.
+        "weekdays": [], "start_time": normalize_clock(args.get("start_time")),
+        "end_time": normalize_clock(args.get("end_time")),
         "role": args.get("role"), "count": args.get("count") or 1,
         "employee_name_hints": [n for n in (args.get("employee_names") or []) if n],
     }

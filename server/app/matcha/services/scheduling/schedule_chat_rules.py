@@ -9,6 +9,7 @@ or a model call — the same reason `schedule_rules.py` and
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
@@ -408,7 +409,8 @@ def match_template(
 
 
 def template_for_request(req: dict, templates: list[dict]) -> Optional[dict]:
-    """The template a create request should adopt, or None to build it ad hoc.
+    """The template a create request should take its HOURS from, or None to
+    build the shift ad hoc.
 
     A template is shorthand for hours the manager did not state. `match_
     template` matches on a name stem OR A ROLE STEM, so "add a Barista shift
@@ -417,14 +419,106 @@ def template_for_request(req: dict, templates: list[dict]) -> Optional[dict]:
     Asking Huume to correct it matched the same template and produced the same
     wrong shift again (reported 2026-09-10).
 
-    Stated hours therefore outrank a template outright, rather than the
-    template being adopted for its role/headcount with its times overridden:
-    that would leave `template_id` pointing at a template the shift does not
-    follow, and `days_of_week` restricting dates the manager named explicitly.
+    ANY stated bound suppresses the template, not just a complete window. A
+    template's other bound next to the manager's one bound is not a shift they
+    asked for — "a barista shift starting at 2pm" against an 06:30-14:30
+    template is a half-hour shift nobody described. With no template matched
+    that same half-stated request already clarifies (`_resolve_create_shifts`
+    needs both bounds), so the template match was the only thing turning a
+    question into a wrong answer.
+
+    Suppressing the hours is not the same as discarding the template — see
+    `named_template_for_request` for the fields a template the manager NAMED
+    still contributes when they stated their own hours.
     """
-    if req.get("start_time") and req.get("end_time"):
+    if req.get("start_time") or req.get("end_time"):
         return None
     return match_template(req.get("template_hint"), req.get("label"), templates)
+
+
+def named_template_for_request(
+    req: dict, templates: list[dict]
+) -> Optional[dict]:
+    """The template a create request should take its NON-time fields from when
+    the manager stated their own hours — headcount, break, job link, role,
+    and the `days_of_week` fallback.
+
+    Stated hours mean the shift does not follow the template's clock, but they
+    say nothing about the rest of it: "add closing barista Sunday 5pm to 11pm"
+    against a `required_staff=3` template is still three baristas, and dropping
+    the template outright staged one (`req["count"]` defaults to 1, which is
+    indistinguishable from the manager actually asking for one). The job link
+    went the same way, back to the free-text role rows the REST route refuses.
+
+    The match is deliberately stricter than `match_template`'s: an EXACT
+    (case-insensitive) `template_hint` == name, and never `label`. The parse
+    prompt says template_hint is "a schedule template name or role they may
+    have named — often the same as label", so a stem match here would let the
+    reported request ("Barista" ~ "Opening Barista") inherit an unrelated
+    template's headcount — the same silent adoption on a different field.
+
+    `template_id` still stays None on these shifts: the row would then point
+    at a template whose hours it does not keep.
+    """
+    if not (req.get("start_time") or req.get("end_time")):
+        return None
+    hint = (req.get("template_hint") or "").strip().lower()
+    if not hint or not templates:
+        return None
+    exact = [t for t in templates if (t.get("name") or "").strip().lower() == hint]
+    if not exact:
+        return None
+    return sorted(exact, key=lambda t: ((t.get("name") or ""), str(t.get("id"))))[0]
+
+
+def template_weekdays(template: Optional[dict]) -> Optional[list[int]]:
+    """A template's `days_of_week` as sunday-indexed ints, or None when there
+    is no template. Stored as JSONB, so it arrives as a list OR as the raw
+    JSON string depending on the driver/column; out-of-range and unparseable
+    entries are dropped rather than failing the create."""
+    if not template:
+        return None
+    days_field = template.get("days_of_week")
+    if isinstance(days_field, str):
+        try:
+            days_field = json.loads(days_field)
+        except json.JSONDecodeError:
+            days_field = []
+    days: list[int] = []
+    for d in (days_field or []):
+        try:
+            di = int(d)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= di <= 6:
+            days.append(di)
+    return days
+
+
+_CLOCK_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def normalize_clock(value) -> Optional[str]:
+    """A clock time as "HH:MM", or None when it is not one.
+
+    `9:00`, `09:00` and `09:00:00` are one time; `2pm` and `25:00` are not
+    times at all. The tool surfaces (Huume threads, the EMS channel path) hand
+    their `start_time`/`end_time` straight through from the model without the
+    JSON parse path's `_coerce_time`, and `_resolve_create_shifts` feeds them
+    to `time.fromisoformat` — where anything but ISO raises out of the whole
+    proposal. Normalizing to None instead lets the create ask for the time it
+    is missing.
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    parts = raw.split(":")
+    if len(parts) >= 2:
+        try:
+            raw = "%02d:%02d" % (int(parts[0]), int(parts[1]))
+        except (TypeError, ValueError):
+            return None
+    return raw if _CLOCK_RE.match(raw) else None
 
 
 def match_week_template(hint: Optional[str], templates: list[dict]) -> Optional[dict]:
