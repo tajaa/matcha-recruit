@@ -465,15 +465,35 @@ def _inconsistent_window_advisory(earliest_minutes: int, deadline_minutes: int) 
 
 
 def _legacy_rules(
-    state: str, db_rules: dict[str, Any] | None = None,
+    state: str,
+    db_rules: dict[str, Any] | None = None,
+    industry_code: str | None = None,
 ) -> tuple[list[BreakRule], list[dict[str, Any]]]:
     """Curated/extracted thresholds adapted into break rules, plus advisories.
+
+    A state whose meal periods are legislated by TIME OF DAY (New York) is
+    curated as a full period payload rather than as scalar thresholds, and that
+    payload is parsed here by the same function the reviewed import path uses —
+    so the scalar adaptation below never gets to invent an
+    hours-from-start deadline the statute does not impose.
 
     The rules handed back are always internally consistent; a threshold pair
     that cannot both be true is dropped down to the one whose breach is the
     actual violation, and reaches the manager as an advisory instead.
     """
     state = (state or "").strip().upper()
+    curated = schedule_compliance.curated_break_periods(state, industry_code)
+    if curated is not None:
+        # A malformed curated payload is a code bug, not a tenant condition:
+        # let it raise here rather than degrade to "this state has no rules".
+        # `test_curated_break_payloads_parse` is what keeps it from shipping.
+        return _rules_from_payload(
+            _uuid_for_legacy(f"{state}:{curated['scope']}"),
+            curated["payload"],
+            curated["citation"],
+            authority_url=curated.get("authority_url"),
+            source_type="legacy_curated",
+        ), []
     rules = schedule_compliance.rules_for_state(state, db_rules)
     rule_set_id = _uuid_for_legacy(state or "UNKNOWN")
     out: list[BreakRule] = []
@@ -721,7 +741,9 @@ async def resolve_break_rules(
                     "location; verify break timing manually."
                 ),
             },)
-    legacy, legacy_advisories = _legacy_rules(state_code, db_rules)
+    legacy, legacy_advisories = _legacy_rules(
+        state_code, db_rules, readiness.industry_code,
+    )
     if legacy:
         return ResolvedBreakRules(
             rules=tuple(legacy),

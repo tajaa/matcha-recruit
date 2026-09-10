@@ -708,6 +708,35 @@ Invariants, each of which has a regression test in
   backstop for rows approved out of separate runs, keeping the deadline (the
   one whose breach is the violation) and emitting `break_rules_inconsistent`
   rather than a permanent unexplained `deadline_conflict` on every shift.
+- **Clock-window law can't be said in scalars, so New York isn't.**
+  `_SCHEDULING_RULES` states "N minutes by hour H"; N.Y. Lab. Law § 162 states
+  "at least 30 minutes between 11 a.m. and 2 p.m." — a window. NY's meal
+  periods therefore live in `schedule_compliance._CURATED_BREAK_PERIODS` as a
+  full period payload in the SAME JSON shape the reviewed
+  `schedule_break_rule_sets` import accepts, and `_legacy_rules` parses it with
+  `_rules_from_payload` — the same parser, so moving a state from here to the
+  compliance catalog is a data move, not a rewrite (that's the endgame:
+  `SCHEDULING_CATALOG_RULES_PLAN.md`). A curated payload REPLACES the scalar
+  adaptation for its state, so the adapter can't invent an hours-from-start
+  deadline § 162 never imposes. Three subdivisions can each govern one shift —
+  (2) noon day 30 min for a >6h shift spanning 11:00–14:00, (4) 45 min around
+  the midpoint for a >6h shift starting 13:00–06:00 (60 in a factory,
+  `industries` scoping by NAICS 31–33 or canonical industry), (3) an extra
+  20 min between 17:00–19:00 when the shift starts before 11:00 and ends after
+  19:00 — so each carries its own subdivision as `citation` and its own
+  `ordinal`, because `(kind, ordinal)` is the key the stagger and
+  `planned_breaks` use and two of these can co-apply. NY's scalar row keeps
+  only the coarse write-path floor (6h/30min) plus its OT and minor caps;
+  `second_meal_after_hours` is an explicit `None` so (3) is not double-counted
+  as an hours-based second meal, and there is no `meal_waiver_max_hours` (a
+  shorter NY meal needs a written Commissioner permit, § 162(5) — an employee
+  attestation cannot waive it). Tests: `test_ny_schedule_law.py`.
+- **Requirements are ordered by when they may be taken, not by trigger.**
+  § 162(3)'s extra period is owed from minute one of a qualifying shift
+  (`trigger_after_minutes` 0), so trigger order rendered it BEFORE the noon day
+  meal it follows. `evaluate_break_plan` sorts on
+  `earliest ?? recommended ?? deadline ?? start+trigger`, which leaves every
+  offset-only state exactly where it was.
 - **The legacy fallback merges approved catalog extractions.** For a state the
   curated table never covered, `resolve_break_rules` now calls
   `shift_compliance._approved_db_rules` so break timing comes from the same

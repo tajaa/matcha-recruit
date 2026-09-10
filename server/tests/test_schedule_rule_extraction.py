@@ -196,4 +196,4 @@ def test_sick_leave_not_in_extraction_categories():
 
 
 def test_code_curated_states_are_skipped():
-    assert set(sre.CODE_CURATED_STATES) == {"US", "CA"}
+    assert set(sre.CODE_CURATED_STATES) == {"US", "CA", "NY"}

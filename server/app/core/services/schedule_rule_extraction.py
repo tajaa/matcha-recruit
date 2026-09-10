@@ -62,7 +62,7 @@ CATALOG_CATEGORIES = ("overtime", "meal_breaks", "scheduling_reporting", "minor_
 # is skipped entirely rather than accumulating a shadow DB copy nothing reads
 # (`schedule_compliance.rules_for_state` ignores DB rows for these states; see
 # its per-state-precedence rule).
-CODE_CURATED_STATES = ("US", "CA")
+CODE_CURATED_STATES = ("US", "CA", "NY")
 
 # Exactly the fields the scheduling engine consumes today — `schedule_compliance.py`'s
 # pure evaluators, plus `meal_break_earliest_after_hours`, which no evaluator reads
