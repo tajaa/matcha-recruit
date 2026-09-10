@@ -577,7 +577,7 @@ class TestCheckIncidentPolicyFeatureGate:
 
     @pytest.mark.asyncio
     async def test_discipline_off_is_module_off_even_with_handbooks_on(self, monkeypatch):
-        """tool_declarations() advertises this tool regardless of company flags —
+        """tool_specs() advertises this tool regardless of company flags —
         unlike the staged HR-ops actions it had no per-call `discipline` re-check
         at all, only `handbooks`. A company with handbooks but not discipline
         must not be able to run the check."""

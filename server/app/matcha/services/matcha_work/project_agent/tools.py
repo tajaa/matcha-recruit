@@ -1,7 +1,12 @@
-"""Gemini tool declarations for the read-only project agent."""
+"""Responses function tools for the read-only project agent.
+
+JSON Schema, sent to the OpenAI Responses API as-is — these used to be
+google-genai `FunctionDeclaration`s translated at the client edge, which
+silently dropped anything the translator did not know about.
+"""
 from __future__ import annotations
 
-from google.genai import types
+from typing import Any
 
 
 def _tool(
@@ -9,21 +14,23 @@ def _tool(
     description: str,
     properties: dict | None = None,
     required: list[str] | None = None,
-) -> types.FunctionDeclaration:
-    return types.FunctionDeclaration(
-        name=name,
-        description=description,
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties=properties or {},
-            required=required or [],
-        ),
-    )
+) -> dict[str, Any]:
+    parameters: dict[str, Any] = {"type": "object"}
+    # Empty is omitted rather than emitted, matching what the provider has
+    # actually been receiving through the retired translator.
+    if properties:
+        parameters["properties"] = properties
+    if required:
+        parameters["required"] = list(required)
+    return {
+        "type": "function", "name": name,
+        "description": description, "parameters": parameters,
+    }
 
 
-def _read_declarations() -> list[types.FunctionDeclaration]:
-    string = lambda description="": types.Schema(type=types.Type.STRING, description=description)
-    integer = lambda description="": types.Schema(type=types.Type.INTEGER, description=description)
+def _read_declarations() -> list[dict[str, Any]]:
+    string = lambda description="": {"type": "string", **({"description": description} if description else {})}
+    integer = lambda description="": {"type": "integer", **({"description": description} if description else {})}
     return [
         _tool(
             "list_files",
@@ -49,8 +56,8 @@ def _read_declarations() -> list[types.FunctionDeclaration]:
     ]
 
 
-def declarations() -> list[types.FunctionDeclaration]:
-    string = lambda description="": types.Schema(type=types.Type.STRING, description=description)
+def declarations() -> list[dict[str, Any]]:
+    string = lambda description="": {"type": "string", **({"description": description} if description else {})}
     return [
         *_read_declarations(),
         _tool(
@@ -62,13 +69,13 @@ def declarations() -> list[types.FunctionDeclaration]:
     ]
 
 
-def task_draft_declarations() -> list[types.FunctionDeclaration]:
-    string = lambda description="": types.Schema(type=types.Type.STRING, description=description)
-    strings = lambda description="": types.Schema(
-        type=types.Type.ARRAY,
-        description=description,
-        items=types.Schema(type=types.Type.STRING),
-    )
+def task_draft_declarations() -> list[dict[str, Any]]:
+    string = lambda description="": {"type": "string", **({"description": description} if description else {})}
+    strings = lambda description="": {
+        "type": "array",
+        **({"description": description} if description else {}),
+        "items": {"type": "string"},
+    }
     return [
         _tool(
             "draft_ticket",

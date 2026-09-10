@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from google.genai import types
 
 from app.matcha.services.huume import agent, routing
+from app.matcha.services.huume.luna_client import LunaResponse
 from app.matcha.services.huume.prompt import build_discovery_block, build_system_prompt
 from app.matcha.services.huume.tools import TOOLS
 
@@ -211,22 +211,15 @@ class TestTiersCatalog:
 
 
 def _fake_call(name, args):
-    return types.FunctionCall(name=name, args=args)
+    _fake_call.counter = getattr(_fake_call, "counter", 0) + 1
+    return {"call_id": f"call_{_fake_call.counter}", "name": name, "arguments": args}
 
 
-def _fake_part(function_call=None):
-    return types.Part(function_call=function_call)
-
-
-def _fake_response(parts=None, text=None):
-    resp = MagicMock()
-    resp.usage_metadata = None
-    resp.text = text
-    candidate = MagicMock()
-    candidate.content = MagicMock()
-    candidate.content.parts = parts or []
-    resp.candidates = [candidate]
-    return resp
+def _fake_response(calls=None, text=None):
+    return LunaResponse(
+        response_id="resp_test", text=text,
+        function_calls=list(calls or []), output_items=[], usage={},
+    )
 
 
 class _NoopRateLimiter:
@@ -242,16 +235,16 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
     """Planner and tool-result calls both remain pinned to Luna."""
     recorded = []
 
-    async def _generate(*, model, contents, config, **_request_options):
-        recorded.append({"model": model, "thinking": config.thinking_config})
+    async def _generate(*, model, **kwargs):
+        recorded.append({"model": model, "thinking": None})
         if len(recorded) == 1:
-            return _fake_response(parts=[_fake_part(_fake_call("check_offer_status", {"offer_id": "abc"}))])
-        return _fake_response(parts=[], text="Done.")
+            return _fake_response(calls=[_fake_call("check_offer_status", {"offer_id": "abc"})])
+        return _fake_response(calls=[], text="Done.")
 
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=_generate)
+    client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
     monkeypatch.setattr(
         agent.onboarding_skill, "check_offer_status", AsyncMock(return_value={"status": "ok", "offer_status": "pending"}),
     )
@@ -278,12 +271,12 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
 @pytest.mark.asyncio
 async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
     async def _generate(*, model, contents, config, **_request_options):
-        return _fake_response(parts=[], text="Sure, here you go.")
+        return _fake_response(calls=[], text="Sure, here you go.")
 
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=_generate)
+    client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
 
     frames = [
         f async for f in agent.run_huume_turn(
@@ -302,14 +295,14 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
 async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
     recorded = []
 
-    async def _generate(*, model, contents, config, **_request_options):
+    async def _generate(*, model, **kwargs):
         recorded.append(model)
-        return _fake_response(parts=[], text="Confirmed.")
+        return _fake_response(calls=[], text="Confirmed.")
 
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=_generate)
+    client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
 
     frames = [
         f async for f in agent.run_huume_turn(

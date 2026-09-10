@@ -9,10 +9,9 @@ import time
 from typing import Any
 from uuid import UUID
 
-from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
-from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.luna_client import get_luna_client, text_item, tool_output_item
 from app.matcha.services.huume.routing import LUNA
 
 from . import store
@@ -305,7 +304,7 @@ async def run_task_draft(
             "Espresso needs a root CLAUDE.md or AGENTS.md to draft a grounded ticket."
         )
 
-    contents = [types.Content(role="user", parts=[types.Part(text=_context_block(
+    input_items: list[dict[str, Any]] = [text_item("user", _context_block(
         project_title=project_title,
         repo=repo,
         base_branch=base_branch,
@@ -314,20 +313,10 @@ async def run_task_draft(
         elements=elements,
         recent_done=recent_done,
         guidance=guidance,
-    ))])]
-    config = types.GenerateContentConfig(
-        system_instruction=build_task_draft_system_prompt(),
-        tools=[types.Tool(function_declarations=task_draft_declarations())],
-        # draft_ticket is the only tool and the only way to finish, and there is
-        # no prose fallback here: a turn that answers in text instead of calling
-        # it drops straight out of the loop into the "couldn't produce a draft"
-        # failure. Force a tool call on every turn.
-        tool_config=types.ToolConfig(
-            function_calling_config=types.FunctionCallingConfig(
-                mode=types.FunctionCallingConfigMode.ANY,
-            ),
-        ),
-    )
+    ))]
+    pending_outputs: list[dict[str, Any]] = []
+    instructions = build_task_draft_system_prompt()
+    tools = task_draft_declarations()
 
     while (
         draft is None
@@ -338,30 +327,30 @@ async def run_task_draft(
         call_timeout = max(1, _WALL_SECONDS - (time.monotonic() - started))
         with feature_scope(_AI_USAGE_FEATURE):
             response = await asyncio.wait_for(
-                client.aio.models.generate_content(
+                client.create_response(
                     model=selected_model,
-                    contents=contents,
-                    config=config,
+                    input=input_items if model_calls == 1 else pending_outputs,
+                    instructions=instructions,
+                    tools=tools,
+                    # draft_ticket is the only tool and the only way to finish,
+                    # and there is no prose fallback here: a turn that answers
+                    # in text instead of calling it drops straight out of the
+                    # loop into the "couldn't produce a draft" failure.
+                    tool_choice="required",
                     timeout_seconds=call_timeout,
                 ),
                 timeout=call_timeout,
             )
 
         _fold_usage(usage, response)
-        parts = [
-            part
-            for candidate in (response.candidates or [])
-            for part in ((candidate.content.parts if candidate.content else []) or [])
-        ]
-        calls = [part.function_call for part in parts if getattr(part, "function_call", None)]
+        calls = response.function_calls
         if not calls:
             break
-        contents.append(types.Content(role="model", parts=parts))
-        tool_responses: list[types.Part] = []
+        tool_responses: list[dict[str, Any]] = []
         for call in calls:
-            result = await call_tool(call.name, dict(call.args or {}))
-            tool_responses.append(types.Part.from_function_response(name=call.name, response=result))
-        contents.append(types.Content(role="user", parts=tool_responses))
+            result = await call_tool(call["name"], dict(call["arguments"] or {}))
+            tool_responses.append(tool_output_item(call["call_id"], result))
+        pending_outputs = tool_responses
 
     if draft is None:
         raise RuntimeError("Espresso couldn't produce a grounded ticket draft within this run's limits.")

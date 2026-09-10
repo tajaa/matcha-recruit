@@ -438,7 +438,7 @@ class TestRegistry:
             "promote_ems_event": {"event_id"},
         }
         for name, required in expected.items():
-            declared = set(TOOLS_BY_NAME[name].declaration.parameters.required or [])
+            declared = set(TOOLS_BY_NAME[name].parameters.get("required") or [])
             assert declared == required, name
 
     def test_documents_topic_registered_and_gated(self):

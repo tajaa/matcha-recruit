@@ -53,7 +53,7 @@ class TestRegistryIsComplete:
         was never shown. This is the single most-repeated footgun in the huume
         spec; adding a tool field means adding it here too."""
         tool = TOOLS_BY_NAME[name]
-        declared = set(tool.declaration.parameters.properties or {})
+        declared = set(tool.parameters["properties"] or {})
         whitelisted = set(_HR_OPS_TOOL_SPECS[name].get("fields") or ())
         # confirm_id is structural (it identifies the staged row) rather than
         # payload, and is handled by match_key.

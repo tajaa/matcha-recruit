@@ -9,10 +9,9 @@ import time
 from typing import Any
 from uuid import UUID
 
-from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
-from app.matcha.services.huume.luna_client import get_luna_client
+from app.matcha.services.huume.luna_client import get_luna_client, text_item, tool_output_item
 from app.matcha.services.huume.routing import LUNA
 
 from . import chat, store
@@ -43,27 +42,19 @@ def _safe_for_audit(value: Any) -> Any:
 
 
 def _fold_usage(total: dict[str, Any], response: Any) -> None:
-    usage = getattr(response, "usage_metadata", None)
-    if usage is None:
+    usage = getattr(response, "usage", None) or {}
+    if not usage:
         return
+    details_out = usage.get("output_tokens_details") or {}
     fields = {
-        "prompt_tokens": "prompt_token_count",
-        "completion_tokens": "candidates_token_count",
-        "thought_tokens": "thoughts_token_count",
-        "total_tokens": "total_token_count",
+        "prompt_tokens": usage.get("input_tokens"),
+        "completion_tokens": usage.get("output_tokens"),
+        "thought_tokens": details_out.get("reasoning_tokens"),
+        "total_tokens": usage.get("total_tokens"),
     }
-    for target, source in fields.items():
-        value = getattr(usage, source, None)
+    for target, value in fields.items():
         if value is not None:
             total[target] = total.get(target, 0) + int(value)
-
-
-def _text_parts(parts: list[Any]) -> str:
-    return "\n".join(
-        str(part.text).strip()
-        for part in parts
-        if getattr(part, "text", None) and str(part.text).strip()
-    ).strip()
 
 
 def _has_source_citation(answer: str, files_read: set[str]) -> bool:
@@ -90,6 +81,7 @@ async def run_repo_question(
     tree: list[dict] | None = None
     files_read: set[str] = set()
     model_calls = 0
+    pending_outputs: list[dict[str, Any]] = []
     finish_refusals = 0
     seq = 0
     answer: str | None = None
@@ -192,16 +184,9 @@ async def run_repo_question(
         f"- base branch: {base_branch!r}\n\n"
         f"Question:\n{question}"
     )
-    contents = [types.Content(role="user", parts=[types.Part(text=user_turn)])]
-    config = types.GenerateContentConfig(
-        system_instruction=build_system_prompt(),
-        tools=[types.Tool(function_declarations=declarations())],
-        tool_config=types.ToolConfig(
-            function_calling_config=types.FunctionCallingConfig(
-                mode=types.FunctionCallingConfigMode.ANY,
-            ),
-        ),
-    )
+    input_items: list[dict[str, Any]] = [text_item("user", user_turn)]
+    instructions = build_system_prompt()
+    tools = declarations()
 
     while (
         answer is None
@@ -212,27 +197,28 @@ async def run_repo_question(
         call_timeout = max(1, _WALL_SECONDS - (time.monotonic() - started))
         with feature_scope(_AI_USAGE_FEATURE):
             response = await asyncio.wait_for(
-                client.aio.models.generate_content(
+                client.create_response(
                     model=LUNA,
-                    contents=contents,
-                    config=config,
+                    # The first call sends the question; follow-ups send only
+                    # tool outputs, with previous_response_id carrying the rest.
+                    input=input_items if model_calls == 1 else pending_outputs,
+                    instructions=instructions,
+                    tools=tools,
+                    # This agent must call a tool: its answer only counts once
+                    # it has actually read the repository.
+                    tool_choice="required",
                     timeout_seconds=call_timeout,
                 ),
                 timeout=call_timeout,
             )
 
         _fold_usage(usage, response)
-        parts = [
-            part
-            for candidate in (response.candidates or [])
-            for part in ((candidate.content.parts if candidate.content else []) or [])
-        ]
-        calls = [part.function_call for part in parts if getattr(part, "function_call", None)]
+        calls = response.function_calls
         if not calls:
             # Luna occasionally returns its final prose directly despite the
             # explicit finish tool. Accept it only after a repository read; the
             # same size and grounding preconditions still apply.
-            direct = _text_parts(parts)
+            direct = (response.text or '').strip()
             if (
                 files_read
                 and direct
@@ -249,20 +235,19 @@ async def run_repo_question(
                 )
             break
 
-        contents.append(types.Content(role="model", parts=parts))
-        tool_responses: list[types.Part] = []
+        tool_responses: list[dict[str, Any]] = []
         for call in calls:
-            result, status = await call_tool(call.name, dict(call.args or {}))
-            if call.name == "answer_question":
+            result, status = await call_tool(call["name"], dict(call["arguments"] or {}))
+            if call["name"] == "answer_question":
                 finish_refusals = finish_refusals + 1 if status == "error" else 0
             elif status == "ok":
                 # A successful read is new grounding, so the next finish attempt
                 # starts from a clean slate.
                 finish_refusals = 0
-            tool_responses.append(types.Part.from_function_response(name=call.name, response=result))
+            tool_responses.append(tool_output_item(call["call_id"], result))
         if finish_refusals >= _MAX_FINISH_REFUSALS:
             break
-        contents.append(types.Content(role="user", parts=tool_responses))
+        pending_outputs = tool_responses
 
     if answer is None:
         raise RuntimeError("I couldn't produce a grounded answer within this run's limits.")

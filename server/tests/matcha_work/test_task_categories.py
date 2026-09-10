@@ -46,8 +46,8 @@ def test_the_espresso_draft_agent_is_told_about_every_category():
     from app.matcha.services.matcha_work.project_agent.tools import task_draft_declarations
     from app.matcha.services.matcha_work.project_agent.task_draft_agent import _CATEGORIES
 
-    decl = next(d for d in task_draft_declarations() if d.name == "draft_ticket")
-    description = decl.parameters.properties["category"].description
+    decl = next(d for d in task_draft_declarations() if d["name"] == "draft_ticket")
+    description = decl["parameters"]["properties"]["category"]["description"]
     for category in _CATEGORIES:
         assert category in description, category
     assert "report" in description  # the research rule, not just the word

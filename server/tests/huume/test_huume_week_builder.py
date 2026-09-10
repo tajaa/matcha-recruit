@@ -58,7 +58,7 @@ def test_schedule_surface_exposes_readiness_build_and_cancel():
     assert {"get_week_build_readiness", "build_week_schedule", "cancel_staged"} <= SCHEDULE_TOOLS
     assert TOOLS_BY_NAME["get_week_build_readiness"].kind == "read"
     assert TOOLS_BY_NAME["build_week_schedule"].kind == "staged"
-    assert not (TOOLS_BY_NAME["build_week_schedule"].declaration.parameters.required or [])
+    assert not (TOOLS_BY_NAME["build_week_schedule"].parameters.get("required") or [])
     assert ASSET_SPECS["schedule_week_draft"].ref_table == "schedule_generation_runs"
 
 
@@ -67,13 +67,13 @@ def test_schedule_surface_exposes_the_location_profile_tools():
     assert TOOLS_BY_NAME["get_location_schedule_profile"].kind == "read"
     assert TOOLS_BY_NAME["save_location_schedule_profile"].kind == "staged"
     # Nothing is required: the model interviews for the fields one at a time.
-    assert not (TOOLS_BY_NAME["save_location_schedule_profile"].declaration.parameters.required or [])
+    assert not (TOOLS_BY_NAME["save_location_schedule_profile"].parameters.get("required") or [])
 
 
 def test_finish_can_carry_a_tappable_question():
-    finish_properties = TOOLS_BY_NAME["finish"].declaration.parameters.properties
+    finish_properties = TOOLS_BY_NAME["finish"].parameters["properties"]
     assert {"question", "options"} <= set(finish_properties)
-    assert (TOOLS_BY_NAME["finish"].declaration.parameters.required or []) == ["message"]
+    assert (TOOLS_BY_NAME["finish"].parameters.get("required") or []) == ["message"]
 
 
 def test_profile_spec_mints_and_matches_confirmation_id():
@@ -316,7 +316,7 @@ def test_the_profile_spec_carries_the_open_and_close_buffers():
 
 
 def test_the_profile_tool_exposes_the_buffers_to_the_model():
-    properties = TOOLS_BY_NAME["save_location_schedule_profile"].declaration.parameters.properties
+    properties = TOOLS_BY_NAME["save_location_schedule_profile"].parameters["properties"]
     assert {"open_buffer_minutes", "close_buffer_minutes"} <= set(properties)
 
 

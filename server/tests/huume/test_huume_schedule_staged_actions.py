@@ -13,14 +13,16 @@ Fixed by giving each of the three its own local import, same as the existing
 """
 
 from datetime import date
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from google.genai import types
 
-from app.matcha.services.huume import agent, schedule_profile_skill, schedule_skill
+from app.matcha.services.huume import agent
+from app.matcha.services.huume import schedule_profile_skill, schedule_skill
+from app.matcha.services.huume.luna_client import LunaResponse
 from app.matcha.services.scheduling import week_builder
 from app.matcha.services.huume.scope import (
     HuumeSurfaceContext,
@@ -48,22 +50,28 @@ class _NoopRateLimiter:
         return None
 
 
-def _fake_call(name: str, args: dict) -> types.FunctionCall:
-    return types.FunctionCall(name=name, args=args)
+def _fake_call(name: str, args: dict) -> dict:
+    """One Responses `function_call`. `call_id` is what a result pairs back to."""
+    _fake_call.counter = getattr(_fake_call, "counter", 0) + 1
+    return {
+        "type": "function_call",
+        "call_id": f"call_{_fake_call.counter}",
+        "name": name,
+        "arguments": json.dumps(args),
+    }
 
 
 def _fake_response(*, calls=None, text=None):
-    response = MagicMock()
-    response.usage_metadata = SimpleNamespace(
-        prompt_token_count=0, candidates_token_count=0, total_token_count=0,
-        thoughts_token_count=0, cached_content_token_count=0,
+    return LunaResponse(
+        response_id="resp_test",
+        text=text,
+        function_calls=[
+            {"call_id": c["call_id"], "name": c["name"], "arguments": json.loads(c["arguments"])}
+            for c in (calls or [])
+        ],
+        output_items=list(calls or []),
+        usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
     )
-    response.text = text
-    candidate = MagicMock()
-    candidate.content = MagicMock()
-    candidate.content.parts = [types.Part(function_call=call) for call in (calls or [])]
-    response.candidates = [candidate]
-    return response
 
 
 def _connection_context(monkeypatch, *, fetchval=None, fetchrow=None):
@@ -82,9 +90,9 @@ async def _run_turn(
     current_state=None, user_text="stage something",
 ):
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=responses)
+    client.create_response = AsyncMock(side_effect=responses)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
     _connection_context(monkeypatch, fetchval=fetchval, fetchrow=fetchrow)
     # The schedule prompt now embeds the location's saved profile; every test
     # here drives the tool loop, not that read.

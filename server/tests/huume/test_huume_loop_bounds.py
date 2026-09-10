@@ -7,14 +7,15 @@ OpenAI call is made; the only connection context is the stage-turn seam in
 agent.py, which is replaced with an inert async context manager.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from google.genai import types
 
 from app.matcha.services.huume import agent, schedule_skill
+from app.matcha.services.huume.luna_client import LunaResponse
 
 
 class _NoopRateLimiter:
@@ -25,25 +26,28 @@ class _NoopRateLimiter:
         return None
 
 
-def _fake_call(name: str, args: dict) -> types.FunctionCall:
-    return types.FunctionCall(name=name, args=args)
+def _fake_call(name: str, args: dict) -> dict:
+    """One Responses `function_call`. `call_id` is what a result pairs back to."""
+    _fake_call.counter = getattr(_fake_call, "counter", 0) + 1
+    return {
+        "type": "function_call",
+        "call_id": f"call_{_fake_call.counter}",
+        "name": name,
+        "arguments": json.dumps(args),
+    }
 
 
 def _fake_response(*, calls=None, text=None, prompt_tokens=0):
-    response = MagicMock()
-    response.usage_metadata = SimpleNamespace(
-        prompt_token_count=prompt_tokens,
-        candidates_token_count=0,
-        total_token_count=prompt_tokens,
-        thoughts_token_count=0,
-        cached_content_token_count=0,
+    return LunaResponse(
+        response_id="resp_test",
+        text=text,
+        function_calls=[
+            {"call_id": c["call_id"], "name": c["name"], "arguments": json.loads(c["arguments"])}
+            for c in (calls or [])
+        ],
+        output_items=list(calls or []),
+        usage={"input_tokens": prompt_tokens, "output_tokens": 0, "total_tokens": prompt_tokens},
     )
-    response.text = text
-    candidate = MagicMock()
-    candidate.content = MagicMock()
-    candidate.content.parts = [types.Part(function_call=call) for call in (calls or [])]
-    response.candidates = [candidate]
-    return response
 
 
 def _connection_context(monkeypatch):
@@ -64,9 +68,9 @@ async def _run_turn(
     history_text="assign Elena",
 ):
     client = MagicMock()
-    client.aio.models.generate_content = AsyncMock(side_effect=responses)
+    client.create_response = AsyncMock(side_effect=responses)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
     _connection_context(monkeypatch)
     if schedule_result is not None:
         monkeypatch.setattr(schedule_skill, "propose", AsyncMock(return_value=schedule_result))
@@ -106,7 +110,7 @@ async def test_schedule_clarification_stops_before_followup_model_call(monkeypat
     frames, client = await _run_turn(monkeypatch, responses, schedule_result=schedule_result)
     result = _result(frames)
 
-    assert client.aio.models.generate_content.await_count == 1
+    assert client.create_response.await_count == 1
     assert result["message"] == schedule_result["message"]
     assert result["model_calls"] == 1
     assert result["token_usage"]["stop_reason"] == "schedule_clarification"
@@ -129,7 +133,7 @@ async def test_duplicate_schedule_call_in_same_batch_is_blocked(monkeypatch):
     )
     result = _result(frames)
 
-    assert client.aio.models.generate_content.await_count == 1
+    assert client.create_response.await_count == 1
     assert schedule_skill.propose.await_count == 1
     assert result["token_usage"]["duplicate_tool_calls_blocked"] == 1
     assert result["token_usage"]["stop_reason"] == "schedule_duplicate_blocked"
@@ -190,7 +194,7 @@ async def test_matching_confirm_call_is_not_blocked_by_schedule_cap(monkeypatch)
     )
     result = _result(frames)
 
-    assert client.aio.models.generate_content.await_count == 1
+    assert client.create_response.await_count == 1
     assert result["message"] == "Schedule updated."
     assert result["token_usage"]["schedule_proposal_attempts"] == 0
     assert result["token_usage"]["stop_reason"] == "schedule_execution_verified"
@@ -231,7 +235,7 @@ async def test_failed_confirm_uses_executor_result_and_does_not_retry_the_model(
     )
     result = _result(frames)
 
-    assert client.aio.models.generate_content.await_count == 1
+    assert client.create_response.await_count == 1
     assert result["message"].startswith("None of the requested shifts changed")
     assert result["state_updates"]["huume_action"]["status"] == "failed"
     assert result["token_usage"]["stop_reason"] == "schedule_execution_failed"
@@ -318,7 +322,94 @@ async def test_prompt_token_limit_prevents_followup_model_call(monkeypatch):
     )
     result = _result(frames)
 
-    assert client.aio.models.generate_content.await_count == 1
+    assert client.create_response.await_count == 1
     assert result["model_calls"] == 1
     assert result["token_usage"]["stop_reason"] == "prompt_token_limit"
     assert "AI budget" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_every_call_in_a_batch_gets_exactly_one_output(monkeypatch):
+    """Responses rejects a follow-up that leaves a function call unpaired, so a
+    silently dropped result would strand the model mid-turn. Two calls to the
+    SAME tool is the case the retired name-based pairing could not tell apart."""
+    sent = []
+
+    issued = []
+
+    async def _generate(*, model, input, **kwargs):
+        sent.append(input)
+        if len(sent) == 1:
+            issued.extend([
+                _fake_call("lookup_context", {"topic": "employee"}),
+                _fake_call("lookup_context", {"topic": "policies"}),
+            ])
+            return _fake_response(calls=list(issued))
+        return _fake_response(calls=[], text="Done.")
+
+    client = MagicMock()
+    client.create_response = AsyncMock(side_effect=_generate)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: client)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(
+        agent.onboarding_skill, "lookup_context",
+        AsyncMock(side_effect=lambda **kw: {"status": "ok", "topic": kw.get("topic")}),
+    )
+    _connection_context(monkeypatch)
+
+    [f async for f in agent.run_huume_turn(
+        thread_id=uuid4(), company_id=uuid4(), user_id=uuid4(), user_role="client",
+        history=[{"role": "user", "content": "look two things up"}],
+        current_state={}, company_name="Acme",
+        features={"huume": True, "matcha_work": True, "employees": True},
+        integrations={},
+    )]
+
+    follow_up = sent[1]
+    assert [item["type"] for item in follow_up] == ["function_call_output"] * 2
+    # Distinct ids, in call order — not two results racing for one tool name.
+    assert [item["call_id"] for item in follow_up] == [c["call_id"] for c in issued]
+    assert len({item["call_id"] for item in follow_up}) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_first_call_sends_the_expected_request_envelope(monkeypatch):
+    """A golden on the whole request, so "behaviour-preserving" is checked.
+
+    Everything here except `store` and the tool schema's minItems/maxItems is
+    what the retired google-genai adapter was already putting on the wire.
+    """
+    sent = []
+
+    async def _generate(**kwargs):
+        sent.append(kwargs)
+        return _fake_response(calls=[], text="Done.")
+
+    client = MagicMock()
+    client.create_response = AsyncMock(side_effect=_generate)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: client)
+    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
+    _connection_context(monkeypatch)
+
+    [f async for f in agent.run_huume_turn(
+        thread_id=uuid4(), company_id=uuid4(), user_id=uuid4(), user_role="client",
+        history=[{"role": "user", "content": "hello there"}],
+        current_state={}, company_name="Acme",
+        features={"huume": True, "matcha_work": True}, integrations={},
+    )]
+
+    call = sent[0]
+    assert call["model"] == "gpt-5.6-luna"
+    # A user turn is `input_text`; assistant history would be `output_text`,
+    # and getting that backwards is a hard 400.
+    assert call["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "hello there"}]},
+    ]
+    assert call["instructions"].strip()
+    assert all(
+        set(tool) == {"type", "name", "description", "parameters"} and tool["type"] == "function"
+        for tool in call["tools"]
+    )
+    # The loop never forces a tool call: `finish` is a tool, and a plain reply
+    # is a legitimate turn.
+    assert "tool_choice" not in call

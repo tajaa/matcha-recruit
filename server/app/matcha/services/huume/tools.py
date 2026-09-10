@@ -19,9 +19,7 @@ Kinds, mirroring the `huume_steps.kind` CHECK constraint:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
-
-from google.genai import types
+from typing import Any, Optional
 
 from app.matcha.services.scheduling.schedule_batch import MAX_BATCH_OPERATIONS
 
@@ -41,7 +39,12 @@ SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential", "disciplin
 class HuumeTool:
     name: str
     kind: str  # read | write | staged | finish
-    declaration: types.FunctionDeclaration
+    description: str
+    # JSON Schema, handed to the Responses API as-is. Authored natively since
+    # the loop moved to OpenAI — it used to be a google-genai `Schema` object
+    # translated at the edge, which silently dropped everything the translator
+    # did not know about (`minItems`/`maxItems` among them).
+    parameters: dict[str, Any]
     # `discovery=True` marks a "which X need attention?" batch entry point —
     # prompt.build_discovery_block and routing.resolve_tier both read this
     # registry so a new skill gets prompt teaching + deep-tier routing by
@@ -51,6 +54,38 @@ class HuumeTool:
     intent_hints: tuple[str, ...] = ()
 
 
+def _s(
+    *, type: str, description: str | None = None, enum: list[str] | None = None,
+    properties: dict[str, Any] | None = None, required: list[str] | None = None,
+    items: dict[str, Any] | None = None,
+    min_items: int | None = None, max_items: int | None = None,
+) -> dict[str, Any]:
+    """One JSON Schema node for a tool parameter.
+
+    Empty is omitted rather than emitted (`properties={}` on a no-argument tool
+    would otherwise ship an empty object), matching what the provider has
+    actually been receiving. `min_items`/`max_items` are new: they were
+    declared before and thrown away in translation, so the model never saw the
+    batch cap it is told about in prose.
+    """
+    schema: dict[str, Any] = {"type": type}
+    if description:
+        schema["description"] = description
+    if enum:
+        schema["enum"] = list(enum)
+    if properties:
+        schema["properties"] = properties
+    if required:
+        schema["required"] = list(required)
+    if items:
+        schema["items"] = items
+    if min_items is not None:
+        schema["minItems"] = min_items
+    if max_items is not None:
+        schema["maxItems"] = max_items
+    return schema
+
+
 def _tool(
     name: str, kind: str, description: str, *, properties: dict | None = None,
     required: list[str] | None = None, discovery: bool = False, intent_hints: tuple[str, ...] = (),
@@ -58,47 +93,44 @@ def _tool(
     return HuumeTool(
         name=name,
         kind=kind,
-        declaration=types.FunctionDeclaration(
-            name=name,
-            description=description,
-            parameters=types.Schema(type=types.Type.OBJECT, properties=properties or {}, required=required or []),
-        ),
+        description=description,
+        parameters=_s(type="object", properties=properties or {}, required=required or []),
         discovery=discovery,
         intent_hints=tuple(h.lower() for h in intent_hints),
     )
 
 
 _SCHEDULE_EDIT_PROPERTIES = {
-    "kind": types.Schema(
-        type=types.Type.STRING,
+    "kind": _s(
+        type="string",
         enum=["reassign", "assign", "unassign", "retime", "cancel", "swap"],
     ),
-    "target_shift_id": types.Schema(
-        type=types.Type.STRING,
+    "target_shift_id": _s(
+        type="string",
         description="Exact shift id returned by get_schedule_overview.",
     ),
-    "target_employee_name": types.Schema(type=types.Type.STRING),
-    "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
-    "target_time_hint": types.Schema(
-        type=types.Type.STRING,
+    "target_employee_name": _s(type="string"),
+    "target_date": _s(type="string", description="YYYY-MM-DD"),
+    "target_time_hint": _s(
+        type="string",
         description="Start time of the shift, e.g. '12:30pm', '8am', or '08:00'.",
     ),
-    "target_role_hint": types.Schema(type=types.Type.STRING),
-    "target_staffing_hint": types.Schema(
-        type=types.Type.STRING,
+    "target_role_hint": _s(type="string"),
+    "target_staffing_hint": _s(
+        type="string",
         enum=["staffed", "unstaffed"],
         description="Use only to distinguish otherwise identical staffed and open shifts.",
     ),
-    "to_employee_name": types.Schema(type=types.Type.STRING),
-    "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
-    "second_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='swap'."),
-    "second_time_hint": types.Schema(type=types.Type.STRING, description="Other shift's start time for kind='swap'."),
-    "second_role_hint": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
-    "new_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='retime'."),
-    "new_start_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
-    "new_end_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
-    "shift_by_minutes": types.Schema(
-        type=types.Type.INTEGER,
+    "to_employee_name": _s(type="string"),
+    "second_employee_name": _s(type="string", description="For kind='swap'."),
+    "second_date": _s(type="string", description="YYYY-MM-DD, for kind='swap'."),
+    "second_time_hint": _s(type="string", description="Other shift's start time for kind='swap'."),
+    "second_role_hint": _s(type="string", description="For kind='swap'."),
+    "new_date": _s(type="string", description="YYYY-MM-DD, for kind='retime'."),
+    "new_start_time": _s(type="string", description="HH:MM 24h, for kind='retime'."),
+    "new_end_time": _s(type="string", description="HH:MM 24h, for kind='retime'."),
+    "shift_by_minutes": _s(
+        type="integer",
         description="For a relative retime with no clock time given.",
     ),
 }
@@ -108,17 +140,17 @@ _SCHEDULE_EDIT_PROPERTIES = {
 # same single confirmation) as the cancellations that make room for them.
 _SCHEDULE_BATCH_ITEM_PROPERTIES = {
     **_SCHEDULE_EDIT_PROPERTIES,
-    "kind": types.Schema(
-        type=types.Type.STRING,
+    "kind": _s(
+        type="string",
         enum=["reassign", "assign", "unassign", "retime", "cancel", "swap", "create"],
     ),
-    "label": types.Schema(type=types.Type.STRING, description="For kind='create' — e.g. 'opener', or a real job name."),
-    "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='create'."),
-    "start_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
-    "end_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
-    "count": types.Schema(type=types.Type.INTEGER, description="Headcount for kind='create'; default 1."),
-    "employee_names": types.Schema(
-        type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+    "label": _s(type="string", description="For kind='create' — e.g. 'opener', or a real job name."),
+    "date": _s(type="string", description="YYYY-MM-DD, for kind='create'."),
+    "start_time": _s(type="string", description="For kind='create', HH:MM 24h."),
+    "end_time": _s(type="string", description="For kind='create', HH:MM 24h."),
+    "count": _s(type="integer", description="Headcount for kind='create'; default 1."),
+    "employee_names": _s(
+        type="array", items=_s(type="string"),
         description="For kind='create' — people to pin onto the new shift.",
     ),
 }
@@ -158,9 +190,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "a location_id for any inventory tool when the admin names a store; "
         "omit location_id entirely for company-wide inventory.",
         properties={
-            "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
-            "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email. For topic='wage_floors', the 2-letter state code (e.g. 'CA')."),
-            "days": types.Schema(type=types.Type.INTEGER, description="Lookback window in days for topic='incidents'. Default 90, max 365."),
+            "topic": _s(type="string", enum=list(LOOKUP_TOPICS)),
+            "query": _s(type="string", description="Optional free-text filter, e.g. a candidate/employee name or email. For topic='wage_floors', the 2-letter state code (e.g. 'CA')."),
+            "days": _s(type="integer", description="Lookback window in days for topic='incidents'. Default 90, max 365."),
         },
         required=["topic"],
     ),
@@ -176,9 +208,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "credential (topic='credentials'), inventory_item "
         "(topic='inventory'). Never guess an id.",
         properties={
-            "record_type": types.Schema(type=types.Type.STRING, enum=list(SHOW_RECORD_TYPES)),
-            "record_ids": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "record_type": _s(type="string", enum=list(SHOW_RECORD_TYPES)),
+            "record_ids": _s(
+                type="array", items=_s(type="string"),
                 description="One or more ids of the SAME record_type, from a prior lookup_context call.",
             ),
         },
@@ -196,15 +228,15 @@ TOOLS: tuple[HuumeTool, ...] = (
         "draft fields and must not block drafting. Unknown fields can be added "
         "later; candidate_email becomes required only when sending.",
         properties={
-            "offer_id": types.Schema(type=types.Type.STRING, description="UUID of an existing draft to revise. Omit to create a new offer."),
-            "candidate_name": types.Schema(type=types.Type.STRING),
-            "candidate_email": types.Schema(type=types.Type.STRING, description="Optional while drafting; required before send_offer can execute."),
-            "position_title": types.Schema(type=types.Type.STRING),
-            "salary": types.Schema(type=types.Type.STRING, description="Free-text salary, e.g. '$95,000/year'."),
-            "start_date": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD."),
-            "employment_type": types.Schema(type=types.Type.STRING, description="e.g. 'Full-Time Exempt', 'Part-Time', 'Contract'."),
-            "location": types.Schema(type=types.Type.STRING, description="Work location or state, e.g. 'Remote' or 'CA'."),
-            "reporting_to": types.Schema(type=types.Type.STRING, description="Optional while drafting. Name of the candidate's supervisor or manager, if known."),
+            "offer_id": _s(type="string", description="UUID of an existing draft to revise. Omit to create a new offer."),
+            "candidate_name": _s(type="string"),
+            "candidate_email": _s(type="string", description="Optional while drafting; required before send_offer can execute."),
+            "position_title": _s(type="string"),
+            "salary": _s(type="string", description="Free-text salary, e.g. '$95,000/year'."),
+            "start_date": _s(type="string", description="ISO date YYYY-MM-DD."),
+            "employment_type": _s(type="string", description="e.g. 'Full-Time Exempt', 'Part-Time', 'Contract'."),
+            "location": _s(type="string", description="Work location or state, e.g. 'Remote' or 'CA'."),
+            "reporting_to": _s(type="string", description="Optional while drafting. Name of the candidate's supervisor or manager, if known."),
         },
     ),
     _tool(
@@ -220,9 +252,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "pass recipient_email — that re-stages with the override and needs "
         "a fresh confirm.",
         properties={
-            "offer_id": types.Schema(type=types.Type.STRING),
-            "candidate_name": types.Schema(type=types.Type.STRING),
-            "recipient_email": types.Schema(type=types.Type.STRING),
+            "offer_id": _s(type="string"),
+            "candidate_name": _s(type="string"),
+            "recipient_email": _s(type="string"),
         },
         intent_hints=("send the offer", "send her offer", "send his offer",
                       "email the offer letter", "send the offer letter"),
@@ -231,7 +263,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "check_offer_status", "read",
         "Check whether a sent offer has been accepted, declined, or is "
         "still pending the candidate's response.",
-        properties={"offer_id": types.Schema(type=types.Type.STRING)},
+        properties={"offer_id": _s(type="string")},
         required=["offer_id"],
     ),
     _tool(
@@ -243,7 +275,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "This STAGES the plan as a checklist the admin reviews and approves "
         "(in full or step by step) before anything executes — it does not "
         "run any step itself. The offer must already be accepted.",
-        properties={"offer_id": types.Schema(type=types.Type.STRING)},
+        properties={"offer_id": _s(type="string")},
         required=["offer_id"],
     ),
     _tool(
@@ -260,9 +292,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "a required feature or integration are skipped and reported, not "
         "executed — that's not an error.",
         properties={
-            "offer_id": types.Schema(type=types.Type.STRING, description="Which candidate's plan. Omit only if exactly one plan is active."),
-            "step_keys": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "offer_id": _s(type="string", description="Which candidate's plan. Omit only if exactly one plan is active."),
+            "step_keys": _s(
+                type="array", items=_s(type="string"),
                 description="Plan step keys to approve+run, e.g. ['create_employee','portal_invitation']. Omit for all remaining proposed steps.",
             ),
         },
@@ -276,8 +308,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "since steps that already ran can't be undone from here. Pass "
         "offer_id whenever more than one plan is active.",
         properties={
-            "target": types.Schema(type=types.Type.STRING, enum=["action", "plan"]),
-            "offer_id": types.Schema(type=types.Type.STRING, description="Required for target='plan' when more than one plan is active."),
+            "target": _s(type="string", enum=["action", "plan"]),
+            "offer_id": _s(type="string", description="Required for target='plan' when more than one plan is active."),
         },
         required=["target"],
     ),
@@ -292,17 +324,17 @@ TOOLS: tuple[HuumeTool, ...] = (
         "specific occurrence date(s), not a vague timeframe — ask if the "
         "admin didn't give one.",
         properties={
-            "employee_name": types.Schema(type=types.Type.STRING),
-            "infraction_type": types.Schema(type=types.Type.STRING, enum=["attendance", "performance", "policy_violation"]),
-            "severity": types.Schema(type=types.Type.STRING, enum=["minor", "moderate", "severe"], description="Defaults to 'moderate' if omitted."),
-            "occurrence_dates": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "employee_name": _s(type="string"),
+            "infraction_type": _s(type="string", enum=["attendance", "performance", "policy_violation"]),
+            "severity": _s(type="string", enum=["minor", "moderate", "severe"], description="Defaults to 'moderate' if omitted."),
+            "occurrence_dates": _s(
+                type="array", items=_s(type="string"),
                 description="ISO date(s) YYYY-MM-DD when the conduct occurred.",
             ),
-            "description": types.Schema(type=types.Type.STRING, description="Brief factual account of what happened, in the admin's words."),
-            "expected_improvement": types.Schema(type=types.Type.STRING, description="Optional — what improvement is expected going forward."),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "description": _s(type="string", description="Brief factual account of what happened, in the admin's words."),
+            "expected_improvement": _s(type="string", description="Optional — what improvement is expected going forward."),
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state' to file it.",
             ),
         },
@@ -321,13 +353,13 @@ TOOLS: tuple[HuumeTool, ...] = (
         "only if the admin named them; the record is editable in Incidents "
         "afterwards.",
         properties={
-            "description": types.Schema(type=types.Type.STRING, description="Factual account of what happened, in the admin's words."),
-            "occurred_at": types.Schema(type=types.Type.STRING, description="ISO datetime of the incident. Omit to use now."),
-            "incident_type": types.Schema(type=types.Type.STRING, enum=["safety", "behavioral", "property", "near_miss", "other"]),
-            "severity": types.Schema(type=types.Type.STRING, enum=["critical", "high", "medium", "low"]),
-            "location": types.Schema(type=types.Type.STRING, description="Where it happened, e.g. 'Warehouse B loading dock'."),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "description": _s(type="string", description="Factual account of what happened, in the admin's words."),
+            "occurred_at": _s(type="string", description="ISO datetime of the incident. Omit to use now."),
+            "incident_type": _s(type="string", enum=["safety", "behavioral", "property", "near_miss", "other"]),
+            "severity": _s(type="string", enum=["critical", "high", "medium", "low"]),
+            "location": _s(type="string", description="Where it happened, e.g. 'Warehouse B loading dock'."),
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state' to file it.",
             ),
         },
@@ -342,14 +374,14 @@ TOOLS: tuple[HuumeTool, ...] = (
         "inferred from the narrative — the admin adds them on the ER page. Use "
         "the admin's own words for the description.",
         properties={
-            "description": types.Schema(type=types.Type.STRING, description="What was reported or is in dispute, in the admin's words."),
-            "title": types.Schema(type=types.Type.STRING, description="Short case title. Omit to derive one from the description."),
-            "category": types.Schema(
-                type=types.Type.STRING,
+            "description": _s(type="string", description="What was reported or is in dispute, in the admin's words."),
+            "title": _s(type="string", description="Short case title. Omit to derive one from the description."),
+            "category": _s(
+                type="string",
                 enum=["harassment", "discrimination", "safety", "retaliation", "policy_violation", "misconduct", "wage_hour", "other"],
             ),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
             ),
         },
@@ -364,12 +396,12 @@ TOOLS: tuple[HuumeTool, ...] = (
         "topic='roster' (or 'employee') for employee ids first. An employee "
         "who already has this training open keeps the earlier due date.",
         properties={
-            "requirement_id": types.Schema(type=types.Type.STRING, description="UUID of the training requirement, from lookup_context(topic='training')."),
-            "employee_ids": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "requirement_id": _s(type="string", description="UUID of the training requirement, from lookup_context(topic='training')."),
+            "employee_ids": _s(
+                type="array", items=_s(type="string"),
                 description="UUIDs of employees to assign, from lookup_context(topic='roster').",
             ),
-            "due_date": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD. Omit to use the requirement's own default."),
+            "due_date": _s(type="string", description="ISO date YYYY-MM-DD. Omit to use the requirement's own default."),
         },
         required=["requirement_id", "employee_ids"],
     ),
@@ -382,9 +414,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "ids first. Approving also draws the hours down from the employee's "
         "balance.",
         properties={
-            "request_id": types.Schema(type=types.Type.STRING, description="UUID of the pending PTO request, from lookup_context(topic='pto_leave')."),
-            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "deny"]),
-            "note": types.Schema(type=types.Type.STRING, description="Optional note recorded with the decision."),
+            "request_id": _s(type="string", description="UUID of the pending PTO request, from lookup_context(topic='pto_leave')."),
+            "decision": _s(type="string", enum=["approve", "deny"]),
+            "note": _s(type="string", description="Optional note recorded with the decision."),
         },
         required=["request_id", "decision"],
     ),
@@ -401,9 +433,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "say plainly that the scan was bounded — never imply it covered "
         "every closed incident.",
         properties={
-            "days": types.Schema(type=types.Type.INTEGER, description="Lookback window over closed incidents, in days. Default 30, max 180."),
-            "limit": types.Schema(type=types.Type.INTEGER, description="Max candidates to return, ranked. Default 5, max 10."),
-            "recheck": types.Schema(type=types.Type.BOOLEAN, description="Re-run the check on already-checked incidents too. Default false."),
+            "days": _s(type="integer", description="Lookback window over closed incidents, in days. Default 30, max 180."),
+            "limit": _s(type="integer", description="Max candidates to return, ranked. Default 5, max 10."),
+            "recheck": _s(type="boolean", description="Re-run the check on already-checked incidents too. Default false."),
         },
         discovery=True,
         intent_hints=(
@@ -418,7 +450,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Read-only — it reports possible matches, it never decides discipline "
         "level or legality. Call this before draft_disciplinary_action when "
         "the admin wants to know what an incident implicates.",
-        properties={"incident_id": types.Schema(type=types.Type.STRING)},
+        properties={"incident_id": _s(type="string")},
         required=["incident_id"],
     ),
     _tool(
@@ -432,20 +464,20 @@ TOOLS: tuple[HuumeTool, ...] = (
         "harassment, discrimination, or other legal/leave topics — route "
         "those to corporate HR instead of drafting them.",
         properties={
-            "employee_id": types.Schema(type=types.Type.STRING),
-            "incident_id": types.Schema(type=types.Type.STRING, description="Source incident, if any."),
-            "infraction_type": types.Schema(type=types.Type.STRING, enum=["attendance", "performance", "safety", "policy_violation"]),
-            "severity": types.Schema(type=types.Type.STRING, enum=["minor", "moderate", "severe"]),
-            "discipline_type": types.Schema(type=types.Type.STRING, enum=["verbal_warning", "written_warning", "pip", "final_warning", "suspension"]),
-            "occurrence_dates": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "employee_id": _s(type="string"),
+            "incident_id": _s(type="string", description="Source incident, if any."),
+            "infraction_type": _s(type="string", enum=["attendance", "performance", "safety", "policy_violation"]),
+            "severity": _s(type="string", enum=["minor", "moderate", "severe"]),
+            "discipline_type": _s(type="string", enum=["verbal_warning", "written_warning", "pip", "final_warning", "suspension"]),
+            "occurrence_dates": _s(
+                type="array", items=_s(type="string"),
                 description="ISO date(s) YYYY-MM-DD when the conduct occurred. Defaults to the incident's own date when omitted and incident_id is given.",
             ),
-            "description": types.Schema(type=types.Type.STRING, description="Factual account of what happened, in the admin's words."),
-            "expected_improvement": types.Schema(type=types.Type.STRING),
-            "template_id": types.Schema(type=types.Type.STRING, description="Optional letter template id. Omit to let the server resolve the best match, or draft from scratch."),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "description": _s(type="string", description="Factual account of what happened, in the admin's words."),
+            "expected_improvement": _s(type="string"),
+            "template_id": _s(type="string", description="Optional letter template id. Omit to let the server resolve the best match, or draft from scratch."),
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state' to file it.",
             ),
         },
@@ -465,9 +497,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "record. Call list_pending_approvals first if you don't already "
         "have the record_id.",
         properties={
-            "record_id": types.Schema(type=types.Type.STRING),
-            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "deny", "revise"]),
-            "reason": types.Schema(type=types.Type.STRING, description="Required when decision='deny' or 'revise' — at least 20 characters."),
+            "record_id": _s(type="string"),
+            "decision": _s(type="string", enum=["approve", "deny", "revise"]),
+            "reason": _s(type="string", description="Required when decision='deny' or 'revise' — at least 20 characters."),
         },
         required=["record_id", "decision"],
     ),
@@ -495,12 +527,12 @@ TOOLS: tuple[HuumeTool, ...] = (
         "on the Legal Pilot page. Confirm the title and what's being alleged "
         "with the admin before opening one; don't invent details.",
         properties={
-            "title": types.Schema(type=types.Type.STRING),
-            "matter_type": types.Schema(type=types.Type.STRING, enum=["subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other"]),
-            "allegation": types.Schema(type=types.Type.STRING, description="What is being alleged or claimed, in the admin's words."),
-            "jurisdiction_state": types.Schema(type=types.Type.STRING, description="Two-letter US state code, e.g. 'CA'."),
-            "evidence_start": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD — start of the relevant evidence window."),
-            "evidence_end": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD — end of the relevant evidence window."),
+            "title": _s(type="string"),
+            "matter_type": _s(type="string", enum=["subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other"]),
+            "allegation": _s(type="string", description="What is being alleged or claimed, in the admin's words."),
+            "jurisdiction_state": _s(type="string", description="Two-letter US state code, e.g. 'CA'."),
+            "evidence_start": _s(type="string", description="ISO date YYYY-MM-DD — start of the relevant evidence window."),
+            "evidence_end": _s(type="string", description="ISO date YYYY-MM-DD — end of the relevant evidence window."),
         },
         required=["title"],
     ),
@@ -516,8 +548,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "matter_id when more than one matter is open (see Current staged "
         "state / list_legal_matters).",
         properties={
-            "question": types.Schema(type=types.Type.STRING),
-            "matter_id": types.Schema(type=types.Type.STRING, description="Which matter. Omit to use the thread's active matter, or when exactly one matter is open."),
+            "question": _s(type="string"),
+            "matter_id": _s(type="string", description="Which matter. Omit to use the thread's active matter, or when exactly one matter is open."),
         },
         required=["question"],
     ),
@@ -531,8 +563,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "the Legal Pilot page. Only call this when the admin explicitly asks "
         "for the packet/export.",
         properties={
-            "matter_id": types.Schema(type=types.Type.STRING, description="Which matter. Omit to use the thread's active matter."),
-            "kind": types.Schema(type=types.Type.STRING, enum=["pdf", "zip", "both"]),
+            "matter_id": _s(type="string", description="Which matter. Omit to use the thread's active matter."),
+            "kind": _s(type="string", enum=["pdf", "zip", "both"]),
         },
     ),
     # ---- Handbook Pilot skill (feature `handbook_pilot`) ---------------------
@@ -547,7 +579,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "are NOT part of the real handbook until promoted. Never call "
         "promote_handbook_drafts in the same turn you drafted.",
         properties={
-            "request": types.Schema(type=types.Type.STRING, description="What to draft, in the admin's words — topic, jurisdictions, any constraints."),
+            "request": _s(type="string", description="What to draft, in the admin's words — topic, jurisdictions, any constraints."),
         },
         required=["request"],
     ),
@@ -566,13 +598,13 @@ TOOLS: tuple[HuumeTool, ...] = (
         "auto-resolves any pending change requests raised by freshness "
         "findings the promoted drafts cite.",
         properties={
-            "draft_ids": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "draft_ids": _s(
+                type="array", items=_s(type="string"),
                 description="Pending draft ids to promote. Omit for all pending drafts from earlier turns.",
             ),
-            "handbook_title": types.Schema(type=types.Type.STRING, description="Title for the new draft handbook when promoting section drafts."),
-            "target_handbook_id": types.Schema(
-                type=types.Type.STRING,
+            "handbook_title": _s(type="string", description="Title for the new draft handbook when promoting section drafts."),
+            "target_handbook_id": _s(
+                type="string",
                 description=(
                     "Existing handbook id to amend INSTEAD of creating a new "
                     "draft handbook: matching sections update in place, new "
@@ -594,7 +626,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "one-line headline for each, note count, and how long it's been open. "
         "No Gemini call, read-only. Names NOBODY involved — use show_record "
         "with record_type='er_case' to open the case and see who's involved.",
-        properties={"case_id": types.Schema(type=types.Type.STRING)},
+        properties={"case_id": _s(type="string")},
         required=["case_id"],
     ),
     _tool(
@@ -608,8 +640,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "first if you don't have a case_id. Pass case_id when more than one "
         "case is in play; omit it to use the thread's active case.",
         properties={
-            "case_id": types.Schema(type=types.Type.STRING, description="Which case. Omit to use the thread's active case (see Current staged state)."),
-            "question": types.Schema(type=types.Type.STRING),
+            "case_id": _s(type="string", description="Which case. Omit to use the thread's active case (see Current staged state)."),
+            "question": _s(type="string"),
         },
         required=["question"],
         intent_hints=(
@@ -627,12 +659,12 @@ TOOLS: tuple[HuumeTool, ...] = (
         "event's own title/suggested type/severity are used unless overridden. "
         "Promotion is one-way; the incident is a legal record editable in Incidents.",
         properties={
-            "event_id": types.Schema(type=types.Type.STRING, description="The EMS event id, from lookup_context(topic='events') or show_record."),
-            "title": types.Schema(type=types.Type.STRING),
-            "incident_type": types.Schema(type=types.Type.STRING, enum=["safety", "behavioral", "property", "near_miss", "other"]),
-            "severity": types.Schema(type=types.Type.STRING, enum=["critical", "high", "medium", "low"]),
-            "occurred_at": types.Schema(type=types.Type.STRING, description="ISO datetime. Omit to use the event's logged time."),
-            "location": types.Schema(type=types.Type.STRING),
+            "event_id": _s(type="string", description="The EMS event id, from lookup_context(topic='events') or show_record."),
+            "title": _s(type="string"),
+            "incident_type": _s(type="string", enum=["safety", "behavioral", "property", "near_miss", "other"]),
+            "severity": _s(type="string", enum=["critical", "high", "medium", "low"]),
+            "occurred_at": _s(type="string", description="ISO datetime. Omit to use the event's logged time."),
+            "location": _s(type="string"),
         },
         required=["event_id"],
         intent_hints=("promote the event", "logged event", "make it an incident", "escalate the event"),
@@ -647,8 +679,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "continue it. Pass incident_id when more than one is in play; omit to "
         "use the thread's active incident (e.g. one just promoted).",
         properties={
-            "question": types.Schema(type=types.Type.STRING),
-            "incident_id": types.Schema(type=types.Type.STRING),
+            "question": _s(type="string"),
+            "incident_id": _s(type="string"),
         },
         required=["question"],
         intent_hints=("incident copilot", "incident report pilot", "guidance on the incident"),
@@ -661,9 +693,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "cached result instantly if it already ran — pass refresh=true to "
         "recompute instead (e.g. the incident was edited since the last run).",
         properties={
-            "analysis_type": types.Schema(type=types.Type.STRING, enum=["root_cause", "recommendations"]),
-            "incident_id": types.Schema(type=types.Type.STRING),
-            "refresh": types.Schema(type=types.Type.BOOLEAN, description="Recompute even if a cached analysis exists."),
+            "analysis_type": _s(type="string", enum=["root_cause", "recommendations"]),
+            "incident_id": _s(type="string"),
+            "refresh": _s(type="boolean", description="Recompute even if a cached analysis exists."),
         },
         required=["analysis_type"],
         intent_hints=("root cause analysis", "corrective action recommendations"),
@@ -685,14 +717,14 @@ TOOLS: tuple[HuumeTool, ...] = (
         "decide_inventory_order(decision='receive'), or attach the "
         "delivery's invoice CSV and use stage_receipt_from_attachment.",
         properties={
-            "kind": types.Schema(type=types.Type.STRING, enum=["out", "stockout", "adjust"]),
-            "item_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='inventory')."),
-            "new_item_name": types.Schema(type=types.Type.STRING, description="Create a new item with this name instead of using item_id."),
-            "quantity": types.Schema(type=types.Type.NUMBER, description="Required for out/adjust. Ignored for stockout."),
-            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
-            "note": types.Schema(type=types.Type.STRING, description="Optional short note recorded on the movement."),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "kind": _s(type="string", enum=["out", "stockout", "adjust"]),
+            "item_id": _s(type="string", description="UUID from lookup_context(topic='inventory')."),
+            "new_item_name": _s(type="string", description="Create a new item with this name instead of using item_id."),
+            "quantity": _s(type="number", description="Required for out/adjust. Ignored for stockout."),
+            "location_id": _s(type="string", description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "note": _s(type="string", description="Optional short note recorded on the movement."),
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
             ),
         },
@@ -709,10 +741,10 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Omit quantity to use the deterministic reorder suggestion from the "
         "item's consumption history, if any.",
         properties={
-            "item_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='inventory')."),
-            "new_item_name": types.Schema(type=types.Type.STRING, description="Create a new item with this name instead of using item_id."),
-            "quantity": types.Schema(type=types.Type.NUMBER, description="Omit to use the reorder-history suggestion."),
-            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "item_id": _s(type="string", description="UUID from lookup_context(topic='inventory')."),
+            "new_item_name": _s(type="string", description="Create a new item with this name instead of using item_id."),
+            "quantity": _s(type="number", description="Omit to use the reorder-history suggestion."),
+            "location_id": _s(type="string", description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
         },
         discovery=True,
         intent_hints=("running low", "restock", "order more", "need to order", "place an order"),
@@ -726,9 +758,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "show_record. decision='receive' records the delivery as stock — "
         "pass quantity if it differs from what was ordered.",
         properties={
-            "order_id": types.Schema(type=types.Type.STRING),
-            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "receive", "cancel"]),
-            "quantity": types.Schema(type=types.Type.NUMBER, description="For decision='receive' when the delivered amount differs from what was ordered."),
+            "order_id": _s(type="string"),
+            "decision": _s(type="string", enum=["approve", "receive", "cancel"]),
+            "quantity": _s(type="number", description="For decision='receive' when the delivered amount differs from what was ordered."),
         },
         required=["order_id", "decision"],
     ),
@@ -741,13 +773,13 @@ TOOLS: tuple[HuumeTool, ...] = (
         "when the admin is really describing a delivery or usage, not just "
         "adding a catalog entry.",
         properties={
-            "name": types.Schema(type=types.Type.STRING),
-            "unit": types.Schema(type=types.Type.STRING, description="e.g. 'BX', 'CS', 'EA'."),
-            "initial_quantity": types.Schema(type=types.Type.NUMBER),
-            "low_stock_threshold": types.Schema(type=types.Type.NUMBER),
-            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "name": _s(type="string"),
+            "unit": _s(type="string", description="e.g. 'BX', 'CS', 'EA'."),
+            "initial_quantity": _s(type="number"),
+            "low_stock_threshold": _s(type="number"),
+            "location_id": _s(type="string", description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
             ),
         },
@@ -759,7 +791,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         "lookups and on the Inventory page. This STAGES the archive for the "
         "admin's confirmation; nothing changes until they confirm on a LATER "
         "turn. Get item_id from lookup_context(topic='inventory').",
-        properties={"item_id": types.Schema(type=types.Type.STRING)},
+        properties={"item_id": _s(type="string")},
         required=["item_id"],
     ),
     _tool(
@@ -776,9 +808,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "staged state shows a duplicate-invoice warning, confirming anyway "
         "commits it — there's no separate override step.",
         properties={
-            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "location_id": _s(type="string", description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
             ),
         },
@@ -786,25 +818,25 @@ TOOLS: tuple[HuumeTool, ...] = (
         intent_hints=("received a delivery", "got a delivery", "invoice attached", "packing slip"),
     ),
     _tool("record_waste_movement", "staged", "Stage observed discarded stock with a reason; this only records after a later confirmation.", properties={
-        "item_id": types.Schema(type=types.Type.STRING), "quantity": types.Schema(type=types.Type.NUMBER),
-        "waste_reason": types.Schema(type=types.Type.STRING, enum=["spoilage","expired","prep_error","overproduction","breakage","contamination","theft","comp","recall","unknown"]),
-        "note": types.Schema(type=types.Type.STRING), "location_id": types.Schema(type=types.Type.STRING), "confirm_id": types.Schema(type=types.Type.STRING),
+        "item_id": _s(type="string"), "quantity": _s(type="number"),
+        "waste_reason": _s(type="string", enum=["spoilage","expired","prep_error","overproduction","breakage","contamination","theft","comp","recall","unknown"]),
+        "note": _s(type="string"), "location_id": _s(type="string"), "confirm_id": _s(type="string"),
     }, required=["item_id", "quantity", "waste_reason"]),
-    _tool("apply_waste_par_change", "staged", "Stage a manager-approved predictive par change from a forecast run.", properties={"run_id": types.Schema(type=types.Type.STRING), "item_id": types.Schema(type=types.Type.STRING)}, required=["run_id", "item_id"]),
-    _tool("correct_waste_recipe", "staged", "Stage a recipe mapping correction; components are existing item ids and quantities per sale.", properties={"sold_name": types.Schema(type=types.Type.STRING), "components": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=types.Type.OBJECT)), "location_id": types.Schema(type=types.Type.STRING), "confirm_id": types.Schema(type=types.Type.STRING)}, required=["sold_name", "components"]),
+    _tool("apply_waste_par_change", "staged", "Stage a manager-approved predictive par change from a forecast run.", properties={"run_id": _s(type="string"), "item_id": _s(type="string")}, required=["run_id", "item_id"]),
+    _tool("correct_waste_recipe", "staged", "Stage a recipe mapping correction; components are existing item ids and quantities per sale.", properties={"sold_name": _s(type="string"), "components": _s(type="array", items=_s(type="object")), "location_id": _s(type="string"), "confirm_id": _s(type="string")}, required=["sold_name", "components"]),
     _tool(
         "propose_assignment_note", "staged",
         "Stage one visible manager note on an employee's shift. Use a shift "
         "and employee id from the schedule overview. Nothing is written or "
         "emailed until a later confirmation.",
         properties={
-            "shift_id": types.Schema(type=types.Type.STRING),
-            "employee_id": types.Schema(type=types.Type.STRING),
-            "note": types.Schema(type=types.Type.STRING),
-            "visible_to_employee": types.Schema(type=types.Type.BOOLEAN),
-            "include_in_location_digest": types.Schema(type=types.Type.BOOLEAN),
-            "send_employee_notice": types.Schema(type=types.Type.BOOLEAN),
-            "confirm_id": types.Schema(type=types.Type.STRING),
+            "shift_id": _s(type="string"),
+            "employee_id": _s(type="string"),
+            "note": _s(type="string"),
+            "visible_to_employee": _s(type="boolean"),
+            "include_in_location_digest": _s(type="boolean"),
+            "send_employee_notice": _s(type="boolean"),
+            "confirm_id": _s(type="string"),
         },
         required=["shift_id", "employee_id", "note"],
     ),
@@ -814,11 +846,11 @@ TOOLS: tuple[HuumeTool, ...] = (
         "waiver is or is not on file. Include the effective date and note; "
         "future assignment break guidance is refreshed only after confirmation.",
         properties={
-            "employee_id": types.Schema(type=types.Type.STRING),
-            "on_file": types.Schema(type=types.Type.BOOLEAN),
-            "effective_from": types.Schema(type=types.Type.STRING),
-            "note": types.Schema(type=types.Type.STRING),
-            "confirm_id": types.Schema(type=types.Type.STRING),
+            "employee_id": _s(type="string"),
+            "on_file": _s(type="boolean"),
+            "effective_from": _s(type="string"),
+            "note": _s(type="string"),
+            "confirm_id": _s(type="string"),
         },
         required=["employee_id", "on_file", "effective_from"],
     ),
@@ -828,10 +860,10 @@ TOOLS: tuple[HuumeTool, ...] = (
         "the selected schedule location. The location is supplied by the "
         "server-scoped workspace; permit dates are checked again when confirmed.",
         properties={
-            "employee_id": types.Schema(type=types.Type.STRING),
-            "issued_at": types.Schema(type=types.Type.STRING),
-            "expires_at": types.Schema(type=types.Type.STRING),
-            "confirm_id": types.Schema(type=types.Type.STRING),
+            "employee_id": _s(type="string"),
+            "issued_at": _s(type="string"),
+            "expires_at": _s(type="string"),
+            "confirm_id": _s(type="string"),
         },
         required=["employee_id", "expires_at"],
     ),
@@ -853,11 +885,11 @@ TOOLS: tuple[HuumeTool, ...] = (
         "cited legal/compliance risk with a written explanation. Nothing "
         "changes until a later confirmation.",
         properties={
-            "case_id": types.Schema(type=types.Type.STRING),
-            "decision": types.Schema(type=types.Type.STRING, enum=["remove", "keep"]),
-            "acknowledgement_confirmed": types.Schema(type=types.Type.BOOLEAN),
-            "acknowledgement_note": types.Schema(type=types.Type.STRING),
-            "confirm_id": types.Schema(type=types.Type.STRING),
+            "case_id": _s(type="string"),
+            "decision": _s(type="string", enum=["remove", "keep"]),
+            "acknowledgement_confirmed": _s(type="boolean"),
+            "acknowledgement_note": _s(type="string"),
+            "confirm_id": _s(type="string"),
         },
         required=["case_id", "decision"],
     ),
@@ -899,8 +931,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "location's default week template. Nothing is written until the "
         "manager confirms on a LATER turn with the exact confirm_id.",
         properties={
-            "operating_hours": types.Schema(
-                type=types.Type.OBJECT,
+            "operating_hours": _s(
+                type="object",
                 description=(
                     "Open/close per weekday keyed '0'..'6' (0=Sunday), e.g. "
                     "{\"1\": {\"open\": \"08:00\", \"close\": \"17:00\"}}. Send null for a "
@@ -910,35 +942,35 @@ TOOLS: tuple[HuumeTool, ...] = (
                     "is still unasked."
                 ),
             ),
-            "blocks": types.Schema(
-                type=types.Type.ARRAY,
+            "blocks": _s(
+                type="array",
                 description="The shift blocks a normal week needs at this location.",
-                items=types.Schema(
-                    type=types.Type.OBJECT,
+                items=_s(
+                    type="object",
                     properties={
-                        "name": types.Schema(type=types.Type.STRING, description="What staff call it, e.g. 'Opener'."),
-                        "job_name": types.Schema(
-                            type=types.Type.STRING,
+                        "name": _s(type="string", description="What staff call it, e.g. 'Opener'."),
+                        "job_name": _s(
+                            type="string",
                             description="An existing job at this location — never invent one.",
                         ),
-                        "days_of_week": types.Schema(
-                            type=types.Type.ARRAY, items=types.Schema(type=types.Type.INTEGER),
+                        "days_of_week": _s(
+                            type="array", items=_s(type="integer"),
                             description="0=Sunday … 6=Saturday.",
                         ),
-                        "start_time": types.Schema(type=types.Type.STRING, description="HH:MM"),
-                        "end_time": types.Schema(type=types.Type.STRING, description="HH:MM"),
-                        "required_staff": types.Schema(type=types.Type.INTEGER),
-                        "break_minutes": types.Schema(type=types.Type.INTEGER),
+                        "start_time": _s(type="string", description="HH:MM"),
+                        "end_time": _s(type="string", description="HH:MM"),
+                        "required_staff": _s(type="integer"),
+                        "break_minutes": _s(type="integer"),
                     },
                     required=["name", "job_name", "days_of_week", "start_time", "end_time", "required_staff"],
                 ),
             ),
-            "leader_job_name": types.Schema(
-                type=types.Type.STRING,
+            "leader_job_name": _s(
+                type="string",
                 description="Job that must be on every open shift (shift lead / manager), if the manager named one.",
             ),
-            "leader_required": types.Schema(
-                type=types.Type.BOOLEAN,
+            "leader_required": _s(
+                type="boolean",
                 description=(
                     "true when a shift lead or manager must be on every open shift — name "
                     "the job in leader_job_name. false when the manager says no lead is "
@@ -946,27 +978,27 @@ TOOLS: tuple[HuumeTool, ...] = (
                     "it. Omit only while the question is still unasked."
                 ),
             ),
-            "open_buffer_minutes": types.Schema(
-                type=types.Type.INTEGER,
+            "open_buffer_minutes": _s(
+                type="integer",
                 description=(
                     "Minutes of prep BEFORE opening time that somebody has to be "
                     "scheduled for (0-240). 0 if the manager says nobody comes in early."
                 ),
             ),
-            "close_buffer_minutes": types.Schema(
-                type=types.Type.INTEGER,
+            "close_buffer_minutes": _s(
+                type="integer",
                 description=(
                     "Minutes of cleanup AFTER closing time that somebody has to be "
                     "scheduled for (0-240). 0 if staff leave when the doors shut."
                 ),
             ),
-            "notes": types.Schema(type=types.Type.STRING),
-            "template_name": types.Schema(
-                type=types.Type.STRING,
+            "notes": _s(type="string"),
+            "template_name": _s(
+                type="string",
                 description="Optional name for the saved week template.",
             ),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "confirm_id": _s(
+                type="string",
                 description="Omit when staging; after explicit approval, echo the staged confirm_id exactly.",
             ),
         },
@@ -985,32 +1017,32 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Nothing is added to the editor until the manager confirms on a LATER "
         "turn with the exact confirm_id; the resulting shifts remain drafts.",
         properties={
-            "source_mode": types.Schema(
-                type=types.Type.STRING, enum=["auto", "existing", "template"],
+            "source_mode": _s(
+                type="string", enum=["auto", "existing", "template"],
                 description="Use auto unless the manager selected a specific source.",
             ),
-            "week_template_id": types.Schema(
-                type=types.Type.STRING,
+            "week_template_id": _s(
+                type="string",
                 description="Required when source_mode=template; use an id returned by readiness.",
             ),
-            "exclude_employee_ids": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "exclude_employee_ids": _s(
+                type="array", items=_s(type="string"),
                 description="Employees the manager explicitly asked not to schedule in this proposal.",
             ),
-            "employee_hour_caps": types.Schema(
-                type=types.Type.ARRAY,
-                items=types.Schema(
-                    type=types.Type.OBJECT,
+            "employee_hour_caps": _s(
+                type="array",
+                items=_s(
+                    type="object",
                     properties={
-                        "employee_id": types.Schema(type=types.Type.STRING),
-                        "max_weekly_minutes": types.Schema(type=types.Type.INTEGER),
+                        "employee_id": _s(type="string"),
+                        "max_weekly_minutes": _s(type="integer"),
                     },
                     required=["employee_id", "max_weekly_minutes"],
                 ),
                 description="Optional manager overrides that can only tighten weekly hour caps.",
             ),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "confirm_id": _s(
+                type="string",
                 description="Omit when staging; after explicit approval, echo the staged confirm_id exactly.",
             ),
         },
@@ -1027,9 +1059,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "assigns anyone; follow up with propose_schedule_change once you "
         "have a candidate.",
         properties={
-            "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
-            "role_hint": types.Schema(
-                type=types.Type.STRING,
+            "date": _s(type="string", description="YYYY-MM-DD"),
+            "role_hint": _s(
+                type="string",
                 description="Optional — filter to shifts whose role matches, e.g. 'opener'.",
             ),
         },
@@ -1064,17 +1096,17 @@ TOOLS: tuple[HuumeTool, ...] = (
         "unless the manager explicitly asked to put named employees on it; "
         "never infer an assignee from the roster or from an earlier shift.",
         properties={
-            "kind": types.Schema(
-                type=types.Type.STRING,
+            "kind": _s(
+                type="string",
                 enum=["create", "reassign", "assign", "unassign", "retime", "cancel", "swap"],
                 description="Legacy single-operation field, with the flat fields below. "
                             "Leave it out entirely whenever you send `changes` — every "
                             "operation's kind belongs on its own item there.",
             ),
-            "changes": types.Schema(
-                type=types.Type.ARRAY,
-                items=types.Schema(
-                    type=types.Type.OBJECT,
+            "changes": _s(
+                type="array",
+                items=_s(
+                    type="object",
                     properties=_SCHEDULE_BATCH_ITEM_PROPERTIES,
                     required=["kind"],
                 ),
@@ -1086,50 +1118,50 @@ TOOLS: tuple[HuumeTool, ...] = (
                     "A named-person swap counts as two."
                 ),
             ),
-            "fill_vacant_shifts": types.Schema(
-                type=types.Type.BOOLEAN,
+            "fill_vacant_shifts": _s(
+                type="boolean",
                 description=(
                     "True to have the server fill the week's open shifts from the roster "
                     "(deterministic, policy-checked). Use for 'fill / staff / cover the open shifts'."
                 ),
             ),
-            "fill_job_name": types.Schema(
-                type=types.Type.STRING,
+            "fill_job_name": _s(
+                type="string",
                 description="With fill_vacant_shifts: only open shifts of this job/role (a real job name from the location).",
             ),
-            "fill_shift_ids": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "fill_shift_ids": _s(
+                type="array", items=_s(type="string"),
                 description="With fill_vacant_shifts: only these shift ids (from get_schedule_overview).",
             ),
-            "exclude_employee_names": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "exclude_employee_names": _s(
+                type="array", items=_s(type="string"),
                 description="With fill_vacant_shifts: people the manager asked not to use.",
             ),
-            "allow_split_shift": types.Schema(
-                type=types.Type.BOOLEAN,
+            "allow_split_shift": _s(
+                type="boolean",
                 description="With fill_vacant_shifts: true only when the manager explicitly allowed one person to work two shifts in a day.",
             ),
-            "all_vacant_shifts": types.Schema(
-                type=types.Type.BOOLEAN,
+            "all_vacant_shifts": _s(
+                type="boolean",
                 description="True only when the manager literally named ONE person for every vacant shift; the server still refuses the ones that overlap or break the caps.",
             ),
-            "location_name": types.Schema(
-                type=types.Type.STRING,
+            "location_name": _s(
+                type="string",
                 description="Store name if the company has more than one location — get exact "
                             "names from lookup_context(topic='locations'). Omit if there's only one.",
             ),
             **{key: value for key, value in _SCHEDULE_EDIT_PROPERTIES.items() if key != "kind"},
-            "label": types.Schema(type=types.Type.STRING, description="For kind='create'."),
-            "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='create'."),
-            "start_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
-            "end_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
-            "count": types.Schema(type=types.Type.INTEGER, description="For kind='create'."),
-            "employee_names": types.Schema(
-                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+            "label": _s(type="string", description="For kind='create'."),
+            "date": _s(type="string", description="YYYY-MM-DD, for kind='create'."),
+            "start_time": _s(type="string", description="For kind='create', HH:MM 24h."),
+            "end_time": _s(type="string", description="For kind='create', HH:MM 24h."),
+            "count": _s(type="integer", description="For kind='create'."),
+            "employee_names": _s(
+                type="array", items=_s(type="string"),
                 description="For kind='create'.",
             ),
-            "confirm_id": types.Schema(
-                type=types.Type.STRING,
+            "confirm_id": _s(
+                type="string",
                 description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
             ),
         },
@@ -1155,9 +1187,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "answer 'what have we made' and to find an existing artifact before "
         "creating a duplicate.",
         properties={
-            "scope": types.Schema(type=types.Type.STRING, enum=["thread", "company"]),
-            "asset_type": types.Schema(type=types.Type.STRING),
-            "limit": types.Schema(type=types.Type.INTEGER),
+            "scope": _s(type="string", enum=["thread", "company"]),
+            "asset_type": _s(type="string"),
+            "limit": _s(type="integer"),
         },
         intent_hints=("what have we made", "what did we create", "assets we created",
                       "list the assets", "offer letters we created"),
@@ -1168,17 +1200,17 @@ TOOLS: tuple[HuumeTool, ...] = (
         "explain why you couldn't — describe ONLY what actually happened, "
         "never what you intended to do.",
         properties={
-            "message": types.Schema(type=types.Type.STRING),
-            "question": types.Schema(
-                type=types.Type.STRING,
+            "message": _s(type="string"),
+            "question": _s(
+                type="string",
                 description=(
                     "The single question you need answered next, when the answer is one "
                     "of a short list of choices. Pass `options` with it."
                 ),
             ),
-            "options": types.Schema(
-                type=types.Type.ARRAY,
-                items=types.Schema(type=types.Type.STRING),
+            "options": _s(
+                type="array",
+                items=_s(type="string"),
                 description=(
                     "2-6 short answers (max 40 chars each) rendered as buttons the "
                     "manager can tap instead of typing. Only for a genuinely finite "
@@ -1193,8 +1225,13 @@ TOOLS: tuple[HuumeTool, ...] = (
 TOOLS_BY_NAME: dict[str, HuumeTool] = {t.name: t for t in TOOLS}
 
 
-def tool_declarations(*, allowed_names=None) -> list[types.FunctionDeclaration]:
-    if allowed_names is None:
-        return [t.declaration for t in TOOLS]
-    allowed = set(allowed_names)
-    return [t.declaration for t in TOOLS if t.name in allowed]
+def tool_specs(*, allowed_names=None) -> list[dict[str, Any]]:
+    """The tool catalog as Responses function tools, ready to send."""
+    tools = TOOLS if allowed_names is None else [
+        t for t in TOOLS if t.name in set(allowed_names)
+    ]
+    return [
+        {"type": "function", "name": t.name, "description": t.description,
+         "parameters": t.parameters}
+        for t in tools
+    ]

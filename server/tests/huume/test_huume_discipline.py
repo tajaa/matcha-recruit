@@ -105,5 +105,5 @@ class TestDraftDisciplineToolRegistered:
         assert TOOLS_BY_NAME["draft_discipline"].kind == "staged"
 
     def test_required_fields(self):
-        required = set(TOOLS_BY_NAME["draft_discipline"].declaration.parameters.required)
+        required = set(TOOLS_BY_NAME["draft_discipline"].parameters.get("required"))
         assert required == {"employee_name", "infraction_type", "occurrence_dates", "description"}

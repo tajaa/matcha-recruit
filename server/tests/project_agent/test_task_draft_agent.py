@@ -3,24 +3,30 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from google.genai import types
 
 from app.core.services import ai_usage
+from app.matcha.services.huume.luna_client import LunaResponse
 from app.matcha.services.matcha_work.project_agent import task_draft_agent
 from app.matcha.services.matcha_work.project_agent.prompt import build_task_draft_system_prompt
 from app.matcha.services.matcha_work.project_agent.tools import task_draft_declarations
 
 
-def _response(*parts):
-    return SimpleNamespace(
-        candidates=[types.Candidate(content=types.Content(role="model", parts=list(parts)))],
-        usage_metadata=SimpleNamespace(
-            prompt_token_count=10,
-            candidates_token_count=5,
-            thoughts_token_count=2,
-            total_token_count=17,
-        ),
+def _response(*calls, text=None):
+    return LunaResponse(
+        response_id="resp_test",
+        text=text,
+        function_calls=list(calls),
+        usage={
+            "input_tokens": 10, "output_tokens": 5, "total_tokens": 17,
+            "output_tokens_details": {"reasoning_tokens": 2},
+        },
     )
+
+
+def _call(name, args):
+    """One Responses function call; `call_id` is what its result pairs back to."""
+    _call.counter = getattr(_call, "counter", 0) + 1
+    return {"call_id": f"call_{_call.counter}", "name": name, "arguments": args}
 
 
 class _FakeModels:
@@ -28,7 +34,7 @@ class _FakeModels:
         self.responses = list(responses)
         self.calls = []
 
-    async def generate_content(self, **kwargs):
+    async def create_response(self, **kwargs):
         self.calls.append({
             **kwargs,
             "feature": ai_usage._feature_override.get(),
@@ -37,7 +43,7 @@ class _FakeModels:
 
 
 def test_task_draft_surface_is_read_only_and_structured():
-    names = {tool.name for tool in task_draft_declarations()}
+    names = {tool["name"] for tool in task_draft_declarations()}
     assert names == {"draft_ticket"}
     assert not names.intersection({"write_file", "open_pr", "run_command", "create_task"})
     prompt = build_task_draft_system_prompt()
@@ -62,9 +68,9 @@ async def test_task_draft_reads_architecture_guide_and_returns_resolved_review_d
         "sources": ["CLAUDE.md:12-18"],
     }
     models = _FakeModels([
-        _response(types.Part.from_function_call(name="draft_ticket", args=draft_args)),
+        _response(_call("draft_ticket", draft_args)),
     ])
-    fake_client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    fake_client = models
     get_client = Mock(return_value=fake_client)
     monkeypatch.setattr(task_draft_agent, "get_luna_client", get_client)
     read_repo_file = AsyncMock(return_value={
@@ -108,11 +114,8 @@ async def test_task_draft_reads_architecture_guide_and_returns_resolved_review_d
     assert all(call["model"] == "gpt-5.6-luna" for call in models.calls)
     assert all(call["feature"] == "matcha.espresso.task_draft" for call in models.calls)
     # draft_ticket is the only exit; a prose turn would fail the whole run.
-    assert all(
-        call["config"].tool_config.function_calling_config.mode
-        == types.FunctionCallingConfigMode.ANY
-        for call in models.calls
-    )
+    # This agent must call a tool; its answer only counts after a real read.
+    assert all(call["tool_choice"] == "required" for call in models.calls)
     get_client.assert_called_once_with()
     read_repo_file.assert_awaited_once_with(
         "example/matcha", "main", "CLAUDE.md", start_line=1, end_line=400,
@@ -126,7 +129,7 @@ async def test_task_draft_reads_architecture_guide_and_returns_resolved_review_d
 @pytest.mark.asyncio
 async def test_task_draft_falls_back_to_root_agents_guide(monkeypatch):
     models = _FakeModels([
-        _response(types.Part.from_function_call(name="draft_ticket", args={
+        _response(_call("draft_ticket", {
             "title": "Clarify the project task",
             "description": "Use the repository architecture guide to scope the task.",
             "priority": "medium",
@@ -139,7 +142,7 @@ async def test_task_draft_falls_back_to_root_agents_guide(monkeypatch):
     monkeypatch.setattr(
         task_draft_agent,
         "get_luna_client",
-        Mock(return_value=SimpleNamespace(aio=SimpleNamespace(models=models))),
+        Mock(return_value=models),
     )
     read_repo_file = AsyncMock(side_effect=[
         FileNotFoundError("CLAUDE.md"),

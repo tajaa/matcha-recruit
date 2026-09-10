@@ -371,14 +371,14 @@ class TestRegistry:
             "stage_receipt_from_attachment": set(),
         }
         for name, required in expected.items():
-            declared = set(TOOLS_BY_NAME[name].declaration.parameters.required or [])
+            declared = set(TOOLS_BY_NAME[name].parameters.get("required") or [])
             assert declared == required, name
 
     def test_movement_kind_enum_excludes_in(self):
         """Schema-level backstop for the provenance invariant — the primary
         gate is the enum itself (Gemini enforces it), the validator refusal
         in TestMovementValidation is the confirm-turn belt."""
-        declared = TOOLS_BY_NAME["record_stock_movement"].declaration.parameters.properties["kind"].enum
+        declared = TOOLS_BY_NAME["record_stock_movement"].parameters["properties"]["kind"]["enum"]
         assert set(declared) == {"out", "stockout", "adjust"}
 
     def test_locations_topic_registered_and_gated(self):
