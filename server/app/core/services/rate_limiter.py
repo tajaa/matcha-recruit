@@ -1,8 +1,15 @@
 """
-Gemini API Rate Limiter
+AI API rate limiter
 
-Database-backed rate limiter to prevent runaway Gemini API costs.
-Uses rolling windows for hourly and daily limits.
+Database-backed rate limiter to prevent runaway model spend. Rolling hourly and
+daily windows, counted **per provider**.
+
+The per-provider part is not cosmetic. Until 2026-09 this counted every row in
+`api_rate_limits` with no filter and compared the total against the Gemini
+limits — so once the Huume and Espresso loops moved to OpenAI (2026-08-25)
+their calls spent the Gemini allowance, and a Gemini-heavy compliance sweep
+could 429 a Huume turn. Each provider now has its own bucket and its own
+configured ceiling.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -26,20 +33,29 @@ class RateLimitExceeded(Exception):
         self.limit = limit
 
 
-class GeminiRateLimiter:
+class ApiRateLimiter:
     """
-    Database-backed rate limiter for Gemini API calls.
+    Database-backed rate limiter for model API calls.
 
-    Enforces two rolling window limits:
+    Enforces two rolling window limits, within one provider's bucket:
     - hourly_limit: Max calls in any 1-hour window
     - daily_limit: Max calls in any 24-hour window
+
+    `provider` defaults to "gemini" so every existing caller keeps the exact
+    limits and the exact rows it had; OpenAI callers pass `provider="openai"`
+    and get their own ceiling from `openai_hourly_limit`/`openai_daily_limit`.
     """
 
-    def __init__(self):
+    def __init__(self, provider: str = "gemini"):
         from ...config import get_settings
         settings = get_settings()
-        self.hourly_limit = settings.gemini_hourly_limit
-        self.daily_limit = settings.gemini_daily_limit
+        self.provider = provider
+        if provider == "openai":
+            self.hourly_limit = settings.openai_hourly_limit
+            self.daily_limit = settings.openai_daily_limit
+        else:
+            self.hourly_limit = settings.gemini_hourly_limit
+            self.daily_limit = settings.gemini_daily_limit
 
     async def check_limit(self, service_name: str, endpoint: Optional[str] = None) -> None:
         """
@@ -58,23 +74,22 @@ class GeminiRateLimiter:
             one_hour_ago = now - timedelta(hours=1)
             one_day_ago = now - timedelta(hours=24)
 
-            # Count calls in the last hour
+            # Scoped to this provider: another provider's traffic must not
+            # consume this one's allowance, in either direction.
             hourly_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1",
-                one_hour_ago,
+                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1 AND provider = $2",
+                one_hour_ago, self.provider,
             )
-
-            # Count calls in the last 24 hours
             daily_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1",
-                one_day_ago,
+                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1 AND provider = $2",
+                one_day_ago, self.provider,
             )
 
             # Check limits
             if hourly_count >= self.hourly_limit:
                 print(f"[RateLimiter] BLOCKED {service_name}/{endpoint}: hourly limit ({hourly_count}/{self.hourly_limit})")
                 raise RateLimitExceeded(
-                    f"Gemini API hourly limit exceeded ({hourly_count}/{self.hourly_limit})",
+                    f"{self.provider} API hourly limit exceeded ({hourly_count}/{self.hourly_limit})",
                     limit_type="hourly",
                     current_count=hourly_count,
                     limit=self.hourly_limit,
@@ -83,7 +98,7 @@ class GeminiRateLimiter:
             if daily_count >= self.daily_limit:
                 print(f"[RateLimiter] BLOCKED {service_name}/{endpoint}: daily limit ({daily_count}/{self.daily_limit})")
                 raise RateLimitExceeded(
-                    f"Gemini API daily limit exceeded ({daily_count}/{self.daily_limit})",
+                    f"{self.provider} API daily limit exceeded ({daily_count}/{self.daily_limit})",
                     limit_type="daily",
                     current_count=daily_count,
                     limit=self.daily_limit,
@@ -91,7 +106,8 @@ class GeminiRateLimiter:
 
     async def record_call(self, service_name: str, endpoint: Optional[str] = None) -> None:
         """
-        Record a Gemini API call. Call this after each actual API call (including retries).
+        Record one API call in this limiter's provider bucket. Call this after
+        each actual API call (including retries).
 
         Args:
             service_name: Name of the calling service (e.g., "gemini_compliance")
@@ -103,12 +119,13 @@ class GeminiRateLimiter:
             safe_endpoint = endpoint[:100] if endpoint else None
             await conn.execute(
                 """
-                INSERT INTO api_rate_limits (service_name, endpoint, called_at)
-                VALUES ($1, $2, $3)
+                INSERT INTO api_rate_limits (service_name, endpoint, called_at, provider)
+                VALUES ($1, $2, $3, $4)
                 """,
                 service_name,
                 safe_endpoint,
                 now,
+                self.provider,
             )
             print(f"[RateLimiter] Recorded {service_name}/{safe_endpoint}")
 
@@ -139,14 +156,15 @@ class GeminiRateLimiter:
             one_hour_ago = now - timedelta(hours=1)
             one_day_ago = now - timedelta(hours=24)
 
-            # Overall counts
+            # This bucket's counts — the numbers shown next to this bucket's
+            # limits, so they must be scoped the same way check_limit is.
             hourly_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1",
-                one_hour_ago,
+                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1 AND provider = $2",
+                one_hour_ago, self.provider,
             )
             daily_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1",
-                one_day_ago,
+                "SELECT COUNT(*) FROM api_rate_limits WHERE called_at > $1 AND provider = $2",
+                one_day_ago, self.provider,
             )
 
             # Breakdown by service (last 24h)
@@ -154,11 +172,11 @@ class GeminiRateLimiter:
                 """
                 SELECT service_name, endpoint, COUNT(*) as count
                 FROM api_rate_limits
-                WHERE called_at > $1
+                WHERE called_at > $1 AND provider = $2
                 GROUP BY service_name, endpoint
                 ORDER BY count DESC
                 """,
-                one_day_ago,
+                one_day_ago, self.provider,
             )
 
             # Recent calls (last 10)
@@ -166,21 +184,24 @@ class GeminiRateLimiter:
                 """
                 SELECT service_name, endpoint, called_at
                 FROM api_rate_limits
+                WHERE provider = $1
                 ORDER BY called_at DESC
                 LIMIT 10
-                """
+                """,
+                self.provider,
             )
 
             # Calculate time until limits reset (rough estimate)
             oldest_in_hour = await conn.fetchval(
-                "SELECT MIN(called_at) FROM api_rate_limits WHERE called_at > $1",
-                one_hour_ago,
+                "SELECT MIN(called_at) FROM api_rate_limits WHERE called_at > $1 AND provider = $2",
+                one_hour_ago, self.provider,
             )
             hourly_reset_at = None
             if oldest_in_hour and hourly_count >= self.hourly_limit:
                 hourly_reset_at = (oldest_in_hour + timedelta(hours=1)).isoformat()
 
             return {
+                "provider": self.provider,
                 "hourly": {
                     "count": hourly_count,
                     "limit": self.hourly_limit,
@@ -235,12 +256,12 @@ class GeminiRateLimiter:
 
 
 # Singleton instance
-_rate_limiter: Optional[GeminiRateLimiter] = None
+_rate_limiters: dict[str, ApiRateLimiter] = {}
 
 
-def get_rate_limiter() -> GeminiRateLimiter:
-    """Get the rate limiter singleton instance."""
-    global _rate_limiter
-    if _rate_limiter is None:
-        _rate_limiter = GeminiRateLimiter()
-    return _rate_limiter
+def get_rate_limiter(provider: str = "gemini") -> ApiRateLimiter:
+    """Get the rate limiter singleton for one provider's bucket."""
+    limiter = _rate_limiters.get(provider)
+    if limiter is None:
+        limiter = _rate_limiters[provider] = ApiRateLimiter(provider)
+    return limiter

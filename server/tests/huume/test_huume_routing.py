@@ -237,6 +237,9 @@ def _assert_the_model_was_actually_called(recorded, frames):
 
 
 class _NoopRateLimiter:
+    def __init__(self, *args, **kwargs):
+        pass
+
     async def check_limit(self, *a, **kw):
         return None
 
@@ -258,7 +261,7 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
     client = MagicMock()
     client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
     monkeypatch.setattr(
         agent.onboarding_skill, "check_offer_status", AsyncMock(return_value={"status": "ok", "offer_status": "pending"}),
     )
@@ -294,7 +297,7 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
     client = MagicMock()
     client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
 
     frames = [
         f async for f in agent.run_huume_turn(
@@ -325,7 +328,7 @@ async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
     client = MagicMock()
     client.create_response = AsyncMock(side_effect=_generate)
     monkeypatch.setattr(agent, "get_luna_client", lambda: client)
-    monkeypatch.setattr(agent, "TurnRateLimiter", _NoopRateLimiter)
+    monkeypatch.setattr(agent, "ApiRateLimiter", _NoopRateLimiter)
 
     frames = [
         f async for f in agent.run_huume_turn(

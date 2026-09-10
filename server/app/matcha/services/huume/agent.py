@@ -43,15 +43,7 @@ from uuid import UUID, uuid4
 
 
 from app.core.services.ai_usage import feature_scope
-# One shared limiter, not a Gemini one: `check_limit` counts `api_rate_limits`
-# with no provider filter, so this loop's OpenAI calls and every Gemini call in
-# the platform spend the same hourly/daily budget. Aliased so OpenAI code stops
-# reading as Gemini code; splitting the bucket per provider is a follow-up that
-# touches ~30 unrelated Gemini call sites.
-from app.core.services.rate_limiter import (
-    GeminiRateLimiter as TurnRateLimiter,
-    RateLimitExceeded,
-)
+from app.core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
 from app.matcha.services.scheduling.schedule_review import bounded_review_echo, compact_review
 
@@ -741,7 +733,10 @@ async def run_huume_turn(
     is an unchanged key then). Optional so existing test callers with no run
     row don't need updating; `opened_at` is simply absent in that case.
     """
-    rate_limiter = TurnRateLimiter()
+    # This loop runs on OpenAI Luna (since 488d928), so it counts in the
+    # OpenAI bucket. Sharing Gemini's meant Huume turns spent the Gemini
+    # allowance and a Gemini-heavy sweep could 429 a Huume turn.
+    rate_limiter = ApiRateLimiter(provider="openai")
     recorder = _StepRecorder()
     state_updates: dict[str, Any] = {}
     final_message: Optional[str] = None

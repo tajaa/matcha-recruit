@@ -286,14 +286,15 @@ async def create_data_sources(conn):
         """)
 
         # ===========================================
-        # API Rate Limits Table (for Gemini rate limiting)
+        # API Rate Limits Table (per-provider model call budgets)
         # ===========================================
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS api_rate_limits (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 service_name VARCHAR(50) NOT NULL,
                 endpoint VARCHAR(100),
-                called_at TIMESTAMPTZ DEFAULT NOW()
+                called_at TIMESTAMPTZ DEFAULT NOW(),
+                provider VARCHAR(20) NOT NULL DEFAULT 'gemini'
             )
         """)
         await conn.execute("""
@@ -301,6 +302,10 @@ async def create_data_sources(conn):
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_rate_limits_service ON api_rate_limits(service_name)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rate_limits_provider_called_at
+            ON api_rate_limits (provider, called_at)
         """)
 
         # ===========================================

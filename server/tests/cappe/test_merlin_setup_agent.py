@@ -197,7 +197,7 @@ def patched(monkeypatch):
     monkeypatch.setattr(setup_agent, "execute_setup_action", _fake_execute_setup_action)
     monkeypatch.setattr(setup_agent, "compute_readiness", _fake_compute_readiness)
     monkeypatch.setattr(setup_agent, "invalidate_site_render_cache", lambda *_a, **_k: asyncio.sleep(0))
-    monkeypatch.setattr(setup_agent, "GeminiRateLimiter", lambda: _NoopLimiter())
+    monkeypatch.setattr(setup_agent, "ApiRateLimiter", lambda: _NoopLimiter())
 
     def _run(script, *, preexisting=None, account=None, **overrides):
         if preexisting is not None:
@@ -433,7 +433,7 @@ def test_rate_limit_propagates(patched, monkeypatch):
             return None
 
     monkeypatch.setattr(setup_agent, "get_genai_client", lambda *a, **k: _FakeClient([]))
-    monkeypatch.setattr(setup_agent, "GeminiRateLimiter", lambda: _Limited())
+    monkeypatch.setattr(setup_agent, "ApiRateLimiter", lambda: _Limited())
 
     async def _collect():
         return [

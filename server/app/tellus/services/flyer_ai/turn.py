@@ -20,7 +20,7 @@ from google.genai import types
 from ....core.services.genai_client import get_genai_client
 from ....core.services.model_catalog import GEMINI_FLASH
 from ....core.services.model_json import parse_model_json
-from ....core.services.rate_limiter import GeminiRateLimiter
+from ....core.services.rate_limiter import ApiRateLimiter
 from .apply import apply_ops
 from .catalog import MAX_OPS_PER_TURN, PALETTE_TOKENS, fields_text
 from .layouts import LAYOUTS, LAYOUTS_BY_KEY, layouts_text
@@ -33,13 +33,13 @@ _TURN_TIMEOUT_SECONDS = 60.0
 _MAX_HISTORY_MESSAGES = 20
 _SERVICE = "tellus_flyer_ai"
 
-_rate_limiter: Optional[GeminiRateLimiter] = None
+_rate_limiter: Optional[ApiRateLimiter] = None
 
 
-def _get_rate_limiter() -> GeminiRateLimiter:
+def _get_rate_limiter() -> ApiRateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
-        _rate_limiter = GeminiRateLimiter()
+        _rate_limiter = ApiRateLimiter()
     return _rate_limiter
 
 

@@ -32,7 +32,7 @@ from google.genai import types
 
 from ....core.services.ai_usage import feature_scope
 from ....core.services.genai_client import get_genai_client
-from ....core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from ....core.services.rate_limiter import ApiRateLimiter, RateLimitExceeded
 from ....database import get_connection
 from ..entitlements import resolve_entitlements
 from ..readiness import compute_readiness
@@ -197,7 +197,7 @@ async def run_setup_agent(
     through to `execute_setup_action` for the tool calls that actually write.
     """
     tier_cfg = MODEL_TIERS["regular"]
-    rate_limiter = GeminiRateLimiter()
+    rate_limiter = ApiRateLimiter()
 
     # Ids staged DURING this turn — an execute_staged_action call naming one
     # of them is structurally refused (evaluate_setup_execute), not just

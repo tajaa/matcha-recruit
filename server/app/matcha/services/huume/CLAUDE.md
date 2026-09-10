@@ -175,11 +175,10 @@ out — so a provider swap could land without touching the loop or its tests. Th
 - **Not everything under `huume/` is OpenAI.** `er_skill` owns a real Gemini call, and
   `discipline_skill` / `handbook_skill` / `legal_skill` / `ir_skill` delegate to Gemini-backed pilot
   services. The package keeps its `google.genai` dependency for exactly that reason.
-- `GeminiRateLimiter` is imported here `as TurnRateLimiter`. The name was the least of it: its
-  `check_limit` counts `api_rate_limits` with no provider filter against `settings.gemini_hourly_limit`,
-  so **Luna traffic spends the Gemini budget** and a Gemini-heavy compliance sweep can block a Huume
-  turn. Splitting the bucket touches ~30 unrelated Gemini call sites and changes behaviour; it is a
-  follow-up, not this change.
+- The loop counts in the **OpenAI** rate-limit bucket (`ApiRateLimiter(provider="openai")`). It used
+  to share Gemini's: `check_limit` counted `api_rate_limits` with no provider filter against
+  `settings.gemini_hourly_limit`, so Luna traffic spent the Gemini allowance and a Gemini-heavy
+  compliance sweep could 429 a Huume turn. Fixed by migration `ratelimit01` (#502).
 - Espresso moved with it (`matcha_work/project_agent/{agent,task_draft_agent,tools}.py`,
   `matcha_work_ai/task_draft.py`) — they share the client, so leaving them behind would have meant
   keeping the shim alive for three callers.

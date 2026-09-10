@@ -73,6 +73,15 @@ server/
 - Some Huume skills still call Gemini for real, and that is deliberate: `er_skill` owns its own call,
   and `discipline`/`handbook`/`legal`/`ir` delegate to Gemini-backed pilot services.
 - Per-feature analyzer singletons (e.g. `get_ir_analyzer`, `get_er_analyzer`) cache the model handle; don't instantiate per request.
+- **Rate limiting is per PROVIDER** (`core/services/rate_limiter.py:ApiRateLimiter`). `ApiRateLimiter()`
+  is the Gemini bucket (`gemini_hourly_limit`/`gemini_daily_limit`); the OpenAI agent loops construct
+  `ApiRateLimiter(provider="openai")` and count against `openai_*_limit`. Before `ratelimit01` this
+  counted every row in `api_rate_limits` with no filter against the Gemini ceiling, so OpenAI traffic
+  spent the Gemini allowance and a Gemini sweep could 429 a Huume turn. A new provider needs a bucket
+  here and its own limits, not a share of someone else's.
+- Not every model call is limited: `huume/er_skill`, the legal/handbook pilot chats and the Espresso
+  project agents call their provider without going through the limiter at all, so the budget
+  understates real spend. Pre-existing; gating them changes behaviour and is deliberately separate.
 
 **Streaming**:
 - SSE for AI analysis runs (`StreamingResponse(event_stream(), media_type="text/event-stream")`).
