@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -35,6 +36,68 @@ class DraftDecisionResult:
     draft: dict
     event: dict | None
     changed: bool
+
+
+async def _sync_confirmation_card_status(
+    conn,
+    *,
+    channel_id: UUID,
+    draft_id: UUID,
+    confirmation_message_id: UUID | None,
+    draft_created_at: datetime,
+    status: str,
+) -> None:
+    """Persist the canonical draft status on every card for this draft.
+
+    The normal card is updated through its primary key. A draft can have more
+    than one card when an ambiguous reply causes Huume to repeat the prompt, so
+    a bounded follow-up also resolves cards created after the draft. No card
+    for this draft can predate the draft row that supplied its action id.
+    """
+
+    await conn.execute(
+        """
+        UPDATE channel_messages
+           SET metadata = jsonb_set(
+               metadata,
+               '{action,status}',
+               to_jsonb($4::text),
+               true
+           )
+         WHERE id = $1
+           AND channel_id = $2
+           AND message_type = 'system'
+           AND metadata #>> '{action,kind}' = 'event_draft'
+           AND metadata #>> '{action,id}' = $3
+        """,
+        confirmation_message_id,
+        channel_id,
+        str(draft_id),
+        status,
+    )
+    await conn.execute(
+        """
+        UPDATE channel_messages
+           SET metadata = jsonb_set(
+               metadata,
+               '{action,status}',
+               to_jsonb($3::text),
+               true
+           )
+         WHERE channel_id = $1
+           AND created_at >= $4
+           AND id IS DISTINCT FROM $5
+           AND message_type = 'system'
+           AND metadata #>> '{action,kind}' = 'event_draft'
+           AND metadata #>> '{action,id}' = $2
+           AND metadata #>> '{action,status}' IS DISTINCT FROM $3
+        """,
+        channel_id,
+        str(draft_id),
+        status,
+        draft_created_at,
+        confirmation_message_id,
+    )
 
 
 def _decode_json(value: Any) -> dict:
@@ -180,6 +243,14 @@ async def confirm_event_draft(
         raise EventDraftForbidden("You do not have permission to confirm this event draft")
 
     if draft["status"] == "confirmed":
+        await _sync_confirmation_card_status(
+            conn,
+            channel_id=draft["channel_id"],
+            draft_id=draft_id,
+            confirmation_message_id=draft["confirmation_message_id"],
+            draft_created_at=draft["created_at"],
+            status="confirmed",
+        )
         event = None
         if draft["event_id"]:
             event = await conn.fetchrow(
@@ -235,6 +306,14 @@ async def confirm_event_draft(
     )
     if not updated:
         raise EventDraftConflict("Event draft changed while confirming")
+    await _sync_confirmation_card_status(
+        conn,
+        channel_id=updated["channel_id"],
+        draft_id=draft_id,
+        confirmation_message_id=updated["confirmation_message_id"],
+        draft_created_at=updated["created_at"],
+        status="confirmed",
+    )
     await conn.execute(
         """
         INSERT INTO ems_event_audit_log (event_id, user_id, action, details)
@@ -279,6 +358,14 @@ async def reject_event_draft(
     ):
         raise EventDraftForbidden("You do not have permission to reject this event draft")
     if draft["status"] == "rejected":
+        await _sync_confirmation_card_status(
+            conn,
+            channel_id=draft["channel_id"],
+            draft_id=draft_id,
+            confirmation_message_id=draft["confirmation_message_id"],
+            draft_created_at=draft["created_at"],
+            status="rejected",
+        )
         return DraftDecisionResult(draft=draft, event=None, changed=False)
     if draft["status"] != "pending":
         raise EventDraftConflict(f"Event draft is already {draft['status']}")
@@ -301,4 +388,12 @@ async def reject_event_draft(
     )
     if not updated:
         raise EventDraftConflict("Event draft changed while rejecting")
+    await _sync_confirmation_card_status(
+        conn,
+        channel_id=updated["channel_id"],
+        draft_id=draft_id,
+        confirmation_message_id=updated["confirmation_message_id"],
+        draft_created_at=updated["created_at"],
+        status="rejected",
+    )
     return DraftDecisionResult(draft=dict(updated), event=None, changed=True)

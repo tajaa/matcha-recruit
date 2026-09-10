@@ -157,6 +157,65 @@ def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
     )
 
 
+def _metadata_dict(raw) -> dict:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+async def _resolve_event_draft_action_statuses(conn, messages, *, channel_id: UUID):
+    """Overlay canonical draft state onto persisted action-card metadata.
+
+    Older confirmed drafts can still have ``status='pending'`` in their
+    channel-message metadata.  Resolve all draft ids in one indexed query so
+    reconnect/history responses cannot resurrect those stale cards while
+    genuinely new drafts remain actionable.
+    """
+
+    draft_ids: set[UUID] = set()
+    for message in messages:
+        action = _metadata_dict(message.get("metadata")).get("action")
+        if not isinstance(action, dict) or action.get("kind") != "event_draft":
+            continue
+        try:
+            draft_ids.add(UUID(str(action.get("id"))))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    if not draft_ids:
+        return messages
+
+    rows = await conn.fetch(
+        """
+        SELECT id, status
+          FROM ems_event_drafts
+         WHERE id = ANY($1::uuid[])
+           AND channel_id = $2
+        """,
+        sorted(draft_ids, key=str),
+        channel_id,
+    )
+    statuses = {str(row["id"]): row["status"] for row in rows}
+    if not statuses:
+        return messages
+
+    resolved = []
+    for message in messages:
+        metadata = _metadata_dict(message.get("metadata"))
+        action = metadata.get("action")
+        canonical = statuses.get(str(action.get("id"))) if isinstance(action, dict) else None
+        if canonical is not None and action.get("status") != canonical:
+            message = dict(message)
+            message["metadata"] = {
+                **metadata,
+                "action": {**action, "status": canonical},
+            }
+        resolved.append(message)
+    return resolved
+
+
 async def _fetch_reactions_map(conn, message_ids: list[UUID]) -> dict[UUID, list[ChannelReaction]]:
     """Fetch reactions for a batch of messages, grouped by message → emoji → user_ids."""
     if not message_ids:
@@ -1403,6 +1462,9 @@ async def get_channel(
             _msg_query("m.channel_id = $1", limit_param="50"),
             channel_id,
         )
+        messages = await _resolve_event_draft_action_statuses(
+            conn, messages, channel_id=channel_id,
+        )
         msg_ids = [m["id"] for m in messages]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
 
@@ -1530,6 +1592,9 @@ async def get_channel_messages(
                 channel_id, limit,
             )
 
+        rows = await _resolve_event_draft_action_statuses(
+            conn, rows, channel_id=channel_id,
+        )
         msg_ids = [r["id"] for r in rows]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
         return [_row_to_message(r, reactions_map) for r in reversed(rows)]

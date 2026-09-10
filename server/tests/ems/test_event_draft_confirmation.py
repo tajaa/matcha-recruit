@@ -1,14 +1,21 @@
 """Pure tests for the channel event-draft confirmation protocol."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
+from app.matcha.services.ems import event_drafts as event_drafts_service
+from app.matcha.services.ems.event_drafts import (
+    _sync_confirmation_card_status,
+    confirm_event_draft,
+    may_decide_event_draft,
+    reject_event_draft,
+)
 from app.matcha.services.ops.permissions import (
     OpsAccess,
     OpsCapability,
 )
-from app.matcha.services.ems.event_drafts import confirm_event_draft, may_decide_event_draft
 from app.werk.routes.channels_ws import (
     _draft_reply_decision,
     _event_draft_confirmation_text,
@@ -63,6 +70,9 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
     company_id = uuid4()
     draft_id = uuid4()
     event_id = uuid4()
+    channel_id = uuid4()
+    confirmation_message_id = uuid4()
+    created_at = datetime.now(timezone.utc)
     actor = uuid4()
     access = OpsAccess(
         company_id=company_id,
@@ -79,6 +89,9 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
             "status": "confirmed",
             "event_id": event_id,
             "reporter_user_id": None,
+            "channel_id": channel_id,
+            "confirmation_message_id": confirmation_message_id,
+            "created_at": created_at,
         },
         {"id": event_id},
     ]
@@ -92,3 +105,197 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
 
     assert result.changed is False
     assert result.event == {"id": event_id}
+    primary_update, duplicate_update = conn.execute.await_args_list
+    assert "WHERE id = $1" in primary_update.args[0]
+    assert primary_update.args[1:] == (
+        confirmation_message_id,
+        channel_id,
+        str(draft_id),
+        "confirmed",
+    )
+    assert "created_at >= $4" in duplicate_update.args[0]
+    assert duplicate_update.args[1:] == (
+        channel_id,
+        str(draft_id),
+        "confirmed",
+        created_at,
+        confirmation_message_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirmation_status_updates_every_card_with_the_same_draft_action():
+    from uuid import uuid4
+
+    conn = AsyncMock()
+    channel_id = uuid4()
+    draft_id = uuid4()
+    confirmation_message_id = uuid4()
+    created_at = datetime.now(timezone.utc)
+
+    await _sync_confirmation_card_status(
+        conn,
+        channel_id=channel_id,
+        draft_id=draft_id,
+        confirmation_message_id=confirmation_message_id,
+        draft_created_at=created_at,
+        status="rejected",
+    )
+
+    primary_update, duplicate_update = conn.execute.await_args_list
+    primary_query, *primary_args = primary_update.args
+    assert "WHERE id = $1" in primary_query
+    assert primary_args == [
+        confirmation_message_id,
+        channel_id,
+        str(draft_id),
+        "rejected",
+    ]
+
+    duplicate_query, *duplicate_args = duplicate_update.args
+    assert "created_at >= $4" in duplicate_query
+    assert "id IS DISTINCT FROM $5" in duplicate_query
+    assert "metadata #>> '{action,id}' = $2" in duplicate_query
+    assert duplicate_args == [
+        channel_id,
+        str(draft_id),
+        "rejected",
+        created_at,
+        confirmation_message_id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pending_confirm_syncs_card_status(monkeypatch):
+    from uuid import uuid4
+
+    company_id = uuid4()
+    draft_id = uuid4()
+    event_id = uuid4()
+    channel_id = uuid4()
+    source_message_id = uuid4()
+    confirmation_message_id = uuid4()
+    actor = uuid4()
+    created_at = datetime.now(timezone.utc)
+    access = OpsAccess(
+        company_id=company_id,
+        user_id=actor,
+        level="admin",
+        capabilities=frozenset(OpsCapability),
+        source="platform_admin",
+    )
+    draft = {
+        "id": draft_id,
+        "company_id": company_id,
+        "channel_id": channel_id,
+        "source_message_id": source_message_id,
+        "confirmation_message_id": confirmation_message_id,
+        "reporter_user_id": actor,
+        "location_id": None,
+        "narrative": "Freezer stopped cooling",
+        "classified": {},
+        "status": "pending",
+        "event_id": None,
+        "created_at": created_at,
+    }
+    updated = {**draft, "status": "confirmed", "event_id": event_id}
+    conn = AsyncMock()
+    conn.fetchrow.side_effect = [draft, updated]
+    conn.fetchval.return_value = False
+    persist_event = AsyncMock(return_value=({"id": event_id}, "Added"))
+    monkeypatch.setattr(event_drafts_service, "persist_event", persist_event)
+
+    result = await confirm_event_draft(
+        conn,
+        draft_id=draft_id,
+        actor_user_id=actor,
+        access=access,
+    )
+
+    assert result.changed is True
+    assert result.event == {"id": event_id}
+    assert conn.execute.await_count == 3
+    assert "WHERE id = $1" in conn.execute.await_args_list[0].args[0]
+
+
+@pytest.mark.asyncio
+async def test_idempotent_reject_syncs_card_status():
+    from uuid import uuid4
+
+    company_id = uuid4()
+    draft_id = uuid4()
+    channel_id = uuid4()
+    confirmation_message_id = uuid4()
+    actor = uuid4()
+    created_at = datetime.now(timezone.utc)
+    access = OpsAccess(
+        company_id=company_id,
+        user_id=actor,
+        level="admin",
+        capabilities=frozenset(OpsCapability),
+        source="platform_admin",
+    )
+    conn = AsyncMock()
+    conn.fetchrow.return_value = {
+        "id": draft_id,
+        "company_id": company_id,
+        "channel_id": channel_id,
+        "confirmation_message_id": confirmation_message_id,
+        "reporter_user_id": None,
+        "status": "rejected",
+        "created_at": created_at,
+    }
+
+    result = await reject_event_draft(
+        conn,
+        draft_id=draft_id,
+        actor_user_id=actor,
+        access=access,
+    )
+
+    assert result.changed is False
+    assert conn.execute.await_count == 2
+    assert "WHERE id = $1" in conn.execute.await_args_list[0].args[0]
+
+
+@pytest.mark.asyncio
+async def test_pending_reject_syncs_card_status():
+    from uuid import uuid4
+
+    company_id = uuid4()
+    draft_id = uuid4()
+    channel_id = uuid4()
+    confirmation_message_id = uuid4()
+    actor = uuid4()
+    created_at = datetime.now(timezone.utc)
+    access = OpsAccess(
+        company_id=company_id,
+        user_id=actor,
+        level="admin",
+        capabilities=frozenset(OpsCapability),
+        source="platform_admin",
+    )
+    draft = {
+        "id": draft_id,
+        "company_id": company_id,
+        "channel_id": channel_id,
+        "confirmation_message_id": confirmation_message_id,
+        "reporter_user_id": None,
+        "status": "pending",
+        "created_at": created_at,
+    }
+    updated = {**draft, "status": "rejected"}
+    conn = AsyncMock()
+    conn.fetchrow.side_effect = [draft, updated]
+
+    result = await reject_event_draft(
+        conn,
+        draft_id=draft_id,
+        actor_user_id=actor,
+        access=access,
+        reason="Not an event",
+    )
+
+    assert result.changed is True
+    assert conn.execute.await_count == 2
+    assert "WHERE id = $1" in conn.execute.await_args_list[0].args[0]
