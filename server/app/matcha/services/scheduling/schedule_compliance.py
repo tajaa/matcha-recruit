@@ -168,6 +168,23 @@ _NY_MIDWAY_CITE = (
 # are cited to it rather than to the bare statute.
 _NY_NOONDAY_GUIDANCE = "NYSDOL Meal Periods guidance (noon day period = 11 a.m.–2 p.m.)"
 
+# START TIME PARTITIONS THE TWO PRIMARY MEAL RULES, and the partition is what
+# keeps a >6h shift from falling between them. § 162(4) names "six o'clock in
+# the morning" as its own lower bound, so the noonday rule takes [06:00, 11:01)
+# and the midway rule takes [11:01, 06:00) — `_clock_in_window` wraps midnight,
+# so together they cover the clock exactly once, with no gap and no overlap.
+#
+# The 11 a.m.–1 p.m. slice is ours, not the statute's: subdivision (4) begins
+# at one o'clock and subdivision (2) speaks only of "the noon day meal", so a
+# shift starting at 12:30 is unassigned by the text. It goes to (4), because an
+# employee who clocks in after the noonday period has begun cannot take the
+# noon day meal at any sensible hour — a 30-minute break half an hour into an
+# eight-hour shift is what the earlier containment model produced, and it is
+# not what either subdivision is for. Confirmed against a live schedule review;
+# verify with counsel before this reaches a paying New York tenant.
+_NY_NOONDAY_START_FROM = "06:00"
+_NY_NOONDAY_START_BEFORE = "11:01"   # exclusive, so an 11:00 start is a noonday start
+
 _CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
     "NY": (
         {
@@ -180,14 +197,16 @@ _CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
                     {
                         "ordinal": 1, "duration_minutes": 60, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_spans_window_start": "11:00", "shift_spans_window_end": "14:00",
+                        "shift_start_window_from": _NY_NOONDAY_START_FROM,
+                        "shift_start_window_before": _NY_NOONDAY_START_BEFORE,
                         "window_start": "11:00", "window_end": "14:00",
                         "citation": f"N.Y. Lab. Law § 162(1); {_NY_NOONDAY_GUIDANCE}",
                     },
                     {
                         "ordinal": 2, "duration_minutes": 60, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_start_window_from": "13:00", "shift_start_window_before": "06:00",
+                        "shift_start_window_from": _NY_NOONDAY_START_BEFORE,
+                        "shift_start_window_before": _NY_NOONDAY_START_FROM,
                         "recommend_midpoint": True,
                         "citation": _NY_MIDWAY_CITE,
                     },
@@ -214,14 +233,16 @@ _CURATED_BREAK_PERIODS: dict[str, tuple[dict[str, Any], ...]] = {
                     {
                         "ordinal": 1, "duration_minutes": 30, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_spans_window_start": "11:00", "shift_spans_window_end": "14:00",
+                        "shift_start_window_from": _NY_NOONDAY_START_FROM,
+                        "shift_start_window_before": _NY_NOONDAY_START_BEFORE,
                         "window_start": "11:00", "window_end": "14:00",
                         "citation": f"N.Y. Lab. Law § 162(2); {_NY_NOONDAY_GUIDANCE}",
                     },
                     {
                         "ordinal": 2, "duration_minutes": 45, "paid": False,
                         "trigger_after_minutes": 360, "trigger_operator": "gt",
-                        "shift_start_window_from": "13:00", "shift_start_window_before": "06:00",
+                        "shift_start_window_from": _NY_NOONDAY_START_BEFORE,
+                        "shift_start_window_before": _NY_NOONDAY_START_FROM,
                         "recommend_midpoint": True,
                         "citation": _NY_MIDWAY_CITE,
                     },
