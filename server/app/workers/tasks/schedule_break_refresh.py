@@ -24,6 +24,9 @@ async def _refresh_employee_breaks(
     cursor_id: UUID | None = None,
 ) -> dict:
     """Refresh one deterministic page so retries resume instead of looping."""
+    from app.matcha.services.scheduling.schedule_break_rule_store import (
+        get_employer_employee_count,
+    )
     from app.matcha.services.scheduling.schedule_guidance import (
         refresh_assignment_break_guidance_and_minimum,
     )
@@ -60,12 +63,14 @@ async def _refresh_employee_breaks(
             cursor_start, cursor_id, _PAGE_SIZE,
         )
         if rows:
+            employer_employee_count = await get_employer_employee_count(conn, company_id)
             async with conn.transaction():
                 for row in rows:
                     await refresh_assignment_break_guidance_and_minimum(
                         conn, company_id, shift_id=row["shift_id"],
                         employee_id=employee_id, actor_user_id=actor_user_id,
                         source=source,
+                        employer_employee_count=employer_employee_count,
                     )
                     refreshed += 1
         return {
@@ -73,6 +78,81 @@ async def _refresh_employee_breaks(
             "has_more": len(rows) == _PAGE_SIZE,
             "cursor_start": rows[-1]["starts_at"].isoformat() if rows else None,
             "cursor_id": str(rows[-1]["shift_id"]) if rows else None,
+        }
+    finally:
+        await conn.close()
+
+
+async def _refresh_location_breaks(
+    *,
+    company_id: UUID,
+    location_id: UUID,
+    actor_user_id: UUID | None,
+    source: str,
+    cursor_start: datetime | None = None,
+    cursor_shift_id: UUID | None = None,
+    cursor_employee_id: UUID | None = None,
+) -> dict:
+    """Refresh one tenant/location page after an applicability decision."""
+    from app.matcha.services.scheduling.schedule_break_rule_store import (
+        get_employer_employee_count,
+    )
+    from app.matcha.services.scheduling.schedule_guidance import (
+        refresh_assignment_break_guidance_and_minimum,
+    )
+
+    conn = await get_db_connection()
+    refreshed = 0
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT s.id AS shift_id, s.starts_at, a.employee_id
+            FROM schedule_shift_assignments a
+            JOIN schedule_shifts s
+              ON s.id = a.shift_id AND s.company_id = a.company_id
+            JOIN business_locations l
+              ON l.id = s.location_id AND l.company_id = s.company_id
+            LEFT JOIN pg_timezone_names tz ON tz.name = l.timezone
+            WHERE a.company_id = $1
+              AND s.location_id = $2
+              AND s.status <> 'cancelled'
+              AND s.starts_at::date >=
+                  (NOW() AT TIME ZONE COALESCE(tz.name, 'UTC'))::date
+              AND (
+                    $3::timestamptz IS NULL
+                    OR (s.starts_at, s.id, a.employee_id) >
+                       ($3::timestamptz, $4::uuid, $5::uuid)
+                  )
+            ORDER BY s.starts_at, s.id, a.employee_id
+            LIMIT $6
+            """,
+            company_id,
+            location_id,
+            cursor_start,
+            cursor_shift_id,
+            cursor_employee_id,
+            _PAGE_SIZE,
+        )
+        if rows:
+            employer_employee_count = await get_employer_employee_count(conn, company_id)
+            async with conn.transaction():
+                for row in rows:
+                    await refresh_assignment_break_guidance_and_minimum(
+                        conn,
+                        company_id,
+                        shift_id=row["shift_id"],
+                        employee_id=row["employee_id"],
+                        actor_user_id=actor_user_id,
+                        source=source,
+                        employer_employee_count=employer_employee_count,
+                    )
+                    refreshed += 1
+        return {
+            "refreshed": refreshed,
+            "has_more": len(rows) == _PAGE_SIZE,
+            "cursor_start": rows[-1]["starts_at"].isoformat() if rows else None,
+            "cursor_shift_id": str(rows[-1]["shift_id"]) if rows else None,
+            "cursor_employee_id": str(rows[-1]["employee_id"]) if rows else None,
         }
     finally:
         await conn.close()
@@ -102,6 +182,39 @@ async def _stale_employee_facts() -> list[dict]:
                     FROM employee_demographics
                 ) facts
                 GROUP BY company_id, employee_id
+            ), latest_company_headcount_facts AS (
+                SELECT company_id, MAX(changed_at) AS changed_at
+                FROM (
+                    SELECT company_id, updated_at AS changed_at
+                    FROM company_handbook_profiles
+                    UNION ALL
+                    SELECT e.org_id AS company_id, e.updated_at AS changed_at
+                    FROM employees e
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM company_handbook_profiles hp
+                        WHERE hp.company_id = e.org_id
+                          AND hp.headcount IS NOT NULL
+                    )
+                ) facts
+                GROUP BY company_id
+            ), active_roster_counts AS (
+                SELECT org_id AS company_id, NULLIF(COUNT(*)::int, 0) AS headcount
+                FROM employees
+                WHERE termination_date IS NULL
+                GROUP BY org_id
+            ), current_company_headcounts AS (
+                SELECT company_ids.company_id,
+                       COALESCE(hp.headcount, arc.headcount) AS headcount
+                FROM (
+                    SELECT company_id FROM company_handbook_profiles
+                    UNION
+                    SELECT org_id AS company_id FROM employees
+                ) company_ids
+                LEFT JOIN company_handbook_profiles hp
+                  ON hp.company_id = company_ids.company_id
+                LEFT JOIN active_roster_counts arc
+                  ON arc.company_id = company_ids.company_id
             )
             SELECT DISTINCT a.company_id, a.employee_id
             FROM schedule_shift_assignments a
@@ -110,12 +223,27 @@ async def _stale_employee_facts() -> list[dict]:
             LEFT JOIN pg_timezone_names tz ON tz.name = l.timezone
             LEFT JOIN latest_facts f
               ON f.company_id = a.company_id AND f.employee_id = a.employee_id
+            LEFT JOIN latest_company_headcount_facts hf
+              ON hf.company_id = a.company_id
+            LEFT JOIN current_company_headcounts ch
+              ON ch.company_id = a.company_id
             WHERE s.status <> 'cancelled'
               AND s.starts_at::date >=
                   (NOW() AT TIME ZONE COALESCE(tz.name, 'UTC'))::date
               AND (
                   a.guidance_evaluated_at IS NULL
                   OR (f.changed_at IS NOT NULL AND a.guidance_evaluated_at < f.changed_at)
+                  OR (hf.changed_at IS NOT NULL AND a.guidance_evaluated_at < hf.changed_at)
+                  OR (
+                      a.compliance_guidance ? 'context'
+                      AND ch.headcount IS DISTINCT FROM CASE
+                          WHEN a.compliance_guidance #>>
+                               '{context,employer_employee_count}' ~ '^[0-9]+$'
+                          THEN (a.compliance_guidance #>>
+                                '{context,employer_employee_count}')::int
+                          ELSE NULL
+                      END
+                  )
                   OR EXISTS (
                       SELECT 1
                       FROM company_schedule_break_rule_confirmations c
@@ -176,6 +304,29 @@ def enqueue_schedule_break_recovery() -> bool:
         return False
 
 
+def enqueue_location_schedule_break_refresh(
+    *,
+    company_id: UUID,
+    location_id: UUID,
+    actor_user_id: UUID | None,
+    source: str,
+) -> bool:
+    """Best-effort scoped dispatch for a location-wide rule decision."""
+    try:
+        refresh_location_schedule_breaks.delay(
+            str(company_id),
+            str(location_id),
+            str(actor_user_id) if actor_user_id else None,
+            source,
+        )
+        return True
+    except Exception:
+        # The durable stale-fact scan sees the committed confirmation timestamp
+        # if the broker is unavailable after the route transaction commits.
+        logger.exception("Could not enqueue location schedule break refresh")
+        return False
+
+
 @celery_app.task(name="schedule_breaks.refresh_employee", bind=True, max_retries=3)
 def refresh_employee_schedule_breaks(
     self,
@@ -205,6 +356,43 @@ def refresh_employee_schedule_breaks(
         return result
     except Exception as exc:
         logger.exception("Employee schedule break refresh failed")
+        raise self.retry(exc=exc, countdown=60)
+
+
+@celery_app.task(name="schedule_breaks.refresh_location", bind=True, max_retries=3)
+def refresh_location_schedule_breaks(
+    self,
+    company_id: str,
+    location_id: str,
+    actor_user_id: str | None,
+    source: str,
+    cursor_start: str | None = None,
+    cursor_shift_id: str | None = None,
+    cursor_employee_id: str | None = None,
+):
+    try:
+        result = asyncio.run(_refresh_location_breaks(
+            company_id=UUID(company_id),
+            location_id=UUID(location_id),
+            actor_user_id=UUID(actor_user_id) if actor_user_id else None,
+            source=source,
+            cursor_start=datetime.fromisoformat(cursor_start) if cursor_start else None,
+            cursor_shift_id=UUID(cursor_shift_id) if cursor_shift_id else None,
+            cursor_employee_id=UUID(cursor_employee_id) if cursor_employee_id else None,
+        ))
+        if result["has_more"]:
+            refresh_location_schedule_breaks.delay(
+                company_id,
+                location_id,
+                actor_user_id,
+                source,
+                result["cursor_start"],
+                result["cursor_shift_id"],
+                result["cursor_employee_id"],
+            )
+        return result
+    except Exception as exc:
+        logger.exception("Location schedule break refresh failed")
         raise self.retry(exc=exc, countdown=60)
 
 

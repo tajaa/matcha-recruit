@@ -275,8 +275,30 @@ async def decide_shift_break_rule_applicability(
                 )
             except LookupError as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
-    from app.workers.tasks.schedule_break_refresh import enqueue_schedule_break_recovery
-    enqueue_schedule_break_recovery()
+            await log_audit(
+                conn,
+                company_id,
+                "break_rule_set",
+                body.rule_set_id,
+                current_user.id,
+                "break_rule.applicability_decision",
+                {
+                    "shift_id": str(shift_id),
+                    "location_id": str(shift["location_id"]),
+                    "shift_date": shift["starts_at"].date().isoformat(),
+                    "decision": body.decision,
+                    "context_hash": body.context_hash,
+                },
+            )
+    from app.workers.tasks.schedule_break_refresh import (
+        enqueue_location_schedule_break_refresh,
+    )
+    enqueue_location_schedule_break_refresh(
+        company_id=company_id,
+        location_id=shift["location_id"],
+        actor_user_id=current_user.id,
+        source="break_rule_applicability_decision",
+    )
     return {"decision": body.decision, "rule_set_id": str(body.rule_set_id)}
 
 

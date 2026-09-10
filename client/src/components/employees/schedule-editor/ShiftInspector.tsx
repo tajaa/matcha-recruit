@@ -93,7 +93,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   // rather than read off the shift payload. A failure leaves the legally
   // required guidance below untouched — it never blocks editing the shift.
   useEffect(() => {
-    if (!shiftId || assignmentKey === '') {
+    if (!shiftId) {
       setStagger([])
       setStaggerAdvisories([])
       return
@@ -125,7 +125,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
   async function decideExpectedRule(decision: 'confirmed' | 'rejected') {
     const ruleSetId = expectedRule?.metadata?.rule_set_id
     const contextHash = expectedRule?.metadata?.context_hash
-    if (!shift || !ruleSetId || !contextHash) return
+    if (readOnly || !shift || !ruleSetId || !contextHash) return
     setSavingApplicability(true)
     try {
       await decideShiftBreakRuleApplicability(shift.id, {
@@ -219,8 +219,8 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
         {expectedRule.metadata.requirements?.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-100/90">{expectedRule.metadata.requirements.map((requirement) => <li key={`${requirement.kind}:${requirement.ordinal}`}>{requirement.summary}</li>)}</ul> : null}
         <p className="mt-2 text-amber-200/80">Confirm that Matcha should use these reviewed rules for this organization. Your confirmation records applicability; it does not verify the source itself.</p>
         <div className="mt-2 flex gap-3">
-          <button disabled={savingApplicability} onClick={() => void decideExpectedRule('confirmed')} className="text-emerald-300 hover:text-emerald-200 disabled:opacity-50">Use these rules</button>
-          <button disabled={savingApplicability} onClick={() => void decideExpectedRule('rejected')} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-50">Not applicable</button>
+          <button type="button" disabled={readOnly || savingApplicability} onClick={() => void decideExpectedRule('confirmed')} className="text-emerald-300 hover:text-emerald-200 disabled:opacity-50">Use these rules</button>
+          <button type="button" disabled={readOnly || savingApplicability} onClick={() => void decideExpectedRule('rejected')} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-50">Not applicable</button>
         </div>
       </div>}
       <div className="mt-4 flex items-center gap-2">

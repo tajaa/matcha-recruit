@@ -20,8 +20,8 @@ from app.matcha.models.scheduling.employee_schedule import (
 from app.matcha.routes.employee_schedule import assignments as assignments_route
 from app.matcha.routes.employee_schedule import shifts as shifts_route
 from app.matcha.services.scheduling import schedule_guidance
-from app.workers.tasks import schedule_break_refresh
 from app.matcha.services.scheduling.schedule_breaks import BreakPlan, BreakRequirement
+from app.workers.tasks import schedule_break_refresh
 from tests._helpers.routes import iter_api_routes
 
 
@@ -120,8 +120,14 @@ def test_stagger_route_returns_a_suggestion_per_assignee(monkeypatch):
 
     async def fake_plans(*_args, **kwargs):
         from zoneinfo import ZoneInfo
+        advisory = {
+            "check": "break_rules",
+            "code": "break_rules_confirmation_required",
+            "severity": "advisory",
+            "message": "Confirm expected rules.",
+        }
         plan = BreakPlan(
-            status="complete", requirements=(_requirement(),), advisories=(),
+            status="complete", requirements=(_requirement(),), advisories=(advisory,),
             rule_set_ids=(uuid4(),), rule_set_hash="hash",
         )
         return ZoneInfo("UTC"), {
@@ -141,12 +147,18 @@ def test_stagger_route_returns_a_suggestion_per_assignee(monkeypatch):
     assert payload["max_concurrent_breaks"] == 1
     assert len(payload["results"]) == 2
     assert {result["status"] for result in payload["results"]} == {"suggested"}
+    assert [item["code"] for item in payload["advisories"]] == [
+        "coverage_shortfall", "break_rules_confirmation_required",
+    ]
     starts = sorted(result["suggested_start"] for result in payload["results"])
     assert starts[0] != starts[1], "two assignees must not be sent on break together"
 
 
 def test_break_rule_applicability_decision_is_tenant_and_context_scoped(monkeypatch):
     class Connection:
+        def __init__(self):
+            self.audits = []
+
         def transaction(self):
             return _Transaction()
 
@@ -156,6 +168,11 @@ def test_break_rule_applicability_decision_is_tenant_and_context_scoped(monkeypa
                 "id": uuid4(), "location_id": uuid4(),
                 "starts_at": datetime(2026, 8, 21, 9, tzinfo=timezone.utc),
             }
+
+        async def execute(self, query, *args):
+            assert "INSERT INTO schedule_audit_log" in query
+            self.audits.append(args)
+            return "INSERT 0 1"
 
     conn = Connection()
     company_id = uuid4()
@@ -168,11 +185,15 @@ def test_break_rule_applicability_decision_is_tenant_and_context_scoped(monkeypa
     async def fake_record(_conn, **kwargs):
         calls.append(kwargs)
 
-    recovery = []
+    refreshes = []
     monkeypatch.setattr(shifts_route, "require_company_id", fake_require_company_id)
     monkeypatch.setattr(shifts_route, "get_connection", lambda: _ConnectionContext(conn))
     monkeypatch.setattr(shifts_route, "record_break_rule_applicability_decision", fake_record)
-    monkeypatch.setattr(schedule_break_refresh, "enqueue_schedule_break_recovery", lambda: recovery.append(True))
+    monkeypatch.setattr(
+        schedule_break_refresh,
+        "enqueue_location_schedule_break_refresh",
+        lambda **kwargs: refreshes.append(kwargs),
+    )
 
     result = _run(shifts_route.decide_shift_break_rule_applicability(
         uuid4(),
@@ -185,7 +206,81 @@ def test_break_rule_applicability_decision_is_tenant_and_context_scoped(monkeypa
     assert result == {"decision": "confirmed", "rule_set_id": str(rule_set_id)}
     assert calls[0]["company_id"] == company_id
     assert calls[0]["context_hash"] == "a" * 64
-    assert recovery == [True]
+    assert len(conn.audits) == 1
+    assert conn.audits[0][4] == "break_rule.applicability_decision"
+    audit_details = json.loads(conn.audits[0][5])
+    assert audit_details["decision"] == "confirmed"
+    assert audit_details["context_hash"] == "a" * 64
+    assert refreshes == [{
+        "company_id": company_id,
+        "location_id": calls[0]["location_id"],
+        "actor_user_id": conn.audits[0][3],
+        "source": "break_rule_applicability_decision",
+    }]
+
+
+def test_unassigned_stagger_route_surfaces_rule_applicability_advisory(monkeypatch):
+    shift_id = uuid4()
+    location_id = uuid4()
+    rule_set_id = uuid4()
+    shift = {
+        "id": shift_id,
+        "location_id": location_id,
+        "starts_at": datetime(2026, 8, 21, 9, tzinfo=timezone.utc),
+        "ends_at": datetime(2026, 8, 21, 17, tzinfo=timezone.utc),
+        "required_staff": 1,
+    }
+
+    class Connection:
+        async def fetchrow(self, *_args):
+            return shift
+
+        async def fetch(self, query, *_args):
+            assert "schedule_shift_assignments" in query
+            return []
+
+    expected = {
+        "check": "break_rules",
+        "code": "break_rules_confirmation_required",
+        "severity": "advisory",
+        "message": "Confirm expected rules.",
+        "metadata": {
+            "rule_set_id": str(rule_set_id),
+            "context_hash": "a" * 64,
+        },
+    }
+
+    async def fake_require_company_id(_user):
+        return uuid4()
+
+    async def fake_co_planned(*_args, **_kwargs):
+        return [shift]
+
+    async def fake_week_plans(*_args, **_kwargs):
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("UTC"), {str(shift_id): {}}, {shift["starts_at"].date()}
+
+    async def fake_open_plan(*_args, **_kwargs):
+        return BreakPlan(
+            status="unmapped",
+            requirements=(),
+            advisories=(expected,),
+            rule_set_ids=(rule_set_id,),
+            rule_set_hash="hash",
+        )
+
+    monkeypatch.setattr(shifts_route, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(
+        shifts_route, "get_connection", lambda: _ConnectionContext(Connection()),
+    )
+    monkeypatch.setattr(schedule_guidance, "_co_planned_shifts", fake_co_planned)
+    monkeypatch.setattr(schedule_guidance, "resolve_week_break_plans", fake_week_plans)
+    monkeypatch.setattr(schedule_guidance, "resolve_shift_break_plan", fake_open_plan)
+
+    payload = _run(shifts_route.get_shift_break_stagger(shift_id, current_user=_user()))
+
+    assert payload["results"] == []
+    assert payload["advisories"] == [expected]
 
 
 def test_stagger_route_treats_a_saved_time_as_fixed(monkeypatch):

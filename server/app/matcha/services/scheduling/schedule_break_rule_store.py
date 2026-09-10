@@ -7,16 +7,16 @@ import json
 from dataclasses import dataclass
 from datetime import date, time
 from typing import Any
-from uuid import UUID, NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from . import schedule_compliance
-from . import shift_compliance
+from . import schedule_compliance, shift_compliance
 from .schedule_breaks import BreakRule
 from .schedule_location_readiness import get_schedule_location_readiness
 
 MAX_SHIFT_BREAK_MINUTES = 1440
 _GUIDANCE_RULE_LOCK_KEY = "schedule-break-rules:guidance:v1"
+_EMPLOYER_EMPLOYEE_COUNT_UNSET = object()
 
 
 async def lock_schedule_break_rule_guidance(conn, *, exclusive: bool) -> None:
@@ -279,16 +279,15 @@ def _rules_from_payload(
         )
         if meal_total > MAX_SHIFT_BREAK_MINUTES:
             raise ValueError("aggregate meal break duration exceeds 1440 minutes")
-    if not parsed:
-        raise ValueError("break rule payload must contain at least one rule")
     return parsed
 
 
 def validate_break_rule_payload(payload: Any, citation: str = "") -> None:
     """Validate persisted/imported rules with the runtime parser.
 
-    Keeping one parser for import, approval, and resolution prevents an
-    approved payload from silently degrading to an empty rule set at runtime.
+    Keeping one parser for import, approval, and resolution prevents shape or
+    bounds accepted at one boundary from failing at another. An explicitly
+    empty meal/rest collection remains a valid reviewed no-rule result.
     """
     _rules_from_payload(UUID(int=0), payload, citation)
 
@@ -309,12 +308,19 @@ def _applicability_context_hash(
     rule_set_id: UUID,
     jurisdiction_id: UUID,
     industry_code: str | None,
-    employer_employee_count: int | None,
     effective_from: date,
     effective_to: date | None,
     rules: Any,
 ) -> str:
-    """Bind a tenant decision to the exact rule and applicability inputs."""
+    """Bind a tenant decision to the reviewed rule and stable scope inputs.
+
+    Headcount deliberately is not part of this identity. Employer-size bounds
+    are evaluated against the current count on every plan; routine hiring and
+    termination must not revoke the organization's rule-set decision.
+    """
+
+    if isinstance(rules, str):
+        rules = json.loads(rules)
 
     payload = {
         "company_id": str(company_id),
@@ -322,13 +328,35 @@ def _applicability_context_hash(
         "rule_set_id": str(rule_set_id),
         "jurisdiction_id": str(jurisdiction_id),
         "industry_code": industry_code,
-        "employer_employee_count": employer_employee_count,
         "effective_from": effective_from.isoformat(),
         "effective_to": effective_to.isoformat() if effective_to else None,
         "rules": rules,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+async def get_employer_employee_count(conn, company_id: UUID) -> int | None:
+    """Return declared headcount, else a known non-empty active roster count.
+
+    Zero active employee rows cannot distinguish an employer with no workers
+    from a tenant that has not imported its roster yet. Preserve that case as
+    ``None`` so size-scoped rules fail visibly instead of being dropped as if
+    the organization had affirmatively declared zero employees.
+    """
+
+    value = await conn.fetchval(
+        """
+        SELECT COALESCE(
+            (SELECT headcount FROM company_handbook_profiles
+             WHERE company_id = $1 AND headcount IS NOT NULL),
+            (SELECT NULLIF(COUNT(*)::int, 0) FROM employees
+             WHERE org_id = $1 AND termination_date IS NULL)
+        )
+        """,
+        company_id,
+    )
+    return int(value) if value is not None else None
 
 
 def _expected_rules_metadata(
@@ -501,6 +529,7 @@ async def resolve_break_rules(
     company_id: UUID,
     location_id: UUID,
     shift_date: date,
+    employer_employee_count: int | None | object = _EMPLOYER_EMPLOYEE_COUNT_UNSET,
 ) -> ResolvedBreakRules:
     await lock_schedule_break_rule_guidance(conn, exclusive=False)
     readiness = await get_schedule_location_readiness(conn, company_id, location_id)
@@ -568,27 +597,34 @@ async def resolve_break_rules(
                     "metadata": {"reason": str(exc)},
                 },),
             )
-        employer_employee_count = await conn.fetchval(
-            """
-            SELECT COALESCE(
-                (SELECT headcount FROM company_handbook_profiles
-                 WHERE company_id = $1 AND headcount IS NOT NULL),
-                (SELECT COUNT(*)::int FROM employees
-                 WHERE org_id = $1 AND termination_date IS NULL)
+        # An approved empty collection explicitly records that this catalog
+        # scope has no meal/rest periods. It needs no organization decision and
+        # retains the pre-confirmation runtime contract.
+        if not rules:
+            return ResolvedBreakRules(
+                rules=(), rule_set_ids=(chosen["id"],),
+                timezone=_location_timezone(readiness.timezone),
+                industry_code=readiness.industry_code,
+                source="approved", advisories=(),
             )
-            """,
-            company_id,
-        )
         employee_count = (
-            int(employer_employee_count) if employer_employee_count is not None else None
+            await get_employer_employee_count(conn, company_id)
+            if employer_employee_count is _EMPLOYER_EMPLOYEE_COUNT_UNSET
+            else (
+                int(employer_employee_count)
+                if employer_employee_count is not None
+                else None
+            )
         )
         context_hash = _applicability_context_hash(
             company_id=company_id,
             location_id=location_id,
             rule_set_id=chosen["id"],
             jurisdiction_id=chosen.get("jurisdiction_id") or readiness.jurisdiction_id,
-            industry_code=readiness.industry_code,
-            employer_employee_count=employee_count,
+            # The selected rule set's own industry is the stable scope input.
+            # A generic rule remains the same rule if the company industry is
+            # corrected, while a different industry-specific set has a new id.
+            industry_code=chosen.get("industry_code"),
             effective_from=chosen["effective_from"],
             effective_to=chosen["effective_to"],
             rules=chosen["rules"],
@@ -598,14 +634,19 @@ async def resolve_break_rules(
             SELECT decision
             FROM company_schedule_break_rule_confirmations
             WHERE company_id = $1 AND location_id = $2 AND rule_set_id = $3
-              AND context_hash = $4
+              AND (
+                  context_hash = $4
+                  OR (decision = 'grandfathered' AND context_hash IS NULL)
+              )
+            ORDER BY CASE WHEN context_hash = $4 THEN 0 ELSE 1 END
+            LIMIT 1
             """,
             company_id, location_id, chosen["id"], context_hash,
         )
-        metadata = _expected_rules_metadata(
-            rules, context_hash=context_hash, decision=decision,
-        )
-        if decision != "confirmed":
+        if decision not in {"confirmed", "grandfathered"}:
+            metadata = _expected_rules_metadata(
+                rules, context_hash=context_hash, decision=decision,
+            )
             message = (
                 "Your organization marked these expected break rules as not applicable; "
                 "no alternative reviewed coverage is mapped."
@@ -637,14 +678,14 @@ async def resolve_break_rules(
             rule_set_ids=(chosen["id"],),
             timezone=_location_timezone(readiness.timezone),
             industry_code=readiness.industry_code,
-            source="approved_and_organization_confirmed",
-            advisories=({
-                "check": "break_rules",
-                "code": "break_rules_applicability_confirmed",
-                "severity": "advisory",
-                "message": "Your organization confirmed that these reviewed rules apply.",
-                "metadata": metadata,
-            },),
+            source=(
+                "approved"
+                if decision == "grandfathered"
+                else "approved_and_organization_confirmed"
+            ),
+            # Confirmation is the normal success state, not an advisory to
+            # duplicate into every assignment's persisted guidance.
+            advisories=(),
             employer_employee_count=employee_count,
             expected_rules=tuple(rules),
             applicability_context_hash=context_hash,

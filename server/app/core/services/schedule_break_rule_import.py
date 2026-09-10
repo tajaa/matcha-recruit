@@ -91,6 +91,17 @@ async def review_break_rule_set(
             decision,
             actor_user_id,
         )
+        # A migration-only grandfather records that this mapping was already
+        # live, not that the tenant confirmed it forever. Any fresh review
+        # retires that compatibility state; an approved row must then receive
+        # an explicit company/location applicability decision.
+        await conn.execute(
+            """
+            DELETE FROM company_schedule_break_rule_confirmations
+            WHERE rule_set_id = $1 AND decision = 'grandfathered'
+            """,
+            rule_set_id,
+        )
     # Existing assignment guidance is a materialized view of rule status.
     # Dispatch is best-effort because the committed rule row itself is the
     # recovery record scanned whenever a worker starts.

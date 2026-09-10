@@ -30,6 +30,7 @@ class FakeConn:
     def __init__(
         self, location, *, industry="retail", structured=None, state="CA",
         extractions=None, extractions_fail=False, applicability_decision="confirmed",
+        employer_employee_count=24,
     ):
         self.location = location
         self.industry = industry
@@ -38,6 +39,9 @@ class FakeConn:
         self.extractions = extractions or []
         self.extractions_fail = extractions_fail
         self.applicability_decision = applicability_decision
+        self.employer_employee_count = employer_employee_count
+        self.headcount_queries = 0
+        self.confirmation_context_hashes = []
 
     async def fetchrow(self, query, *args):
         if "FROM business_locations" in query:
@@ -52,8 +56,10 @@ class FakeConn:
         if "SELECT state FROM business_locations" in query:
             return self.state
         if "company_handbook_profiles" in query:
-            return 24
+            self.headcount_queries += 1
+            return self.employer_employee_count
         if "company_schedule_break_rule_confirmations" in query:
+            self.confirmation_context_hashes.append(args[3])
             return self.applicability_decision
         raise AssertionError(query)
 
@@ -177,8 +183,96 @@ def test_confirmed_expected_rule_operates_after_separate_source_review():
     assert result.source == "approved_and_organization_confirmed"
     assert len(result.rules) == 1
     assert result.expected_rules == result.rules
-    assert result.advisories[0]["code"] == "break_rules_applicability_confirmed"
-    assert "reviewed rules apply" in result.advisories[0]["message"]
+    assert result.advisories == ()
+
+
+def test_grandfathered_expected_rule_preserves_pre_migration_behavior():
+    location = _location()
+    row = {
+        "id": uuid4(),
+        "rules": {"meal_periods": [{
+            "trigger_after_minutes": 360, "duration_minutes": 30,
+        }]},
+        "citation": "Expected authority", "depth": 0,
+        "industry_code": "retail", "effective_from": date(2026, 1, 1),
+        "effective_to": None, "authority_url": "https://example.gov/rule",
+        "source_type": "api", "jurisdiction_id": location["jurisdiction_id"],
+    }
+    result = _run(resolve_break_rules(
+        FakeConn(location, structured=[row], applicability_decision="grandfathered"),
+        company_id=uuid4(), location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.source == "approved"
+    assert len(result.rules) == 1
+    assert result.applicability_decision == "grandfathered"
+    assert result.advisories == ()
+
+
+def test_headcount_change_does_not_invalidate_applicability_context():
+    location = _location()
+    row = {
+        "id": uuid4(),
+        "rules": {"meal_periods": [{
+            "trigger_after_minutes": 360,
+            "duration_minutes": 30,
+            "minimum_employees": 20,
+        }]},
+        "citation": "Expected authority", "depth": 0,
+        "industry_code": "retail", "effective_from": date(2026, 1, 1),
+        "effective_to": None, "authority_url": None, "source_type": "manual",
+        "jurisdiction_id": location["jurisdiction_id"],
+    }
+    company_id = uuid4()
+    first = FakeConn(location, structured=[row], employer_employee_count=47)
+    second = FakeConn(location, structured=[row], employer_employee_count=48)
+
+    first_result = _run(resolve_break_rules(
+        first, company_id=company_id, location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    second_result = _run(resolve_break_rules(
+        second, company_id=company_id, location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+
+    assert first_result.applicability_context_hash == second_result.applicability_context_hash
+    assert first_result.employer_employee_count == 47
+    assert second_result.employer_employee_count == 48
+
+
+def test_empty_active_roster_keeps_employer_size_unknown_and_can_be_prefetched():
+    location = _location()
+    row = {
+        "id": uuid4(),
+        "rules": {"meal_periods": [{
+            "trigger_after_minutes": 360,
+            "duration_minutes": 30,
+            "minimum_employees": 20,
+        }]},
+        "citation": "Expected authority", "depth": 0,
+        "industry_code": "retail", "effective_from": date(2026, 1, 1),
+        "effective_to": None, "authority_url": None, "source_type": "manual",
+        "jurisdiction_id": location["jurisdiction_id"],
+    }
+    conn = FakeConn(location, structured=[row], employer_employee_count=None)
+    result = _run(resolve_break_rules(
+        conn, company_id=uuid4(), location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.employer_employee_count is None
+    assert conn.headcount_queries == 1
+
+    prefetched = FakeConn(location, structured=[row])
+    result = _run(resolve_break_rules(
+        prefetched, company_id=uuid4(), location_id=location["id"],
+        shift_date=date(2026, 8, 22), employer_employee_count=None,
+    ))
+    assert result.employer_employee_count is None
+    assert prefetched.headcount_queries == 0
+    assert "NULLIF(COUNT(*)::int, 0)" in inspect.getsource(
+        schedule_break_rule_store.get_employer_employee_count
+    )
 
 
 def test_approved_rule_preserves_reviewed_age_scope():
@@ -498,13 +592,30 @@ def test_import_rejects_rules_the_runtime_parser_cannot_enforce():
         )
 
 
-def test_import_rejects_empty_rule_collections_before_confirmation_metadata():
-    with pytest.raises(ValueError, match="at least one rule"):
-        BreakRuleSetImport(
-            jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
-            rules={"meal_periods": [], "rest_periods": []},
-            citation="Authority", source_type="manual",
-        )
+def test_import_and_runtime_preserve_an_approved_empty_rule_collection():
+    item = BreakRuleSetImport(
+        jurisdiction_id=uuid4(), effective_from=date(2026, 1, 1),
+        rules={"meal_periods": [], "rest_periods": []},
+        citation="Authority", source_type="manual",
+    )
+    assert item.rules == {"meal_periods": [], "rest_periods": []}
+
+    location = _location()
+    conn = FakeConn(location, structured=[{
+        "id": uuid4(), "rules": item.rules, "citation": "Authority", "depth": 0,
+        "industry_code": None, "effective_from": date(2026, 1, 1),
+        "effective_to": None, "authority_url": None, "source_type": "manual",
+        "jurisdiction_id": location["jurisdiction_id"],
+    }], applicability_decision=None)
+    result = _run(resolve_break_rules(
+        conn, company_id=uuid4(), location_id=location["id"],
+        shift_date=date(2026, 8, 21),
+    ))
+    assert result.source == "approved"
+    assert result.rules == ()
+    assert result.advisories == ()
+    assert conn.headcount_queries == 0
+    assert conn.confirmation_context_hashes == []
 
 
 def test_import_validates_clock_windows_and_employer_size_bounds():
@@ -578,6 +689,57 @@ def test_rule_review_uses_commit_order_timestamp_for_recovery():
     source = inspect.getsource(review_break_rule_set)
     assert "lock_schedule_break_rule_guidance(conn, exclusive=True)" in source
     assert "updated_at = clock_timestamp()" in source
+    assert "DELETE FROM company_schedule_break_rule_confirmations" in source
+    assert "decision = 'grandfathered'" in source
+
+
+def test_rule_rereview_retires_grandfathered_compatibility(monkeypatch):
+    class Transaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class Connection:
+        def __init__(self):
+            self.deleted = []
+
+        def transaction(self):
+            return Transaction()
+
+        async def fetchval(self, query, *_args):
+            assert "pg_advisory_xact_lock(" in query
+
+        async def fetchrow(self, query, *args):
+            if "FOR UPDATE" in query:
+                return {
+                    "id": args[0], "jurisdiction_id": uuid4(),
+                    "rules": {"meal_periods": []}, "citation": "Authority",
+                }
+            assert "UPDATE schedule_break_rule_sets" in query
+            return {
+                "id": args[0], "review_status": args[1],
+                "reviewed_by": args[2], "reviewed_at": "now",
+            }
+
+        async def execute(self, query, *args):
+            self.deleted.append((query, args))
+
+    monkeypatch.setattr(
+        "app.workers.tasks.schedule_break_refresh.enqueue_schedule_break_recovery",
+        lambda: None,
+    )
+    conn = Connection()
+    rule_set_id = uuid4()
+    result = _run(review_break_rule_set(
+        conn, rule_set_id=rule_set_id, decision="approved", actor_user_id=uuid4(),
+    ))
+
+    assert result["review_status"] == "approved"
+    assert len(conn.deleted) == 1
+    assert "decision = 'grandfathered'" in conn.deleted[0][0]
+    assert conn.deleted[0][1] == (rule_set_id,)
 
 
 def test_applicability_decision_rechecks_context_before_upsert(monkeypatch):

@@ -21,7 +21,6 @@ from typing import Any, Literal, Sequence
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-
 BreakKind = Literal["meal", "rest"]
 BreakPlanStatus = Literal["complete", "unmapped", "error"]
 TriggerOperator = Literal["gt", "gte"]
@@ -145,23 +144,41 @@ def _rule_context_applies(
             return False, False
 
     start_clock = starts_local.time().replace(tzinfo=None)
-    end_clock = ends_local.time().replace(tzinfo=None)
     if rule.shift_start_window_from is not None and rule.shift_start_window_before is not None:
         if not _clock_in_window(
             start_clock, rule.shift_start_window_from, rule.shift_start_window_before,
         ):
             return False, False
     if rule.shift_spans_window_start is not None and rule.shift_spans_window_end is not None:
-        window_start = datetime.combine(starts_local.date(), rule.shift_spans_window_start, starts_local.tzinfo)
-        window_end = datetime.combine(starts_local.date(), rule.shift_spans_window_end, starts_local.tzinfo)
-        if window_end <= window_start:
-            window_end += timedelta(days=1)
-        if not (starts_local <= window_start and ends_local >= window_end):
+        base_start = datetime.combine(
+            starts_local.date(), rule.shift_spans_window_start, starts_local.tzinfo,
+        )
+        base_end = datetime.combine(
+            starts_local.date(), rule.shift_spans_window_end, starts_local.tzinfo,
+        )
+        if base_end <= base_start:
+            base_end += timedelta(days=1)
+        windows = (
+            (base_start + timedelta(days=delta), base_end + timedelta(days=delta))
+            for delta in (-1, 0, 1)
+        )
+        if not any(
+            starts_local <= window_start and ends_local >= window_end
+            for window_start, window_end in windows
+        ):
             return False, False
-    if rule.shift_starts_before is not None and not start_clock < rule.shift_starts_before:
-        return False, False
-    if rule.shift_ends_after is not None and not end_clock > rule.shift_ends_after:
-        return False, False
+    if rule.shift_starts_before is not None:
+        starts_before = datetime.combine(
+            starts_local.date(), rule.shift_starts_before, starts_local.tzinfo,
+        )
+        if not starts_local < starts_before:
+            return False, False
+    if rule.shift_ends_after is not None:
+        ends_after = datetime.combine(
+            starts_local.date(), rule.shift_ends_after, starts_local.tzinfo,
+        )
+        if not ends_local > ends_after:
+            return False, False
     return True, False
 
 
@@ -284,16 +301,48 @@ def evaluate_break_plan(
         def _offset(value: int | None) -> datetime | None:
             return starts_local + timedelta(minutes=value) if value is not None else None
 
+        def _distance_from_shift(window_start: datetime, window_end: datetime) -> timedelta:
+            if window_end <= starts_local:
+                return starts_local - window_end
+            if window_start >= ends_local:
+                return window_start - ends_local
+            return timedelta(0)
+
         def _clock(value: time | None) -> datetime | None:
             if value is None:
                 return None
-            candidate = datetime.combine(starts_local.date(), value, starts_local.tzinfo)
-            if candidate < starts_local and ends_local.date() > starts_local.date():
-                candidate += timedelta(days=1)
-            return candidate
+            base = datetime.combine(starts_local.date(), value, starts_local.tzinfo)
+            candidates = [base + timedelta(days=delta) for delta in (-1, 0, 1)]
+            return min(
+                candidates,
+                key=lambda candidate: (
+                    _distance_from_shift(candidate, candidate),
+                    abs((candidate - starts_local).total_seconds()),
+                ),
+            )
 
-        earliest = _clock(rule.window_start) or _offset(rule.earliest_offset_minutes)
-        deadline = _clock(rule.window_end) or _offset(rule.deadline_offset_minutes)
+        def _clock_window(start: time, end: time) -> tuple[datetime, datetime]:
+            base_start = datetime.combine(starts_local.date(), start, starts_local.tzinfo)
+            base_end = datetime.combine(starts_local.date(), end, starts_local.tzinfo)
+            if base_end <= base_start:
+                base_end += timedelta(days=1)
+            candidates = [
+                (base_start + timedelta(days=delta), base_end + timedelta(days=delta))
+                for delta in (-1, 0, 1)
+            ]
+            return min(
+                candidates,
+                key=lambda window: (
+                    _distance_from_shift(*window),
+                    abs((window[0] - starts_local).total_seconds()),
+                ),
+            )
+
+        if rule.window_start is not None and rule.window_end is not None:
+            earliest, deadline = _clock_window(rule.window_start, rule.window_end)
+        else:
+            earliest = _clock(rule.window_start) or _offset(rule.earliest_offset_minutes)
+            deadline = _clock(rule.window_end) or _offset(rule.deadline_offset_minutes)
         recommended = _offset(rule.recommended_offset_minutes)
         if rule.recommend_midpoint:
             recommended = starts_local + timedelta(
@@ -389,7 +438,7 @@ def guidance_payload(plan: BreakPlan, *, timezone: str, evaluated_at: datetime) 
     """Convert the immutable plan into the JSON shape stored on assignments."""
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": plan.status,
         "evaluated_at": evaluated_at.isoformat(),
         "timezone": timezone,

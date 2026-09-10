@@ -205,6 +205,21 @@ describe('ShiftInspector break staggering', () => {
     ))
   })
 
+  it('records a not-applicable decision for the expected rule', async () => {
+    renderWith([], {
+      advisories: [{
+        check: 'break_rules', code: 'break_rules_confirmation_required', severity: 'advisory',
+        message: 'Matcha expects these rules may apply.',
+        metadata: { rule_set_id: 'rule-1', context_hash: 'e'.repeat(64) },
+      }],
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Not applicable' }))
+    await waitFor(() => expect(decideShiftBreakRuleApplicability).toHaveBeenCalledWith(
+      'shift-1', { rule_set_id: 'rule-1', context_hash: 'e'.repeat(64), decision: 'rejected' },
+    ))
+  })
+
   it('renders no stagger control for a waived requirement', async () => {
     // A waived meal produces no stagger result at all, so there is nothing to time.
     renderWith([assignment({
@@ -221,17 +236,39 @@ describe('ShiftInspector break staggering', () => {
   })
 
   it('does not offer a save control on a locked published shift', async () => {
-    renderWith([assignment()], { results: [staggerResult()] }, true)
+    renderWith([assignment()], {
+      results: [staggerResult()],
+      advisories: [{
+        check: 'break_rules', code: 'break_rules_confirmation_required', severity: 'advisory',
+        message: 'Matcha expects these rules may apply.',
+        metadata: { rule_set_id: 'rule-1', context_hash: 'c'.repeat(64) },
+      }],
+    }, true)
 
     expect(await screen.findByLabelText('30-min meal break start for Ada Ling')).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Save break times' })).not.toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: 'Use these rules' })
+    const reject = screen.getByRole('button', { name: 'Not applicable' })
+    expect(confirm).toBeDisabled()
+    expect(reject).toBeDisabled()
+    fireEvent.click(confirm)
+    fireEvent.click(reject)
+    expect(decideShiftBreakRuleApplicability).not.toHaveBeenCalled()
   })
 
-  it('does not query suggestions for a shift with nobody on it', async () => {
-    renderWith([], { results: [] })
+  it('loads rule applicability for a shift with nobody on it', async () => {
+    renderWith([], {
+      results: [],
+      advisories: [{
+        check: 'break_rules', code: 'break_rules_confirmation_required', severity: 'advisory',
+        message: 'Matcha expects these rules may apply.',
+        metadata: { rule_set_id: 'rule-1', context_hash: 'd'.repeat(64) },
+      }],
+    })
 
     await waitFor(() => expect(screen.getByText('Nobody yet')).toBeInTheDocument())
-    expect(fetchShiftBreakStagger).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchShiftBreakStagger).toHaveBeenCalledWith('shift-1'))
+    expect(screen.getByText('Confirm expected break-law coverage')).toBeInTheDocument()
   })
 
   it('still shows and can clear a saved time when the suggestion fetch fails', async () => {

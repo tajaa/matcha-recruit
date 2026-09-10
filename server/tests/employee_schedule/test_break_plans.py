@@ -14,7 +14,6 @@ from app.matcha.services.scheduling.schedule_breaks import (
     render_break_plan,
 )
 
-
 LA = ZoneInfo("America/Los_Angeles")
 NY = ZoneInfo("America/New_York")
 
@@ -118,6 +117,95 @@ def test_ny_clock_conditions_do_not_affect_a_short_or_unmatched_shift():
         starts_at=starts_at, ends_at=ends_at, timezone=NY, rules=_ny_rules(),
     )
     assert plan.requirements == ()
+
+
+def test_midnight_crossing_clock_window_keeps_deadline_after_earliest():
+    starts_at, ends_at = _ny_window(12, 20)
+    plan = evaluate_break_plan(
+        starts_at=starts_at,
+        ends_at=ends_at,
+        timezone=NY,
+        rules=[_rule(
+            trigger_after_minutes=360,
+            window_start=time(22),
+            window_end=time(2),
+            deadline_offset_minutes=None,
+        )],
+    )
+
+    requirement = plan.requirements[0]
+    assert requirement.earliest_local == datetime(
+        2026, 9, 1, 22, tzinfo=NY,
+    )
+    assert requirement.deadline_local == datetime(
+        2026, 9, 2, 2, tzinfo=NY,
+    )
+
+
+def test_midnight_crossing_window_uses_the_occurrence_overlapping_a_late_shift():
+    plan = evaluate_break_plan(
+        starts_at=datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 9, 2, 6, tzinfo=timezone.utc),
+        timezone=NY,
+        rules=[_rule(
+            trigger_after_minutes=360,
+            window_start=time(22),
+            window_end=time(2),
+            deadline_offset_minutes=None,
+        )],
+    )
+
+    requirement = plan.requirements[0]
+    assert requirement.earliest_local == datetime(2026, 9, 1, 22, tzinfo=NY)
+    assert requirement.deadline_local == datetime(2026, 9, 2, 2, tzinfo=NY)
+
+
+def test_midnight_crossing_window_uses_prior_day_for_an_early_shift():
+    plan = evaluate_break_plan(
+        starts_at=datetime(2026, 9, 1, 0, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 9, 1, 8, tzinfo=timezone.utc),
+        timezone=NY,
+        rules=[_rule(
+            trigger_after_minutes=360,
+            window_start=time(22),
+            window_end=time(2),
+            deadline_offset_minutes=None,
+        )],
+    )
+
+    requirement = plan.requirements[0]
+    assert requirement.earliest_local == datetime(2026, 8, 31, 22, tzinfo=NY)
+    assert requirement.deadline_local == datetime(2026, 9, 1, 2, tzinfo=NY)
+
+
+def test_overnight_shift_satisfies_absolute_end_after_threshold():
+    starts_at = datetime(2026, 9, 1, 8, tzinfo=timezone.utc)
+    ends_at = datetime(2026, 9, 2, 1, tzinfo=timezone.utc)
+    plan = evaluate_break_plan(
+        starts_at=starts_at,
+        ends_at=ends_at,
+        timezone=NY,
+        rules=_ny_rules(),
+    )
+
+    assert [(item.ordinal, item.duration_minutes) for item in plan.requirements] == [
+        (1, 30), (3, 20),
+    ]
+
+
+def test_overnight_shift_can_span_a_next_day_clock_window():
+    plan = evaluate_break_plan(
+        starts_at=datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 9, 2, 15, tzinfo=timezone.utc),
+        timezone=NY,
+        rules=[_rule(
+            trigger_after_minutes=360,
+            shift_spans_window_start=time(11),
+            shift_spans_window_end=time(14),
+        )],
+    )
+
+    assert len(plan.requirements) == 1
 
 
 def test_employer_size_scopes_rules_and_missing_context_fails_visible():
@@ -347,7 +435,7 @@ def test_guidance_payload_is_json_safe_and_versioned():
         timezone="America/Los_Angeles",
         evaluated_at=datetime(2026, 8, 21, 12, tzinfo=timezone.utc),
     )
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["summary"] == "Mandatory 30-minute unpaid meal break by 2 PM"
     assert payload["requirements"][0]["rule_set_id"] == str(plan.rule_set_ids[0])
     assert payload["requirements"][0]["effective_from"] == "2026-01-01"
