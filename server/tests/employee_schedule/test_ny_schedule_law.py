@@ -98,12 +98,14 @@ def test_a_six_hour_shift_owes_no_noonday_meal():
     assert _plan(_ny_rules().rules, 8, 0, 14, 0).requirements == ()
 
 
-def test_a_shift_that_clocks_out_before_two_owes_no_noonday_meal():
-    # 07:00–13:30 is over six hours but does not extend over the whole noon
-    # day period, so § 162(2) does not attach. The scalar 6h/30min floor in
-    # `_SCHEDULING_RULES` is what still flags it at write time — see
-    # `test_scalar_floor_still_flags_a_long_shift_without_a_break`.
-    assert _plan(_ny_rules().rules, 7, 0, 13, 30).requirements == ()
+def test_a_shift_that_clocks_out_before_two_still_owes_the_noonday_meal():
+    # 07:00–13:30 is over six hours and is working through part of the noon day
+    # period, so § 162(2) attaches even though the shift ends before 2 PM. The
+    # stagger clamps the 2 PM deadline to what the shift can actually hold.
+    plan = _plan(_ny_rules().rules, 7, 0, 13, 30)
+
+    assert [r.duration_minutes for r in plan.requirements] == [30]
+    assert plan.requirements[0].earliest_local.strftime("%H:%M") == "11:00"
 
 
 # ── § 162(4): the midway meal for afternoon/night shifts ──────────────────
@@ -128,10 +130,14 @@ def test_overnight_shift_starting_before_six_am_is_also_midway_governed():
     assert plan.requirements[0].recommended_local.strftime("%H:%M") == "01:37"
 
 
-def test_a_shift_starting_at_noon_is_outside_the_midway_window():
-    # Starts after 11:00 (so not § 162(2)-spanning) and before 13:00 (so not
-    # § 162(4)). The statute leaves this seam; we do not invent a rule for it.
-    assert _plan(_ny_rules().rules, 12, 0, 19, 0).requirements == ()
+def test_a_shift_starting_after_eleven_gets_the_midway_meal():
+    # The 11 AM–1 PM slice is unassigned by § 162's own text. It goes to (4):
+    # someone who clocks in after the noon day period has begun cannot take the
+    # noon day meal at a sensible hour.
+    plan = _plan(_ny_rules().rules, 12, 0, 19, 0)
+
+    assert [(r.duration_minutes, r.ordinal) for r in plan.requirements] == [(45, 2)]
+    assert plan.requirements[0].recommended_local.strftime("%H:%M") == "15:07"
 
 
 # ── § 162(3): the additional evening meal period ──────────────────────────
@@ -292,3 +298,63 @@ def test_every_curated_period_carries_its_own_subdivision():
     assert len({(rule.kind, rule.ordinal) for rule in rules}) == len(rules)
     assert all(rule.citation.startswith("N.Y. Lab. Law") for rule in rules)
     assert all(rule.authority_url for rule in rules)
+
+
+# ── The three shifts the reviewer scheduled by hand (round 2) ─────────────
+#
+# Verbatim from the send-back: 6:30a–2:30p and 10:30a–6:30p were each owed a
+# 30-minute break, the first correctly suggested at 11 AM and the second
+# "compliant but not realistic to send an employee on break after only 30
+# minutes"; 12:30p–8:30p was "incorrectly recommending no break, this should be
+# recommending a 45 minute break and it should suggest 'midway through'".
+
+def _suggested(rules, start_hour, start_minute, end_hour, end_minute):
+    """What the manager actually sees: the plan, placed."""
+    starts = datetime(2026, 9, 14, start_hour, start_minute, tzinfo=dt_timezone.utc)
+    ends = datetime(2026, 9, 14, end_hour, end_minute, tzinfo=dt_timezone.utc)
+    plan = evaluate_break_plan(starts_at=starts, ends_at=ends, timezone=NY, rules=rules)
+    staggered = stagger_shift_breaks(
+        shift_start_local=reinterpret_schedule_wall_time(starts, NY),
+        shift_end_local=reinterpret_schedule_wall_time(ends, NY),
+        required_staff=1,
+        assignments=[StaggerAssignment(employee_id=uuid4(), plan=plan)],
+    )
+    return [
+        (r.duration_minutes, r.suggested_start.strftime("%H:%M"))
+        for r in sorted(staggered.results, key=lambda r: r.ordinal)
+    ]
+
+
+def test_reviewer_case_0630_to_1430_keeps_the_eleven_am_noonday_meal():
+    assert _suggested(_ny_rules().rules, 6, 30, 14, 30) == [(30, "11:00")]
+
+
+def test_reviewer_case_1030_to_1830_is_not_sent_on_break_thirty_minutes_in():
+    # Still inside the 11:00–14:00 noon day window, but no longer at its very
+    # opening: the placement floor reaches a wall-clock earliest now.
+    assert _suggested(_ny_rules().rules, 10, 30, 18, 30) == [(30, "12:30")]
+
+
+def test_reviewer_case_1230_to_2030_gets_the_forty_five_minute_midway_meal():
+    assert _suggested(_ny_rules().rules, 12, 30, 20, 30) == [(45, "16:07")]
+
+
+def test_every_start_time_lands_on_exactly_one_primary_meal_rule():
+    """No >6h shift may fall between § 162(2) and § 162(4), at any start time.
+
+    The two are partitioned by start clock time, and this is the guard on that
+    partition: a gap is the bug the reviewer found, an overlap would double-bill
+    the meal and collide on the `(kind, ordinal)` key the stagger persists.
+    """
+    rules = _ny_rules().rules
+    for minutes in range(0, 24 * 60, 30):
+        start_hour, start_minute = divmod(minutes, 60)
+        end = minutes + 8 * 60
+        plan = _plan(
+            rules, start_hour, start_minute, (end // 60) % 24, end % 60,
+            end_day=14 + (end // (24 * 60)) + (1 if end % (24 * 60) < minutes else 0),
+        )
+        primary = [r for r in plan.requirements if r.ordinal in (1, 2)]
+        assert len(primary) == 1, f"{start_hour:02d}:{start_minute:02d} → {primary}"
+        keys = [(r.kind, r.ordinal) for r in plan.requirements]
+        assert len(keys) == len(set(keys)), f"{start_hour:02d}:{start_minute:02d} → {keys}"
