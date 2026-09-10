@@ -1,17 +1,18 @@
 """Pure tests for the channel event-draft confirmation protocol."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.matcha.services.ops.permissions import (
-    OpsAccess,
-    OpsCapability,
-)
 from app.matcha.services.ems.event_drafts import (
     _sync_confirmation_card_status,
     confirm_event_draft,
     may_decide_event_draft,
+)
+from app.matcha.services.ops.permissions import (
+    OpsAccess,
+    OpsCapability,
 )
 from app.werk.routes.channels_ws import (
     _draft_reply_decision,
@@ -68,6 +69,8 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
     draft_id = uuid4()
     event_id = uuid4()
     channel_id = uuid4()
+    confirmation_message_id = uuid4()
+    created_at = datetime.now(timezone.utc)
     actor = uuid4()
     access = OpsAccess(
         company_id=company_id,
@@ -85,6 +88,8 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
             "event_id": event_id,
             "reporter_user_id": None,
             "channel_id": channel_id,
+            "confirmation_message_id": confirmation_message_id,
+            "created_at": created_at,
         },
         {"id": event_id},
     ]
@@ -98,9 +103,22 @@ async def test_confirm_accepts_the_public_call_signature_without_reason():
 
     assert result.changed is False
     assert result.event == {"id": event_id}
-    status_update = conn.execute.await_args
-    assert "UPDATE channel_messages" in status_update.args[0]
-    assert status_update.args[1:] == (channel_id, str(draft_id), "confirmed")
+    primary_update, duplicate_update = conn.execute.await_args_list
+    assert "WHERE id = $1" in primary_update.args[0]
+    assert primary_update.args[1:] == (
+        confirmation_message_id,
+        channel_id,
+        str(draft_id),
+        "confirmed",
+    )
+    assert "created_at >= $4" in duplicate_update.args[0]
+    assert duplicate_update.args[1:] == (
+        channel_id,
+        str(draft_id),
+        "confirmed",
+        created_at,
+        confirmation_message_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -110,14 +128,36 @@ async def test_confirmation_status_updates_every_card_with_the_same_draft_action
     conn = AsyncMock()
     channel_id = uuid4()
     draft_id = uuid4()
+    confirmation_message_id = uuid4()
+    created_at = datetime.now(timezone.utc)
 
     await _sync_confirmation_card_status(
         conn,
         channel_id=channel_id,
         draft_id=draft_id,
+        confirmation_message_id=confirmation_message_id,
+        draft_created_at=created_at,
         status="rejected",
     )
 
-    query, *args = conn.execute.await_args.args
-    assert "metadata #>> '{action,id}' = $2" in query
-    assert args == [channel_id, str(draft_id), "rejected"]
+    primary_update, duplicate_update = conn.execute.await_args_list
+    primary_query, *primary_args = primary_update.args
+    assert "WHERE id = $1" in primary_query
+    assert primary_args == [
+        confirmation_message_id,
+        channel_id,
+        str(draft_id),
+        "rejected",
+    ]
+
+    duplicate_query, *duplicate_args = duplicate_update.args
+    assert "created_at >= $4" in duplicate_query
+    assert "id IS DISTINCT FROM $5" in duplicate_query
+    assert "metadata #>> '{action,id}' = $2" in duplicate_query
+    assert duplicate_args == [
+        channel_id,
+        str(draft_id),
+        "rejected",
+        created_at,
+        confirmation_message_id,
+    ]
