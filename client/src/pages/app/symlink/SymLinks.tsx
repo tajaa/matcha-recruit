@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Copy, KeyRound, Link2, Plus, Settings2 } from 'lucide-react'
+import { Copy, HelpCircle, KeyRound, Link2, Plus, Settings2 } from 'lucide-react'
 import { createSymlink, listKinds, listSymlinks, searchEmployees } from '../../../api/symlink/symlink'
+import { HowItWorksWizard } from '../../../components/symlink/HowItWorksWizard'
+import { readHowItWorksDismissed } from '../../../components/symlink/howItWorksStorage'
 import { useAsync } from '../../../hooks/useAsync'
 import { useMe } from '../../../hooks/useMe'
 import type {
@@ -51,6 +53,8 @@ export default function SymLinks() {
   const [showCreate, setShowCreate] = useState(false)
   const [created, setCreated] = useState<Symlink | null>(null)
   const [filter, setFilter] = useState<'all' | 'open' | 'submitted'>('all')
+  // Lazy init: read storage once on mount, never during render.
+  const [showHow, setShowHow] = useState(() => !readHowItWorksDismissed())
 
   const visible = useMemo(() => links.filter((l) => {
     if (filter === 'open') return l.status === 'pending' || l.status === 'in_progress'
@@ -69,6 +73,13 @@ export default function SymLinks() {
           <p className="mt-2 max-w-2xl text-slate-600">Send someone a link that walks them through exactly what you need — a credential, a check-in, an info update — and stages the result for your review.</p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setShowHow(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            <HelpCircle size={18} /> How it works
+          </button>
           <Link to="/app/symlink/settings" className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50">
             <KeyRound size={18} /> Passcode
           </Link>
@@ -77,6 +88,10 @@ export default function SymLinks() {
           </button>
         </div>
       </div>
+
+      {showHow && (
+        <HowItWorksWizard onClose={() => setShowHow(false)} onCreate={() => { setShowHow(false); setShowCreate(true) }} />
+      )}
 
       {error && <p className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
@@ -110,6 +125,11 @@ export default function SymLinks() {
             <div className="mb-4 rounded-2xl bg-emerald-50 p-4 text-emerald-700"><Link2 size={30} /></div>
             <h3 className="font-semibold text-slate-900">No sym-links yet</h3>
             <p className="mt-2 max-w-md text-sm text-slate-500">Create one to ask a team member for a credential, a manager for a check-in, or anyone for the items on a checklist.</p>
+            {!showHow && (
+              <button type="button" onClick={() => setShowHow(true)} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-emerald-700 underline hover:text-emerald-800">
+                <HelpCircle size={15} /> See how sym-links work
+              </button>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-slate-100">

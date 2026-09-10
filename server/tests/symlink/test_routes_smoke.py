@@ -164,3 +164,22 @@ def test_every_ip_limit_call_goes_through_the_table(public_router):
     src = inspect.getsource(sys.modules["app.matcha.routes.intake.symlink_public"])
     inline = re.findall(r'check_rate_limit\(\s*(?:ip|client_ip\(request\))\s*,', src)
     assert inline == [], "per-IP limits must call _ip_limit(), not check_rate_limit() directly"
+
+
+def test_admin_router_is_company_admin_only(admin_router):
+    """Sym-link is company-scoped: it needs a tenant, a roster and a company
+    passcode. `individual` (personal matcha-work, no company) must not reach it,
+    and neither must `employee` — the recipient side is the unauthenticated
+    /sym/{token} surface, not this router."""
+    import inspect
+    import sys
+
+    mod = sys.modules["app.matcha.routes.symlink"]
+    src = inspect.getsource(mod)
+
+    assert 'require_roles("admin", "client")' in src
+    # Match the call, not the name — the module comment explains why the shared
+    # dep was dropped and legitimately mentions it.
+    assert "Depends(require_admin_or_client)" not in src, "shared dep also admits `individual`"
+    # Every authenticated endpoint goes through the narrowed gate.
+    assert src.count("Depends(require_symlink_admin)") >= 15
