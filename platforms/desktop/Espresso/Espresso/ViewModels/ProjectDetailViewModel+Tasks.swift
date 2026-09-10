@@ -275,6 +275,20 @@ extension ProjectDetailViewModel {
         if merged.subtaskDone == nil { merged.subtaskDone = previous.subtaskDone }
         if merged.updateCount == nil { merged.updateCount = previous.updateCount }
         if merged.recentEventIds == nil { merged.recentEventIds = previous.recentEventIds }
+        if merged.autoprClaimedAt != nil {
+            // A claim consumes both queue shapes immediately. The claim's WS
+            // payload carries the active timestamp while list-only queue
+            // fields are absent, so do not preserve stale queued badges.
+            merged.autoprRunRequestedAt = nil
+            merged.autoprReconsiderationPending = false
+        } else if merged.boardColumn != previous.boardColumn
+                    || merged.progressNote != previous.progressNote {
+            // Publication settles an active run with one of these mutations.
+            // Single-task update payloads omit list-derived claim state.
+            merged.autoprClaimedAt = nil
+        } else {
+            merged.autoprClaimedAt = previous.autoprClaimedAt
+        }
         if merged.progressNote != previous.progressNote {
             // A reconsideration event is bound to one exact AutoPR decision.
             // Single-task/WS payloads omit the list-only event fields, so a

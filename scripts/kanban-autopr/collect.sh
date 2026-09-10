@@ -59,6 +59,13 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 and (.autopr_run_requested_at // null) != null
               )
               or (
+                # The claim endpoint moves a picked card to In Progress. An
+                # unsettled claim is durable crash-recovery authorization, so
+                # a killed workflow can resume instead of stranding the card.
+                .board_column == "in_progress"
+                and (.autopr_claimed_at // null) != null
+              )
+              or (
                 # A worker can consume an explicit additional-context directive
                 # by repeating the very refusal that directive overrides.
                 # Admit those cards as bounded recovery probes; only a matching
@@ -101,6 +108,7 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 autopr_reconsideration_event_id: $t.autopr_reconsideration_event_id,
                 autopr_reconsideration_at: $t.autopr_reconsideration_at,
                 autopr_run_requested_at: $t.autopr_run_requested_at,
+                autopr_claimed_at: $t.autopr_claimed_at,
                 assigned_to_autopr: ($t.assigned_email == $email),
                 # Keep attachment metadata available for ranking/debugging,
                 # but never put short-lived signed storage URLs in card.json.
@@ -158,7 +166,8 @@ done
 out="$(printf '%s' "$out" | jq -c '
   map(select(.assigned_to_autopr
              or (.autopr_reconsideration_pending // false)
-             or ((.autopr_run_requested_at // null) != null)))
+             or ((.autopr_run_requested_at // null) != null)
+             or ((.autopr_claimed_at // null) != null)))
   | map(del(.assigned_to_autopr))
 ')"
 

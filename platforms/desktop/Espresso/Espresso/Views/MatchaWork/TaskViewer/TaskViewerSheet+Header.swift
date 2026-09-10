@@ -49,9 +49,18 @@ extension TaskViewerSheet {
     }
 
     /// A short, human-readable state for the ticket detail banner. The full
-    /// machine-written note remains visible below it, including build/PR/card
-    /// identifiers, so this is a summary rather than a lossy replacement.
+    /// machine-written note remains available in its disclosure, including
+    /// build/PR/card identifiers, so this is a summary rather than a lossy replacement.
     var autoSetupStatus: (label: String, color: Color, icon: String) {
+        if liveAutoPRTask.autoprPaused == true {
+            return ("AUTOPR PAUSED", .orange, "pause.circle.fill")
+        }
+        if liveAutoPRTask.autoprClaimedAt != nil {
+            return ("WORKING NOW", .mwInkStrong, "hammer.circle.fill")
+        }
+        if liveAutoPRTask.isAutoPRQueueCandidate {
+            return ("IN QUEUE", .blue, "clock.arrow.circlepath")
+        }
         let note = (autoSetupProgressNote ?? "").lowercased()
         if autoPRNeedsRuntimeApproval {
             return ("APPROVAL NEEDED FOR 10 MORE MINUTES", .orange, "timer")
@@ -74,9 +83,9 @@ extension TaskViewerSheet {
         return ("AUTOMATION IN PROGRESS", .mwInkStrong, "cpu")
     }
 
-    /// Persistent provenance shown directly below the ticket metadata. Unlike
-    /// the one-line card preview, this deliberately renders the full note so a
-    /// reviewer can see the exact AutoPR decision after opening the card.
+    /// Persistent automation provenance. The outcome stays readable at a
+    /// glance; machine details and any original message are opt-in so this does
+    /// not become a second giant body competing with the contributor's brief.
     @ViewBuilder
     var autoSetupBanner: some View {
         if let note = autoSetupProgressNote {
@@ -84,39 +93,80 @@ extension TaskViewerSheet {
             let paragraphs = note.components(separatedBy: "\n\n").filter { !$0.isEmpty }
             let first = paragraphs.first ?? note
             let summary = first.range(of: " · note: ").map { String(first[$0.upperBound...]) } ?? first
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    Image(systemName: status.icon).foregroundColor(status.color)
-                    Text(autoPRIsAwaitingAnswers ? "Your input is needed" : status.label.capitalized)
-                        .font(.system(size: 16, weight: .semibold))
+            let hasTransientRunState = liveAutoPRTask.autoprClaimedAt != nil
+                || liveAutoPRTask.isAutoPRQueueCandidate
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: status.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(status.color)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("MATCHA-AUTOPR")
+                            .font(.system(size: 8, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundColor(status.color)
+                        Text(status.label == "AWAITING ANSWERS"
+                             ? "Your input is needed"
+                             : status.label.capitalized)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(appState.themeText)
+                    }
                     Spacer()
-                    Text("AutoPR").font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
+                    Text("AUTOMATED")
+                        .font(.system(size: 8, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(appState.themeText.opacity(0.07))
+                        .cornerRadius(3)
                 }
-                Text(summary)
-                    .font(.system(size: 13)).lineSpacing(4)
+                Text(hasTransientRunState ? "Previous AutoPR update: \(summary)" : summary)
+                    .font(.system(size: 12)).lineSpacing(3)
                     .foregroundColor(appState.themeTextSecondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 autoPRReconsiderationControl
-                ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { _, paragraph in
-                    Text(paragraph)
-                        .font(.system(size: 14)).lineSpacing(5)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(appState.themeText.opacity(0.04)).cornerRadius(10)
-                }
-                DisclosureGroup("Run details & original message") {
+                autoPRRunNowControl
+                DisclosureGroup(paragraphs.count > 1 ? "Technical details & original message" : "Technical details") {
                     Text(note).font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled).padding(.top, 8)
                 }
                 .font(.system(size: 11)).foregroundColor(.secondary)
             }
-            .padding(18)
+            .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(status.color.opacity(0.05)).cornerRadius(14)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(status.color.opacity(0.18), lineWidth: 1))
+            .background(status.color.opacity(0.045)).cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.16), lineWidth: 1))
+        } else if liveAutoPRTask.autoprClaimedAt != nil
+                    || liveAutoPRTask.isAutoPRQueueCandidate {
+            let isWorking = liveAutoPRTask.autoprClaimedAt != nil
+            HStack(spacing: 8) {
+                Image(systemName: isWorking ? "hammer.circle.fill" : "clock.arrow.circlepath")
+                    .foregroundColor(isWorking ? .mwInkStrong : .blue)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MATCHA-AUTOPR · AUTOMATED")
+                        .font(.system(size: 8, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(isWorking ? .mwInkStrong : .blue)
+                    Text(isWorking ? "Working now" : "In queue")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+                }
+                Spacer(minLength: 0)
+                Text(isWorking
+                     ? "Picked up and moved to In Progress"
+                     : "Waiting for matcha-autopr")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((isWorking ? Color.mwInkStrong : Color.blue).opacity(0.045)).cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke((isWorking ? Color.mwInkStrong : Color.blue).opacity(0.16), lineWidth: 1)
+            )
         }
     }
 
@@ -437,7 +487,9 @@ extension TaskViewerSheet {
         }
         if task.boardColumn == "review" { return .review }
         if task.boardColumn == "in_progress",
-           let pn = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines), !pn.isEmpty {
+           let pn = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !pn.isEmpty,
+           !(pn.hasPrefix("🤖 AUTO SETUP") || pn.lowercased().hasPrefix("from auto setup")) {
             return .progress(pn)
         }
         if task.boardColumn == "done" { return .done }
@@ -475,9 +527,12 @@ extension TaskViewerSheet {
         case .done:
             heroRule(color: .mwInkStrong, icon: "checkmark.seal.fill", label: "DONE", text: "This ticket is closed.")
         case .brief(let desc):
-            // No more-specific directive (fresh/no-note ticket) → the brief is
-            // the directive. Phase-colored so it still reads as the current state.
-            heroRule(color: currentPhase.color, icon: "doc.text", label: "THE BRIEF", text: desc)
+            heroRule(
+                color: currentPhase.color,
+                icon: "person.text.rectangle",
+                label: "CONTRIBUTOR BRIEF · \(contributorDisplayName.uppercased())",
+                text: desc
+            )
         case .phase:
             // No feedback, no progress note, no description → don't leave a blank
             // hole; show the phase + owner so the sheet still answers "where is

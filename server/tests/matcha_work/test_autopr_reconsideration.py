@@ -377,21 +377,27 @@ def test_task_shape_serializes_reconsideration_fields():
             "autopr_reconsideration_pending": True,
             "autopr_reconsideration_event_id": event_id,
             "autopr_reconsideration_at": now,
+            "autopr_claimed_at": now,
         }
     )
     assert shaped["autopr_reconsideration_event_id"] == str(event_id)
     assert shaped["autopr_reconsideration_at"] == now.isoformat()
+    assert shaped["autopr_claimed_at"] == now.isoformat()
 
 
 class _RunRequestConn:
     """Stub for the run-now queue: one task row, one pending-request lookup."""
 
-    def __init__(self, *, board_column="todo", status="pending", pending_at=None, exists=True):
+    def __init__(self, *, board_column="todo", status="pending", pending_at=None,
+                 active_claimed_at=None, exists=True):
         self.board_column = board_column
         self.status = status
         self.pending_at = pending_at
+        self.active_claimed_at = active_claimed_at
         self.exists = exists
         self.insert_args = None
+        self.update_args = None
+        self.history_events = []
         self.activity_id = uuid4()
         self.created_at = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
 
@@ -404,14 +410,40 @@ class _RunRequestConn:
                 return None
             return {"id": args[0], "board_column": self.board_column, "status": self.status,
                     "progress_note": getattr(self, "progress_note", None)}
+        if "UPDATE mw_tasks SET" in query:
+            self.update_args = args
+            self.board_column = "in_progress"
+            self.status = "pending"
+            return {
+                "id": args[0], "project_id": args[1], "company_id": uuid4(),
+                "created_by": uuid4(), "title": "Queued task", "description": None,
+                "due_date": None, "priority": "medium", "status": "pending",
+                "board_column": "in_progress", "pipeline_column": "lead",
+                "assigned_to": None, "completed_at": None,
+                "created_at": self.created_at, "updated_at": self.created_at,
+                "progress_note": getattr(self, "progress_note", None),
+                "category": "engineering", "element_id": None, "review_note": None,
+                "deal_value": None, "probability": None, "contact_name": None,
+                "contact_company": None, "contact_email": None, "contact_phone": None,
+                "outcome": None, "loss_reason": None, "next_action_at": None,
+                "expected_close": None, "pr_url": None, "pr_number": None,
+            }
         if "INSERT INTO mw_task_history" in query:
             self.insert_args = args
             return {"id": self.activity_id, "created_at": self.created_at}
         raise AssertionError(f"Unexpected query: {query}")
 
+    async def execute(self, query, *args):
+        if "INSERT INTO mw_task_history" in query:
+            self.history_events.append(args)
+            return "INSERT 0 1"
+        raise AssertionError(f"Unexpected query: {query}")
+
     async def fetchval(self, query, *args):
-        if "SELECT h.metadata" in query:
+        if "AS paused" in query:
             return getattr(self, "held", False)
+        if "metadata->>'kind' = 'autopr_run_claim'" in query:
+            return self.active_claimed_at
         if "autopr_run_request" in query:
             return self.pending_at
         if "SELECT 1 FROM mw_tasks" in query:
@@ -489,6 +521,10 @@ async def test_run_claim_consumes_the_request(monkeypatch):
     result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
 
     assert result["claimed_at"] == conn.created_at.isoformat()
+    assert result["task"]["board_column"] == "in_progress"
+    assert result["task"]["autopr_claimed_at"] == conn.created_at.isoformat()
+    assert conn.update_args is not None
+    assert conn.history_events[0][4:7] == ("column_change", "todo", "in_progress")
     assert json.loads(conn.insert_args[4]) == {"kind": "autopr_run_claim"}
 
 
@@ -538,6 +574,25 @@ async def test_unqueue_preserves_card_and_records_hold(monkeypatch, exists, colu
         assert "INSERT INTO mw_task_history" in args[0]
         assert "clock_timestamp()" in args[0]
         assert json.loads(args[-1]) == {"kind": "autopr_run_cancel"}
+
+
+@pytest.mark.asyncio
+async def test_selector_deferral_consumes_request_without_pausing_or_moving(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.defer_autopr_run(
+        project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4()
+    )
+
+    assert result == {"ok": True, "autopr_paused": False}
+    assert conn.board_column == "todo"
+    assert conn.update_args is None
+    assert json.loads(conn.history_events[0][-1]) == {
+        "kind": "autopr_run_cancel", "pause": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -604,6 +659,22 @@ async def test_claim_preserves_scoped_recovery_lane(monkeypatch, note, held, sta
     assert (conn.insert_args is not None) is allowed
 
 
+@pytest.mark.asyncio
+async def test_claim_resumes_an_unsettled_in_progress_pickup(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    active_at = datetime(2026, 9, 2, 2, 45, tzinfo=timezone.utc)
+    conn = _RunRequestConn(board_column="in_progress", active_claimed_at=active_at)
+    conn.progress_note = "Ordinary brief state"
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+
+    assert result["ok"] is True
+    assert result["task"]["board_column"] == "in_progress"
+    assert conn.history_events == []
+
+
 def test_hold_sql_releases_only_for_new_work_or_review_round():
     # Execute the production state query against an isolated in-memory SQL
     # fixture. No application database, migrations, or external connections.
@@ -616,9 +687,12 @@ def test_hold_sql_releases_only_for_new_work_or_review_round():
         db.execute("INSERT INTO mw_tasks VALUES ('ticket')")
         query = f"SELECT {svc._AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = 'ticket'"
 
-        def add(at, kind=None, event="activity"):
+        def add(at, kind=None, event="activity", pause=None):
+            metadata = {"kind": kind} if kind else {}
+            if pause is not None:
+                metadata["pause"] = pause
             db.execute("INSERT INTO mw_task_history VALUES (?, ?, ?, ?)",
-                       ("ticket", event, json.dumps({"kind": kind} if kind else {}), at))
+                       ("ticket", event, json.dumps(metadata), at))
 
         def paused():
             return bool(db.execute(query).fetchone()[0])
@@ -628,22 +702,25 @@ def test_hold_sql_releases_only_for_new_work_or_review_round():
         add(2, "autopr_run_claim")
         add(3, "autopr_run_cancel")
         assert paused()
-        add(4, event="column_change")  # publish -> review does not resume
-        add(5, "autopr_run_claim")     # stale worker does not resume
-        assert paused()
-        add(6, event="review_rejected")
+        add(4, "autopr_run_cancel", pause=False)
         assert not paused()
-        add(7, "autopr_run_cancel")
-        add(8, event="round_started")
+        add(5, "autopr_run_cancel")
+        add(6, event="column_change")  # publish -> review does not resume
+        add(7, "autopr_run_claim")     # stale worker does not resume
+        assert paused()
+        add(8, event="review_rejected")
         assert not paused()
         add(9, "autopr_run_cancel")
-        add(10, "autopr_additional_context")
+        add(10, event="round_started")
         assert not paused()
         add(11, "autopr_run_cancel")
-        add(12, "autopr_run_request")
+        add(12, "autopr_additional_context")
         assert not paused()
-        add(12, "autopr_run_cancel")  # conservative equal-time ordering
-        add(12, event="review_rejected")
+        add(13, "autopr_run_cancel")
+        add(14, "autopr_run_request")
+        assert not paused()
+        add(14, "autopr_run_cancel")  # conservative equal-time ordering
+        add(14, event="review_rejected")
         assert paused()
 
 
@@ -655,6 +732,37 @@ def test_hold_lookup_is_joined_once_per_task():
     assert query_source.count("{_AUTOPR_HOLD_QUERY}") == 1
     assert "{_AUTOPR_HOLD_SQL}" not in query_source
     assert "COALESCE(autopr_hold.paused, FALSE) AS autopr_paused" in query_source
+
+
+def test_active_claim_survives_comments_but_settles_on_run_mutation():
+    import sqlite3
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    with sqlite3.connect(":memory:") as db:
+        db.execute("CREATE TABLE mw_tasks (id TEXT)")
+        db.execute(
+            "CREATE TABLE mw_task_history "
+            "(task_id TEXT, event_type TEXT, metadata TEXT, created_at INTEGER)"
+        )
+        db.execute("INSERT INTO mw_tasks VALUES ('ticket')")
+        query = f"SELECT ({svc._AUTOPR_ACTIVE_CLAIM_QUERY}) FROM mw_tasks t WHERE t.id = 'ticket'"
+
+        def add(at, event="activity", kind=None):
+            db.execute(
+                "INSERT INTO mw_task_history VALUES (?, ?, ?, ?)",
+                ("ticket", event, json.dumps({"kind": kind} if kind else {}), at),
+            )
+
+        add(1, kind="autopr_run_claim")
+        assert db.execute(query).fetchone()[0] == 1
+        add(2, kind="note")
+        assert db.execute(query).fetchone()[0] == 1
+        add(3, event="progress_note_change")
+        assert db.execute(query).fetchone()[0] is None
+        add(4, kind="autopr_run_claim")
+        assert db.execute(query).fetchone()[0] == 4
+        add(5, event="column_change")
+        assert db.execute(query).fetchone()[0] is None
 
 
 def test_hold_index_upgrade_and_downgrade_are_concurrent(monkeypatch):

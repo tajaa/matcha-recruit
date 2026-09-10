@@ -6,23 +6,18 @@ import SwiftUI
 
 extension TaskViewerSheet {
 
-    /// The in-ticket Q&A thread: a note composer plus the activity notes,
-    /// newest-first. Always visible in every column so clarifying questions
-    /// are one click away. Posting a note bells the other participants.
+    /// The in-ticket Q&A thread, read like a conversation: oldest to newest,
+    /// then the composer. Always visible in every column so clarifying
+    /// questions are one click away. Posting a note bells the other participants.
     @ViewBuilder
     var discussionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             discussionHeader
 
-            if !isAddingAutoPRContext {
-                noteComposer
-            }
-
-            // One combined thread, newest-first (current-round comments land on
-            // top). Each row carries a Round-N chip and prior-round comments are
-            // dimmed, so it's never ambiguous which round a comment is from.
+            // One combined thread in reading order. Each row carries actor
+            // provenance plus a Round-N chip; prior-round comments recede.
             if !notes.isEmpty {
-                ForEach(Array(notes.reversed())) { note in
+                ForEach(notes) { note in
                     NoteRow(
                         entry: note,
                         files: attachments,
@@ -40,6 +35,11 @@ extension TaskViewerSheet {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .padding(.vertical, 4)
+            }
+
+            if !isAddingAutoPRContext {
+                if !notes.isEmpty { Divider().padding(.vertical, 2) }
+                noteComposer
             }
         }
     }

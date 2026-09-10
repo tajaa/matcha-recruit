@@ -879,7 +879,7 @@ AUTOPR_BOT_PRS_FILE="$TMP_DIR/bot-prs.json" AUTOPR_CACHE_DIR="$TMP_DIR/cache-ung
 ungranted_run_rc=$?
 check "an explicit run on an ungranted board is answered on the card, not silently eaten" \
     $([ "$ungranted_run_rc" = 3 ] \
-      && grep -q 'autopr/run-claim' "$RESEARCH_TEST_CURL_LOG" \
+      && grep -q 'autopr/run-defer' "$RESEARCH_TEST_CURL_LOG" \
       && jq -e '.kind == "note" and (.body | contains("research")) and (.body | contains("Admin"))' \
             "$RESEARCH_TEST_ACTIVITY" >/dev/null \
       && echo 0 || echo 1)

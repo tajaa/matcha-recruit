@@ -11,6 +11,64 @@ import SwiftUI
 
 extension TaskViewerSheet {
 
+    // MARK: - Research deliverable
+
+    /// Research is a first-class card result, not just another attachment.
+    /// The existing attachment preview already renders Markdown (with a
+    /// Rendered/Source toggle) and PDF; this row makes that reader discoverable
+    /// next to the card's current state.
+    @ViewBuilder
+    var researchReportSection: some View {
+        if liveAutoPRTask.category == "research" {
+            if let report = researchReportAttachment {
+                Button { previewFile = report } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.mwInkStrong)
+                            .frame(width: 28, height: 28)
+                            .background(Color.mwInkStrong.opacity(0.12))
+                            .cornerRadius(6)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("RESEARCH REPORT")
+                                .font(.system(size: 9, weight: .bold))
+                                .tracking(0.5)
+                                .foregroundColor(.mwInkStrong)
+                            Text(report.filename)
+                                .font(.system(size: 11))
+                                .foregroundColor(appState.themeTextSecondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
+                        Text("Read report")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.mwInkStrong)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.mwInkStrong)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.mwInkStrong.opacity(0.06))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.mwInkStrong.opacity(0.18), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else if liveAutoPRTask.autoprClaimedAt != nil
+                        || liveAutoPRTask.isAutoPRQueueCandidate {
+                Label("Research report will appear here when the run finishes.",
+                      systemImage: "doc.text.magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
     // MARK: - Attachments (task-level files)
 
     @ViewBuilder

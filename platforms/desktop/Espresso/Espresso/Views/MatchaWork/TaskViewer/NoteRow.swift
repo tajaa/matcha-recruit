@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One note in the task feed. Renders body + actor/timestamp footer plus
+/// One note in the task feed. Leads with actor/timestamp provenance, then body,
 /// (when the note has linked file ids) a row of inline image thumbnails
 /// resolved from the task's uploaded files. Tap a thumbnail to open the
 /// existing AttachmentPreviewSheet.
@@ -27,6 +27,24 @@ struct NoteRow: View {
         entry.metadata?["kind"] == "autopr_additional_context"
     }
 
+    /// The AutoPR service account is stable and seeded with this UUID on every
+    /// environment. Name matching keeps older/local fixtures legible too.
+    private var isAutoPRActor: Bool {
+        if entry.actorUserId?.lowercased() == MWProjectTask.autoPRBotUserId {
+            return true
+        }
+        let name = entry.actorName?.lowercased() ?? ""
+        return name.contains("autopr") || name.contains("auto setup")
+    }
+
+    private var actorDisplayName: String {
+        if isAutoPRActor { return "matcha-autopr" }
+        if let name = entry.actorName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return entry.actorUserId == nil ? "System" : "Contributor"
+    }
+
     private var linkedFiles: [MWProjectFile] {
         guard let ids = entry.attachmentIds, !ids.isEmpty else { return [] }
         let idSet = Set(ids)
@@ -50,7 +68,16 @@ struct NoteRow: View {
                 // reads like a chat thread — eye drops down the avatar
                 // column to identify who wrote what without parsing the
                 // actor name in the footer.
-                if let actorId = entry.actorUserId {
+                if isAutoPRActor {
+                    Circle()
+                        .fill(Color.mwInkStrong.opacity(0.16))
+                        .frame(width: 24, height: 24)
+                        .overlay(
+                            Image(systemName: "cpu")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.mwInkStrong)
+                        )
+                } else if let actorId = entry.actorUserId {
                     ChannelAvatarView(
                         senderId: actorId,
                         payloadURL: entry.actorAvatarUrl,
@@ -70,6 +97,42 @@ struct NoteRow: View {
                         )
                 }
                 VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(actorDisplayName)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.mwInk)
+                        if isAutoPRActor {
+                            Text("AUTOMATED")
+                                .font(.system(size: 7, weight: .bold))
+                                .tracking(0.4)
+                                .foregroundColor(.mwInkStrong)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.mwInkStrong.opacity(0.14))
+                                .cornerRadius(3)
+                        }
+                        Text(PacificDateFormatter.absolute(entry.createdAt) ?? "")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        if currentRound > 1 {
+                            Text("Round \(noteRound)")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(isPriorRound ? .secondary : .mwInkStrong)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background((isPriorRound ? Color.secondary : Color.mwInkStrong).opacity(0.15))
+                                .cornerRadius(3)
+                        }
+                        Spacer(minLength: 0)
+                        if let onReply, isHovered {
+                            Button(action: onReply) {
+                                Label("Reply", systemImage: "arrowshape.turn.up.left")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.mwInkStrong)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     if isAutoPRAdditionalContext {
                         Label("ADDITIONAL CONTEXT", systemImage: "arrow.clockwise.circle.fill")
                             .font(.system(size: 8, weight: .bold))
@@ -116,41 +179,20 @@ struct NoteRow: View {
                             }
                         }
                     }
-                    HStack(spacing: 8) {
-                        Text("\((entry.actorName?.isEmpty == false ? entry.actorName! : "Someone")) · \(PacificDateFormatter.absolute(entry.createdAt) ?? "")")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                        // Which round this comment is from. Only shown on
-                        // multi-round tickets; greyed for prior rounds, matcha
-                        // for the current one.
-                        if currentRound > 1 {
-                            Text("Round \(noteRound)")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(isPriorRound ? .secondary : .mwInkStrong)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background((isPriorRound ? Color.secondary : Color.mwInkStrong).opacity(0.15))
-                                .cornerRadius(3)
-                        }
-                        if let onReply, isHovered {
-                            Button(action: onReply) {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "arrowshape.turn.up.left")
-                                        .font(.system(size: 8))
-                                    Text("Reply")
-                                        .font(.system(size: 9, weight: .semibold))
-                                }
-                                .foregroundColor(.mwInkStrong)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
                 }
                 Spacer(minLength: 0)
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.mwInk.opacity(0.06))
+            .background(isAutoPRActor ? Color.mwInkStrong.opacity(0.07) : Color.mwInk.opacity(0.045))
+            .overlay(alignment: .leading) {
+                if isAutoPRActor {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.mwInkStrong.opacity(0.75))
+                        .frame(width: 2)
+                        .padding(.vertical, 5)
+                }
+            }
             .cornerRadius(5)
             .opacity(isPriorRound ? 0.6 : 1)   // prior-round comments recede
             .onHover { isHovered = $0 }

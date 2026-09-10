@@ -255,6 +255,11 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     /// yet claimed the card. The scheduled lane only sweeps every twenty
     /// minutes; this is what jumps the queue.
     var autoprRunRequestedAt: String? = nil
+    /// Latest AutoPR pickup that has not yet been settled by a progress-note
+    /// update or another board transition. The claim endpoint moves the card
+    /// to In Progress at the same time, and this timestamp drives the visible
+    /// working banner plus crash recovery.
+    var autoprClaimedAt: String? = nil
     var autoprPaused: Bool? = nil
 
     // ── Pipeline position (independent of kanban board_column) ──
@@ -309,6 +314,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case autoprReconsiderationEventId = "autopr_reconsideration_event_id"
         case autoprReconsiderationAt = "autopr_reconsideration_at"
         case autoprRunRequestedAt = "autopr_run_requested_at"
+        case autoprClaimedAt = "autopr_claimed_at"
         case autoprPaused = "autopr_paused"
         case projectId = "project_id"
         case boardColumn = "board_column"
@@ -343,6 +349,19 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
 }
 
 extension MWProjectTask {
+    static let autoPRBotUserId = "a0700000-0000-4000-8000-000000000001"
+
+    /// A card waiting in one of AutoPR's pickup lanes. Assignment is the
+    /// scheduled queue; run-now and reconsideration are explicit queue signals.
+    var isAutoPRQueueCandidate: Bool {
+        status != "cancelled"
+            && ["todo", "changes_requested"].contains(boardColumn)
+            && autoprPaused != true
+            && (assignedTo?.lowercased() == Self.autoPRBotUserId
+                || autoprRunRequestedAt != nil
+                || autoprReconsiderationPending == true)
+    }
+
     /// Priority bucket for column ordering (critical highest). Mirrors the
     /// backend `list_project_tasks` ORDER BY and CollabOverview.upcomingTasks().
     var priorityRank: Int {

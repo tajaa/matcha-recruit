@@ -9,6 +9,11 @@ extension TaskViewerSheet {
 
     // MARK: - Generic disclosure
 
+    var contributorDisplayName: String {
+        let name = task.createdByName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Contributor" : name
+    }
+
     /// Generic disclosure row mirroring `historyToggle` so supporting context
     /// (description, AI summary) sits one click away instead of crowding the
     /// directive. Closed by default.
@@ -59,7 +64,12 @@ extension TaskViewerSheet {
     var descriptionCollapsible: some View {
         if !descriptionIsHero,
            let desc = task.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
-            collapsibleSection(icon: "doc.text", title: "DESCRIPTION", isOpen: $showDescription) {
+            collapsibleSection(
+                icon: "person.text.rectangle",
+                title: "CONTRIBUTOR BRIEF",
+                badge: "Written by \(contributorDisplayName)",
+                isOpen: $showDescription
+            ) {
                 ScrollView {
                     Text(desc)
                         .font(.system(size: 13)).foregroundColor(appState.themeText.opacity(0.85))
