@@ -61,3 +61,43 @@ async def test_history_without_event_draft_cards_does_not_query_drafts():
 
     assert resolved is messages
     conn.fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_history_ignores_malformed_metadata_and_draft_ids():
+    conn = AsyncMock()
+    messages = [
+        {"id": uuid4(), "metadata": "{not-json"},
+        {
+            "id": uuid4(),
+            "metadata": {
+                "action": {"kind": "event_draft", "id": "not-a-uuid"},
+            },
+        },
+    ]
+
+    resolved = await _resolve_event_draft_action_statuses(
+        conn, messages, channel_id=uuid4(),
+    )
+
+    assert resolved is messages
+    conn.fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_history_keeps_messages_when_draft_is_not_in_the_channel():
+    draft_id = uuid4()
+    conn = AsyncMock()
+    conn.fetch.return_value = []
+    messages = [{
+        "id": uuid4(),
+        "metadata": {
+            "action": {"kind": "event_draft", "id": str(draft_id), "status": "pending"},
+        },
+    }]
+
+    resolved = await _resolve_event_draft_action_statuses(
+        conn, messages, channel_id=uuid4(),
+    )
+
+    assert resolved is messages
