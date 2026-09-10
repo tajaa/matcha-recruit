@@ -244,6 +244,45 @@ class TestPlanVacantFill:
             "exclusions", "exclusion_codes",
         }
 
+    def test_a_long_refusal_truncates_but_keeps_the_blocked_seats(self):
+        sentence = "Food Handler Card expired 2026-08-01 and blocks new scheduling"
+        seats = [
+            {"shift_id": f"s{i}", "role": "Barista", "starts_at": f"2026-08-2{i}T06:00:00+00:00",
+             "reason": "not qualified for the shift job", "reason_code": "not_qualified",
+             "exclusions": {"not qualified for the shift job": 1},
+             "exclusion_codes": {"not_qualified": 1}}
+            for i in range(8)
+        ]
+        seats.append({
+            "shift_id": "lead", "role": "Shift Lead", "starts_at": "2026-08-29T06:00:00+00:00",
+            "reason": sentence, "reason_code": "credential_expired",
+            "exclusions": {sentence: 1}, "exclusion_codes": {"credential_expired": 1},
+        })
+        text = week_builder.explain_unfilled(seats)
+        # The one seat a manager could actually fix outranks calendar order.
+        assert sentence in text
+        assert "\u2026and 4 more" in text
+        assert text.count("Barista") == 4
+
+    def test_more_reasons_than_fit_are_counted_not_dropped(self):
+        seat = {
+            "shift_id": "s1", "role": "Barista", "starts_at": "2026-08-23T06:00:00+00:00",
+            "reason": "manager exclusion", "reason_code": "manager_exclusion",
+            "exclusions": {"manager exclusion": 5, "approved time away": 4,
+                           "overlapping assignment": 3, "weekly hour cap": 2,
+                           "outside confirmed availability": 1},
+            "exclusion_codes": {"manager_exclusion": 5, "approved_time_away": 4,
+                                "existing_overlap": 3, "weekly_cap": 2, "outside_availability": 1},
+        }
+        text = week_builder.explain_unfilled([seat])
+        assert "+2 other reasons" in text
+        single = week_builder.explain_unfilled([{**seat, "exclusions": {"a": 2, "b": 1, "c": 1, "d": 1},
+                                                 "exclusion_codes": {"manager_exclusion": 5}}])
+        assert "+1 other reason" in single and "+1 other reasons" not in single
+
+    def test_no_open_seats_renders_nothing_rather_than_a_bare_remedy(self):
+        assert week_builder.explain_unfilled([]) == ""
+
     def test_statutory_advisories_are_attached_to_the_preview_assignment(self):
         advisory = {
             "check": "weekly_overtime", "severity": "advisory",

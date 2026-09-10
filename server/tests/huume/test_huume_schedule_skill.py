@@ -1621,6 +1621,13 @@ class TestFillVacantShifts(unittest.TestCase):
         for code in ("credential_expired", "rest_gap", "exclusion_codes", "fill_vacant_shifts"):
             assert code not in text
 
+    def test_a_refusal_with_no_open_seats_at_all_admits_it_knows_nothing(self):
+        """The scheduler staffed nobody and reported no seat either. Say that,
+        rather than dressing the silence up as a reason."""
+        result, _captured = self._propose({"fill_vacant_shifts": True}, plan=_fill_plan([], []))
+        assert result["status"] == "clarify"
+        assert "didn't report a reason" in result["message"]
+
     def test_a_planner_clarify_or_refusal_is_relayed_verbatim(self):
         result, captured = self._propose(
             {"fill_vacant_shifts": True, "fill_job_name": "barista"},
