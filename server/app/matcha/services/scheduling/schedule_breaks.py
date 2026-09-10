@@ -87,13 +87,6 @@ class BreakRequirement:
     effective_to: date | None = None
     authority_url: str | None = None
     source_type: str | None = None
-    # True when `earliest_local` came from a WALL-CLOCK window (New York's
-    # 11 a.m. noon day period) rather than an offset from the shift's own start
-    # (Washington's "no less than two hours"). An offset already states how far
-    # into the shift the break may open; a clock time says nothing about that —
-    # 11 a.m. is 4.5 hours into a 06:30 shift and 30 minutes into a 10:30 one —
-    # so only the clock-anchored kind yields to the stagger's placement floor.
-    earliest_clock_anchored: bool = False
 
 
 @dataclass(frozen=True)
@@ -379,7 +372,6 @@ def evaluate_break_plan(
             effective_to=rule.effective_to,
             authority_url=rule.authority_url,
             source_type=rule.source_type,
-            earliest_clock_anchored=rule.window_start is not None,
         )))
 
     ordered.sort(key=lambda item: item[:3])
@@ -481,7 +473,6 @@ def guidance_payload(plan: BreakPlan, *, timezone: str, evaluated_at: datetime) 
                 "effective_to": requirement.effective_to.isoformat() if requirement.effective_to else None,
                 "authority_url": requirement.authority_url,
                 "source_type": requirement.source_type,
-                "earliest_clock_anchored": requirement.earliest_clock_anchored,
             }
             for requirement in plan.requirements
         ],

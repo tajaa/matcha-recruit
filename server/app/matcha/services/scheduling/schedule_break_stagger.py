@@ -48,12 +48,10 @@ nothing about how early a break may start — California is the case in point
 (2012) 53 Cal.4th 1004 make a first-hour meal lawful).  Suggesting the shift's
 own start time is legal there and useless everywhere: nobody has worked yet.
 ``DEFAULT_PLACEMENT_FLOOR_MINUTES`` is this module's operational answer, and it
-is policy, not law — it is never written into a ``BreakRequirement``, it
-applies only where the rule set states no earliest of its own or states one as
-a wall-clock time rather than an offset from the shift start (see
-``_build_slot``), it yields both to the legal deadline and to coverage rather
-than manufacturing a conflict of either kind, and a time a manager saved is
-never re-judged against it.
+is policy, not law — it is never written into a ``BreakRequirement``, it only
+ever applies where the rule set states no earliest of its own, it yields both
+to the legal deadline and to coverage rather than manufacturing a conflict of
+either kind, and a time a manager saved is never re-judged against it.
 """
 
 from __future__ import annotations
@@ -183,8 +181,8 @@ def _build_slot(
     two placement rules narrow it — both subordinate to the rule's own window,
     and neither able to create a conflict the law does not have:
 
-    * a requirement whose earliest is statute-silent OR wall-clock-anchored
-      does not start before the policy floor (``policy_earliest``), and
+    * a statute-silent requirement does not start before the policy floor
+      (``policy_earliest``), and
     * nothing starts at the shift's first instant (``floor_earliest``), even
       where a rule set encodes an earliest offset of zero.
 
@@ -197,14 +195,6 @@ def _build_slot(
     never useful to anybody — so it bounds every candidate, including the
     ones policy discourages.  Both stay off the legal ``earliest`` itself,
     which still decides whether the break fits before its deadline.
-
-    The floor reaches a wall-clock earliest but not an offset one, because the
-    two say different things.  Washington's "no less than two hours from the
-    beginning of the shift" already fixes the distance from shift start, and
-    policy must not push a real statutory offset later.  New York's noon day
-    period opens at 11 a.m. whatever time the shift began — 30 minutes into a
-    10:30 shift — which is the case the floor exists for.  Either way the floor
-    only reorders candidates; the legal window is never narrowed.
     """
 
     duration = timedelta(minutes=requirement.duration_minutes)
@@ -224,7 +214,7 @@ def _build_slot(
         # a rule set encodes an earliest offset of zero.
         floor_earliest = shift_start_local + step
     policy_earliest = floor_earliest
-    if requirement.earliest_local is None or requirement.earliest_clock_anchored:
+    if requirement.earliest_local is None:
         floor = shift_start_local + timedelta(minutes=max(0, placement_floor_minutes))
         if policy_earliest < floor <= latest_start:
             policy_earliest = floor

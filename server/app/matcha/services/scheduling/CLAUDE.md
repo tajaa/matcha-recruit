@@ -718,40 +718,19 @@ Invariants, each of which has a regression test in
   compliance catalog is a data move, not a rewrite (that's the endgame:
   `SCHEDULING_CATALOG_RULES_PLAN.md`). A curated payload REPLACES the scalar
   adaptation for its state, so the adapter can't invent an hours-from-start
-  deadline § 162 never imposes. Three subdivisions — (2) noon day 30 min placed
-  in 11:00–14:00, (4) 45 min around the midpoint (60 in a factory, `industries`
-  scoping by NAICS 31–33 or canonical industry), (3) an extra 20 min in
-  17:00–19:00 when the shift starts before 11:00 and ends after 19:00 — each
-  carrying its own subdivision as `citation` and its own `ordinal`, because
-  `(kind, ordinal)` is the key the stagger and `planned_breaks` use.
-- **START TIME PARTITIONS (2) FROM (4), and the partition is load-bearing.**
-  The noon day rule takes starts in `[06:00, 11:01)` and the midway rule takes
-  `[11:01, 06:00)`; `_clock_in_window` wraps midnight, so together they cover
-  the clock exactly once. A gap is a >6h shift owed NO meal period — modelling
-  (2) as CONTAINMENT of 11:00–14:00 left 11:00–13:00 starts unassigned, and a
-  12:30–20:30 shift came back with nothing (found in review, 2026-09-09). An
-  overlap is the same shift billed for two meals and two rows fighting over one
-  `(kind, ordinal)` key. `test_every_start_time_lands_on_exactly_one_primary_
-  meal_rule` walks the whole clock as the guard. The 11 AM–1 PM slice is ours,
-  not the statute's — (4) begins at one o'clock, (2) speaks only of "the noon
-  day meal" — and it goes to (4) because someone clocking in after the noon day
-  period has begun cannot take the noon day meal at a sensible hour. NY's scalar row keeps
+  deadline § 162 never imposes. Three subdivisions can each govern one shift —
+  (2) noon day 30 min for a >6h shift spanning 11:00–14:00, (4) 45 min around
+  the midpoint for a >6h shift starting 13:00–06:00 (60 in a factory,
+  `industries` scoping by NAICS 31–33 or canonical industry), (3) an extra
+  20 min between 17:00–19:00 when the shift starts before 11:00 and ends after
+  19:00 — so each carries its own subdivision as `citation` and its own
+  `ordinal`, because `(kind, ordinal)` is the key the stagger and
+  `planned_breaks` use and two of these can co-apply. NY's scalar row keeps
   only the coarse write-path floor (6h/30min) plus its OT and minor caps;
   `second_meal_after_hours` is an explicit `None` so (3) is not double-counted
   as an hours-based second meal, and there is no `meal_waiver_max_hours` (a
   shorter NY meal needs a written Commissioner permit, § 162(5) — an employee
   attestation cannot waive it). Tests: `test_ny_schedule_law.py`.
-- **The placement floor reaches a wall-clock earliest, not an offset one.**
-  `DEFAULT_PLACEMENT_FLOOR_MINUTES` used to apply only where a rule stated no
-  earliest at all, so NY's 11:00 noon day window suggested a break 30 minutes
-  into a 10:30–18:30 shift. The two kinds of earliest say different things:
-  WA's "no less than two hours from the beginning of the shift" already fixes
-  the distance from shift start and policy must not push it later, while
-  11:00 is 4.5h into a 06:30 shift and 30 min into a 10:30 one.
-  `BreakRequirement.earliest_clock_anchored` (set from `rule.window_start`)
-  records which, and `_build_slot` lets the floor reorder only the clock-anchored
-  kind. Still a preference, still clamped to `latest_start` — it cannot narrow
-  the legal window or invent a `deadline_conflict`.
 - **Requirements are ordered by when they may be taken, not by trigger.**
   § 162(3)'s extra period is owed from minute one of a qualifying shift
   (`trigger_after_minutes` 0), so trigger order rendered it BEFORE the noon day

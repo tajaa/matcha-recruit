@@ -361,53 +361,6 @@ def test_a_statutory_earliest_below_the_floor_is_not_raised_to_it():
     assert plan.results[0].suggested_start == _local(8)
 
 
-def test_a_clock_anchored_earliest_yields_to_the_placement_floor():
-    """NY's noon day period opens at 11 AM whatever hour the shift began.
-
-    On a 10:30 shift that is 30 minutes in — legal, and not a break anybody
-    would take. Unlike WA's offset, a wall-clock earliest says nothing about
-    distance from shift start, so the floor is allowed to reorder past it.
-    """
-    plan = stagger_shift_breaks(
-        shift_start_local=_local(10, 30),
-        shift_end_local=_local(18, 30),
-        required_staff=1,
-        assignments=[StaggerAssignment(
-            employee_id=_employee(1),
-            plan=_plan(_requirement(
-                earliest_local=_local(11), recommended_local=None,
-                deadline_local=_local(14), earliest_clock_anchored=True,
-                citation="N.Y. Lab. Law § 162(2)",
-            )),
-        )],
-    )
-
-    result = plan.results[0]
-    assert result.status == "suggested"
-    assert result.suggested_start == _local(12, 30)
-    assert result.suggested_end <= _local(14)
-
-
-def test_a_clock_anchored_earliest_still_bounds_the_break_below():
-    """The floor reorders; it never lets a break open before the law does."""
-    plan = stagger_shift_breaks(
-        shift_start_local=_local(10, 30),
-        shift_end_local=_local(18, 30),
-        required_staff=1,
-        assignments=[StaggerAssignment(
-            employee_id=_employee(index),
-            plan=_plan(_requirement(
-                earliest_local=_local(11), recommended_local=None,
-                deadline_local=_local(14), earliest_clock_anchored=True,
-            )),
-        ) for index in range(1, 8)],
-    )
-
-    starts = [result.suggested_start for result in plan.results if result.suggested_start]
-    assert starts, "a crew too big for the floor still gets lawful times"
-    assert min(starts) >= _local(11)
-
-
 def test_a_zero_offset_statute_still_avoids_the_shift_start():
     plan = _opener(lambda: _ca_meal(earliest_local=_local(6, 30)))
 
