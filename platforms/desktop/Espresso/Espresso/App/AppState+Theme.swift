@@ -23,17 +23,19 @@ extension AppState {
         }
     }
 
-    /// The navigation rail always uses the opposite color mode of the body:
-    /// dark for light-family themes and light for dark-family themes.
-    var isSidebarDark: Bool { isLightFamily }
+    /// Keep navigation in the same color family as the workspace. The old
+    /// inverse rail made a dark board sit beside a bright beige slab, splitting
+    /// one window into two unrelated interfaces.
+    var isSidebarDark: Bool { !isLightFamily }
 
     var themeSidebar: Color {
-        if isSidebarDark {
-            return appTheme == "platinum"
-                ? Color.platinumSidebar
-                : Color(red: 0.075, green: 0.078, blue: 0.086)
+        switch appTheme {
+        case "light": return Color.graySidebar
+        case "platinum": return Color.platinumCard
+        case "cappuchin": return Color.cappuchinDark
+        case "graphite": return Color.graphiteBg
+        default: return Color(red: 0.075, green: 0.078, blue: 0.086)
         }
-        return Color(red: 0.775, green: 0.770, blue: 0.750)
     }
 
     var themeSidebarCard: Color {

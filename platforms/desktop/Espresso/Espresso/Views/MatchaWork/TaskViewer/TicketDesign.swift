@@ -29,6 +29,11 @@ extension Font {
     static func ticket(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         TicketTypography.font(size: size, weight: weight)
     }
+
+    /// App-wide alias used by the sidebar and board surfaces that frame tickets.
+    static func espresso(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        TicketTypography.font(size: size, weight: weight)
+    }
 }
 
 /// Quiet labels share one baseline; hierarchy comes from space, not weight or boxes.

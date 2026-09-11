@@ -1,6 +1,6 @@
 # Espresso ticket design
 
-Native macOS design refresh: bundled Inter, regular-weight headings, a single reading surface, source-attributed updates, content-sized replies, and persistent review actions. No API, queue, or report-generation behavior changes.
+Native macOS design refresh: bundled Inter, regular-weight headings, a single reading surface, source-attributed updates, content-sized replies, persistent review actions, quieter navigation, and compact unopened kanban cards. No API, queue, or report-generation behavior changes.
 
 ## Assets
 
@@ -19,10 +19,14 @@ python3 scripts/tests/test_espresso_ticket_design.py /tmp/espresso-ticket-design
 git diff --check
 ```
 
-The offline native smoke test compiles the production typography, brief renderer, discussion row, and research-report entry. It verifies font registration and quote/empty-note sizing, and renders fixture-based component previews in light and dark themes. These are component previews, not signed-in end-to-end screenshots. The production build covers integration with the full ticket viewer; live queue/review mutations are intentionally not exercised against production.
+The offline native smoke test compiles the production typography, brief renderer, discussion row, and research-report entry. It verifies font registration, quote/empty-note sizing, compact card design contracts, and sidebar theme alignment. It renders fixture-based ticket and workspace previews in light and dark themes. These are component previews, not signed-in end-to-end screenshots. The production build covers integration with the full ticket viewer and board; live queue/review mutations are intentionally not exercised against production.
 
 ### Component previews
 
 ![Dark native component preview](ticket-dark.png)
 
 ![Light native component preview](ticket-light.png)
+
+![Dark workspace chrome preview](workspace-dark.png)
+
+![Light workspace chrome preview](workspace-light.png)

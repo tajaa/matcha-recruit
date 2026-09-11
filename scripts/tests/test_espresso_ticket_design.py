@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Offline native smoke checks + component previews (not a signed-in app test).
 
-Compiles production typography, brief, discussion row and report entry views.
+Compiles production typography, brief, discussion row and report entry views,
+then renders ticket and workspace-chrome design fixtures.
 Usage: python3 scripts/tests/test_espresso_ticket_design.py [output-directory]
 No account, API, network images or production application state is used.
 """
@@ -103,6 +104,158 @@ struct TicketComponents: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }
+struct PreviewAppMark: View {
+    var body: some View {
+        let url = Bundle.main.url(forResource: "app_icon_512", withExtension: "png")!
+        Image(nsImage: NSImage(contentsOf: url)!)
+            .resizable().interpolation(.high).scaledToFit()
+            .frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+struct PreviewSidebarRow: View {
+    let icon: String
+    let label: String
+    var active = false
+    var railOnly = false
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).frame(width: 15)
+            Text(label).font(.espresso(size: 12, weight: active ? .medium : .regular))
+            Spacer()
+        }
+        .foregroundStyle(active ? Color.orange : Color.primary.opacity(0.72))
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 6).fill(active && !railOnly ? Color.orange.opacity(0.075) : .clear))
+        .overlay(alignment: .leading) {
+            if active { Capsule().fill(Color.orange).frame(width: 2, height: 16) }
+        }
+    }
+}
+struct PreviewSidebar: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                PreviewAppMark()
+                Text("Espresso").font(.espresso(size: 15, weight: .medium))
+                Spacer()
+            }.padding(.bottom, 15)
+            PreviewSidebarRow(icon: "house", label: "Home")
+            HStack {
+                Image(systemName: "magnifyingglass")
+                Text("Filter sidebar…")
+                Spacer()
+            }
+            .font(.espresso(size: 11)).foregroundStyle(.secondary)
+            .padding(.horizontal, 9).padding(.vertical, 7)
+            .background(.primary.opacity(0.045)).clipShape(RoundedRectangle(cornerRadius: 7))
+            .padding(.vertical, 12)
+            Text("Tabs").font(.espresso(size: 11)).foregroundStyle(.secondary)
+                .padding(.horizontal, 10).padding(.bottom, 5)
+            PreviewSidebarRow(icon: "square.grid.2x2", label: "WorkWork")
+            PreviewSidebarRow(icon: "square.grid.2x2", label: "Collab", active: true, railOnly: true)
+            PreviewSidebarRow(icon: "square.grid.2x2", label: "Beetlejuice")
+            PreviewSidebarRow(icon: "square.grid.2x2", label: "Gummfit")
+            Spacer().frame(height: 12)
+            PreviewSidebarRow(icon: "square.grid.2x2", label: "Workspaces", active: true)
+            PreviewSidebarRow(icon: "number", label: "Channels")
+            PreviewSidebarRow(icon: "book.closed", label: "Journals")
+            PreviewSidebarRow(icon: "bubble.left.and.bubble.right", label: "Threads")
+            PreviewSidebarRow(icon: "checklist", label: "Productivity")
+            PreviewSidebarRow(icon: "envelope", label: "Email")
+            Spacer()
+            Divider().opacity(0.45)
+            HStack {
+                Label("Inbox", systemImage: "envelope")
+                Spacer()
+                Label("People", systemImage: "person.2")
+            }.font(.espresso(size: 11)).foregroundStyle(.secondary).padding(.top, 12)
+        }
+        .padding(16).frame(width: 220)
+        .background(Color.primary.opacity(0.025))
+    }
+}
+struct PreviewBoardCard: View {
+    let title: String
+    var queue = false
+    var progress: String? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if queue {
+                Label("In queue · Waiting for matcha-autopr", systemImage: "clock.arrow.circlepath")
+                    .font(.espresso(size: 9)).foregroundStyle(.blue)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.blue.opacity(0.06))
+            }
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "circle").foregroundStyle(.secondary)
+                Text(title).font(.espresso(size: 13)).fixedSize(horizontal: false, vertical: true)
+            }.padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 7)
+            if let progress {
+                Label(progress, systemImage: "location.north.line")
+                    .font(.espresso(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    .padding(.horizontal, 10).padding(.bottom, 7)
+            }
+            HStack(spacing: 7) {
+                Label("Engineering", systemImage: "hammer")
+                    .foregroundStyle(.blue)
+                Text("Haley").foregroundStyle(.secondary)
+                Spacer()
+                Text("2h").foregroundStyle(.secondary)
+                Image(systemName: "ellipsis").foregroundStyle(.secondary)
+            }.font(.espresso(size: 9)).padding(.horizontal, 10).padding(.bottom, 9)
+        }
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.12), lineWidth: 0.7))
+        .overlay(alignment: .topTrailing) { Circle().fill(.orange).frame(width: 6, height: 6).padding(7) }
+    }
+}
+struct PreviewColumn: View {
+    let title: String
+    let cards: [(String, Bool, String?)]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Text(title).font(.espresso(size: 12))
+                Text("\(cards.count)").font(.espresso(size: 10)).foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "plus").foregroundStyle(.secondary)
+            }.padding(.horizontal, 8).padding(.top, 8)
+            ForEach(Array(cards.enumerated()), id: \.offset) { entry in
+                PreviewBoardCard(title: entry.element.0, queue: entry.element.1, progress: entry.element.2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 6).padding(.bottom, 7)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.02)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.08), lineWidth: 0.5))
+    }
+}
+struct WorkspaceChromePreview: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            PreviewSidebar()
+            Divider().opacity(0.45)
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Collab").font(.espresso(size: 20, weight: .medium))
+                HStack(alignment: .top, spacing: 8) {
+                    PreviewColumn(title: "Todo", cards: [
+                        ("Harden production test passwords", false, nil),
+                        ("Create broker-specific tier information", true, nil),
+                    ])
+                    PreviewColumn(title: "In progress", cards: [
+                        ("Add source screenshots to the research report", false, "Researching source examples"),
+                    ])
+                    PreviewColumn(title: "Review", cards: [
+                        ("Refine the EMS documentation brief", false, nil),
+                    ])
+                }
+            }.padding(18)
+        }
+        .frame(width: 900, height: 550)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
 @main struct DesignSmoke {
     @MainActor static func main() throws {
         let app = NSApplication.shared
@@ -131,8 +284,22 @@ struct TicketComponents: View {
             let url = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent(name)
             try bitmap.representation(using: .png, properties: [:])!.write(to: url)
             window.orderOut(nil)
+
+            let workspace = NSHostingView(rootView: WorkspaceChromePreview().preferredColorScheme(scheme))
+            let workspaceSize = workspace.fittingSize
+            let workspaceWindow = NSWindow(contentRect: NSRect(origin: .zero, size: workspaceSize), styleMask: [.borderless], backing: .buffered, defer: false)
+            workspaceWindow.contentView = workspace
+            workspaceWindow.orderFront(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            workspace.layoutSubtreeIfNeeded()
+            let workspaceBitmap = workspace.bitmapImageRepForCachingDisplay(in: workspace.bounds)!
+            workspace.cacheDisplay(in: workspace.bounds, to: workspaceBitmap)
+            let workspaceName = scheme == .dark ? "workspace-dark.png" : "workspace-light.png"
+            let workspaceURL = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent(workspaceName)
+            try workspaceBitmap.representation(using: .png, properties: [:])!.write(to: workspaceURL)
+            workspaceWindow.orderOut(nil)
         }
-        print("PASS: bundled Inter, content-sized replies, empty notes, Markdown headings; dark/light native renders")
+        print("PASS: bundled Inter, content-sized replies, empty notes, Markdown headings; dark/light ticket and workspace renders")
     }
 }
 '''
@@ -147,6 +314,8 @@ def main():
         binary = bundle / "MacOS/smoke"
         binary.parent.mkdir(parents=True)
         shutil.copytree(APP / "Resources/Fonts", bundle / "Resources/Fonts")
+        shutil.copy2(APP / "Resources/Assets.xcassets/AppIcon.appiconset/app_icon_512.png",
+                     bundle / "Resources/app_icon_512.png")
         source = root / "Smoke.swift"
         source.write_text((VIEWS / "TicketDesign.swift").read_text()
                           + (VIEWS / "NoteRow.swift").read_text() + report + STUBS)
@@ -158,6 +327,14 @@ def main():
     icon = APP / "Resources/Assets.xcassets/AppIcon.appiconset"
     for entry in json.loads((icon / "Contents.json").read_text())["images"]:
         assert (icon / entry["filename"]).is_file()
+    card = (APP / "Views/MatchaWork/KanbanCard.swift").read_text()
+    columns = (APP / "Views/MatchaWork/KanbanBoardView+Columns.swift").read_text()
+    theme = (APP / "App/AppState+Theme.swift").read_text()
+    assert 'return ("In queue"' in card
+    assert "Text(currentColumnLabel)" not in card
+    assert ".strokeBorder(Color.yellow" not in columns
+    assert "Text(label.uppercased())" not in columns
+    assert "var isSidebarDark: Bool { !isLightFamily }" in theme
     print("PASS: icon catalog references resolve")
 
 

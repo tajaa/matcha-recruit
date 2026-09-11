@@ -35,7 +35,7 @@ struct EmailSidebarView: View {
 
             if let err = vm.errorMessage {
                 Text(err)
-                    .font(.system(size: 10))
+                    .font(.espresso(size: 10))
                     .foregroundColor(.red.opacity(0.85))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
@@ -58,13 +58,13 @@ struct EmailSidebarView: View {
                     Text("Connecting…")
                 } else {
                     Image(systemName: "envelope.badge")
-                        .font(.system(size: 12))
+                        .font(.espresso(size: 12))
                         .foregroundColor(appState.themeSidebarAccent)
                     Text("Connect Gmail")
                 }
                 Spacer()
             }
-            .font(.system(size: 12, weight: .medium))
+            .font(.espresso(size: 12))
             .foregroundColor(appState.themeSidebarText)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -81,11 +81,11 @@ struct EmailSidebarView: View {
         } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text(msg.subject.isEmpty ? "(no subject)" : msg.subject)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.espresso(size: 12, weight: .medium))
                     .foregroundColor(appState.themeSidebarText)
                     .lineLimit(1)
                 Text(msg.fromAddress)
-                    .font(.system(size: 10))
+                    .font(.espresso(size: 10))
                     .foregroundColor(appState.themeSidebarTextSecondary)
                     .lineLimit(1)
             }
@@ -104,8 +104,8 @@ struct EmailSidebarView: View {
 
     private func infoRow(icon: String, text: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 10))
-            Text(text).font(.system(size: 11))
+            Image(systemName: icon).font(.espresso(size: 10))
+            Text(text).font(.espresso(size: 11))
             Spacer()
         }
         .foregroundColor(appState.themeSidebarTextSecondary)
@@ -116,10 +116,10 @@ struct EmailSidebarView: View {
     private var connectedFooter: some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.seal")
-                .font(.system(size: 9))
+                .font(.espresso(size: 9))
                 .foregroundColor(appState.themeSidebarAccent)
             Text(vm.email ?? "Connected")
-                .font(.system(size: 10))
+                .font(.espresso(size: 10))
                 .foregroundColor(appState.themeSidebarTextSecondary)
                 .lineLimit(1)
             Spacer()
@@ -129,7 +129,7 @@ struct EmailSidebarView: View {
                 Button("Disconnect", role: .destructive) { Task { await vm.disconnect() } }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.espresso(size: 11))
                     .foregroundColor(appState.themeSidebarTextSecondary)
                     .frame(width: 18, height: 18)
             }
