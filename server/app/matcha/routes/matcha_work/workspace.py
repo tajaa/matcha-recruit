@@ -8,10 +8,9 @@ order-sensitive route pair this module used to carry.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
-import json
 import logging
+import re
 import secrets
-import time
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -20,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.config import get_settings
 from app.core.models.auth import CurrentUser
+from app.core.services.redis_cache import get_redis_cache
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
@@ -30,42 +30,67 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 oauth_callback_router = APIRouter()
 
-GMAIL_OAUTH_STATE_TTL_SECONDS = 10 * 60
+GMAIL_OAUTH_STATE_TTL_SECONDS = 30 * 60
+_GMAIL_OAUTH_STATE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
+_GMAIL_OAUTH_STATE_KEY_PREFIX = "gmail_oauth_state:"
 
 
-def _build_gmail_oauth_state(user_id: UUID) -> str:
-    """Return a tamper-evident, short-lived capability for the public callback."""
-    from app.core.services.secret_crypto import encrypt_secret
-
-    payload = json.dumps(
-        {
-            "user_id": str(user_id),
-            "issued_at": int(time.time()),
-            "nonce": secrets.token_urlsafe(16),
-        },
-        separators=(",", ":"),
-    )
-    encrypted = encrypt_secret(payload)
-    if encrypted is None:  # Defensive only: payload is always non-empty.
-        raise RuntimeError("Failed to create OAuth state")
-    return encrypted
+class _GmailOAuthStateStoreUnavailable(RuntimeError):
+    """Raised when a secure, one-time OAuth state cannot be issued or consumed."""
 
 
-def _decode_gmail_oauth_state(state: str) -> UUID:
-    from app.core.services.secret_crypto import decrypt_secret
+def _gmail_oauth_state_key(state: str) -> str:
+    return f"{_GMAIL_OAUTH_STATE_KEY_PREFIX}{state}"
 
+
+def _validate_gmail_oauth_state_format(state: str) -> None:
+    if not _GMAIL_OAUTH_STATE_PATTERN.fullmatch(state):
+        raise ValueError("Invalid or expired OAuth state")
+
+
+async def _issue_gmail_oauth_state(user_id: UUID) -> str:
+    """Persist an opaque user binding that can be consumed exactly once."""
+    redis = get_redis_cache()
+    if redis is None:
+        raise _GmailOAuthStateStoreUnavailable("OAuth state store is unavailable")
+
+    # SET NX handles the practically impossible random collision without ever
+    # replacing a still-live state.
+    for _attempt in range(3):
+        state = secrets.token_urlsafe(32)
+        try:
+            stored = await redis.set(
+                _gmail_oauth_state_key(state),
+                str(user_id),
+                ex=GMAIL_OAUTH_STATE_TTL_SECONDS,
+                nx=True,
+            )
+        except Exception as exc:
+            raise _GmailOAuthStateStoreUnavailable(
+                "OAuth state store is unavailable"
+            ) from exc
+        if stored:
+            return state
+    raise _GmailOAuthStateStoreUnavailable("Failed to allocate OAuth state")
+
+
+async def _consume_gmail_oauth_state(state: str) -> UUID:
+    """Atomically consume an opaque state and return its initiating user."""
+    _validate_gmail_oauth_state_format(state)
+    redis = get_redis_cache()
+    if redis is None:
+        raise _GmailOAuthStateStoreUnavailable("OAuth state store is unavailable")
     try:
-        payload = json.loads(decrypt_secret(state))
-        user_id = UUID(payload["user_id"])
-        issued_at = int(payload["issued_at"])
-        nonce = payload["nonce"]
-        age_seconds = int(time.time()) - issued_at
-        if not isinstance(nonce, str) or not nonce:
-            raise ValueError("Missing nonce")
-        if age_seconds < -60 or age_seconds > GMAIL_OAUTH_STATE_TTL_SECONDS:
-            raise ValueError("State expired")
-        return user_id
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        user_id = await redis.getdel(_gmail_oauth_state_key(state))
+    except Exception as exc:
+        raise _GmailOAuthStateStoreUnavailable(
+            "OAuth state store is unavailable"
+        ) from exc
+    if user_id is None:
+        raise ValueError("Invalid or expired OAuth state")
+    try:
+        return UUID(user_id)
+    except (AttributeError, TypeError, ValueError) as exc:
         raise ValueError("Invalid or expired OAuth state") from exc
 
 
@@ -291,9 +316,16 @@ async def agent_email_connect(
     settings = get_settings()
     redirect_uri = f"{settings.app_base_url}/api/matcha-work/agent/email/callback"
 
-    # The system-browser callback has no Matcha bearer token, so carry a
-    # tamper-evident, short-lived user binding in OAuth state.
-    state = _build_gmail_oauth_state(current_user.id)
+    # The system-browser callback has no Matcha bearer token. Carry only an
+    # opaque random handle; Redis holds the user binding and consumes it once.
+    try:
+        state = await _issue_gmail_oauth_state(current_user.id)
+    except _GmailOAuthStateStoreUnavailable as exc:
+        logger.error("Cannot issue Gmail OAuth state: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail connection is temporarily unavailable. Please try again.",
+        ) from exc
 
     params = {
         "client_id": creds["client_id"],
@@ -310,8 +342,9 @@ async def agent_email_connect(
 
 @oauth_callback_router.get("/agent/email/callback", include_in_schema=False)
 async def agent_email_callback(
-    code: str = Query(...),
     state: str = Query(...),
+    code: str | None = Query(None),
+    error: str | None = Query(None),
 ):
     """OAuth callback — exchange code for tokens, store encrypted in DB, close popup."""
     from app.matcha.services.matcha_work.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
@@ -319,9 +352,33 @@ async def agent_email_callback(
     # Recover the initiating user without requiring a bearer token: Google
     # redirects the system browser here directly and cannot attach one.
     try:
-        user_id = _decode_gmail_oauth_state(state)
+        user_id = await _consume_gmail_oauth_state(state)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except _GmailOAuthStateStoreUnavailable as exc:
+        logger.error("Cannot consume Gmail OAuth state: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail connection is temporarily unavailable. Please try again.",
+        ) from exc
+
+    if error == "access_denied":
+        return Response(
+            content="""<!DOCTYPE html><html><body>
+<script>window.opener && window.opener.postMessage('gmail-cancelled', '*'); window.close();</script>
+<p>Gmail connection canceled. You can close this window.</p>
+</body></html>""",
+            media_type="text/html",
+        )
+    if error or not code:
+        return Response(
+            content="""<!DOCTYPE html><html><body>
+<script>window.opener && window.opener.postMessage('gmail-error', '*'); window.close();</script>
+<p>Google could not complete the Gmail connection. Close this window and try again.</p>
+</body></html>""",
+            media_type="text/html",
+            status_code=400,
+        )
 
     creds = get_oauth_credentials()
     if not creds:
