@@ -932,12 +932,6 @@ only; their content is never included. The endpoint is idempotent on filename. T
 never touches Gmail: the snapshots are the whole corpus, and a message nobody attached does
 not exist for the run.
 
-A card can also start on the board: choosing the Email template in Espresso's New Ticket
-flow opens a four-step wizard (pick up to 10 unread emails → goal → reply tone → a review
-of what AutoPR will and won't do). Creating the ticket then snapshots the picked emails onto
-the new card through the same endpoint, and lists them under `## Emails attached` in the
-description.
-
 Registry row (`autopr_kind_field email …` in `lib.sh`):
 
 | Field | Value |

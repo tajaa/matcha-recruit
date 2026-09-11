@@ -86,16 +86,13 @@ extension ProjectDetailViewModel {
         }
     }
 
-    /// Returns the created task (nil on failure, with `errorMessage` set) —
-    /// an email ticket needs its id to attach the chosen emails.
-    @discardableResult
     func addTask(title: String, column: String = "todo", pipelineColumn: String = "lead", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil, subtasks: [String]? = nil,
                  dealValue: Double? = nil, probability: Int? = nil,
                  contactName: String? = nil, contactCompany: String? = nil,
                  contactEmail: String? = nil, contactPhone: String? = nil,
                  outcome: String? = nil, lossReason: String? = nil,
-                 nextActionAt: String? = nil, expectedClose: String? = nil) async -> MWProjectTask? {
-        guard let pid = project?.id else { return nil }
+                 nextActionAt: String? = nil, expectedClose: String? = nil) async {
+        guard let pid = project?.id else { return }
         // A deal (sales-pipeline create) carries any deal field — used for the
         // activity-log verb so the timeline reads "added deal" not "added task".
         let isDeal = category == "sales" || dealValue != nil || contactCompany != nil || contactName != nil
@@ -116,10 +113,8 @@ extension ProjectDetailViewModel {
                 tasks.insert(task, at: 0)
                 logActivity("plus.circle", isDeal ? "added deal \u{201C}\(title)\u{201D}" : "added task \u{201C}\(title)\u{201D}")
             }
-            return task
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
-            return nil
         }
     }
 

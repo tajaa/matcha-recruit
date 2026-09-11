@@ -90,9 +90,6 @@ class AppState {
     /// Full-pane Productivity hub — personal kanban boards (To Do / In Progress
     /// / Done). Same nav-only model as the other hubs.
     var showProductivityHub: Bool = false
-    /// Full-pane Email hub (mailbox · message list · reader). Same nav-only
-    /// model; a selected email (`selectedEmailId`) opens inside it.
-    var showEmailHub: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
@@ -119,7 +116,6 @@ class AppState {
         showThreadsHub = false
         showChannelsHub = false
         showProductivityHub = false
-        showEmailHub = false
     }
 
     var onlineUsers: [MWOnlineUser] = []
