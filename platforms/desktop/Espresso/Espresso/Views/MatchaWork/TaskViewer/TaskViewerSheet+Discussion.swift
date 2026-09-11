@@ -23,6 +23,7 @@ extension TaskViewerSheet {
                         files: attachments,
                         noteRound: roundIndex(forCreatedAt: note.createdAt),
                         currentRound: currentRound,
+                        autoPRBotUserId: viewModel.autoPRBotUserId,
                         onPreview: { previewFile = $0 },
                         onReply: {
                             replyingToNote = note

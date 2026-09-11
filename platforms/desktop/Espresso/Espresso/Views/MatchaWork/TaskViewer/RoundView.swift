@@ -10,6 +10,7 @@ struct RoundView: View {
     let round: TaskRound
     let previousFixed: [String]
     let files: [MWProjectFile]
+    let autoPRBotUserId: String?
     let onPreview: (MWProjectFile) -> Void
 
     @State private var isExpanded: Bool
@@ -18,11 +19,13 @@ struct RoundView: View {
         round: TaskRound,
         previousFixed: [String],
         files: [MWProjectFile],
+        autoPRBotUserId: String?,
         onPreview: @escaping (MWProjectFile) -> Void
     ) {
         self.round = round
         self.previousFixed = previousFixed
         self.files = files
+        self.autoPRBotUserId = autoPRBotUserId
         self.onPreview = onPreview
         self._isExpanded = State(initialValue: round.isLatest)
     }
@@ -69,7 +72,12 @@ struct RoundView: View {
                     // threshold; short rounds render inline with no scrollbar.
                     let eventsStack = VStack(alignment: .leading, spacing: 4) {
                         ForEach(round.events) { event in
-                            EventRow(event: event, files: files, onPreview: onPreview)
+                            EventRow(
+                                event: event,
+                                files: files,
+                                autoPRBotUserId: autoPRBotUserId,
+                                onPreview: onPreview
+                            )
                         }
                     }
                     if round.events.count > 8 {

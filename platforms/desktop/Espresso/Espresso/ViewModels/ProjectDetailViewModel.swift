@@ -57,6 +57,12 @@ class ProjectDetailViewModel {
     /// but not project switches or app relaunches. Backend feed is a follow-up.
     var recentActivity: [CollabActivityItem] = []
 
+    /// Server-owned AutoPR identity and board eligibility. Both are loaded from
+    /// `/autopr/board-capabilities`; never infer bot ownership from a name or a
+    /// duplicated UUID in the desktop app.
+    var autoPRBotUserId: String?
+    var autoPRBoardIsWatched: Bool?
+
     /// subtaskId → the accepted commit that completed it (latest). Loaded for the
     /// in-review audit so a reviewer can see + overturn the AI auto-checks.
     var commitCompletions: [String: MWCommitSuggestion] = [:]

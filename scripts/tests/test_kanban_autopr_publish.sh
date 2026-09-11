@@ -247,6 +247,9 @@ EOF
 
 check "already-fixed reconsideration leaves a threaded note with the covering PR" \
   $(jq -e '.kind == "note" and .reply_to == "ffffffff-0000-4000-8000-000000000002" and (.body | startswith("After reviewing your additional context, AutoPR still found this request already fixed in PR #364."))' "$TMP_DIR/activity.json" >/dev/null && echo 0 || echo 1)
+check "non-rework no-safe-action returns a claimed card to a runnable lane" \
+  $(jq -e '.board_column == "changes_requested" and (.progress_note | contains("NO PR: ALREADY FIXED"))' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 check "missing result-notification route does not fail completed publication" \
   $(grep -q 'result notification endpoint is not deployed; PR/card publication for task aaaa0000-0000-4000-8000-000000000001 remains complete' \
     "$TMP_DIR/result-notification-404.stderr" && echo 0 || echo 1)
@@ -647,7 +650,8 @@ check "a partial_implementation cannot smuggle a string-literal-only diff past t
     && git -C "$TEST_REPO" diff --quiet \
     && echo 0 || echo 1)
 check "the cosmetic-diff refusal is recorded on the card" \
-  $(jq -e '.progress_note | contains("BLOCKED: COSMETIC DIFF") and contains("[autopr:rejected")' \
+  $(jq -e '.board_column == "changes_requested"
+      and (.progress_note | contains("BLOCKED: COSMETIC DIFF") and contains("[autopr:rejected"))' \
     "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
 check "the cosmetic-diff refusal asks the card owner for a decision" \
   $(jq -e '(.reason | contains("only rewrites string literals"))

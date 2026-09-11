@@ -254,6 +254,7 @@ def test_staged_rows_are_bookkeeping_not_discussion():
     model's own context — filters through this list."""
     assert "autopr_staged_action" in pt._AUTOPR_BOOKKEEPING_KINDS
     assert "autopr_staged_action_result" in pt._AUTOPR_BOOKKEEPING_KINDS
+    assert "autopr_run_claim_move" in pt._AUTOPR_BOOKKEEPING_KINDS
     assert pt.is_autopr_bookkeeping_row({"kind": "autopr_staged_action", "action_body": "x"})
     assert pt.is_autopr_bookkeeping_row({"kind": "autopr_run_claim"})
     assert not pt.is_autopr_bookkeeping_row({"kind": "note", "body": "hello"})

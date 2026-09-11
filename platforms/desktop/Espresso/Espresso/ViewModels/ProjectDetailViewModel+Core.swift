@@ -79,6 +79,8 @@ extension ProjectDetailViewModel {
                 // clear the prior project's map so ids don't bleed across projects.
                 taskFiles = [:]
                 recentActivity = []   // Overview's .task(id:) reloads the server feed
+                autoPRBotUserId = nil
+                autoPRBoardIsWatched = nil
                 if let cachedDetail {
                     project = cachedDetail
                     activeChatId = cachedDetail.chats?.first?.id

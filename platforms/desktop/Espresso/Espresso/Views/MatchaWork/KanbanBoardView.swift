@@ -274,6 +274,7 @@ struct KanbanBoardView: View {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
             }
+            await viewModel.loadAutoPRBoardState()
             // A cumulative Done column needs the cards the week-scoped load
             // withheld. Weekly boards fetch them only if the user expands.
             if !doneWeeklyReset && !isPipeline {

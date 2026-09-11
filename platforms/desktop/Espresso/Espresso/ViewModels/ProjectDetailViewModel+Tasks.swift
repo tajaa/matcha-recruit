@@ -4,6 +4,29 @@ extension ProjectDetailViewModel {
 
     // MARK: - Collab: tasks
 
+    /// Resolve the server-owned bot identity and whether this board is polled.
+    /// Kept on the project view model so cards, the viewer, and note provenance
+    /// all consume one authoritative value.
+    func loadAutoPRBoardState() async {
+        guard let pid = project?.id else { return }
+        do {
+            let caps = try await service.autoprBoardCapabilities(projectId: pid)
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                autoPRBotUserId = caps.autoprBotUserId
+                autoPRBoardIsWatched = caps.isWatched(pid)
+            }
+        } catch {
+            // Unknown is intentionally not treated as watched. A later board or
+            // ticket refresh retries the read without showing a false queue.
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                autoPRBotUserId = nil
+                autoPRBoardIsWatched = nil
+            }
+        }
+    }
+
     /// Load the Done column beyond the current week (server-capped). Called when
     /// the user expands Done, or opens a board whose Done policy is cumulative.
     /// No-op once "all" is already loaded, so expanding twice costs one fetch.
@@ -281,6 +304,8 @@ extension ProjectDetailViewModel {
             // fields are absent, so do not preserve stale queued badges.
             merged.autoprRunRequestedAt = nil
             merged.autoprReconsiderationPending = false
+            merged.autoprReconsiderationEventId = nil
+            merged.autoprReconsiderationAt = nil
         } else if merged.boardColumn != previous.boardColumn
                     || merged.progressNote != previous.progressNote {
             // Publication settles an active run with one of these mutations.
@@ -289,7 +314,10 @@ extension ProjectDetailViewModel {
         } else {
             merged.autoprClaimedAt = previous.autoprClaimedAt
         }
-        if merged.progressNote != previous.progressNote {
+        if merged.autoprClaimedAt != nil {
+            // The claim branch above is authoritative. Do not let the generic
+            // list-field preservation below restore the request it consumed.
+        } else if merged.progressNote != previous.progressNote {
             // A reconsideration event is bound to one exact AutoPR decision.
             // Single-task/WS payloads omit the list-only event fields, so a
             // changed decision must consume the cached pending state instead

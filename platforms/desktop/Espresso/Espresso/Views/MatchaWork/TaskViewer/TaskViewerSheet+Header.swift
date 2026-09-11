@@ -17,6 +17,13 @@ extension TaskViewerSheet {
         viewModel.tasks.first(where: { $0.id == task.id }) ?? task
     }
 
+    var autoPRIsQueueCandidate: Bool {
+        liveAutoPRTask.isAutoPRQueueCandidate(
+            botUserId: viewModel.autoPRBotUserId,
+            boardIsWatched: viewModel.autoPRBoardIsWatched
+        )
+    }
+
     /// AutoPR writes its durable ticket state into `progress_note`. The board
     /// card already previews that field, but the detail sheet must repeat it:
     /// opening a ticket should never hide the fact that an autonomous system
@@ -58,15 +65,15 @@ extension TaskViewerSheet {
         if liveAutoPRTask.autoprClaimedAt != nil {
             return ("WORKING NOW", .mwInkStrong, "hammer.circle.fill")
         }
-        if liveAutoPRTask.isAutoPRQueueCandidate {
-            return ("IN QUEUE", .blue, "clock.arrow.circlepath")
-        }
         let note = (autoSetupProgressNote ?? "").lowercased()
         if autoPRNeedsRuntimeApproval {
             return ("APPROVAL NEEDED FOR 10 MORE MINUTES", .orange, "timer")
         }
         if autoPRIsAwaitingAnswers {
             return ("AWAITING ANSWERS", .orange, "questionmark.circle.fill")
+        }
+        if autoPRIsQueueCandidate {
+            return ("IN QUEUE", .blue, "clock.arrow.circlepath")
         }
         if note.contains("already fixed") {
             return ("NO PR · ALREADY FIXED", .mwInkStrong, "checkmark.circle.fill")
@@ -94,7 +101,9 @@ extension TaskViewerSheet {
             let first = paragraphs.first ?? note
             let summary = first.range(of: " · note: ").map { String(first[$0.upperBound...]) } ?? first
             let hasTransientRunState = liveAutoPRTask.autoprClaimedAt != nil
-                || liveAutoPRTask.isAutoPRQueueCandidate
+                || (autoPRIsQueueCandidate
+                    && !autoPRNeedsRuntimeApproval
+                    && !autoPRIsAwaitingAnswers)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: status.icon)
@@ -126,8 +135,21 @@ extension TaskViewerSheet {
                     .foregroundColor(appState.themeTextSecondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if autoPRIsAwaitingAnswers {
+                    ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { _, paragraph in
+                        Text(paragraph)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineSpacing(3)
+                            .foregroundColor(appState.themeText)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(status.color.opacity(0.08))
+                            .cornerRadius(5)
+                    }
+                }
                 autoPRReconsiderationControl
-                autoPRRunNowControl
                 DisclosureGroup(paragraphs.count > 1 ? "Technical details & original message" : "Technical details") {
                     Text(note).font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled).padding(.top, 8)
@@ -139,7 +161,7 @@ extension TaskViewerSheet {
             .background(status.color.opacity(0.045)).cornerRadius(8)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.16), lineWidth: 1))
         } else if liveAutoPRTask.autoprClaimedAt != nil
-                    || liveAutoPRTask.isAutoPRQueueCandidate {
+                    || autoPRIsQueueCandidate {
             let isWorking = liveAutoPRTask.autoprClaimedAt != nil
             HStack(spacing: 8) {
                 Image(systemName: isWorking ? "hammer.circle.fill" : "clock.arrow.circlepath")
@@ -224,14 +246,13 @@ extension TaskViewerSheet {
         liveAutoPRTask.category == "research" ? "Run research now" : "Run AutoPR now"
     }
 
-    /// Why the run button is disabled, when it is. Only a Research card on a
-    /// board that is not granted `research` (or not watched at all) — the one
-    /// unrunnable state a person can fix, so name the fix.
+    /// Why the run button is disabled, when it is. No card can run on an
+    /// unwatched board; Research also requires its explicit capability grant.
     var autoPRRunBlockedReason: String? {
-        guard liveAutoPRTask.category == "research" else { return nil }
-        if boardWatchedByAutoPR == false {
+        if viewModel.autoPRBoardIsWatched == false {
             return "AutoPR does not watch this board, so this card cannot run."
         }
+        guard liveAutoPRTask.category == "research" else { return nil }
         if researchGranted == false {
             return "This board is not granted research. An admin can grant it under Admin → Settings → AutoPR board capabilities."
         }
@@ -243,25 +264,46 @@ extension TaskViewerSheet {
         do {
             let caps = try await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid)
             researchGranted = caps.has("research", on: pid)
-            boardWatchedByAutoPR = caps.isWatched(pid)
+            viewModel.autoPRBotUserId = caps.autoprBotUserId
+            viewModel.autoPRBoardIsWatched = caps.isWatched(pid)
         } catch {
             // Unknown stays unknown: the button works as before and the
             // server / harness give the definitive answer.
             researchGranted = nil
-            boardWatchedByAutoPR = nil
         }
     }
 
     @ViewBuilder
     var autoPRRunNowControl: some View {
-        if canRequestAutoPRRun {
+        let hasActiveClaim = liveAutoPRTask.autoprClaimedAt != nil
+        let canControlRun = canRequestAutoPRRun
+            || hasActiveClaim
+            || liveAutoPRTask.autoprPaused == true
+        if canControlRun {
             HStack(spacing: 8) {
                 if liveAutoPRTask.autoprPaused == true {
                     Label("AutoPR paused", systemImage: "pause.circle")
                         .font(.system(size: 10, weight: .semibold))
-                    Button("Run again") { Task { await requestAutoPRRun() } }
-                        .buttonStyle(.plain)
-                        .disabled(requestingAutoPRRun || addingNote)
+                    if canRequestAutoPRRun {
+                        Button("Run again") { Task { await requestAutoPRRun() } }
+                            .buttonStyle(.plain)
+                            .disabled(requestingAutoPRRun || addingNote)
+                    } else {
+                        Text("Move to Todo or Changes Requested to run again.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                } else if hasActiveClaim {
+                    Label("AutoPR working", systemImage: "hammer.circle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.mwInkStrong)
+                    Button(requestingAutoPRRun ? "Pausing…" : "Pause retries") {
+                        Task { await cancelAutoPRRun() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .disabled(requestingAutoPRRun || addingNote)
+                    .help("Prevent automatic retries. A run already executing may still finish.")
                 } else if autoPRRunIsQueued || autoPRReconsiderationIsPending {
                     Label("Queued for AutoPR", systemImage: "bolt.horizontal.circle.fill")
                         .font(.system(size: 10, weight: .semibold))
@@ -297,7 +339,7 @@ extension TaskViewerSheet {
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .disabled(requestingAutoPRRun || addingNote)
-                    .help("Hold future runs while you edit. An investigation already started will continue.")
+                    .help("Hold future runs while you edit.")
                 }
                 if let error = autoPRRunError {
                     Text(Self.stripHTTPPrefix(error))
@@ -458,6 +500,17 @@ extension TaskViewerSheet {
                 .background(Color.mwInkStrong.opacity(0.15)).cornerRadius(3)
             }
             Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                Text("Added \(PacificDateFormatter.absolute(liveAutoPRTask.createdAt) ?? liveAutoPRTask.createdAt)")
+                if let moved = liveAutoPRTask.lastMovedAt,
+                   let label = PacificDateFormatter.absolute(moved) {
+                    Text("·")
+                    Text("Moved \(label)")
+                }
+            }
+            .font(.system(size: 8.5))
+            .foregroundColor(.secondary)
+            .lineLimit(1)
         }
     }
 

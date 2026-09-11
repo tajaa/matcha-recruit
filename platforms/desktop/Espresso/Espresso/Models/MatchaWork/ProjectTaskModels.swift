@@ -349,17 +349,21 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
 }
 
 extension MWProjectTask {
-    static let autoPRBotUserId = "a0700000-0000-4000-8000-000000000001"
-
     /// A card waiting in one of AutoPR's pickup lanes. Assignment is the
     /// scheduled queue; run-now and reconsideration are explicit queue signals.
-    var isAutoPRQueueCandidate: Bool {
-        status != "cancelled"
+    /// The bot id and watched-board state come from the server capabilities
+    /// response so reseeding an environment cannot silently break attribution.
+    func isAutoPRQueueCandidate(botUserId: String?, boardIsWatched: Bool?) -> Bool {
+        guard boardIsWatched != false else { return false }
+        let explicitRequest = autoprRunRequestedAt != nil
+            || autoprReconsiderationPending == true
+        let scheduledAssignment = boardIsWatched == true
+            && botUserId != nil
+            && assignedTo?.lowercased() == botUserId?.lowercased()
+        return status != "cancelled"
             && ["todo", "changes_requested"].contains(boardColumn)
             && autoprPaused != true
-            && (assignedTo?.lowercased() == Self.autoPRBotUserId
-                || autoprRunRequestedAt != nil
-                || autoprReconsiderationPending == true)
+            && (scheduledAssignment || explicitRequest)
     }
 
     /// Priority bucket for column ordering (critical highest). Mirrors the

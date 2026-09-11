@@ -13,6 +13,8 @@ struct KanbanCardView: View {
     /// Drives the purple "commits may have finished N" badge on the card face.
     var pendingCommitCount: Int = 0
     var autoPRRuntimeApprovalInFlight = false
+    var autoPRBotUserId: String?
+    var autoPRBoardIsWatched: Bool?
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
@@ -57,7 +59,10 @@ struct KanbanCardView: View {
         if task.autoprClaimedAt != nil {
             return ("AUTOPR WORKING", "Picked up", "hammer.circle.fill", .mwInkStrong)
         }
-        if task.isAutoPRQueueCandidate {
+        if task.isAutoPRQueueCandidate(
+            botUserId: autoPRBotUserId,
+            boardIsWatched: autoPRBoardIsWatched
+        ) {
             return ("IN QUEUE", "Waiting for matcha-autopr", "clock.arrow.circlepath", .blue)
         }
         return nil

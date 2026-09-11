@@ -429,9 +429,12 @@ ranked="$(jq -c '
         (.autopr_plan.work_position //
           (if ((.autopr_run_requested_at // null) != null) then 0
            elif (.autopr_reconsideration_pending // false) then 1
-           elif .board_column == "changes_requested" then 2
-           else 3 end)),
-        (.last_moved_at // .created_at)
+           elif ((.autopr_claimed_at // null) != null) then 2
+           elif .board_column == "changes_requested" then 3
+           else 4 end)),
+        (if ((.autopr_claimed_at // null) != null)
+         then .autopr_claimed_at
+         else (.last_moved_at // .created_at) end)
     )
 ' "$CARDS_FILE")"
 

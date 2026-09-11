@@ -75,7 +75,6 @@ struct TaskViewerSheet: View {
     /// (not asked, or the call failed) — the button stays enabled and the
     /// server / harness answer as before. false disables it with the reason.
     @State var researchGranted: Bool?
-    @State var boardWatchedByAutoPR: Bool?
     @State var isNoteFieldFocused = false
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -335,18 +334,19 @@ struct TaskViewerSheet: View {
             directiveHero
 
             if viewMode == .list {
-                // Source-separated context: name the contributor before the
-                // machine-generated update so neither reads as the other.
+                // Contributor-authored context leads in list mode; graph mode
+                // uses the activity lanes as its human-authored context.
                 descriptionCollapsible
-                autoSetupBanner
+            }
 
-                // A ticket AutoPR has never touched has no automation update to
-                // hang this control off, so it remains an independent row.
-                if autoSetupProgressNote == nil {
-                    autoPRRunNowControl
-                }
-                researchReportSection
+            // Automation provenance and controls are ticket state, not one
+            // presentation mode's content. Keep them visible in both list and
+            // graph mode, along with the first-class research deliverable.
+            autoSetupBanner
+            autoPRRunNowControl
+            researchReportSection
 
+            if viewMode == .list {
                 checklistSection
                     .padding(12)
                     .background(appState.themeText.opacity(0.035)).cornerRadius(8)
@@ -484,10 +484,10 @@ struct TaskViewerSheet: View {
             // ask on every ticket: the answer is an empty list and the section
             // renders nothing.
             await loadStagedActions()
-            // A Research card can only run on a board granted `research`;
-            // find out now rather than letting the user press a button whose
-            // answer arrives as a comment several minutes later.
-            if task.category == "research" { await loadResearchGrant() }
+            // This one response owns the bot identity, watched-board state,
+            // and research grant. Load it for every ticket so attribution and
+            // queue labels are trustworthy even outside the board surface.
+            await loadResearchGrant()
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)

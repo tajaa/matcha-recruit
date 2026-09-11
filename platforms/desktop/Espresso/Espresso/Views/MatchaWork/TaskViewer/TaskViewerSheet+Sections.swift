@@ -60,7 +60,7 @@ extension TaskViewerSheet {
                 }
                 .buttonStyle(.plain)
             } else if liveAutoPRTask.autoprClaimedAt != nil
-                        || liveAutoPRTask.isAutoPRQueueCandidate {
+                        || autoPRIsQueueCandidate {
                 Label("Research report will appear here when the run finishes.",
                       systemImage: "doc.text.magnifyingglass")
                     .font(.system(size: 10))

@@ -34,7 +34,8 @@ enum GraphGeom {
     /// rows (graph, discussion thread, review delta) filters through this.
     /// Mirror of the server's `_AUTOPR_BOOKKEEPING_KINDS`.
     static let bookkeepingKinds: Set<String> = [
-        "autopr_run_request", "autopr_run_claim", "autopr_run_cancel",
+        "autopr_run_request", "autopr_run_claim", "autopr_run_claim_move",
+        "autopr_run_cancel",
         "autopr_staged_action", "autopr_staged_action_result",
     ]
 

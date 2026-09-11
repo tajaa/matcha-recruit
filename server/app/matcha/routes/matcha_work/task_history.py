@@ -339,9 +339,14 @@ async def defer_autopr_run_endpoint(
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
-    result = await pt_svc.defer_autopr_run(
-        project_id=project_id, task_id=task_id, actor_user_id=current_user.id,
-    )
+    try:
+        result = await pt_svc.defer_autopr_run(
+            project_id=project_id, task_id=task_id, actor_user_id=current_user.id,
+        )
+    except pt_svc.AutoPRReconsiderationConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except pt_svc.AutoPRActorNotPermitted as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
@@ -360,11 +365,16 @@ async def claim_autopr_run_endpoint(
     from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
-    result = await pt_svc.claim_autopr_run(
-        project_id=project_id,
-        task_id=task_id,
-        actor_user_id=current_user.id,
-    )
+    try:
+        result = await pt_svc.claim_autopr_run(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+        )
+    except pt_svc.AutoPRReconsiderationConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except pt_svc.AutoPRActorNotPermitted as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result

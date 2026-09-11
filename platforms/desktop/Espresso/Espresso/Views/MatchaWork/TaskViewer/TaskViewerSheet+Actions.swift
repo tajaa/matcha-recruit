@@ -275,6 +275,7 @@ extension TaskViewerSheet {
                 viewModel.tasks[index].autoprPaused = true
                 viewModel.tasks[index].autoprRunRequestedAt = nil
                 viewModel.tasks[index].autoprReconsiderationPending = false
+                viewModel.tasks[index].autoprClaimedAt = nil
             }
             await viewModel.loadTasks()
         } catch {

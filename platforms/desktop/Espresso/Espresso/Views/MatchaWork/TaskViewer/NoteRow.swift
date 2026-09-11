@@ -13,6 +13,7 @@ struct NoteRow: View {
     /// inline use) renders no chip.
     var noteRound: Int = 1
     var currentRound: Int = 1
+    var autoPRBotUserId: String? = nil
     let onPreview: (MWProjectFile) -> Void
     var onReply: (() -> Void)? = nil
     @State private var isHovered = false
@@ -27,14 +28,11 @@ struct NoteRow: View {
         entry.metadata?["kind"] == "autopr_additional_context"
     }
 
-    /// The AutoPR service account is stable and seeded with this UUID on every
-    /// environment. Name matching keeps older/local fixtures legible too.
+    /// Only the server-provided service-account id can mark a note automated.
+    /// Display names are user-controlled and therefore never an identity signal.
     private var isAutoPRActor: Bool {
-        if entry.actorUserId?.lowercased() == MWProjectTask.autoPRBotUserId {
-            return true
-        }
-        let name = entry.actorName?.lowercased() ?? ""
-        return name.contains("autopr") || name.contains("auto setup")
+        guard let autoPRBotUserId else { return false }
+        return entry.actorUserId?.lowercased() == autoPRBotUserId.lowercased()
     }
 
     private var actorDisplayName: String {

@@ -191,6 +191,7 @@ extension TaskViewerSheet {
                     round: round,
                     previousFixed: round.index >= 2 ? previousFixed : [],
                     files: attachments,
+                    autoPRBotUserId: viewModel.autoPRBotUserId,
                     onPreview: { previewFile = $0 }
                 )
             }

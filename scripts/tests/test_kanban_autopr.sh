@@ -2083,6 +2083,19 @@ check "pending additional context reopens an unchanged no-spec decision" \
       && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
       && echo 0 || echo 1)
 
+cat > "$TMP_DIR/claim-recovery-cards.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Interrupted pickup","board_column":"in_progress","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-10T03:00:00Z","autopr_claimed_at":"2026-09-10T03:00:01Z"},
+  {"task_id":"bbbbbbbb-0000-4000-8000-00000000000b","id8":"bbbbbbbb","project_id":"p","title":"Routine todo","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"}
+]
+EOF
+claim_recovery="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+  AUTOPR_CACHE_DIR="$TMP_DIR/claim-recovery-cache" \
+  "$AUTOPR_DIR/select.sh" "$TMP_DIR/claim-recovery-cards.json")"
+check "an interrupted active claim outranks routine Todo work" \
+  $([ "$(printf '%s' "$claim_recovery" | jq -r '.id8')" = "aaaaaaaa" ] \
+    && echo 0 || echo 1)
+
 cat > "$TMP_DIR/run-request-cards.json" <<'EOF'
 [
   {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Ordinary changes-requested work","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"},

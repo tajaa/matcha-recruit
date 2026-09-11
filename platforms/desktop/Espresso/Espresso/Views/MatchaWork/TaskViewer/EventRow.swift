@@ -7,6 +7,7 @@ struct EventRow: View {
     @Environment(AppState.self) private var appState
     let event: MWTaskHistoryEntry
     let files: [MWProjectFile]
+    var autoPRBotUserId: String? = nil
     let onPreview: (MWProjectFile) -> Void
 
     /// Only "ownership-meaningful" events show an avatar: notes (via NoteRow),
@@ -21,7 +22,12 @@ struct EventRow: View {
     var body: some View {
         if event.eventType == "activity" {
             // Notes get the full card treatment (body + actor + thumbs).
-            NoteRow(entry: event, files: files, onPreview: onPreview)
+            NoteRow(
+                entry: event,
+                files: files,
+                autoPRBotUserId: autoPRBotUserId,
+                onPreview: onPreview
+            )
         } else {
             HStack(alignment: .top, spacing: 8) {
                 if Self.avatarBearingEvents.contains(event.eventType),

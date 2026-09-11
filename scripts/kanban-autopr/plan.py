@@ -107,22 +107,28 @@ def parse_time(value: str | None) -> str:
 
 def card_base_key(card: dict[str, Any]) -> tuple[Any, ...]:
     reconsider = bool(card.get("autopr_reconsideration_pending"))
+    claimed = card.get("autopr_claimed_at") is not None
     column = card.get("board_column")
     has_pr = isinstance(card.get("pr_number"), int)
     if reconsider:
         lane = 0
-    elif card_context_state(card) is not None:
-        lane = 4
-    elif column == "changes_requested" and has_pr:
+    elif claimed:
         lane = 1
-    elif column == "changes_requested":
+    elif card_context_state(card) is not None:
+        lane = 5
+    elif column == "changes_requested" and has_pr:
         lane = 2
-    else:
+    elif column == "changes_requested":
         lane = 3
+    else:
+        lane = 4
     return (
         lane,
         priority_value(card.get("priority")),
-        parse_time(card.get("last_moved_at") or card.get("created_at")),
+        parse_time(
+            card.get("autopr_claimed_at") if claimed
+            else card.get("last_moved_at") or card.get("created_at")
+        ),
         card.get("task_id") or "",
     )
 

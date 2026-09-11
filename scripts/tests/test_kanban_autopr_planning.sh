@@ -77,6 +77,19 @@ assert module.card_base_key({
     "board_column": "todo",
     "progress_note": "[autopr:no-spec 2026-08-30T00:00:00Z] already_fixed",
 })[0]
+claimed = {
+    "task_id": "recovery",
+    "board_column": "in_progress",
+    "last_moved_at": "2026-09-10T02:00:00Z",
+    "autopr_claimed_at": "2026-09-10T01:00:00Z",
+}
+routine = {
+    "task_id": "routine",
+    "board_column": "todo",
+    "last_moved_at": "2026-01-01T00:00:00Z",
+}
+assert module.card_base_key(claimed)[0] < module.card_base_key(routine)[0]
+assert module.card_base_key(claimed)[2] == claimed["autopr_claimed_at"]
 PY
 
 python3 "$REPO_ROOT/scripts/kanban-autopr/plan.py" \
