@@ -8,7 +8,7 @@ type TextareaProps = ComponentProps<'textarea'> & {
 export function Textarea({ label, id, className = '', ...props }: TextareaProps) {
   // See Input: an unassociated label is a caption, not a label.
   const generated = useId()
-  const textareaId = id ?? generated
+  const textareaId = id || generated  // `||`: an empty-string id associates nothing either
   return (
     <div>
       {label && (

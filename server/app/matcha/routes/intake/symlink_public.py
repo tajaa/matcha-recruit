@@ -21,13 +21,15 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from app.core.services.redis_cache import check_rate_limit, client_ip
+from app.core.services.redis_cache import check_rate_limit, client_ip, get_rate_limit_state
 from app.database import get_connection
 from app.matcha.models.symlink import (
+    MAX_ATTACHMENT_SLOTS,
     MAX_PUBLIC_CHAT_BODY_BYTES,
     UNLOCK_HEADER,
     PublicSubmitRequest,
@@ -91,46 +93,83 @@ async def _require_unlock(conn, row: Any, request: Request) -> None:
 # Per-IP is a FLOOD BACKSTOP, not the cost governor — see
 # services/symlink/CLAUDE.md. Only the sender can mint a token, `chat.MAX_TURNS`
 # caps a conversation absolutely, and `_budget` bounds every link and company by
-# the hour. A bulk send (20 credential requests to one office) lands a whole
-# team on one NAT address, so per-IP ceilings that bind before the per-link ones
-# just 429 legitimate recipients. Keep every per-hour value here comfortably
-# above the matching `_budget` per-link value; tests/symlink asserts it.
-IP_LIMITS: dict[str, tuple[int, int]] = {
-    # key: (limit, window_seconds)
-    "symlink_validate": (300, 3600),
-    "symlink_unlock_ip": (60, 600),      # per-link 12/hr is the brute-force guard
-    "symlink_turn_ip": (30, 60),
-    "symlink_turn_ip_hr": (200, 3600),
-    "symlink_upload_ip": (120, 3600),
-    "symlink_submit_ip": (60, 3600),
-    "symlink_delete_ip": (120, 3600),
+# the hour.
+#
+# Every ceiling is sized against one written-down design load instead of by
+# feel (feel moved the turn ceiling in both directions): a bulk send to a single
+# office, every recipient behind the same NAT address, each finishing their
+# whole task inside the same hour. tests/symlink pins each number against it:
+#
+#   per-link budget  >= one recipient's need      (a task always fits its link)
+#   per-IP ceiling   >= OFFICE_RECIPIENTS x need  (the office is never throttled)
+#   per-link budget  <  per-IP ceiling            (per-IP never binds first)
+#   per-company      >  per-IP ceiling            (one address can't drain a tenant)
+OFFICE_RECIPIENTS = 20
+PER_RECIPIENT_NEED: dict[str, int] = {
+    "validate": 10,                   # page loads: open, reload, come back later
+    "unlock": 3,                      # the code, plus a couple of typos
+    "turn": chat.MAX_TURNS,           # the conversation's absolute cap
+    "upload": MAX_ATTACHMENT_SLOTS,   # one file per slot
+    "delete": MAX_ATTACHMENT_SLOTS,   # removing each once
+    "submit": 1,
 }
 
-# The real governors, hourly: kind -> (per link, per company). Every number the
-# rate limiter uses lives in one of these two tables so the invariant
-# (per-link < per-IP-hourly < per-company) is a dict comparison in the tests
-# rather than a regex over call sites.
+IP_LIMITS: dict[str, tuple[int, int]] = {
+    # key: (limit, window_seconds). Keys are `symlink_<kind>_ip[_hr]`; the tests
+    # map every key to a PER_RECIPIENT_NEED kind, so none escapes the invariants.
+    "symlink_validate_ip": (300, 3600),
+    "symlink_unlock_ip": (60, 600),
+    "symlink_turn_ip": (60, 60),       # 20 people each sending within one minute, x3
+    "symlink_turn_ip_hr": (450, 3600),
+    "symlink_upload_ip": (150, 3600),
+    "symlink_submit_ip": (60, 3600),
+    "symlink_delete_ip": (150, 3600),
+}
+
+# The real governors, hourly: kind -> (per link, per company).
 LINK_BUDGETS: dict[str, tuple[int, int]] = {
-    "turn": (40, 240),
+    "validate": (60, 600),
+    "turn": (40, 600),
     "upload": (24, 200),
+    "delete": (24, 200),
     "submit": (6, 120),
 }
 
-# Unlock is deliberately absent from LINK_BUDGETS: the passcode is company-wide,
-# so a per-company unlock budget would let one attacker lock every legitimate
-# recipient out of a tenant for the hour. Per-link (below) bounds guessing on any
-# one token and per-IP bounds it across tokens; the code space (32^6 ≈ 1.07e9,
-# rotated weekly) carries the rest.
+# Unlock has no row above. The passcode is company-wide, so a per-company budget
+# on unlock ATTEMPTS would let anyone holding one leaked link lock every
+# legitimate recipient of the tenant out. Instead:
+#   - per link: UNLOCK_PER_LINK_HOURLY guesses against any one token;
+#   - per company: only FAILED attempts count. A whole office mistyping twice
+#     each stays far below it, while an attacker holding many leaked links gets
+#     at most this many guesses per tenant per hour, however many addresses
+#     they spread across. The price: that attacker can block NEW unlocks for
+#     the tenant for up to an hour. Already-unlocked recipients keep working —
+#     their unlock token never re-checks the passcode.
 UNLOCK_PER_LINK_HOURLY = 12
+UNLOCK_FAILURES_PER_COMPANY_HOURLY = 100
+
+# What an unknown key or kind gets. A typo must turn a public endpoint into
+# neither a 500 (KeyError) nor an unmetered path, so it fails closed on a tight
+# ceiling and logs at ERROR. tests/symlink pins every literal key to its table.
+_UNKNOWN_IP_LIMIT = (10, 3600)
+_UNKNOWN_BUDGET = (6, 60)
 
 
 async def _ip_limit(addr: str, key: str) -> None:
-    limit, window = IP_LIMITS[key]
+    limits = IP_LIMITS.get(key)
+    if limits is None:
+        logger.error("[symlink] unknown per-IP limit key %r — failing closed", key)
+        limits = _UNKNOWN_IP_LIMIT
+    limit, window = limits
     await check_rate_limit(addr, key, limit, window)
 
 
 async def _budget(token: str, company_id: str, kind: str) -> None:
-    per_link, per_company = LINK_BUDGETS[kind]
+    budget = LINK_BUDGETS.get(kind)
+    if budget is None:
+        logger.error("[symlink] unknown budget kind %r — failing closed", kind)
+        budget = _UNKNOWN_BUDGET
+    per_link, per_company = budget
     await check_rate_limit(token, f"symlink_{kind}_link", per_link, 3600)
     await check_rate_limit(company_id, f"symlink_{kind}_co", per_company, 3600)
 
@@ -170,8 +209,9 @@ def _public_summary(row: Any) -> dict:
 @router.get("/sym/{token}")
 async def validate_symlink(token: str, request: Request):
     """Link summary; plus the resumable conversation when the unlock header is valid."""
-    await _ip_limit(client_ip(request), "symlink_validate")
+    await _ip_limit(client_ip(request), "symlink_validate_ip")
     row = await _resolve(token)
+    await _budget(token, str(row["company_id"]), "validate")
     out = _public_summary(row)
     status = out["status"]
     if status not in links.OPEN_STATUSES:
@@ -193,9 +233,11 @@ async def validate_symlink(token: str, request: Request):
 
 @router.post("/sym/{token}/unlock")
 async def unlock_symlink(token: str, request: Request):
-    # Charged before the body is buffered: `_read_json_capped` awaits the whole
-    # payload into memory, so a limit charged after it is a limit an attacker
-    # pays only once they have already made us do the work.
+    # Charged first: before the body is buffered (`_read_json_capped` awaits the
+    # whole payload), and therefore before the honeypot check. Reading first and
+    # short-circuiting bots would make `internal_ref` an unmetered path — anyone
+    # could set it and get unlimited fake successes. The price is that a bot on a
+    # shared NAT spends the same bucket as the real recipients behind it.
     ip = client_ip(request)
     await _ip_limit(ip, "symlink_unlock_ip")
     body = await _read_json_capped(request, PublicUnlockRequest)
@@ -208,11 +250,27 @@ async def unlock_symlink(token: str, request: Request):
     await check_rate_limit(token, "symlink_unlock_link", UNLOCK_PER_LINK_HOURLY, 3600)
 
     company_id = str(row["company_id"])
+    # Tenant-wide guess ceiling (UNLOCK_FAILURES_PER_COMPANY_HOURLY). Peeked, not
+    # incremented, so a correct passcode never spends it; only a failure below
+    # charges it. Without Redis the peek returns None and the charge falls back
+    # to check_rate_limit's per-worker memory.
+    failures = await get_rate_limit_state(
+        company_id, "symlink_unlock_fail_co", UNLOCK_FAILURES_PER_COMPANY_HOURLY, 3600,
+    )
+    if failures is not None and failures["remaining"] <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many wrong passcodes for this company. Try again later.",
+            headers={"Retry-After": str(max(failures["resets_in_seconds"], 60))},
+        )
     async with get_connection(tenant_id=company_id) as conn:
         code_row = await passcode.fetch_passcode(conn, row["company_id"])
         stored = code_row["code"] if code_row else None
         if not passcode.verify(body.passcode, stored):
             await links.log_audit(conn, row["id"], row["company_id"], None, "symlink_unlock_failed", ip_address=ip)
+            await check_rate_limit(
+                company_id, "symlink_unlock_fail_co", UNLOCK_FAILURES_PER_COMPANY_HOURLY, 3600,
+            )
             raise HTTPException(status_code=401, detail="That passcode isn't right. Check with the person who sent this link.")
         async with conn.transaction():
             unlock_token = await links.record_unlock(conn, row["id"], row["company_id"], ip=ip)
@@ -242,7 +300,6 @@ async def symlink_chat_turn(token: str, request: Request):
 
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
-        await _budget(token, company_id, "turn")
         fresh = await links.fetch_by_id(conn, row["id"], row["company_id"])
         spec = links.spec_of(fresh)
         transcript = links.transcript_of(fresh)
@@ -259,6 +316,10 @@ async def symlink_chat_turn(token: str, request: Request):
                 "error": False,
                 "limit_reached": True,
             }
+        # Charged only for a turn that will reach the model. Past MAX_TURNS the
+        # answer above comes from the DB and costs no Gemini call, so it must not
+        # spend budget a live conversation elsewhere in the tenant needs.
+        await _budget(token, company_id, "turn")
         company_name = row["company_name"]
         instructions = fresh["instructions"]
 
@@ -287,21 +348,18 @@ async def symlink_chat_turn(token: str, request: Request):
 
 
 @router.post("/sym/{token}/attachments")
-async def upload_symlink_attachment(
-    token: str,
-    request: Request,
-    slot: str = Form(..., max_length=64),
-    file: UploadFile = File(...),
-):
+async def upload_symlink_attachment(token: str, request: Request):
+    # No `File(...)`/`Form(...)` parameters, on purpose: FastAPI parses a
+    # declared multipart body BEFORE the handler runs, so the whole upload would
+    # already be spooled when `_ip_limit` executed. The form is read by hand,
+    # after every check that doesn't need it. (nginx's client_max_body_size caps
+    # the size earlier still — see docs/ops/MATCHA_EDGE.md.)
     ip = client_ip(request)
     await _ip_limit(ip, "symlink_upload_ip")
     row = await _resolve(token)
     _check_open(row)
     company_id = str(row["company_id"])
     spec = links.spec_of(row)
-    slot_spec = next((a for a in spec.get("attachments", []) if a.get("slot") == slot), None)
-    if not slot_spec:
-        raise HTTPException(status_code=422, detail="Unknown attachment slot")
 
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
@@ -309,8 +367,20 @@ async def upload_symlink_attachment(
         # No per-link file cap here: one live file per slot (insert_attachment
         # discards the previous one) and the spec caps slots at MAX_ATTACHMENT_SLOTS.
 
-    # S3 round-trip happens with no connection held.
-    staged = await att.stage_upload(file, company_id=company_id, symlink_id=row["id"], accept=slot_spec.get("accept"))
+    async with request.form(max_files=1, max_fields=1) as form:
+        slot = form.get("slot")
+        file = form.get("file")
+        if not isinstance(slot, str) or not slot or len(slot) > 64:
+            raise HTTPException(status_code=422, detail="Missing or invalid attachment slot")
+        if not isinstance(file, StarletteUploadFile):
+            raise HTTPException(status_code=422, detail="Missing file")
+        slot_spec = next((a for a in spec.get("attachments", []) if a.get("slot") == slot), None)
+        if not slot_spec:
+            raise HTTPException(status_code=422, detail="Unknown attachment slot")
+        # S3 round-trip happens with no connection held.
+        staged = await att.stage_upload(
+            file, company_id=company_id, symlink_id=row["id"], accept=slot_spec.get("accept"),
+        )
 
     try:
         async with get_connection(tenant_id=company_id) as conn:
@@ -347,6 +417,7 @@ async def delete_symlink_attachment(token: str, attachment_id: UUID, request: Re
     company_id = str(row["company_id"])
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
+        await _budget(token, company_id, "delete")
         gone = await conn.fetchrow(
             """UPDATE symlink_attachments SET discarded_at = NOW()
                 WHERE id = $1 AND symlink_id = $2 AND discarded_at IS NULL
@@ -367,6 +438,7 @@ async def delete_symlink_attachment(token: str, attachment_id: UUID, request: Re
 
 @router.post("/sym/{token}/submit")
 async def submit_symlink(token: str, request: Request, background_tasks: BackgroundTasks):
+    # Charged before the body and the honeypot, for the reason on unlock_symlink.
     ip = client_ip(request)
     await _ip_limit(ip, "symlink_submit_ip")
     body = await _read_json_capped(request, PublicSubmitRequest)
@@ -379,14 +451,15 @@ async def submit_symlink(token: str, request: Request, background_tasks: Backgro
 
     async with get_connection(tenant_id=company_id) as conn:
         await _require_unlock(conn, row, request)
-        # Outside the transaction on purpose: a Redis INCR is not rolled back
-        # with the txn, so charging it inside would burn one of only 6 hourly
-        # attempts every time staging failed — and it would hold the row's
-        # FOR UPDATE lock across a network call.
-        await _budget(token, company_id, "submit")
         async with conn.transaction():
             fresh = await links.fetch_by_id(conn, row["id"], row["company_id"], for_update=True)
             _check_open(fresh)
+            # After the FOR UPDATE re-check, so the loser of a double-submit race
+            # gets its 410 without spending an attempt. The INCR is NOT rolled
+            # back if staging then fails, and that is intended — a failed staging
+            # attempt is an attempt. The cost is one Redis round-trip under a
+            # per-link row lock that only this link's own recipient contends for.
+            await _budget(token, company_id, "submit")
             submission = await submissions.stage(conn, fresh, body.fields)
             await links.log_audit(
                 conn, row["id"], row["company_id"], None, "symlink_submitted",

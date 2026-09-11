@@ -373,6 +373,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
         {draft.kind === 'credential_upload' && current?.credential_document_types && (
           <Select
+            portal
             label="Credential type"
             value={draft.document_type}
             onChange={(e) => update('document_type', e.target.value)}

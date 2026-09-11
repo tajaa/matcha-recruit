@@ -4,11 +4,14 @@ Imports the modules by their own path (not through `app.matcha.routes`, whose
 `__init__` boots the entire router zoo and needs WeasyPrint's native libs).
 """
 import importlib.util
+import re
 import sys
 import types
 from pathlib import Path
 
 import pytest
+
+from tests._helpers.routes import iter_api_routes
 
 SERVER = Path(__file__).resolve().parents[2]
 
@@ -126,77 +129,168 @@ def _hourly(limit: int, window: int) -> float:
     return limit * 3600 / window
 
 
-def _effective_hourly(mod, kind: str) -> float:
-    """The binding per-IP rate for a kind: the tightest of its ceilings once
-    every window is expressed per hour. A 30/60s burst cap normalises to
-    1800/hr but can never outrun the 200/hr cap sitting beside it."""
-    rates = [
-        _hourly(limit, window)
-        for key, (limit, window) in mod.IP_LIMITS.items()
-        if key.startswith(f"symlink_{kind}_ip")
-    ]
-    assert rates, f"no per-IP limit for {kind}"
-    return min(rates)
+_IP_KEY = re.compile(r"^symlink_(?P<kind>[a-z]+)_ip(?:_hr)?$")
 
 
-def test_per_ip_limits_are_a_flood_backstop_not_the_binding_constraint(public_router):
-    """Per-link/per-company budgets are the cost governors; per-IP is a flood
-    backstop. A bulk send puts a whole office behind one NAT address, so a
-    per-IP ceiling below the matching per-link budget 429s legitimate
-    recipients, and one above the per-company budget lets a single address
-    exhaust the tenant's whole hour. Every window is normalised before the
-    comparison — the burst caps are part of the invariant, not exempt from it.
-    See services/symlink/CLAUDE.md.
-    """
-    import sys
+def _public_module():
+    return sys.modules["app.matcha.routes.intake.symlink_public"]
 
-    mod = sys.modules["app.matcha.routes.intake.symlink_public"]
-    assert mod.LINK_BUDGETS == {"turn": (40, 240), "upload": (24, 200), "submit": (6, 120)}
 
+def _ip_rates_by_kind(mod) -> dict[str, float]:
+    """kind -> its BINDING per-IP rate: the tightest ceiling once every window
+    is expressed per hour (a 60/min burst normalises to 3600/hr but can never
+    outrun the hourly cap beside it). Every key must parse, so a key named
+    outside the scheme can't slip past the invariants below."""
+    rates: dict[str, list[float]] = {}
+    for key, (limit, window) in mod.IP_LIMITS.items():
+        m = _IP_KEY.match(key)
+        assert m, f"IP_LIMITS key {key!r} is not symlink_<kind>_ip[_hr]; it would escape every invariant"
+        rates.setdefault(m["kind"], []).append(_hourly(limit, window))
+    return {kind: min(values) for kind, values in rates.items()}
+
+
+def test_every_ip_limit_has_a_design_load_and_a_governor(public_router):
+    mod = _public_module()
+    kinds = set(_ip_rates_by_kind(mod))
+    assert kinds == set(mod.PER_RECIPIENT_NEED), "every per-IP kind needs a stated per-recipient load"
+    # Every kind is governed per link + per company, except unlock (per link +
+    # FAILURES per company — see test_unlock_guessing_is_bounded_per_tenant).
+    assert set(mod.LINK_BUDGETS) == kinds - {"unlock"}
+
+
+def test_structural_needs_track_the_caps_they_come_from(public_router):
+    mod = _public_module()
+    assert mod.PER_RECIPIENT_NEED["turn"] == mod.chat.MAX_TURNS
+    assert mod.PER_RECIPIENT_NEED["upload"] == mod.MAX_ATTACHMENT_SLOTS
+    assert mod.PER_RECIPIENT_NEED["delete"] == mod.MAX_ATTACHMENT_SLOTS
+    assert mod.PER_RECIPIENT_NEED["submit"] == 1
+
+
+def test_an_office_behind_one_nat_is_never_throttled_per_ip(public_router):
+    """The design load: OFFICE_RECIPIENTS recipients on one NAT address, each
+    finishing their whole task within the hour. With MAX_TURNS=20 a 20-person
+    office is 400 turns — a 200/hr ceiling 429'd it mid-conversation, and a
+    test that only compared per-IP against the per-LINK budget couldn't see it."""
+    mod = _public_module()
+    for kind, rate in _ip_rates_by_kind(mod).items():
+        office = mod.OFFICE_RECIPIENTS * mod.PER_RECIPIENT_NEED[kind]
+        assert rate >= office, (
+            f"per-IP {kind} allows {rate:.0f}/hr but an office of {mod.OFFICE_RECIPIENTS} needs {office}"
+        )
+
+
+def test_budgets_sit_between_one_recipient_and_the_whole_tenant(public_router):
+    mod = _public_module()
+    rates = _ip_rates_by_kind(mod)
     for kind, (per_link, per_company) in mod.LINK_BUDGETS.items():
-        effective = _effective_hourly(mod, kind)
-        assert effective > per_link, (
-            f"per-IP hourly rate for {kind} ({effective}) must stay above the per-link "
-            f"budget ({per_link}) or per-IP becomes the binding constraint"
-        )
-        assert effective < per_company, (
-            f"per-IP hourly rate for {kind} ({effective}) must stay below the per-company "
-            f"budget ({per_company}) or one address can exhaust the whole tenant's hour"
+        need, rate = mod.PER_RECIPIENT_NEED[kind], rates[kind]
+        assert per_link >= need, f"{kind}: one recipient's task ({need}) doesn't fit its link budget ({per_link})"
+        assert per_link < rate, f"{kind}: per-IP ({rate:.0f}/hr) would bind before per-link ({per_link})"
+        assert per_company > rate, (
+            f"{kind}: one address at the per-IP ceiling ({rate:.0f}/hr) could drain the company ({per_company})"
         )
 
 
-def test_unlock_is_bounded_per_link_and_has_no_company_budget(public_router):
-    """The passcode is company-wide, so a per-company unlock budget would let
-    one attacker lock every legitimate recipient of a tenant out for the hour.
-    Guessing is bounded per link and, across links, per IP."""
-    import sys
-
-    mod = sys.modules["app.matcha.routes.intake.symlink_public"]
+def test_unlock_guessing_is_bounded_per_tenant(public_router):
+    """The passcode is company-wide. Per link bounds one token; per company only
+    FAILED attempts count, so an office's typos never lock it out while an
+    attacker spreading leaked links across many addresses still gets a fixed
+    number of guesses per tenant per hour."""
+    mod = _public_module()
     assert "unlock" not in mod.LINK_BUDGETS
     assert mod.UNLOCK_PER_LINK_HOURLY == 12
-    assert _effective_hourly(mod, "unlock") > mod.UNLOCK_PER_LINK_HOURLY
+    rate = _ip_rates_by_kind(mod)["unlock"]
+    assert rate > mod.UNLOCK_PER_LINK_HOURLY
+    typos = mod.OFFICE_RECIPIENTS * (mod.PER_RECIPIENT_NEED["unlock"] - 1)
+    assert mod.UNLOCK_FAILURES_PER_COMPANY_HOURLY >= typos
+    # The tenant-wide ceiling is tighter than one address alone would allow.
+    assert mod.UNLOCK_FAILURES_PER_COMPANY_HOURLY < rate
 
 
-def test_every_public_endpoint_charges_a_per_ip_limit(public_router):
-    """The per-IP table is only a backstop if every public handler is behind it.
-    `DELETE /sym/{token}/attachments/{id}` was the one that wasn't: it ran a
-    token lookup (a DB round-trip) per request with nothing charged."""
+def _handler_tree(route):
+    import ast
+    import inspect
+    import textwrap
+
+    return ast.parse(textwrap.dedent(inspect.getsource(route.endpoint))).body[0]
+
+
+def _first_await(fn):
+    import ast
+
+    for stmt in fn.body:  # statements in source order; walk within each
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Await):
+                return node
+    return None
+
+
+def test_public_handlers_charge_the_ip_limit_before_any_other_work(public_router):
+    """Structural, not a substring match: the FIRST await in every public
+    handler is `_ip_limit(...)`, and no handler declares a body parameter.
+    FastAPI reads File/Form/body-model parameters before the handler runs, so a
+    declared UploadFile is spooled whole before any limit can be charged — which
+    is what the upload endpoint used to do."""
+    import ast
+
+    for route in iter_api_routes(public_router):
+        label = f"{sorted(route.methods)} {route.path}"
+        assert route.dependant.body_params == [], f"{label} declares a body FastAPI parses before the handler"
+        first = _first_await(_handler_tree(route))
+        assert first is not None and isinstance(first.value, ast.Call), f"{label} awaits nothing"
+        func = first.value.func
+        assert isinstance(func, ast.Name) and func.id == "_ip_limit", (
+            f"{label}: first await is {ast.unparse(first.value)!r}, not _ip_limit(...)"
+        )
+
+
+def test_every_limit_key_used_exists_and_every_row_is_used(public_router):
+    """A key missing from its table used to be a KeyError (a 500 on a public
+    route); a row nothing charges is a limit that isn't one."""
+    import ast
     import inspect
 
-    for route in public_router.routes:
-        src = inspect.getsource(route.endpoint)
-        assert "_ip_limit(" in src, f"{sorted(route.methods)} {route.path} charges no per-IP limit"
+    mod = _public_module()
+    ip_keys: set[str] = set()
+    budget_kinds: set[str] = set()
+    for node in ast.walk(ast.parse(inspect.getsource(mod))):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id == "_ip_limit":
+            ip_keys.add(node.args[1].value)
+        elif node.func.id == "_budget":
+            budget_kinds.add(node.args[2].value)
+    assert ip_keys == set(mod.IP_LIMITS)
+    assert budget_kinds == set(mod.LINK_BUDGETS)
+
+
+def test_unknown_limit_key_fails_closed_instead_of_500(public_router, monkeypatch):
+    import asyncio
+
+    mod = _public_module()
+    calls = []
+
+    async def record(key, action, limit, window):
+        calls.append((action, limit, window))
+
+    monkeypatch.setattr(mod, "check_rate_limit", record)
+    asyncio.run(mod._ip_limit("198.51.100.7", "symlink_typo_ip"))
+    asyncio.run(mod._budget("tok", "co", "typo"))
+    assert calls == [
+        ("symlink_typo_ip", *mod._UNKNOWN_IP_LIMIT),
+        ("symlink_typo_link", mod._UNKNOWN_BUDGET[0], 3600),
+        ("symlink_typo_co", mod._UNKNOWN_BUDGET[1], 3600),
+    ]
 
 
 def test_rate_limit_numbers_live_in_the_tables(public_router):
     """No inline magic numbers: `check_rate_limit` is reached through `_ip_limit`
-    or `_budget` (which read IP_LIMITS / LINK_BUDGETS), and the one direct call
-    passes a named constant, not a literal."""
+    or `_budget` (which read IP_LIMITS / LINK_BUDGETS), and the direct calls in
+    unlock_symlink pass named constants, not literals."""
     import ast
     import inspect
-    import sys
 
-    mod = sys.modules["app.matcha.routes.intake.symlink_public"]
+    mod = _public_module()
     tree = ast.parse(inspect.getsource(mod))
 
     callers: dict[str, list[ast.Call]] = {}
@@ -216,9 +310,7 @@ def test_rate_limit_numbers_live_in_the_tables(public_router):
     )
     for call in callers.get("unlock_symlink", []):
         limit_arg = call.args[2]  # check_rate_limit(key, action, limit, window)
-        assert not isinstance(limit_arg, ast.Constant), (
-            "the unlock per-link budget must be UNLOCK_PER_LINK_HOURLY, not a literal"
-        )
+        assert not isinstance(limit_arg, ast.Constant), "unlock limits must be named constants, not literals"
 
 
 def test_admin_router_is_company_admin_only(admin_router):
@@ -244,7 +336,7 @@ def test_admin_router_is_company_admin_only(admin_router):
 
     ungated = [
         f"{sorted(route.methods)} {route.path}"
-        for route in admin_router.routes
+        for route in iter_api_routes(admin_router)
         if not _guarded(route.dependant)
     ]
     assert ungated == [], f"endpoints not behind require_symlink_admin: {ungated}"

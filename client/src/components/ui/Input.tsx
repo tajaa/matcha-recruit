@@ -10,7 +10,7 @@ export function Input({ label, id, className = '', ...props }: InputProps) {
   // a screen reader reads the field as unlabeled. Nearly every call site omits
   // `id`, so generate one rather than ask 200 of them to remember.
   const generated = useId()
-  const inputId = id ?? generated
+  const inputId = id || generated  // `||`: an empty-string id associates nothing either
   return (
     <div>
       {label && (

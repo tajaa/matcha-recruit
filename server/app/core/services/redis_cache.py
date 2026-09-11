@@ -116,11 +116,21 @@ def _trusted_proxy_count(request: Request) -> int:
 
     Both headers name the same hop — presenting both must never add two.
 
-    Compared as BYTES. Starlette decodes header values as latin-1, so a viewer
-    can put a non-ASCII character in a header we read; `hmac.compare_digest` on
-    two `str` raises TypeError for any codepoint above 127, and this runs inside
-    `client_ip()` on every rate-limited route — an attacker-supplied header must
-    fail the comparison, never 500 the request.
+    Compared as BYTES, each recovered the way it was decoded:
+
+    - `provided` came off the wire through Starlette, which decodes header
+      bytes as latin-1 — so `.encode("latin-1")` gives back exactly the bytes
+      CloudFront sent. (Re-encoding as UTF-8 would turn wire byte 0xE9 into
+      b"\\xc3\\xa9", and a secret containing any byte >= 0x80 could then never
+      match — silently dropping every per-IP limit back onto the POP address.)
+    - `expected` came from the environment, which Python decodes with the
+      filesystem encoding (UTF-8) + surrogateescape — so that is how it goes
+      back to bytes.
+
+    And never as two `str`: `hmac.compare_digest` raises TypeError for any
+    codepoint above 127, and this runs inside `client_ip()` on every
+    rate-limited route — an attacker-supplied header must fail the comparison,
+    never 500 the request.
     """
     count = _TRUSTED_PROXY_COUNT
     for header, env_var in _ORIGIN_VERIFY_HEADERS:
@@ -128,8 +138,11 @@ def _trusted_proxy_count(request: Request) -> int:
         provided = request.headers.get(header, "")
         if not expected or not provided:
             continue
-        if hmac.compare_digest(expected.encode("utf-8", "surrogateescape"),
-                               provided.encode("utf-8", "surrogateescape")):
+        try:
+            wire = provided.encode("latin-1")
+        except UnicodeEncodeError:
+            continue  # not a value that can have arrived as header bytes
+        if hmac.compare_digest(expected.encode("utf-8", "surrogateescape"), wire):
             return count + 1
     return count
 

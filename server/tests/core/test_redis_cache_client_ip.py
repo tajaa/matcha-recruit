@@ -94,3 +94,27 @@ def test_non_ascii_origin_header_is_rejected_not_a_500(monkeypatch):
         matcha_secret="\u00c3\u00a9",
     )
     assert redis_cache.client_ip(request) == "203.0.113.5"
+
+
+def test_non_ascii_secret_matches_the_bytes_that_arrived(monkeypatch):
+    """A secret containing a byte >= 0x80 must still authenticate. Starlette
+    hands us header bytes decoded as latin-1; re-encoding that as UTF-8 would
+    compare different bytes than CloudFront sent and never match, silently
+    keying every per-IP limit on the CloudFront POP address."""
+    monkeypatch.setattr(redis_cache, "_TRUSTED_PROXY_COUNT", 1)
+    _clear_origin_secrets(monkeypatch)
+    monkeypatch.setenv("MATCHA_CLOUDFRONT_ORIGIN_SECRET", "edge-caf\u00e9")
+    as_starlette_decodes_it = "edge-caf\u00e9".encode("utf-8").decode("latin-1")
+    request = _request("spoofed, 198.51.100.10, 203.0.113.5", matcha_secret=as_starlette_decodes_it)
+    assert redis_cache.client_ip(request) == "198.51.100.10"
+
+
+def test_header_that_cannot_be_wire_bytes_is_rejected(monkeypatch):
+    """A str with a codepoint above 0xFF can't have come from header bytes;
+    it must fail the comparison rather than raise."""
+    monkeypatch.setattr(redis_cache, "_TRUSTED_PROXY_COUNT", 1)
+    _clear_origin_secrets(monkeypatch)
+    monkeypatch.setenv("CAPPE_CLOUDFRONT_ORIGIN_SECRET", "edge-secret")
+    request = _request("spoofed, 198.51.100.10, 203.0.113.5", secret="edge-\u4e2d")
+    assert redis_cache.client_ip(request) == "203.0.113.5"
+

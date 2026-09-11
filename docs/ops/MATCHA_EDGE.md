@@ -41,26 +41,31 @@ token:
 | Layer | Bound |
 |---|---|
 | `chat.MAX_TURNS` | 20 model turns per link, absolute |
-| `_budget(...)` per link, hourly | turn 40, upload 24, submit 6 |
-| `_budget(...)` per company, hourly | turn 240, upload 200, submit 120 |
-| `symlink_unlock_link` | 12 passcode attempts per link per hour |
+| `LINK_BUDGETS` per link, hourly | turn 40, upload 24, delete 24, submit 6, validate 60 |
+| `LINK_BUDGETS` per company, hourly | turn 600, upload 200, delete 200, submit 120, validate 600 |
+| `UNLOCK_PER_LINK_HOURLY` / `UNLOCK_FAILURES_PER_COMPANY_HOURLY` | 12 attempts per link; 100 *failed* attempts per company — per hour |
 | `IP_LIMITS` per IP | flood backstop only — see below |
 | App body ceiling | 64 KiB JSON (`MAX_PUBLIC_CHAT_BODY_BYTES`), 10 MB per file |
 
-Per-IP ceilings are deliberately loose. A bulk send — 20 credential requests to
-one employer — puts a whole office behind a single NAT address, so a per-IP
-ceiling that binds before the per-link budget just 429s legitimate recipients.
-`tests/symlink/test_routes_smoke.py` asserts, with every window normalised to
-requests/hour, that each per-IP rate sits **between** the per-link and the
-per-company budget: below the per-link one it 429s an office, above the
-per-company one a single address can drain the whole tenant's hour. Do not
-"harden" it by tightening those.
+Per-IP ceilings are sized against one written-down design load, not tuned by
+feel: `OFFICE_RECIPIENTS` (20) recipients of one bulk send, all behind one NAT
+address, each finishing their whole task inside the hour (`PER_RECIPIENT_NEED`,
+e.g. `chat.MAX_TURNS` turns each — 400 turns for the office). With every window
+normalised to requests/hour, `tests/symlink/test_routes_smoke.py` asserts
+per-link ≥ one recipient's need, per-IP ≥ the office's need, per-link < per-IP,
+and per-company > per-IP. Every `IP_LIMITS` key must map to a kind, so none is
+silently exempt. A 200/hr turn ceiling once 429'd exactly that office
+mid-conversation; do not "harden" these without changing the design load.
 
-Unlock is the one kind with no per-company budget, on purpose: the passcode is
-company-wide, so a per-company unlock counter would let one attacker lock every
-legitimate recipient of a tenant out for the hour. Guessing is bounded per link
-(12/hr) and, across links, per IP — the code space (32^6 ≈ 1.07e9, rotated
-weekly) carries the rest.
+Unlock is governed differently, on purpose: the passcode is company-wide, so a
+per-company budget on unlock *attempts* would let anyone holding one leaked link
+lock every legitimate recipient of the tenant out. Instead only **failed**
+attempts count per company (100/hr, peeked before the verify so a correct code
+never spends it). An office's typos stay far below it; an attacker holding many
+leaked links gets at most 100 guesses per tenant per hour however many addresses
+they use (against 32^6 ≈ 1.07e9 codes, rotated weekly). The price: that attacker
+can block *new* unlocks for the tenant for up to an hour — already-unlocked
+recipients keep working.
 
 ### nginx `limit_req` — the same CloudFront coupling as fail2ban
 
@@ -72,12 +77,21 @@ weekly) carries the rest.
 | `/api/auth/` | `matcha_auth` | 30r/m, burst 20 |
 | `/api/ws/` | `matcha_ws` | 8r/m, burst 10 |
 
+The zones, together with `limit_req_status 429` and the `matcha_conn`
+connection zone, are defined in `/etc/nginx/conf.d/00-matcha-limits.conf` — a
+host-only file that is **not in this repo** (verified with `nginx -T`,
+2026-09-11). Request bodies are capped by `client_max_body_size 20m` in the http
+block of `/etc/nginx/nginx.conf`, also host-only; the sym-link upload path
+inherits it (the app's own cap is 10 MB per file), as does the frontend
+container's nginx (`client/nginx.conf`, 20m).
+
 Every one of those zones is `limit_req_zone $binary_remote_addr` — and behind
 CloudFront `$remote_addr` is the **POP address**, not the viewer's. The host also
 sets `X-Real-IP $remote_addr`, so the frontend container's `real_ip_header`
 resolves to the same POP. Only the application layer recovers the true viewer
 address, via `client_ip()` reading `X-Forwarded-For` right-to-left past the
-trusted proxy count.
+trusted proxy count. The same holds for `limit_conn matcha_conn 30`: thirty
+concurrent connections **per POP**, shared by everyone routed through it.
 
 So every matcha viewer routed through one edge location shares a single nginx
 bucket. This is exactly the coupling that caused the 2026-09-10 outage below,
@@ -86,12 +100,15 @@ current rate (20r/s per POP) is far above real per-POP traffic, so nothing is
 tripping today — but it is shared-fate, and tightening it would blackhole a POP
 for every user on it.
 
-`limit_req_status 429` and an `@ratelimited` handler were added to the server
-block (2026-09-10) so that a trip returns a real 429 with a JSON body. Before
-that, `limit_req`'s default 503 landed in `error_page 502 503 504 = @maintenance`
-and every rate-limited user was told "Server is updating" — an outage
-misdiagnosis waiting to happen. **This file is hand-applied** (`scp` per
-`deploy/nginx/README.md`); the change is in the repo, confirm it is on the box.
+The server block routes 429s to `@rate_limited` (same name and shape as
+cappe.conf's: a JSON body plus `Retry-After: 30`) instead of nginx's HTML page.
+`limit_req` already returned 429 host-wide via `00-matcha-limits.conf`; the
+setting is repeated in `matcha.conf` only because that file is not in the repo.
+The one that mattered was `limit_conn_status 429`, which nothing set: a tripped
+`limit_conn` returned 503, landed in `error_page 502 503 504 = @maintenance`,
+and told the user "Server is updating" — an outage misdiagnosis waiting to
+happen. **This file is hand-applied** (`scp` per `deploy/nginx/README.md`);
+confirm the change is on the box.
 
 **Not yet fixed:** making the nginx zones key per-viewer needs
 `set_real_ip_from` for the CloudFront ranges plus `real_ip_header
@@ -133,8 +150,15 @@ limit as a match. On an 8192-byte block rule that means **every** larger request
 is blocked outright, so the rule may only cover endpoints whose legitimate
 bodies are tiny:
 
-- `/unlock` — a passcode, at most 16 characters.
-- `/chat/turn` — one message, capped at 600 characters client-side.
+- `/unlock` — `PublicUnlockRequest`: `passcode` ≤ 32 characters plus the honeypot
+  `internal_ref` ≤ 200. A browser sends that as ≤ ~1 KB of UTF-8; a crafted client
+  that `\u`-escapes every character tops out near 2.8 KB.
+- `/chat/turn` — `PublicTurnRequest.message` ≤ 600 code points
+  (`MAX_PUBLIC_CHAT_MESSAGE_CHARS`, enforced server-side). A browser sends ≤ 2.4 KB
+  (4 UTF-8 bytes per astral character); a crafted client escaping every astral
+  character as a surrogate pair (`\uD83D\uDE00`, 12 bytes) reaches **~7.2 KB —
+  inside 8192 with under 1 KB to spare.** Below ~7.3 KB the WAF would reject bodies
+  the app accepts; raising `MAX_PUBLIC_CHAT_MESSAGE_CHARS` means raising this rule.
 
 It must **not** cover:
 

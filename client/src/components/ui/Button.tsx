@@ -10,9 +10,10 @@ const variants = {
   ghost: 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900',
   // Destructive and affirmative actions were being hand-rolled at call sites
   // (each a divergent copy of the class string, so Apply and Reject rendered at
-  // different heights). They belong here.
-  danger: 'border border-red-500/25 text-red-300 hover:bg-red-500/[0.06]',
-  success: 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/[0.16]',
+  // different heights). Their outline is an inset RING, not a border: a border
+  // adds 2px the other variants don't have, which is the mismatch all over again.
+  danger: 'ring-1 ring-inset ring-red-500/25 text-red-300 hover:bg-red-500/[0.06]',
+  success: 'ring-1 ring-inset ring-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/[0.16]',
 } as const
 
 const sizes = {
