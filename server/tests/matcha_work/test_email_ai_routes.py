@@ -84,7 +84,7 @@ def test_get_message_returns_thread_id_without_a_plan_gate(gmail, plan):
         resp = client.get("/agent/email/messages/18c3f0a1b2c3")
     assert resp.status_code == 200
     assert resp.json()["thread_id"] == "thr-9"
-    gmail.get_message.assert_awaited_once_with("18c3f0a1b2c3")
+    gmail.get_message.assert_awaited_once_with("18c3f0a1b2c3", include_html=True)
     plan.assert_not_awaited()
 
 
@@ -351,6 +351,26 @@ async def test_connected_gmail_400s_when_not_connected(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await workspace._connected_gmail(USER)
     assert exc.value.status_code == 400
+
+
+def test_status_carries_the_snapshot_limit(monkeypatch):
+    from app.matcha.services.matcha_work import gmail_service
+
+    class Connected:
+        def __init__(self, user_id):
+            self.user_id = user_id
+
+        async def get_status(self):
+            return {"connected": True, "email": "owner@example.com"}
+
+    monkeypatch.setattr(gmail_service, "GmailService", Connected)
+    with _client() as client:
+        body = client.get("/agent/email/status").json()
+    assert body == {
+        "connected": True,
+        "email": "owner@example.com",
+        "snapshot_max_emails": workspace.SNAPSHOT_MAX_EMAILS,
+    }
 
 
 def test_reply_subject():

@@ -537,7 +537,7 @@ struct ThreadsLibraryView: View {
     private func open(_ id: String) {
         appState.selectedThreadId = id   // hub flag stays set → back returns here
         appState.selectedProjectId = nil; appState.selectedChannelId = nil
-        appState.selectedJournalId = nil; appState.selectedEmailId = nil
+        appState.selectedJournalId = nil
     }
 
     private func create() async {

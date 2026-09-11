@@ -1,226 +1,28 @@
 import SwiftUI
+import WebKit
+import AppKit
 
-// MARK: - Sidebar section content
+// MARK: - Reader
 
-/// Rendered inside the collapsible "Email" sidebar section. Shows a connect
-/// prompt when no Gmail is linked, otherwise the unread list — grouped by AI
-/// triage bucket once the user runs "Organize with AI". Tapping a row routes
-/// the primary detail pane to `EmailDetailView` via `selectedEmailId`.
-struct EmailSidebarView: View {
-    let searchText: String
-    @Environment(AppState.self) private var appState
-    private let vm = EmailViewModel.shared
-
-    private var filtered: [EmailMessage] {
-        guard !searchText.isEmpty else { return vm.emails }
-        let q = searchText.lowercased()
-        return vm.emails.filter {
-            $0.subject.lowercased().contains(q) || $0.fromAddress.lowercased().contains(q)
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 2) {
-            if !vm.connected {
-                connectRow
-            } else {
-                if vm.isTriaging {
-                    infoRow(icon: "sparkles", text: "Organizing…")
-                }
-                if vm.isLoading && vm.emails.isEmpty {
-                    infoRow(icon: "arrow.triangle.2.circlepath", text: "Loading…")
-                } else if filtered.isEmpty {
-                    infoRow(icon: "tray", text: searchText.isEmpty ? "No unread mail" : "No matches")
-                } else {
-                    ForEach(vm.grouped(filtered)) { group in
-                        if let bucket = group.bucket {
-                            bucketHeader(bucket, count: group.emails.count)
-                        } else if !vm.triage.isEmpty {
-                            unsortedHeader(count: group.emails.count)
-                        }
-                        ForEach(group.emails) { msg in emailRow(msg) }
-                    }
-                }
-                connectedFooter
-            }
-
-            if let err = vm.errorMessage {
-                Text(err)
-                    .font(.espresso(size: 10))
-                    .foregroundColor(.red.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 3)
-            }
-        }
-        .padding(.bottom, 6)
-        .task { await vm.loadStatus() }
-    }
-
-    // MARK: rows
-
-    private var connectRow: some View {
-        Button {
-            Task { await vm.connect() }
-        } label: {
-            HStack(spacing: 8) {
-                if vm.isConnecting {
-                    ProgressView().controlSize(.small)
-                    Text("Connecting…")
-                } else {
-                    Image(systemName: "envelope.badge")
-                        .font(.espresso(size: 12))
-                        .foregroundColor(appState.themeSidebarAccent)
-                    Text("Connect Gmail")
-                }
-                Spacer()
-            }
-            .font(.espresso(size: 12))
-            .foregroundColor(appState.themeSidebarText)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(vm.isConnecting)
-    }
-
-    private func emailRow(_ msg: EmailMessage) -> some View {
-        let isSelected = appState.selectedEmailId == msg.id
-        return Button {
-            selectEmail(msg.id)
-        } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(msg.subject.isEmpty ? "(no subject)" : msg.subject)
-                    .font(.espresso(size: 12, weight: .medium))
-                    .foregroundColor(appState.themeSidebarText)
-                    .lineLimit(1)
-                Text(msg.fromAddress)
-                    .font(.espresso(size: 10))
-                    .foregroundColor(appState.themeSidebarTextSecondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(isSelected ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 4)
-        .help(vm.triage[msg.id]?.reason ?? "")
-    }
-
-    private func bucketHeader(_ bucket: EmailTriageBucket, count: Int) -> some View {
-        groupHeader(icon: bucket.icon, title: bucket.label, count: count)
-    }
-
-    private func unsortedHeader(count: Int) -> some View {
-        groupHeader(icon: "tray", title: "Unsorted", count: count)
-    }
-
-    private func groupHeader(icon: String, title: String, count: Int) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon).font(.espresso(size: 9))
-            Text(title.uppercased())
-                .font(.espresso(size: 9, weight: .semibold))
-                .tracking(0.5)
-            Text("\(count)").font(.espresso(size: 9))
-            Spacer()
-        }
-        .foregroundColor(appState.themeSidebarTextSecondary)
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
-    }
-
-    private func infoRow(icon: String, text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon).font(.espresso(size: 10))
-            Text(text).font(.espresso(size: 11))
-            Spacer()
-        }
-        .foregroundColor(appState.themeSidebarTextSecondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-    }
-
-    private var connectedFooter: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.seal")
-                .font(.espresso(size: 9))
-                .foregroundColor(appState.themeSidebarAccent)
-            Text(vm.email ?? "Connected")
-                .font(.espresso(size: 10))
-                .foregroundColor(appState.themeSidebarTextSecondary)
-                .lineLimit(1)
-            Spacer()
-            Menu {
-                Button {
-                    organize()
-                } label: {
-                    Label(
-                        vm.isTriaging ? "Organizing…" : "Organize with AI",
-                        systemImage: appState.canEmailAI ? "sparkles" : "lock.fill"
-                    )
-                }
-                .disabled(vm.isTriaging || vm.emails.isEmpty)
-                if !vm.triage.isEmpty {
-                    Button("Clear groups") { vm.clearTriage() }
-                }
-                Divider()
-                Button("Refresh") { Task { await vm.loadInbox() } }
-                Divider()
-                Button("Disconnect", role: .destructive) { Task { await vm.disconnect() } }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.espresso(size: 11))
-                    .foregroundColor(appState.themeSidebarTextSecondary)
-                    .frame(width: 18, height: 18)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Email account options")
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
-    }
-
-    private func organize() {
-        guard appState.canEmailAI else {
-            appState.presentPaywall(for: "email_ai")
-            return
-        }
-        Task { await vm.organize() }
-    }
-
-    /// Email participates in the primary-pane routing chain *after* the
-    /// category hubs, so any open hub flag would mask it. Clear everything
-    /// first, then set the one destination (same contract as every other
-    /// sidebar entry point).
-    private func selectEmail(_ id: String) {
-        appState.clearPrimaryNav()
-        appState.selectedEmailId = id
-    }
-}
-
-// MARK: - Detail pane
-
-/// Reader for one message plus the AI quick actions: summarize, draft a
-/// reply (saved to Gmail drafts, reviewed in `EmailReplySheet` before
-/// sending). Resolves from the loaded list, falling back to a fetch by id so
-/// a message read elsewhere (or re-opened after relaunch) still opens.
+/// One message: header, AI quick actions (summarize; draft a reply — saved to
+/// Gmail drafts and reviewed in `EmailReplySheet` before sending), and the
+/// body. HTML mail renders in a locked-down web view (`EmailHTMLView`); plain
+/// text renders natively with its links shortened. Hosted by the Email hub's
+/// reader column. Resolves from the loaded list, falling back to a fetch by id
+/// so a message read elsewhere (or re-opened after a relaunch) still opens.
 struct EmailDetailView: View {
     let emailId: String
     @Environment(AppState.self) private var appState
     private let vm = EmailViewModel.shared
 
     @State private var loaded: EmailMessage?
+    /// The single-message fetch — the only copy that carries the HTML body.
+    @State private var full: EmailMessage?
     @State private var isResolving = true
+    @State private var bodyReady = false
+    @State private var htmlDocument: String?
+    @State private var hasRemoteContent = false
+    @State private var showRemoteImages = false
     @State private var summary: String?
     @State private var isSummarizing = false
     @State private var isDrafting = false
@@ -229,11 +31,11 @@ struct EmailDetailView: View {
     @State private var actionError: String?
     @State private var sentNote: String?
     @State private var showSendToBoard = false
-    /// Bumped whenever the shown message changes, so a slow AI response for
-    /// the previous message can't land on this one.
+    /// Bumped whenever the shown message changes, so a slow response for the
+    /// previous message can't land on this one.
     @State private var generation = 0
 
-    private var msg: EmailMessage? { vm.message(id: emailId) ?? loaded }
+    private var msg: EmailMessage? { full ?? vm.message(id: emailId) ?? loaded }
 
     var body: some View {
         Group {
@@ -247,30 +49,67 @@ struct EmailDetailView: View {
                 placeholder
             }
         }
-        .background(appState.themeBg)
-        .task(id: emailId) {
-            generation += 1
-            // Drop the previous message first: `msg` falls back to `loaded`,
-            // so keeping it would show the old email (with a live action bar)
-            // under the new id until the fetch returns.
-            loaded = nil
-            summary = nil
-            actionError = nil
-            sentNote = nil
-            instructions = ""
-            reply = nil
-            showSendToBoard = false
-            isSummarizing = false
-            isDrafting = false
-            isResolving = true
-            loaded = await vm.ensureMessage(id: emailId)
-            isResolving = false
+        .task(id: emailId) { await open() }
+        .onChange(of: showRemoteImages) { _, _ in
+            let gen = generation
+            Task { await renderHTML(for: gen) }
         }
         .sheet(item: $reply) { draft in
             EmailReplySheet(draft: draft, original: msg) {
                 sentNote = "Reply sent to \(draft.to)"
             }
         }
+    }
+
+    private func open() async {
+        generation += 1
+        let gen = generation
+        // Drop the previous message first: `msg` falls back to `loaded`, so a
+        // stale copy would show the old email (with a live action bar) under
+        // the new id until the fetch returns.
+        loaded = nil
+        full = nil
+        htmlDocument = nil
+        hasRemoteContent = false
+        showRemoteImages = false
+        bodyReady = false
+        summary = nil
+        actionError = nil
+        sentNote = nil
+        instructions = ""
+        reply = nil
+        showSendToBoard = false
+        isSummarizing = false
+        isDrafting = false
+        isResolving = true
+        let resolved = await vm.ensureMessage(id: emailId)
+        guard gen == generation else { return }
+        loaded = resolved
+        isResolving = false
+        // The list copy has no HTML; the single fetch does (and is cached).
+        let fetched = await vm.fullMessage(id: emailId)
+        guard gen == generation else { return }
+        full = fetched
+        await renderHTML(for: gen)
+        guard gen == generation else { return }
+        bodyReady = true
+    }
+
+    /// Builds the web document off the main actor: a newsletter can be a
+    /// megabyte of HTML to scan and wrap, and selecting it mustn't freeze the UI.
+    private func renderHTML(for gen: Int) async {
+        guard let html = full?.bodyHtml, !html.isEmpty else {
+            htmlDocument = nil
+            hasRemoteContent = false
+            return
+        }
+        let allowRemote = showRemoteImages
+        let (document, remote) = await Task.detached(priority: .userInitiated) {
+            (EmailHTML.document(html, allowRemote: allowRemote), EmailHTML.hasRemoteContent(html))
+        }.value
+        guard gen == generation else { return }
+        htmlDocument = document
+        hasRemoteContent = remote
     }
 
     private var placeholder: some View {
@@ -286,8 +125,8 @@ struct EmailDetailView: View {
     }
 
     private func content(_ msg: EmailMessage) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
                 header(msg)
                 if let atts = msg.attachments, !atts.isEmpty {
                     attachmentsRow(atts)
@@ -296,17 +135,14 @@ struct EmailDetailView: View {
                 if isSummarizing || summary != nil {
                     summaryCard
                 }
-                Divider().background(appState.themeBorder)
-                Text(msg.body)
-                    .font(.system(size: 13))
-                    .foregroundColor(appState.themeText)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(24)
-            .frame(maxWidth: 780, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+            Divider().opacity(0.25)
+            messageBody(msg)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(isPresented: $showSendToBoard) {
             EmailSendToBoardSheet(emails: [msg]) { board in
                 actionError = nil
@@ -315,14 +151,70 @@ struct EmailDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func messageBody(_ msg: EmailMessage) -> some View {
+        if !bodyReady {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let htmlDocument {
+            VStack(spacing: 0) {
+                if hasRemoteContent && !showRemoteImages {
+                    remoteImagesBanner
+                }
+                // Mail is designed on white; it gets a white page in every theme.
+                EmailHTMLView(document: htmlDocument)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(appState.themeBorder.opacity(0.4), lineWidth: 0.5)
+                    )
+                    .padding(12)
+            }
+        } else {
+            EmailPlainBody(text: msg.body)
+        }
+    }
+
+    private var remoteImagesBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "eye.slash").font(.system(size: 11))
+            Text("Remote images are hidden, so the sender can't tell you opened this.")
+                .font(.system(size: 11))
+                .lineLimit(2)
+            Spacer(minLength: 8)
+            Button("Show images") { showRemoteImages = true }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(appState.themeAccent)
+        }
+        .foregroundColor(appState.themeTextSecondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .background(appState.themeCard.opacity(0.5))
+    }
+
     private func header(_ msg: EmailMessage) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let info = vm.rowInfo(for: msg)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(msg.subject.isEmpty ? "(no subject)" : msg.subject)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(appState.themeText)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
+                if htmlDocument != nil && !showRemoteImages {
+                    Button {
+                        showRemoteImages = true
+                    } label: {
+                        Image(systemName: "photo").font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Load remote images (the sender can tell you opened this)")
+                }
                 Button {
                     showSendToBoard = true
                 } label: {
@@ -333,13 +225,25 @@ struct EmailDetailView: View {
                 .controlSize(.small)
                 .help("Create an Email card with this message attached, for you or AutoPR to work")
             }
-            HStack(alignment: .firstTextBaseline) {
-                Text(msg.fromAddress)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(appState.themeTextSecondary)
-                    .textSelection(.enabled)
-                Spacer()
-                Text(msg.date)
+            HStack(spacing: 10) {
+                EmailAvatar(initial: info.initial, tint: info.tint, size: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(info.senderName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+                        .lineLimit(1)
+                    Text(info.senderAddress)
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 8)
+                if let bucket = vm.bucket(of: msg.id) {
+                    EmailBucketChip(bucket: bucket)
+                        .help(vm.triage[msg.id]?.reason ?? "")
+                }
+                Text(info.fullDate)
                     .font(.system(size: 11))
                     .foregroundColor(appState.themeTextSecondary)
             }
@@ -518,5 +422,203 @@ struct EmailDetailView: View {
             }
             if gen == generation { isDrafting = false }
         }
+    }
+}
+
+// MARK: - Bodies
+
+/// Wraps a sender's HTML for `EmailHTMLView`. The CSP is the content
+/// boundary: no scripts, frames, forms or external stylesheets, and no remote
+/// loads at all — tracking pixels included — until the reader asks for images.
+enum EmailHTML {
+    static func document(_ html: String, allowRemote: Bool) -> String {
+        let images = allowRemote ? "data: cid: https: http:" : "data: cid:"
+        let fonts = allowRemote ? "data: https:" : "data:"
+        let csp = "default-src 'none'; style-src 'unsafe-inline'; img-src \(images); font-src \(fonts); form-action 'none'"
+        return """
+        <!doctype html><html><head><meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="\(csp)">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+        html { background: #ffffff; }
+        body { margin: 0; padding: 18px 20px; color: #1d1d1f; overflow-wrap: anywhere;
+               font: 14px/1.5 -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+        img { max-width: 100%; height: auto; }
+        pre { white-space: pre-wrap; }
+        </style></head><body>\(html)</body></html>
+        """
+    }
+
+    /// A resource reference that would load from the network: an image or
+    /// lazy-load attribute, a poster, an SVG href, a stylesheet link, a CSS
+    /// `url(...)` or `@import`. Only decides whether the banner shows — the
+    /// reader's photo button can load remote content either way.
+    private static let remotePattern = #"(?:\b(?:src|srcset|background|poster|xlink:href)\s*=\s*["']?\s*(?:https?:)?//)|(?:<link\b[^>]*\bhref\s*=\s*["']?\s*(?:https?:)?//)|(?:url\(\s*["']?\s*(?:https?:)?//)|(?:@import\s+(?:url\()?\s*["']?\s*(?:https?:)?//)"#
+
+    static func hasRemoteContent(_ html: String) -> Bool {
+        // Inline styles often entity-encode their quotes: url(&quot;https://…).
+        let text = html
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#34;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+        guard let regex = try? NSRegularExpression(pattern: remotePattern, options: .caseInsensitive) else {
+            return true
+        }
+        return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+}
+
+/// Sender-written HTML rendered with nothing live: no JavaScript, an
+/// ephemeral data store (no cookies to set or read), the `EmailHTML` CSP, and
+/// every link handed to the system browser instead of navigating in place.
+struct EmailHTMLView: NSViewRepresentable {
+    let document: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        config.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = false
+        webView.allowsLinkPreview = false
+        context.coordinator.load(document, in: webView)
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.load(document, in: webView)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        private var loaded: String?
+        /// Set just before `loadHTMLString`; the one main-frame navigation it
+        /// starts is the only one allowed to load in place.
+        private var documentLoadPending = false
+
+        func load(_ document: String, in webView: WKWebView) {
+            guard loaded != document else { return }
+            loaded = document
+            documentLoadPending = true
+            webView.loadHTMLString(document, baseURL: nil)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+        ) {
+            // A clicked link opens in the default browser. Only our own
+            // document load navigates in place; anything else the page tries —
+            // a meta refresh, a frame, a form post — is refused.
+            if navigationAction.navigationType == .linkActivated {
+                if let url = navigationAction.request.url { Self.openExternally(url) }
+                decisionHandler(.cancel)
+                return
+            }
+            if documentLoadPending, navigationAction.targetFrame?.isMainFrame == true {
+                documentLoadPending = false
+                decisionHandler(.allow)
+                return
+            }
+            decisionHandler(.cancel)
+        }
+
+        /// `target="_blank"` links ask for a new web view; open them outside.
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if let url = navigationAction.request.url { Self.openExternally(url) }
+            return nil
+        }
+
+        private static func openExternally(_ url: URL) {
+            if url.scheme?.lowercased() == "mailto" {
+                NSWorkspace.shared.open(url)
+            } else {
+                SafeURL.open(url.absoluteString)   // http(s) only
+            }
+        }
+    }
+}
+
+/// A plain-text body, natively: themed, selectable, and each URL shown as its
+/// host ("pinterest.com/…") instead of a wall of tracking parameters.
+struct EmailPlainBody: View {
+    let text: String
+    @Environment(AppState.self) private var appState
+    @State private var rendered = AttributedString()
+
+    var body: some View {
+        ScrollView {
+            Text(rendered)
+                .font(.system(size: 13))
+                .foregroundColor(appState.themeText)
+                .tint(appState.themeAccent)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            SafeURL.open(url.absoluteString) ? .handled : .discarded
+        })
+        .task(id: text) {
+            let source = text
+            rendered = await Task.detached(priority: .userInitiated) {
+                EmailPlainText.linkified(source)
+            }.value
+        }
+    }
+}
+
+enum EmailPlainText {
+    /// Past this many UTF-16 units the text is shown as-is: link detection
+    /// over a huge HTML-converted body isn't worth the wait.
+    static let linkScanLimit = 200_000
+
+    static func linkified(_ raw: String) -> AttributedString {
+        let text = raw
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        let ns = text as NSString
+        guard ns.length <= linkScanLimit else { return AttributedString(text) }
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        var out = AttributedString()
+        var cursor = 0
+        for match in detector?.matches(in: text, range: NSRange(location: 0, length: ns.length)) ?? [] {
+            guard let url = match.url,
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else { continue }
+            if match.range.location > cursor {
+                out += AttributedString(ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+            }
+            var link = AttributedString(shortLabel(url))
+            link.link = url
+            out += link
+            cursor = match.range.location + match.range.length
+        }
+        if cursor < ns.length {
+            out += AttributedString(ns.substring(from: cursor))
+        }
+        return out
+    }
+
+    /// "pinterest.com/…" for a URL with a path or query; the bare host otherwise.
+    static func shortLabel(_ url: URL) -> String {
+        var host = url.host ?? url.absoluteString
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        let hasMore = !(url.path.isEmpty || url.path == "/") || url.query != nil
+        return hasMore ? "\(host)/…" : host
     }
 }

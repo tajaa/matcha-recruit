@@ -25,10 +25,6 @@ class AppState {
     var selectedProjectId: String? = nil
     var selectedChannelId: String? = nil
     var selectedJournalId: String? = nil
-    /// Selected unread email (id from the Gmail fetch). Routes the primary
-    /// detail pane to EmailDetailView. Mutually exclusive with the other
-    /// `selected*` ids — set it and clear them (and vice-versa).
-    var selectedEmailId: String? = nil
     /// When set, the main window shows a second (pinned) detail pane beside the
     /// primary one — the in-window split. nil = no split. Reuses AuxWindowTarget.
     var splitTarget: AuxWindowTarget? = nil
@@ -90,6 +86,9 @@ class AppState {
     /// Full-pane Productivity hub — personal kanban boards (To Do / In Progress
     /// / Done). Same nav-only model as the other hubs.
     var showProductivityHub: Bool = false
+    /// Full-pane Email hub (mailbox · message list · reader). Same nav-only
+    /// model; the hub itself owns which message is open.
+    var showEmailHub: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
@@ -104,7 +103,6 @@ class AppState {
         selectedProjectId = nil
         selectedChannelId = nil
         selectedJournalId = nil
-        selectedEmailId = nil
         showInbox = false
         showPeople = false
         showArchive = false
@@ -116,6 +114,7 @@ class AppState {
         showThreadsHub = false
         showChannelsHub = false
         showProductivityHub = false
+        showEmailHub = false
     }
 
     var onlineUsers: [MWOnlineUser] = []

@@ -172,11 +172,11 @@ def _optional_str(body: dict, key: str) -> str | None:
     return value
 
 
-async def _get_message_or_404(gmail, email_id: str) -> dict:
+async def _get_message_or_404(gmail, email_id: str, *, include_html: bool = False) -> dict:
     """Gmail answers a stale id (a message deleted since the list loaded) with
     400/404. That is "not found" for the caller, not a server error."""
     try:
-        return await gmail.get_message(email_id)
+        return await gmail.get_message(email_id, include_html=include_html)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (400, 404):
             raise HTTPException(status_code=404, detail="Message not found") from exc
@@ -387,7 +387,9 @@ async def agent_email_status(
     """Check if the current user has Gmail connected."""
     from app.matcha.services.matcha_work.gmail_service import GmailService
     gmail = GmailService(current_user.id)
-    return await gmail.get_status()
+    # The client caps a card's email picker from this, so the limit lives in
+    # one place (the snapshot route enforces it).
+    return {**(await gmail.get_status()), "snapshot_max_emails": SNAPSHOT_MAX_EMAILS}
 
 
 @router.post("/agent/email/connect")
@@ -538,11 +540,12 @@ async def agent_email_get_message(
     email_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """One message by Gmail id, so a viewer can re-open a message that has
-    dropped out of the unread list (read elsewhere, or after a relaunch)."""
+    """One message by Gmail id, with its HTML part (`body_html`) for the
+    reader. Also re-opens a message that has dropped out of the unread list
+    (read elsewhere, or after a relaunch)."""
     _require_message_id(email_id)
     gmail = await _connected_gmail(current_user)
-    return await _get_message_or_404(gmail, email_id)
+    return await _get_message_or_404(gmail, email_id, include_html=True)
 
 
 @router.post("/agent/email/summarize")

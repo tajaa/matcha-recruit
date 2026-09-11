@@ -15,6 +15,12 @@ struct TaskComposeContent: View {
     @State private var showingWizard = false
     @State private var creating = false
     @State private var creationError: String?
+    @State private var showingEmailWizard = false
+    /// Emails an email ticket attaches as snapshots once it's created.
+    @State private var attachEmails: [EmailMessage] = []
+    /// Set once the ticket exists but attaching its emails failed, so a retry
+    /// only re-attaches instead of creating a second ticket.
+    @State private var createdTaskId: String?
 
     private var fields: [KanbanTemplate.TicketField] {
         template == .research ? ResearchBriefWizard.fields : template.fields
@@ -125,6 +131,25 @@ struct TaskComposeContent: View {
                     .font(.system(size: 12)).foregroundColor(.secondary)
             }
 
+            if template == .email {
+                Button { showingEmailWizard = true } label: {
+                    Label(attachEmails.isEmpty ? "Guide me through this email ticket" : "Change emails or brief",
+                          systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.bordered)
+                .disabled(createdTaskId != nil)
+                .sheet(isPresented: $showingEmailWizard) {
+                    EmailTicketWizard(initialTitle: title, initialValues: fieldValues, initialEmails: attachEmails) { brief in
+                        title = brief.title
+                        fieldValues.merge(brief.values) { _, new in new }
+                        attachEmails = brief.emails
+                    }
+                }
+                Text(emailAttachSummary)
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("Ticket title").font(.system(size: 12, weight: .semibold))
             TextField("Give this ticket a clear, specific name", text: $title)
                 .textFieldStyle(.plain)
@@ -188,38 +213,14 @@ struct TaskComposeContent: View {
             }
             Divider()
             HStack {
-                Button("Cancel") { onClose() }
+                Button(createdTaskId == nil ? "Cancel" : "Close") { onClose() }
                     .buttonStyle(.plain)
                     .foregroundColor(.secondary)
                 Spacer()
-                Button(creating ? "Creating…" : "Create ticket") {
-                    let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !t.isEmpty else { return }
-                    let desc = KanbanTemplate.composeDescription(
-                        fields: fields, values: fieldValues
-                    )
-                    creating = true
-                    creationError = nil
-                    viewModel.errorMessage = nil
-                    Task {
-                        await viewModel.addTask(
-                            title: t, column: column, priority: priority,
-                            assignedTo: assignedTo,
-                            description: desc.isEmpty ? nil : desc,
-                            category: template.rawValue,
-                            elementId: selectedElementId
-                        )
-                        creating = false
-                        if let error = viewModel.errorMessage {
-                            creationError = error
-                        } else {
-                            onClose()
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.matcha500)
-                .disabled(creating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button(createButtonTitle) { createTicket() }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.matcha500)
+                    .disabled(creating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .disabled(creating)
@@ -235,11 +236,90 @@ struct TaskComposeContent: View {
         }
         .task {
             if template == .research { showingWizard = true }
+            if template == .email && attachEmails.isEmpty { showingEmailWizard = true }
             await loadResearchDefaults()
         }
         .onChange(of: viewModel.collaborators.count) { _, _ in preselectAutoPRIfPossible() }
         .glassPanel(cornerRadius: 0, material: .hudWindow, blending: .behindWindow,
                     tint: Color.appBackground, tintOpacity: 0.62, shadow: false)
+    }
+
+    private var createButtonTitle: String {
+        if creating { return "Creating…" }
+        return createdTaskId == nil ? "Create ticket" : "Retry attaching emails"
+    }
+
+    private var emailAttachSummary: String {
+        if attachEmails.isEmpty {
+            return "Pick the emails for the agent, say what to do with them, and see what happens next. Without attached emails, AutoPR asks for them instead of running."
+        }
+        let subjects = attachEmails.prefix(2)
+            .map { $0.subject.isEmpty ? "(no subject)" : $0.subject }
+            .joined(separator: ", ")
+        let more = attachEmails.count > 2 ? " and \(attachEmails.count - 2) more" : ""
+        return "\(attachEmails.count) email\(attachEmails.count == 1 ? "" : "s") will be attached: \(subjects)\(more)."
+    }
+
+    /// The template fields, plus — on an email ticket — how many emails are
+    /// attached. Only the count: subjects and senders are written by whoever
+    /// sent the mail, and the description reads as the card owner's words, so
+    /// sender text stays in the snapshots, which the agent treats as untrusted.
+    private var composedDescription: String {
+        let base = KanbanTemplate.composeDescription(fields: fields, values: fieldValues)
+        guard template == .email, !attachEmails.isEmpty else { return base }
+        let count = attachEmails.count
+        let note = "## Emails attached\n\(count) email\(count == 1 ? "" : "s") attached to this card as `email-*.md` snapshots."
+        return [base, note].filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
+    private func createTicket() {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !creating else { return }
+        creating = true
+        creationError = nil
+        viewModel.errorMessage = nil
+        let description = composedDescription
+        Task {
+            defer { creating = false }
+            var taskId = createdTaskId
+            if taskId == nil {
+                let created = await viewModel.addTask(
+                    title: t, column: column, priority: priority,
+                    assignedTo: assignedTo,
+                    description: description.isEmpty ? nil : description,
+                    category: template.rawValue,
+                    elementId: selectedElementId
+                )
+                if let error = viewModel.errorMessage {
+                    creationError = error
+                    return
+                }
+                taskId = created?.id
+                createdTaskId = created?.id
+            }
+            if template == .email, !attachEmails.isEmpty, let taskId, let pid = viewModel.project?.id,
+               let problem = await attachSnapshots(taskId: taskId, projectId: pid) {
+                creationError = problem
+                return
+            }
+            onClose()
+        }
+    }
+
+    /// Attach the picked emails as `email-<message id>.md` snapshots. nil =
+    /// done; otherwise what to show — the ticket exists, Retry re-attaches.
+    private func attachSnapshots(taskId: String, projectId: String) async -> String? {
+        do {
+            let result = try await EmailService.shared.snapshot(
+                emailIds: attachEmails.map(\.id), projectId: projectId, taskId: taskId
+            )
+            MatchaWorkService.shared.invalidateProjectTasks(projectId: projectId)
+            let failed = result.skipped.filter { $0.reason == "fetch_failed" }.count
+            guard failed > 0 else { return nil }
+            return "The ticket was created, but \(failed) of \(attachEmails.count) emails couldn't be read from Gmail. Retry to attach them."
+        } catch {
+            return "The ticket was created, but attaching the emails failed: \(error.localizedDescription)"
+        }
     }
 
     /// Renders one structured field (labeled). Single-line → TextField,

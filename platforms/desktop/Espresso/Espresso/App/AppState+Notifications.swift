@@ -329,7 +329,7 @@ extension AppState {
             showInbox = false
             showPeople = false
             showChannelBrowse = false
-            selectedEmailId = nil
+            showEmailHub = false
         }
 
         if let project {
