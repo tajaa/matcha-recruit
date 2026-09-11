@@ -39,6 +39,12 @@ check "the kind registry maps the research category to an artifact mode" \
       && [ "$(autopr_kind_field research decision)" = normalize-research ] \
       && [ -f "$AUTOPR_DIR/$(autopr_kind_field research prompt)" ] \
       && echo 0 || echo 1)
+check "explicit screenshot deliverables are distinguished from input-evidence mentions and waivers" \
+    $(autopr_research_screenshots_required '{"title":"EMS documentation","description":"Expected output: graphs, data, and screenshots from your research"}' \
+      && ! autopr_research_screenshots_required '{"title":"Review attached screenshot","description":"Explain what this input shows"}' \
+      && ! autopr_research_screenshots_required '{"title":"EMS documentation","description":"Include screenshots","review_note":"No need for screenshots this round"}' \
+      && autopr_research_screenshots_required '{"title":"EMS documentation","description":"Short report","review_note":"The last report had no screenshots; add them"}' \
+      && echo 0 || echo 1)
 check "research sandbox switches enforce an empty patch and enable search + images" \
     $(switches="$(autopr_kind_field research sandbox)"; \
       [[ "$switches" == *AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1* ]] \
@@ -94,6 +100,23 @@ run_select "$TMP_DIR/cards-todo.json" "$TMP_DIR/select-todo.json"
 check "a research card in Todo selects as mode research without any gh pr list call" \
     $([ "$(jq -r '.mode' "$TMP_DIR/select-todo.json" 2>/dev/null)" = research ] \
       && ! grep -q 'pr list' "$RESEARCH_TEST_GH_LOG" \
+      && echo 0 || echo 1)
+
+jq '.[0] |= (.description = "Expected output: graphs, data, and screenshots from your research" | .autopr_capabilities = ["research"])' \
+    "$TMP_DIR/cards-todo.json" > "$TMP_DIR/cards-shots-no-browse.json"
+run_select "$TMP_DIR/cards-shots-no-browse.json" "$TMP_DIR/select-shots-no-browse.json"
+shots_no_browse_rc=$?
+check "a screenshot-required report is held when the board lacks browser capture" \
+    $([ "$shots_no_browse_rc" = 3 ] \
+      && jq -e 'any(.[]; .id8 == "aaaa0000" and .capability == "browse")' \
+          "$TMP_DIR/cache/ungranted.json" >/dev/null \
+      && echo 0 || echo 1)
+
+jq '.[0].autopr_capabilities += ["browse"]' "$TMP_DIR/cards-shots-no-browse.json" \
+    > "$TMP_DIR/cards-shots-browse.json"
+run_select "$TMP_DIR/cards-shots-browse.json" "$TMP_DIR/select-shots-browse.json"
+check "a screenshot-required report runs once both research and browse are granted" \
+    $([ "$(jq -r '.mode' "$TMP_DIR/select-shots-browse.json" 2>/dev/null)" = research ] \
       && echo 0 || echo 1)
 
 cat > "$TMP_DIR/cards-cr.json" <<'EOF'
@@ -335,6 +358,27 @@ check "the bridge collects screenshots and refuses non-images, dotfiles, and ove
       && grep -q 'is 5000000 bytes' "$TMP_DIR/shots.log" \
       && echo 0 || echo 1)
 
+printf '{"outcome":"research_report"}\n' > "$TMP_DIR/screenshot-contract-decision.json"
+printf '### Findings\nNo visual references yet.\n' > "$TMP_DIR/screenshot-contract-report.md"
+contract_error="$(autopr_research_screenshot_contract_error true \
+    "$TMP_DIR/screenshot-contract-report.md" "$TMP_DIR/screenshot-contract-decision.json" \
+    "$TMP_DIR/no-contract-shots")"
+check "a required screenshot contract rejects a report with no captured images" \
+    $([[ "$contract_error" == *'no admitted image files'* ]] && echo 0 || echo 1)
+mkdir -p "$TMP_DIR/contract-shots"
+printf 'PNG' > "$TMP_DIR/contract-shots/01-evidence.png"
+contract_error="$(autopr_research_screenshot_contract_error true \
+    "$TMP_DIR/screenshot-contract-report.md" "$TMP_DIR/screenshot-contract-decision.json" \
+    "$TMP_DIR/contract-shots")"
+check "a required screenshot contract rejects unreferenced captures" \
+    $([[ "$contract_error" == *'does not name: 01-evidence.png'* ]] && echo 0 || echo 1)
+printf '### Findings\nSee 01-evidence.png for the source UI.\n' > "$TMP_DIR/screenshot-contract-report.md"
+check "a required screenshot contract accepts an admitted image named in the report" \
+    $(! autopr_research_screenshot_contract_error true \
+        "$TMP_DIR/screenshot-contract-report.md" "$TMP_DIR/screenshot-contract-decision.json" \
+        "$TMP_DIR/contract-shots" >/dev/null \
+      && echo 0 || echo 1)
+
 rm -rf "$TMP_DIR/collected-shots"
 PATH="$TMP_DIR/shot-bin:$PATH" AUTOPR_SANDBOX_TEST_DIRECT=1 \
 AUTOPR_SANDBOX_REPO_ROOT="$SANDBOX_TEST_REPO" \
@@ -361,9 +405,11 @@ check "the capture helper refuses non-http, credentialed, and internal URLs" \
 check "the browser paragraph lives in its own fragment, keyed into the prompt by a placeholder" \
     $(grep -qF 'browse-capture.py' "$AUTOPR_DIR/_prompt_research_browse.txt" \
       && grep -q 'Do not try to drive a browser any other way' "$AUTOPR_DIR/_prompt_research_browse.txt" \
-      && grep -q 'operator setting on this machine, not a research failure' "$AUTOPR_DIR/_prompt_research_browse.txt" \
+      && grep -q 'hold the incomplete report' "$AUTOPR_DIR/_prompt_research_browse.txt" \
       && grep -qx 'BROWSE_TOOL_SECTION' "$AUTOPR_DIR/_prompt_research.txt" \
       && ! grep -qF 'browse-capture.py' "$AUTOPR_DIR/_prompt_research.txt" \
+      && grep -qF 'required_deliverables.screenshots' "$AUTOPR_DIR/_prompt_research.txt" \
+      && grep -qF 'required_screenshots_missing' "$AUTOPR_DIR/investigate.sh" \
       && echo 0 || echo 1)
 
 # The same template serves every research run and nothing else reaches the
@@ -881,6 +927,26 @@ check "an explicit run on an ungranted board is answered on the card, not silent
     $([ "$ungranted_run_rc" = 3 ] \
       && grep -q 'autopr/run-defer' "$RESEARCH_TEST_CURL_LOG" \
       && jq -e '.kind == "note" and (.body | contains("research")) and (.body | contains("Admin"))' \
+            "$RESEARCH_TEST_ACTIVITY" >/dev/null \
+      && echo 0 || echo 1)
+
+# The kind's research grant is present here; only the deliverable-specific
+# browser grant is missing. The same visible response must name the actual
+# capability that blocked this particular card.
+jq '.[0].autopr_run_requested_at = "2026-09-08T02:00:00Z"' \
+    "$TMP_DIR/cards-shots-no-browse.json" > "$TMP_DIR/cards-shots-no-browse-run.json"
+: > "$RESEARCH_TEST_CURL_LOG"
+rm -f "$RESEARCH_TEST_ACTIVITY"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+MATCHA_AUTOPR_ENV="$TMP_DIR/env" \
+AUTOPR_BOT_PRS_FILE="$TMP_DIR/bot-prs.json" AUTOPR_CACHE_DIR="$TMP_DIR/cache-no-browse" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/cards-shots-no-browse-run.json" \
+    > "$TMP_DIR/select-shots-no-browse-run.json" 2>"$TMP_DIR/select-shots-no-browse-run.err"
+shots_no_browse_run_rc=$?
+check "an explicit screenshot run names the missing browse grant on the card" \
+    $([ "$shots_no_browse_run_rc" = 3 ] \
+      && grep -q 'autopr/run-defer' "$RESEARCH_TEST_CURL_LOG" \
+      && jq -e '.kind == "note" and (.body | contains("`browse` capability"))' \
             "$RESEARCH_TEST_ACTIVITY" >/dev/null \
       && echo 0 || echo 1)
 

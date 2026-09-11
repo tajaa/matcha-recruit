@@ -460,6 +460,10 @@ for ((i = 0; i < n; i++)); do
     # One capability per line so already_handled can grep -qx for an exact
     # match instead of substring-matching "browse" inside a longer name.
     capabilities="$(printf '%s' "$card" | jq -r '(.autopr_capabilities // [])[]' 2>/dev/null || true)"
+    screenshots_required=false
+    if [ "$category" = research ] && autopr_research_screenshots_required "$card"; then
+        screenshots_required=true
+    fi
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
@@ -475,12 +479,22 @@ for ((i = 0; i < n; i++)); do
         github_unavailable=true
         decision=skip
     fi
+    ungranted_capability=""
+    if [ "$decision" = research ] && [ "$screenshots_required" = true ] \
+        && ! printf '%s\n' "$capabilities" | grep -qxF browse; then
+        # A requested screenshot is part of the deliverable, not an optional
+        # enhancement. Do not spend a research run and publish a knowingly
+        # incomplete report when this board has not granted browser capture.
+        decision=skip_ungranted
+        ungranted_capability=browse
+    fi
     if [ "$decision" = skip_ungranted ]; then
         # Leave a hint for the tmux dashboard, which runs this selector
         # read-only and otherwise cannot tell "held: needs a grant" from
         # "cooling down". A hint file, not a cooldown marker: written on the
         # read-only path too, and never consulted by selection.
-        ungranted_capability="$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
+        [ -n "$ungranted_capability" ] \
+            || ungranted_capability="$(autopr_kind_field "$(autopr_kind_for_category "$category")" capability)"
         note_ungranted_hint "$id8" "$ungranted_capability"
         # Still consume the request — an unconsumed one re-dispatches every
         # minute forever — but never silently: without the note the operator

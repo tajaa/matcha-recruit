@@ -173,6 +173,69 @@ mw_move_card() {
         "$(jq -n --arg col "$column" '{board_column: $col}')" >/dev/null
 }
 
+# autopr_research_screenshots_required CARD_JSON
+# Returns 0 when a Research card explicitly asks the report to include
+# screenshots. This is deliberately narrower than "the card mentions a
+# screenshot": attached screenshots are commonly input evidence, while this
+# flag governs an output deliverable that the trusted harness must enforce.
+# A revision note may explicitly waive the original requirement for that
+# round; otherwise an original requirement remains in force on every revision.
+autopr_research_screenshots_required() {
+    local card_json="$1"
+    printf '%s' "$card_json" | jq -e '
+      def normalized: tostring | ascii_downcase;
+      def mentions: test("screenshots?");
+      def requests:
+        test("(^|[^[:alnum:]_])(include|attach|capture|provide|add|need|want|show)[[:space:]][^\\n.]{0,60}screenshots?")
+        or test("screenshots?[^\\n.]{0,60}(from|in|with|for) (the |your )?(report|research|output|deliverable)")
+        or test("expected output[\\s\\S]{0,600}screenshots?");
+      def waives:
+        test("screenshots? (are )?(optional|unnecessary|not (needed|required))"
+             + "|no need for screenshots?"
+             + "|without screenshots?"
+             + "|do not (include|attach|capture|provide|add) screenshots?"
+             + "|don.t (include|attach|capture|provide|add) screenshots?"
+             + "|skip (the )?screenshots?");
+      ((.review_note // "") | normalized) as $review
+      | (([.title // "", .description // ""] | join("\n")) | normalized) as $brief
+      | if ($review | waives) then false
+        elif ($review | mentions) then true
+        else (($brief | requests) and (($brief | waives) | not))
+        end
+    ' >/dev/null 2>&1
+}
+
+# autopr_research_screenshot_contract_error REQUIRED REPORT DECISION ARTIFACTS
+# Prints the reason a completed research report does not satisfy its requested
+# screenshot deliverable and returns 0. Returns 1 when the contract is met or
+# does not apply (including a needs_clarification decision).
+autopr_research_screenshot_contract_error() {
+    local required="$1" report_file="$2" decision_file="$3" artifacts_dir="$4"
+    local count=0 unnamed="" shot shot_name
+    [ "$required" = true ] || return 1
+    [ "$(jq -r '.outcome // empty' "$decision_file" 2>/dev/null)" = research_report ] \
+        || return 1
+    if [ -d "$artifacts_dir" ]; then
+        while IFS= read -r shot; do
+            [ -n "$shot" ] || continue
+            count=$((count + 1))
+            shot_name="$(basename "$shot")"
+            if ! grep -qF "$shot_name" "$report_file" 2>/dev/null; then
+                unnamed="${unnamed}${unnamed:+, }$shot_name"
+            fi
+        done < <(find "$artifacts_dir" -maxdepth 1 -type f | sort)
+    fi
+    if [ "$count" -eq 0 ]; then
+        printf 'the card requires screenshots, but the browser produced no admitted image files'
+        return 0
+    fi
+    if [ -n "$unnamed" ]; then
+        printf 'the browser produced %s screenshot(s), but the report does not name: %s' "$count" "$unnamed"
+        return 0
+    fi
+    return 1
+}
+
 # A card whose criteria are already met, on a run forbidden from saying so,
 # produces a diff that changes nothing real. PR #418 shipped exactly one such
 # line: a nav label reworded while the route, the row, and the feature gate it

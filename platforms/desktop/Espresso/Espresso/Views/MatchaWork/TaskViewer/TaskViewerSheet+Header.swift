@@ -501,10 +501,14 @@ extension TaskViewerSheet {
             }
             Spacer(minLength: 0)
             HStack(spacing: 4) {
-                Text("Added \(PacificDateFormatter.absolute(liveAutoPRTask.createdAt) ?? liveAutoPRTask.createdAt)")
+                if let created = liveAutoPRTask.createdAt {
+                    Text("Added \(PacificDateFormatter.absolute(created) ?? created)")
+                }
                 if let moved = liveAutoPRTask.lastMovedAt,
                    let label = PacificDateFormatter.absolute(moved) {
-                    Text("·")
+                    if liveAutoPRTask.createdAt != nil {
+                        Text("·")
+                    }
                     Text("Moved \(label)")
                 }
             }
