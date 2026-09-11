@@ -261,7 +261,7 @@ private struct EmailSnapshotBody: Encodable {
 }
 
 extension EmailService {
-    /// Server renders each message to `email-<id8>.md` and attaches it to the
+    /// Server renders each message to `email-<message id>.md` and attaches it to the
     /// task — the corpus an `email` card hands the AutoPR run. Idempotent.
     func snapshot(emailIds: [String], projectId: String, taskId: String) async throws -> EmailSnapshotResponse {
         try await APIClient.shared.request(

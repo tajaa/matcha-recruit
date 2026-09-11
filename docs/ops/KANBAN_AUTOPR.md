@@ -964,7 +964,7 @@ all, or one that needs a decision only its owner can make.
 ```json
 {"schema_version": 1, "outcome": "email_report | needs_clarification",
  "card_note": "...", "summary": "...",
- "per_email": [{"file": "email-18c3f0a1.md", "from": "...", "subject": "...",
+ "per_email": [{"file": "email-18c3f0a1b2c3d4e5.md", "from": "...", "subject": "...",
                 "bucket": "needs_reply | action | fyi | newsletter",
                 "summary": "...", "suggested_action": "..."}],
  "confidence": {"score": 0, "reason": "..."},

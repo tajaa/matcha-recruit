@@ -131,7 +131,7 @@ struct EmailReplySheet: View {
 /// Turn emails into an `email` kanban card: pick a collab board, fill the
 /// template, optionally hand it to AutoPR (only offered on a board that is
 /// watched, granted `email`, and has the bot as a collaborator). The server
-/// then attaches each message as an `email-<id8>.md` snapshot — the corpus the
+/// then attaches each message as an `email-<message id>.md` snapshot — the corpus the
 /// AutoPR run reads, since the sandbox never touches Gmail.
 struct EmailSendToBoardSheet: View {
     @Environment(AppState.self) private var appState
