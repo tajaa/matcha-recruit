@@ -22,11 +22,12 @@ struct PrimaryDetailPane: View {
     // rail never unmounts. Context is whichever item is selected, else whichever
     // hub flag is set. selected*Id wins so a cross-link (e.g. project → channel)
     // switches rails to the active item.
-    private enum WorkCategory { case threads, projects, journals, channels, productivity }
+    private enum WorkCategory { case threads, projects, journals, channels, productivity, email }
     private var workCategory: WorkCategory? {
         if appState.selectedThreadId != nil  { return .threads }
         if appState.selectedProjectId != nil { return .projects }
         if appState.selectedChannelId != nil { return .channels }
+        if appState.selectedEmailId != nil   { return .email }
         if appState.showThreadsHub  { return .threads }
         if appState.showProjectsHub { return .projects }
         // Journals = the Notes-style workspace. A selected journal stays inside
@@ -35,6 +36,8 @@ struct PrimaryDetailPane: View {
         if appState.showJournalsHub || appState.selectedJournalId != nil { return .journals }
         if appState.showChannelsHub { return .channels }
         if appState.showProductivityHub { return .productivity }
+        // Last: a stale Email flag must never mask a journal selection.
+        if appState.showEmailHub { return .email }
         return nil
     }
 
@@ -47,9 +50,8 @@ struct PrimaryDetailPane: View {
                 case .journals: JournalsWorkspace()
                 case .channels: ChannelsLibraryView()
                 case .productivity: ProductivityWorkspace()
+                case .email: EmailWorkspace()
                 }
-            } else if let emailId = appState.selectedEmailId {
-                EmailDetailView(emailId: emailId)
             } else if appState.showChannelBrowse {
                 ChannelBrowseView()
             } else if appState.showInbox {
@@ -71,6 +73,7 @@ struct PrimaryDetailPane: View {
         .onChange(of: appState.selectedProjectId) { _, v in if v != nil { appState.showProjectsHub = true } }
         .onChange(of: appState.selectedJournalId) { _, v in if v != nil { appState.showJournalsHub = true } }
         .onChange(of: appState.selectedChannelId) { _, v in if v != nil { appState.showChannelsHub = true } }
+        .onChange(of: appState.selectedEmailId)   { _, v in if v != nil { appState.showEmailHub = true } }
     }
 }
 

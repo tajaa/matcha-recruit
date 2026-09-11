@@ -37,6 +37,28 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
 ]
 
+# A newsletter is ~100 KB of HTML. Past this the reader shows the text body.
+BODY_HTML_MAX_CHARS = 1_000_000
+
+_HTML_DROP_RE = re.compile(r"<(style|script|head)\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
+_HTML_BREAK_RE = re.compile(
+    r"<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table|/blockquote|/header|/footer|/section|/article)\b[^>]*>",
+    re.IGNORECASE,
+)
+
+
+def _html_to_text(markup: str) -> str:
+    """Readable text from an HTML-only message. Block ends become line
+    breaks so paragraphs survive; every other tag is dropped."""
+    text = _HTML_DROP_RE.sub("", markup)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    text = _HTML_BREAK_RE.sub("\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 # (limit, window seconds, label) — per user, however many requests or workers.
 SEND_RATE_LIMITS = ((5, 60, "5 emails per minute"), (50, 3600, "50 emails per hour"))
 
@@ -216,12 +238,18 @@ class GmailService:
                 return None
 
         results = await _aio.gather(*[_fetch_one(s) for s in stubs])
+        # The list stays light: 25 newsletters of HTML is megabytes, and the
+        # reader fetches the one message it opens.
+        for r in results:
+            if r is not None:
+                r.pop("body_html", None)
         return [r for r in results if r is not None]
 
     async def get_message(self, msg_id: str) -> dict:
         data = await self._gmail_get(f"/users/me/messages/{msg_id}", params={"format": "full"})
-        headers = {h["name"].lower(): h["value"] for h in data.get("payload", {}).get("headers", [])}
-        body = self._extract_body(data.get("payload", {}))
+        payload = data.get("payload", {})
+        headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
+        markup = self._find_part(payload, "text/html")
         return {
             "id": msg_id,
             # Gmail's own thread id (for threadId on a reply) and the RFC 5322
@@ -232,8 +260,14 @@ class GmailService:
             "subject": headers.get("subject", "(no subject)"),
             "from": headers.get("from", "unknown"),
             "date": headers.get("date", ""),
-            "body": body,
-            "attachments": self._extract_attachments(data.get("payload", {})),
+            # Gmail's own preview line, entity-escaped the way it arrives.
+            "snippet": html.unescape(data.get("snippet") or ""),
+            "body": self._extract_body(payload),
+            # The reader renders this (sandboxed); past the cap it falls back
+            # to `body`. Never sent to the model or into a card snapshot.
+            "body_html": markup if markup and len(markup) <= BODY_HTML_MAX_CHARS else None,
+            "is_unread": "UNREAD" in (data.get("labelIds") or []),
+            "attachments": self._extract_attachments(payload),
         }
 
     async def get_attachment(self, msg_id: str, attachment_id: str) -> bytes:
@@ -331,35 +365,48 @@ class GmailService:
             except HTTPException as exc:
                 raise GmailSendRateLimited(f"Send rate limit: max {label}") from exc
 
+    def _part_text(self, part: dict) -> str | None:
+        """One MIME part's body, decoded with the charset its Content-Type
+        declares. Not every sender writes UTF-8; an unknown charset falls back
+        to it rather than failing the whole message."""
+        data = (part.get("body") or {}).get("data")
+        if not data:
+            return None
+        raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+        charset = "utf-8"
+        for header in part.get("headers") or []:
+            if (header.get("name") or "").lower() == "content-type":
+                found = re.search(r'charset="?([\w.:-]+)"?', header.get("value") or "", re.IGNORECASE)
+                if found:
+                    charset = found.group(1)
+        try:
+            return raw.decode(charset, errors="replace")
+        except LookupError:
+            return raw.decode("utf-8", errors="replace")
+
+    def _find_part(self, part: dict, mime: str) -> str | None:
+        """The first `mime` body in a depth-first walk. A part with a
+        filename is an attachment (a forwarded .html, a notes.txt), never the
+        message body."""
+        if part.get("mimeType") == mime and not part.get("filename"):
+            text = self._part_text(part)
+            if text:
+                return text
+        for child in part.get("parts") or []:
+            found = self._find_part(child, mime)
+            if found:
+                return found
+        return None
+
     def _extract_body(self, payload: dict) -> str:
-        if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):
-            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
-
-        parts = payload.get("parts", [])
-        plain_text = None
-        html_text = None
-
-        for part in parts:
-            mime = part.get("mimeType", "")
-            body_data = part.get("body", {}).get("data")
-            if mime == "text/plain" and body_data:
-                plain_text = base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
-            elif mime == "text/html" and body_data:
-                html_text = base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
-            elif mime.startswith("multipart/"):
-                nested = self._extract_body(part)
-                if nested and nested != "(no readable body)":
-                    return nested
-
-        if plain_text:
-            return plain_text
-        if html_text:
-            text = re.sub(r"<style[^>]*>.*?</style>", "", html_text, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r"<[^>]+>", " ", text)
-            text = html.unescape(text)
-            return re.sub(r"\s+", " ", text).strip()
-
+        """Plain text: what the AI actions and a card's snapshot read. The
+        HTML-only case is converted with its paragraphs kept."""
+        plain = self._find_part(payload, "text/plain")
+        if plain and plain.strip():
+            return plain
+        markup = self._find_part(payload, "text/html")
+        if markup:
+            return _html_to_text(markup)
         return "(no readable body)"
 
     def _extract_attachments(self, payload: dict) -> list[dict]:
