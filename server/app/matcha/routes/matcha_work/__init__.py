@@ -1,10 +1,11 @@
 """Matcha Work router package. Split from an 11,572-line flat matcha_work.py
 on 2026-07-03 -- see matcha_work/CLAUDE.md for the module map.
 
-Three routers are exported, mounted separately in routes/__init__.py:
-  router          -> /matcha-work            (feature-gated here)
-  public_router   -> /matcha-work/public      (unauthenticated webhooks + public review)
-  presence_router -> /matcha-work/presence
+Four routers are exported, mounted separately in routes/__init__.py:
+  router                -> /matcha-work          (feature-gated here)
+  oauth_callback_router -> /matcha-work          (Google's unauthenticated callback)
+  public_router         -> /matcha-work/public   (unauthenticated webhooks + public review)
+  presence_router       -> /matcha-work/presence
 
 No submodule declares empty-path routes, so `router` is a fresh aggregator
 rather than the crud-owns-router pattern used by ir_incidents/employees.
@@ -17,6 +18,7 @@ from fastapi import APIRouter, Depends
 from app.matcha.dependencies import require_feature
 
 router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
+oauth_callback_router = APIRouter()
 public_router = APIRouter()
 presence_router = APIRouter()
 
@@ -65,9 +67,13 @@ from .research_tasks import router as _research_tasks_router
 
 router.include_router(_research_tasks_router)
 
-from .workspace import router as _workspace_router
+from .workspace import (
+    router as _workspace_router,
+    oauth_callback_router as _workspace_oauth_callback_router,
+)
 
 router.include_router(_workspace_router)
+oauth_callback_router.include_router(_workspace_oauth_callback_router)
 
 from .elements import router as _elements_router
 
@@ -114,4 +120,4 @@ from .permissions import router as _permissions_router
 
 router.include_router(_permissions_router)
 
-__all__ = ["router", "public_router", "presence_router"]
+__all__ = ["router", "oauth_callback_router", "public_router", "presence_router"]

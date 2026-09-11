@@ -37,7 +37,12 @@ from .employee_schedule import router as employee_schedule_router, schedule_inte
 from .ir_surveys import router as ir_surveys_router
 from .dashboard import router as dashboard_router
 from .fractional_hr import router as fractional_hr_router
-from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
+from .matcha_work import (
+    router as matcha_work_router,
+    oauth_callback_router as matcha_work_oauth_callback_router,
+    public_router as matcha_work_public_router,
+    presence_router as matcha_work_presence_router,
+)
 from .risk_assessment import router as risk_assessment_router
 from .benefits import router as benefits_router
 from .labor_relations import router as labor_relations_router
@@ -255,6 +260,11 @@ matcha_router.include_router(
     prefix="/matcha-work",
     tags=["matcha-work"],
     dependencies=[Depends(require_feature("matcha_work"))],
+)
+matcha_router.include_router(
+    matcha_work_oauth_callback_router,
+    prefix="/matcha-work",
+    tags=["matcha-work-oauth"],
 )
 matcha_router.include_router(
     journals_router,

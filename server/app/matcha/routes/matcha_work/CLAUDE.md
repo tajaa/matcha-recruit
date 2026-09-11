@@ -31,7 +31,7 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 
 | File | Concern | Routes |
 |---|---|---|
-| `__init__.py` | Routing assembly + 3-router re-exports (fresh aggregator, not crud-owned) | — |
+| `__init__.py` | Routing assembly + 4-router re-exports (fresh aggregator, not crud-owned) | — |
 | `_shared.py` | Cross-cutting helpers: project-access guards, file-url resolvers, upload constants. The pure shaping helpers (`_sse_data`, `_json_object`, `_row_to_message`, `THREAD_FILE_TEXT_CAP`) moved to `services/matcha_work/message_shapes.py` in the stage-5 audit — they carry no HTTP coupling, and keeping them here forced `turn_pipeline.py` into a module-level services→routes import. Re-exported here, so `from ._shared import _sse_data` is unchanged | — |
 | `presence.py` | Heartbeat + online-users (**owns `presence_router`**) | 2 |
 | ~~`ai_turn.py`~~ | **Moved to `services/matcha_work/ai_apply.py`** (refactor round 2, stage 5) — it always had zero routes. Field validation, phantom-claim scrubbing, offer-draft detection, onboarding provisioning, slide/blog/recruiting context injection, `_apply_ai_updates_and_operations` (the AI-response-to-DB-write step). Consumed by `messaging.py` and `threads.py` | — |
@@ -45,7 +45,7 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 | `task_history.py` | Task history timeline, weekly board replay, project activity feed, and AutoPR additional-context reconsideration (+ `_serialize_history_row` / `_serialize_activity_row`) | 5 |
 | `task_files.py` | Attachments scoped to one kanban task (ownership via `_shared._verify_task_belongs_to_project`) | 3 |
 | `research_tasks.py` | Research tasks — HTTP shape + the 3 SSE streams. **Persistence lives in `services/research_task_service.py`**; storage is a list under the `research_tasks` key of the `mw_projects.project_data` JSONB blob (no table, no migration) — response shapes are consumed directly by `client/src/work/api/matchaWork/research.ts`, so they are byte-frozen | 9 |
-| `workspace.py` | Cross-project home surface: open-tasks/recent-activity feeds, per-user Gmail email agent, entitlements/usage. The global (non-project) manual task board moved to `routes/dashboard/tasks.py` (2026-07-28) — see that package's CLAUDE.md — so this no longer holds an order-sensitive route pair | 11 |
+| `workspace.py` | Cross-project home surface: open-tasks/recent-activity feeds, per-user Gmail email agent, entitlements/usage. The Google OAuth callback is exported on its own ungated router at the unchanged `/matcha-work/agent/email/callback` path because Google's system-browser redirect carries signed state but no Matcha bearer token. The global (non-project) manual task board moved to `routes/dashboard/tasks.py` (2026-07-28) — see that package's CLAUDE.md — so this no longer holds an order-sensitive route pair | 10 + 1 OAuth callback |
 | `elements.py` | Project elements (context-repo bindings) CRUD + repo-snapshot sync + files/folders/notes | 12 |
 | `github.py` | Commit scan/suggestions, GitHub connection/sync/scan-commits (**owns `public_router`** for the push webhook) | 10 + 1 public |
 | `collaboration.py` | Discussion channel, project collaborators, invites, admin-user search, thread collaborators | 13 |
@@ -57,13 +57,14 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 | `huume.py` | Huume plan approve/execute — `POST /threads/{id}/huume/plan/approve` (flip named/all `proposed` steps to `approved`) + `.../plan/execute` (run every `approved` step, idempotent). Plans are keyed by `offer_id` (a thread may onboard several candidates at once); both routes take an optional `offer_id` in the body and fall back to "the sole active plan" via `actions.resolve_plan_offer_id`, 400ing with the candidate list when more than one is active and none was named. `/plan/execute` delegates to `services/huume/store.execute_plan_locked` — the same per-`(thread_id, offer_id)` advisory-locked path the chat tool's `execute_approved_steps` uses, so a UI-button execute and a chat-driven execute for the same candidate can't race. Also `GET .../huume/record` — the panel-facing fetch for the chat tool `show_record` (normalized incident/er_case/employee/credential view via `services/huume/record_view.py`, admin's own auth, re-checks the record type's own feature flag) — and `DELETE .../huume/record`, which drops one entry from the panel's open-record working set (`current_state.huume_records`, `store.update_huume_records`) via a record tab's `×`. `GET .../huume/offers` lists every offer letter ever drafted from the thread (`offer_letters.source_thread_id`, set once by `onboarding_skill`, never repointed) — `current_state.huume_offer` is a single slot that agent.py overwrites on each `draft_offer_letter` call, so this is what lets the panel keep a tab for an earlier candidate's offer after a second one is drafted in the same thread. `require_feature("huume")` on top of the package gate. See root CLAUDE.md's `huume` flag row for the full picture — the agent loop itself lives in `services/huume/`, not this package (only the REST counterpart to its chat-driven `execute_approved_steps`/`cancel_staged`/`show_record` tools does; `cancel_staged` has no REST twin, chat-only) | 5 |
 | **Total** | | **200 routes** (+ 4 public) — was 199 before `huume.py`'s `DELETE .../huume/record` route (2026-07-29). Stale as of 2026-08-05 (`huume.py`'s new `GET .../huume/offers` route not reflected, and a fresh `grep -h "^@router\." app/matcha/routes/matcha_work/*.py \| wc -l` now returns 210, not 202) — this whole total needs a proper recount, not a one-line patch |
 
-## Three routers
+## Four routers
 
-The package exposes **three** routers from `__init__.py`:
+The package exposes **four** routers from `__init__.py`:
 
 1. `router` — mounted at `/matcha-work`, feature-gated with `require_feature("matcha_work")` at construction (the constructor gate, not just the mount — see Gate note below).
-2. `public_router` — mounted at `/matcha-work/public`, no gate. Aggregates public sub-routers from `projects.py` (signature webhook), `github.py` (push webhook), and `threads.py` (public review GET/POST).
-3. `presence_router` — mounted at `/matcha-work/presence`, no gate. Owned entirely by `presence.py`.
+2. `oauth_callback_router` — mounted at `/matcha-work`, no gate. Owns only Google's Gmail callback; the authenticated connect route issues an encrypted, nonced state token that expires after 10 minutes.
+3. `public_router` — mounted at `/matcha-work/public`, no gate. Aggregates public sub-routers from `projects.py` (signature webhook), `github.py` (push webhook), and `threads.py` (public review GET/POST).
+4. `presence_router` — mounted at `/matcha-work/presence`, no gate. Owned entirely by `presence.py`.
 
 **Unlike `ir_incidents/`/`employees/`, `router` is a fresh `APIRouter()`** in `__init__.py`, not a re-export of one submodule's router. Verified during the split: no submodule declares an empty-path route (`@router.get("")`), so there's no "prefix and path both empty" hazard to avoid — the crud-owns-router workaround those packages use isn't needed here.
 
