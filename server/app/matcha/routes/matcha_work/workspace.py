@@ -8,8 +8,12 @@ order-sensitive route pair this module used to carry.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
+import json
 import logging
+import secrets
+import time
 from datetime import datetime, timezone
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -24,6 +28,46 @@ from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+oauth_callback_router = APIRouter()
+
+GMAIL_OAUTH_STATE_TTL_SECONDS = 10 * 60
+
+
+def _build_gmail_oauth_state(user_id: UUID) -> str:
+    """Return a tamper-evident, short-lived capability for the public callback."""
+    from app.core.services.secret_crypto import encrypt_secret
+
+    payload = json.dumps(
+        {
+            "user_id": str(user_id),
+            "issued_at": int(time.time()),
+            "nonce": secrets.token_urlsafe(16),
+        },
+        separators=(",", ":"),
+    )
+    encrypted = encrypt_secret(payload)
+    if encrypted is None:  # Defensive only: payload is always non-empty.
+        raise RuntimeError("Failed to create OAuth state")
+    return encrypted
+
+
+def _decode_gmail_oauth_state(state: str) -> UUID:
+    from app.core.services.secret_crypto import decrypt_secret
+
+    try:
+        payload = json.loads(decrypt_secret(state))
+        user_id = UUID(payload["user_id"])
+        issued_at = int(payload["issued_at"])
+        nonce = payload["nonce"]
+        age_seconds = int(time.time()) - issued_at
+        if not isinstance(nonce, str) or not nonce:
+            raise ValueError("Missing nonce")
+        if age_seconds < -60 or age_seconds > GMAIL_OAUTH_STATE_TTL_SECONDS:
+            raise ValueError("State expired")
+        return user_id
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid or expired OAuth state") from exc
+
 
 @router.get("/tasks/open")
 async def list_open_tasks_endpoint(
@@ -231,6 +275,7 @@ async def agent_email_status(
     gmail = GmailService(current_user.id)
     return await gmail.get_status()
 
+
 @router.post("/agent/email/connect")
 async def agent_email_connect(
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -246,9 +291,9 @@ async def agent_email_connect(
     settings = get_settings()
     redirect_uri = f"{settings.app_base_url}/api/matcha-work/agent/email/callback"
 
-    # Encode user ID in state so callback knows who to store the token for
-    from app.core.services.secret_crypto import encrypt_secret
-    state = encrypt_secret(str(current_user.id))
+    # The system-browser callback has no Matcha bearer token, so carry a
+    # tamper-evident, short-lived user binding in OAuth state.
+    state = _build_gmail_oauth_state(current_user.id)
 
     params = {
         "client_id": creds["client_id"],
@@ -262,22 +307,21 @@ async def agent_email_connect(
     auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
     return {"auth_url": auth_url}
 
-@router.get("/agent/email/callback")
+
+@oauth_callback_router.get("/agent/email/callback", include_in_schema=False)
 async def agent_email_callback(
     code: str = Query(...),
     state: str = Query(...),
 ):
     """OAuth callback — exchange code for tokens, store encrypted in DB, close popup."""
     from app.matcha.services.matcha_work.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
-    from app.core.services.secret_crypto import decrypt_secret as _decrypt
 
-    # Recover user ID from state
+    # Recover the initiating user without requiring a bearer token: Google
+    # redirects the system browser here directly and cannot attach one.
     try:
-        user_id_str = _decrypt(state)
-        from uuid import UUID as _UUID
-        user_id = _UUID(user_id_str)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+        user_id = _decode_gmail_oauth_state(state)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     creds = get_oauth_credentials()
     if not creds:
@@ -322,6 +366,7 @@ async def agent_email_callback(
 </body></html>""",
         media_type="text/html",
     )
+
 
 @router.delete("/agent/email/disconnect")
 async def agent_email_disconnect(
