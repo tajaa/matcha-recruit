@@ -1,6 +1,6 @@
 """Token-based billing for Matcha Work.
 
-Every account gets 1M free tokens. After that, $40/month for 5M tokens/month.
+Every account gets 3M free tokens. After that, $40/month for 5M tokens/month.
 Admin can grant additional tokens to any account.
 """
 
@@ -18,6 +18,7 @@ from . import entitlements_service
 logger = logging.getLogger(__name__)
 
 FREE_TOKEN_GRANT = 3_000_000
+PREVIOUS_FREE_TOKEN_GRANT = 1_000_000
 SUBSCRIPTION_TOKENS = 5_000_000
 SUBSCRIPTION_AMOUNT_CENTS = 4000  # $40/month
 SUBSCRIPTION_PACK_ID = "matcha_work_pro"
@@ -71,6 +72,28 @@ async def get_token_budget(company_id: UUID, *, conn=None) -> dict[str, Any]:
         if not row:
             await ensure_token_budget_row(c, company_id)
             row = await c.fetchrow(
+                "SELECT * FROM mw_token_budgets WHERE company_id = $1", company_id,
+            )
+        elif PREVIOUS_FREE_TOKEN_GRANT <= row["free_token_limit"] < FREE_TOKEN_GRANT:
+            # FREE_TOKEN_GRANT was raised from 1M to 3M after existing rows had
+            # already captured the old limit. Apply that policy delta once on
+            # read, retaining any admin-granted tokens above the old baseline.
+            # The guarded UPDATE is concurrency-safe: a competing reader that
+            # upgrades first makes this return no row, so reload its result.
+            upgraded = await c.fetchrow(
+                """UPDATE mw_token_budgets
+                   SET free_token_limit = free_token_limit + $2,
+                       updated_at = NOW()
+                   WHERE company_id = $1
+                     AND free_token_limit >= $3
+                     AND free_token_limit < $4
+                   RETURNING *""",
+                company_id,
+                FREE_TOKEN_GRANT - PREVIOUS_FREE_TOKEN_GRANT,
+                PREVIOUS_FREE_TOKEN_GRANT,
+                FREE_TOKEN_GRANT,
+            )
+            row = upgraded or await c.fetchrow(
                 "SELECT * FROM mw_token_budgets WHERE company_id = $1", company_id,
             )
         free_remaining = max(0, row["free_token_limit"] - row["free_tokens_used"])
