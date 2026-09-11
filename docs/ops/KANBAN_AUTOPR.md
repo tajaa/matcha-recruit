@@ -677,10 +677,17 @@ kind is a registry row plus a publisher, not another branch in the PR path.
    On a revision the bot's own earlier uploads are dropped from the attachment budget
    except the newest prior report. The browser paragraph of the prompt
    (`_prompt_research_browse.txt`) is substituted in by the bridge only when the board
-   holds `browse`; otherwise the prompt says there is no browser. The model may read the clone to
+   holds `browse`; otherwise the prompt says there is no browser. The selector detects
+   an explicit screenshot deliverable in the title/description/review note and holds the
+   card for the `browse` grant instead of running a report it already knows will be
+   incomplete. The model may read the clone to
    cite `path:line` under *How it applies to Matcha*, search the web, and view images;
    it may not edit a file, install anything, or send anything. Any repository diff
-   discards the run.
+   discards the run. `context.json.required_deliverables.screenshots` carries the
+   trusted requirement into the sandbox. A completed report with no admitted image, or
+   with images whose filenames are absent from the report, is rejected and retried once;
+   a second miss is parked visibly in Changes Requested and is never published as Ready
+   for Review.
 4. `decision.sh normalize-research` validates the decision: `research_report` (≥ 1
    source, no questions) or `needs_clarification` (≥ 1 question, no staged actions);
    `card_note` 1–240 characters with no `·` or newline; `summary` ≤ 1200; optional
@@ -880,7 +887,10 @@ is checked and aborted at the routing layer *before* it goes out. Checking only 
 `page.goto` returns meant the internal page had already been fetched, and a short-TTL
 record could answer differently for Chromium than it did for the pre-flight. Exit 3 means the
 image was built without Chromium (`msandbox build --playwright`); the prompt tells the
-model to say so in one line and finish on web search alone rather than failing.
+model to say so in one line. An optional capture falls back to web search. When the card
+explicitly requires screenshots, the trusted harness requires at least one admitted image
+whose filename appears in the report; it retries one miss, then parks the card as an
+incomplete research output rather than publishing prose that does not meet the request.
 
 Screenshots cross back the same way `report.md` does — one directory the bridge empties
 under an image-extension allowlist, a 12-file cap, and a 4 MB per-file cap, naming

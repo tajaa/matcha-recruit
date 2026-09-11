@@ -101,6 +101,13 @@ elif printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF research; then
 fi
 ARTIFACTS_DIR="$WORK_DIR/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
+SCREENSHOTS_REQUIRED=false
+if [ "$MODE" = research ] && autopr_research_screenshots_required "$(cat "$CARD_FILE")"; then
+    SCREENSHOTS_REQUIRED=true
+fi
+if [ "$SCREENSHOTS_REQUIRED" = true ] && [ "$BROWSE_GRANTED" != true ]; then
+    die "this research card requires screenshots but the board lacks the browse capability"
+fi
 
 ATTACH_ARGS=()
 FEEDBACK_CHECKPOINT='{"comment_id":"","review_id":""}'
@@ -346,7 +353,8 @@ jq -n \
     --argjson downloaded "$downloaded" \
     --argjson withheld "$withheld_attachments" \
     --argjson web_search_available "$SEARCH_GRANTED" \
-    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], grounding: {web_search_available: $web_search_available}, production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded, withheld_attachments: $withheld}' \
+    --argjson screenshots_required "$SCREENSHOTS_REQUIRED" \
+    '{card: $card[0], directive_policy: $directive_policy[0], prior_checkpoint: $prior_checkpoint[0], test_tenant_evidence: $test_tenant_evidence[0], grounding: {web_search_available: $web_search_available}, required_deliverables: {screenshots: $screenshots_required}, production: ($card[0].production // null), changes_since_production: $changes_since_production[0], production_recent_errors: $production_errors[0], production_log_signals: $production_log_signals, subtasks: $subtasks[0], history: $history[0], files: ($files[0] | map(del(.storage_url))), downloaded_attachments: $downloaded, withheld_attachments: $withheld}' \
     > "$CONTEXT_FILE"
 
 if [ -s "$TEST_TENANT_SCREENSHOT" ]; then
@@ -533,11 +541,11 @@ append_correction() {
 $instruction"
     fi
 }
-if [ "$KIND_OUTCOME" != pull_request ]; then
-    # Directive, migration, and cosmetic-diff corrections all describe a
-    # patch; an artifact kind produces none. Its schema check below is the
-    # only gate, and a failure there is fatal rather than retried.
-    :
+if [ "$KIND_OUTCOME" = artifact ]; then
+    if screenshot_contract_error="$(autopr_research_screenshot_contract_error \
+            "$SCREENSHOTS_REQUIRED" "$REPORT_FILE" "$RAW_DECISION_FILE" "$ARTIFACTS_DIR")"; then
+        append_correction required_screenshots_missing "The trusted harness REJECTED the research report you just returned: $screenshot_contract_error. The card explicitly requires screenshots. Run browse-capture.py for at least one relevant source page, verify that it prints a saved filename, and name the captured filename beside the finding it supports. Return a complete report and decision again; do not merely promise that screenshots will be added later."
+    fi
 elif [ "$(jq -r '.no_safe_action_reason // ""' "$RAW_DECISION_FILE" 2>/dev/null)" = migration_required ]; then
     # The single most common refusal, and it never protected anything: the
     # operator applies every migration by hand, so authoring the version file
@@ -639,6 +647,13 @@ if [ -n "$CORRECTION_KIND" ]; then
           instruction: $instruction}' \
         > "$CORRECTION_FILE"
     ATTACH_ARGS+=(-f "$CORRECTION_FILE")
+    if [ "$KIND_OUTCOME" = artifact ]; then
+        # Do not publish an uncited capture from the rejected attempt. The
+        # retry runs in a fresh sandbox and cannot inspect that image; it must
+        # capture and name its own final evidence set.
+        rm -rf -- "$ARTIFACTS_DIR"
+        mkdir -p "$ARTIFACTS_DIR"
+    fi
     : > "$REPORT_FILE"
     : > "$RAW_DECISION_FILE"
     codex_pass
@@ -662,7 +677,12 @@ park_rejected_after_correction() {
 }
 
 POST_CORRECTION_FAILURE=""
-if [ "$KIND_OUTCOME" = pull_request ] && [ -n "$CORRECTION_KIND" ]; then
+if [ "$KIND_OUTCOME" = artifact ] && [ -n "$CORRECTION_KIND" ]; then
+    if screenshot_contract_error="$(autopr_research_screenshot_contract_error \
+            "$SCREENSHOTS_REQUIRED" "$REPORT_FILE" "$RAW_DECISION_FILE" "$ARTIFACTS_DIR")"; then
+        POST_CORRECTION_FAILURE="still did not satisfy the requested screenshot deliverable: $screenshot_contract_error"
+    fi
+elif [ "$KIND_OUTCOME" = pull_request ] && [ -n "$CORRECTION_KIND" ]; then
     if ! "$SCRIPT_DIR/decision.sh" schema-ok "$RAW_DECISION_FILE" 2>/dev/null; then
         POST_CORRECTION_FAILURE="returned an invalid decision"
     elif [ -s "$DIRECTIVE_FILE" ] \
@@ -689,7 +709,20 @@ if [ "$KIND_OUTCOME" = pull_request ] && [ -n "$CORRECTION_KIND" ]; then
     fi
 fi
 if [ -n "$POST_CORRECTION_FAILURE" ]; then
-    park_rejected_after_correction "$POST_CORRECTION_FAILURE"
+    if [ "$KIND_OUTCOME" = artifact ]; then
+        marker="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] source_unavailable"
+        origin_note="$(progress_note_with_origin \
+            "🤖 AUTO SETUP · BLOCKED: RESEARCH OUTPUT INCOMPLETE · $marker · note: Requested screenshots were not captured after one retry." \
+            "$(jq -r '.progress_note // ""' "$CARD_FILE")")"
+        mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+            "$(jq -n --arg note "$origin_note" '{board_column:"changes_requested",progress_note:$note}')" >/dev/null \
+            || die "could not park the incomplete research result on task $TASK_ID"
+        autopr_post_context_request "$PROJECT_ID" "$TASK_ID" \
+            "AutoPR completed the written research but $POST_CORRECTION_FAILURE. Verify the board's browser runtime, then press Run to retry; the incomplete report was not published." \
+            "$origin_note"
+    else
+        park_rejected_after_correction "$POST_CORRECTION_FAILURE"
+    fi
     die "corrected investigation still failed validation; card parked for context"
 fi
 

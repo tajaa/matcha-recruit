@@ -11,9 +11,13 @@
   prints, so a reader can match image to claim.
 
   It refuses non-http(s) URLs and internal addresses, and caps how many
-  captures one run may take. Do not try to drive a browser any other way: no
+  captures one run may take. When
+  `context.json.required_deliverables.screenshots` is true, at least one
+  successful capture is mandatory. Do not try to drive a browser any other way: no
   other automation is collected, and the attempt only spends your time.
 
   If it reports that Chromium or Playwright is unavailable, that is an
-  operator setting on this machine, not a research failure. Say so in one
-  line under `### Findings` and finish the report using web search alone.
+  operator setting on this machine. Say so in one line under `### Findings`.
+  When screenshots are optional, finish the report using web search alone;
+  when they are required, the harness will hold the incomplete report for an
+  operator instead of publishing it as Ready for Review.

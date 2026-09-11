@@ -34,6 +34,15 @@ What you may not do:
   a review request, describe it under `staged_actions` in the decision JSON
   and the harness will show it to a human, who decides whether it is sent.
 
+Required deliverables: `context.json.required_deliverables.screenshots` is a
+trusted boolean derived from the card's requested output. When it is true,
+capture at least one relevant source page with the browser command described above and
+name every captured filename beside the finding it supports. A report with no
+admitted screenshot is rejected by the harness and retried once. Do not treat
+this as optional merely because the prose also asks for a concise report. If
+browser capture fails, include the exact failure in `### Findings`; never claim
+that a screenshot exists unless the command printed its saved filename.
+
 Revision rounds: if `review_note` is set, or the attachments include an
 earlier `research-report-*.md`, this is a send-back. Treat that report as
 version 1 and the review note plus the newest discussion as the change
