@@ -1,0 +1,29 @@
+- Verified no-ops: select.sh capability gate reads registry (289-303); screenshot hold (483-490) is research-only by design; collect.sh already downloads .md attachments; checkpoint.sh reads registry.
+
+B6. NEW scripts/tests/test_kanban_autopr_email.sh
+
+Copy harness from test_kanban_autopr_research.sh (check(), curl/gh stubs ~540-615, run_publisher 619-629). Cases: registry maps email category → artifact mode with prompt/model/effort/decision/publisher/capability; sandbox has REQUIRE_EMPTY_PATCH=1 and neither WEB_SEARCH nor IMAGE_INPUTS; prompt forbids sending + asks Re: + "Do NOT add any other keys"; normalize-email accepts a good email_report (stamps kind=email, safe_changes_present=false); rejects six negatives (missing per_email on report / bad bucket / bad file name / unknown top key / staged on needs_clarification / · in card_note); publish-email.sh uploads email-report-<id8>-r2.md when r1 exists, posts note, stages on outreach board, PATCHes review, provenance header matches; refuses a research-kind decision; workflow greps publish-email.sh + email); ci.yml greps publish-email.sh.
+
+B7. Docs
+
+- docs/ops/KANBAN_AUTOPR.md: new ## Email cards before ## Work/merge plan… (~918): template, snapshot corpus (POST /agent/email/snapshot, 20k body cap, attachments listed not included), registry row, no search/browser/images, decision shape, email-report-<id8>-rN.md, staged replies need outreach + per-item approval, unthreaded (follow-up), capability email. Capability table (~752) += email row. "three things that reach past the repository" → four.
+- Root CLAUDE.md Kanban autopr bullet (~305): add email-card sentence.
+- routes/matcha_work/CLAUDE.md workspace row → 14 + 1 OAuth callback.
+
+---
+
+Follow-ups (out of scope, note in PR-B description)
+
+- Threaded staged replies: add thread_id/in_reply_to to _STAGED_ACTION_FIELD_LIMITS + task_history.py:568 send call.
+- Fix legacy agentDraftReply decode in MatchaWorkService+Agent.swift or delete AgentPanelView.
+- Multi-select in the sidebar to send several emails to one card (v1 = one email per Send-to-board; sheet already accepts [EmailMessage]).
+
+Verification
+
+cd server && ./venv/bin/python -m pytest tests -q                       # whole suite (~8.9k, no DB)
+cd server && grep -h "^@router\." app/matcha/routes/matcha_work/workspace.py | wc -l   # 13 after PR-A, 14 after PR-B
+cd client && npx tsc -p tsconfig.app.json --noEmit
+./scripts/xcode-build.sh espresso build                                  # pbxproj lint + build; `test` action broken pre-existing
+bash -n scripts/kanban-autopr/publish-email.sh scripts/kanban-autopr/decision.sh scripts/kanban-autopr/lib.sh
+bash scripts/tests/test_kanban_autopr_email.sh && bash scripts/tests/test_kanban_autopr_research.sh && bash scripts/tests/test_ci_guards.sh
+Manual (host, dev-remote.sh running): Espresso → connect Gmail → tap row with Projects hub open → detail renders → Summarize (paywall on Free plan) → Draft reply → EmailReplySheet → Send now → reply lands in the Gmail thread → Organize → grouped sidebar → Send to board on a watched board granted email → card shows email-<id8>.md attachment → "Run email review now" → email-report-*-r1.md + staged reply under Proposed actions.
