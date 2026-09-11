@@ -88,12 +88,20 @@ KIND_DECISION="$(autopr_kind_field "$MODE" decision)"
 # `browse` is an extra grant on top of the kind's own capability: a research
 # run on a board without it still reads the web through search, it just cannot
 # drive a browser or bring screenshots back.
+#
+# An artifact kind's own grant already authorized the run; whether that run
+# reads the web at all is its registry row's call. Research's row sets
+# AUTOPR_CODEX_WEB_SEARCH=1; email's does not — its corpus is the snapshots
+# attached to the card — so an email run gets neither search nor a browser,
+# whatever else its board is granted, and context.json says so truthfully.
 BOARD_CAPABILITIES="$(jq -r '(.autopr_capabilities // [])[]' "$CARD_FILE" 2>/dev/null || true)"
 BROWSE_GRANTED=false
 SEARCH_GRANTED=false
 if [ "$KIND_OUTCOME" = artifact ]; then
-    SEARCH_GRANTED=true
-    printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF browse && BROWSE_GRANTED=true
+    if [[ " $KIND_SANDBOX_ENV " == *" AUTOPR_CODEX_WEB_SEARCH=1 "* ]]; then
+        SEARCH_GRANTED=true
+        printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF browse && BROWSE_GRANTED=true
+    fi
 elif printf '%s\n' "$BOARD_CAPABILITIES" | grep -qxF research; then
     # Code drafting itself needs no grant. Reading the live web still crosses
     # the repository boundary and uses the existing per-board research grant.
@@ -311,9 +319,11 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
     # to a dozen of its screenshots, which would crowd out files people attached
     # and be re-fed as image inputs. Keep only the newest prior report (the
     # revision prompt treats it as version 1) and drop the rest of what the
-    # publisher uploaded, recognised by its own naming.
-    def mine: ((.filename // "") | test("^research-(report-)?" + $id8 + "-r[0-9]+"));
-    def prior_report: ((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"));
+    # publisher uploaded, recognised by its own naming (research-… or
+    # email-…-rN). The snapshots on an email card, email-<gmail id8>.md, carry no
+    # round suffix and are never mistaken for output of the bot.
+    def mine: ((.filename // "") | test("^(research|email)-(report-)?" + $id8 + "-r[0-9]+"));
+    def prior_report: ((.filename // "") | test("^(research|email)-report-" + $id8 + "-r[0-9]+\\.md$"));
     (if $outcome == "artifact" then
         ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
         | map(select((mine | not) or (. == $keep)))
@@ -329,8 +339,8 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
 withheld_attachments='[]'
 if [ "$KIND_OUTCOME" = artifact ]; then
     withheld_attachments="$(printf '%s' "$files" | jq -c --arg id8 "$ID8" '
-        def mine: ((.filename // "") | test("^research-(report-)?" + $id8 + "-r[0-9]+"));
-        def prior_report: ((.filename // "") | test("^research-report-" + $id8 + "-r[0-9]+\\.md$"));
+        def mine: ((.filename // "") | test("^(research|email)-(report-)?" + $id8 + "-r[0-9]+"));
+        def prior_report: ((.filename // "") | test("^(research|email)-report-" + $id8 + "-r[0-9]+\\.md$"));
         ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
         | [.[] | select(mine and (. != $keep)) | (.filename // empty)]' 2>/dev/null || printf '[]')"
 fi
