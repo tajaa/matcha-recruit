@@ -30,7 +30,11 @@ export default function MatchaLiteAdmin() {
     setTokens(data)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    void load().catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : 'Failed to load signup links')
+    })
+  }, [])
 
   async function generate() {
     setGenerating(true)
