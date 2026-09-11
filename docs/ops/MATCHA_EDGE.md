@@ -100,15 +100,17 @@ current rate (20r/s per POP) is far above real per-POP traffic, so nothing is
 tripping today — but it is shared-fate, and tightening it would blackhole a POP
 for every user on it.
 
-The server block routes 429s to `@rate_limited` (same name and shape as
-cappe.conf's: a JSON body plus `Retry-After: 30`) instead of nginx's HTML page.
-`limit_req` already returned 429 host-wide via `00-matcha-limits.conf`; the
-setting is repeated in `matcha.conf` only because that file is not in the repo.
-The one that mattered was `limit_conn_status 429`, which nothing set: a tripped
-`limit_conn` returned 503, landed in `error_page 502 503 504 = @maintenance`,
-and told the user "Server is updating" — an outage misdiagnosis waiting to
-happen. **This file is hand-applied** (`scp` per `deploy/nginx/README.md`);
-confirm the change is on the box.
+Every HTTPS server block in `matcha.conf` and `cappe.conf` routes nginx's own
+429s to `@rate_limited`: a JSON body plus `Retry-After: 30` on `/api/`, nginx's
+built-in 429 page elsewhere. `limit_req` already returned 429 host-wide via
+`00-matcha-limits.conf`; the setting is repeated in each block only because
+that file is not in the repo. The one that mattered was `limit_conn_status
+429`, which nothing set: a tripped `limit_conn` returned 503, landed in
+`error_page 502 503 504 = @maintenance`, and told the user "Server is
+updating" — an outage misdiagnosis waiting to happen. Keep `error_page` at
+server level; `deploy/nginx/README.md` has the inheritance rule that bit
+cappe.conf. **These files are hand-applied** (`scp` per that README); confirm
+a change is on the box.
 
 **Not yet fixed:** making the nginx zones key per-viewer needs
 `set_real_ip_from` for the CloudFront ranges plus `real_ip_header
