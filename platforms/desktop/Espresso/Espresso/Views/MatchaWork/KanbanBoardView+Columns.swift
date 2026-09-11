@@ -114,17 +114,15 @@ extension KanbanBoardView {
         .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
         .frame(width: compact ? nil : l.width)
         .animation(compact ? nil : .easeOut(duration: 0.15), value: l.width)
-        // Flat tinted fill instead of a glassPanel: each column was an
-        // NSVisualEffectView (live blur), and sliding 5 of them horizontally
-        // recomposites every frame → the left/right scroll jank. A plain fill
-        // over the radial background reads nearly the same and scrolls smooth.
+        // A quiet tint keeps lanes legible without turning each one into a
+        // second card around the cards. It also avoids live-blur scroll jank.
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.cardBackground.opacity(0.40))
+                .fill(Color.cardBackground.opacity(0.16))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.borderColor.opacity(0.5), lineWidth: 1)
+                .stroke(Color.borderColor.opacity(0.22), lineWidth: 0.5)
         )
         .onHover { hovering in
             // Only react when the column is empty — populated columns don't
@@ -143,29 +141,20 @@ extension KanbanBoardView {
     /// Column title, count, per-column affordances, and the add button.
     @ViewBuilder
     private func columnHeader(key: String, label: String, layout l: ColumnLayout) -> some View {
-        HStack {
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .tracking(0.5)
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.espresso(size: 12))
+                .foregroundColor(appState.themeText.opacity(0.72))
             Text("\(l.visible.count)")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(appState.themeText.opacity(0.08))
-                .cornerRadius(4)
+                .font(.espresso(size: 10))
+                .foregroundColor(.secondary.opacity(0.75))
             if l.isDoneColumn {
                 donePolicyMenu
             }
             if isPipeline && l.stageValue > 0 {
                 Text(formatDealValue(l.stageValue))
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.espresso(size: 9, weight: .medium))
                     .foregroundColor(appState.themeAccent)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(appState.themeAccent.opacity(0.12))
-                    .cornerRadius(4)
             }
             Spacer()
             addButton(key: key)
@@ -184,7 +173,7 @@ extension KanbanBoardView {
                 dealComposeColumn = key
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 10))
+                    .font(.espresso(size: 10))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
@@ -206,7 +195,7 @@ extension KanbanBoardView {
                 }
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 10))
+                    .font(.espresso(size: 10))
                     .foregroundColor(.secondary)
             }
             .menuStyle(.borderlessButton)
@@ -323,7 +312,7 @@ extension KanbanBoardView {
         }
     }
 
-    /// Yellow ring marks tickets moved/added OR carrying unviewed updates (a
+    /// Amber dot marks tickets moved/added OR carrying unviewed updates (a
     /// changes-requested send-back, new round, comment) since this user last
     /// opened them. The column-move diff alone misses a send-back that
     /// round-trips to an already-seen column or lands live after the board
@@ -332,13 +321,14 @@ extension KanbanBoardView {
     private func unreadRing(_ task: MWProjectTask) -> some View {
         let ringed = changedIds.contains(task.id)
             || TicketUpdatesStore.shared.unviewedCount(task) > 0
-        // Hairline ring + soft outer glow instead of the old 2pt
-        // full-saturation stroke — still unmissable in a column scan, no longer
-        // shouting over the card content.
-        return RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Color.yellow.opacity(ringed ? 0.75 : 0), lineWidth: 1.5)
-            .shadow(color: .yellow.opacity(ringed ? 0.35 : 0), radius: 5)
+        return Circle()
+            .fill(Color.orange.opacity(ringed ? 0.9 : 0))
+            .frame(width: 6, height: 6)
+            .shadow(color: .orange.opacity(ringed ? 0.28 : 0), radius: 3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(7)
             .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -371,7 +361,7 @@ extension KanbanBoardView {
             }
         } label: {
             Text("Show more")
-                .font(.system(size: 10, weight: .medium))
+                .font(.espresso(size: 10, weight: .medium))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 5)
@@ -388,7 +378,7 @@ extension KanbanBoardView {
         HStack(spacing: 6) {
             TextField("New task", text: $inlineAddTitle)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.espresso(size: 12))
                 .foregroundColor(appState.themeText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -399,7 +389,7 @@ extension KanbanBoardView {
                 commitInlineAdd(column: column)
             } label: {
                 Image(systemName: "return")
-                    .font(.system(size: 9))
+                    .font(.espresso(size: 9))
                     .foregroundColor(.matcha500)
             }
             .buttonStyle(.plain)
@@ -410,7 +400,7 @@ extension KanbanBoardView {
                 inlineAddTitle = ""
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9))
+                    .font(.espresso(size: 9))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)

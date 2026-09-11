@@ -115,44 +115,21 @@ struct ThemeRadialBackground: View {
 
 // MARK: - Espresso brand mark
 
-/// Espresso's coffee-cup mark on the shared platinum tile. It is used on the
-/// login screen and at the top of the sidebar, scaling cleanly from 22pt to
-/// 72pt without needing a separate bitmap asset.
+/// The same generated Espresso mark used by the application bundle, kept
+/// consistent across the login screen and navigation instead of substituting
+/// the old SF Symbols coffee cup inside the app.
 struct EspressoMark: View {
     var size: CGFloat = 64
     var showTile: Bool = true
 
     var body: some View {
-        let mark = Image(systemName: "cup.and.saucer.fill")
-            .font(.system(size: size * 0.44, weight: .semibold))
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [Color.platinumAccent, Color.platinumAccentDark],
-                    startPoint: .top, endPoint: .bottom
-                )
-            )
-
-        if showTile {
-            mark
-                .frame(width: size, height: size)
-                .background(
-                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.platinumRadialCenter, Color.platinumRadialEdge],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            )
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                        .strokeBorder(Color.platinumBorder, lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.10), radius: size * 0.14, y: size * 0.05)
-                .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
-        } else {
-            mark
-        }
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+            .shadow(color: .black.opacity(showTile ? 0.12 : 0), radius: size * 0.10, y: 1)
     }
 }
 
@@ -172,10 +149,10 @@ struct ElevatedCardModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return content
             .background(shape.fill(Color.cardBackground))
-            .overlay(shape.strokeBorder(appState.themeBorder.opacity(isLight ? 0.0 : 0.9), lineWidth: 1))
+            .overlay(shape.strokeBorder(appState.themeBorder.opacity(isLight ? 0.35 : 0.52), lineWidth: 0.7))
             // Two-layer shadow: a soft ambient spread + a tight contact shadow.
-            .shadow(color: .black.opacity(isLight ? 0.08 : 0.0), radius: 16, y: 5)
-            .shadow(color: .black.opacity(isLight ? 0.06 : 0.22), radius: 2, y: 1)
+            .shadow(color: .black.opacity(isLight ? 0.07 : 0.0), radius: 8, y: 3)
+            .shadow(color: .black.opacity(isLight ? 0.04 : 0.12), radius: 1, y: 1)
     }
 }
 
@@ -203,14 +180,13 @@ struct WorkTabsSidebarSection: View {
         if !pinnedTabs.isEmpty || appState.canPinActiveTab {
             VStack(spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("TABS")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.5)
+                    Text("Tabs")
+                        .font(.espresso(size: 11))
                         .foregroundColor(appState.themeSidebarTextSecondary)
                     Spacer(minLength: 0)
                     Button { appState.pinActiveTab() } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.espresso(size: 10))
                             .foregroundColor(appState.themeSidebarTextSecondary)
                             .frame(width: 18, height: 18)
                             .contentShape(Rectangle())
@@ -245,18 +221,18 @@ struct WorkTabsSidebarSection: View {
         return Button { appState.selectTab(tab) } label: {
             HStack(spacing: 8) {
                 Image(systemName: tab.icon)
-                    .font(.system(size: 11))
+                    .font(.espresso(size: 11))
                     .foregroundColor(active ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 16)
                 Text(tab.title)
-                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                    .font(.espresso(size: 12, weight: active ? .medium : .regular))
                     .foregroundColor(active ? appState.themeSidebarText : appState.themeSidebarText.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if unseen > 0 && !hovered {
                     Text(unseen > 10 ? "10+" : "\(unseen)")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.espresso(size: 9, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -265,7 +241,7 @@ struct WorkTabsSidebarSection: View {
                 if hovered {
                     Button { appState.closeTab(tab) } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.espresso(size: 9))
                             .foregroundColor(appState.themeSidebarText.opacity(0.5))
                             .frame(width: 16, height: 16)
                             .contentShape(Rectangle())
@@ -278,8 +254,13 @@ struct WorkTabsSidebarSection: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(active ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
+                    .fill(Color.clear)
             )
+            .overlay(alignment: .leading) {
+                if active {
+                    Capsule().fill(appState.themeSidebarAccent).frame(width: 2, height: 16)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -302,8 +283,8 @@ struct SidebarShowMoreButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-                Text("Show \(min(pageSize, remaining)) more").font(.system(size: 10, weight: .medium))
+                Image(systemName: "chevron.down").font(.espresso(size: 9))
+                Text("Show \(min(pageSize, remaining)) more").font(.espresso(size: 10))
                 Spacer()
             }
             .foregroundColor(appState.themeSidebarTextSecondary)
@@ -327,7 +308,7 @@ struct SidebarRowModifier: ViewModifier {
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected
-                          ? appState.themeSidebarAccent.opacity(0.10)
+                          ? appState.themeSidebarAccent.opacity(0.075)
                           : (isHovered ? (isSidebarDark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)) : Color.clear))
                     .padding(.horizontal, 6)
             )

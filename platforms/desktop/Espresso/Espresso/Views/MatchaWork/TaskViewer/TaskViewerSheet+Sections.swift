@@ -24,37 +24,34 @@ extension TaskViewerSheet {
                 Button { previewFile = report } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.ticket(size: 15))
                             .foregroundColor(.mwInkStrong)
-                            .frame(width: 28, height: 28)
-                            .background(Color.mwInkStrong.opacity(0.12))
-                            .cornerRadius(6)
+                            .frame(width: 24, height: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("RESEARCH REPORT")
-                                .font(.system(size: 9, weight: .bold))
-                                .tracking(0.5)
+                            Text("Research report")
+                                .font(.ticket(size: 13))
                                 .foregroundColor(.mwInkStrong)
                             Text(report.filename)
-                                .font(.system(size: 11))
+                                .font(.ticket(size: 11))
                                 .foregroundColor(appState.themeTextSecondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
                         Spacer(minLength: 0)
                         Text("Read report")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.ticket(size: 11))
                             .foregroundColor(.mwInkStrong)
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.ticket(size: 10))
                             .foregroundColor(.mwInkStrong)
                     }
-                    .padding(10)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.mwInkStrong.opacity(0.06))
+                    .background(appState.themeText.opacity(0.025))
                     .cornerRadius(8)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.mwInkStrong.opacity(0.18), lineWidth: 1)
+                            .stroke(appState.themeText.opacity(0.1), lineWidth: 0.5)
                     )
                     .contentShape(Rectangle())
                 }
@@ -63,7 +60,7 @@ extension TaskViewerSheet {
                         || autoPRIsQueueCandidate {
                 Label("Research report will appear here when the run finishes.",
                       systemImage: "doc.text.magnifyingglass")
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
             }
         }
@@ -76,14 +73,14 @@ extension TaskViewerSheet {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "paperclip")
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
-                Text("ATTACHMENTS")
-                    .font(.system(size: 9, weight: .semibold))
+                Text("Attachments")
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
-                    .tracking(0.5)
+
                 Text("\(currentRoundAttachments.count)")
-                    .font(.system(size: 9))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -91,7 +88,7 @@ extension TaskViewerSheet {
                     .cornerRadius(4)
                 if currentRound > 1 {
                     Text("Round \(currentRound)")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
                 }
             }
@@ -106,7 +103,7 @@ extension TaskViewerSheet {
             }
             if thisRound.isEmpty {
                 Text("No files this round.")
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
             }
 
@@ -119,9 +116,9 @@ extension TaskViewerSheet {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: showEarlierAttachments ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.ticket(size: 10))
                         Text("\(earlier.count) from earlier round\(earlier.count == 1 ? "" : "s")")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.ticket(size: 10))
                     }
                     .foregroundColor(.secondary)
                 }
@@ -154,10 +151,10 @@ extension TaskViewerSheet {
             HStack(spacing: 6) {
                 TextField("Add a checklist item…", text: $newSubtask)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.ticket(size: 12))
                     .foregroundColor(appState.themeText)
                     .padding(7)
-                    .background(appState.themeText.opacity(0.07))
+                    .background(appState.themeText.opacity(0.025))
                     .cornerRadius(5)
                     .onSubmit { submitSubtask() }
                 Button {
@@ -166,7 +163,7 @@ extension TaskViewerSheet {
                     if addingSubtask {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Add").font(.system(size: 12, weight: .semibold))
+                        Text("Add").font(.ticket(size: 12))
                             .foregroundColor(.mwInkStrong)
                     }
                 }
@@ -178,34 +175,10 @@ extension TaskViewerSheet {
 
     @ViewBuilder
     private var checklistHeader: some View {
-        if appState.isGraphite {
-            HStack(spacing: 8) {
-                asciiRule(subtasks.isEmpty ? "CHECKLIST" : "CHECKLIST · \(subtaskDoneCount)/\(subtasks.count)")
-                if currentRound > 1 { roundScopePill }
-            }
-        } else {
-            HStack(spacing: 6) {
-                Image(systemName: "checklist")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                Text("CHECKLIST")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .tracking(0.5)
-                if !subtasks.isEmpty {
-                    Text("\(subtaskDoneCount)/\(subtasks.count)")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(appState.themeText.opacity(0.08))
-                        .cornerRadius(4)
-                }
-                Spacer()
-                if currentRound > 1 {
-                    roundScopePill
-                }
-            }
+        HStack(spacing: 8) {
+            TicketSectionHeading(title: "Checklist",
+                                 detail: subtasks.isEmpty ? nil : "\(subtaskDoneCount)/\(subtasks.count)")
+            if currentRound > 1 { roundScopePill }
         }
     }
 
@@ -253,10 +226,10 @@ extension TaskViewerSheet {
             if task.boardColumn == "review", item.isDone,
                let comp = viewModel.completion(subtaskId: item.id) {
                 HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: "sparkles").font(.system(size: 8)).foregroundColor(.mwInkSoft)
+                    Image(systemName: "sparkles").font(.ticket(size: 10)).foregroundColor(.mwInkSoft)
                     Text("Completed by commit \(comp.commitShortSha ?? "?") · \(Int((comp.confidence * 100).rounded()))%"
                          + (comp.reasoning.map { " — \($0)" } ?? ""))
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                         .foregroundColor(appState.themeText.opacity(0.55))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)

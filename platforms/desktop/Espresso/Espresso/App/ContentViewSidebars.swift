@@ -225,15 +225,14 @@ struct SidebarStarredView: View {
         return Group {
             if !pins.isEmpty {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("STARRED")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.5)
+                    Text("Starred")
+                        .font(.espresso(size: 11))
                         .foregroundColor(appState.themeSidebarTextSecondary)
                         .padding(.horizontal, 12)
                         .padding(.top, 6)
                         .padding(.bottom, 3)
                     ForEach(pins) { pin in row(pin) }
-                    Divider().background(appState.themeSidebarBorder).padding(.top, 6)
+                    Spacer().frame(height: 6)
                 }
             }
         }
@@ -254,11 +253,11 @@ struct SidebarStarredView: View {
         return Button { open(pin) } label: {
             HStack(spacing: 8) {
                 Image(systemName: pin.icon)
-                    .font(.system(size: 11))
+                    .font(.espresso(size: 11))
                     .foregroundColor(pin.kind == .channel ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 16)
                 Text(pin.name)
-                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                    .font(.espresso(size: 12, weight: active ? .medium : .regular))
                     .foregroundColor(appState.themeSidebarText.opacity(0.9))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -267,8 +266,13 @@ struct SidebarStarredView: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(active ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
+                    .fill(active ? appState.themeSidebarAccent.opacity(0.075) : Color.clear)
             )
+            .overlay(alignment: .leading) {
+                if active {
+                    Capsule().fill(appState.themeSidebarAccent).frame(width: 2, height: 16)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

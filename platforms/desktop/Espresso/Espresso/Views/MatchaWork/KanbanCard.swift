@@ -30,9 +30,6 @@ struct KanbanCardView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private var imageAttachments: [MWProjectFile] { attachments.filter { $0.isImage } }
-    private var nonImageCount: Int { attachments.count - imageAttachments.count }
-
     private var priorityColor: Color {
         switch task.priority {
         case "critical": return .red
@@ -54,16 +51,16 @@ struct KanbanCardView: View {
     /// ordinary contributor prose.
     private var autoPRBanner: (label: String, detail: String, icon: String, color: Color)? {
         if task.autoprPaused == true {
-            return ("AUTOPR PAUSED", "Run again from the ticket", "pause.circle.fill", .orange)
+            return ("AutoPR paused", "Run again from the ticket", "pause.circle.fill", .orange)
         }
         if task.autoprClaimedAt != nil {
-            return ("AUTOPR WORKING", "Picked up", "hammer.circle.fill", .mwInkStrong)
+            return ("AutoPR working", "Picked up", "hammer.circle.fill", .mwInkStrong)
         }
         if task.isAutoPRQueueCandidate(
             botUserId: autoPRBotUserId,
             boardIsWatched: autoPRBoardIsWatched
         ) {
-            return ("IN QUEUE", "Waiting for matcha-autopr", "clock.arrow.circlepath", .blue)
+            return ("In queue", "Waiting for matcha-autopr", "clock.arrow.circlepath", .blue)
         }
         return nil
     }
@@ -101,17 +98,17 @@ struct KanbanCardView: View {
                 HStack(spacing: 5) {
                     Image(systemName: banner.icon)
                     Text(banner.label)
-                        .fontWeight(.bold)
                     Text("· \(banner.detail)")
                         .foregroundColor(appState.themeTextSecondary)
                     Spacer(minLength: 0)
                 }
-                .font(.system(size: 9))
+                .font(.espresso(size: 10))
                 .foregroundColor(banner.color)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(banner.color.opacity(0.10))
+                .background(banner.color.opacity(0.06))
+                .overlay(alignment: .bottom) { Divider().opacity(0.35) }
                 .help(task.autoprPaused == true
                       ? "Open the ticket to run again. A new review round also releases this hold."
                       : banner.detail)
@@ -126,304 +123,32 @@ struct KanbanCardView: View {
                 if !pipelineMode {
                     Button(action: onToggle) {
                         Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 12, weight: .light))
+                            .font(.espresso(size: 12))
                             .foregroundColor(task.status == "completed" ? .matcha500 : .secondary.opacity(0.55))
                     }
                     .buttonStyle(.plain)
                 }
 
                 Text(task.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.espresso(size: 13))
                     .foregroundColor(appState.themeText)
                     .strikethrough(task.status == "completed")
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    // Clearance for the floating creator badge so a full-width
-                    // title never runs underneath it.
-                    .padding(.trailing, task.createdByName != nil ? 16 : 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 11)
-            .padding(.bottom, 9)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
 
-            VStack(alignment: .leading, spacing: 9) {
-                if let details = autoPRRuntimeDetails {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("AUTO SETUP · NEEDS 10 MORE MINUTES", systemImage: "timer")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.orange)
-                        Text(details)
-                            .font(.system(size: 10))
-                            .foregroundColor(appState.themeText.opacity(0.76))
-                            .lineLimit(8)
-                            .multilineTextAlignment(.leading)
-                        if task.autoprReconsiderationPending == true {
-                            Label("10-minute continuation queued", systemImage: "clock.arrow.circlepath")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(appState.themeText.opacity(0.7))
-                        } else {
-                            Button(action: onApproveAutoPRRuntime) {
-                                Label(
-                                    autoPRRuntimeApprovalInFlight ? "Approving…" : "Approve 10 more minutes",
-                                    systemImage: "play.circle.fill"
-                                )
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.orange)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(autoPRRuntimeApprovalInFlight)
-                        }
-                    }
-                } else if let questions = autoPRQuestionPreview {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("AUTO SETUP · ANSWERS NEEDED", systemImage: "questionmark.circle.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.orange)
-                        Text(questions)
-                            .font(.system(size: 10))
-                            .foregroundColor(appState.themeText.opacity(0.72))
-                            .lineLimit(4)
-                            .multilineTextAlignment(.leading)
-                    }
-                } else if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.north.line")
-                            .font(.system(size: 8))
-                            .foregroundColor(appState.themeAccent)
-                        Text(note)
-                            .font(.system(size: 10))
-                            .italic()
-                            .foregroundColor(appState.themeText.opacity(0.6))
-                            .lineLimit(1)
-                    }
-                }
-
-                // Why it bounced — surfaced on the card face while it sits in
-                // the rework lane, so you don't have to open the card to know.
-                if task.boardColumn == "changes_requested",
-                   let rnote = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !rnote.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 8))
-                            .foregroundColor(.orange)
-                        Text(rnote)
-                            .font(.system(size: 10))
-                            .foregroundColor(.orange.opacity(0.85))
-                            .lineLimit(2)
-                    }
-                }
-
-                if pipelineMode, let contact = contactDisplay {
-                    HStack(spacing: 4) {
-                        Image(systemName: "building.2")
-                            .font(.system(size: 8))
-                            .foregroundColor(.secondary)
-                        Text(contact)
-                            .font(.system(size: 10))
-                            .foregroundColor(appState.themeText.opacity(0.7))
-                            .lineLimit(1)
-                    }
-                }
-
-                HStack(spacing: 5) {
-                    // Review churn — how many times this card has been kicked
-                    // back. Only shows once it's bounced at least once.
-                    if let cycles = task.reviewCycleCount, cycles > 0 {
-                        HStack(spacing: 1) {
-                            Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 7))
-                            Text("×\(cycles)").font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.15))
-                        .cornerRadius(3)
-                        .help("Sent back from review \(cycles) time\(cycles == 1 ? "" : "s")")
-                    }
-
-                    // Unviewed updates — comments / round changes / subtasks
-                    // added / moves since this user last marked them viewed.
-                    // Distinct blue bell so it doesn't read as the orange churn
-                    // chip. Reading the store here tracks it: ticking updates
-                    // off in the viewer decrements this live.
-                    let unviewedUpdates = TicketUpdatesStore.shared.unviewedCount(task)
-                    if unviewedUpdates > 0 {
-                        HStack(spacing: 1) {
-                            Image(systemName: "bell.badge.fill").font(.system(size: 7))
-                            Text("\(unviewedUpdates)").font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.blue.opacity(0.15))
-                        .cornerRadius(3)
-                        .help("\(unviewedUpdates) unviewed update\(unviewedUpdates == 1 ? "" : "s")")
-                    }
-
-                    // Commit → subtask suggestions waiting for review. A merge
-                    // scan (push webhook / auto-scan) flagged N subtasks this
-                    // commit may have completed; you still open the card to
-                    // Accept. Purple sparkle so it reads "AI suggestion", not the
-                    // blue unviewed bell or orange churn chip.
-                    if !pipelineMode, pendingCommitCount > 0 {
-                        HStack(spacing: 1) {
-                            Image(systemName: "sparkles").font(.system(size: 7))
-                            Text("\(pendingCommitCount)").font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundColor(.purple)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.purple.opacity(0.15))
-                        .cornerRadius(3)
-                        .help("\(pendingCommitCount) subtask\(pendingCommitCount == 1 ? "" : "s") a recent commit may have completed — open to accept")
-                    }
-
-                    if pipelineMode {
-                        if let dv = task.dealValue, dv > 0 {
-                            Text(formatDealValue(dv))
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(appState.themeAccent)
-                        }
-                        if task.dealOutcome != "open" {
-                            Text(task.dealOutcome.capitalized)
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(task.dealOutcome == "won" ? .green : .red)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background((task.dealOutcome == "won" ? Color.green : Color.red).opacity(0.15))
-                                .cornerRadius(3)
-                        }
-                    }
-
-                    Menu {
-                        ForEach(columnsFor(pipeline: pipelineMode), id: \.key) { c in
-                            Button {
-                                if c.key != task.boardColumn { onMoveColumn(c.key) }
-                            } label: {
-                                if c.key == task.boardColumn {
-                                    Label(c.label, systemImage: "checkmark")
-                                } else {
-                                    Text(c.label)
-                                }
-                            }
-                        }
-                    } label: {
-                        // Capsule with a hairline edge + chevron so the move
-                        // control reads as a control, not stray bold text.
-                        HStack(spacing: 3) {
-                            Text(currentColumnLabel)
-                                .font(.system(size: 9, weight: .medium))
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.system(size: 6, weight: .semibold))
-                                .opacity(0.6)
-                        }
-                        .foregroundColor(appState.themeText.opacity(0.7))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2.5)
-                        .background(Capsule().fill(appState.themeText.opacity(0.05)))
-                        .overlay(Capsule().strokeBorder(appState.themeText.opacity(0.13), lineWidth: 1))
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-
-                    if let name = assigneeDisplay {
-                        // Real profile photo with hashed-color initials
-                        // fallback — same component the chat rows use.
-                        ChannelAvatarView(
-                            senderId: task.assignedTo ?? task.id,
-                            payloadURL: task.assignedAvatarUrl,
-                            name: name,
-                            size: 15
-                        )
-                        Text(name)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-
-                    if let due = task.dueDate, !due.isEmpty {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                        Text(due.prefix(10))
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // Template + element tags on their own row so a crowded status
-                // row never squeezes them into a vertical one-letter-per-line
-                // strip (and never pushes the assignee off the card edge).
-                if KanbanTemplate.from(category: task.category) != nil
-                    || (elementName ?? task.elementName) != nil {
-                    HStack(spacing: 5) {
-                        if let tpl = KanbanTemplate.from(category: task.category) {
-                            HStack(spacing: 2) {
-                                Image(systemName: tpl.icon).font(.system(size: 7))
-                                Text(tpl.displayName).font(.system(size: 8, weight: .semibold))
-                                    .lineLimit(1)
-                            }
-                            .fixedSize(horizontal: true, vertical: false)
-                            .foregroundColor(tpl.color)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(tpl.color.opacity(0.15))
-                            .cornerRadius(3)
-                        }
-                        if let elName = elementName ?? task.elementName {
-                            HStack(spacing: 2) {
-                                Image(systemName: "square.stack.3d.up.fill").font(.system(size: 7))
-                                Text(elName).font(.system(size: 8, weight: .medium))
-                                    .lineLimit(1)
-                            }
-                            .fixedSize(horizontal: true, vertical: false)
-                            .foregroundColor(appState.themeAccent)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(appState.themeAccent.opacity(0.12))
-                            .cornerRadius(3)
-                        }
-                    }
-                }
-
-                if let total = task.subtaskTotal, total > 0 {
-                    let done = task.subtaskDone ?? 0
-                    let frac = CGFloat(done) / CGFloat(total)
-                    let complete = done >= total
-                    HStack(spacing: 5) {
-                        Image(systemName: complete ? "checkmark.circle.fill" : "checklist")
-                            .font(.system(size: 8))
-                            .foregroundColor(complete ? .matcha500 : .secondary)
-                        // Full-width track so progress reads as a real meter,
-                        // not a fixed-width decoration.
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(appState.themeText.opacity(0.12))
-                                Capsule().fill(complete ? Color.matcha500 : appState.themeAccent)
-                                    .frame(width: geo.size.width * frac)
-                            }
-                        }
-                        .frame(height: 3)
-                        Text("\(done)/\(total)")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                timestampLine
-
-                if !attachments.isEmpty {
-                    attachmentStrip
-                }
+            VStack(alignment: .leading, spacing: 7) {
+                cardAttentionContext
+                cardCategoryLine
+                cardMetaLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
-            .padding(.top, 8)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 9)
         }
         // Priority edge — the card's one loud element. A 3pt capsule down the
         // left edge, colored by priority; low/none stays clean (absence is the
@@ -432,54 +157,196 @@ struct KanbanCardView: View {
             if priorityEdgeVisible {
                 Capsule()
                     .fill(priorityColor)
-                    .frame(width: 3)
+                    .frame(width: 2)
                     .padding(.vertical, 7)
                     .padding(.leading, 1.5)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .elevatedCard(cornerRadius: 10)
-        // Glass edge — a faint highlight along the top rim, fading out by
-        // mid-card. The one-pixel bevel is what separates "flat dark rect"
-        // from a surface that catches light. Dark themes only; light mode
-        // already gets depth from elevatedCard's layered shadows.
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(appState.isLightFamily ? 0 : 0.09),
-                            .clear,
-                        ],
-                        startPoint: .top, endPoint: .center
-                    ),
-                    lineWidth: 1
-                )
-                .allowsHitTesting(false)
-        )
-        // Creator badge — floats over the top-right corner, so "who filed
-        // this" reads at a glance without a labeled row. Sits after the clip
-        // so the corner never crops it.
-        .overlay(alignment: .topTrailing) {
-            if let creatorName = task.createdByName {
-                ChannelAvatarView(
-                    senderId: task.createdBy ?? task.id,
-                    payloadURL: task.createdByAvatarUrl,
-                    name: creatorName,
-                    size: 18
-                )
-                .overlay(
-                    Circle().strokeBorder(Color.cardBackground, lineWidth: 1.5)
-                )
-                .padding(6)
-                .help("Created by \(creatorName)")
-            }
-        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .elevatedCard(cornerRadius: 8)
         // Hover lift — a whisper, not a bounce. Signals draggable/clickable.
-        .scaleEffect(hovering ? 1.012 : 1.0)
+        .scaleEffect(hovering ? 1.006 : 1.0)
         .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
         .onTapGesture(perform: onTap)
+    }
+
+    @ViewBuilder
+    private var cardAttentionContext: some View {
+        if let details = autoPRRuntimeDetails {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("AutoPR needs 10 more minutes", systemImage: "timer")
+                    .font(.espresso(size: 10)).foregroundColor(.orange)
+                Text(details)
+                    .font(.espresso(size: 10))
+                    .foregroundColor(appState.themeText.opacity(0.72))
+                    .lineLimit(3)
+                if task.autoprReconsiderationPending == true {
+                    Label("Continuation queued", systemImage: "clock.arrow.circlepath")
+                        .font(.espresso(size: 10)).foregroundStyle(.secondary)
+                } else {
+                    Button(action: onApproveAutoPRRuntime) {
+                        Label(autoPRRuntimeApprovalInFlight ? "Approving…" : "Approve 10 more minutes",
+                              systemImage: "play.circle.fill")
+                            .font(.espresso(size: 10)).foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(autoPRRuntimeApprovalInFlight)
+                }
+            }
+        } else if let questions = autoPRQuestionPreview {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("AutoPR needs an answer", systemImage: "questionmark.circle")
+                    .font(.espresso(size: 10)).foregroundColor(.orange)
+                Text(questions)
+                    .font(.espresso(size: 10))
+                    .foregroundColor(appState.themeText.opacity(0.72))
+                    .lineLimit(2)
+            }
+        } else if let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !note.isEmpty {
+            Label {
+                Text(note).lineLimit(1)
+            } icon: {
+                Image(systemName: "location.north.line")
+            }
+            .font(.espresso(size: 10))
+            .foregroundColor(appState.themeText.opacity(0.58))
+        }
+
+        if task.boardColumn == "changes_requested",
+           let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !note.isEmpty {
+            Label {
+                Text(note).lineLimit(2)
+            } icon: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .font(.espresso(size: 10))
+            .foregroundColor(.orange.opacity(0.88))
+        }
+
+        if pipelineMode, let contact = contactDisplay {
+            Label(contact, systemImage: "building.2")
+                .font(.espresso(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var cardCategoryLine: some View {
+        if KanbanTemplate.from(category: task.category) != nil
+            || (elementName ?? task.elementName) != nil {
+            HStack(spacing: 8) {
+                if let template = KanbanTemplate.from(category: task.category) {
+                    Label(template.displayName, systemImage: template.icon)
+                        .foregroundColor(template.color)
+                        .lineLimit(1)
+                }
+                if let name = elementName ?? task.elementName {
+                    Label(name, systemImage: "square.stack.3d.up")
+                        .foregroundColor(appState.themeAccent)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.espresso(size: 10))
+        }
+    }
+
+    private var cardMetaLine: some View {
+        HStack(spacing: 7) {
+            if let cycles = task.reviewCycleCount, cycles > 0 {
+                Label("×\(cycles)", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundColor(.orange)
+                    .help("Sent back from review \(cycles) time\(cycles == 1 ? "" : "s")")
+            }
+
+            let unviewed = TicketUpdatesStore.shared.unviewedCount(task)
+            if unviewed > 0 {
+                Label("\(unviewed)", systemImage: "bell.fill")
+                    .foregroundColor(.blue)
+                    .help("\(unviewed) unviewed update\(unviewed == 1 ? "" : "s")")
+            }
+
+            if !pipelineMode, pendingCommitCount > 0 {
+                Label("\(pendingCommitCount)", systemImage: "sparkles")
+                    .foregroundColor(.purple)
+                    .help("\(pendingCommitCount) possible commit completion\(pendingCommitCount == 1 ? "" : "s")")
+            }
+
+            if pipelineMode, let value = task.dealValue, value > 0 {
+                Text(formatDealValue(value)).foregroundColor(appState.themeAccent)
+            }
+
+            if pipelineMode, task.dealOutcome != "open" {
+                Text(task.dealOutcome.capitalized)
+                    .foregroundColor(task.dealOutcome == "won" ? .green : .red)
+            }
+
+            if let name = assigneeDisplay {
+                ChannelAvatarView(
+                    senderId: task.assignedTo ?? task.id,
+                    payloadURL: task.assignedAvatarUrl,
+                    name: name,
+                    size: 14
+                )
+                Text(name)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            if let total = task.subtaskTotal, total > 0 {
+                let done = task.subtaskDone ?? 0
+                Label("\(done)/\(total)", systemImage: done >= total ? "checkmark.circle.fill" : "checklist")
+                    .foregroundColor(done >= total ? .matcha500 : .secondary)
+                    .help("\(done) of \(total) checklist items complete")
+            }
+
+            if !attachments.isEmpty {
+                Label("\(attachments.count)", systemImage: "paperclip")
+                    .foregroundStyle(.secondary)
+            }
+
+            if let due = task.dueDate, !due.isEmpty {
+                Label(String(due.prefix(10)), systemImage: "calendar")
+                    .foregroundStyle(.secondary)
+                    .help("Due \(due.prefix(10))")
+            }
+
+            Spacer(minLength: 0)
+            timestampLine
+            moveMenu
+        }
+        .font(.espresso(size: 10))
+    }
+
+    private var moveMenu: some View {
+        Menu {
+            ForEach(columnsFor(pipeline: pipelineMode), id: \.key) { column in
+                Button {
+                    if column.key != task.boardColumn { onMoveColumn(column.key) }
+                } label: {
+                    if column.key == task.boardColumn {
+                        Label(column.label, systemImage: "checkmark")
+                    } else {
+                        Text(column.label)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.espresso(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Move from \(currentColumnLabel)")
+        .accessibilityLabel("Move card")
     }
 
     /// Only critical/high get the edge — medium is the default priority, so
@@ -498,85 +365,23 @@ struct KanbanCardView: View {
         }
     }
 
-    /// Compact "Jun 15 · moved 9m ago" footer in Pacific time; the full
+    /// Compact activity date in Pacific time; the full
     /// "Added <date> at <time>" detail lives in the tooltip so the card face
-    /// stays quiet. Moved only shows once the card has crossed columns at
-    /// least once (lastMovedAt != nil).
+    /// stays quiet. Once a card has moved, its last move replaces the added
+    /// date rather than adding a second timestamp to an already dense footer.
     @ViewBuilder
     private var timestampLine: some View {
         if let added = PacificDateFormatter.shortDate(task.createdAt) {
-            HStack(spacing: 3) {
-                Text(added)
-                    .foregroundColor(.secondary.opacity(0.85))
+            Group {
                 if let moved = PacificDateFormatter.relative(task.lastMovedAt) {
-                    // Staleness signal (replaces the old full-header tint):
-                    // once a card sits untouched past the warn/overdue
-                    // thresholds, the clock + elapsed time pick up the aging
-                    // color — a whisper where the band was a shout.
-                    if let aging = agingColor {
-                        HStack(spacing: 2) {
-                            Image(systemName: "clock")
-                                .font(.system(size: 8))
-                            Text("moved \(moved)")
-                        }
-                        .foregroundColor(aging.opacity(0.9))
-                    } else {
-                        Text("· moved \(moved)")
-                            .foregroundColor(.secondary.opacity(0.85))
-                    }
-                } else if let aging = agingColor {
-                    // Never moved but already stale — age off creation time.
-                    HStack(spacing: 2) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 8))
-                        if let rel = PacificDateFormatter.relative(task.createdAt) {
-                            Text(rel)
-                        }
-                    }
-                    .foregroundColor(aging.opacity(0.9))
+                    Text(moved)
+                } else {
+                    Text(added)
                 }
             }
-            .font(.system(size: 9))
+            .font(.espresso(size: 9))
+            .foregroundColor(agingColor?.opacity(0.9) ?? .secondary.opacity(0.8))
             .help("Added \(PacificDateFormatter.dateTime(task.createdAt) ?? added)")
-        }
-    }
-
-    @ViewBuilder
-    private var attachmentStrip: some View {
-        if imageAttachments.isEmpty {
-            HStack(spacing: 4) {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-                Text("\(attachments.count)")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-        } else {
-            HStack(spacing: 4) {
-                ForEach(imageAttachments.prefix(3)) { f in
-                    AsyncImage(url: URL(string: f.storageUrl)) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().aspectRatio(contentMode: .fill)
-                        default:
-                            Rectangle().fill(Color.white.opacity(0.08))
-                        }
-                    }
-                    .frame(width: 24, height: 24)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                }
-                let extras = (imageAttachments.count - 3) + nonImageCount
-                if extras > 0 {
-                    Text("+\(extras)")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.08))
-                        .cornerRadius(3)
-                }
-            }
         }
     }
 }

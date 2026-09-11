@@ -201,17 +201,17 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            // Brand header — MW monogram + wordmark, pinned above the scroll.
-            HStack(spacing: 9) {
-                EspressoMark(size: 26)
+            // Brand header — the application mark + quiet wordmark.
+            HStack(spacing: 10) {
+                EspressoMark(size: 28)
                 Text("Espresso")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.espresso(size: 15, weight: .medium))
                     .foregroundColor(appState.themeSidebarText)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -223,7 +223,7 @@ struct ContentView: View {
                 }
             }
 
-            Divider().background(appState.themeSidebarBorder)
+            Divider().opacity(0.45)
 
             // Footer — Inbox + People always-visible buttons with live badges
             HStack(spacing: 6) {
@@ -291,7 +291,7 @@ struct ContentView: View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(appState.themeSidebarTextSecondary)
-                .font(.system(size: 11))
+                .font(.espresso(size: 11))
             TextField(
                 "",
                 text: $searchText,
@@ -299,7 +299,7 @@ struct ContentView: View {
                     .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.72))
             )
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.espresso(size: 12))
                 .foregroundColor(appState.themeSidebarText)
             if !searchText.isEmpty {
                 Button {
@@ -307,23 +307,16 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(appState.themeSidebarTextSecondary)
-                        .font(.system(size: 11))
+                        .font(.espresso(size: 11))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(appState.themeSidebarCard)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(appState.themeSidebarBorder, lineWidth: 1)
-        )
-        .padding(.horizontal, 8)
-        .padding(.bottom, 8)
+        .background(RoundedRectangle(cornerRadius: 7).fill(appState.themeSidebarCard.opacity(0.65)))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
@@ -358,9 +351,7 @@ struct ContentView: View {
                         orderStore.resetToDefault()
                     }
                 }
-            if idx < visibleSections.count - 1 {
-                Divider().background(appState.themeSidebarBorder)
-            }
+            if idx < visibleSections.count - 1 { Spacer().frame(height: 2) }
         }
     }
 
@@ -381,9 +372,9 @@ struct ContentView: View {
     private func sectionDragPreview(_ section: SidebarSectionOrderStore.Section) -> some View {
         HStack(spacing: 6) {
             Image(systemName: section.iconName)
-                .font(.system(size: 11))
+                .font(.espresso(size: 11))
             Text(section.displayName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.espresso(size: 12))
         }
         .foregroundColor(.white)
         .padding(.horizontal, 10)
@@ -413,16 +404,15 @@ struct ContentView: View {
         }) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(.espresso(size: 12))
                     .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 16)
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.5)
+                Text(title)
+                    .font(.espresso(size: 12))
                     .foregroundColor(appState.themeSidebarText)
                 if lockedFeature != nil {
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 8))
+                        .font(.espresso(size: 9))
                         .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
                 }
                 Spacer(minLength: 0)
@@ -430,12 +420,18 @@ struct ContentView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isActive ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
+                .fill(isActive ? appState.themeSidebarAccent.opacity(0.075) : Color.clear)
         )
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule().fill(appState.themeSidebarAccent).frame(width: 2, height: 16)
+            }
+        }
+        .padding(.horizontal, 6)
     }
 
     @ViewBuilder
@@ -499,11 +495,9 @@ struct ContentView: View {
                     Task { await EmailViewModel.shared.loadInbox() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.espresso(size: 10))
                         .foregroundColor(.secondary)
                         .frame(width: 18, height: 18)
-                        .background(Color(white: 0.58))
-                        .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
                 .help("Refresh unread")
@@ -542,16 +536,15 @@ struct ContentView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: isOpen.wrappedValue ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.espresso(size: 9))
                             .foregroundColor(appState.themeSidebarTextSecondary)
                             .frame(width: 10)
                         Image(systemName: icon)
-                            .font(.system(size: 11))
+                            .font(.espresso(size: 11))
                             .foregroundColor(appState.themeSidebarTextSecondary)
-                        Text(title.uppercased())
-                            .font(.system(size: 10, weight: .semibold))
+                        Text(title)
+                            .font(.espresso(size: 11))
                             .foregroundColor(appState.themeSidebarTextSecondary)
-                            .tracking(0.5)
                         Spacer()
                     }
                     .contentShape(Rectangle())
@@ -560,8 +553,8 @@ struct ContentView: View {
 
                 trailing()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
 
             if isOpen.wrappedValue || alwaysRenderContent {
                 content()
@@ -580,16 +573,16 @@ struct ContentView: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.espresso(size: 12))
                     .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                 Text(label)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .font(.espresso(size: 12, weight: isActive ? .medium : .regular))
                     .foregroundColor(appState.themeSidebarText.opacity(isActive ? 1.0 : 0.85))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if badge > 0 {
                     Text("\(badge)")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.espresso(size: 9, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -602,7 +595,7 @@ struct ContentView: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
+                    .fill(isActive ? appState.themeSidebarAccent.opacity(0.075) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -621,21 +614,8 @@ struct ContentView: View {
 
     // MARK: - Starred section & theme background helpers
 
-    @ViewBuilder
     private var sidebarBackground: some View {
-#if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            // Keep a solid inverse-mode foundation for legibility, then layer
-            // the system glass over a strong tint for depth without washout.
-            Rectangle()
-                .fill(appState.themeSidebar.opacity(0.68))
-                .glassEffect(.regular.tint(appState.themeSidebar.opacity(0.52)), in: Rectangle())
-        } else {
-            appState.themeSidebar
-        }
-#else
         appState.themeSidebar
-#endif
     }
 
 }

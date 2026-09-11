@@ -33,7 +33,7 @@ struct ViewerAttachmentRow: View {
                         img.resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
                     case .failure:
                         Color.zinc800.overlay(
-                            Image(systemName: "photo").font(.system(size: 10)).foregroundColor(.secondary))
+                            Image(systemName: "photo").font(.ticket(size: 10)).foregroundColor(.secondary))
                     default:
                         Color.zinc800.overlay(ProgressView().controlSize(.small))
                     }
@@ -42,23 +42,23 @@ struct ViewerAttachmentRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
                 Image(systemName: "doc")
-                    .font(.system(size: 12))
+                    .font(.ticket(size: 12))
                     .foregroundColor(.secondary)
                     .frame(width: 30, height: 30)
             }
             Text(file.filename)
-                .font(.system(size: 11))
+                .font(.ticket(size: 11))
                 .foregroundColor(.mwInk)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
             Text(sizeLabel)
-                .font(.system(size: 10))
+                .font(.ticket(size: 10))
                 .foregroundColor(.secondary)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(isHovered ? Color.mwInk.opacity(0.08) : Color.mwInk.opacity(0.04))
+        .background(isHovered ? Color.mwInk.opacity(0.06) : Color.clear)
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }

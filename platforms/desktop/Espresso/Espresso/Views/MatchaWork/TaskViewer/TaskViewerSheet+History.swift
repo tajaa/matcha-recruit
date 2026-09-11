@@ -15,11 +15,10 @@ extension TaskViewerSheet {
     }
 
     /// Generic disclosure row mirroring `historyToggle` so supporting context
-    /// (description, AI summary) sits one click away instead of crowding the
-    /// directive. Closed by default.
+    /// keeps the brief and AI summary collapsible without nesting scroll panels.
     @ViewBuilder
     func collapsibleSection<Content: View>(
-        icon: String, title: String, badge: String? = nil, tint: Color = .secondary,
+        title: String, badge: String? = nil,
         isOpen: Binding<Bool>, onFirstOpen: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -28,30 +27,13 @@ extension TaskViewerSheet {
                 if !isOpen.wrappedValue { onFirstOpen?() }
                 withAnimation(.easeInOut(duration: 0.18)) { isOpen.wrappedValue.toggle() }
             } label: {
-                if appState.isGraphite {
-                    HStack(spacing: 8) {
-                        Text(isOpen.wrappedValue ? "[-]" : "[+]")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(appState.themeTextSecondary)
-                        asciiRule(badge.map { "\(title) · \($0)" } ?? title)
-                    }
-                    .padding(.vertical, 7).frame(maxWidth: .infinity).contentShape(Rectangle())
-                } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: icon).font(.system(size: 10)).foregroundColor(tint)
-                        Text(title).font(.system(size: 9, weight: .semibold)).foregroundColor(tint).tracking(0.5)
-                        if let badge {
-                            Text(badge).font(.system(size: 9)).foregroundColor(.secondary)
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(appState.themeText.opacity(0.08)).cornerRadius(4)
-                        }
-                        Spacer()
-                        Image(systemName: isOpen.wrappedValue ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 8).padding(.horizontal, 10).frame(maxWidth: .infinity)
-                    .background(appState.themeText.opacity(0.07)).cornerRadius(6).contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    TicketSectionHeading(title: title, detail: badge)
+                    Image(systemName: isOpen.wrappedValue ? "chevron.up" : "chevron.down")
+                        .font(.ticket(size: 9)).foregroundStyle(.secondary)
                 }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if isOpen.wrappedValue { content() }
@@ -65,18 +47,11 @@ extension TaskViewerSheet {
         if !descriptionIsHero,
            let desc = task.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
             collapsibleSection(
-                icon: "person.text.rectangle",
-                title: "CONTRIBUTOR BRIEF",
-                badge: "Written by \(contributorDisplayName)",
+                title: "Contributor brief",
+                badge: contributorDisplayName,
                 isOpen: $showDescription
             ) {
-                ScrollView {
-                    Text(desc)
-                        .font(.system(size: 13)).foregroundColor(appState.themeText.opacity(0.85))
-                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                }
-                .frame(maxHeight: 220).padding(10)
-                .background(appState.themeText.opacity(0.07)).cornerRadius(6)
+                TicketBriefText(text: desc).foregroundColor(appState.themeText)
             }
         }
     }
@@ -86,9 +61,9 @@ extension TaskViewerSheet {
     @ViewBuilder
     var aiSummaryCollapsible: some View {
         if let summary = viewModel.taskSummaries[task.id], !summary.isEmpty {
-            collapsibleSection(icon: "sparkles", title: "AI SUMMARY", tint: .mwInkStrong, isOpen: $showSummary) {
+            collapsibleSection(title: "AI summary", isOpen: $showSummary) {
                 Text(summary)
-                    .font(.system(size: 12)).foregroundColor(appState.themeText.opacity(0.9))
+                    .font(.ticket(size: 12)).foregroundColor(appState.themeText.opacity(0.9))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 2)
@@ -105,12 +80,10 @@ extension TaskViewerSheet {
     /// round, so it's explicit the body is showing the current round's work.
     var roundScopePill: some View {
         Text("Round \(currentRound)")
-            .font(.system(size: 8, weight: .semibold))
+            .font(.ticket(size: 10))
             .foregroundColor(.mwInkStrong)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Color.mwInkStrong.opacity(0.15))
-            .cornerRadius(4)
     }
 
     // MARK: - History (rounds-grouped audit)
@@ -127,15 +100,15 @@ extension TaskViewerSheet {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
-                Text("HISTORY")
-                    .font(.system(size: 9, weight: .semibold))
+                Text("History")
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
-                    .tracking(0.5)
+
                 if rounds.count > 1 {
                     Text("\(rounds.count) rounds")
-                        .font(.system(size: 9))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -144,17 +117,14 @@ extension TaskViewerSheet {
                 }
                 Spacer()
                 Text("Show")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.mwInkStrong)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.mwInkStrong)
             }
             .padding(.vertical, 8)
-            .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
-            .background(appState.themeText.opacity(0.07))
-            .cornerRadius(6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -201,15 +171,15 @@ extension TaskViewerSheet {
     private var historySectionHeader: some View {
         HStack(spacing: 6) {
             Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 10))
+                .font(.ticket(size: 10))
                 .foregroundColor(.secondary)
-            Text("HISTORY")
-                .font(.system(size: 9, weight: .semibold))
+            Text("History")
+                .font(.ticket(size: 10))
                 .foregroundColor(.secondary)
-                .tracking(0.5)
+
             if !rounds.isEmpty {
                 Text("\(rounds.count) round\(rounds.count == 1 ? "" : "s")")
-                    .font(.system(size: 9))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -222,7 +192,7 @@ extension TaskViewerSheet {
             Spacer()
             Button { showHistory = false } label: {
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
@@ -232,9 +202,9 @@ extension TaskViewerSheet {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                     Text("Start Next Round")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                 }
                 .foregroundColor(.mwInkStrong)
                 .padding(.horizontal, 8)

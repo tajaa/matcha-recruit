@@ -106,39 +106,24 @@ extension TaskViewerSheet {
                     && !autoPRIsAwaitingAnswers)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Image(systemName: status.icon)
-                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "cpu").foregroundColor(status.color)
+                    Text("matcha-autopr").foregroundColor(appState.themeText)
+                    Text("Automated").foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Label(status.label == "AWAITING ANSWERS" ? "Your input is needed" : status.label.capitalized,
+                          systemImage: status.icon)
                         .foregroundColor(status.color)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("MATCHA-AUTOPR")
-                            .font(.system(size: 8, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundColor(status.color)
-                        Text(status.label == "AWAITING ANSWERS"
-                             ? "Your input is needed"
-                             : status.label.capitalized)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(appState.themeText)
-                    }
-                    Spacer()
-                    Text("AUTOMATED")
-                        .font(.system(size: 8, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(appState.themeText.opacity(0.07))
-                        .cornerRadius(3)
                 }
+                .font(.ticket(size: 11))
                 Text(hasTransientRunState ? "Previous AutoPR update: \(summary)" : summary)
-                    .font(.system(size: 12)).lineSpacing(3)
+                    .font(.ticket(size: 12)).lineSpacing(3)
                     .foregroundColor(appState.themeTextSecondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 if autoPRIsAwaitingAnswers {
                     ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.ticket(size: 12))
                             .lineSpacing(3)
                             .foregroundColor(appState.themeText)
                             .textSelection(.enabled)
@@ -154,41 +139,23 @@ extension TaskViewerSheet {
                     Text(note).font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled).padding(.top, 8)
                 }
-                .font(.system(size: 11)).foregroundColor(.secondary)
+                .font(.ticket(size: 11)).foregroundColor(.secondary)
             }
-            .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(status.color.opacity(0.045)).cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.16), lineWidth: 1))
         } else if liveAutoPRTask.autoprClaimedAt != nil
                     || autoPRIsQueueCandidate {
             let isWorking = liveAutoPRTask.autoprClaimedAt != nil
             HStack(spacing: 8) {
-                Image(systemName: isWorking ? "hammer.circle.fill" : "clock.arrow.circlepath")
+                Image(systemName: "cpu")
+                Text("matcha-autopr").foregroundColor(appState.themeText)
+                Text("Automated").foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Label(isWorking ? "Working now" : "In queue",
+                      systemImage: isWorking ? "hammer" : "clock")
                     .foregroundColor(isWorking ? .mwInkStrong : .blue)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("MATCHA-AUTOPR · AUTOMATED")
-                        .font(.system(size: 8, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundColor(isWorking ? .mwInkStrong : .blue)
-                    Text(isWorking ? "Working now" : "In queue")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(appState.themeText)
-                }
-                Spacer(minLength: 0)
-                Text(isWorking
-                     ? "Picked up and moved to In Progress"
-                     : "Waiting for matcha-autopr")
-                    .font(.system(size: 10))
-                    .foregroundColor(appState.themeTextSecondary)
             }
-            .padding(11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background((isWorking ? Color.mwInkStrong : Color.blue).opacity(0.045)).cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke((isWorking ? Color.mwInkStrong : Color.blue).opacity(0.16), lineWidth: 1)
-            )
+            .font(.ticket(size: 11))
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -283,38 +250,38 @@ extension TaskViewerSheet {
             HStack(spacing: 8) {
                 if liveAutoPRTask.autoprPaused == true {
                     Label("AutoPR paused", systemImage: "pause.circle")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                     if canRequestAutoPRRun {
                         Button("Run again") { Task { await requestAutoPRRun() } }
                             .buttonStyle(.plain)
                             .disabled(requestingAutoPRRun || addingNote)
                     } else {
                         Text("Move to Todo or Changes Requested to run again.")
-                            .font(.system(size: 10))
+                            .font(.ticket(size: 10))
                             .foregroundColor(.secondary)
                     }
                 } else if hasActiveClaim {
                     Label("AutoPR working", systemImage: "hammer.circle.fill")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
                     Button(requestingAutoPRRun ? "Pausing…" : "Pause retries") {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.ticket(size: 11))
                     .disabled(requestingAutoPRRun || addingNote)
                     .help("Prevent automatic retries. A run already executing may still finish.")
                 } else if autoPRRunIsQueued || autoPRReconsiderationIsPending {
                     Label("Queued for AutoPR", systemImage: "bolt.horizontal.circle.fill")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
                 } else if let reason = autoPRRunBlockedReason {
                     Label(autoPRRunNowLabel, systemImage: "bolt.slash")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
                         .help(reason)
                     Text(reason)
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                 } else {
@@ -325,7 +292,7 @@ extension TaskViewerSheet {
                             requestingAutoPRRun ? "Queueing…" : autoPRRunNowLabel,
                             systemImage: "bolt.fill"
                         )
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
                     }
                     .buttonStyle(.plain)
@@ -337,13 +304,13 @@ extension TaskViewerSheet {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.ticket(size: 11))
                     .disabled(requestingAutoPRRun || addingNote)
                     .help("Hold future runs while you edit.")
                 }
                 if let error = autoPRRunError {
                     Text(Self.stripHTTPPrefix(error))
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.red)
                         .lineLimit(2)
                 }
@@ -358,15 +325,15 @@ extension TaskViewerSheet {
             if autoPRReconsiderationIsPending {
                 HStack(spacing: 5) {
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                     Text("Reconsideration queued")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                 }
                 .foregroundColor(.mwInkStrong)
                 .padding(.top, 3)
             } else if isAddingAutoPRContext {
                 Text("Answer below — you can scroll the questions while writing.")
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
             } else {
                 Button {
@@ -380,7 +347,7 @@ extension TaskViewerSheet {
                     Task { @MainActor in isNoteFieldFocused = true }
                 } label: {
                     Label(autoPRContextActionLabel, systemImage: "arrowshape.turn.up.left")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
                 }
                 .buttonStyle(.plain)
@@ -462,60 +429,41 @@ extension TaskViewerSheet {
     /// time-in-review.
     var metaLine: some View {
         let p = currentPhase
-        return HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: p.icon).font(.system(size: 9, weight: .semibold))
-                Text(p.label).font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundColor(p.color)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(p.color.opacity(0.14)).cornerRadius(4)
-
+        return FlowLayout(spacing: 12) {
+            Label(p.label, systemImage: p.icon).foregroundColor(p.color)
             metaPill(label: task.priority.capitalized, color: .secondary)
-            if let due = task.dueDate, !due.isEmpty {
-                metaPill(label: "Due \(String(due.prefix(10)))", color: .secondary)
-            }
             assigneeMenu
-            if currentRound > 0 {
-                Text("Round \(currentRound)")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
+            if currentRound > 1 { Text("Round \(currentRound)") }
             if let days = daysInReview {
-                HStack(spacing: 2) {
-                    Image(systemName: "clock").font(.system(size: 8))
-                    Text(days <= 0 ? "review today" : "review \(days)d")
-                        .font(.system(size: 9, weight: .medium))
-                }
-                .foregroundColor(days >= 3 ? .mwAttention : .secondary)
+                Text(days <= 0 ? "Review today" : "In review \(days)d")
+                    .foregroundColor(days >= 3 ? .mwAttention : .secondary)
             }
-            if let elName = task.elementName
+            if let due = task.dueDate, !due.isEmpty {
+                Text("Due \(String(due.prefix(10)))")
+            }
+            if let name = task.elementName
                 ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
-                HStack(spacing: 3) {
-                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 8))
-                    Text(elName).font(.system(size: 9, weight: .semibold))
-                }
-                .foregroundColor(.mwInkStrong)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.mwInkStrong.opacity(0.15)).cornerRadius(3)
+                Label(name, systemImage: "square.stack.3d.up")
+                    .lineLimit(1).frame(maxWidth: 200, alignment: .leading)
             }
-            Spacer(minLength: 0)
-            HStack(spacing: 4) {
-                if let created = liveAutoPRTask.createdAt {
-                    Text("Added \(PacificDateFormatter.absolute(created) ?? created)")
-                }
-                if let moved = liveAutoPRTask.lastMovedAt,
-                   let label = PacificDateFormatter.absolute(moved) {
-                    if liveAutoPRTask.createdAt != nil {
-                        Text("·")
-                    }
-                    Text("Moved \(label)")
-                }
-            }
-            .font(.system(size: 8.5))
-            .foregroundColor(.secondary)
-            .lineLimit(1)
         }
+        .font(.ticket(size: 11))
+        .foregroundStyle(.secondary)
+    }
+
+    /// Audit timestamps are available without competing with status and ownership.
+    var ticketDates: some View {
+        FlowLayout(spacing: 8) {
+            if let created = liveAutoPRTask.createdAt {
+                Text("Added \(PacificDateFormatter.absolute(created) ?? created)")
+            }
+            if let moved = liveAutoPRTask.lastMovedAt,
+               let label = PacificDateFormatter.absolute(moved) {
+                Text("· Moved \(label)")
+            }
+        }
+        .font(.ticket(size: 10))
+        .foregroundStyle(.secondary)
     }
 
     // MARK: - The directive
@@ -573,177 +521,59 @@ extension TaskViewerSheet {
         case .feedback(let fb):
             feedbackHero(fb)
         case .review:
-            VStack(alignment: .leading, spacing: 8) {
-                heroRule(color: .mwInkStrong, icon: "magnifyingglass.circle.fill",
-                         label: "DO NOW · REVIEW",
-                         text: "Assess this submission, then Approve or Send back below.")
-                reviewDeltaSection
-            }
+            reviewDeltaSection
         case .progress(let pn):
-            heroRule(color: .mwInkStrong, icon: "hammer.fill", label: "WHERE WE'RE AT", text: pn)
+            heroRule(label: "Progress update", text: pn)
         case .done:
-            heroRule(color: .mwInkStrong, icon: "checkmark.seal.fill", label: "DONE", text: "This ticket is closed.")
+            EmptyView()
         case .brief(let desc):
             heroRule(
-                color: currentPhase.color,
-                icon: "person.text.rectangle",
-                label: "CONTRIBUTOR BRIEF · \(contributorDisplayName.uppercased())",
+                label: "Contributor brief · \(contributorDisplayName)",
                 text: desc
             )
         case .phase:
             // No feedback, no progress note, no description → don't leave a blank
             // hole; show the phase + owner so the sheet still answers "where is
             // this and whose move is it?" (the old stateBanner's job).
-            heroRule(color: currentPhase.color, icon: currentPhase.icon,
-                     label: currentPhase.label.uppercased(),
+            heroRule(label: currentPhase.label,
                      text: currentPhase.owner.isEmpty ? "No details yet." : currentPhase.owner)
         }
     }
 
-    // MARK: - Hero chrome
+    // MARK: - Quiet section chrome
 
-    /// `── LABEL ─────────` monospace rule — the graphite ASCII section header,
-    /// stretching to fill the row. Used by the hero + collapsibles in graphite.
-    func asciiRule(_ label: String) -> some View {
-        HStack(spacing: 10) {
-            Text(label.capitalized)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(appState.themeTextSecondary)
-            Rectangle().fill(appState.themeBorder.opacity(0.6)).frame(height: 1)
+    func heroRule(label: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TicketSectionHeading(title: label)
+            TicketBriefText(text: text).foregroundColor(appState.themeText)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Prominent hero. Graphite: a flat ASCII rule + text (no tinted box) for the
-    /// stripped-down terminal feel. Other themes: the left-rule card.
-    @ViewBuilder
-    func heroRule(color: Color, icon: String, label: String, text: String) -> some View {
-        if appState.isGraphite {
-            VStack(alignment: .leading, spacing: 6) {
-                asciiRule(label)
-                TicketBriefText(text: text)
-                    .font(.system(size: 14))
-                    .foregroundColor(appState.themeText)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 5) {
-                        Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-                        Text(label).font(.system(size: 10, weight: .bold)).tracking(0.6)
-                    }
-                    .foregroundColor(color)
-                    TicketBriefText(text: text)
-                        .font(.system(size: 14))
-                        .foregroundColor(appState.themeText)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.vertical, 10).padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.06)).cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
-        }
-    }
-
-    /// Changes-requested hero — the send-back note promoted to the focal point,
-    /// with the per-item denials (severity + reason) the reviewer flagged.
-    /// Absorbs the old NEEDS WORK block.
-    ///
-    /// `reviewDenials` walks the whole history, so it is bound ONCE here and
-    /// threaded into the severity summary — the previous shape recomputed it
-    /// four times per body render (twice inside `denialSeverityCounts` alone).
+    /// Feedback stays prominent through its wording and amber cue, not a large panel.
     @ViewBuilder
     func feedbackHero(_ fb: String) -> some View {
         let denials = reviewDenials
-        let counts = denialSeveritySummary(denials)
-        if appState.isGraphite {
-            // Flat ASCII — no tinted box, monochrome denials with `!` markers.
-            VStack(alignment: .leading, spacing: 6) {
-                asciiRule("DO NOW · CHANGES REQUESTED")
-                Text(fb)
-                    .font(.system(size: 13)).foregroundColor(appState.themeText)
-                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                if let counts {
-                    Text(counts).font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundColor(appState.themeText.opacity(0.6))
-                }
-                ForEach(Array(denials.enumerated()), id: \.offset) { _, d in
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(d.severity == "blocker" ? "[!]" : "[ ]")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(appState.themeTextSecondary)
-                        Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
-                            .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Review feedback", systemImage: "arrow.uturn.backward")
+                .font(.ticket(size: 11)).foregroundColor(.mwAttention)
+            TicketBriefText(text: fb).foregroundColor(appState.themeText)
+            if let counts = denialSeveritySummary(denials) {
+                Text(counts).font(.ticket(size: 11)).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            let color = Color.mwAttention
-            HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .semibold))
-                        Text("DO NOW · CHANGES REQUESTED").font(.system(size: 10, weight: .bold)).tracking(0.5)
+            ForEach(Array(denials.enumerated()), id: \.offset) { _, d in
+                HStack(alignment: .top, spacing: 6) {
+                    if !d.severity.isEmpty {
+                        Text(d.severity.capitalized)
+                            .foregroundColor(d.severity == "blocker" ? .mwAttention : .secondary)
                     }
-                    .foregroundColor(color)
-                    Text(fb)
-                        .font(.system(size: 13))
+                    Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
                         .foregroundColor(appState.themeText)
-                        .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let counts {
-                        Text(counts).font(.system(size: 9, weight: .semibold)).foregroundColor(appState.themeText.opacity(0.6))
-                    }
-                    ForEach(Array(denials.enumerated()), id: \.offset) { _, d in
-                        HStack(alignment: .top, spacing: 5) {
-                            Image(systemName: "xmark.square.fill").font(.system(size: 9)).foregroundColor(color.opacity(0.9))
-                            if !d.severity.isEmpty {
-                                Text(d.severity.uppercased())
-                                    .font(.system(size: 7, weight: .bold)).tracking(0.3)
-                                    .foregroundColor(d.severity == "blocker" ? .mwAttention : .secondary)
-                                    .padding(.horizontal, 3).padding(.vertical, 1)
-                                    .background((d.severity == "blocker" ? Color.mwAttention : Color.secondary).opacity(0.15))
-                                    .cornerRadius(2)
-                            }
-                            Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
-                                .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
                 }
-            }
-            .padding(.vertical, 10).padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.06)).cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
-        }
-    }
-}
-
-
-/// Render existing Markdown section boundaries without changing the stored brief.
-struct TicketBriefText: View {
-    let text: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(text.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, block in
-                if block.hasPrefix("## ") {
-                    let lines = block.components(separatedBy: "\n")
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(String((lines.first ?? "").dropFirst(3)))
-                            .font(.system(size: 13, weight: .semibold))
-                        if lines.count > 1 { Text(lines.dropFirst().joined(separator: "\n")).lineSpacing(4) }
-                    }
-                } else { Text(block).lineSpacing(4) }
+                .font(.ticket(size: 12))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

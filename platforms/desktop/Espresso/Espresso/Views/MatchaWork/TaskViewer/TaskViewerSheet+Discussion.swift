@@ -11,7 +11,7 @@ extension TaskViewerSheet {
     /// questions are one click away. Posting a note bells the other participants.
     @ViewBuilder
     var discussionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             discussionHeader
 
             // One combined thread in reading order. Each row carries actor
@@ -31,11 +31,6 @@ extension TaskViewerSheet {
                         }
                     )
                 }
-            } else if !loadingHistory {
-                Text("No comments yet — ask a question to start the thread.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 4)
             }
 
             if !isAddingAutoPRContext {
@@ -47,32 +42,10 @@ extension TaskViewerSheet {
 
     @ViewBuilder
     private var discussionHeader: some View {
-        if appState.isGraphite {
-            HStack(spacing: 8) {
-                asciiRule("DISCUSSION")
-                if loadingHistory { ProgressView().controlSize(.small) }
-                if currentRound > 1 { roundScopePill }
-            }
-        } else {
-            HStack(spacing: 6) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 10))
-                    .foregroundColor(.mwInkStrong)
-                Text("DISCUSSION")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .tracking(0.5)
-                Text("Ask & answer clarifications")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary.opacity(0.7))
-                if loadingHistory {
-                    ProgressView().controlSize(.small)
-                }
-                Spacer()
-                if currentRound > 1 {
-                    roundScopePill
-                }
-            }
+        HStack(spacing: 8) {
+            TicketSectionHeading(title: "Discussion", detail: notes.isEmpty ? nil : "\(notes.count)")
+            if loadingHistory { ProgressView().controlSize(.small) }
+            if currentRound > 1 { roundScopePill }
         }
     }
 
@@ -115,10 +88,10 @@ extension TaskViewerSheet {
                 text: $newNote,
                 placeholder: isAddingAutoPRContext
                     ? "Add answers, context, or research guidance…"
-                    : (replyingToNote == nil ? "Add a note…" : "Write a reply…"),
-                font: .systemFont(ofSize: 13),
+                    : (replyingToNote == nil ? "Write a comment…" : "Write a reply…"),
+                font: TicketTypography.native(size: 13),
                 textColor: appState.themeText,
-                minLines: isAddingAutoPRContext ? 4 : 2,
+                minLines: isAddingAutoPRContext ? 4 : 1,
                 maxLines: 10,
                 submitKey: .commandReturnSends,
                 onSubmit: { Task { await submitNote() } },
@@ -126,20 +99,20 @@ extension TaskViewerSheet {
                 focusRequested: $isNoteFieldFocused
             )
             .padding(8)
-            .background(appState.themeText.opacity(0.07))
+            .background(appState.themeText.opacity(0.035))
             .cornerRadius(6)
             .disabled(addingNote)
 
             HStack(spacing: 10) {
-                Text("Return for a new line · ⌘Return to submit")
-                    .font(.system(size: 10))
+                Text("⌘↵ to send")
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
                 Spacer()
                 Button {
                     attachFileFromDisk()
                 } label: {
                     Image(systemName: "paperclip")
-                        .font(.system(size: 12))
+                        .font(.ticket(size: 12))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -148,7 +121,7 @@ extension TaskViewerSheet {
                     attachImageFromClipboard()
                 } label: {
                     Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 12))
+                        .font(.ticket(size: 12))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -159,8 +132,8 @@ extension TaskViewerSheet {
                     if addingNote {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text(isAddingAutoPRContext ? "Submit" : "Add")
-                            .font(.system(size: 12, weight: .semibold))
+                        Text(isAddingAutoPRContext ? "Submit" : "Post")
+                            .font(.ticket(size: 12))
                             .foregroundColor(canSubmitNote ? .mwInkStrong : .secondary)
                     }
                 }
@@ -178,7 +151,7 @@ extension TaskViewerSheet {
 
             if let error = autoPRContextError, isAddingAutoPRContext {
                 Text(error)
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.mwAttention)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -205,11 +178,11 @@ extension TaskViewerSheet {
                 .frame(width: 2)
                 .cornerRadius(1)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Additional context for AUTO SETUP")
-                    .font(.system(size: 9, weight: .semibold))
+                Text("Additional context for matcha-autopr")
+                    .font(.ticket(size: 10))
                     .foregroundColor(.mwInkStrong)
                 Text(autoSetupStatus.label)
-                    .font(.system(size: 10))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
@@ -219,30 +192,31 @@ extension TaskViewerSheet {
                 autoPRContextError = nil
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(.ticket(size: 11))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
             .disabled(addingNote)
             .help("Cancel additional context")
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(appState.themeText.opacity(0.07))
+        .background(appState.themeText.opacity(0.035))
         .cornerRadius(5)
     }
 
     private var subtaskNudge: some View {
         HStack(spacing: 6) {
-            Image(systemName: "checklist").font(.system(size: 9)).foregroundColor(.mwInkStrong)
+            Image(systemName: "checklist").font(.ticket(size: 10)).foregroundColor(.mwInkStrong)
             Text("Looks like a to-do — add it as a subtask instead?")
-                .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                .font(.ticket(size: 10)).foregroundColor(appState.themeTextSecondary)
             Button("Add as subtask") {
                 let t = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
                 Task { await viewModel.addSubtask(taskId: task.id, title: t) }
                 newNote = ""
             }
-            .buttonStyle(.plain).font(.system(size: 10, weight: .semibold)).foregroundColor(.mwInkStrong)
+            .buttonStyle(.plain).font(.ticket(size: 10)).foregroundColor(.mwInkStrong)
             Spacer(minLength: 0)
         }
         .padding(.leading, 2)
@@ -263,11 +237,11 @@ extension TaskViewerSheet {
                 .cornerRadius(1)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Replying to \(name)")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.ticket(size: 10))
                     .foregroundColor(.mwInkStrong)
                 if !excerpt.isEmpty {
                     Text(excerpt)
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -277,15 +251,16 @@ extension TaskViewerSheet {
                 replyingToNote = nil
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(.ticket(size: 11))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
             .help("Cancel reply")
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(appState.themeText.opacity(0.07))
+        .background(appState.themeText.opacity(0.035))
         .cornerRadius(5)
     }
 }
