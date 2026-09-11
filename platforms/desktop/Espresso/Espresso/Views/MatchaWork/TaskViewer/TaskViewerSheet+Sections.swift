@@ -19,7 +19,7 @@ extension TaskViewerSheet {
     /// next to the card's current state.
     @ViewBuilder
     var researchReportSection: some View {
-        if liveAutoPRTask.category == "research" {
+        if autoPRReportPrefix != nil {
             if let report = researchReportAttachment {
                 Button { previewFile = report } label: {
                     HStack(spacing: 10) {
@@ -28,7 +28,7 @@ extension TaskViewerSheet {
                             .foregroundColor(.mwInkStrong)
                             .frame(width: 24, height: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Research report")
+                            Text(autoPRReportTitle)
                                 .font(.ticket(size: 13))
                                 .foregroundColor(.mwInkStrong)
                             Text(report.filename)
@@ -58,7 +58,7 @@ extension TaskViewerSheet {
                 .buttonStyle(.plain)
             } else if liveAutoPRTask.autoprClaimedAt != nil
                         || autoPRIsQueueCandidate {
-                Label("Research report will appear here when the run finishes.",
+                Label("\(autoPRReportTitle) will appear here when the run finishes.",
                       systemImage: "doc.text.magnifyingglass")
                     .font(.ticket(size: 10))
                     .foregroundColor(.secondary)

@@ -52,9 +52,11 @@ DEFAULT_TENANT_CODIFIED_ONLY = True
 # what makes the lane safe to extend beyond code review: "research" reads the
 # world and writes a report, "outreach" lets a human approve and send an email
 # the model drafted, "browse" lets a run drive a real browser and attach
-# screenshots. Each is a different blast radius, so each is granted separately
-# and every one of them defaults OFF.
-AUTOPR_BOARD_CAPABILITIES = ("research", "outreach", "browse")
+# screenshots, "email" lets a run read the email snapshots a person attached
+# to an email card and draft replies (sending those still needs "outreach" and a
+# per-item human approval). Each is a different blast radius, so each is
+# granted separately and every one of them defaults OFF.
+AUTOPR_BOARD_CAPABILITIES = ("research", "outreach", "browse", "email")
 DEFAULT_AUTOPR_BOARD_CAPABILITIES: dict[str, list[str]] = {}
 
 _visible_features_cache: list[str] | None = None

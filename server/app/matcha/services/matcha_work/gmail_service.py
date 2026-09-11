@@ -187,6 +187,12 @@ class GmailService:
             resp.raise_for_status()
             return resp.json()
 
+    async def _gmail_delete(self, path: str) -> None:
+        headers = await self._get_headers()
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(f"{GMAIL_API_BASE}{path}", headers=headers, timeout=30.0)
+            resp.raise_for_status()
+
     async def fetch_unread(self, max_results: int = 25) -> list[dict]:
         import asyncio as _aio
         await self.load_token()
@@ -212,6 +218,11 @@ class GmailService:
         body = self._extract_body(data.get("payload", {}))
         return {
             "id": msg_id,
+            # Gmail's own thread id (for threadId on a reply) and the RFC 5322
+            # Message-ID header (for In-Reply-To/References). They are different
+            # identifiers; conflating them was the old reply_to_id bug.
+            "thread_id": data.get("threadId"),
+            "message_id_header": headers.get("message-id"),
             "subject": headers.get("subject", "(no subject)"),
             "from": headers.get("from", "unknown"),
             "date": headers.get("date", ""),
@@ -231,43 +242,74 @@ class GmailService:
             f"/users/me/messages/{msg_id}/modify", {"removeLabelIds": ["UNREAD"]}
         )
 
-    async def create_draft(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
+    def _build_raw(self, to: str, subject: str, body: str, in_reply_to: str | None) -> str:
+        """RFC 822 message, base64url-encoded the way Gmail's `raw` field wants.
+
+        `in_reply_to` is the ORIGINAL message's `Message-ID` header value (angle
+        brackets included), never Gmail's hex message id — that one only goes in
+        the API-level `threadId`.
+        """
         for field_name, value in [("to", to), ("subject", subject)]:
             if "\r" in value or "\n" in value:
                 raise ValueError(f"Email {field_name} contains newline characters")
+        if in_reply_to and ("\r" in in_reply_to or "\n" in in_reply_to):
+            raise ValueError("Email in_reply_to contains newline characters")
 
         lines = [f"To: {to}", f"Subject: {subject}", "Content-Type: text/plain; charset=utf-8"]
-        if reply_to_id:
-            lines += [f"In-Reply-To: {reply_to_id}", f"References: {reply_to_id}"]
+        if in_reply_to:
+            lines += [f"In-Reply-To: {in_reply_to}", f"References: {in_reply_to}"]
         lines += ["", body]
+        return base64.urlsafe_b64encode("\r\n".join(lines).encode()).decode()
 
-        raw = base64.urlsafe_b64encode("\r\n".join(lines).encode()).decode()
+    async def create_draft(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        reply_to_id: str | None = None,
+        *,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+    ) -> dict:
+        """Save a Gmail draft. `thread_id` keeps it in the conversation;
+        `in_reply_to` threads it for other mail clients. `reply_to_id` is the
+        legacy positional form (a Gmail message id used as the thread id — only
+        correct for a thread's first message); it no longer writes a bogus
+        In-Reply-To header."""
+        raw = self._build_raw(to, subject, body, in_reply_to)
         draft_body: dict = {"message": {"raw": raw}}
-        if reply_to_id:
-            draft_body["message"]["threadId"] = reply_to_id
-
+        thread = thread_id or reply_to_id
+        if thread:
+            draft_body["message"]["threadId"] = thread
         return await self._gmail_post("/users/me/drafts", draft_body)
 
-    async def send_email(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
+    async def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        reply_to_id: str | None = None,
+        *,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+    ) -> dict:
+        """Send now. Same threading contract as create_draft."""
         self._check_send_rate()
-
-        for field_name, value in [("to", to), ("subject", subject)]:
-            if "\r" in value or "\n" in value:
-                raise ValueError(f"Email {field_name} contains newline characters")
-
-        lines = [f"To: {to}", f"Subject: {subject}", "Content-Type: text/plain; charset=utf-8"]
-        if reply_to_id:
-            lines += [f"In-Reply-To: {reply_to_id}", f"References: {reply_to_id}"]
-        lines += ["", body]
-
-        raw = base64.urlsafe_b64encode("\r\n".join(lines).encode()).decode()
+        raw = self._build_raw(to, subject, body, in_reply_to)
         send_body: dict = {"raw": raw}
-        if reply_to_id:
-            send_body["threadId"] = reply_to_id
-
+        thread = thread_id or reply_to_id
+        if thread:
+            send_body["threadId"] = thread
         data = await self._gmail_post("/users/me/messages/send", send_body)
         self._send_timestamps.append(time.time())
         return data
+
+    async def delete_draft(self, draft_id: str) -> None:
+        """Remove a saved draft (gmail.compose covers drafts.delete). Used after
+        an AI draft's edited version is sent, so it doesn't linger in Drafts."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", draft_id or ""):
+            raise ValueError("Invalid draft id")
+        await self._gmail_delete(f"/users/me/drafts/{draft_id}")
 
     def _check_send_rate(self):
         now = time.time()

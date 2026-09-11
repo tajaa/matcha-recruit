@@ -16,6 +16,22 @@ def test_every_category_allowlist_accepts_research():
     assert "research" in task_draft_agent._CATEGORIES
 
 
+def test_every_category_allowlist_accepts_email():
+    """`email` cards carry Gmail snapshots attached from Espresso and run the
+    AutoPR email lane; same failure modes as research if an allowlist misses it."""
+    assert "email" in project_task_service._ALLOWED_CATEGORIES
+    assert "email" in task_draft._TASK_DRAFT_CATEGORIES
+    assert "email" in task_draft_agent._CATEGORIES
+
+
+def test_the_web_draft_prompt_names_the_email_category():
+    import inspect
+
+    source = inspect.getsource(task_draft)
+    assert "| email |" in source
+    assert '→ "email"' in source
+
+
 def test_category_allowlists_stay_in_sync():
     """Three copies of one list; a template added to one and not the others is
     exactly the drift this guards."""

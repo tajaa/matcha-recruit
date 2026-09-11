@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _TASK_DRAFT_PRIORITIES = {"critical", "high", "medium", "low"}
 
 
-_TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix", "research"}
+_TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix", "research", "email"}
 
 
 _TASK_DRAFT_COLUMNS = {"todo", "in_progress", "review", "done"}
@@ -123,7 +123,7 @@ Return ONLY a JSON object with these keys:
 - "title": short imperative summary (max ~80 chars).
 - "description": markdown. Restate the ask; fold in any relevant element context so the assignee has what they need. If the request pastes an error/log/stack trace, include it VERBATIM inside a fenced ``` code block. Keep it concise.
 - "priority": one of critical | high | medium | low. Infer from urgency words ("urgent","blocker","asap"→high/critical); default "medium".
-- "category": one of engineering | bug | product | sales | general | research | manual. Errors/crashes/stack traces → "bug"; build/refactor/infra → "engineering"; feature ideas → "product"; deals → "sales"; "look into / evaluate / compare / find out whether" with a written report as the deliverable and no code change → "research"; else "general".
+- "category": one of engineering | bug | product | sales | general | research | email | manual. Errors/crashes/stack traces → "bug"; build/refactor/infra → "engineering"; feature ideas → "product"; deals → "sales"; "look into / evaluate / compare / find out whether" with a written report as the deliverable and no code change → "research"; "triage / summarize / draft replies to these emails" where emails attached to the card are the input → "email"; else "general".
 - "board_column": almost always "todo".
 - "assignee_name": EXACTLY one name from this list, or null. People: [{people}]. Match the person the user names (e.g. "assign to haley" → the matching name); null if none clearly named or no match.
 - "element_name": EXACTLY one element name from the Elements list above, or null per the rule above.

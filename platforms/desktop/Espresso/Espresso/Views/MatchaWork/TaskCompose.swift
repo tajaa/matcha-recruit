@@ -31,7 +31,7 @@ struct TaskComposeContent: View {
     /// Resolved from the board-capabilities endpoint when the template is
     /// research; nil when the board is not watched or the call failed.
     @State private var autoPRBotUserId: String?
-    @State private var researchGranted: Bool?
+    @State private var artifactGranted: Bool?
     /// nil until the capabilities call answers; false means AutoPR does not
     /// watch this board at all, which is the one case where the card provably
     /// can never run.
@@ -45,7 +45,11 @@ struct TaskComposeContent: View {
         _priority = State(initialValue: template.defaultPriority)
     }
 
-    /// Nothing else on the sheet says that a Research card sits in Todo
+    /// Research and Email cards are AutoPR artifact kinds: they only run when
+    /// the bot owns them on a board granted their capability.
+    private var artifactCapability: String? { template.autoprArtifactCapability }
+
+    /// Nothing else on the sheet says that an artifact card sits in Todo
     /// forever unless the bot owns it.
     private var researchAssignmentHint: String? {
         // Said first, and without needing the bot's identity: an unwatched
@@ -53,32 +57,32 @@ struct TaskComposeContent: View {
         // one unfixable case as the only one that explained nothing, while a
         // merely-ungranted board got told.
         if boardWatchedByAutoPR == false {
-            return "AutoPR does not watch this board, so a Research card here will not run automatically."
+            return "AutoPR does not watch this board, so a \(template.displayName) card here will not run automatically."
         }
         guard let bot = autoPRBotUserId else { return nil }
         let botIsCollaborator = viewModel.collaborators.contains { $0.userId == bot }
         if !botIsCollaborator {
             return "AutoPR is not a collaborator on this board, so this card will not run automatically."
         }
-        if researchGranted == false {
-            return "This board is not granted research (Admin → Settings → AutoPR board capabilities); the card will wait until it is."
+        if artifactGranted == false {
+            return "This board is not granted \(artifactCapability ?? template.rawValue) (Admin → Settings → AutoPR board capabilities); the card will wait until it is."
         }
         if assignedTo == bot {
-            return "Assigned to AutoPR — runs on the next pass, or press Run research now on the ticket."
+            return "Assigned to AutoPR — runs on the next pass, or press \(template.autoprRunNowLabel) on the ticket."
         }
-        return "Assign to AutoPR to have the research run automatically."
+        return "Assign to AutoPR to have it run automatically."
     }
 
     /// For a Research card, learn who the bot is and preselect it: the
     /// harness only picks up cards assigned to that account.
     private func loadResearchDefaults() async {
-        guard template == .research, let pid = viewModel.project?.id else { return }
+        guard let capability = artifactCapability, let pid = viewModel.project?.id else { return }
         guard let caps = try? await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid)
         else { return }
         boardWatchedByAutoPR = caps.isWatched(pid)
         guard caps.isWatched(pid), let bot = caps.autoprBotUserId else { return }
         autoPRBotUserId = bot
-        researchGranted = caps.has("research", on: pid)
+        artifactGranted = caps.has(capability, on: pid)
         preselectAutoPRIfPossible()
     }
 
@@ -88,7 +92,7 @@ struct TaskComposeContent: View {
     /// bot owns — the card then sits in Todo forever, which is precisely what
     /// preselecting exists to prevent. Re-run when the list changes.
     private func preselectAutoPRIfPossible() {
-        guard template == .research, assignedTo == nil, let bot = autoPRBotUserId,
+        guard artifactCapability != nil, assignedTo == nil, let bot = autoPRBotUserId,
               viewModel.collaborators.contains(where: { $0.userId == bot }) else { return }
         assignedTo = bot
     }
@@ -172,7 +176,7 @@ struct TaskComposeContent: View {
                     Spacer()
                 }
             }
-            if template == .research, let hint = researchAssignmentHint {
+            if artifactCapability != nil, let hint = researchAssignmentHint {
                 Text(hint)
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)

@@ -38,6 +38,10 @@ const AUTOPR_CAPABILITY_COPY: Record<string, { label: string; description: strin
     label: 'Browse',
     description: 'A run may drive a real browser and attach screenshots of what it saw.',
   },
+  email: {
+    label: 'Email',
+    description: 'Email tickets may run: the model reads the email snapshots a person attached to the card and drafts replies. Nothing sends without the Outreach grant AND a per-item approval.',
+  },
 }
 
 export default function Settings() {

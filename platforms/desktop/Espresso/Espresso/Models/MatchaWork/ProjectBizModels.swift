@@ -245,6 +245,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
     case feat   // promoted from a "Prop" feature draft
     case fix    // promoted from a "Prop" fix draft
     case research   // AutoPR attaches a report to the card instead of opening a PR
+    case email      // AutoPR reads the attached email-*.md snapshots and attaches a triage report
 
     var id: String { rawValue }
 
@@ -258,6 +259,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .feat: return "Feature"
         case .fix: return "Fix"
         case .research: return "Research"
+        case .email: return "Email"
         }
     }
 
@@ -271,6 +273,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .feat: return "sparkles"
         case .fix: return "wrench.and.screwdriver"
         case .research: return "magnifyingglass"
+        case .email: return "envelope"
         }
     }
 
@@ -284,6 +287,7 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         case .feat: return .teal
         case .fix: return .orange
         case .research: return .indigo
+        case .email: return .cyan
         }
     }
 
@@ -291,6 +295,26 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         switch self {
         case .bug, .fix: return "high"
         default: return "medium"
+        }
+    }
+
+    /// AutoPR artifact kinds — the run attaches a report to the card instead
+    /// of opening a PR — and the per-board capability each needs
+    /// (Admin → Settings → AutoPR board capabilities). nil = the PR lane.
+    var autoprArtifactCapability: String? {
+        switch self {
+        case .research: return "research"
+        case .email: return "email"
+        default: return nil
+        }
+    }
+
+    /// What the ticket's run button says for this kind.
+    var autoprRunNowLabel: String {
+        switch self {
+        case .research: return "Run research now"
+        case .email: return "Run email review now"
+        default: return "Run AutoPR now"
         }
     }
 
@@ -422,6 +446,17 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
             ## Why it matters to us
             _The decision this informs._
             """
+        case .email:
+            return """
+            ## What should the agent do with these emails?
+            _One line._
+
+            ## Instructions
+            _Which senders matter, what to ignore, what a good reply looks like._
+
+            ## Tone
+            professional
+            """
         }
     }
 
@@ -508,6 +543,16 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
                 .init(key: "why", label: "Why it matters to us", placeholder: "The decision this informs.", kind: .multiLine),
                 .init(key: "constraints", label: "Constraints / scope", placeholder: "Budget, timeline, what to leave out.", kind: .multiLine),
                 .init(key: "sources", label: "Preferred sources", placeholder: "Vendor docs, a competitor, a paper — or leave blank.", kind: .singleLine),
+            ]
+        case .email:
+            // The emails arrive as `email-<id>.md` attachments from the Email
+            // viewer's "Send to board"; assigned to the AutoPR bot on a board
+            // granted `email`, the run attaches a triage report and stages reply
+            // drafts a person approves one at a time (docs/ops/KANBAN_AUTOPR.md).
+            return [
+                .init(key: "goal", label: "What should the agent do with these emails?", placeholder: "e.g. Summarize and draft replies to anything from customers", kind: .singleLine),
+                .init(key: "instructions", label: "Instructions", placeholder: "Which senders matter, what to ignore, what a good reply looks like.", kind: .multiLine),
+                .init(key: "tone", label: "Tone", placeholder: "", kind: .picker(["professional", "casual", "brief"])),
             ]
         }
     }
