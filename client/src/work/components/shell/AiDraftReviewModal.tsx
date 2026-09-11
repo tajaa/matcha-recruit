@@ -10,7 +10,7 @@ import type {
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 
 const PRIORITIES: TaskPriority[] = ['critical', 'high', 'medium', 'low']
-const CATEGORIES = ['manual', 'engineering', 'bug', 'product', 'sales', 'general', 'feat', 'fix', 'research']
+const CATEGORIES = ['manual', 'engineering', 'bug', 'product', 'sales', 'general', 'feat', 'fix', 'research', 'email']
 
 interface AiDraftReviewModalProps {
   draft: MWTaskDraft

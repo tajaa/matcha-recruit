@@ -324,8 +324,9 @@ autopr_migration_draft_errors() {
 }
 
 # ---- shared publisher helpers ----------------------------------------------
-# Used by every publisher (publish.sh for PR kinds, publish-research.sh for
-# artifact kinds). They only shape text; the caller owns the board write.
+# Used by every publisher (publish.sh for PR kinds, publish-research.sh and
+# publish-email.sh for artifact kinds). They only shape text; the caller owns
+# the board write.
 
 # progress_note_with_origin MARKER EXISTING_NOTE
 # Replace this system's prior structured prefix instead of nesting it every
@@ -434,7 +435,8 @@ autopr_strip_bookkeeping_history() {
 #   prompt     template under scripts/kanban-autopr/
 #   model      Codex model for the investigation pass
 #   effort     Codex reasoning effort
-#   sandbox    extra AUTOPR_CODEX_* switches for run-codex-sandboxed.sh
+#   sandbox    extra AUTOPR_CODEX_* switches for run-codex-sandboxed.sh (an
+#              artifact kind reads the web only if this sets WEB_SEARCH=1)
 #   headings   required `### …` headings in report.md, one per line
 #   decision   decision.sh subcommand that validates the model's JSON
 #   publisher  script that turns the validated result into board/GitHub state
@@ -474,6 +476,25 @@ autopr_kind_field() {
                 capability) printf 'research' ;;
                 *) return 1 ;;
             esac ;;
+        email)
+            case "$field" in
+                prompt) printf '_prompt_email.txt' ;;
+                model) printf 'gpt-5.6-luna' ;;
+                effort) printf 'medium' ;;
+                # The corpus is the email snapshots Espresso attached to the
+                # card, so this pass gets no web search and no image inputs —
+                # only the rule that it may not change a repository file.
+                # investigate.sh keys an artifact kind's search and browse
+                # grants on AUTOPR_CODEX_WEB_SEARCH=1 here, so leaving it out
+                # also keeps the browser away on a board granted `browse`.
+                sandbox) printf 'AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1' ;;
+                headings) printf '### Summary\n### Emails reviewed\n### Recommended actions\n### Confidence\n' ;;
+                decision) printf 'normalize-email' ;;
+                publisher) printf 'publish-email.sh' ;;
+                outcome) printf 'artifact' ;;
+                capability) printf 'email' ;;
+                *) return 1 ;;
+            esac ;;
         *) return 1 ;;
     esac
 }
@@ -485,6 +506,7 @@ autopr_kind_field() {
 autopr_kind_for_category() {
     case "${1:-}" in
         research) printf 'research' ;;
+        email) printf 'email' ;;
         *) printf 'investigate' ;;
     esac
 }

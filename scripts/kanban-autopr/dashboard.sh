@@ -485,6 +485,8 @@ render_dashboard() {
           "  " + (.project_title // "?") + " · " + .title,
           "  " + (if .mode == "research" then
                     (if .board_column == "changes_requested" then "research revision" else "research report" end)
+                  elif .mode == "email" then
+                    (if .board_column == "changes_requested" then "email review revision" else "email review" end)
                   elif .board_column == "changes_requested" then "rework" else "new work" end)
                + " · task " + .id8
         '

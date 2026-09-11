@@ -85,9 +85,11 @@ def task_draft_declarations() -> list[dict[str, Any]]:
                 "description": string("Concise Markdown that explains scope and acceptance criteria"),
                 "priority": string("critical, high, medium, or low"),
                 "category": string(
-                    "engineering, bug, product, sales, general, research, manual, feat, or fix. "
+                    "engineering, bug, product, sales, general, research, email, manual, feat, or fix. "
                     "Use research when the ask is to look into, evaluate, compare, or find out "
-                    "whether something, with a written report as the deliverable and no code change."
+                    "whether something, with a written report as the deliverable and no code change. "
+                    "Use email when the ask is to triage, summarize, or draft replies to emails "
+                    "attached to the card."
                 ),
                 "board_column": string("todo, in_progress, review, or done; normally todo"),
                 "assignee_name": string("Exact collaborator name, or an empty string"),

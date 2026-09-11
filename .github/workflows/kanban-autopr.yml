@@ -456,23 +456,45 @@ jobs:
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/publication-copy.json"
 
-      - name: Publish research report
+      - name: Publish research report or email review
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.select.outputs.outcome == 'artifact'
         timeout-minutes: 5
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
         run: |
           # The default shell here is `bash -e`, not `bash -eo pipefail`: piping
           # the publisher into tee would otherwise report tee's exit status, so
           # a failed publication (report upload 500, non-2xx card PATCH) went
           # green with the card still sitting in Todo.
           set -o pipefail
-          # No GH_TOKEN here: a research card owns no branch and no PR. The
+          # No GH_TOKEN here: an artifact card owns no branch and no PR. The
           # publisher uploads the report to the card, posts the summary note,
           # and moves the card to Review through the bot's REST identity;
           # the server's task-update path notifies collaborators from there.
-          "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh" \
-            "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
-            "$RUNNER_TEMP/research-artifacts" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+          #
+          # One publisher per artifact mode, each named LITERALLY:
+          # test_ci_guards.sh reads every $AUTOPR_CONTROL_ROOT/… script path
+          # out of this file to prove it is inside the control-plane archive,
+          # and a path assembled from the registry's `publisher` field would
+          # slip past that check. An artifact mode with no branch here fails
+          # the step rather than leaving the card in Todo with no signal.
+          case "$MODE" in
+            research)
+              "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-research.sh" \
+                "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
+                "$RUNNER_TEMP/research-artifacts" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              ;;
+            email)
+              "$AUTOPR_CONTROL_ROOT/kanban-autopr/publish-email.sh" \
+                "$RUNNER_TEMP/card.json" "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/decision.json" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "No publisher for artifact mode '$MODE'; refusing to publish." >&2
+              exit 1
+              ;;
+          esac
 
       - name: Cleanup
         if: always() && steps.select.outputs.skip == 'false'

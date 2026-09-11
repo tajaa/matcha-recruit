@@ -30,6 +30,58 @@ ALLOWED_PROJECT_FILE_EXTENSIONS = {
 PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
+def _require_allowed_extension(filename: str) -> None:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_PROJECT_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+
+async def store_project_file_bytes(
+    content: bytes,
+    *,
+    filename: str,
+    content_type: Optional[str],
+    project_id: UUID,
+    uploaded_by: UUID,
+    prefix: str,
+    task_id: Optional[UUID] = None,
+    element_id: Optional[str] = None,
+    folder_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """The upload policy for bytes the server already holds — a file it
+    rendered itself (an email snapshot) rather than one a person sent.
+    `validate_and_store_project_upload` delegates here, so both paths share
+    the whitelist, the size limit, the storage sink and the row."""
+    _require_allowed_extension(filename)
+    if len(content) > PROJECT_FILE_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+
+    storage_url = await get_storage().upload_file(
+        content, filename,
+        prefix=prefix,
+        content_type=content_type,
+    )
+
+    folder_uuid: Optional[UUID] = None
+    if folder_id:
+        try:
+            folder_uuid = UUID(folder_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid folder_id")
+
+    return await add_project_file(
+        project_id=project_id,
+        uploaded_by=uploaded_by,
+        filename=filename,
+        storage_url=storage_url,
+        content_type=content_type,
+        file_size=len(content),
+        task_id=task_id,
+        element_id=element_id or None,
+        folder_id=folder_uuid,
+    )
+
+
 async def validate_and_store_project_upload(
     file: UploadFile,
     *,
@@ -49,37 +101,19 @@ async def validate_and_store_project_upload(
     original inline ordering at the project-files call site.
     """
     fname = file.filename or "file"
-    ext = os.path.splitext(fname)[1].lower()
-    if ext not in ALLOWED_PROJECT_FILE_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
-
+    # Refuse a disallowed type before reading its body.
+    _require_allowed_extension(fname)
     content = await file.read()
-    if len(content) > PROJECT_FILE_MAX_BYTES:
-        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
-
-    storage_url = await get_storage().upload_file(
-        content, fname,
-        prefix=prefix,
+    return await store_project_file_bytes(
+        content,
+        filename=fname,
         content_type=file.content_type,
-    )
-
-    folder_uuid: Optional[UUID] = None
-    if folder_id:
-        try:
-            folder_uuid = UUID(folder_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid folder_id")
-
-    return await add_project_file(
         project_id=project_id,
         uploaded_by=uploaded_by,
-        filename=fname,
-        storage_url=storage_url,
-        content_type=file.content_type,
-        file_size=len(content),
+        prefix=prefix,
         task_id=task_id,
-        element_id=element_id or None,
-        folder_id=folder_uuid,
+        element_id=element_id,
+        folder_id=folder_id,
     )
 
 

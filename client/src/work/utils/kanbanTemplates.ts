@@ -1,4 +1,4 @@
-import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, Search, type LucideIcon } from 'lucide-react'
+import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, Search, Mail, type LucideIcon } from 'lucide-react'
 import type { TaskPriority } from '../types'
 
 export type TemplateFieldKind = 'single' | 'multi' | { picker: string[] }
@@ -134,6 +134,23 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
       { key: 'why', label: 'Why it matters to us', placeholder: 'The decision this informs.', kind: 'multi' },
       { key: 'constraints', label: 'Constraints / scope', placeholder: 'Budget, timeline, what to leave out.', kind: 'multi' },
       { key: 'sources', label: 'Preferred sources', placeholder: 'Vendor docs, a competitor, a paper — or leave blank.', kind: 'single' },
+    ],
+  },
+  {
+    // The emails themselves arrive as `email-<id>.md` attachments from
+    // Espresso's "Send to board"; assigned to the AutoPR bot on a board granted
+    // `email`, the run attaches a triage report and stages reply drafts that a
+    // person approves one at a time — docs/ops/KANBAN_AUTOPR.md.
+    key: 'email',
+    displayName: 'Email',
+    icon: Mail,
+    colorClass: 'text-cyan-400',
+    defaultPriority: 'medium',
+    hint: 'Send emails to this card from Espresso, then assign it to AutoPR on a board granted email; it attaches a triage report and stages reply drafts you approve one at a time.',
+    fields: [
+      { key: 'goal', label: 'What should the agent do with these emails?', placeholder: 'e.g. Summarize and draft replies to anything from customers', kind: 'single' },
+      { key: 'instructions', label: 'Instructions', placeholder: 'Which senders matter, what to ignore, what a good reply looks like.', kind: 'multi' },
+      { key: 'tone', label: 'Tone', placeholder: '', kind: { picker: ['professional', 'casual', 'brief'] } },
     ],
   },
 ]

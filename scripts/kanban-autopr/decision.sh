@@ -303,6 +303,121 @@ autopr_normalize_research_decision() {
     ' "$raw_file" > "$normalized_file"
 }
 
+# ---- email (artifact) decisions --------------------------------------------
+# The email pass reviews the snapshots Espresso attached to the card
+# (email-<gmail message id>.md) and writes a triage report: one `per_email` entry per
+# snapshot it read, plus optional reply drafts in `staged_actions` that —
+# exactly as for research — the harness renders and NEVER sends. There is no
+# `sources`: the corpus is the card's own attachments, not the web.
+#
+# valid_question and valid_staged_action below are copied verbatim from
+# _autopr_research_decision_schema_ok. jq `def`s are scoped to the one program
+# they appear in, so the two validators cannot share them: change both or
+# neither, or a staged email one validator refuses would pass the other.
+_autopr_email_decision_schema_ok() {
+    local file="$1"
+    jq -e '
+      def valid_question:
+        (.id | type == "string" and length > 0)
+        and (.question | type == "string" and length > 0)
+        and (.why_blocking | type == "string" and length > 0)
+        and (.default_assumption | type == "string" and length > 0)
+        and (.options | type == "array" and length >= 2
+             and all(.[]; (.key | type == "string" and length > 0)
+                         and (.label | type == "string" and length > 0)
+                         and (.impact | type == "string" and length > 0)));
+      def valid_staged_action:
+        type == "object"
+        and (.kind | IN("email", "contact", "review_request"))
+        and (.to | type == "string" and length > 0 and length <= 200)
+        # `to` on an email is the RFC 5322 To: header the send path uses
+        # verbatim, so it must be an address here. contact / review_request
+        # name someone for a human to approach and are never handed to a
+        # mail server, so a name or a role is fine there.
+        and (if .kind == "email"
+             then (.to | test("^[^@[:space:],;<>]+@[^@[:space:],;<>]+\\.[A-Za-z]{2,}$"))
+             else true end)
+        and (.subject | type == "string" and length > 0 and length <= 200)
+        and (.body | type == "string" and length > 0 and length <= 4000)
+        and (.why | type == "string" and length > 0 and length <= 600);
+      def valid_per_email:
+        type == "object"
+        # An allowlist, like the top level: nothing the model adds to an
+        # entry rides through into a file the publisher trusts.
+        and ((keys_unsorted - ["file", "from", "subject", "bucket", "summary",
+                               "suggested_action"]) | length == 0)
+        # The bare attachment name the snapshot endpoint writes
+        # (email-<Gmail message id>.md) — never a path, and never one of the
+        # email-report-… files the publisher writes.
+        and (.file | type == "string" and test("^email-[A-Za-z0-9_-]{1,128}\\.md$")
+             and (startswith("email-report-") | not))
+        and (.from | type == "string" and length <= 200)
+        and (.subject | type == "string" and length <= 200)
+        and (.bucket | IN("needs_reply", "action", "fyi", "newsletter"))
+        and (.summary | type == "string" and length >= 1 and length <= 600)
+        and (.suggested_action | type == "string" and length <= 300);
+      type == "object"
+      # Top-level keys are an allowlist, so the model cannot author `kind`.
+      # publish-email.sh refuses any decision whose kind is not "email", and
+      # that guard is only worth anything if the marker can be written solely
+      # by the normalizer below.
+      and ((keys_unsorted - ["schema_version", "outcome", "card_note", "summary",
+                             "per_email", "confidence", "questions", "staged_actions"])
+           | length == 0)
+      and .schema_version == 1
+      and (.outcome | IN("email_report", "needs_clarification"))
+      and (.card_note | type == "string" and length >= 1 and length <= 240
+           and (test("[\r\n·]") | not))
+      and (.summary | type == "string" and length >= 1 and length <= 1200)
+      and ((.per_email // []) | type == "array" and length <= 50
+           and all(.[]; valid_per_email))
+      and ([(.per_email // [])[].file] | length == (unique | length))
+      and (.confidence | type == "object")
+      and (.confidence.score | type == "number" and floor == . and . >= 0 and . <= 100)
+      and (.confidence.reason | type == "string" and length > 0)
+      and ((.questions // []) | type == "array" and all(.[]; valid_question))
+      and ([(.questions // [])[].id] | length == (unique | length))
+      and ((.staged_actions // []) | type == "array" and length <= 10
+           and all(.[]; valid_staged_action))
+      and (if .outcome == "email_report" then
+             ((.per_email // []) | length >= 1) and ((.questions // []) | length == 0)
+           else
+             ((.questions // []) | length >= 1) and ((.staged_actions // []) | length == 0)
+           end)
+    ' "$file" >/dev/null
+}
+
+# Same contract as autopr_normalize_research_decision: the output is exactly
+# the keys listed here, and the generic workflow steps find
+# safe_changes_present / awaiting_human / confidence_score / confidence_band /
+# criticality where they read them on every kind.
+autopr_normalize_email_decision() {
+    local raw_file="$1" normalized_file="$2"
+    [ -s "$raw_file" ] || die "email review produced no decision at $raw_file"
+    _autopr_email_decision_schema_ok "$raw_file" \
+        || die "email decision failed schema validation"
+    jq '
+      {
+        kind: "email",
+        schema_version: .schema_version,
+        outcome: .outcome,
+        card_note: .card_note,
+        summary: .summary,
+        per_email: (.per_email // []),
+        confidence: .confidence,
+        questions: (.questions // []),
+        staged_actions: (.staged_actions // []),
+        safe_changes_present: false,
+        awaiting_human: (.outcome == "needs_clarification"),
+        confidence_score: .confidence.score,
+        confidence_band: (if .confidence.score >= 75 then "high"
+                          elif .confidence.score >= 45 then "medium"
+                          else "low" end),
+        criticality: {level: "yellow", reasons: ["email review; no product change"]}
+      }
+    ' "$raw_file" > "$normalized_file"
+}
+
 # Rendered for the card note and the report tail. Plain text, one action per
 # bullet, always headed by the fact that nothing was sent.
 autopr_render_staged_actions() {
@@ -477,8 +592,15 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
                 || die "usage: decision.sh normalize-research raw-decision.json decision.json"
             autopr_normalize_research_decision "$2" "$3"
             ;;
+        normalize-email)
+            # Same optional, ignored directive-policy argument as
+            # normalize-research.
+            { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } \
+                || die "usage: decision.sh normalize-email raw-decision.json decision.json"
+            autopr_normalize_email_decision "$2" "$3"
+            ;;
         *)
-            die "usage: decision.sh normalize-grounded raw-decision.json decision.json | decision.sh schema-ok raw-decision.json | decision.sh grounding-ok raw-decision.json | decision.sh acceptance-ok raw-decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
+            die "usage: decision.sh normalize-grounded raw-decision.json decision.json | decision.sh schema-ok raw-decision.json | decision.sh grounding-ok raw-decision.json | decision.sh acceptance-ok raw-decision.json | decision.sh normalize-research raw-decision.json decision.json | decision.sh normalize-email raw-decision.json decision.json | decision.sh directive-ok raw-decision.json directive-policy.json | decision.sh feedback-snapshot feedback.json"
             ;;
     esac
 fi

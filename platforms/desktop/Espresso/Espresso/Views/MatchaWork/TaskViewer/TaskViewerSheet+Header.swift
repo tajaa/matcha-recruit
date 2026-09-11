@@ -210,7 +210,12 @@ extension TaskViewerSheet {
     /// Same endpoint and same queue; a research card just produces a report
     /// under the attachments instead of a draft PR, so say so on the button.
     var autoPRRunNowLabel: String {
-        liveAutoPRTask.category == "research" ? "Run research now" : "Run AutoPR now"
+        KanbanTemplate.from(category: liveAutoPRTask.category)?.autoprRunNowLabel ?? "Run AutoPR now"
+    }
+
+    /// The board grant this card's kind needs; nil for ordinary PR cards.
+    var autoPRArtifactCapability: String? {
+        KanbanTemplate.from(category: liveAutoPRTask.category)?.autoprArtifactCapability
     }
 
     /// Why the run button is disabled, when it is. No card can run on an
@@ -219,9 +224,9 @@ extension TaskViewerSheet {
         if viewModel.autoPRBoardIsWatched == false {
             return "AutoPR does not watch this board, so this card cannot run."
         }
-        guard liveAutoPRTask.category == "research" else { return nil }
+        guard let capability = autoPRArtifactCapability else { return nil }
         if researchGranted == false {
-            return "This board is not granted research. An admin can grant it under Admin → Settings → AutoPR board capabilities."
+            return "This board is not granted \(capability). An admin can grant it under Admin → Settings → AutoPR board capabilities."
         }
         return nil
     }
@@ -230,7 +235,7 @@ extension TaskViewerSheet {
         guard let pid = viewModel.project?.id else { return }
         do {
             let caps = try await MatchaWorkService.shared.autoprBoardCapabilities(projectId: pid)
-            researchGranted = caps.has("research", on: pid)
+            researchGranted = caps.has(autoPRArtifactCapability ?? "research", on: pid)
             viewModel.autoPRBotUserId = caps.autoprBotUserId
             viewModel.autoPRBoardIsWatched = caps.isWatched(pid)
         } catch {

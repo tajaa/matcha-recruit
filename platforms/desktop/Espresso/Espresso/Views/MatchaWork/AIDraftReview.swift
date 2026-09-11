@@ -35,7 +35,7 @@ struct AIDraftReviewSheet: View {
     @State private var newStep = ""
 
     private let priorities = ["critical", "high", "medium", "low"]
-    private let categories = ["manual", "engineering", "bug", "product", "sales", "general", "feat", "fix", "research"]
+    private let categories = ["manual", "engineering", "bug", "product", "sales", "general", "feat", "fix", "research", "email"]
 
     init(
         draft: MWTaskDraft,

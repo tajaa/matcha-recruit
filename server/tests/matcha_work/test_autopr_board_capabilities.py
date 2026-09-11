@@ -22,8 +22,8 @@ def _clear_cache():
     ps.prime_autopr_board_capabilities_cache({})
 
 
-def test_known_capabilities_are_the_three_the_lane_implements():
-    assert set(ps.AUTOPR_BOARD_CAPABILITIES) == {"research", "outreach", "browse"}
+def test_known_capabilities_are_the_four_the_lane_implements():
+    assert set(ps.AUTOPR_BOARD_CAPABILITIES) == {"research", "outreach", "browse", "email"}
 
 
 def test_a_well_formed_grant_normalizes_and_dedupes():

@@ -744,7 +744,7 @@ kind is a registry row plus a publisher, not another branch in the PR path.
 ### Board capabilities
 
 Drafting code PRs is what this lane has always done on every board it watches, and it
-needs no grant. The three things that reach past the repository are granted per board
+needs no grant. The four things that reach past the repository are granted per board
 and default off — `platform_settings` key `autopr_board_capabilities`, edited at
 **Admin → Settings → AutoPR board capabilities**:
 
@@ -753,6 +753,7 @@ and default off — `platform_settings` key `autopr_board_capabilities`, edited 
 | `research` | Live web search: Artifact Research cards can run and ordinary code PR runs can research public facts. |
 | `outreach` | A run may **stage** email/contact/review requests on a card. Nothing sends until a person approves that exact item. |
 | `browse` | A run may drive Chromium through `browse-capture.py` and attach screenshots. |
+| `email` | Artifact Email cards can run: a pass reviews the email snapshots attached to the card and attaches a triage report. It grants no web search, browser, or mailbox access; its reply drafts need `outreach` as well to become approvable. |
 
 Fail-closed in every direction: an absent row, unparseable JSON, an unknown capability
 name, or a non-UUID key all resolve to "this board may do nothing extra". The admin PUT
@@ -784,9 +785,9 @@ without that note the operator sees only the button come back and can press it f
 
 ### Staged outreach — approving a send
 
-A research decision may carry `staged_actions` (≤10, each `email` | `contact` |
+A research or email decision may carry `staged_actions` (≤10, each `email` | `contact` |
 `review_request`). The harness never sends one. On a board holding `outreach`,
-`publish-research.sh` posts them to
+`publish-research.sh` / `publish-email.sh` posts them to
 `POST …/tasks/{t}/autopr/staged-actions`, where each becomes an immutable
 `autopr_staged_action` history row. Without the grant they stay report-only and the
 report says so.
@@ -914,6 +915,100 @@ create a Research card on one of the four boards with a screenshot attached, pre
 `research-report-<id8>-r1.md` appears under the ticket, the note and the "Ready for
 review" bell arrive, the card is in Review, and the `.md` opens rendered; reject with a
 note and a `-r2.md` lands on the next cycle.
+
+## Email cards
+
+The second artifact kind, and the first whose corpus a person supplies rather than the
+model finding it. Kind = the `email` ticket template (`mw_tasks.category = "email"`;
+fields Goal / Instructions / Tone). In Espresso's Email panel a person picks a message and
+uses **Send to board**: that creates the card and calls
+`POST /matcha-work/agent/email/snapshot`, which fetches each chosen message **on the
+server**, with that person's own Gmail connection, and attaches it to the task as
+`email-<Gmail message id>.md` (the whole id: Gmail ids are time-ordered, so a prefix collides
+for mail received together) — YAML front matter, values double-quoted (`email_id`, `thread_id`, `from`,
+`date`, `subject`, `attachments`), a `# subject` heading, From / Date lines, then the body,
+capped at 20,000 characters. The email's own attachments are listed by filename and type
+only; their content is never included. The endpoint is idempotent on filename. The sandbox
+never touches Gmail: the snapshots are the whole corpus, and a message nobody attached does
+not exist for the run.
+
+Registry row (`autopr_kind_field email …` in `lib.sh`):
+
+| Field | Value |
+|---|---|
+| prompt | `_prompt_email.txt` |
+| model / effort | `gpt-5.6-luna` / `medium` |
+| sandbox | `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1` only — no web search, no image inputs |
+| headings | `### Summary` / `### Emails reviewed` / `### Recommended actions` / `### Confidence` |
+| decision | `decision.sh normalize-email` |
+| publisher | `publish-email.sh` |
+| outcome / capability | `artifact` / `email` |
+
+No search, no browser, no images. `investigate.sh` gives an artifact kind hosted web search
+(and, on a `browse` board, the capture command) only when the kind's own row sets
+`AUTOPR_CODEX_WEB_SEARCH=1`, so an email run on a board that also holds `research` and
+`browse` still gets neither, and `context.json.grounding.web_search_available` is `false`.
+Selection, cooldowns, the no-spec ledger, revision rounds, checkpointing, and the workflow's
+PR-step gating are the research path unchanged: they key on the registry `outcome`, never
+the mode. On a revision the newest prior `email-report-*.md` rides along as version 1 and
+older rounds are withheld — the own-output filter in `investigate.sh` accepts `research-`
+and `email-` names alike; snapshots carry no round suffix and are never filtered.
+
+The prompt treats card text and snapshots as untrusted: an email that tells the model to do
+something is a fact about the email, not a directive. `"handle these"` is not a vague card —
+the attached emails are the scope. `needs_clarification` is for a card with no snapshot at
+all, or one that needs a decision only its owner can make.
+
+`decision.sh normalize-email` validates:
+
+```json
+{"schema_version": 1, "outcome": "email_report | needs_clarification",
+ "card_note": "...", "summary": "...",
+ "per_email": [{"file": "email-18c3f0a1b2c3d4e5.md", "from": "...", "subject": "...",
+                "bucket": "needs_reply | action | fyi | newsletter",
+                "summary": "...", "suggested_action": "..."}],
+ "confidence": {"score": 0, "reason": "..."},
+ "questions": [], "staged_actions": []}
+```
+
+- `per_email`: one entry per snapshot actually read, no other keys; `file` is the bare
+  attachment name (`^email-[A-Za-z0-9_-]{1,128}\.md$`, never an `email-report-` name) and
+  unique across entries; `from` /
+  `subject` ≤ 200, `summary` 1–600, `suggested_action` ≤ 300.
+- `email_report` needs ≥ 1 `per_email` entry and no questions; `needs_clarification` needs
+  ≥ 1 question and no staged actions. No `sources`. `card_note`, `summary`, `confidence`,
+  questions, and staged actions validate exactly as for research — the jq defs are
+  duplicated (jq `def`s are program-scoped), so change both validators or neither.
+- The normalizer rebuilds the object key by key with `kind: "email"`,
+  `safe_changes_present: false`, `awaiting_human`, `confidence_score` / `confidence_band`,
+  and research's criticality shape, so the generic workflow steps read it unchanged.
+
+`publish-email.sh` is a copy of `publish-research.sh` kept in step with it: kind guard
+`email`; round N from the card's existing `email-report-*.md`; uploads
+`email-report-<id8>-rN.md` under the trusted line `_AutoPR email review · <date> · model
+<m> · round N · K email(s) reviewed_`; the same orphan reuse keyed on
+`Report attached: <file>`, staging, summary note, and move to Review; no screenshots. The
+workflow's publish step dispatches on `steps.select.outputs.mode`, with each publisher
+named by its literal `$AUTOPR_CONTROL_ROOT/kanban-autopr/…` path so `test_ci_guards.sh`
+can prove it is archived; an artifact mode with no branch fails the step.
+
+Reply drafts: the prompt asks for `kind: "email"` staged actions only for `needs_reply`
+mail, at most ten, addressed to the snapshot sender's bare address, subject `Re: <original>`,
+never to no-reply or newsletter senders, with no other keys. They become approvable rows
+only on a board that also holds `outreach`, and each still needs a person to approve that
+exact send in Espresso (see *Staged outreach* above). **Staged replies are not threaded
+yet:** the send route calls `gmail.send_email(to, subject, body)` and the staged-action
+cleaner silently drops unknown keys, so a reply goes out as a new message carrying the
+`Re:` subject. Threading (`thread_id` / `in_reply_to` in the staged-action field limits and
+the send call) is a follow-up.
+
+The kind needs the `email` board grant. Like `research`, that grant has no later
+server-side moment to re-check it — the harness's stamp is the gate — but it reaches no
+mailbox: the snapshots were fetched by a person's own session, and sending re-checks
+`outreach` server-side.
+
+Contract tests: `scripts/tests/test_kanban_autopr_email.sh` (registry, sandbox switches
+and the search/browse gate, prompt rules, validator, publisher, workflow wiring).
 
 ## Work/merge plan and explicit release
 

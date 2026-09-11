@@ -117,17 +117,30 @@ struct TaskViewerSheet: View {
         attachments.filter { ($0.roundIndex ?? currentRound) < currentRound }
     }
 
+    /// Artifact kinds publish `<kind>-report-<id8>-r<N>.md`; nil for PR cards.
+    var autoPRReportPrefix: String? {
+        switch liveAutoPRTask.category {
+        case "research": return "research-report-"
+        case "email": return "email-report-"
+        default: return nil
+        }
+    }
+
+    var autoPRReportTitle: String {
+        liveAutoPRTask.category == "email" ? "Email review" : "Research report"
+    }
+
     /// AutoPR research publishes a Markdown deliverable named
     /// `research-report-…`. Pull the newest one forward into a dedicated reader
     /// entry instead of making someone hunt through the generic attachment list.
     var researchReportAttachment: MWProjectFile? {
-        guard liveAutoPRTask.category == "research" else { return nil }
+        guard let prefix = autoPRReportPrefix else { return nil }
         return
             attachments
             .filter { file in
                 let name = file.filename.lowercased()
                 let ext = (file.filename as NSString).pathExtension.lowercased()
-                return name.hasPrefix("research-report-")
+                return name.hasPrefix(prefix)
                     && ["md", "markdown", "pdf"].contains(ext)
             }
             .sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }

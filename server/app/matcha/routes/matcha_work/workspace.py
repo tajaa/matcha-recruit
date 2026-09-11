@@ -8,6 +8,7 @@ order-sensitive route pair this module used to carry.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
+import asyncio
 import logging
 import re
 import secrets
@@ -24,7 +25,6 @@ from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
-from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -92,6 +92,95 @@ async def _consume_gmail_oauth_state(state: str) -> UUID:
         return UUID(user_id)
     except (AttributeError, TypeError, ValueError) as exc:
         raise ValueError("Invalid or expired OAuth state") from exc
+
+
+async def _connected_gmail(current_user: CurrentUser):
+    """The caller's own GmailService with its token loaded, or 400. Mail is
+    always read and sent as the signed-in user — there is no shared mailbox."""
+    from app.matcha.services.matcha_work.gmail_service import GmailService
+
+    gmail = GmailService(current_user.id)
+    await gmail.load_token()
+    if not gmail.is_configured:
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+    return gmail
+
+
+async def _require_email_ai(current_user: CurrentUser) -> None:
+    """Email fetch/read/send stay free (non-AI); every AI action is Lite+."""
+    from app.matcha.services.billing import entitlements_service
+
+    await entitlements_service.require_plan(
+        current_user.id, entitlements_service.PLAN_LITE, "email_ai"
+    )
+
+
+_GMAIL_MESSAGE_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def _is_message_id(value) -> bool:
+    """Gmail message ids are opaque url-safe tokens. Anything else (a slash,
+    `..`, a query string) would splice into the Gmail API path and reach a
+    different endpoint of the caller's mailbox, so it is refused up front."""
+    return isinstance(value, str) and bool(_GMAIL_MESSAGE_ID_RE.fullmatch(value))
+
+
+def _require_message_id(value) -> str:
+    if not _is_message_id(value):
+        raise HTTPException(status_code=400, detail="email_id must be a Gmail message id")
+    return value
+
+
+def _reply_subject(subject: str | None) -> str:
+    subject = re.sub(r"[\r\n]+", " ", subject or "").strip()
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+
+_BARE_ADDRESS_RE = re.compile(r"[^@\s,;<>\"]+@[^@\s,;<>\"]+\.[^@\s,;<>\"]+")
+
+
+def _reply_recipient(from_header: str | None) -> str | None:
+    """The one bare address a reply goes to, parsed out of the original's
+    From header, or None when it has no usable one. The header is written by
+    the sender: a folded CR/LF would make `_build_raw` refuse the draft (a
+    sender-chosen 500), and `Alice <a@x.test>, b@y.test` would become a
+    two-recipient To: line on the saved draft."""
+    from email.utils import getaddresses
+
+    for _name, addr in getaddresses([from_header or ""]):
+        addr = addr.strip()
+        if _BARE_ADDRESS_RE.fullmatch(addr):
+            return addr
+    return None
+
+
+def _clean_message_id_header(value) -> str | None:
+    """The original's Message-ID when it is one (`<…>`, no whitespace). A
+    malformed value is dropped, not refused: Gmail's threadId still keeps the
+    reply in its conversation."""
+    if isinstance(value, str) and re.fullmatch(r"<[^<>\s]{1,995}>", value.strip()):
+        return value.strip()
+    return None
+
+
+def _optional_str(body: dict, key: str) -> str | None:
+    value = body.get(key)
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{key} must be a string")
+    return value
+
+
+async def _get_message_or_404(gmail, email_id: str) -> dict:
+    """Gmail answers a stale id (a message deleted since the list loaded) with
+    400/404. That is "not found" for the caller, not a server error."""
+    try:
+        return await gmail.get_message(email_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (400, 404):
+            raise HTTPException(status_code=404, detail="Message not found") from exc
+        raise
 
 
 @router.get("/tasks/open")
@@ -439,85 +528,253 @@ async def agent_email_fetch(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Fetch unread emails for the current user."""
-    from app.matcha.services.matcha_work.gmail_service import GmailService
-    gmail = GmailService(current_user.id)
-    await gmail.load_token()
-    if not gmail.is_configured:
-        raise HTTPException(status_code=400, detail="Gmail not connected")
+    gmail = await _connected_gmail(current_user)
     emails = await gmail.fetch_unread(max_results=25)
     return {"emails": emails}
+
+
+@router.get("/agent/email/messages/{email_id}")
+async def agent_email_get_message(
+    email_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """One message by Gmail id, so a viewer can re-open a message that has
+    dropped out of the unread list (read elsewhere, or after a relaunch)."""
+    _require_message_id(email_id)
+    gmail = await _connected_gmail(current_user)
+    return await _get_message_or_404(gmail, email_id)
+
+
+@router.post("/agent/email/summarize")
+async def agent_email_summarize(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Flash Lite catch-up summary of one message. An empty `summary` means
+    the model was unavailable — the client shows retry copy, never a 500."""
+    from app.matcha.services.matcha_work import email_ai_service as email_ai
+
+    await _require_email_ai(current_user)
+    email_id = _require_message_id(body.get("email_id"))
+
+    gmail = await _connected_gmail(current_user)
+    msg = await _get_message_or_404(gmail, email_id)
+    return {"email_id": email_id, "summary": await email_ai.summarize_email(msg)}
+
+
+@router.post("/agent/email/triage")
+async def agent_email_triage(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Bucket messages into needs_reply / action / fyi / newsletter for the
+    sidebar. In-app only: nothing is labelled, archived or marked read in
+    Gmail. With no `email_ids`, triages the current unread list; an empty
+    list is an empty selection and triages nothing."""
+    from app.matcha.services.matcha_work import email_ai_service as email_ai
+
+    await _require_email_ai(current_user)
+    ids = body.get("email_ids")
+    if ids is not None and (not isinstance(ids, list) or not all(_is_message_id(i) for i in ids)):
+        raise HTTPException(status_code=400, detail="email_ids must be a list of message ids")
+    if ids == []:
+        return {"buckets": []}
+
+    gmail = await _connected_gmail(current_user)
+    if ids is not None:
+        unique_ids = list(dict.fromkeys(ids))[: email_ai.TRIAGE_MAX_EMAILS]
+        fetched = await asyncio.gather(
+            *[gmail.get_message(i) for i in unique_ids], return_exceptions=True
+        )
+        msgs = [m for m in fetched if isinstance(m, dict)]
+    else:
+        msgs = await gmail.fetch_unread(max_results=email_ai.TRIAGE_MAX_EMAILS)
+    return {"buckets": await email_ai.triage_emails(msgs)}
+
 
 @router.post("/agent/email/draft")
 async def agent_email_draft(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Draft a reply to an email using AI."""
-    from app.matcha.services.billing import entitlements_service
-    from app.matcha.services.matcha_work.gmail_service import GmailService
+    """Draft a reply with Flash Lite and save it as a Gmail draft in the
+    original thread. Returns the text so the client can review and send."""
+    from app.matcha.services.matcha_work import email_ai_service as email_ai
 
-    # Email fetch/send stay free (non-AI); AI drafting is Lite+.
-    await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_LITE, "email_ai")
+    await _require_email_ai(current_user)
+    email_id = _require_message_id(body.get("email_id"))
+    instructions = body.get("instructions")
+    if instructions is not None and not isinstance(instructions, str):
+        raise HTTPException(status_code=400, detail="instructions must be a string")
 
-    gmail = GmailService(current_user.id)
-    await gmail.load_token()
-    if not gmail.is_configured:
-        raise HTTPException(status_code=400, detail="Gmail not connected")
+    gmail = await _connected_gmail(current_user)
+    email = await _get_message_or_404(gmail, email_id)
+    # Before the model call: no point drafting a reply that can't be addressed.
+    to = _reply_recipient(email.get("from"))
+    if to is None:
+        raise HTTPException(
+            status_code=422, detail="The original sender has no address a reply can go to"
+        )
 
-    email_id = body.get("email_id")
-    instructions = body.get("instructions", "Write a helpful, concise reply.")
-    if not email_id:
-        raise HTTPException(status_code=400, detail="email_id is required")
+    draft_body = await email_ai.draft_reply(email, instructions)
+    if not draft_body:
+        raise HTTPException(
+            status_code=502, detail="AI drafting is temporarily unavailable — try again"
+        )
 
-    email = await gmail.get_message(email_id)
+    subject = _reply_subject(email.get("subject"))
+    thread_id = email.get("thread_id")
+    in_reply_to = _clean_message_id_header(email.get("message_id_header"))
+    try:
+        result = await gmail.create_draft(
+            to=to,
+            subject=subject,
+            body=draft_body,
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+        )
+    except ValueError as exc:  # a header that still can't be written
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    ai_provider = get_ai_provider()
-    prompt = (
-        f"Draft a professional reply to this email. Return ONLY the reply body text, no subject line.\n"
-        f"Instructions: {instructions}\n\n"
-        f"Original email:\nFrom: {email['from']}\nSubject: {email['subject']}\nBody:\n{email['body'][:3000]}"
-    )
-    ai_resp = await ai_provider.generate(
-        [{"role": "user", "content": prompt}], {}, company_context=""
-    )
-    draft_body = ai_resp.assistant_reply
-
-    result = await gmail.create_draft(
-        to=email["from"],
-        subject=f"Re: {email['subject']}" if not email["subject"].startswith("Re:") else email["subject"],
-        body=draft_body,
-        reply_to_id=email_id,
-    )
-
+    # `subject` is the one saved on the draft, so the client never re-derives
+    # the Re: rule.
     return {
         "draft_id": result.get("id"),
-        "to": email["from"],
-        "subject": email["subject"],
+        "to": to,
+        "subject": subject,
         "body": draft_body,
+        "thread_id": thread_id,
+        "in_reply_to": in_reply_to,
     }
+
 
 @router.post("/agent/email/send")
 async def agent_email_send(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Send an email via Gmail."""
-    from app.matcha.services.matcha_work.gmail_service import GmailService
-    gmail = GmailService(current_user.id)
-    await gmail.load_token()
-    if not gmail.is_configured:
-        raise HTTPException(status_code=400, detail="Gmail not connected")
+    """Send an email via the caller's Gmail. `thread_id` + `in_reply_to`
+    (the original's Message-ID header) keep a reply in its conversation;
+    `reply_to_id` is the legacy form and still threads."""
+    from app.matcha.services.matcha_work.gmail_service import GmailSendRateLimited
 
     to = body.get("to")
     subject = body.get("subject")
     email_body = body.get("body")
-    reply_to_id = body.get("reply_to_id")
-
-    if not all([to, subject, email_body]):
+    if not all(isinstance(v, str) and v.strip() for v in (to, subject, email_body)):
         raise HTTPException(status_code=400, detail="to, subject, and body are required")
+    reply_to_id = _optional_str(body, "reply_to_id")
+    thread_id = _optional_str(body, "thread_id")
+    in_reply_to = _optional_str(body, "in_reply_to")
+    draft_id = _optional_str(body, "draft_id")
+    for key, value in (("reply_to_id", reply_to_id), ("thread_id", thread_id)):
+        if value is not None and not _is_message_id(value):
+            raise HTTPException(status_code=400, detail=f"{key} must be a Gmail id")
 
-    result = await gmail.send_email(to=to, subject=subject, body=email_body, reply_to_id=reply_to_id)
+    gmail = await _connected_gmail(current_user)
+    try:
+        result = await gmail.send_email(
+            to=to,
+            subject=subject,
+            body=email_body,
+            reply_to_id=reply_to_id,
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+        )
+    except GmailSendRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ValueError as exc:  # a header carrying CR/LF
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if draft_id:
+        # The AI draft this reply started from is now redundant. Best-effort:
+        # the mail already went out, so a failed cleanup must not fail the send.
+        try:
+            await gmail.delete_draft(draft_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("Gmail draft cleanup failed after send", exc_info=True)
     return {"message_id": result.get("id"), "to": to, "subject": subject}
+
+SNAPSHOT_MAX_EMAILS = 10
+
+
+@router.post("/agent/email/snapshot")
+async def agent_email_snapshot(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Attach `email-<message id>.md` snapshots of the caller's own Gmail
+    messages to a kanban task, so an `email` card carries its corpus into the
+    AutoPR sandbox (which never touches Gmail itself). Rendered server-side so
+    mail bodies make one hop. Idempotent on filename; no AI, so no `email_ai`
+    gate. Project access + task ownership are checked exactly like the
+    task-file upload route, and the bytes go through the same project-file
+    upload policy."""
+    from app.matcha.routes.matcha_work._shared import (
+        _resolve_file_urls,
+        _verify_project_access,
+        _verify_task_belongs_to_project,
+    )
+    from app.matcha.services.matcha_work import email_ai_service as email_ai
+    from app.matcha.services.matcha_work import project_file_service
+
+    ids = body.get("email_ids")
+    if not isinstance(ids, list) or not ids or not all(_is_message_id(i) for i in ids):
+        raise HTTPException(status_code=400, detail="email_ids must be a non-empty list of message ids")
+    unique_ids = list(dict.fromkeys(ids))
+    if len(unique_ids) > SNAPSHOT_MAX_EMAILS:
+        raise HTTPException(
+            status_code=400, detail=f"At most {SNAPSHOT_MAX_EMAILS} emails per snapshot"
+        )
+    try:
+        project_id = UUID(str(body.get("project_id")))
+        task_id = UUID(str(body.get("task_id")))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="project_id and task_id must be UUIDs")
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+    company_id = project.get("company_id") or await get_client_company_id(current_user)
+    gmail = await _connected_gmail(current_user)
+
+    existing = {f.get("filename") for f in await project_file_service.list_task_files(project_id, task_id)}
+    prefix = f"matcha-work/{company_id}/{project_id}/tasks/{task_id}/files"
+    skipped: list[dict] = []
+    to_fetch: list[str] = []
+    for email_id in unique_ids:
+        # The filename is the id, so an attached message is skipped unread.
+        if email_ai.snapshot_filename(email_id) in existing:
+            skipped.append({"email_id": email_id, "reason": "already_attached"})
+        else:
+            to_fetch.append(email_id)
+
+    # Concurrent reads, as in triage: one Gmail round-trip at a time held the
+    # Send-to-board sheet open for seconds.
+    fetched = await asyncio.gather(
+        *[gmail.get_message(i) for i in to_fetch], return_exceptions=True
+    )
+    files: list[dict] = []
+    for email_id, msg in zip(to_fetch, fetched):
+        if not isinstance(msg, dict):  # one unreadable message must not sink the rest
+            logger.warning(
+                "email snapshot: fetch failed for one message",
+                exc_info=msg if isinstance(msg, BaseException) else False,
+            )
+            skipped.append({"email_id": email_id, "reason": "fetch_failed"})
+            continue
+        record = await project_file_service.store_project_file_bytes(
+            email_ai.snapshot_markdown(msg).encode("utf-8"),
+            filename=email_ai.snapshot_filename(email_id),
+            content_type="text/markdown",
+            project_id=project_id,
+            uploaded_by=current_user.id,
+            prefix=prefix,
+            task_id=task_id,
+        )
+        files.append(record)
+
+    return {"files": _resolve_file_urls(files), "skipped": skipped}
+
 
 @router.get("/entitlements")
 async def get_entitlements(
