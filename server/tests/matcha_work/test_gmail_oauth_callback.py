@@ -46,7 +46,6 @@ def oauth_settings(monkeypatch):
         "get_settings",
         lambda: SimpleNamespace(
             app_base_url="https://hey-matcha.com",
-            jwt_secret_key="test-jwt-secret",
         ),
     )
 
@@ -75,10 +74,9 @@ async def test_oauth_state_is_opaque_stored_for_30_minutes_and_single_use(monkey
 
     assert len(state) == 43
     assert str(user_id) not in state
-    assert state not in redis.set_calls[0][0]
     assert redis.set_calls == [
         (
-            workspace._gmail_oauth_state_key(state),
+            f"gmail_oauth_state:{state}",
             str(user_id),
             {"ex": 30 * 60, "nx": True},
         )

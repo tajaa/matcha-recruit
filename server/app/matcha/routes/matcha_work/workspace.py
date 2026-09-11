@@ -8,8 +8,6 @@ order-sensitive route pair this module used to carry.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
-import hashlib
-import hmac
 import logging
 import re
 import secrets
@@ -42,12 +40,7 @@ class _GmailOAuthStateStoreUnavailable(RuntimeError):
 
 
 def _gmail_oauth_state_key(state: str) -> str:
-    digest = hmac.new(
-        get_settings().jwt_secret_key.encode("utf-8"),
-        state.encode("ascii"),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{_GMAIL_OAUTH_STATE_KEY_PREFIX}{digest}"
+    return f"{_GMAIL_OAUTH_STATE_KEY_PREFIX}{state}"
 
 
 def _validate_gmail_oauth_state_format(state: str) -> None:
