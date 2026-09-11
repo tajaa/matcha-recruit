@@ -41,13 +41,13 @@ struct SubtaskRow: View {
                         .foregroundColor(item.isDone ? appState.themeAccent : appState.themeTextSecondary)
                 } else {
                     Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 13))
+                        .font(.ticket(size: 13))
                         .foregroundColor(item.isDone ? .mwInkStrong : .secondary)
                 }
             }
             .buttonStyle(.plain)
             Text(item.title)
-                .font(.system(size: 12))
+                .font(.ticket(size: 13))
                 .foregroundColor(item.isDone ? appState.themeTextSecondary : appState.themeText)
                 .strikethrough(item.isDone)
                 .lineLimit(2)
@@ -61,8 +61,8 @@ struct SubtaskRow: View {
                 }
             if let by = addedByName {
                 HStack(spacing: 2) {
-                    Image(systemName: "person.badge.plus").font(.system(size: 7))
-                    Text("added by \(by)").font(.system(size: 8, weight: .medium))
+                    Image(systemName: "person.badge.plus").font(.ticket(size: 10))
+                    Text("added by \(by)").font(.ticket(size: 10))
                 }
                 .foregroundColor(.mwInkSoft)
                 .padding(.horizontal, 4).padding(.vertical, 1)
@@ -77,7 +77,7 @@ struct SubtaskRow: View {
             if isHovered {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwInkSoft)
                 }
                 .buttonStyle(.plain)
@@ -96,7 +96,7 @@ struct SubtaskRow: View {
     private var denyButton: some View {
         Button { showDeny = true } label: {
             Image(systemName: "xmark.circle")
-                .font(.system(size: 11))
+                .font(.ticket(size: 11))
                 .foregroundColor(.mwAttention.opacity(0.85))
         }
         .buttonStyle(.plain)
@@ -104,9 +104,9 @@ struct SubtaskRow: View {
         .popover(isPresented: $showDeny, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Deny completion")
-                    .font(.system(size: 11, weight: .semibold)).foregroundColor(appState.themeText)
+                    .font(.ticket(size: 11)).foregroundColor(appState.themeText)
                 Text("\u{201C}\(item.title)\u{201D}")
-                    .font(.system(size: 10)).italic().foregroundColor(appState.themeTextSecondary).lineLimit(2)
+                    .font(.ticket(size: 10)).italic().foregroundColor(appState.themeTextSecondary).lineLimit(2)
                 Picker("", selection: $denySeverity) {
                     Text("Blocker").tag("blocker")
                     Text("Nit").tag("nit")
@@ -114,19 +114,19 @@ struct SubtaskRow: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 TextField("Why isn't this actually done?", text: $denyReason, axis: .vertical)
-                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
+                    .textFieldStyle(.plain).font(.ticket(size: 12)).foregroundColor(appState.themeText)
                     .lineLimit(1...4).padding(8).background(appState.themeText.opacity(0.06)).cornerRadius(6)
                     .focused($denyFocused)
                 HStack {
                     Spacer()
                     Button("Cancel") { showDeny = false; denyReason = "" }
-                        .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
+                        .buttonStyle(.plain).font(.ticket(size: 11)).foregroundColor(.secondary)
                     let empty = denyReason.trimmingCharacters(in: .whitespaces).isEmpty
                     Button("Deny") {
                         onDeny?(denyReason.trimmingCharacters(in: .whitespacesAndNewlines), denySeverity)
                         showDeny = false; denyReason = ""
                     }
-                    .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
+                    .buttonStyle(.plain).font(.ticket(size: 11))
                     .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
                     .background(empty ? appState.themeText.opacity(0.12) : Color.mwAttention).cornerRadius(5)
                     .disabled(empty)
@@ -159,7 +159,7 @@ struct SubtaskRow: View {
                     .overlay(
                         Image(systemName: "plus")
                             .symbolRenderingMode(.monochrome)
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.ticket(size: 10))
                             .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.45))
                     )
             }

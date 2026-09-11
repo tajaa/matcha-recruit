@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// Read-only modal that opens on a kanban card tap. Surfaces title,
@@ -32,8 +32,8 @@ struct TaskViewerSheet: View {
     /// guards that one-time fetch; the rounds/audit feed stays collapsed behind
     /// `showHistory` so the audit trail is opt-in, not in the way.
     @State var showHistory = false
-    /// Supporting context collapsed by default so the directive + checklist lead.
-    @State var showDescription = false
+    /// The contributor brief is readable on open; audit history stays folded.
+    @State var showDescription = true
     @State var showSummary = false
     @State var historyLoaded = false
     @State var loadingHistory = false
@@ -122,7 +122,8 @@ struct TaskViewerSheet: View {
     /// entry instead of making someone hunt through the generic attachment list.
     var researchReportAttachment: MWProjectFile? {
         guard liveAutoPRTask.category == "research" else { return nil }
-        return attachments
+        return
+            attachments
             .filter { file in
                 let name = file.filename.lowercased()
                 let ext = (file.filename as NSString).pathExtension.lowercased()
@@ -186,10 +187,16 @@ struct TaskViewerSheet: View {
     var assigneeMenu: some View {
         Menu {
             if let uid = appState.currentUser?.id, uid != task.assignedTo {
-                Button { assign(uid) } label: { Label("Assign to me", systemImage: "person.fill") }
+                Button {
+                    assign(uid)
+                } label: {
+                    Label("Assign to me", systemImage: "person.fill")
+                }
             }
             ForEach(viewModel.collaborators) { c in
-                Button { assign(c.userId) } label: {
+                Button {
+                    assign(c.userId)
+                } label: {
                     if c.userId == task.assignedTo {
                         Label(c.name, systemImage: "checkmark")
                     } else {
@@ -203,17 +210,17 @@ struct TaskViewerSheet: View {
             }
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: "person.crop.circle").font(.system(size: 8))
-                Text(assigneeName ?? "Assign").font(.system(size: 9, weight: .semibold))
-                Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold))
+                Image(systemName: "person.crop.circle").font(.ticket(size: 12))
+                Text(assigneeName ?? "Assign").font(.ticket(size: 11))
+                    .lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.down").font(.ticket(size: 6))
             }
             .foregroundColor(.secondary)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(appState.themeText.opacity(0.08)).cornerRadius(3)
+
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
+        .frame(maxWidth: 180)
         .help("Assign this task")
     }
 
@@ -242,216 +249,98 @@ struct TaskViewerSheet: View {
 
     var body: some View {
         ScrollView {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(task.title)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundColor(appState.themeText)
-                    .lineLimit(2)
-                    .help(task.title)
-                Spacer()
-                HStack(spacing: 2) {
-                    modeButton(.list, icon: "list.bullet")
-                    modeButton(.graph, icon: "point.3.connected.trianglepath.dotted")
+            VStack(alignment: .leading, spacing: 20) {
+                ticketToolbar
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(task.title)
+                        .font(.ticket(size: 23))
+                        .foregroundColor(appState.themeText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    metaLine
                 }
-                .padding(2)
-                .background(appState.themeText.opacity(0.08))
-                .cornerRadius(5)
-                Button("Edit") { onEdit() }
-                    .buttonStyle(.bordered)
-                    .help("Edit this ticket")
-                Button {
-                    Task { await copyTicketToClipboard() }
-                } label: {
-                    if isCopying {
-                        ProgressView().controlSize(.small)
+                Divider().opacity(0.5)
+
+                // THE directive — the single salient "do this now", chosen by phase
+                // (send-back, review prompt, progress note, or the brief). Everything
+                // below this is supporting detail.
+                directiveHero
+
+                if viewMode == .list {
+                    // Contributor-authored context leads in list mode; graph mode
+                    // uses the activity lanes as its human-authored context.
+                    descriptionCollapsible
+                }
+
+                // Automation provenance and controls are ticket state, not one
+                // presentation mode's content. Keep them visible in both list and
+                // graph mode, along with the first-class research deliverable.
+                autoSetupBanner
+                autoPRRunNowControl
+                researchReportSection
+
+                if viewMode == .list {
+                    checklistSection
+
+                    aiSummaryCollapsible
+
+                    // Discussion: the always-on in-ticket Q&A thread (composer + notes).
+                    // Available in every column — clarifying questions shouldn't sit
+                    // behind a toggle.
+                    Divider().opacity(0.5)
+                    discussionSection
+
+                    // Proposed outreach sits directly under the discussion: it is
+                    // the one thing on the ticket that asks the reader for a
+                    // decision with an outside effect.
+                    outreachSection
+
+                    if !attachments.isEmpty {
+                        attachmentsSection
+                    }
+
+                    // History: rounds + audit trail — the background (prior rounds, who
+                    // moved what, what got fixed). Collapsed by default so the active
+                    // work (checklist + feedback + discussion) leads.
+                    Divider().opacity(0.5)
+                    if showHistory {
+                        historySection
                     } else {
-                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 11))
-                            .foregroundColor(didCopy ? .mwInkStrong : .secondary)
+                        historyToggle
                     }
-                }
-                .buttonStyle(.plain)
-                .disabled(isCopying)
-                .help("Copy ticket as text + screenshot paths (for Claude Code)")
-                Button {
-                    Task {
-                        isDuplicating = true
-                        await viewModel.duplicateTask(task)
-                        isDuplicating = false
-                        didDuplicate = true
-                        try? await Task.sleep(for: .milliseconds(1500))
-                        didDuplicate = false
-                    }
-                } label: {
-                    if isDuplicating {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: didDuplicate ? "checkmark" : "plus.square.on.square")
-                            .font(.system(size: 11))
-                            .foregroundColor(didDuplicate ? .mwInkStrong : .secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isDuplicating)
-                .help("Duplicate this ticket")
-                Button {
-                    Task {
-                        isSummarizing = true
-                        await viewModel.summarizeTask(taskId: task.id, projectId: task.projectId)
-                        isSummarizing = false
-                        // Auto-expand the (otherwise collapsed) AI Summary so the
-                        // user sees the result of their click.
-                        withAnimation(.easeInOut(duration: 0.18)) { showSummary = true }
-                    }
-                } label: {
-                    if isSummarizing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 11))
-                            .foregroundColor(.mwInkStrong)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isSummarizing)
-                .help("AI catch-up summary — where it's at, what's been done (Gemini)")
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-
-            // One status line — folds the old status/priority pills and the
-            // "you are here" banner together so the top isn't a stack of blocks.
-            metaLine
-
-            // THE directive — the single salient "do this now", chosen by phase
-            // (send-back, review prompt, progress note, or the brief). Everything
-            // below this is supporting detail.
-            directiveHero
-
-            if viewMode == .list {
-                // Contributor-authored context leads in list mode; graph mode
-                // uses the activity lanes as its human-authored context.
-                descriptionCollapsible
-            }
-
-            // Automation provenance and controls are ticket state, not one
-            // presentation mode's content. Keep them visible in both list and
-            // graph mode, along with the first-class research deliverable.
-            autoSetupBanner
-            autoPRRunNowControl
-            researchReportSection
-
-            if viewMode == .list {
-                checklistSection
-                    .padding(12)
-                    .background(appState.themeText.opacity(0.035)).cornerRadius(8)
-
-                aiSummaryCollapsible
-
-                // Discussion: the always-on in-ticket Q&A thread (composer + notes).
-                // Available in every column — clarifying questions shouldn't sit
-                // behind a toggle.
-                discussionSection
-                    .padding(12)
-                    .background(appState.themeText.opacity(0.035)).cornerRadius(8)
-
-                // Proposed outreach sits directly under the discussion: it is
-                // the one thing on the ticket that asks the reader for a
-                // decision with an outside effect.
-                outreachSection
-
-                if !attachments.isEmpty {
-                    attachmentsSection
-                }
-
-                // History: rounds + audit trail — the background (prior rounds, who
-                // moved what, what got fixed). Collapsed by default so the active
-                // work (checklist + feedback + discussion) leads.
-                if showHistory {
-                    historySection
                 } else {
-                    historyToggle
+                    // Activity graph: the same history, drawn as a branching diagram
+                    // of collaboration — one lane per person, each action a node,
+                    // edges crossing lanes on handoffs.
+                    activityGraphSection
                 }
-            } else {
-                // Activity graph: the same history, drawn as a branching diagram
-                // of collaboration — one lane per person, each action a node,
-                // edges crossing lanes on handoffs.
-                activityGraphSection
-            }
 
-            if isRejecting {
-                rejectEditor
+                ticketDates
             }
-
-            HStack(spacing: 12) {
-                if task.boardColumn == "review" && !isRejecting {
-                    Button {
-                        isRejecting = true
-                        rejectNote = ""
-                    } label: {
-                        Label("Send back", systemImage: "arrow.uturn.backward")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.mwAttention)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Mark incomplete and send to Changes Requested — notifies the assignee")
-
-                    Button { isApproving = true } label: {
-                        Label("Approve", systemImage: "checkmark.seal")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.mwInkStrong)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Approve out of review → Done, with a sign-off")
-                    .popover(isPresented: $isApproving, arrowEdge: .top) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Approve & close")
-                                .font(.system(size: 11, weight: .semibold)).foregroundColor(appState.themeText)
-                            TextField("Optional sign-off note…", text: $approveNote, axis: .vertical)
-                                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
-                                .lineLimit(1...3).padding(8).background(appState.themeText.opacity(0.08)).cornerRadius(6)
-                            HStack {
-                                Spacer()
-                                Button("Cancel") { isApproving = false; approveNote = "" }
-                                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
-                                Button("Approve") {
-                                    Task { await submitApprove() }
-                                }
-                                .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(Color.mwSolid).cornerRadius(5)
-                            }
-                        }
-                        .padding(12).frame(width: 260)
-                        .background(appState.themeCard)
-                    }
-                }
-                Spacer()
-                Button("Edit") { onEdit() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.mwInkStrong)
-            }
-        }
-        .padding(20)
+            .padding(24)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if isAddingAutoPRContext {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(autoPRContextInstructions)
-                        .font(.system(size: 11))
-                        .foregroundColor(appState.themeTextSecondary)
-                    noteComposer
+            VStack(spacing: 0) {
+                if isAddingAutoPRContext {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(autoPRContextInstructions)
+                            .font(.ticket(size: 11))
+                            .foregroundColor(appState.themeTextSecondary)
+                        noteComposer
+                    }
+                    .padding(16)
+                    .background(Color.appBackground)
+                    .overlay(alignment: .top) { Divider() }
                 }
-                .padding(16)
-                .background(Color.appBackground)
-                .overlay(alignment: .top) { Divider() }
+                if isRejecting {
+                    ScrollView { rejectEditor.padding(16) }
+                        .frame(maxHeight: 260)
+                        .overlay(alignment: .top) { Divider() }
+                } else if task.boardColumn == "review" {
+                    reviewFooter
+                }
             }
+            .background(Color.appBackground)
         }
         .frame(width: viewMode == .graph ? 820 : 700)
         .frame(maxHeight: 820)
@@ -509,13 +398,139 @@ struct TaskViewerSheet: View {
         }
     }
 
+    private var ticketToolbar: some View {
+        HStack(spacing: 16) {
+            HStack(spacing: 2) {
+                modeButton(.list, icon: "list.bullet")
+                modeButton(.graph, icon: "point.3.connected.trianglepath.dotted")
+            }
+            .padding(2)
+            .background(appState.themeText.opacity(0.08))
+            .cornerRadius(5)
+            Spacer()
+            Button("Edit") { onEdit() }
+                .buttonStyle(.plain)
+                .font(.ticket(size: 11))
+                .help("Edit this ticket")
+            if isCopying || isDuplicating || isSummarizing {
+                ProgressView().controlSize(.small)
+            }
+            Menu {
+                Button {
+                    Task { await copyTicketToClipboard() }
+                } label: {
+                    Label(didCopy ? "Copied" : "Copy ticket", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .disabled(isCopying)
+                .help("Copy ticket as text + screenshot paths (for Claude Code)")
+                Button {
+                    Task {
+                        isDuplicating = true
+                        await viewModel.duplicateTask(task)
+                        isDuplicating = false
+                        didDuplicate = true
+                        try? await Task.sleep(for: .milliseconds(1500))
+                        didDuplicate = false
+                    }
+                } label: {
+                    Label(didDuplicate ? "Duplicated" : "Duplicate ticket", systemImage: "plus.square.on.square")
+                }
+                .buttonStyle(.plain)
+                .disabled(isDuplicating)
+                .help("Duplicate this ticket")
+                Button {
+                    Task {
+                        isSummarizing = true
+                        await viewModel.summarizeTask(taskId: task.id, projectId: task.projectId)
+                        isSummarizing = false
+                        // Auto-expand the (otherwise collapsed) AI Summary so the
+                        // user sees the result of their click.
+                        withAnimation(.easeInOut(duration: 0.18)) { showSummary = true }
+                    }
+                } label: {
+                    Label("Summarize with AI", systemImage: "sparkles")
+                }
+                .buttonStyle(.plain)
+                .disabled(isSummarizing)
+                .help("AI catch-up summary — where it's at, what's been done (Gemini)")
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 24, height: 24)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("More ticket actions")
+            .accessibilityLabel("More ticket actions")
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.ticket(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Close ticket")
+            .accessibilityLabel("Close ticket")
+        }
+    }
+
+    private var reviewFooter: some View {
+        HStack(spacing: 12) {
+            if task.boardColumn == "review" && !isRejecting {
+                Button {
+                    isRejecting = true
+                    rejectNote = ""
+                } label: {
+                    Label("Send back", systemImage: "arrow.uturn.backward")
+                        .font(.ticket(size: 12))
+                        .foregroundColor(.mwAttention)
+                }
+                .buttonStyle(.plain)
+                .help("Mark incomplete and send to Changes Requested — notifies the assignee")
+
+                Button {
+                    isApproving = true
+                } label: {
+                    Label("Approve", systemImage: "checkmark.seal")
+                        .font(.ticket(size: 12))
+                        .foregroundColor(.mwInkStrong)
+                }
+                .buttonStyle(.plain)
+                .help("Approve out of review → Done, with a sign-off")
+                .popover(isPresented: $isApproving, arrowEdge: .top) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Approve & close")
+                            .font(.ticket(size: 11)).foregroundColor(appState.themeText)
+                        TextField("Optional sign-off note…", text: $approveNote, axis: .vertical)
+                            .textFieldStyle(.plain).font(.ticket(size: 12)).foregroundColor(appState.themeText)
+                            .lineLimit(1...3).padding(8).background(appState.themeText.opacity(0.08)).cornerRadius(6)
+                        HStack {
+                            Spacer()
+                            Button("Cancel") {
+                                isApproving = false
+                                approveNote = ""
+                            }
+                            .buttonStyle(.plain).font(.ticket(size: 11)).foregroundColor(.secondary)
+                            Button("Approve") {
+                                Task { await submitApprove() }
+                            }
+                            .buttonStyle(.plain).font(.ticket(size: 11))
+                            .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Color.mwSolid).cornerRadius(5)
+                        }
+                    }
+                    .padding(12).frame(width: 260)
+                    .background(appState.themeCard)
+                }
+            }
+            Spacer()
+            Text("Ready for your review").font(.ticket(size: 11)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 14)
+        .overlay(alignment: .top) { Divider().opacity(0.5) }
+    }
+
     func metaPill(label: String, color: Color) -> some View {
         Text(label)
-            .font(.system(size: 9, weight: .semibold))
+            .font(.ticket(size: 11))
             .foregroundColor(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15))
-            .cornerRadius(3)
+
     }
 }

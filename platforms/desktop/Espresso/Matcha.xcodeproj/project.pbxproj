@@ -136,6 +136,8 @@
 		7A5C0000000000000000B0AA /* TaskViewerSheet+Outreach.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */; };
 		7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */; };
 		7A5C0000000000000000B014 /* TaskViewerSheet+Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */; };
+		9D5100000000000000000001 /* TicketDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D5100000000000000000002 /* TicketDesign.swift */; };
+		9D5100000000000000000003 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = 9D5100000000000000000004 /* Fonts */; };
 		7A5C0000000000000000B015 /* TaskViewerSheet+Review.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */; };
 		7A5C0000000000000000B016 /* TaskViewerSheet+History.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */; };
 		7A5C0000000000000000B017 /* TaskViewerSheet+Discussion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */; };
@@ -493,6 +495,8 @@
 		7A5C0000000000000000F0AA /* TaskViewerSheet+Outreach.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Outreach.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Actions.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Header.swift"; sourceTree = "<group>"; };
+		9D5100000000000000000002 /* TicketDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketDesign.swift; sourceTree = "<group>"; };
+		9D5100000000000000000004 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fonts; sourceTree = "<group>"; };
 		7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Review.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+History.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Discussion.swift"; sourceTree = "<group>"; };
@@ -903,6 +907,7 @@
 			children = (
 				043A0A515D971904874F82FA /* Assets.xcassets */,
 				G1G2G3000000000000000010 /* JournalPreview */,
+				9D5100000000000000000004 /* Fonts */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -994,6 +999,7 @@
 				7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */,
 				7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */,
 				7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */,
+				9D5100000000000000000002 /* TicketDesign.swift */,
 				7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */,
 			);
 			name = TaskViewer;
@@ -1465,6 +1471,7 @@
 			files = (
 				84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */,
 				G1G2G3000000000000000011 /* JournalPreview in Resources */,
+				9D5100000000000000000003 /* Fonts in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1615,6 +1622,7 @@
 				7A5C0000000000000000B016 /* TaskViewerSheet+History.swift in Sources */,
 				7A5C0000000000000000B015 /* TaskViewerSheet+Review.swift in Sources */,
 				7A5C0000000000000000B014 /* TaskViewerSheet+Header.swift in Sources */,
+				9D5100000000000000000001 /* TicketDesign.swift in Sources */,
 				7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */,
 				B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */,
 				A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */,

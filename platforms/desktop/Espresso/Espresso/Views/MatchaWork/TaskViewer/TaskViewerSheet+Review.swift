@@ -137,27 +137,28 @@ extension TaskViewerSheet {
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 1).fill(Color.mwInkStrong.opacity(0.7)).frame(width: 2)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("SINCE LAST REVIEW")
-                        .font(.system(size: 9, weight: .semibold)).tracking(0.5)
+                    Text("Since last review")
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
                     ForEach(d.completed.prefix(6), id: \.self) { t in
                         HStack(spacing: 5) {
-                            Image(systemName: "checkmark.circle.fill").font(.system(size: 8)).foregroundColor(.mwInkStrong)
-                            Text(t).font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.8)).lineLimit(1)
+                            Image(systemName: "checkmark.circle.fill").font(.ticket(size: 10)).foregroundColor(.mwInkStrong)
+                            Text(t).font(.ticket(size: 11)).foregroundColor(appState.themeText.opacity(0.8)).lineLimit(1)
                         }
                     }
                     HStack(spacing: 10) {
                         if d.comments > 0 {
                             Label("\(d.comments) new comment\(d.comments == 1 ? "" : "s")", systemImage: "bubble.left")
-                                .font(.system(size: 10)).foregroundColor(.secondary)
+                                .font(.ticket(size: 10)).foregroundColor(.secondary)
                         }
                         if !d.commits.isEmpty {
                             Label(d.commits.joined(separator: ", "), systemImage: "arrow.triangle.branch")
-                                .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                                .font(.ticket(size: 10)).foregroundColor(.secondary).lineLimit(1)
                         }
                     }
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -168,12 +169,12 @@ extension TaskViewerSheet {
     @ViewBuilder
     var rejectEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("WHAT'S INCOMPLETE?")
-                .font(.system(size: 9, weight: .semibold))
+            Text("What needs to change?")
+                .font(.ticket(size: 10))
                 .foregroundColor(.mwAttention)
-                .tracking(0.5)
+
             TextEditor(text: $rejectNote)
-                .font(.system(size: 12))
+                .font(.ticket(size: 12))
                 .foregroundColor(appState.themeText.opacity(0.9))
                 .scrollContentBackground(.hidden)
                 .padding(5)
@@ -187,26 +188,26 @@ extension TaskViewerSheet {
             let doneItems = subtasks.filter { $0.isDone }
             if !doneItems.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("RE-OPEN ITEMS")
-                        .font(.system(size: 9, weight: .semibold))
+                    Text("Reopen items")
+                        .font(.ticket(size: 10))
                         .foregroundColor(.mwAttention)
-                        .tracking(0.5)
+
                     ForEach(doneItems) { item in
                         Button {
                             Task { await viewModel.toggleSubtask(taskId: task.id, subtaskId: item.id, isDone: false) }
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 11))
+                                    .font(.ticket(size: 11))
                                     .foregroundColor(.mwInkStrong)
                                 Text(item.title)
-                                    .font(.system(size: 11))
+                                    .font(.ticket(size: 11))
                                     .foregroundColor(appState.themeText.opacity(0.85))
                                     .strikethrough()
                                     .lineLimit(1)
                                 Spacer()
                                 Text("Re-open")
-                                    .font(.system(size: 9, weight: .semibold))
+                                    .font(.ticket(size: 10))
                                     .foregroundColor(.mwAttention)
                             }
                         }
@@ -218,7 +219,7 @@ extension TaskViewerSheet {
             HStack {
                 Button("Cancel") { isRejecting = false; rejectNote = "" }
                     .buttonStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.ticket(size: 12))
                     .foregroundColor(.secondary)
                 Spacer()
                 Button {
@@ -228,7 +229,7 @@ extension TaskViewerSheet {
                         ProgressView().controlSize(.small)
                     } else {
                         Text("Send back")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.ticket(size: 12))
                             .foregroundColor(.mwAttention)
                     }
                 }

@@ -16,7 +16,6 @@ struct NoteRow: View {
     var autoPRBotUserId: String? = nil
     let onPreview: (MWProjectFile) -> Void
     var onReply: (() -> Void)? = nil
-    @State private var isHovered = false
 
     private var isPriorRound: Bool { noteRound < currentRound }
 
@@ -72,7 +71,7 @@ struct NoteRow: View {
                         .frame(width: 24, height: 24)
                         .overlay(
                             Image(systemName: "cpu")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.ticket(size: 10))
                                 .foregroundColor(.mwInkStrong)
                         )
                 } else if let actorId = entry.actorUserId {
@@ -90,31 +89,28 @@ struct NoteRow: View {
                         .frame(width: 24, height: 24)
                         .overlay(
                             Image(systemName: "text.bubble")
-                                .font(.system(size: 11))
+                                .font(.ticket(size: 11))
                                 .foregroundColor(.secondary)
                         )
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(actorDisplayName)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.ticket(size: 12, weight: .medium))
                             .foregroundColor(.mwInk)
                         if isAutoPRActor {
-                            Text("AUTOMATED")
-                                .font(.system(size: 7, weight: .bold))
-                                .tracking(0.4)
+                            Text("Automated")
+                                .font(.ticket(size: 10))
                                 .foregroundColor(.mwInkStrong)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
-                                .background(Color.mwInkStrong.opacity(0.14))
-                                .cornerRadius(3)
                         }
                         Text(PacificDateFormatter.absolute(entry.createdAt) ?? "")
-                            .font(.system(size: 9))
+                            .font(.ticket(size: 10))
                             .foregroundColor(.secondary)
                         if currentRound > 1 {
                             Text("Round \(noteRound)")
-                                .font(.system(size: 8, weight: .semibold))
+                                .font(.ticket(size: 10))
                                 .foregroundColor(isPriorRound ? .secondary : .mwInkStrong)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -122,24 +118,21 @@ struct NoteRow: View {
                                 .cornerRadius(3)
                         }
                         Spacer(minLength: 0)
-                        if let onReply, isHovered {
+                        if let onReply {
                             Button(action: onReply) {
                                 Label("Reply", systemImage: "arrowshape.turn.up.left")
-                                    .font(.system(size: 9, weight: .semibold))
+                                    .font(.ticket(size: 10))
                                     .foregroundColor(.mwInkStrong)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     if isAutoPRAdditionalContext {
-                        Label("ADDITIONAL CONTEXT", systemImage: "arrow.clockwise.circle.fill")
-                            .font(.system(size: 8, weight: .bold))
-                            .tracking(0.4)
+                        Label("Additional context", systemImage: "arrow.clockwise.circle.fill")
+                            .font(.ticket(size: 10))
                             .foregroundColor(.mwInkStrong)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color.mwInkStrong.opacity(0.14))
-                            .cornerRadius(3)
                     }
                     // Quoted parent — shows what this note is replying to.
                     if let excerpt = replyParentExcerpt {
@@ -151,21 +144,24 @@ struct NoteRow: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 if let name = replyParentName {
                                     Text(name)
-                                        .font(.system(size: 8, weight: .semibold))
+                                        .font(.ticket(size: 10))
                                         .foregroundColor(.mwInkStrong)
                                 }
                                 Text(excerpt)
-                                    .font(.system(size: 10))
+                                    .font(.ticket(size: 10))
                                     .foregroundColor(.secondary)
                                     .lineLimit(2)
                             }
                         }
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 1)
                     }
                     if !bodyText.isEmpty {
                         Text(bodyText)
-                            .font(.system(size: 12))
+                            .font(.ticket(size: 13))
+                            .lineSpacing(3)
                             .foregroundColor(.mwInk.opacity(0.9))
+                            .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
                     if !linked.isEmpty {
@@ -180,20 +176,9 @@ struct NoteRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(8)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isAutoPRActor ? Color.mwInkStrong.opacity(0.07) : Color.mwInk.opacity(0.045))
-            .overlay(alignment: .leading) {
-                if isAutoPRActor {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.mwInkStrong.opacity(0.75))
-                        .frame(width: 2)
-                        .padding(.vertical, 5)
-                }
-            }
-            .cornerRadius(5)
             .opacity(isPriorRound ? 0.6 : 1)   // prior-round comments recede
-            .onHover { isHovered = $0 }
         }
     }
 }
@@ -230,16 +215,16 @@ private struct NoteAttachmentThumb: View {
             } else {
                 HStack(spacing: 4) {
                     Image(systemName: "doc")
-                        .font(.system(size: 11))
+                        .font(.ticket(size: 11))
                     Text(file.filename)
-                        .font(.system(size: 10))
+                        .font(.ticket(size: 10))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                .foregroundColor(.white)
+                .foregroundColor(.mwInk)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(Color.zinc800)
+                .background(Color.mwInk.opacity(0.06))
                 .cornerRadius(4)
             }
         }
