@@ -36,13 +36,21 @@ struct EmailMessage: Decodable, Identifiable, Equatable {
     /// The RFC 5322 `Message-ID` header — becomes a reply's `In-Reply-To`.
     let messageIdHeader: String?
     let attachments: [EmailAttachment]?
+    /// Gmail's own one-line preview.
+    var snippet: String? = nil
+    /// The HTML part, for the sandboxed reader. Only a single-message fetch
+    /// carries it — the unread list leaves it out to stay light.
+    var bodyHtml: String? = nil
+    var isUnread: Bool? = nil
 
     // `from` is a Swift keyword — map it to fromAddress.
     enum CodingKeys: String, CodingKey {
-        case id, subject, date, body, attachments
+        case id, subject, date, body, attachments, snippet
         case fromAddress = "from"
         case threadId = "thread_id"
         case messageIdHeader = "message_id_header"
+        case bodyHtml = "body_html"
+        case isUnread = "is_unread"
     }
 }
 

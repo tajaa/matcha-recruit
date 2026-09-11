@@ -13,7 +13,6 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-projects-open-v2") private var projectsSectionOpen = false
     @AppStorage("mw-sidebar-journals-open-v2") private var journalsSectionOpen = false
     @AppStorage("mw-sidebar-threads-open-v2") private var threadsSectionOpen = false
-    @AppStorage("mw-sidebar-email-open") private var emailSectionOpen = false
     @State private var showNewJournal = false
     @State private var pendingConnectionsCount = 0
     @State private var showDiscoverChannels = false
@@ -460,6 +459,7 @@ struct ContentView: View {
     private func openThreadsHub()   { appState.clearPrimaryNav(); appState.showThreadsHub = true }
     private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
     private func openProductivityHub() { appState.clearPrimaryNav(); appState.showProductivityHub = true }
+    private func openEmailHub()     { appState.clearPrimaryNav(); appState.showEmailHub = true }
 
     /// Nav-only row — opens the full-pane Notes-style Journals workspace
     /// (folders · note list · editor). Browsing/organizing lives in the
@@ -484,27 +484,13 @@ struct ContentView: View {
                       isActive: appState.showThreadsHub, onOpen: openThreadsHub)
     }
 
+    /// Nav-only row — opens the full-pane Email hub (mailbox · list ·
+    /// reader). Reading, organizing and sending to a board live in the hub.
     @ViewBuilder
     private var emailSidebarSection: some View {
-        sidebarSection(
-            title: "Email",
-            icon: "envelope",
-            isOpen: $emailSectionOpen,
-            trailing: {
-                Button {
-                    Task { await EmailViewModel.shared.loadInbox() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.espresso(size: 10))
-                        .foregroundColor(.secondary)
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .help("Refresh unread")
-            }
-        ) {
-            EmailSidebarView(searchText: searchText)
-        }
+        sidebarNavRow(title: "Email", icon: "envelope",
+                      isActive: appState.showEmailHub || appState.selectedEmailId != nil,
+                      onOpen: openEmailHub)
     }
 
     private func setThreadFilter(_ status: String?) {
