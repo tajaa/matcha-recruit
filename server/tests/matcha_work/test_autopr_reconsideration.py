@@ -377,21 +377,27 @@ def test_task_shape_serializes_reconsideration_fields():
             "autopr_reconsideration_pending": True,
             "autopr_reconsideration_event_id": event_id,
             "autopr_reconsideration_at": now,
+            "autopr_claimed_at": now,
         }
     )
     assert shaped["autopr_reconsideration_event_id"] == str(event_id)
     assert shaped["autopr_reconsideration_at"] == now.isoformat()
+    assert shaped["autopr_claimed_at"] == now.isoformat()
 
 
 class _RunRequestConn:
     """Stub for the run-now queue: one task row, one pending-request lookup."""
 
-    def __init__(self, *, board_column="todo", status="pending", pending_at=None, exists=True):
+    def __init__(self, *, board_column="todo", status="pending", pending_at=None,
+                 active_claimed_at=None, exists=True):
         self.board_column = board_column
         self.status = status
         self.pending_at = pending_at
+        self.active_claimed_at = active_claimed_at
         self.exists = exists
         self.insert_args = None
+        self.update_args = None
+        self.history_events = []
         self.activity_id = uuid4()
         self.created_at = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
 
@@ -404,14 +410,40 @@ class _RunRequestConn:
                 return None
             return {"id": args[0], "board_column": self.board_column, "status": self.status,
                     "progress_note": getattr(self, "progress_note", None)}
+        if "UPDATE mw_tasks SET" in query:
+            self.update_args = args
+            self.board_column = "in_progress"
+            self.status = "pending"
+            return {
+                "id": args[0], "project_id": args[1], "company_id": uuid4(),
+                "created_by": uuid4(), "title": "Queued task", "description": None,
+                "due_date": None, "priority": "medium", "status": "pending",
+                "board_column": "in_progress", "pipeline_column": "lead",
+                "assigned_to": None, "completed_at": None,
+                "created_at": self.created_at, "updated_at": self.created_at,
+                "progress_note": getattr(self, "progress_note", None),
+                "category": "engineering", "element_id": None, "review_note": None,
+                "deal_value": None, "probability": None, "contact_name": None,
+                "contact_company": None, "contact_email": None, "contact_phone": None,
+                "outcome": None, "loss_reason": None, "next_action_at": None,
+                "expected_close": None, "pr_url": None, "pr_number": None,
+            }
         if "INSERT INTO mw_task_history" in query:
             self.insert_args = args
             return {"id": self.activity_id, "created_at": self.created_at}
         raise AssertionError(f"Unexpected query: {query}")
 
+    async def execute(self, query, *args):
+        if "INSERT INTO mw_task_history" in query:
+            self.history_events.append(args)
+            return "INSERT 0 1"
+        raise AssertionError(f"Unexpected query: {query}")
+
     async def fetchval(self, query, *args):
-        if "SELECT h.metadata" in query:
+        if "AS paused" in query:
             return getattr(self, "held", False)
+        if "metadata->>'kind' = 'autopr_run_claim'" in query:
+            return self.active_claimed_at
         if "autopr_run_request" in query:
             return self.pending_at
         if "SELECT 1 FROM mw_tasks" in query:
@@ -428,6 +460,12 @@ def _watched_project_id():
     from app.matcha.services.matcha_work import project_task_service as svc
 
     return UUID(next(iter(svc.KANBAN_AUTOPR_PROJECT_IDS)))
+
+
+def _autopr_bot_id():
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    return UUID(svc.KANBAN_AUTOPR_BOT_USER_ID)
 
 
 @pytest.mark.asyncio
@@ -486,10 +524,41 @@ async def test_run_claim_consumes_the_request(monkeypatch):
     conn = _RunRequestConn()
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
 
-    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+    result = await svc.claim_autopr_run(
+        project_id=_watched_project_id(),
+        task_id=uuid4(),
+        actor_user_id=_autopr_bot_id(),
+    )
 
     assert result["claimed_at"] == conn.created_at.isoformat()
+    assert result["task"]["board_column"] == "in_progress"
+    assert result["task"]["autopr_claimed_at"] == conn.created_at.isoformat()
+    assert conn.update_args is not None
+    assert conn.history_events[0][4:7] == ("column_change", "todo", "in_progress")
+    assert json.loads(conn.history_events[0][-1]) == {"kind": "autopr_run_claim_move"}
     assert json.loads(conn.insert_args[4]) == {"kind": "autopr_run_claim"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["claim", "defer"])
+async def test_machine_run_mutations_require_watched_board_and_bot_actor(
+    monkeypatch, operation
+):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    connection_factory = AsyncMock()
+    monkeypatch.setattr(svc, "get_connection", connection_factory)
+    fn = svc.claim_autopr_run if operation == "claim" else svc.defer_autopr_run
+
+    with pytest.raises(svc.AutoPRReconsiderationConflict, match="does not watch"):
+        await fn(
+            project_id=uuid4(), task_id=uuid4(), actor_user_id=_autopr_bot_id()
+        )
+    with pytest.raises(svc.AutoPRActorNotPermitted, match="service account"):
+        await fn(
+            project_id=_watched_project_id(), task_id=uuid4(), actor_user_id=uuid4()
+        )
+    connection_factory.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -512,18 +581,25 @@ async def test_run_now_rejects_a_board_autopr_does_not_watch(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("exists,column,status", [
-    (True, "todo", "pending"), (True, "changes_requested", "pending"),
-    (False, "todo", "pending"), (True, "in_progress", "pending"),
-    (True, "todo", "cancelled"),
+@pytest.mark.parametrize("exists,column,status,active_claim", [
+    (True, "todo", "pending", False),
+    (True, "changes_requested", "pending", False),
+    (False, "todo", "pending", False),
+    (True, "in_progress", "pending", False),
+    (True, "in_progress", "pending", True),
+    (True, "todo", "cancelled", False),
 ])
-async def test_unqueue_preserves_card_and_records_hold(monkeypatch, exists, column, status):
+async def test_unqueue_preserves_card_and_records_hold(
+    monkeypatch, exists, column, status, active_claim
+):
     from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _RunRequestConn(exists=exists, board_column=column, status=status)
+    if active_claim:
+        conn.active_claimed_at = conn.created_at
     conn.execute = AsyncMock()
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
-    if exists and (column == "in_progress" or status == "cancelled"):
+    if exists and ((column == "in_progress" and not active_claim) or status == "cancelled"):
         with pytest.raises(svc.AutoPRReconsiderationConflict):
             await svc.cancel_autopr_run(project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4())
         conn.execute.assert_not_called()
@@ -541,6 +617,27 @@ async def test_unqueue_preserves_card_and_records_hold(monkeypatch, exists, colu
 
 
 @pytest.mark.asyncio
+async def test_selector_deferral_consumes_request_without_pausing_or_moving(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.defer_autopr_run(
+        project_id=_watched_project_id(),
+        task_id=uuid4(),
+        actor_user_id=_autopr_bot_id(),
+    )
+
+    assert result == {"ok": True, "autopr_paused": False}
+    assert conn.board_column == "todo"
+    assert conn.update_args is None
+    assert json.loads(conn.history_events[0][-1]) == {
+        "kind": "autopr_run_cancel", "pause": False,
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("held,column,status,exists", [
     (True, "todo", "pending", True), (False, "in_progress", "pending", True),
     (False, "todo", "cancelled", True), (False, "todo", "pending", False),
@@ -551,7 +648,11 @@ async def test_stale_investigation_cannot_claim_unqueued_card(monkeypatch, held,
     conn = _RunRequestConn(exists=exists, board_column=column, status=status)
     conn.held = held
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
-    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+    result = await svc.claim_autopr_run(
+        project_id=_watched_project_id(),
+        task_id=uuid4(),
+        actor_user_id=_autopr_bot_id(),
+    )
     assert result is None if not exists else result["ok"] is False
     assert conn.insert_args is None
 
@@ -585,6 +686,36 @@ async def test_unqueue_route_checks_access_and_results(monkeypatch, outcome, cod
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint_name,service_name", [
+    ("claim_autopr_run_endpoint", "claim_autopr_run"),
+    ("defer_autopr_run_endpoint", "defer_autopr_run"),
+])
+@pytest.mark.parametrize("error_type,status_code", [
+    ("conflict", 409),
+    ("actor", 403),
+])
+async def test_machine_run_routes_map_service_guards(
+    monkeypatch, endpoint_name, service_name, error_type, status_code
+):
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.matcha.routes.matcha_work import task_history as route
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    monkeypatch.setattr(route, "_verify_project_access", AsyncMock())
+    error = (
+        svc.AutoPRReconsiderationConflict("unwatched")
+        if error_type == "conflict"
+        else svc.AutoPRActorNotPermitted("wrong actor")
+    )
+    monkeypatch.setattr(svc, service_name, AsyncMock(side_effect=error))
+
+    with pytest.raises(HTTPException) as exc:
+        await getattr(route, endpoint_name)(uuid4(), uuid4(), SimpleNamespace(id=uuid4()))
+    assert exc.value.status_code == status_code
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("note,held,status,allowed", [
     ("🤖 AUTO SETUP · ALREADY SCOPED · PR #42", False, "pending", True),
     ("🤖 AUTO SETUP · ALREADY SCOPED · PR #42", True, "pending", False),
@@ -599,9 +730,33 @@ async def test_claim_preserves_scoped_recovery_lane(monkeypatch, note, held, sta
     conn.progress_note = note
     conn.held = held
     monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
-    result = await svc.claim_autopr_run(project_id=uuid4(), task_id=uuid4())
+    result = await svc.claim_autopr_run(
+        project_id=_watched_project_id(),
+        task_id=uuid4(),
+        actor_user_id=_autopr_bot_id(),
+    )
     assert result["ok"] is allowed
     assert (conn.insert_args is not None) is allowed
+
+
+@pytest.mark.asyncio
+async def test_claim_resumes_an_unsettled_in_progress_pickup(monkeypatch):
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    active_at = datetime(2026, 9, 2, 2, 45, tzinfo=timezone.utc)
+    conn = _RunRequestConn(board_column="in_progress", active_claimed_at=active_at)
+    conn.progress_note = "Ordinary brief state"
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+
+    result = await svc.claim_autopr_run(
+        project_id=_watched_project_id(),
+        task_id=uuid4(),
+        actor_user_id=_autopr_bot_id(),
+    )
+
+    assert result["ok"] is True
+    assert result["task"]["board_column"] == "in_progress"
+    assert conn.history_events == []
 
 
 def test_hold_sql_releases_only_for_new_work_or_review_round():
@@ -616,9 +771,12 @@ def test_hold_sql_releases_only_for_new_work_or_review_round():
         db.execute("INSERT INTO mw_tasks VALUES ('ticket')")
         query = f"SELECT {svc._AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = 'ticket'"
 
-        def add(at, kind=None, event="activity"):
+        def add(at, kind=None, event="activity", pause=None):
+            metadata = {"kind": kind} if kind else {}
+            if pause is not None:
+                metadata["pause"] = pause
             db.execute("INSERT INTO mw_task_history VALUES (?, ?, ?, ?)",
-                       ("ticket", event, json.dumps({"kind": kind} if kind else {}), at))
+                       ("ticket", event, json.dumps(metadata), at))
 
         def paused():
             return bool(db.execute(query).fetchone()[0])
@@ -628,22 +786,25 @@ def test_hold_sql_releases_only_for_new_work_or_review_round():
         add(2, "autopr_run_claim")
         add(3, "autopr_run_cancel")
         assert paused()
-        add(4, event="column_change")  # publish -> review does not resume
-        add(5, "autopr_run_claim")     # stale worker does not resume
-        assert paused()
-        add(6, event="review_rejected")
+        add(4, "autopr_run_cancel", pause=False)
         assert not paused()
-        add(7, "autopr_run_cancel")
-        add(8, event="round_started")
+        add(5, "autopr_run_cancel")
+        add(6, event="column_change")  # publish -> review does not resume
+        add(7, "autopr_run_claim")     # stale worker does not resume
+        assert paused()
+        add(8, event="review_rejected")
         assert not paused()
         add(9, "autopr_run_cancel")
-        add(10, "autopr_additional_context")
+        add(10, event="round_started")
         assert not paused()
         add(11, "autopr_run_cancel")
-        add(12, "autopr_run_request")
+        add(12, "autopr_additional_context")
         assert not paused()
-        add(12, "autopr_run_cancel")  # conservative equal-time ordering
-        add(12, event="review_rejected")
+        add(13, "autopr_run_cancel")
+        add(14, "autopr_run_request")
+        assert not paused()
+        add(14, "autopr_run_cancel")  # conservative equal-time ordering
+        add(14, event="review_rejected")
         assert paused()
 
 
@@ -655,6 +816,51 @@ def test_hold_lookup_is_joined_once_per_task():
     assert query_source.count("{_AUTOPR_HOLD_QUERY}") == 1
     assert "{_AUTOPR_HOLD_SQL}" not in query_source
     assert "COALESCE(autopr_hold.paused, FALSE) AS autopr_paused" in query_source
+
+
+def test_active_claim_survives_comments_but_settles_on_run_mutation():
+    import sqlite3
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    with sqlite3.connect(":memory:") as db:
+        db.execute("CREATE TABLE mw_tasks (id TEXT, board_column TEXT)")
+        db.execute(
+            "CREATE TABLE mw_task_history "
+            "(task_id TEXT, event_type TEXT, metadata TEXT, created_at INTEGER)"
+        )
+        db.execute("INSERT INTO mw_tasks VALUES ('ticket', 'in_progress')")
+        sqlite_claim_query = svc._AUTOPR_ACTIVE_CLAIM_QUERY.replace(
+            f"AND h.created_at > now() - interval '{svc._AUTOPR_ACTIVE_CLAIM_TTL}'",
+            "",
+        )
+        query = f"SELECT ({sqlite_claim_query}) FROM mw_tasks t WHERE t.id = 'ticket'"
+
+        def add(at, event="activity", kind=None):
+            db.execute(
+                "INSERT INTO mw_task_history VALUES (?, ?, ?, ?)",
+                ("ticket", event, json.dumps({"kind": kind} if kind else {}), at),
+            )
+
+        add(1, kind="autopr_run_claim")
+        assert db.execute(query).fetchone()[0] == 1
+        add(2, kind="note")
+        assert db.execute(query).fetchone()[0] == 1
+        add(3, event="progress_note_change")
+        assert db.execute(query).fetchone()[0] is None
+        add(4, kind="autopr_run_claim")
+        assert db.execute(query).fetchone()[0] == 4
+        add(5, event="column_change")
+        assert db.execute(query).fetchone()[0] is None
+
+
+def test_active_claim_is_bounded_and_column_gated_in_list_query():
+    import inspect
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    assert "t.board_column = 'in_progress'" in svc._AUTOPR_ACTIVE_CLAIM_QUERY
+    assert svc._AUTOPR_ACTIVE_CLAIM_TTL in svc._AUTOPR_ACTIVE_CLAIM_QUERY
+    query_source = inspect.getsource(svc.list_project_tasks)
+    assert "autopr_claim ON TRUE" in query_source
 
 
 def test_hold_index_upgrade_and_downgrade_are_concurrent(monkeypatch):

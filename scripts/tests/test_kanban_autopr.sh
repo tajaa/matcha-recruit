@@ -435,7 +435,8 @@ cat > "$TMP_DIR/collect-bundle.json" <<'EOF'
     {"id":"77777777-0000-4000-8000-000000000007","title":"Queued by hand from the card","assigned_email":"human@example.com","board_column":"todo","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
     {"id":"88888888-0000-4000-8000-000000000008","title":"Blocked on a vendor that used the words","assigned_email":"human@example.com","board_column":"todo","status":"pending","progress_note":"🤖 AUTO SETUP · NO PR: EXTERNAL DEPENDENCY · [autopr:no-spec 2026-09-02T01:00:00Z] external_dependency · note: the vendor said it was already_fixed upstream"},
     {"id":"bbbbbbbb-0000-4000-8000-00000000000b","title":"Unqueued assigned card","assigned_email":"owner@example.com","board_column":"todo","status":"pending","autopr_paused":true,"autopr_reconsideration_pending":true,"autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
-    {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"}
+    {"id":"aaaaaaaa-0000-4000-8000-00000000000a","title":"Queued but already in review","assigned_email":"human@example.com","board_column":"review","status":"pending","autopr_run_requested_at":"2026-09-02T03:00:00+00:00"},
+    {"id":"cccccccc-0000-4000-8000-00000000000c","title":"Resume interrupted pickup","assigned_email":"human@example.com","board_column":"in_progress","status":"pending","autopr_claimed_at":"2026-09-02T03:05:00+00:00"}
   ]
 }
 EOF
@@ -491,10 +492,11 @@ check "collector excludes unqueued work even with assignment and stale queue sig
 
 check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "4" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "5" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444", "55555555", "77777777"]
+        'map(.id8) == ["11111111", "44444444", "55555555", "77777777", "cccccccc"]
          and (.[3].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
+         and (.[4].autopr_claimed_at == "2026-09-02T03:05:00+00:00")
          and .[2].autopr_reconsideration_pending
          and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
          and (.[3].autopr_reconsideration_pending | not)' >/dev/null \
@@ -529,6 +531,9 @@ if [[ "$url" == */auth/login ]]; then
     exit 0
 fi
 case "$url" in
+    */autopr/run-defer)
+        printf '{"ok":true}' > "$output_file"
+        ;;
     */autopr/run-claim)
         printf '{"ok":%s}' "${AUTOPR_TEST_CLAIM_OK:-true}" > "$output_file"
         ;;
@@ -2078,6 +2083,19 @@ check "pending additional context reopens an unchanged no-spec decision" \
       && [ "$(printf '%s' "$reconsidered" | jq -r '.mode')" = "investigate" ] \
       && echo 0 || echo 1)
 
+cat > "$TMP_DIR/claim-recovery-cards.json" <<'EOF'
+[
+  {"task_id":"aaaaaaaa-0000-4000-8000-00000000000a","id8":"aaaaaaaa","project_id":"p","title":"Interrupted pickup","board_column":"in_progress","created_at":"2026-09-01T00:00:00Z","last_moved_at":"2026-09-10T03:00:00Z","autopr_claimed_at":"2026-09-10T03:00:01Z"},
+  {"task_id":"bbbbbbbb-0000-4000-8000-00000000000b","id8":"bbbbbbbb","project_id":"p","title":"Routine todo","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z"}
+]
+EOF
+claim_recovery="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+  AUTOPR_CACHE_DIR="$TMP_DIR/claim-recovery-cache" \
+  "$AUTOPR_DIR/select.sh" "$TMP_DIR/claim-recovery-cards.json")"
+check "an interrupted active claim outranks routine Todo work" \
+  $([ "$(printf '%s' "$claim_recovery" | jq -r '.id8')" = "aaaaaaaa" ] \
+    && echo 0 || echo 1)
+
 cat > "$TMP_DIR/run-request-cards.json" <<'EOF'
 [
   {"task_id":"88888888-0000-4000-8000-000000000008","id8":"88888888","project_id":"p","title":"Ordinary changes-requested work","board_column":"changes_requested","created_at":"2026-02-01T00:00:00Z","last_moved_at":"2026-02-01T00:00:00Z"},
@@ -2125,8 +2143,8 @@ AUTOPR_TEST_CURL_URLS="$TMP_DIR/claim-urls" MATCHA_AUTOPR_ENV="$env_file" \
     PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
     AUTOPR_CACHE_DIR="$TMP_DIR/run-request-cache" \
     "$AUTOPR_DIR/select.sh" "$TMP_DIR/run-request-cards.json" >/dev/null 2>&1
-check "a declined run request is consumed instead of re-forcing every tick" \
-    $(grep -q '/tasks/99999999-0000-4000-8000-000000000009/autopr/run-claim' \
+check "a declined run request is deferred instead of falsely claimed" \
+    $(grep -q '/tasks/99999999-0000-4000-8000-000000000009/autopr/run-defer' \
         "$TMP_DIR/claim-urls" && echo 0 || echo 1)
 
 # The dashboard asks the same selector what would run next. That probe must

@@ -75,7 +75,6 @@ struct TaskViewerSheet: View {
     /// (not asked, or the call failed) — the button stays enabled and the
     /// server / harness answer as before. false disables it with the reason.
     @State var researchGranted: Bool?
-    @State var boardWatchedByAutoPR: Bool?
     @State var isNoteFieldFocused = false
     /// The discussion comment the composer is currently replying to, if any.
     /// Drives the "Replying to …" banner and threads `reply_to` through submit.
@@ -116,6 +115,22 @@ struct TaskViewerSheet: View {
     /// a disclosure so a sent-back ticket doesn't show stale round-1 files up top.
     var earlierRoundAttachments: [MWProjectFile] {
         attachments.filter { ($0.roundIndex ?? currentRound) < currentRound }
+    }
+
+    /// AutoPR research publishes a Markdown deliverable named
+    /// `research-report-…`. Pull the newest one forward into a dedicated reader
+    /// entry instead of making someone hunt through the generic attachment list.
+    var researchReportAttachment: MWProjectFile? {
+        guard liveAutoPRTask.category == "research" else { return nil }
+        return attachments
+            .filter { file in
+                let name = file.filename.lowercased()
+                let ext = (file.filename as NSString).pathExtension.lowercased()
+                return name.hasPrefix("research-report-")
+                    && ["md", "markdown", "pdf"].contains(ext)
+            }
+            .sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
+            .first
     }
 
     /// All checklist items for this task, across every round (ordered).
@@ -227,12 +242,13 @@ struct TaskViewerSheet: View {
 
     var body: some View {
         ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .firstTextBaseline) {
                 Text(task.title)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundColor(appState.themeText)
-                    .lineLimit(3)
+                    .lineLimit(2)
+                    .help(task.title)
                 Spacer()
                 HStack(spacing: 2) {
                     modeButton(.list, icon: "list.bullet")
@@ -312,55 +328,37 @@ struct TaskViewerSheet: View {
             // "you are here" banner together so the top isn't a stack of blocks.
             metaLine
 
-            // AutoPR provenance is durable ticket context, not a card-only
-            // preview. Keep the full stored note visible whenever this ticket
-            // is opened so a person can distinguish automated work from their
-            // own and see exactly why the automation acted or stopped.
-            autoSetupBanner
-
-            // Independent of the banner: a ticket AutoPR has never touched has
-            // no note to hang this off, and queueing an untouched card is the
-            // common case.
-            autoPRRunNowControl
-
-            if PacificDateFormatter.absolute(task.createdAt) != nil
-                || PacificDateFormatter.absolute(task.lastMovedAt) != nil {
-                HStack(spacing: 8) {
-                    if let added = PacificDateFormatter.absolute(task.createdAt) {
-                        Label("Added \(added)", systemImage: "plus.circle")
-                    }
-                    if let moved = PacificDateFormatter.absolute(task.lastMovedAt) {
-                        Label("Moved \(moved)", systemImage: "arrow.left.arrow.right")
-                    }
-                    Spacer()
-                }
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-            }
-
             // THE directive — the single salient "do this now", chosen by phase
             // (send-back, review prompt, progress note, or the brief). Everything
             // below this is supporting detail.
             directiveHero
 
             if viewMode == .list {
-                // Action-first order: the concrete steps to clear this round sit
-                // directly under the directive hero.
-                checklistSection
-                    .padding(16)
-                    .background(appState.themeText.opacity(0.035)).cornerRadius(12)
-
-                // Supporting context, collapsed by default (one click away) so it
-                // doesn't crowd the directive: the brief, then the AI catch-up.
+                // Contributor-authored context leads in list mode; graph mode
+                // uses the activity lanes as its human-authored context.
                 descriptionCollapsible
+            }
+
+            // Automation provenance and controls are ticket state, not one
+            // presentation mode's content. Keep them visible in both list and
+            // graph mode, along with the first-class research deliverable.
+            autoSetupBanner
+            autoPRRunNowControl
+            researchReportSection
+
+            if viewMode == .list {
+                checklistSection
+                    .padding(12)
+                    .background(appState.themeText.opacity(0.035)).cornerRadius(8)
+
                 aiSummaryCollapsible
 
                 // Discussion: the always-on in-ticket Q&A thread (composer + notes).
                 // Available in every column — clarifying questions shouldn't sit
                 // behind a toggle.
                 discussionSection
-                    .padding(16)
-                    .background(appState.themeText.opacity(0.035)).cornerRadius(12)
+                    .padding(12)
+                    .background(appState.themeText.opacity(0.035)).cornerRadius(8)
 
                 // Proposed outreach sits directly under the discussion: it is
                 // the one thing on the ticket that asks the reader for a
@@ -440,7 +438,7 @@ struct TaskViewerSheet: View {
                     .foregroundColor(.mwInkStrong)
             }
         }
-        .padding(24)
+        .padding(20)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if isAddingAutoPRContext {
@@ -464,9 +462,12 @@ struct TaskViewerSheet: View {
             // it if the viewer was opened from a non-board surface).
             TicketUpdatesStore.shared.configure(
                 userId: appState.currentUser?.id, projectId: viewModel.project?.id)
-            if viewModel.taskFiles[task.id] == nil {
-                await viewModel.loadTaskFiles(taskId: task.id)
-            }
+            // Always refresh on open. The board bundle may have cached the
+            // empty pre-run attachment list; a research report is uploaded
+            // before AutoPR's later task-update event, and that event does not
+            // embed files. Reusing the cache here made a finished report look
+            // as though it had no viewer until the whole board was reloaded.
+            await viewModel.loadTaskFiles(taskId: task.id)
             await viewModel.loadSubtasks(taskId: task.id)
             // Refresh commit-driven suggestions so chips appear even when the
             // ticket is opened straight from the board (no-op if no repo bound).
@@ -483,10 +484,10 @@ struct TaskViewerSheet: View {
             // ask on every ticket: the answer is an empty list and the section
             // renders nothing.
             await loadStagedActions()
-            // A Research card can only run on a board granted `research`;
-            // find out now rather than letting the user press a button whose
-            // answer arrives as a comment several minutes later.
-            if task.category == "research" { await loadResearchGrant() }
+            // This one response owns the bot identity, watched-board state,
+            // and research grant. Load it for every ticket so attribution and
+            // queue labels are trustworthy even outside the board surface.
+            await loadResearchGrant()
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)

@@ -299,7 +299,7 @@ def _row_to_task(row: dict) -> dict:
         d["due_date"] = d["due_date"].isoformat()
     for key in (
         "completed_at", "created_at", "updated_at", "last_moved_at",
-        "autopr_reconsideration_at", "autopr_run_requested_at",
+        "autopr_reconsideration_at", "autopr_run_requested_at", "autopr_claimed_at",
     ):
         if d.get(key) is not None:
             d[key] = d[key].isoformat()
@@ -463,6 +463,12 @@ _AUTOPR_RUN_LANES = ("todo", "changes_requested")
 # A code constant interpolated into SQL below; never user input.
 _AUTOPR_RUN_REQUEST_TTL = "30 minutes"
 
+# A pickup is a lease, not permanent ownership. Normal runs finish well inside
+# this window (including the one human-approved extension); after it expires,
+# the card stops advertising active work and the collector stops retrying it.
+# A human can move the stale card back to an AutoPR lane before requesting it.
+_AUTOPR_ACTIVE_CLAIM_TTL = "30 minutes"
+
 # The bookkeeping rows this feature writes carry no body and render nothing, so
 # they must not reach the unviewed-updates badge or the ticket activity graph.
 # They share event_type='activity' with real discussion notes and are told
@@ -470,6 +476,9 @@ _AUTOPR_RUN_REQUEST_TTL = "30 minutes"
 _AUTOPR_BOOKKEEPING_KINDS = (
     "autopr_run_request",
     "autopr_run_claim",
+    # The paired Todo -> In Progress move is implementation detail of a claim,
+    # not a collaborator-authored update.
+    "autopr_run_claim_move",
     "autopr_run_cancel",
     # A staged proposal is rendered by the Proposed Outreach section, not the
     # discussion thread, and the report note that arrives with it is what puts
@@ -496,7 +505,10 @@ def is_autopr_bookkeeping_row(metadata: object) -> bool:
 # round releases it; publish/claim events do not. The same indexed lookup is
 # used by claims and, once per task, the list query's lateral join.
 _AUTOPR_HOLD_QUERY = """
-    SELECT h.metadata->>'kind' = 'autopr_run_cancel' AS paused
+    SELECT (
+        h.metadata->>'kind' = 'autopr_run_cancel'
+        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+    ) AS paused
     FROM mw_task_history h
     WHERE h.task_id = t.id AND (
         (h.event_type = 'activity' AND h.metadata->>'kind' IN (
@@ -508,15 +520,56 @@ _AUTOPR_HOLD_QUERY = """
 """
 _AUTOPR_HOLD_SQL = f"COALESCE(({_AUTOPR_HOLD_QUERY}), FALSE)"
 
+# A claim is active until the card records a terminal run-side mutation. The
+# claim itself is the durable recovery marker: if the workflow dies after
+# moving the card to In Progress, the next scheduled pass can safely resume
+# that exact card instead of leaving it stranded outside the normal queue.
+# Keep the terminal event set in lock-step with the query in
+# ``claim_autopr_run`` below.
+_AUTOPR_ACTIVE_CLAIM_QUERY = f"""
+    SELECT h.created_at
+    FROM mw_task_history h
+    WHERE t.board_column = 'in_progress'
+      AND h.task_id = t.id
+      AND h.event_type = 'activity'
+      AND h.metadata->>'kind' = 'autopr_run_claim'
+      AND h.created_at > now() - interval '{_AUTOPR_ACTIVE_CLAIM_TTL}'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM mw_task_history terminal
+          WHERE terminal.task_id = h.task_id
+            AND terminal.created_at > h.created_at
+            AND (
+                terminal.event_type IN (
+                    'column_change', 'progress_note_change',
+                    'review_rejected', 'review_approved'
+                )
+                OR (
+                    terminal.event_type = 'activity'
+                    AND terminal.metadata->>'kind' = 'autopr_run_cancel'
+                )
+            )
+      )
+    ORDER BY h.created_at DESC
+    LIMIT 1
+"""
 
-async def cancel_autopr_run(
+
+async def defer_autopr_run(
     *, project_id: UUID, task_id: UUID, actor_user_id: UUID,
 ) -> Optional[dict]:
-    """Hold future AutoPR runs without moving the card or discarding answers.
+    """Consume one run-now request without claiming or pausing the ticket.
 
-    An investigation already claimed is not interrupted. The task lock orders
-    this event with run requests, reconsiderations, and investigation claims.
+    The selector uses this when it considered an explicit request but could not
+    choose that card (for example because of the open-PR cap). Reusing the
+    actual claim here would falsely move work that never started to In Progress.
     """
+    if str(project_id) not in KANBAN_AUTOPR_PROJECT_IDS:
+        raise AutoPRReconsiderationConflict(
+            "AutoPR does not watch this board, so it cannot defer this ticket"
+        )
+    if str(actor_user_id) != KANBAN_AUTOPR_BOT_USER_ID:
+        raise AutoPRActorNotPermitted("Only the AutoPR service account may defer runs")
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
@@ -527,6 +580,55 @@ async def cancel_autopr_run(
             if not task:
                 return None
             if task["status"] == "cancelled" or task["board_column"] not in _AUTOPR_RUN_LANES:
+                return {"ok": False, "reason": "Ticket has left the queue"}
+            await conn.execute(
+                """
+                INSERT INTO mw_task_history
+                    (task_id, task_id_text, project_id, actor_user_id,
+                     event_type, metadata, created_at)
+                VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
+                """,
+                task_id, str(task_id), project_id, actor_user_id,
+                # The existing cancel kind already settles a request and is
+                # covered by the AutoPR state index. `pause: false` keeps this
+                # machine deferral distinct from a person's explicit hold.
+                json.dumps({"kind": "autopr_run_cancel", "pause": False}),
+            )
+    return {"ok": True, "autopr_paused": False}
+
+
+async def cancel_autopr_run(
+    *, project_id: UUID, task_id: UUID, actor_user_id: UUID,
+) -> Optional[dict]:
+    """Hold future AutoPR runs without moving the card or discarding answers.
+
+    For an active In Progress claim, this settles the recovery lease so the
+    harness will not retry it. It does not kill an already-running process. The
+    task lock orders this event with requests, reconsiderations, and claims.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            task = await conn.fetchrow(
+                "SELECT id, board_column, status FROM mw_tasks "
+                "WHERE id = $1 AND project_id = $2 FOR UPDATE",
+                task_id, project_id,
+            )
+            if not task:
+                return None
+            active_claimed_at = None
+            if task["board_column"] == "in_progress":
+                active_claimed_at = await conn.fetchval(
+                    f"SELECT ({_AUTOPR_ACTIVE_CLAIM_QUERY}) "
+                    "FROM mw_tasks t WHERE t.id = $1",
+                    task_id,
+                )
+            if (
+                task["status"] == "cancelled"
+                or (
+                    task["board_column"] not in _AUTOPR_RUN_LANES
+                    and active_claimed_at is None
+                )
+            ):
                 raise AutoPRReconsiderationConflict(
                     "This ticket has left the queue. Refresh to see its current state."
                 )
@@ -627,11 +729,19 @@ async def claim_autopr_run(
     task_id: UUID,
     actor_user_id: Optional[UUID] = None,
 ) -> Optional[dict]:
-    """Consume any pending run request for this card.
+    """Consume a pending request and mark the card In Progress atomically.
 
     Called by the trusted harness when it actually starts investigating, so a
-    crashed or unselectable card cannot make the watcher dispatch forever.
+    queued card leaves Todo at pickup rather than after publication. An active
+    claim remains discoverable for crash recovery until a later column or
+    progress-note event settles the run.
     """
+    if str(project_id) not in KANBAN_AUTOPR_PROJECT_IDS:
+        raise AutoPRReconsiderationConflict(
+            "AutoPR does not watch this board, so it cannot claim this ticket"
+        )
+    if str(actor_user_id) != KANBAN_AUTOPR_BOT_USER_ID:
+        raise AutoPRActorNotPermitted("Only the AutoPR service account may claim runs")
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
@@ -645,17 +755,76 @@ async def claim_autopr_run(
                 f"SELECT {_AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = $1",
                 task_id,
             )
+            if held or task["status"] == "cancelled":
+                return {"ok": False, "reason": "Ticket is held or no longer queued"}
+            active_claimed_at = None
+            if task["board_column"] == "in_progress":
+                active_claimed_at = await conn.fetchval(
+                    f"""
+                    SELECT ({_AUTOPR_ACTIVE_CLAIM_QUERY})
+                    FROM mw_tasks t
+                    WHERE t.id = $1
+                    """,
+                    task_id,
+                )
             # collect/select also admit an ALREADY SCOPED in-progress card
             # whose linked PR closed without merging. The selector verifies
-            # that PR state; recheck the live provenance here before claiming.
+            # that PR state. An active claim is the other admitted in-progress
+            # shape: it means a prior workflow died after pickup and this run
+            # is resuming the durable checkpoint.
             scoped_recovery = (
                 task["board_column"] == "in_progress"
                 and (task["progress_note"] or "").startswith("🤖 AUTO SETUP · ALREADY SCOPED")
             )
-            if held or task["status"] == "cancelled" or (
-                task["board_column"] not in _AUTOPR_RUN_LANES and not scoped_recovery
+            claimed_recovery = (
+                task["board_column"] == "in_progress"
+                and active_claimed_at is not None
+            )
+            if (
+                task["board_column"] not in _AUTOPR_RUN_LANES
+                and not scoped_recovery
+                and not claimed_recovery
             ):
                 return {"ok": False, "reason": "Ticket is held or no longer queued"}
+
+            moved_from = task["board_column"]
+            updated = await conn.fetchrow(
+                """
+                UPDATE mw_tasks SET
+                    board_column = 'in_progress',
+                    status = 'pending',
+                    completed_at = NULL,
+                    updated_at = NOW()
+                WHERE id = $1 AND project_id = $2
+                RETURNING id, project_id, company_id, created_by, title, description,
+                          due_date, priority, status, board_column,
+                          COALESCE(pipeline_column, 'lead') AS pipeline_column,
+                          assigned_to, completed_at, created_at, updated_at,
+                          progress_note, category, element_id, review_note,
+                          deal_value, probability, contact_name, contact_company,
+                          contact_email, contact_phone, outcome, loss_reason,
+                          next_action_at, expected_close,
+                          to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                          (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number
+                """,
+                task_id, project_id,
+            )
+            if not updated:
+                return None
+            if moved_from != "in_progress":
+                # This event is deliberately written before the claim. Both
+                # share the task lock; clock_timestamp() on the claim makes the
+                # active-claim query see pickup as newer than its own move.
+                await _log_task_history(
+                    conn,
+                    task_id=task_id,
+                    project_id=project_id,
+                    actor_user_id=actor_user_id,
+                    event_type="column_change",
+                    from_value=moved_from,
+                    to_value="in_progress",
+                    metadata={"kind": "autopr_run_claim_move"},
+                )
             row = await conn.fetchrow(
                 """
                 INSERT INTO mw_task_history
@@ -667,7 +836,17 @@ async def claim_autopr_run(
                 task_id, str(task_id), project_id, actor_user_id,
                 json.dumps({"kind": "autopr_run_claim"}),
             )
-    return {"ok": True, "claimed_at": row["created_at"].isoformat()}
+    claimed_at = row["created_at"].isoformat()
+    result = _row_to_task(dict(updated))
+    result["autopr_claimed_at"] = claimed_at
+    result["autopr_run_requested_at"] = None
+    if moved_from != "in_progress":
+        result["last_moved_at"] = claimed_at
+    task_payload = dict(result)
+    if actor_user_id is not None:
+        task_payload["actor_id"] = str(actor_user_id)
+    await _broadcast_task_event_safe(project_id, "task.updated", task_payload)
+    return {"ok": True, "claimed_at": claimed_at, "task": result}
 
 
 # ---------------------------------------------------------------------------
@@ -1513,6 +1692,11 @@ async def list_project_tasks(
                    -- claims the card for a run, so the scheduled lane can stay
                    -- slow without a human having to wait for its next tick.
                    autopr_run.created_at AS autopr_run_requested_at,
+                   -- Latest unsettled pickup. The claim endpoint moves the
+                   -- card to In Progress immediately; this marker lets the
+                   -- dispatcher recover that card if the workflow dies before
+                   -- publishing a progress note or another column move.
+                   autopr_claim.created_at AS autopr_claimed_at,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first move. Counts a
                    -- review_rejected as a move too (review → changes_requested)
@@ -1613,6 +1797,7 @@ async def list_project_tasks(
                 ORDER BY h6.created_at DESC
                 LIMIT 1
             ) autopr_run ON TRUE
+            LEFT JOIN LATERAL ({_AUTOPR_ACTIVE_CLAIM_QUERY}) autopr_claim ON TRUE
             WHERE t.project_id = $1 AND t.status != 'cancelled'
               {_done_clause}
             ORDER BY

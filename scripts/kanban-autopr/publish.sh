@@ -168,7 +168,8 @@ reject_cosmetic_diff() {
         "🤖 AUTO SETUP · BLOCKED: COSMETIC DIFF · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
         "$EXISTING_PROGRESS_NOTE")"
     if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-        "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null; then
+        "$(jq -n --arg note "$origin_note" \
+            '{board_column: "changes_requested", progress_note: $note}')" >/dev/null; then
         post_context_request \
             "AutoPR produced a diff that only rewrites string literals for a card asking for structure, so it was discarded. Either the criteria are already met — reply and it will return acceptance_criteria_met with per-criterion evidence — or the card needs the missing structural detail." \
             "$origin_note"
@@ -451,7 +452,8 @@ if [ "$OUTCOME" = no_safe_action ]; then
             "$note_prefix · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $no_spec · note: $CARD_NOTE" \
             "$EXISTING_PROGRESS_NOTE")"
         mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
-            "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" >/dev/null
+            "$(jq -n --arg note "$origin_note" \
+                '{board_column: "changes_requested", progress_note: $note}')" >/dev/null
         if [ "$NEEDS_CONTEXT_REQUEST" = true ]; then
             post_context_request "$CONTEXT_REASON" "$origin_note"
         fi

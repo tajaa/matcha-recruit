@@ -279,6 +279,8 @@ extension KanbanBoardView {
                 ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
             pendingCommitCount: viewModel.pendingSuggestionCount(taskId: task.id),
             autoPRRuntimeApprovalInFlight: approvingAutoPRRuntimeTaskIds.contains(task.id),
+            autoPRBotUserId: viewModel.autoPRBotUserId,
+            autoPRBoardIsWatched: viewModel.autoPRBoardIsWatched,
             onTap: { open(task) },
             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
             onMoveColumn: { col in move(taskId: task.id, to: col) },

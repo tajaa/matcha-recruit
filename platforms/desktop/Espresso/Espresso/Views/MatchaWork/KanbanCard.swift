@@ -13,6 +13,8 @@ struct KanbanCardView: View {
     /// Drives the purple "commits may have finished N" badge on the card face.
     var pendingCommitCount: Int = 0
     var autoPRRuntimeApprovalInFlight = false
+    var autoPRBotUserId: String?
+    var autoPRBoardIsWatched: Bool?
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
@@ -46,6 +48,26 @@ struct KanbanCardView: View {
 
     private var assigneeDisplay: String? { task.displayAssignee }
 
+    /// Full-width state at the top of the card. Queue and pickup are different
+    /// moments: a request waits in Todo, while a claim moves to In Progress.
+    /// Naming both prevents a quiet one-line note state from being mistaken for
+    /// ordinary contributor prose.
+    private var autoPRBanner: (label: String, detail: String, icon: String, color: Color)? {
+        if task.autoprPaused == true {
+            return ("AUTOPR PAUSED", "Run again from the ticket", "pause.circle.fill", .orange)
+        }
+        if task.autoprClaimedAt != nil {
+            return ("AUTOPR WORKING", "Picked up", "hammer.circle.fill", .mwInkStrong)
+        }
+        if task.isAutoPRQueueCandidate(
+            botUserId: autoPRBotUserId,
+            boardIsWatched: autoPRBoardIsWatched
+        ) {
+            return ("IN QUEUE", "Waiting for matcha-autopr", "clock.arrow.circlepath", .blue)
+        }
+        return nil
+    }
+
     /// Pull the answer form out of AutoPR's progress note for the card face.
     private var autoPRQuestionPreview: String? {
         guard let note = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -75,12 +97,24 @@ struct KanbanCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if task.autoprPaused == true {
-                Label("AutoPR paused", systemImage: "pause.circle.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 12).padding(.top, 10)
-                    .help("Open the ticket to run again. A new review round also releases this hold.")
+            if let banner = autoPRBanner {
+                HStack(spacing: 5) {
+                    Image(systemName: banner.icon)
+                    Text(banner.label)
+                        .fontWeight(.bold)
+                    Text("· \(banner.detail)")
+                        .foregroundColor(appState.themeTextSecondary)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 9))
+                .foregroundColor(banner.color)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(banner.color.opacity(0.10))
+                .help(task.autoprPaused == true
+                      ? "Open the ticket to run again. A new review round also releases this hold."
+                      : banner.detail)
             }
             // Header — checkbox + title. Staleness no longer tints the whole
             // band (the 18% red/orange wash read as mud on dark surfaces);
