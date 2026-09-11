@@ -9,6 +9,7 @@ Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
 import hashlib
+import hmac
 import logging
 import re
 import secrets
@@ -41,7 +42,11 @@ class _GmailOAuthStateStoreUnavailable(RuntimeError):
 
 
 def _gmail_oauth_state_key(state: str) -> str:
-    digest = hashlib.sha256(state.encode("ascii")).hexdigest()
+    digest = hmac.new(
+        get_settings().jwt_secret_key.encode("utf-8"),
+        state.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
     return f"{_GMAIL_OAUTH_STATE_KEY_PREFIX}{digest}"
 
 

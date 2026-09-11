@@ -15,19 +15,40 @@ CALLBACK_PATH = "/api/matcha-work/agent/email/callback"
 
 
 class FakeRedis:
-    def __init__(self):
+    def __init__(self, *, set_error=None, getdel_error=None, reject_sets=False):
         self.values = {}
         self.set_calls = []
+        self.set_error = set_error
+        self.getdel_error = getdel_error
+        self.reject_sets = reject_sets
 
     async def set(self, key, value, **kwargs):
         self.set_calls.append((key, value, kwargs))
+        if self.set_error:
+            raise self.set_error
+        if self.reject_sets:
+            return False
         if kwargs.get("nx") and key in self.values:
             return False
         self.values[key] = value
         return True
 
     async def getdel(self, key):
+        if self.getdel_error:
+            raise self.getdel_error
         return self.values.pop(key, None)
+
+
+@pytest.fixture(autouse=True)
+def oauth_settings(monkeypatch):
+    monkeypatch.setattr(
+        workspace,
+        "get_settings",
+        lambda: SimpleNamespace(
+            app_base_url="https://hey-matcha.com",
+            jwt_secret_key="test-jwt-secret",
+        ),
+    )
 
 
 def test_callback_is_public_but_connect_remains_authenticated():
@@ -54,6 +75,7 @@ async def test_oauth_state_is_opaque_stored_for_30_minutes_and_single_use(monkey
 
     assert len(state) == 43
     assert str(user_id) not in state
+    assert state not in redis.set_calls[0][0]
     assert redis.set_calls == [
         (
             workspace._gmail_oauth_state_key(state),
@@ -95,6 +117,46 @@ async def test_oauth_state_fails_closed_without_redis(monkeypatch):
         await workspace._consume_gmail_oauth_state("a" * 43)
 
 
+@pytest.mark.asyncio
+async def test_oauth_state_store_errors_and_collisions_fail_closed(monkeypatch):
+    monkeypatch.setattr(
+        workspace,
+        "get_redis_cache",
+        lambda: FakeRedis(set_error=ConnectionError("set failed")),
+    )
+    with pytest.raises(workspace._GmailOAuthStateStoreUnavailable):
+        await workspace._issue_gmail_oauth_state(uuid4())
+
+    monkeypatch.setattr(
+        workspace,
+        "get_redis_cache",
+        lambda: FakeRedis(reject_sets=True),
+    )
+    with pytest.raises(workspace._GmailOAuthStateStoreUnavailable):
+        await workspace._issue_gmail_oauth_state(uuid4())
+
+    monkeypatch.setattr(
+        workspace,
+        "get_redis_cache",
+        lambda: FakeRedis(getdel_error=ConnectionError("getdel failed")),
+    )
+    with pytest.raises(workspace._GmailOAuthStateStoreUnavailable):
+        await workspace._consume_gmail_oauth_state("a" * 43)
+
+
+@pytest.mark.asyncio
+async def test_oauth_state_rejects_corrupt_user_binding(monkeypatch):
+    redis = FakeRedis()
+    state = workspace.secrets.token_urlsafe(32)
+    redis.values[workspace._gmail_oauth_state_key(state)] = "not-a-user-id"
+    monkeypatch.setattr(workspace, "get_redis_cache", lambda: redis)
+
+    with pytest.raises(ValueError, match="Invalid or expired OAuth state"):
+        await workspace._consume_gmail_oauth_state(state)
+
+    assert redis.values == {}
+
+
 def test_callback_returns_503_when_state_store_is_unavailable(monkeypatch):
     monkeypatch.setattr(workspace, "get_redis_cache", lambda: None)
 
@@ -108,6 +170,24 @@ def test_callback_returns_503_when_state_store_is_unavailable(monkeypatch):
     assert response.json() == {
         "detail": "Gmail connection is temporarily unavailable. Please try again."
     }
+
+
+@pytest.mark.asyncio
+async def test_connect_returns_503_when_state_store_is_unavailable(monkeypatch):
+    monkeypatch.setattr(workspace, "get_redis_cache", lambda: None)
+    monkeypatch.setattr(
+        gmail_service,
+        "get_oauth_credentials",
+        lambda: {"client_id": "client-id", "client_secret": "client-secret"},
+    )
+
+    with pytest.raises(workspace.HTTPException) as exc_info:
+        await workspace.agent_email_connect(SimpleNamespace(id=uuid4()))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "Gmail connection is temporarily unavailable. Please try again."
+    )
 
 
 def test_google_cancel_returns_friendly_html_without_requiring_code(monkeypatch):
@@ -184,11 +264,6 @@ def test_callback_exchanges_code_and_stores_token_without_matcha_auth(monkeypatc
         async def save_token(self, token):
             saved["token"] = token
 
-    monkeypatch.setattr(
-        workspace,
-        "get_settings",
-        lambda: SimpleNamespace(app_base_url="https://hey-matcha.com"),
-    )
     monkeypatch.setattr(workspace, "get_redis_cache", lambda: redis)
     monkeypatch.setattr(gmail_service, "get_oauth_credentials", lambda: credentials)
     monkeypatch.setattr(gmail_service, "GmailService", FakeGmailService)
