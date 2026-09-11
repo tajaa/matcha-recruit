@@ -203,7 +203,7 @@ announced_reports="$(printf '%s' "$history_json" | jq -c '
 [ "$announced_reports" != null ] || die "could not read prior report announcements"
 
 # Only the NEWEST report can be a crashed pass's orphan. The snapshots Espresso
-# attached (email-<gmail id8>.md) never match: they carry no -report- infix.
+# attached (email-<gmail message id>.md) never match: they carry no -report- infix.
 orphan_report="$(printf '%s' "$existing_files" \
     | jq -c --arg id8 "$ID8" --argjson announced "$announced_reports" '
     ([.[] | select((.filename // "") | test("^email-report-" + $id8 + "-r[0-9]+\\.md$"))]

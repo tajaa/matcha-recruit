@@ -250,6 +250,10 @@ struct EmailDetailView: View {
         .background(appState.themeBg)
         .task(id: emailId) {
             generation += 1
+            // Drop the previous message first: `msg` falls back to `loaded`,
+            // so keeping it would show the old email (with a live action bar)
+            // under the new id until the fetch returns.
+            loaded = nil
             summary = nil
             actionError = nil
             sentNote = nil

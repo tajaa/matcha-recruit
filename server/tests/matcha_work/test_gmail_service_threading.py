@@ -3,12 +3,14 @@ header are different identifiers. The old code used one message id for
 both, which wrote an In-Reply-To no mail client could match."""
 
 import base64
+from collections import defaultdict
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-from app.matcha.services.matcha_work.gmail_service import GmailService
+from app.core.services import redis_cache
+from app.matcha.services.matcha_work.gmail_service import GmailSendRateLimited, GmailService
 
 
 def _b64(text: str) -> str:
@@ -18,7 +20,7 @@ def _b64(text: str) -> str:
 def _svc():
     svc = GmailService(uuid4())
     svc._gmail_post = AsyncMock(return_value={"id": "gmail-1"})
-    svc._check_send_rate = lambda: None
+    svc._check_send_rate = AsyncMock(return_value=None)
     return svc
 
 
@@ -73,7 +75,7 @@ async def test_send_email_legacy_reply_to_id_threads_without_a_bogus_header():
     assert path == "/users/me/messages/send"
     assert payload["threadId"] == "m1"
     assert "In-Reply-To" not in _decoded_raw(payload["raw"])
-    assert len(svc._send_timestamps) == 1
+    svc._check_send_rate.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -98,6 +100,65 @@ async def test_header_injection_is_still_rejected(kwargs):
     with pytest.raises(ValueError):
         await svc.send_email(**args)
     svc._gmail_post.assert_not_awaited()
+
+
+# --- per-user send ceiling ---------------------------------------------------
+
+@pytest.fixture
+def fresh_limits(monkeypatch):
+    """No Redis in tests, so the limiter's in-process fallback is the store;
+    start each test from an empty one."""
+    monkeypatch.setattr(redis_cache, "get_redis_cache", lambda: None)
+    monkeypatch.setattr(redis_cache, "_rl_attempts", defaultdict(list))
+
+
+def _live(user_id):
+    """A real rate check, a fake Gmail — and a fresh instance each call, the
+    way every route builds one."""
+    svc = GmailService(user_id)
+    svc._gmail_post = AsyncMock(return_value={"id": "gmail-1"})
+    return svc
+
+
+async def _send(svc, subject="Hi"):
+    return await svc.send_email(to="alice@example.com", subject=subject, body="b")
+
+
+@pytest.mark.asyncio
+async def test_send_ceiling_holds_across_instances_for_one_user(fresh_limits):
+    user = uuid4()
+    for _ in range(5):
+        await _send(_live(user))
+    blocked = _live(user)
+    with pytest.raises(GmailSendRateLimited, match="5 emails per minute"):
+        await _send(blocked)
+    blocked._gmail_post.assert_not_awaited()
+    await _send(_live(uuid4()))  # someone else's allowance is untouched
+
+
+@pytest.mark.asyncio
+async def test_both_windows_are_checked_per_user(monkeypatch):
+    seen = []
+
+    async def record(key, action, limit, window):
+        seen.append((key, action, limit, window))
+
+    monkeypatch.setattr(redis_cache, "check_rate_limit", record)
+    user = uuid4()
+    await _send(_live(user))
+    assert seen == [
+        (str(user), "gmail_send_60s", 5, 60),
+        (str(user), "gmail_send_3600s", 50, 3600),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_header_does_not_spend_the_allowance(fresh_limits):
+    user = uuid4()
+    for _ in range(10):
+        with pytest.raises(ValueError):
+            await _send(_live(user), subject="Hi\r\nBcc: x@example.net")
+    await _send(_live(user))
 
 
 @pytest.mark.asyncio

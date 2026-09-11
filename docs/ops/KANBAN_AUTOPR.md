@@ -924,7 +924,8 @@ fields Goal / Instructions / Tone). In Espresso's Email panel a person picks a m
 uses **Send to board**: that creates the card and calls
 `POST /matcha-work/agent/email/snapshot`, which fetches each chosen message **on the
 server**, with that person's own Gmail connection, and attaches it to the task as
-`email-<first 8 of the Gmail id>.md` — YAML front matter (`email_id`, `thread_id`, `from`,
+`email-<Gmail message id>.md` (the whole id: Gmail ids are time-ordered, so a prefix collides
+for mail received together) — YAML front matter, values double-quoted (`email_id`, `thread_id`, `from`,
 `date`, `subject`, `attachments`), a `# subject` heading, From / Date lines, then the body,
 capped at 20,000 characters. The email's own attachments are listed by filename and type
 only; their content is never included. The endpoint is idempotent on filename. The sandbox
@@ -971,7 +972,8 @@ all, or one that needs a decision only its owner can make.
 ```
 
 - `per_email`: one entry per snapshot actually read, no other keys; `file` is the bare
-  attachment name (`^email-[A-Za-z0-9_-]{4,8}\.md$`) and unique across entries; `from` /
+  attachment name (`^email-[A-Za-z0-9_-]{1,128}\.md$`, never an `email-report-` name) and
+  unique across entries; `from` /
   `subject` ≤ 200, `summary` 1–600, `suggested_action` ≤ 300.
 - `email_report` needs ≥ 1 `per_email` entry and no questions; `needs_clarification` needs
   ≥ 1 question and no staged actions. No `sources`. `card_note`, `summary`, `confidence`,

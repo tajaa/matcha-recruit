@@ -305,7 +305,7 @@ autopr_normalize_research_decision() {
 
 # ---- email (artifact) decisions --------------------------------------------
 # The email pass reviews the snapshots Espresso attached to the card
-# (email-<gmail id8>.md) and writes a triage report: one `per_email` entry per
+# (email-<gmail message id>.md) and writes a triage report: one `per_email` entry per
 # snapshot it read, plus optional reply drafts in `staged_actions` that —
 # exactly as for research — the harness renders and NEVER sends. There is no
 # `sources`: the corpus is the card's own attachments, not the web.
@@ -347,8 +347,10 @@ _autopr_email_decision_schema_ok() {
         and ((keys_unsorted - ["file", "from", "subject", "bucket", "summary",
                                "suggested_action"]) | length == 0)
         # The bare attachment name the snapshot endpoint writes
-        # (email-<first 8 of the Gmail id>.md) — never a path.
-        and (.file | type == "string" and test("^email-[A-Za-z0-9_-]{4,8}\\.md$"))
+        # (email-<Gmail message id>.md) — never a path, and never one of the
+        # email-report-… files the publisher writes.
+        and (.file | type == "string" and test("^email-[A-Za-z0-9_-]{1,128}\\.md$")
+             and (startswith("email-report-") | not))
         and (.from | type == "string" and length <= 200)
         and (.subject | type == "string" and length <= 200)
         and (.bucket | IN("needs_reply", "action", "fyi", "newsletter"))

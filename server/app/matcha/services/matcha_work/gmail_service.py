@@ -37,6 +37,13 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
 ]
 
+# (limit, window seconds, label) — per user, however many requests or workers.
+SEND_RATE_LIMITS = ((5, 60, "5 emails per minute"), (50, 3600, "50 emails per hour"))
+
+
+class GmailSendRateLimited(RuntimeError):
+    """The per-user send ceiling tripped. Nothing was sent."""
+
 
 def get_oauth_credentials() -> dict | None:
     """Load Google OAuth client credentials from credentials.json."""
@@ -58,7 +65,6 @@ class GmailService:
         self.user_id = user_id
         self._token_data: dict | None = None
         self._loaded = False
-        self._send_timestamps: list[float] = []
         self._token_validated_at: float = 0
 
     async def load_token(self):
@@ -294,15 +300,14 @@ class GmailService:
         in_reply_to: str | None = None,
     ) -> dict:
         """Send now. Same threading contract as create_draft."""
-        self._check_send_rate()
+        # Validate first, so a refused header doesn't spend the allowance.
         raw = self._build_raw(to, subject, body, in_reply_to)
+        await self._check_send_rate()
         send_body: dict = {"raw": raw}
         thread = thread_id or reply_to_id
         if thread:
             send_body["threadId"] = thread
-        data = await self._gmail_post("/users/me/messages/send", send_body)
-        self._send_timestamps.append(time.time())
-        return data
+        return await self._gmail_post("/users/me/messages/send", send_body)
 
     async def delete_draft(self, draft_id: str) -> None:
         """Remove a saved draft (gmail.compose covers drafts.delete). Used after
@@ -311,13 +316,20 @@ class GmailService:
             raise ValueError("Invalid draft id")
         await self._gmail_delete(f"/users/me/drafts/{draft_id}")
 
-    def _check_send_rate(self):
-        now = time.time()
-        self._send_timestamps = [t for t in self._send_timestamps if now - t < 3600]
-        if len([t for t in self._send_timestamps if now - t < 60]) >= 5:
-            raise ValueError("Send rate limit: max 5 emails per minute")
-        if len(self._send_timestamps) >= 50:
-            raise ValueError("Send rate limit: max 50 emails per hour")
+    async def _check_send_rate(self) -> None:
+        """Per-USER ceiling in the shared rate-limit store (Redis; in-process
+        when Redis is down). It used to be a list on the instance, but every
+        route builds a fresh GmailService, so the list never held more than
+        the one send in flight and the ceiling could not trip."""
+        from fastapi import HTTPException
+
+        from ....core.services.redis_cache import check_rate_limit
+
+        for limit, window, label in SEND_RATE_LIMITS:
+            try:
+                await check_rate_limit(str(self.user_id), f"gmail_send_{window}s", limit, window)
+            except HTTPException as exc:
+                raise GmailSendRateLimited(f"Send rate limit: max {label}") from exc
 
     def _extract_body(self, payload: dict) -> str:
         if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):

@@ -320,7 +320,7 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
     # and be re-fed as image inputs. Keep only the newest prior report (the
     # revision prompt treats it as version 1) and drop the rest of what the
     # publisher uploaded, recognised by its own naming (research-… or
-    # email-…-rN). The snapshots on an email card, email-<gmail id8>.md, carry no
+    # email-…-rN). The snapshots on an email card, email-<gmail message id>.md, carry no
     # round suffix and are never mistaken for output of the bot.
     def mine: ((.filename // "") | test("^(research|email)-(report-)?" + $id8 + "-r[0-9]+"));
     def prior_report: ((.filename // "") | test("^(research|email)-report-" + $id8 + "-r[0-9]+\\.md$"));

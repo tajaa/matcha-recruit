@@ -112,7 +112,7 @@ contain no markdown fences. Use this exact shape:
   "outcome": "email_report|needs_clarification",
   "card_note": "1-240 characters, plain text, no newline and no · character",
   "summary": "Plain text, at most 1200 characters. Same substance as ### Summary.",
-  "per_email": [{"file": "email-18c3f0a1.md", "from": "...", "subject": "...", "bucket": "needs_reply|action|fyi|newsletter", "summary": "...", "suggested_action": "..."}],
+  "per_email": [{"file": "email-18c3f0a1b2c3d4e5.md", "from": "...", "subject": "...", "bucket": "needs_reply|action|fyi|newsletter", "summary": "...", "suggested_action": "..."}],
   "confidence": {"score": 0, "reason": "..."},
   "questions": [{"id":"q1", "question":"...", "why_blocking":"...", "options":[{"key":"a","label":"...","impact":"..."},{"key":"b","label":"...","impact":"..."}], "default_assumption":"..."}],
   "staged_actions": [{"kind":"email", "to":"alice@example.com", "subject":"Re: ...", "body":"...", "why":"..."}]

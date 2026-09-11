@@ -22,8 +22,9 @@ struct EmailReplySheet: View {
         self.original = original
         self.onSent = onSent
         _to = State(initialValue: draft.to)
-        let subject = draft.subject
-        _subject = State(initialValue: subject.lowercased().hasPrefix("re:") ? subject : "Re: \(subject)")
+        // Already the reply subject saved on the Gmail draft (the server owns
+        // the Re: rule).
+        _subject = State(initialValue: draft.subject)
         _text = State(initialValue: draft.body)
     }
 

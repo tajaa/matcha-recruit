@@ -8,6 +8,7 @@ order-sensitive route pair this module used to carry.
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
 """
+import asyncio
 import json
 import logging
 import re
@@ -107,8 +108,55 @@ def _require_message_id(value) -> str:
 
 
 def _reply_subject(subject: str | None) -> str:
-    subject = subject or ""
+    subject = re.sub(r"[\r\n]+", " ", subject or "").strip()
     return subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+
+_BARE_ADDRESS_RE = re.compile(r"[^@\s,;<>\"]+@[^@\s,;<>\"]+\.[^@\s,;<>\"]+")
+
+
+def _reply_recipient(from_header: str | None) -> str | None:
+    """The one bare address a reply goes to, parsed out of the original's
+    From header, or None when it has no usable one. The header is written by
+    the sender: a folded CR/LF would make `_build_raw` refuse the draft (a
+    sender-chosen 500), and `Alice <a@x.test>, b@y.test` would become a
+    two-recipient To: line on the saved draft."""
+    from email.utils import getaddresses
+
+    for _name, addr in getaddresses([from_header or ""]):
+        addr = addr.strip()
+        if _BARE_ADDRESS_RE.fullmatch(addr):
+            return addr
+    return None
+
+
+def _clean_message_id_header(value) -> str | None:
+    """The original's Message-ID when it is one (`<…>`, no whitespace). A
+    malformed value is dropped, not refused: Gmail's threadId still keeps the
+    reply in its conversation."""
+    if isinstance(value, str) and re.fullmatch(r"<[^<>\s]{1,995}>", value.strip()):
+        return value.strip()
+    return None
+
+
+def _optional_str(body: dict, key: str) -> str | None:
+    value = body.get(key)
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{key} must be a string")
+    return value
+
+
+async def _get_message_or_404(gmail, email_id: str) -> dict:
+    """Gmail answers a stale id (a message deleted since the list loaded) with
+    400/404. That is "not found" for the caller, not a server error."""
+    try:
+        return await gmail.get_message(email_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (400, 404):
+            raise HTTPException(status_code=404, detail="Message not found") from exc
+        raise
 
 
 @router.get("/tasks/open")
@@ -438,12 +486,7 @@ async def agent_email_get_message(
     dropped out of the unread list (read elsewhere, or after a relaunch)."""
     _require_message_id(email_id)
     gmail = await _connected_gmail(current_user)
-    try:
-        return await gmail.get_message(email_id)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in (400, 404):
-            raise HTTPException(status_code=404, detail="Message not found") from exc
-        raise
+    return await _get_message_or_404(gmail, email_id)
 
 
 @router.post("/agent/email/summarize")
@@ -459,7 +502,7 @@ async def agent_email_summarize(
     email_id = _require_message_id(body.get("email_id"))
 
     gmail = await _connected_gmail(current_user)
-    msg = await gmail.get_message(email_id)
+    msg = await _get_message_or_404(gmail, email_id)
     return {"email_id": email_id, "summary": await email_ai.summarize_email(msg)}
 
 
@@ -470,18 +513,19 @@ async def agent_email_triage(
 ):
     """Bucket messages into needs_reply / action / fyi / newsletter for the
     sidebar. In-app only: nothing is labelled, archived or marked read in
-    Gmail. With no `email_ids`, triages the current unread list."""
-    import asyncio
-
+    Gmail. With no `email_ids`, triages the current unread list; an empty
+    list is an empty selection and triages nothing."""
     from app.matcha.services.matcha_work import email_ai_service as email_ai
 
     await _require_email_ai(current_user)
     ids = body.get("email_ids")
     if ids is not None and (not isinstance(ids, list) or not all(_is_message_id(i) for i in ids)):
         raise HTTPException(status_code=400, detail="email_ids must be a list of message ids")
+    if ids == []:
+        return {"buckets": []}
 
     gmail = await _connected_gmail(current_user)
-    if ids:
+    if ids is not None:
         unique_ids = list(dict.fromkeys(ids))[: email_ai.TRIAGE_MAX_EMAILS]
         fetched = await asyncio.gather(
             *[gmail.get_message(i) for i in unique_ids], return_exceptions=True
@@ -508,7 +552,13 @@ async def agent_email_draft(
         raise HTTPException(status_code=400, detail="instructions must be a string")
 
     gmail = await _connected_gmail(current_user)
-    email = await gmail.get_message(email_id)
+    email = await _get_message_or_404(gmail, email_id)
+    # Before the model call: no point drafting a reply that can't be addressed.
+    to = _reply_recipient(email.get("from"))
+    if to is None:
+        raise HTTPException(
+            status_code=422, detail="The original sender has no address a reply can go to"
+        )
 
     draft_body = await email_ai.draft_reply(email, instructions)
     if not draft_body:
@@ -516,20 +566,26 @@ async def agent_email_draft(
             status_code=502, detail="AI drafting is temporarily unavailable — try again"
         )
 
+    subject = _reply_subject(email.get("subject"))
     thread_id = email.get("thread_id")
-    in_reply_to = email.get("message_id_header")
-    result = await gmail.create_draft(
-        to=email["from"],
-        subject=_reply_subject(email.get("subject")),
-        body=draft_body,
-        thread_id=thread_id,
-        in_reply_to=in_reply_to,
-    )
+    in_reply_to = _clean_message_id_header(email.get("message_id_header"))
+    try:
+        result = await gmail.create_draft(
+            to=to,
+            subject=subject,
+            body=draft_body,
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+        )
+    except ValueError as exc:  # a header that still can't be written
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # `subject` is the one saved on the draft, so the client never re-derives
+    # the Re: rule.
     return {
         "draft_id": result.get("id"),
-        "to": email["from"],
-        "subject": email["subject"],
+        "to": to,
+        "subject": subject,
         "body": draft_body,
         "thread_id": thread_id,
         "in_reply_to": in_reply_to,
@@ -544,18 +600,20 @@ async def agent_email_send(
     """Send an email via the caller's Gmail. `thread_id` + `in_reply_to`
     (the original's Message-ID header) keep a reply in its conversation;
     `reply_to_id` is the legacy form and still threads."""
+    from app.matcha.services.matcha_work.gmail_service import GmailSendRateLimited
+
     to = body.get("to")
     subject = body.get("subject")
     email_body = body.get("body")
-    reply_to_id = body.get("reply_to_id")
-    thread_id = body.get("thread_id")
-    in_reply_to = body.get("in_reply_to")
-    draft_id = body.get("draft_id")
-
-    if not all([to, subject, email_body]):
+    if not all(isinstance(v, str) and v.strip() for v in (to, subject, email_body)):
         raise HTTPException(status_code=400, detail="to, subject, and body are required")
-    if draft_id is not None and not isinstance(draft_id, str):
-        raise HTTPException(status_code=400, detail="draft_id must be a string")
+    reply_to_id = _optional_str(body, "reply_to_id")
+    thread_id = _optional_str(body, "thread_id")
+    in_reply_to = _optional_str(body, "in_reply_to")
+    draft_id = _optional_str(body, "draft_id")
+    for key, value in (("reply_to_id", reply_to_id), ("thread_id", thread_id)):
+        if value is not None and not _is_message_id(value):
+            raise HTTPException(status_code=400, detail=f"{key} must be a Gmail id")
 
     gmail = await _connected_gmail(current_user)
     try:
@@ -567,7 +625,9 @@ async def agent_email_send(
             thread_id=thread_id,
             in_reply_to=in_reply_to,
         )
-    except ValueError as exc:  # newline injection / per-instance rate limit
+    except GmailSendRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ValueError as exc:  # a header carrying CR/LF
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if draft_id:
@@ -587,13 +647,13 @@ async def agent_email_snapshot(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Attach `email-<id8>.md` snapshots of the caller's own Gmail messages to
-    a kanban task, so an `email` card carries its corpus into the AutoPR
-    sandbox (which never touches Gmail itself). Rendered server-side so mail
-    bodies make one hop. Idempotent on filename; no AI, so no `email_ai` gate.
-    Project access + task ownership are checked exactly like the task-file
-    upload route."""
-    from app.core.services.storage import get_storage
+    """Attach `email-<message id>.md` snapshots of the caller's own Gmail
+    messages to a kanban task, so an `email` card carries its corpus into the
+    AutoPR sandbox (which never touches Gmail itself). Rendered server-side so
+    mail bodies make one hop. Idempotent on filename; no AI, so no `email_ai`
+    gate. Project access + task ownership are checked exactly like the
+    task-file upload route, and the bytes go through the same project-file
+    upload policy."""
     from app.matcha.routes.matcha_work._shared import (
         _resolve_file_urls,
         _verify_project_access,
@@ -623,35 +683,39 @@ async def agent_email_snapshot(
 
     existing = {f.get("filename") for f in await project_file_service.list_task_files(project_id, task_id)}
     prefix = f"matcha-work/{company_id}/{project_id}/tasks/{task_id}/files"
-    storage = get_storage()
-    files: list[dict] = []
     skipped: list[dict] = []
+    to_fetch: list[str] = []
     for email_id in unique_ids:
-        try:
-            msg = await gmail.get_message(email_id)
-        except Exception:  # noqa: BLE001 — one unreadable message must not sink the rest
-            logger.warning("email snapshot: fetch failed for one message", exc_info=True)
+        # The filename is the id, so an attached message is skipped unread.
+        if email_ai.snapshot_filename(email_id) in existing:
+            skipped.append({"email_id": email_id, "reason": "already_attached"})
+        else:
+            to_fetch.append(email_id)
+
+    # Concurrent reads, as in triage: one Gmail round-trip at a time held the
+    # Send-to-board sheet open for seconds.
+    fetched = await asyncio.gather(
+        *[gmail.get_message(i) for i in to_fetch], return_exceptions=True
+    )
+    files: list[dict] = []
+    for email_id, msg in zip(to_fetch, fetched):
+        if not isinstance(msg, dict):  # one unreadable message must not sink the rest
+            logger.warning(
+                "email snapshot: fetch failed for one message",
+                exc_info=msg if isinstance(msg, BaseException) else False,
+            )
             skipped.append({"email_id": email_id, "reason": "fetch_failed"})
             continue
-        filename = email_ai.snapshot_filename(msg)
-        if filename in existing:
-            skipped.append({"email_id": email_id, "reason": "already_attached"})
-            continue
-        content = email_ai.snapshot_markdown(msg).encode("utf-8")
-        storage_url = await storage.upload_file(
-            content, filename, prefix=prefix, content_type="text/markdown"
-        )
-        record = await project_file_service.add_project_file(
+        record = await project_file_service.store_project_file_bytes(
+            email_ai.snapshot_markdown(msg).encode("utf-8"),
+            filename=email_ai.snapshot_filename(email_id),
+            content_type="text/markdown",
             project_id=project_id,
             uploaded_by=current_user.id,
-            filename=filename,
-            storage_url=storage_url,
-            content_type="text/markdown",
-            file_size=len(content),
+            prefix=prefix,
             task_id=task_id,
         )
         files.append(record)
-        existing.add(filename)
 
     return {"files": _resolve_file_urls(files), "skipped": skipped}
 

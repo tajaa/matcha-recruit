@@ -6,6 +6,7 @@ plan gate is patched at `entitlements_service.require_plan`, so the test
 proves the route actually calls it.
 """
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -162,15 +163,18 @@ def test_draft_saves_a_threaded_gmail_draft(gmail, plan, monkeypatch):
         resp = client.post("/agent/email/draft", json={"email_id": "18c3f0a1b2c3", "instructions": "yes"})
     assert resp.status_code == 200
     body = resp.json()
+    # The response carries exactly what was saved on the draft, so the client
+    # never re-derives the recipient or the Re: rule.
     assert body == {
         "draft_id": "draft-1",
-        "to": "Alice <alice@example.com>",
-        "subject": "Friday sync",
+        "to": "alice@example.com",
+        "subject": "Re: Friday sync",
         "body": "Friday works.",
         "thread_id": "thr-9",
         "in_reply_to": "<abc@mail.example.com>",
     }
     kwargs = gmail.create_draft.await_args.kwargs
+    assert kwargs["to"] == "alice@example.com"
     assert kwargs["subject"] == "Re: Friday sync"
     assert kwargs["thread_id"] == "thr-9"
     assert kwargs["in_reply_to"] == "<abc@mail.example.com>"
@@ -199,6 +203,85 @@ def test_draft_400_on_bad_input(gmail, plan):
         assert client.post("/agent/email/draft", json={"email_id": "x", "instructions": 5}).status_code == 400
 
 
+@pytest.mark.parametrize("sender, expected", [
+    ("Alice <alice@example.com>, harvest@evil.example.net", "alice@example.com"),
+    ("alice@example.com", "alice@example.com"),
+])
+def test_draft_replies_to_exactly_one_parsed_address(gmail, plan, monkeypatch, sender, expected):
+    gmail.get_message.return_value = {**MSG, "from": sender}
+    monkeypatch.setattr(email_ai_service, "draft_reply", AsyncMock(return_value="ok"))
+    with _client() as client:
+        resp = client.post("/agent/email/draft", json={"email_id": "x"})
+    assert resp.status_code == 200
+    assert resp.json()["to"] == expected
+    assert gmail.create_draft.await_args.kwargs["to"] == expected
+
+
+@pytest.mark.parametrize("sender", [
+    "", "undisclosed-recipients:;", "Alice <alice@example.com\r\nBcc: x@example.net>",
+])
+def test_draft_422s_without_a_replyable_sender_before_the_model_call(gmail, plan, monkeypatch, sender):
+    draft = AsyncMock(return_value="ok")
+    monkeypatch.setattr(email_ai_service, "draft_reply", draft)
+    gmail.get_message.return_value = {**MSG, "from": sender}
+    with _client() as client:
+        resp = client.post("/agent/email/draft", json={"email_id": "x"})
+    assert resp.status_code == 422
+    draft.assert_not_awaited()
+    gmail.create_draft.assert_not_awaited()
+
+
+def test_draft_flattens_a_sender_written_subject_and_drops_a_bad_message_id(gmail, plan, monkeypatch):
+    gmail.get_message.return_value = {
+        **MSG,
+        "subject": "Hi\r\nBcc: x@example.net",
+        "message_id_header": "<a@b.example.com>\r\nBcc: y@example.net",
+    }
+    monkeypatch.setattr(email_ai_service, "draft_reply", AsyncMock(return_value="ok"))
+    with _client() as client:
+        assert client.post("/agent/email/draft", json={"email_id": "x"}).status_code == 200
+    kwargs = gmail.create_draft.await_args.kwargs
+    assert kwargs["subject"] == "Re: Hi Bcc: x@example.net"
+    assert kwargs["in_reply_to"] is None
+    assert kwargs["thread_id"] == "thr-9"  # still threads in Gmail
+
+
+def test_draft_422s_when_the_gmail_service_refuses_a_header(gmail, plan, monkeypatch):
+    monkeypatch.setattr(email_ai_service, "draft_reply", AsyncMock(return_value="ok"))
+    gmail.create_draft.side_effect = ValueError("Email to contains newline characters")
+    with _client() as client:
+        resp = client.post("/agent/email/draft", json={"email_id": "x"})
+    assert resp.status_code == 422
+
+
+def _gmail_404():
+    request = httpx.Request("GET", "https://gmail.googleapis.com/gmail/v1/users/me/messages/gone")
+    return httpx.HTTPStatusError("not found", request=request, response=httpx.Response(404, request=request))
+
+
+@pytest.mark.parametrize("path", ["/agent/email/summarize", "/agent/email/draft"])
+def test_ai_actions_404_on_a_message_gmail_no_longer_has(gmail, plan, monkeypatch, path):
+    model = AsyncMock(return_value="ok")
+    monkeypatch.setattr(email_ai_service, "summarize_email", model)
+    monkeypatch.setattr(email_ai_service, "draft_reply", model)
+    gmail.get_message.side_effect = _gmail_404()
+    with _client() as client:
+        resp = client.post(path, json={"email_id": "gone123"})
+    assert resp.status_code == 404
+    model.assert_not_awaited()
+
+
+def test_triage_with_an_empty_selection_triages_nothing(gmail, plan, monkeypatch):
+    triage = AsyncMock(return_value=[{"email_id": "x", "bucket": "fyi", "reason": ""}])
+    monkeypatch.setattr(email_ai_service, "triage_emails", triage)
+    with _client() as client:
+        resp = client.post("/agent/email/triage", json={"email_ids": []})
+    assert resp.status_code == 200
+    assert resp.json() == {"buckets": []}
+    gmail.fetch_unread.assert_not_awaited()
+    triage.assert_not_awaited()
+
+
 # --- send ----------------------------------------------------------------------
 
 def test_send_passes_threading_through(gmail):
@@ -222,6 +305,32 @@ def test_send_400_on_missing_fields_and_rejected_headers(gmail):
         resp = client.post("/agent/email/send", json={"to": "a@example.com", "subject": "x", "body": "y"})
     assert resp.status_code == 400
     assert "newline" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("extra", [
+    {"in_reply_to": 123},
+    {"thread_id": 5},
+    {"thread_id": "thr/../x"},
+    {"reply_to_id": ["m1"]},
+    {"subject": 7},
+    {"body": "   "},
+])
+def test_send_400s_on_mistyped_fields_instead_of_a_500(gmail, extra):
+    body = {"to": "alice@example.com", "subject": "Re: Hi", "body": "Yes.", **extra}
+    with _client() as client:
+        resp = client.post("/agent/email/send", json=body)
+    assert resp.status_code == 400
+    gmail.send_email.assert_not_awaited()
+
+
+def test_send_429s_when_the_per_user_ceiling_trips(gmail):
+    from app.matcha.services.matcha_work.gmail_service import GmailSendRateLimited
+
+    gmail.send_email.side_effect = GmailSendRateLimited("Send rate limit: max 5 emails per minute")
+    with _client() as client:
+        resp = client.post("/agent/email/send", json={"to": "alice@example.com", "subject": "Hi", "body": "b"})
+    assert resp.status_code == 429
+    assert "5 emails per minute" in resp.json()["detail"]
 
 
 # --- helper --------------------------------------------------------------------
@@ -248,6 +357,13 @@ def test_reply_subject():
     assert workspace._reply_subject("Hello") == "Re: Hello"
     assert workspace._reply_subject("re: Hello") == "re: Hello"
     assert workspace._reply_subject(None) == "Re: "
+    assert workspace._reply_subject("Hi\r\nBcc: x") == "Re: Hi Bcc: x"
+
+
+def test_clean_message_id_header():
+    assert workspace._clean_message_id_header(" <a@b.example.com> ") == "<a@b.example.com>"
+    for bad in [None, 5, "", "a@b.example.com", "<a@b>\r\nBcc: x", "<a b>"]:
+        assert workspace._clean_message_id_header(bad) is None
 
 
 def test_send_removes_the_ai_draft_it_replaced(gmail):
@@ -288,7 +404,8 @@ COMPANY_ID = "33333333-3333-4333-8333-333333333333"
 
 @pytest.fixture
 def board(monkeypatch):
-    from app.core.services import storage as storage_mod
+    """Access guards and the file-row/storage sinks are fakes; the real
+    `store_project_file_bytes` runs, so its upload policy is exercised."""
     from app.matcha.routes.matcha_work import _shared
     from app.matcha.services.matcha_work import project_file_service
 
@@ -304,7 +421,7 @@ def board(monkeypatch):
     monkeypatch.setattr(_shared, "_resolve_file_urls", lambda files: files)
     monkeypatch.setattr(project_file_service, "list_task_files", state.existing)
     monkeypatch.setattr(project_file_service, "add_project_file", state.add)
-    monkeypatch.setattr(storage_mod, "get_storage", lambda: SimpleNamespace(upload_file=state.upload))
+    monkeypatch.setattr(project_file_service, "get_storage", lambda: SimpleNamespace(upload_file=state.upload))
     return state
 
 
@@ -327,15 +444,15 @@ def test_snapshot_uploads_markdown_and_records_a_task_file(gmail, board):
     assert resp.status_code == 200
     body = resp.json()
     assert body["skipped"] == []
-    assert [f["filename"] for f in body["files"]] == ["email-18c3f0a1.md"]
+    assert [f["filename"] for f in body["files"]] == ["email-18c3f0a1b2c3.md"]
 
     content, filename = board.upload.await_args.args
-    assert filename == "email-18c3f0a1.md"
+    assert filename == "email-18c3f0a1b2c3.md"
     assert board.upload.await_args.kwargs == {
         "prefix": f"matcha-work/{COMPANY_ID}/{PROJECT_ID}/tasks/{TASK_ID}/files",
         "content_type": "text/markdown",
     }
-    assert b"email_id: 18c3f0a1b2c3" in content and b"Can you confirm Friday?" in content
+    assert b'email_id: "18c3f0a1b2c3"' in content and b"Can you confirm Friday?" in content
 
     kwargs = board.add.await_args.kwargs
     assert str(kwargs["task_id"]) == TASK_ID and str(kwargs["project_id"]) == PROJECT_ID
@@ -345,9 +462,9 @@ def test_snapshot_uploads_markdown_and_records_a_task_file(gmail, board):
     board.owns.assert_awaited_once()
 
 
-def test_snapshot_skips_already_attached_and_unreadable_messages(gmail, board):
-    board.existing.return_value = [{"filename": "email-18c3f0a1.md"}]
-    gmail.get_message.side_effect = [dict(MSG), RuntimeError("gone")]
+def test_snapshot_skips_already_attached_unread_and_unreadable_messages(gmail, board):
+    board.existing.return_value = [{"filename": "email-18c3f0a1b2c3.md"}]
+    gmail.get_message.side_effect = [RuntimeError("gone")]
     with _client() as client:
         resp = _snap(client, email_ids=["18c3f0a1b2c3", "ffff0000aaaa"])
     assert resp.status_code == 200
@@ -358,6 +475,8 @@ def test_snapshot_skips_already_attached_and_unreadable_messages(gmail, board):
             {"email_id": "ffff0000aaaa", "reason": "fetch_failed"},
         ],
     }
+    # The attached one is known by its filename, so it is never fetched.
+    gmail.get_message.assert_awaited_once_with("ffff0000aaaa")
     board.upload.assert_not_awaited()
 
 
@@ -366,6 +485,44 @@ def test_snapshot_dedupes_ids_within_one_request(gmail, board):
         resp = _snap(client, email_ids=["18c3f0a1b2c3", "18c3f0a1b2c3"])
     assert resp.status_code == 200
     assert gmail.get_message.await_count == 1
+
+
+def test_snapshot_keeps_two_messages_whose_ids_share_a_prefix(gmail, board):
+    board.existing.return_value = [{"filename": "email-18c3f0a1aaaa.md"}]
+    gmail.get_message.side_effect = lambda i: {**MSG, "id": i}
+    with _client() as client:
+        body = _snap(client, email_ids=["18c3f0a1aaaa", "18c3f0a1bbbb"]).json()
+    assert [f["filename"] for f in body["files"]] == ["email-18c3f0a1bbbb.md"]
+    assert body["skipped"] == [{"email_id": "18c3f0a1aaaa", "reason": "already_attached"}]
+
+
+def test_snapshot_reads_messages_concurrently(gmail, board):
+    # Each read waits until the other has started; read one at a time, the
+    # first would time out and be reported as fetch_failed.
+    started, state = [], {}
+
+    async def get(email_id):
+        both = state.setdefault("both", asyncio.Event())
+        started.append(email_id)
+        if len(started) == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), 1)
+        return {**MSG, "id": email_id}
+
+    gmail.get_message.side_effect = get
+    with _client() as client:
+        body = _snap(client, email_ids=["aaaa1111", "bbbb2222"]).json()
+    assert body["skipped"] == []
+    assert [f["filename"] for f in body["files"]] == ["email-aaaa1111.md", "email-bbbb2222.md"]
+
+
+def test_snapshot_goes_through_the_project_file_upload_policy(gmail, board, monkeypatch):
+    from app.matcha.services.matcha_work import project_file_service
+
+    monkeypatch.setattr(project_file_service, "PROJECT_FILE_MAX_BYTES", 10)
+    with _client() as client:
+        assert _snap(client).status_code == 400
+    board.upload.assert_not_awaited()
 
 
 @pytest.mark.parametrize("overrides", [

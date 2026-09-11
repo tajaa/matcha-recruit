@@ -168,6 +168,12 @@ rejects "the same snapshot reviewed twice is rejected" '.per_email[1].file = "em
 rejects "an extra key on a per_email entry is rejected" '.per_email[0].in_reply_to = "<abc@mail.example.com>"'
 rejects "a staged email addressed with a display name is rejected" \
     '.staged_actions[0].to = "Alice Example <alice@example.com>"'
+rejects "a per_email file naming one of the bot's own reports is rejected" \
+    '.per_email[0].file = "email-report-aaaa0000-r1.md"'
+jq '.per_email[0].file = "email-18c3f0a1b2c3d4e5.md"' "$TMP_DIR/email-raw.json" > "$TMP_DIR/email-fullid.json"
+check "a snapshot named by the whole Gmail message id is accepted" \
+    $("$AUTOPR_DIR/decision.sh" normalize-email "$TMP_DIR/email-fullid.json" "$TMP_DIR/x.json" >/dev/null 2>&1 \
+      && echo 0 || echo 1)
 rejects "a research-shaped report (sources, no per_email) is rejected" \
     'del(.per_email) | . + {sources: [{"title":"x","url":"https://example.com"}]}'
 
