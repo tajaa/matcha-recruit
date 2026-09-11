@@ -935,8 +935,8 @@ not exist for the run.
 A card can also start on the board: choosing the Email template in Espresso's New Ticket
 flow opens a four-step wizard (pick up to 10 unread emails → goal → reply tone → a review
 of what AutoPR will and won't do). Creating the ticket then snapshots the picked emails onto
-the new card through the same endpoint, and lists them under `## Emails attached` in the
-description.
+the new card through the same endpoint. The description notes only how many are attached:
+subjects and senders stay inside the snapshots, which the agent treats as untrusted.
 
 Registry row (`autopr_kind_field email …` in `lib.sh`):
 

@@ -27,7 +27,6 @@ struct PrimaryDetailPane: View {
         if appState.selectedThreadId != nil  { return .threads }
         if appState.selectedProjectId != nil { return .projects }
         if appState.selectedChannelId != nil { return .channels }
-        if appState.selectedEmailId != nil   { return .email }
         if appState.showThreadsHub  { return .threads }
         if appState.showProjectsHub { return .projects }
         // Journals = the Notes-style workspace. A selected journal stays inside
@@ -73,7 +72,6 @@ struct PrimaryDetailPane: View {
         .onChange(of: appState.selectedProjectId) { _, v in if v != nil { appState.showProjectsHub = true } }
         .onChange(of: appState.selectedJournalId) { _, v in if v != nil { appState.showJournalsHub = true } }
         .onChange(of: appState.selectedChannelId) { _, v in if v != nil { appState.showChannelsHub = true } }
-        .onChange(of: appState.selectedEmailId)   { _, v in if v != nil { appState.showEmailHub = true } }
     }
 }
 

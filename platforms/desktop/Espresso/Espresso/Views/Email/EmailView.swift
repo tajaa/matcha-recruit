@@ -50,7 +50,10 @@ struct EmailDetailView: View {
             }
         }
         .task(id: emailId) { await open() }
-        .onChange(of: showRemoteImages) { _, _ in renderHTML() }
+        .onChange(of: showRemoteImages) { _, _ in
+            let gen = generation
+            Task { await renderHTML(for: gen) }
+        }
         .sheet(item: $reply) { draft in
             EmailReplySheet(draft: draft, original: msg) {
                 sentNote = "Reply sent to \(draft.to)"
@@ -87,18 +90,26 @@ struct EmailDetailView: View {
         let fetched = await vm.fullMessage(id: emailId)
         guard gen == generation else { return }
         full = fetched
-        renderHTML()
+        await renderHTML(for: gen)
+        guard gen == generation else { return }
         bodyReady = true
     }
 
-    private func renderHTML() {
+    /// Builds the web document off the main actor: a newsletter can be a
+    /// megabyte of HTML to scan and wrap, and selecting it mustn't freeze the UI.
+    private func renderHTML(for gen: Int) async {
         guard let html = full?.bodyHtml, !html.isEmpty else {
             htmlDocument = nil
             hasRemoteContent = false
             return
         }
-        hasRemoteContent = EmailHTML.hasRemoteContent(html)
-        htmlDocument = EmailHTML.document(html, allowRemote: showRemoteImages)
+        let allowRemote = showRemoteImages
+        let (document, remote) = await Task.detached(priority: .userInitiated) {
+            (EmailHTML.document(html, allowRemote: allowRemote), EmailHTML.hasRemoteContent(html))
+        }.value
+        guard gen == generation else { return }
+        htmlDocument = document
+        hasRemoteContent = remote
     }
 
     private var placeholder: some View {
@@ -194,6 +205,16 @@ struct EmailDetailView: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
+                if htmlDocument != nil && !showRemoteImages {
+                    Button {
+                        showRemoteImages = true
+                    } label: {
+                        Image(systemName: "photo").font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Load remote images (the sender can tell you opened this)")
+                }
                 Button {
                     showSendToBoard = true
                 } label: {
@@ -428,15 +449,23 @@ enum EmailHTML {
         """
     }
 
-    private static let remotePattern = try? NSRegularExpression(
-        pattern: #"(?:src|srcset|background)\s*=\s*["']?\s*(?:https?:)?//|url\(\s*["']?\s*(?:https?:)?//"#,
-        options: .caseInsensitive
-    )
+    /// A resource reference that would load from the network: an image or
+    /// lazy-load attribute, a poster, an SVG href, a stylesheet link, a CSS
+    /// `url(...)` or `@import`. Only decides whether the banner shows — the
+    /// reader's photo button can load remote content either way.
+    private static let remotePattern = #"(?:\b(?:src|srcset|background|poster|xlink:href)\s*=\s*["']?\s*(?:https?:)?//)|(?:<link\b[^>]*\bhref\s*=\s*["']?\s*(?:https?:)?//)|(?:url\(\s*["']?\s*(?:https?:)?//)|(?:@import\s+(?:url\()?\s*["']?\s*(?:https?:)?//)"#
 
-    /// Anything that would phone home if loaded: an image, a background, a font.
     static func hasRemoteContent(_ html: String) -> Bool {
-        guard let remotePattern else { return false }
-        return remotePattern.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) != nil
+        // Inline styles often entity-encode their quotes: url(&quot;https://…).
+        let text = html
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#34;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+        guard let regex = try? NSRegularExpression(pattern: remotePattern, options: .caseInsensitive) else {
+            return true
+        }
+        return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 }
 
@@ -544,16 +573,26 @@ struct EmailPlainBody: View {
         .environment(\.openURL, OpenURLAction { url in
             SafeURL.open(url.absoluteString) ? .handled : .discarded
         })
-        .task(id: text) { rendered = EmailPlainText.linkified(text) }
+        .task(id: text) {
+            let source = text
+            rendered = await Task.detached(priority: .userInitiated) {
+                EmailPlainText.linkified(source)
+            }.value
+        }
     }
 }
 
 enum EmailPlainText {
+    /// Past this many UTF-16 units the text is shown as-is: link detection
+    /// over a huge HTML-converted body isn't worth the wait.
+    static let linkScanLimit = 200_000
+
     static func linkified(_ raw: String) -> AttributedString {
         let text = raw
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
         let ns = text as NSString
+        guard ns.length <= linkScanLimit else { return AttributedString(text) }
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         var out = AttributedString()
         var cursor = 0

@@ -42,6 +42,8 @@ final class EmailViewModel {
     var isLoading = false
     var isConnecting = false
     var errorMessage: String?
+    /// Messages one card snapshot takes — the server's cap, from `/status`.
+    var snapshotLimit = 10
 
     /// AI triage keyed by message id. In-app only — nothing is labelled or
     /// moved in Gmail. Survives a refresh for messages still in the list.
@@ -49,9 +51,14 @@ final class EmailViewModel {
     var isTriaging = false
 
     /// Single-message fetches: they carry the HTML body the list leaves out,
-    /// and cover a message opened after it left the unread list.
+    /// and cover a message opened after it left the unread list. Bounded —
+    /// one newsletter can be a megabyte of HTML — so only the most recently
+    /// opened few stay (`fullCacheOrder`, most recent last).
     @ObservationIgnored private var fullCache: [String: EmailMessage] = [:]
+    @ObservationIgnored private var fullCacheOrder: [String] = []
+    private static let fullCacheLimit = 12
     @ObservationIgnored private var rowInfoCache: [String: EmailRowInfo] = [:]
+    @ObservationIgnored private var lastLoadedAt: Date?
 
     private let service = EmailService.shared
 
@@ -62,6 +69,7 @@ final class EmailViewModel {
             let st = try await service.status()
             connected = st.connected
             email = st.email
+            if let limit = st.snapshotMaxEmails, limit > 0 { snapshotLimit = limit }
             statusLoaded = true
             if st.connected { await loadInbox() }
         } catch {
@@ -111,9 +119,17 @@ final class EmailViewModel {
             let ids = Set(resp.emails.map(\.id))
             triage = triage.filter { ids.contains($0.key) }
             errorMessage = nil
+            lastLoadedAt = Date()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Reload the inbox unless it was loaded in the last `maxAge` seconds, so
+    /// reopening the hub doesn't cost 25 Gmail reads every time.
+    func refreshIfStale(maxAge: TimeInterval = 120) async {
+        if let lastLoadedAt, Date().timeIntervalSince(lastLoadedAt) < maxAge { return }
+        await loadInbox()
     }
 
     func disconnect() async {
@@ -123,7 +139,9 @@ final class EmailViewModel {
         emails = []
         triage = [:]
         fullCache = [:]
+        fullCacheOrder = []
         rowInfoCache = [:]
+        lastLoadedAt = nil
         errorMessage = nil
     }
 
@@ -139,10 +157,22 @@ final class EmailViewModel {
 
     /// The message with its HTML body (fetched once, then cached).
     func fullMessage(id: String) async -> EmailMessage? {
-        if let cached = fullCache[id] { return cached }
+        if let cached = fullCache[id] {
+            touchFull(id)
+            return cached
+        }
         guard connected, let fetched = try? await service.message(id: id) else { return nil }
         fullCache[id] = fetched
+        touchFull(id)
+        while fullCacheOrder.count > Self.fullCacheLimit {
+            fullCache[fullCacheOrder.removeFirst()] = nil
+        }
         return fetched
+    }
+
+    private func touchFull(_ id: String) {
+        fullCacheOrder.removeAll { $0 == id }
+        fullCacheOrder.append(id)
     }
 
     // MARK: Organize (AI triage)

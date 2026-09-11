@@ -148,7 +148,6 @@ struct ArchiveView: View {
     private func open(_ select: () -> Void) {
         appState.selectedThreadId = nil; appState.selectedProjectId = nil
         appState.selectedChannelId = nil; appState.selectedJournalId = nil
-        appState.selectedEmailId = nil
         appState.showInbox = false; appState.showPeople = false; appState.showSkills = false
         appState.showChannelBrowse = false; appState.showArchive = false
         select()

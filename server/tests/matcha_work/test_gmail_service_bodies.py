@@ -100,7 +100,7 @@ async def test_get_message_carries_snippet_html_and_unread():
             "headers": [{"name": "Subject", "value": "Hi"}, {"name": "From", "value": "alice@example.com"}],
         },
     })
-    msg = await svc.get_message("m1")
+    msg = await svc.get_message("m1", include_html=True)
     assert msg["snippet"] == "Tom & Jerry's plan"
     assert msg["body"] == "plain"
     assert msg["body_html"] == "<p>rich</p>"
@@ -112,7 +112,7 @@ async def test_oversize_html_is_left_to_the_text_body(monkeypatch):
     monkeypatch.setattr(gmail_service, "BODY_HTML_MAX_CHARS", 10)
     svc = _svc()
     svc._gmail_get = AsyncMock(return_value={"payload": _part("text/html", "<p>" + "x" * 50 + "</p>")})
-    msg = await svc.get_message("m1")
+    msg = await svc.get_message("m1", include_html=True)
     assert msg["body_html"] is None
     assert msg["body"] == "x" * 50
     assert msg["is_unread"] is False
@@ -137,3 +137,62 @@ async def test_fetch_unread_leaves_the_html_out_of_the_list():
     assert len(out) == 1
     assert "body_html" not in out[0]
     assert out[0]["body"] == "p" and out[0]["is_unread"] is True
+
+
+def test_an_attached_email_is_never_the_body():
+    forwarded = {
+        "mimeType": "message/rfc822",
+        "filename": "fwd.eml",
+        "headers": [],
+        "body": {"attachmentId": "att-1"},
+        "parts": [_alternative(_part("text/plain", "attached plain"), _part("text/html", "<p>attached html</p>"))],
+    }
+    payload = {"mimeType": "multipart/mixed", "filename": "", "parts": [_part("text/html", "<p>outer</p>"), forwarded]}
+    svc = _svc()
+    assert svc._extract_body(payload) == "outer"
+    assert svc._find_part(payload, "text/html") == "<p>outer</p>"
+
+
+@pytest.mark.asyncio
+async def test_html_is_built_only_when_asked_and_decoded_once(monkeypatch):
+    svc = _svc()
+    svc._gmail_get = AsyncMock(return_value={"payload": _part("text/html", "<p>only html</p>")})
+    decoded = []
+    real = GmailService._part_text
+
+    def counting(self, part):
+        decoded.append(part.get("mimeType"))
+        return real(self, part)
+
+    monkeypatch.setattr(GmailService, "_part_text", counting)
+    msg = await svc.get_message("m1")
+    assert "body_html" not in msg
+    assert msg["body"] == "only html"
+
+    decoded.clear()
+    msg = await svc.get_message("m1", include_html=True)
+    assert msg["body_html"] == "<p>only html</p>"
+    assert decoded.count("text/html") == 1
+
+
+@pytest.mark.asyncio
+async def test_encoded_word_headers_are_decoded():
+    name = base64.b64encode("Jörg Müller".encode()).decode()
+    svc = _svc()
+    svc._gmail_get = AsyncMock(return_value={"payload": {
+        **_part("text/plain", "hi"),
+        "headers": [
+            {"name": "From", "value": f"=?UTF-8?B?{name}?= <jorg@example.test>"},
+            {"name": "Subject", "value": "=?UTF-8?Q?Caf=C3=A9_plans?="},
+        ],
+    }})
+    msg = await svc.get_message("m1")
+    assert msg["from"] == "Jörg Müller <jorg@example.test>"
+    assert msg["subject"] == "Café plans"
+
+
+def test_an_undecodable_header_comes_back_as_it_arrived():
+    raw = "=?x-made-up?B?Zm9v?= <a@example.test>"
+    assert gmail_service._decode_header(raw) == raw
+    assert gmail_service._decode_header(None) == ""
+    assert gmail_service._decode_header("Plain Name <a@example.test>") == "Plain Name <a@example.test>"

@@ -322,7 +322,7 @@ struct ProjectsLibraryView: View {
     private func open(_ p: MWProject) {
         appState.selectedProjectId = p.id   // hub flag stays set → back returns here
         appState.selectedThreadId = nil; appState.selectedChannelId = nil
-        appState.selectedJournalId = nil; appState.selectedEmailId = nil
+        appState.selectedJournalId = nil
     }
 
     private func create(type: String) {

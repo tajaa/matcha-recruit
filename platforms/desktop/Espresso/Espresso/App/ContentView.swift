@@ -265,12 +265,12 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarHomeButton: some View {
         let isHomeActive = !appState.showJournalsHub && !appState.showProjectsHub
-            && !appState.showThreadsHub && !appState.showChannelsHub && (appState.showHome || (
+            && !appState.showThreadsHub && !appState.showChannelsHub
+            && !appState.showProductivityHub && !appState.showEmailHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
             appState.selectedJournalId == nil &&
-            appState.selectedEmailId == nil &&
             !appState.showInbox &&
             !appState.showPeople &&
             !appState.showSkills &&
@@ -489,7 +489,7 @@ struct ContentView: View {
     @ViewBuilder
     private var emailSidebarSection: some View {
         sidebarNavRow(title: "Email", icon: "envelope",
-                      isActive: appState.showEmailHub || appState.selectedEmailId != nil,
+                      isActive: appState.showEmailHub,
                       onOpen: openEmailHub)
     }
 

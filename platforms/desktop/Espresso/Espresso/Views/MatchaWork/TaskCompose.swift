@@ -260,20 +260,16 @@ struct TaskComposeContent: View {
         return "\(attachEmails.count) email\(attachEmails.count == 1 ? "" : "s") will be attached: \(subjects)\(more)."
     }
 
-    /// The template fields, plus — on an email ticket — the list of attached
-    /// emails, so anyone reading the card sees what the snapshots are.
+    /// The template fields, plus — on an email ticket — how many emails are
+    /// attached. Only the count: subjects and senders are written by whoever
+    /// sent the mail, and the description reads as the card owner's words, so
+    /// sender text stays in the snapshots, which the agent treats as untrusted.
     private var composedDescription: String {
         let base = KanbanTemplate.composeDescription(fields: fields, values: fieldValues)
         guard template == .email, !attachEmails.isEmpty else { return base }
-        let lines = attachEmails.map { msg -> String in
-            let subject = msg.subject.isEmpty ? "(no subject)" : msg.subject
-            return "- \(subject) — \(msg.fromAddress)"
-                .replacingOccurrences(of: "\r", with: " ")
-                .replacingOccurrences(of: "\n", with: " ")
-        }
-        return [base, "## Emails attached\n" + lines.joined(separator: "\n")]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        let count = attachEmails.count
+        let note = "## Emails attached\n\(count) email\(count == 1 ? "" : "s") attached to this card as `email-*.md` snapshots."
+        return [base, note].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
     private func createTicket() {

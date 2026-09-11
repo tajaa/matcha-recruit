@@ -11,6 +11,8 @@ import logging
 import os
 import re
 import time
+from email.errors import HeaderParseError
+from email.header import decode_header, make_header
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -57,6 +59,18 @@ def _html_to_text(markup: str) -> str:
     text = html.unescape(text)
     lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _decode_header(value: str | None) -> str:
+    """RFC 2047 encoded-words (`=?UTF-8?B?…?=`) as readable text. Gmail
+    returns header values verbatim, so a non-ASCII sender name or subject
+    arrives encoded. A value that won't decode is returned as it came."""
+    if not value or "=?" not in value:
+        return value or ""
+    try:
+        return str(make_header(decode_header(value)))
+    except (HeaderParseError, LookupError, UnicodeDecodeError, ValueError):
+        return value
 
 
 # (limit, window seconds, label) — per user, however many requests or workers.
@@ -232,43 +246,45 @@ class GmailService:
 
         async def _fetch_one(stub: dict) -> dict | None:
             try:
+                # No HTML: the list stays light; the reader fetches the one
+                # message it opens.
                 return await self.get_message(stub["id"])
             except Exception as e:
                 logger.warning("Failed to fetch message %s: %s", stub["id"], e)
                 return None
 
         results = await _aio.gather(*[_fetch_one(s) for s in stubs])
-        # The list stays light: 25 newsletters of HTML is megabytes, and the
-        # reader fetches the one message it opens.
-        for r in results:
-            if r is not None:
-                r.pop("body_html", None)
         return [r for r in results if r is not None]
 
-    async def get_message(self, msg_id: str) -> dict:
+    async def get_message(self, msg_id: str, *, include_html: bool = False) -> dict:
+        """One message. `include_html` adds the raw HTML part (`body_html`)
+        for the reader. Nothing else needs it, and building it for a list of
+        newsletters is megabytes of strings thrown straight away."""
         data = await self._gmail_get(f"/users/me/messages/{msg_id}", params={"format": "full"})
         payload = data.get("payload", {})
         headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
-        markup = self._find_part(payload, "text/html")
-        return {
+        markup = self._find_part(payload, "text/html") if include_html else None
+        message = {
             "id": msg_id,
             # Gmail's own thread id (for threadId on a reply) and the RFC 5322
             # Message-ID header (for In-Reply-To/References). They are different
             # identifiers; conflating them was the old reply_to_id bug.
             "thread_id": data.get("threadId"),
             "message_id_header": headers.get("message-id"),
-            "subject": headers.get("subject", "(no subject)"),
-            "from": headers.get("from", "unknown"),
+            "subject": _decode_header(headers.get("subject", "(no subject)")),
+            "from": _decode_header(headers.get("from", "unknown")),
             "date": headers.get("date", ""),
             # Gmail's own preview line, entity-escaped the way it arrives.
             "snippet": html.unescape(data.get("snippet") or ""),
-            "body": self._extract_body(payload),
-            # The reader renders this (sandboxed); past the cap it falls back
-            # to `body`. Never sent to the model or into a card snapshot.
-            "body_html": markup if markup and len(markup) <= BODY_HTML_MAX_CHARS else None,
+            "body": self._extract_body(payload, markup),
             "is_unread": "UNREAD" in (data.get("labelIds") or []),
             "attachments": self._extract_attachments(payload),
         }
+        if include_html:
+            # The reader renders this (sandboxed); past the cap it falls back
+            # to `body`. Never sent to the model or into a card snapshot.
+            message["body_html"] = markup if markup and len(markup) <= BODY_HTML_MAX_CHARS else None
+        return message
 
     async def get_attachment(self, msg_id: str, attachment_id: str) -> bytes:
         data = await self._gmail_get(
@@ -385,26 +401,34 @@ class GmailService:
             return raw.decode("utf-8", errors="replace")
 
     def _find_part(self, part: dict, mime: str) -> str | None:
-        """The first `mime` body in a depth-first walk. A part with a
-        filename is an attachment (a forwarded .html, a notes.txt), never the
-        message body."""
-        if part.get("mimeType") == mime and not part.get("filename"):
+        """The first `mime` body in a depth-first walk of this message's own
+        multipart tree. A part with a filename is an attachment (a notes.txt,
+        a saved .html), and a `message/rfc822` part is a forwarded or attached
+        email; neither is ever this message's body, so the walk descends only
+        through `multipart/*` containers."""
+        mime_type = part.get("mimeType") or ""
+        if mime_type == mime and not part.get("filename"):
             text = self._part_text(part)
             if text:
                 return text
+        if mime_type and not mime_type.startswith("multipart/"):
+            return None
         for child in part.get("parts") or []:
             found = self._find_part(child, mime)
             if found:
                 return found
         return None
 
-    def _extract_body(self, payload: dict) -> str:
+    def _extract_body(self, payload: dict, markup: str | None = None) -> str:
         """Plain text: what the AI actions and a card's snapshot read. The
-        HTML-only case is converted with its paragraphs kept."""
+        HTML-only case is converted with its paragraphs kept. Pass `markup`
+        when the caller already decoded the HTML part, so it isn't decoded
+        twice."""
         plain = self._find_part(payload, "text/plain")
         if plain and plain.strip():
             return plain
-        markup = self._find_part(payload, "text/html")
+        if markup is None:
+            markup = self._find_part(payload, "text/html")
         if markup:
             return _html_to_text(markup)
         return "(no readable body)"

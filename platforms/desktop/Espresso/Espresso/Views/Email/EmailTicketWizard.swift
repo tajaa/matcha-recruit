@@ -70,8 +70,8 @@ struct EmailTicketWizard: View {
     private let vm = EmailViewModel.shared
     let onApply: (Brief) -> Void
 
-    /// The server snapshots at most this many messages onto one card.
-    static let maxEmails = 10
+    /// The server's per-card snapshot cap (from `/status`).
+    private var maxEmails: Int { vm.snapshotLimit }
     private static let steps = ["Emails", "Goal", "Replies", "Review"]
     private static let tones = ["professional", "casual", "brief"]
 
@@ -147,8 +147,10 @@ struct EmailTicketWizard: View {
         .frame(width: 660, height: 640)
         .background(Color.appBackground)
         .task {
-            if !vm.statusLoaded || (vm.connected && vm.emails.isEmpty) {
+            if !vm.statusLoaded {
                 await vm.loadStatus()
+            } else if vm.connected {
+                await vm.refreshIfStale()
             }
         }
         .onChange(of: goalText) { _, text in
@@ -173,7 +175,7 @@ struct EmailTicketWizard: View {
 
     private var canContinue: Bool {
         switch step {
-        case 0: return !pickedEmails.isEmpty && picked.count <= Self.maxEmails
+        case 0: return !pickedEmails.isEmpty && picked.count <= maxEmails
         case 1: return !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case 2: return true
         default: return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !pickedEmails.isEmpty
@@ -213,7 +215,7 @@ struct EmailTicketWizard: View {
     private func toggle(_ msg: EmailMessage) {
         if let index = picked.firstIndex(of: msg.id) {
             picked.remove(at: index)
-        } else if picked.count < Self.maxEmails {
+        } else if picked.count < maxEmails {
             picked.append(msg.id)
             known[msg.id] = msg
         }
@@ -264,7 +266,7 @@ struct EmailTicketWizard: View {
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Pick up to \(Self.maxEmails) from your unread mail. Each one is attached to the ticket as a read-only snapshot, and the agent reads only those.")
+                Text("Pick up to \(maxEmails) from your unread mail. Each one is attached to the ticket as a read-only snapshot, and the agent reads only those.")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -283,7 +285,7 @@ struct EmailTicketWizard: View {
                     let replyIds = needsReplyIds
                     if !replyIds.isEmpty {
                         Button("Pick the \(replyIds.count) that need a reply") {
-                            for id in replyIds where !picked.contains(id) && picked.count < Self.maxEmails {
+                            for id in replyIds where !picked.contains(id) && picked.count < maxEmails {
                                 picked.append(id)
                                 if let msg = vm.message(id: id) { known[id] = msg }
                             }
@@ -310,7 +312,7 @@ struct EmailTicketWizard: View {
                     .cornerRadius(8)
                 }
                 HStack {
-                    Text("\(picked.count) of \(Self.maxEmails) picked")
+                    Text("\(picked.count) of \(maxEmails) picked")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
                     Spacer()
@@ -326,7 +328,7 @@ struct EmailTicketWizard: View {
 
     private func pickRow(_ msg: EmailMessage) -> some View {
         let isPicked = picked.contains(msg.id)
-        let atCap = !isPicked && picked.count >= Self.maxEmails
+        let atCap = !isPicked && picked.count >= maxEmails
         let info = vm.rowInfo(for: msg)
         return Button { toggle(msg) } label: {
             HStack(alignment: .top, spacing: 10) {

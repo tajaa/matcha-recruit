@@ -335,7 +335,7 @@ struct ChannelsLibraryView: View {
     private func open(_ id: String) {
         appState.selectedChannelId = id   // hub flag stays set → back returns here
         appState.selectedThreadId = nil; appState.selectedProjectId = nil
-        appState.selectedJournalId = nil; appState.selectedEmailId = nil
+        appState.selectedJournalId = nil
     }
 
     private func browse() {

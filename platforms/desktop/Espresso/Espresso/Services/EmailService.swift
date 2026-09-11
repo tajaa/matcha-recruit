@@ -5,6 +5,13 @@ import Foundation
 struct EmailStatus: Decodable {
     let connected: Bool
     let email: String?
+    /// How many messages one card snapshot takes (server `SNAPSHOT_MAX_EMAILS`).
+    var snapshotMaxEmails: Int? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case connected, email
+        case snapshotMaxEmails = "snapshot_max_emails"
+    }
 }
 
 struct EmailConnectResponse: Decodable {

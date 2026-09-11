@@ -22,9 +22,6 @@ struct EmailWorkspace: View {
         let emails: [EmailMessage]
     }
 
-    /// The server snapshots at most this many messages onto one card.
-    static let maxPerCard = 10
-
     @AppStorage("email.autoOrganize") private var autoOrganize = true
     @State private var filter: Filter = .all
     @State private var search = ""
@@ -58,12 +55,17 @@ struct EmailWorkspace: View {
         }
         .background(ThemeRadialBackground())
         .task {
-            await vm.loadStatus()
-            adoptRequestedEmail()
+            // Reopening the hub reuses a recent load instead of re-reading
+            // the mailbox every time.
+            if vm.statusLoaded && vm.connected {
+                await vm.refreshIfStale()
+            } else {
+                await vm.loadStatus()
+            }
             await autoOrganizeIfNeeded()
         }
-        .onChange(of: appState.selectedEmailId) { _, _ in adoptRequestedEmail() }
         .onChange(of: vm.emails.map(\.id)) { _, _ in
+            pruneSelection()
             Task { await autoOrganizeIfNeeded() }
         }
         .onChange(of: appState.canEmailAI) { _, _ in
@@ -81,23 +83,19 @@ struct EmailWorkspace: View {
 
     // MARK: - State helpers
 
-    /// `selectedEmailId` is an "open this message" request from outside the
-    /// hub. The hub owns selection from then on, so the request is consumed.
-    private func adoptRequestedEmail() {
-        guard let id = appState.selectedEmailId else { return }
-        appState.showEmailHub = true
-        selection = [id]
-        anchor = id
-        if !shown.contains(where: { $0.id == id }) {
-            filter = .all
-            search = ""
-        }
-        appState.selectedEmailId = nil
-    }
-
+    /// Only mail not yet sorted goes to the model (`organizeNew`), so this
+    /// costs a call only when something new has arrived.
     private func autoOrganizeIfNeeded() async {
         guard autoOrganize, appState.canEmailAI, vm.connected, !vm.emails.isEmpty else { return }
         await vm.organizeNew()
+    }
+
+    /// Drop picks that no longer resolve: read elsewhere, gone from the
+    /// unread list, and not the message open in the reader.
+    private func pruneSelection() {
+        let live = selection.filter { vm.message(id: $0) != nil }
+        if live != selection { selection = live }
+        if let current = anchor, vm.message(id: current) == nil { anchor = nil }
     }
 
     private var shown: [EmailMessage] {
@@ -127,6 +125,7 @@ struct EmailWorkspace: View {
     /// Display order, for ⇧-click ranges and the arrow keys.
     private var orderedIds: [String] { sections.flatMap { $0.emails.map(\.id) } }
 
+    /// The picked messages that still resolve, in display order.
     private var selectedEmails: [EmailMessage] {
         let ordered = orderedIds.filter { selection.contains($0) }
         let offList = selection.subtracting(ordered).sorted()
@@ -139,6 +138,10 @@ struct EmailWorkspace: View {
         case .bucket(let bucket): return bucket.label
         case .unsorted: return "Unsorted"
         }
+    }
+
+    private func countLabel(_ count: Int) -> String? {
+        count > 0 ? "\(count)" : nil
     }
 
     private func click(_ id: String) {
@@ -167,7 +170,7 @@ struct EmailWorkspace: View {
     }
 
     private func sendToBoard(_ emails: [EmailMessage]) {
-        guard !emails.isEmpty, emails.count <= Self.maxPerCard else { return }
+        guard !emails.isEmpty, emails.count <= vm.snapshotLimit else { return }
         boardNote = nil
         boardRequest = BoardRequest(emails: emails)
     }
@@ -175,60 +178,52 @@ struct EmailWorkspace: View {
     // MARK: - Mailbox rail
 
     private var mailboxRail: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Text("Mailbox")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary)
-                Spacer()
-                Button { Task { await vm.loadInbox() } } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
+        VStack(spacing: 0) {
+            MWHubRail {
+                HStack {
+                    Text("Mailbox")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(appState.themeTextSecondary)
+                    Spacer()
+                    if vm.isLoading {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        MWHubRailIconButton(icon: "arrow.clockwise", help: "Check for new mail") {
+                            Task { await vm.loadInbox() }
+                        }
+                    }
+                    MWHubRailIconButton(icon: "sidebar.left", help: "Hide mailbox") { railCollapsed = true }
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(appState.themeTextSecondary)
-                .disabled(vm.isLoading)
-                .help("Check for new mail")
-                Button { railCollapsed = true } label: {
-                    Image(systemName: "sidebar.left").font(.system(size: 12))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(appState.themeTextSecondary)
-                .help("Hide mailbox")
+            } rows: {
+                MWHubRailRow(icon: "tray", title: "Unread", selected: filter == .all,
+                             trailing: countLabel(vm.emails.count)) { filter = .all }
+                railHeading("Sorted by AI")
+                sortedRows
             }
-            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
-                    railRow("Unread", icon: "tray", count: vm.emails.count, target: .all)
-                    railHeading("Sorted by AI")
-                    sortedRows
-                }
-                .padding(.horizontal, 6)
-            }
-            Spacer(minLength: 0)
             accountFooter
+                .background(appState.themeSidebar)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
     private var sortedRows: some View {
         if !appState.canEmailAI {
-            railAction("Organize with AI", icon: "lock.fill") {
+            MWHubRailRow(icon: "lock.fill", title: "Organize with AI", selected: false, accent: true) {
                 appState.presentPaywall(for: "email_ai")
             }
         } else if vm.triage.isEmpty && !vm.isTriaging {
-            railAction("Organize with AI", icon: "sparkles") {
+            MWHubRailRow(icon: "sparkles", title: "Organize with AI", selected: false, accent: true) {
                 Task { await vm.organizeNew() }
             }
             .disabled(vm.emails.isEmpty)
         } else {
             ForEach(EmailTriageBucket.allCases, id: \.self) { bucket in
-                railRow(bucket.label, icon: bucket.icon, count: vm.count(of: bucket),
-                        target: .bucket(bucket), tint: bucket.tint)
+                MWHubRailRow(icon: bucket.icon, title: bucket.label, selected: filter == .bucket(bucket),
+                             trailing: countLabel(vm.count(of: bucket))) { filter = .bucket(bucket) }
             }
             if vm.unsortedCount > 0 {
-                railRow("Unsorted", icon: "questionmark.folder", count: vm.unsortedCount, target: .unsorted)
+                MWHubRailRow(icon: "questionmark.folder", title: "Unsorted", selected: filter == .unsorted,
+                             trailing: countLabel(vm.unsortedCount)) { filter = .unsorted }
             }
             if vm.isTriaging {
                 HStack(spacing: 6) {
@@ -240,45 +235,6 @@ struct EmailWorkspace: View {
                 .padding(.horizontal, 8).padding(.vertical, 5)
             }
         }
-    }
-
-    private func railRow(_ title: String, icon: String, count: Int, target: Filter, tint: Color? = nil) -> some View {
-        let selected = filter == target
-        return Button { filter = target } label: {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundColor(tint ?? (selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary))
-                    .frame(width: 15)
-                Text(title)
-                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundColor(appState.themeSidebarText.opacity(0.92))
-                Spacer(minLength: 0)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(appState.themeSidebarTextSecondary)
-                }
-            }
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeSidebarAccent.opacity(0.10) : Color.clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func railAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: icon).font(.system(size: 11)).frame(width: 15)
-                Text(title).font(.system(size: 12, weight: .medium))
-                Spacer(minLength: 0)
-            }
-            .foregroundColor(appState.themeAccent)
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     private func railHeading(_ title: String) -> some View {
@@ -365,7 +321,6 @@ struct EmailWorkspace: View {
                         .font(.system(size: 11))
                         .foregroundColor(appState.themeTextSecondary)
                     Spacer()
-                    if vm.isLoading { ProgressView().controlSize(.mini) }
                 }
             }
             .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
@@ -412,18 +367,40 @@ struct EmailWorkspace: View {
                 .onKeyPress(.downArrow) { move(1); return .handled }
             }
 
-            if let err = vm.errorMessage {
-                HStack(spacing: 5) {
-                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9))
-                    Text(err).font(.system(size: 10)).lineLimit(2)
-                    Spacer(minLength: 0)
-                }
-                .foregroundColor(.orange)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-            }
+            listFooter
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(appState.themeBg.opacity(0.3))
+    }
+
+    /// Confirmation for a Send-to-board from the context menu or the
+    /// multi-select panel, and load errors. The reader's own "Send to board"
+    /// reports in its status line.
+    @ViewBuilder
+    private var listFooter: some View {
+        if let boardNote {
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 10))
+                Text(boardNote).font(.system(size: 10.5)).lineLimit(2)
+                Spacer(minLength: 0)
+                Button { self.boardNote = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+            }
+            .foregroundColor(.green)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+        }
+        if let err = vm.errorMessage {
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9))
+                Text(err).font(.system(size: 10)).lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(.orange)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+        }
     }
 
     @ViewBuilder
@@ -432,7 +409,7 @@ struct EmailWorkspace: View {
         Button(targets.count > 1 ? "Send \(targets.count) emails to board…" : "Send to board…") {
             sendToBoard(targets)
         }
-        .disabled(targets.count > Self.maxPerCard)
+        .disabled(targets.count > vm.snapshotLimit)
         Button("Copy sender address") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(msg.senderAddress, forType: .string)
@@ -468,12 +445,15 @@ struct EmailWorkspace: View {
 
     // MARK: - Reader
 
+    /// Driven by the picks that still resolve, so a selection whose messages
+    /// have all gone can't strand the reader on an empty multi-select panel.
     @ViewBuilder
     private var readerPane: some View {
-        if selection.count == 1, let id = selection.first {
-            EmailDetailView(emailId: id)
-        } else if selection.count > 1 {
-            multiSelectPanel
+        let picked = selectedEmails
+        if picked.count == 1 {
+            EmailDetailView(emailId: picked[0].id)
+        } else if picked.count > 1 {
+            multiSelectPanel(picked)
         } else {
             VStack(spacing: 10) {
                 Image(systemName: "envelope.open")
@@ -490,9 +470,8 @@ struct EmailWorkspace: View {
         }
     }
 
-    private var multiSelectPanel: some View {
-        let picked = selectedEmails
-        return VStack(spacing: 14) {
+    private func multiSelectPanel(_ picked: [EmailMessage]) -> some View {
+        VStack(spacing: 14) {
             Image(systemName: "envelope.badge")
                 .font(.system(size: 28))
                 .foregroundColor(appState.themeAccent)
@@ -528,17 +507,12 @@ struct EmailWorkspace: View {
                     Label("Send to board", systemImage: "rectangle.stack.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(picked.count > Self.maxPerCard)
+                .disabled(picked.count > vm.snapshotLimit)
             }
-            if picked.count > Self.maxPerCard {
-                Text("A card holds up to \(Self.maxPerCard) emails.")
+            if picked.count > vm.snapshotLimit {
+                Text("A card holds up to \(vm.snapshotLimit) emails.")
                     .font(.system(size: 11))
                     .foregroundColor(.orange)
-            }
-            if let boardNote {
-                Label(boardNote, systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(.green)
             }
         }
         .padding(24)
