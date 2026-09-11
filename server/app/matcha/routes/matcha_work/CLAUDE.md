@@ -62,7 +62,7 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 The package exposes **four** routers from `__init__.py`:
 
 1. `router` — mounted at `/matcha-work`, feature-gated with `require_feature("matcha_work")` at construction (the constructor gate, not just the mount — see Gate note below).
-2. `oauth_callback_router` — mounted at `/matcha-work`, no gate. Owns only Google's Gmail callback; the authenticated connect route issues an encrypted, nonced state token that expires after 10 minutes.
+2. `oauth_callback_router` — mounted at `/matcha-work`, no gate. Owns only Google's Gmail callback; the authenticated connect route issues a 256-bit opaque state handle backed by Redis for 30 minutes. The callback atomically consumes it with `GETDEL` before handling success or cancellation, so the public route never trusts user identity from the URL and a captured callback cannot be replayed. Issuance and consumption fail closed while Redis is unavailable.
 3. `public_router` — mounted at `/matcha-work/public`, no gate. Aggregates public sub-routers from `projects.py` (signature webhook), `github.py` (push webhook), and `threads.py` (public review GET/POST).
 4. `presence_router` — mounted at `/matcha-work/presence`, no gate. Owned entirely by `presence.py`.
 
