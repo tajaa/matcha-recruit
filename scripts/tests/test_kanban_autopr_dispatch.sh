@@ -257,7 +257,12 @@ else
   python3 -c 'import plistlib, sys; plistlib.load(open(sys.argv[1], "rb"))' "$rendered"
 fi
 check "LaunchAgent plist is valid and uses the required timer" \
-  $(grep -q '<integer>300</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
+  $(grep -q '<integer>60</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
+# The tick interval paces the Kanban lane, because one dispatch happens per tick
+# and the errors lane is checked first. Keep the plist and the value the
+# dispatcher reports to the dashboard in step.
+check "dispatcher poll interval matches the LaunchAgent tick" \
+  $(grep -q 'AUTOPR_DISPATCH_POLL_SECONDS:-60' "$REPO_ROOT/scripts/kanban-autopr/dispatch-if-idle.sh" && echo 0 || echo 1)
 check "LaunchAgent PATH can reach the Docker Desktop CLI used by msandbox" \
   $(grep -q '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' "$rendered" && echo 0 || echo 1)
 

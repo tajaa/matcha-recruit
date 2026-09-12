@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install the local dispatcher without embedding credentials in launchd. Two
-# agents share one script: the five-minute scheduler (which now holds the
-# Kanban lane to one pass every twenty minutes) and a one-minute watcher that
+# agents share one script: the one-minute scheduler (which holds the Kanban
+# lane to one pass per AUTOPR_KANBAN_MAX_AGE_SECONDS, default five minutes
+# measured from the last run's completion) and a one-minute watcher that
 # dispatches immediately when a card asks for a run. The workflow itself still
 # owns Codex, board, and production use.
 set -euo pipefail
