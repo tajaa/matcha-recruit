@@ -186,6 +186,8 @@ export interface BusinessLocation {
   coverage_status: string
   has_local_ordinance: boolean
   facility_attributes?: FacilityAttributes | null
+  /** Server-resolved from persisted location/company NAICS and industry. */
+  facility_profile_eligible?: boolean
   source?: 'manual' | 'employee_derived'
   ein: string | null
   naics: string | null

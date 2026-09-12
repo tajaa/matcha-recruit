@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '../ui'
 import { updateFacilityAttributes } from '../../api/compliance'
 import type { FacilityAttributes } from '../../types/compliance'
@@ -45,6 +45,7 @@ function getDismissKey(locationId: string): string {
 type LocationSummary = {
   id: string
   facility_attributes?: FacilityAttributes | null
+  facility_profile_eligible?: boolean
 }
 
 type Props = {
@@ -55,11 +56,13 @@ type Props = {
   allLocations?: LocationSummary[]
   /** Location source — hide banner for employee-derived locations */
   source?: 'manual' | 'employee_derived'
+  /** Server-resolved from the persisted location/company classification. */
+  eligible?: boolean
   /** Read-only mode (compliance_lite taste) — hide the Edit affordance. */
   readOnly?: boolean
 }
 
-export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdated, allLocations, source, readOnly }: Props) {
+export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdated, allLocations, source, eligible, readOnly }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -70,25 +73,15 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
     () => localStorage.getItem(getDismissKey(locationId)) === 'true'
   )
 
-  // Reset state when locationId changes (component may not remount)
-  const prevLocationRef = useRef(locationId)
-  if (prevLocationRef.current !== locationId) {
-    prevLocationRef.current = locationId
-    setExpanded(false)
-    setSaving(false)
-    setSaveError(null)
-    setEntityType(facilityAttributes?.entity_type || '')
-    setPayers(facilityAttributes?.payer_contracts || [])
-    setApplyToAll(false)
-    setDismissed(localStorage.getItem(getDismissKey(locationId)) === 'true')
-  }
-
   const hasAttrs = facilityAttributes &&
     (facilityAttributes.entity_type || (facilityAttributes.payer_contracts && facilityAttributes.payer_contracts.length > 0))
 
   // Hide for employee-derived locations or dismissed
   if (source === 'employee_derived') return null
   if (dismissed) return null
+  // Existing profiles stay visible/editable, but an unprofiled location must
+  // be explicitly classified as healthcare before offering healthcare setup.
+  if (!hasAttrs && eligible !== true) return null
 
   function togglePayer(value: string) {
     setPayers((prev) =>
@@ -103,7 +96,9 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
 
   // Locations that don't have a facility profile yet (excluding current)
   const otherUnprofiled = (allLocations || []).filter(
-    (l) => l.id !== locationId && !(l.facility_attributes?.entity_type)
+    (l) => l.id !== locationId &&
+      l.facility_profile_eligible === true &&
+      !(l.facility_attributes?.entity_type)
   )
 
   async function handleSave() {
