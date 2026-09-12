@@ -34,20 +34,6 @@ case "$OUTCOME" in
     *) echo "run-journal: --outcome must be success|failure|cancelled|paused" >&2; exit 2 ;;
 esac
 
-# A run killed at its time budget reaches Cleanup as a plain step failure:
-# investigate.sh writes `paused=true` only for an acknowledged operator
-# takeover (codex rc 75, which exits 0). The authority on "this was a timeout"
-# is the checkpoint, which already parked the card with
-# `PAUSED: APPROVE 10 MORE MINUTES` and moved it to Changes Requested. Believe
-# it over the step outcome: otherwise this script overwrites that header with
-# STOPPED, and both select.sh and Espresso's "approve 10 more minutes"
-# affordance prefix-match the header that just disappeared.
-if [ -n "$CHECKPOINT_DIR" ] && [ -s "$CHECKPOINT_DIR/metadata.json" ] \
-    && [ "$(jq -r '.runtime_limited // false' "$CHECKPOINT_DIR/metadata.json" 2>/dev/null)" = true ]; then
-    OUTCOME=paused
-    REASON=runtime_limited
-fi
-
 PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
 ID8="$(jq -r '.id8 // (.task_id | .[0:8])' "$CARD_FILE")"
@@ -67,6 +53,43 @@ JOURNAL_NAME="autopr-run-$RUN_ID-$STAMP.md"
 JOURNAL="$STAGE_DIR/$JOURNAL_NAME"
 
 warn() { printf 'run-journal: warning: %s\n' "$1" >&2; }
+
+# The Cleanup step can only hand us the checkpoint its save-on-failure step
+# wrote, and that step runs only when Investigate itself failed. A run whose
+# model pass SUCCEEDED and then died in verify or publish still has one: the
+# in-flight snapshot timer saves under the same `<run id>-<epoch>-inflight`
+# key. Reporting "nothing was saved" for that run is how a valid patch gets
+# abandoned — it happened to run 34670939778, whose 19-file patch survived a
+# `docs/PRODUCTS.md` publish refusal with nothing on the card to say so.
+if [ -z "$CHECKPOINT_DIR" ] && [ "$RUN_ID" != local ]; then
+    checkpoint_root="${AUTOPR_CHECKPOINT_ROOT:-}"
+    if [ -z "$checkpoint_root" ]; then
+        journal_git_dir="$(git -C "${AUTOPR_WORKSPACE_ROOT:-.}" rev-parse --absolute-git-dir 2>/dev/null || true)"
+        [ -z "$journal_git_dir" ] || checkpoint_root="$journal_git_dir/matcha-kanban-autopr-checkpoints"
+    fi
+    if [ -n "$checkpoint_root" ] && [ -d "$checkpoint_root/$TASK_ID" ]; then
+        # Newest first, and only this run's own snapshots: an earlier round's
+        # leftovers are not what this journal is reporting on.
+        found="$(cd "$checkpoint_root/$TASK_ID" \
+            && ls -1td -- "$RUN_ID"-*/ 2>/dev/null | sed 's|/$||' | head -1 || true)"
+        [ -z "$found" ] || CHECKPOINT_DIR="$checkpoint_root/$TASK_ID/$found"
+    fi
+fi
+
+# A run killed at its time budget reaches Cleanup as a plain step failure:
+# investigate.sh writes `paused=true` only for an acknowledged operator
+# takeover (codex rc 75, which exits 0). The authority on "this was a timeout"
+# is the checkpoint, which already parked the card with
+# `PAUSED: APPROVE 10 MORE MINUTES` and moved it to Changes Requested. Believe
+# it over the step outcome: otherwise this script overwrites that header with
+# STOPPED, and both select.sh and Espresso's "approve 10 more minutes"
+# affordance prefix-match the header that just disappeared. The workflow reads
+# the same verdict before it records a ledger strike, so the two agree.
+if [ -n "$CHECKPOINT_DIR" ] && [ -s "$CHECKPOINT_DIR/metadata.json" ] \
+    && [ "$(jq -r '.runtime_limited // false' "$CHECKPOINT_DIR/metadata.json" 2>/dev/null)" = true ]; then
+    OUTCOME=paused
+    REASON=runtime_limited
+fi
 
 # One line, operator words, per machine reason. Unknown reasons pass through.
 reason_label() {
@@ -110,7 +133,14 @@ changed_files_section() {
         fi
     fi
     if [ -n "$BASE_SHA" ] && git rev-parse --verify -q "$BASE_SHA" >/dev/null 2>&1; then
-        listed="$(git diff --name-only "$BASE_SHA" -- . 2>/dev/null | sed 's/^/- `/; s/$/`/' || true)"
+        # run-codex-sandboxed.sh applies the model patch with plain `git apply`,
+        # so everything the model CREATED is still untracked and invisible to
+        # `git diff` alone. checkpoint.sh solves this by staging with
+        # --intent-to-add; here the index belongs to the checkout hand-back
+        # that runs next, so list the untracked paths instead of touching it.
+        listed="$( { git diff --name-only "$BASE_SHA" -- . 2>/dev/null || true
+                     git ls-files --others --exclude-standard -- . 2>/dev/null || true
+                   } | sort -u | sed 's/^/- `/; s/$/`/' )"
         if [ -n "$listed" ]; then
             printf 'Files changed on the branch:\n%s\n' "$listed"
             return
@@ -137,7 +167,11 @@ left_section() {
     local questions met summary
     if [ -n "$DECISION_FILE" ] && jq -e . "$DECISION_FILE" >/dev/null 2>&1; then
         # `false // empty` would drop a false verdict; test for the key instead.
-        met="$(jq -r 'if has("acceptance_criteria_met") then (.acceptance_criteria_met | tostring) else empty end' "$DECISION_FILE")"
+        # `jq -e .` above accepts any truthy JSON, and a failed investigate
+        # run hands us the raw model output — an array reaches `has(...)`,
+        # which errors. Guard like the two calls below: this script exists to
+        # explain the failure path, so it must survive malformed model JSON.
+        met="$(jq -r 'if type == "object" and has("acceptance_criteria_met") then (.acceptance_criteria_met | tostring) else empty end' "$DECISION_FILE" 2>/dev/null || true)"
         [ -z "$met" ] || printf 'Acceptance criteria met: %s\n' "$met"
         summary="$(jq -r '.summary // empty' "$DECISION_FILE" | jq -Rsr '.[0:600]' 2>/dev/null || true)"
         [ -z "$summary" ] || printf 'Decision: %s\n' "$summary"
@@ -152,7 +186,7 @@ left_section() {
 }
 
 resume_section() {
-    local metadata="$CHECKPOINT_DIR/metadata.json"
+    local metadata="$CHECKPOINT_DIR/metadata.json" held
     if [ "$REASON" = operator_takeover ]; then
         printf 'Nothing was checkpointed: the working tree is held by the operator outside this workflow. `msandbox` shows the takeover session.\n'
         return
@@ -164,8 +198,18 @@ resume_section() {
             "$(jq -r '.patch_bytes // 0' "$metadata")" \
             "$(jq -r '.created_at // "?"' "$metadata")" "$CHECKPOINT_DIR"
     elif [ -n "$CHECKPOINT_DIR" ] && [ -s "$metadata" ]; then
-        printf 'A checkpoint was saved at `%s` but holds no model patch (%s). The next run starts over.\n' \
-            "$CHECKPOINT_DIR" "$(jq -r '[(if .report_saved then "report" else empty end), (if .decision_saved then "decision" else empty end), (if .transcript_saved then "transcript" else empty end)] | join(", ") | if . == "" then "it saved nothing" else "it holds the " + . end' "$metadata")"
+        # No patch is not the same as no resume: checkpoint.sh still points
+        # `active` at a checkpoint holding a report or decision, and
+        # investigate.sh re-attaches those to the next run as model inputs.
+        # Saying "starts over" here sends an operator who wants a clean restart
+        # to press Run and get a resumed run instead.
+        held="$(jq -r '[(if .report_saved then "report" else empty end), (if .decision_saved then "decision" else empty end), (if .transcript_saved then "transcript" else empty end)] | join(", ")' "$metadata" 2>/dev/null || true)"
+        if [ -n "$held" ]; then
+            printf 'A checkpoint at `%s` holds no model patch, only the %s. The next run of this card starts the code over but is given those as inputs.\n' \
+                "$CHECKPOINT_DIR" "$held"
+        else
+            printf 'A checkpoint directory exists at `%s` but saved nothing. The next run starts over.\n' "$CHECKPOINT_DIR"
+        fi
     else
         printf 'No resumable work was saved by this run.\n'
     fi
@@ -207,13 +251,57 @@ else
     warn "could not attach $JOURNAL_NAME to task $TASK_ID"
 fi
 
-if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] && [ "$OUTCOME" != paused ]; then
-    existing="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+# One journal per run, forever, would bury the spec PDFs and screenshots people
+# actually attached — a card run twenty times would carry twenty of them ahead
+# of the real evidence. checkpoint.sh bounds its own footprint for the same
+# reason; the newest few are the only ones anyone reads.
+JOURNAL_KEEP="${AUTOPR_JOURNAL_KEEP:-5}"
+prune_journals() {
+    local files stale id
+    files="$( ( mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" ) 2>/dev/null || true )"
+    [ -n "$files" ] || return 0
+    stale="$(printf '%s' "$files" | jq -r --argjson keep "$JOURNAL_KEEP" '
+        [ .[]? | select((.filename // "") | test("^autopr-run-.*\\.md$")) ]
+        | sort_by(.created_at // "") | reverse | .[$keep:] | .[].id // empty' 2>/dev/null || true)"
+    while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        ( mw_api DELETE "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files/$id" >/dev/null ) 2>/dev/null \
+            || warn "could not prune old journal $id"
+    done <<< "$stale"
+}
+prune_journals
+
+# The card face. `$CARD_FILE` is the SELECTION-time snapshot, so it cannot be
+# trusted here: investigate.sh's park_rejected_after_correction and
+# publish-research.sh both PATCH a `BLOCKED: AWAITING ANSWERS ·
+# [autopr:no-spec …]` header and then exit non-zero, which reaches Cleanup as
+# a plain failure. Writing STOPPED over that erases the marker select.sh uses
+# to keep the card settled and the question form Espresso renders. Read the
+# live note, and stand down whenever this run already parked the card.
+snapshot_note="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+live_note="$snapshot_note"
+live_tasks="$( ( mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks" ) 2>/dev/null || true )"
+if [ -n "$live_tasks" ]; then
+    live_note="$(printf '%s' "$live_tasks" \
+        | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .progress_note // "") // ""' 2>/dev/null \
+        || printf '%s' "$snapshot_note")"
+fi
+already_parked=false
+if [ "$live_note" != "$snapshot_note" ] \
+    && printf '%s' "$live_note" \
+        | grep -qE '\[autopr:(no-spec|rejected|parked) |· (PAUSED|BLOCKED|ON HOLD):'; then
+    already_parked=true
+fi
+
+if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] \
+    && [ "$OUTCOME" != paused ] && [ "$already_parked" != true ]; then
     # lib.sh's header alternation matches `· run #<id>`; RUN_ID is "local"
     # off CI, so that group accepts word characters, not just digits.
     marker="🤖 AUTO SETUP · STOPPED: $label · run #$RUN_ID · note: see $JOURNAL_NAME"
-    note="$(progress_note_with_origin "$marker" "$existing")"
+    note="$(progress_note_with_origin "$marker" "$live_note")"
     ( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null ) \
         || warn "could not record the stop reason on task $TASK_ID"
+elif [ "$already_parked" = true ]; then
+    printf 'run-journal: card already parked by this run; leaving its header alone\n' >&2
 fi

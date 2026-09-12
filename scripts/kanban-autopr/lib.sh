@@ -362,14 +362,18 @@ progress_note_with_origin() {
     # New notes put the state first so the narrow card face shows the reason
     # for a stall before build provenance. Keep accepting the legacy lowercase
     # prefix above so an upgrade does not duplicate an existing human note.
-    # PAUSED belongs in this alternation: checkpoint.sh writes it, so without
-    # it every recovery run would re-append its own stale pause header here.
-    # The same goes for every other machine header (BLOCKED: <reason>,
-    # ON HOLD: …, STOPPED: … from run-journal.sh) and the rejected/parked
-    # ledger markers: any header this alternation does not recognise survives
-    # as a "remainder" and the next cycle prefixes its own state to it.
+    # Every machine header this system writes belongs in this alternation:
+    # READY FOR REVIEW, ALREADY SCOPED (record-coverage.sh), PAUSED
+    # (checkpoint.sh), BLOCKED:/NO PR: (investigate.sh, publish.sh), ON HOLD:
+    # (select.sh's park) and STOPPED: (run-journal.sh), plus the no-spec,
+    # rejected and parked ledger markers. Recognising a header is what lets an
+    # OPERATOR tail after it survive: the sed strips the machine part and the
+    # remainder is re-appended to the new marker. An unrecognised
+    # `🤖 AUTO SETUP` header does NOT survive — both branches below fail and
+    # the marker replaces it wholesale — so a new header must be added here at
+    # the same time it is introduced.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|ON HOLD: [A-Z0-9_-]+( [A-Z0-9_-]+)*|STOPPED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · run #[A-Za-z0-9_-]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?( · \[autopr:(rejected|parked) [^]]+\] [A-Za-z0-9_.:-]+( · [^·]+)?)?( · note: [^·]+)?( · )?//')"
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|ALREADY SCOPED|BLOCKED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|ON HOLD: [A-Z0-9_-]+( [A-Z0-9_-]+)*|STOPPED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · run #[A-Za-z0-9_-]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?( · \[autopr:(rejected|parked) [^]]+\] [A-Za-z0-9_.:-]+( · [^·]+)?)?( · note: [^·]+)?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$header" ] \
@@ -442,6 +446,30 @@ autopr_record_outcome() {
         count=$((previous_count + 1))
     fi
     printf '%s\t%s\t%s\n' "$count" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+}
+
+# autopr_attempt_ledger_path TASK_ID_OR_ID8
+# The one place that knows where the failure ledger lives and how a task id
+# maps to its file name. Readers that derive either themselves drift from the
+# writer above: card-control.sh read `$AUTOPR_USER_HOME/.cache/...`, which is a
+# different file whenever that variable points at the runner account, and
+# always reported "no strikes" there.
+autopr_attempt_ledger_path() {
+    local key="$1" id8
+    id8="$(printf '%s' "$key" | tr -d '-' | cut -c1-8)"
+    [ -n "$id8" ] || return 1
+    printf '%s/attempts/%s' "${AUTOPR_CACHE_DIR:-$HOME/.cache/matcha-autopr}" "$id8"
+}
+
+# autopr_attempt_ledger_line TASK_ID_OR_ID8
+# Emits `count<TAB>reason<TAB>iso-ts` for a card with consecutive failures, and
+# nothing at all for a card that has none. Never fails: an absent ledger is the
+# normal state.
+autopr_attempt_ledger_line() {
+    local marker
+    marker="$(autopr_attempt_ledger_path "$1")" || return 0
+    [ -s "$marker" ] || return 0
+    head -n 1 "$marker"
 }
 
 # autopr_strip_bookkeeping_history HISTORY_JSON

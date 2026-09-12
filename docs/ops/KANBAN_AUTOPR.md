@@ -146,14 +146,32 @@ a resumable checkpoint exists on the runner, and the next step. A run that died 
 nothing else had already written to the card (model pass failed, verify failed, publish
 failed, died in setup, cancelled) also gets a `🤖 AUTO SETUP · STOPPED: <why> · run #N`
 card-face header pointing at the journal; refusals, pauses, and successes keep the header
-the publisher or checkpoint already wrote. A timeout reaches Cleanup as an ordinary step
-failure — `investigate.sh` reports `paused` only for an acknowledged operator takeover
-(Codex exit 75) — so the journal reclassifies it from the checkpoint's own
-`runtime_limited` verdict and leaves the `PAUSED: APPROVE 10 MORE MINUTES` header alone.
-The journals are excluded from the attachments `investigate.sh` feeds the model: one
-lands per run, and re-reading them would crowd out operator evidence. `msandbox autopr log <id8|title>` prints the
-journal list with the newest in full, the failure ledger, and the runner's checkpoints
-for that card.
+the publisher or checkpoint already wrote. The card file the Cleanup step holds is the
+selection-time snapshot, so the journal re-reads the live note first and stands down
+whenever this run already parked the card — otherwise a `BLOCKED: AWAITING ANSWERS ·
+[autopr:no-spec …]` park written by `investigate.sh` or `publish-research.sh`, which both
+exit non-zero afterwards, would be overwritten by `STOPPED` and lose both the settled-state
+marker and the question form. A timeout reaches Cleanup as an ordinary step failure —
+`investigate.sh` reports `paused` only for an acknowledged operator takeover (Codex exit
+75) — so the Cleanup step reads the checkpoint's own `runtime_limited` verdict *before* it
+books a ledger strike, and the journal reports the same run as a pause: an approved
+continuation that runs out of time again is not a strike, and the
+`PAUSED: APPROVE 10 MORE MINUTES` header stays. Only the newest
+`AUTOPR_JOURNAL_KEEP` (5) journals are kept on a card; older ones are deleted so they
+cannot bury the attachments people added. The journals are excluded at the single fetch
+that writes `files.json`, so they reach the model neither as downloaded attachments nor as
+filenames in `context.json`: one lands per run, and re-reading them would crowd out
+operator evidence. `msandbox autopr log <id8|title>` prints the journal list with the
+newest in full, the failure ledger, and the runner's checkpoints for that card.
+
+**The resume pointer survives a failed publish.** `checkpoint.sh consume` runs from the
+Cleanup step once `publish.sh` or `publish-research.sh` has actually succeeded, not as the
+last line of `investigate.sh`. Under the old ordering a publish-stage failure — a path
+guard refusal, a `gh` error, a dropped connection — renamed `active` to `consumed-…` while
+the work it pointed at was still valid and still on disk, so the next run started over.
+The journal also finds this run's own in-flight snapshot when the Cleanup step has no
+checkpoint to hand it (the save step only runs when *Investigate* failed), rather than
+reporting that nothing was saved.
 
 **Card control from any terminal.** `msandbox autopr queue` lists the cached snapshot
 including held (`HOLD · <reason>`) and claimed In Progress cards; `msandbox autopr hold

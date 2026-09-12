@@ -124,6 +124,8 @@ check_contract_tests() {
         test_kanban_autopr_dispatch.sh \
         test_kanban_autopr_dashboard.sh \
         test_kanban_autopr_publish.sh \
+        test_kanban_autopr_card_control.sh \
+        test_kanban_autopr_run_journal.sh \
         test_kanban_autopr_research.sh \
         test_kanban_autopr_email.sh \
         test_kanban_autopr_checkout_cleanup.sh \

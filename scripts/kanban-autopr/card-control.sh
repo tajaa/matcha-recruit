@@ -148,7 +148,8 @@ unstick_card() {
 # failure ledger select.sh consults, and the resumable checkpoints on the
 # runner. Reads only.
 log_card() {
-    local card="$1" project task id8 files journals newest_url ledger checkpoints printed
+    local card="$1" project task id8 files journals newest_url checkpoints printed
+    local ledger_line count reason ts body lines
     project="$(card_field "$card" .project_id)"; task="$(card_field "$card" .task_id)"
     id8="$(card_field "$card" .id8)"
     printf '%s · %s · %s\n' "$id8" "$(card_field "$card" .title)" "$(card_field "$card" .board_column)"
@@ -156,16 +157,32 @@ log_card() {
     journals="$(printf '%s' "$files" | jq -c '[.[] | select((.filename // "") | test("^autopr-run-.*\\.md$"))] | sort_by(.created_at) | reverse')"
     printf '\nRun journals: %s\n' "$(printf '%s' "$journals" | jq 'length')"
     printf '%s' "$journals" | jq -r '.[:10][] | "  " + (.created_at // "?")[0:19] + "  " + .filename'
-    newest_url="$(printf '%s' "$journals" | jq -r '.[0] | (.url // .storage_url // empty)')"
+    newest_url="$(printf '%s' "$journals" | jq -r '.[0] | .storage_url // empty')"
     if [ -n "$newest_url" ]; then
         printf '\n--- newest journal ---\n'
-        curl -sS "${MW_CURL_TIMEOUTS[@]}" "$newest_url" 2>/dev/null | head -n 120 \
-            || printf '(could not download %s)\n' "$newest_url"
+        # Download whole, then trim. Piping curl into `head` under `pipefail`
+        # reports a failure for every journal LONGER than the cap (head exits
+        # first, curl dies on SIGPIPE), and without -f an expired presigned S3
+        # link prints its <Error>AccessDenied</Error> body as if it were the
+        # journal.
+        body="$(mktemp)"
+        if curl -fsS "${MW_CURL_TIMEOUTS[@]}" -o "$body" "$newest_url"; then
+            head -n 120 "$body"
+            lines="$(wc -l < "$body" | tr -d '[:space:]')"
+            [ "${lines:-0}" -le 120 ] \
+                || printf '… (%s more lines; open the attachment on the card)\n' "$((lines - 120))"
+        else
+            printf '(could not download %s — the presigned link may have expired)\n' "$newest_url"
+        fi
+        rm -f "$body"
     fi
-    ledger="${AUTOPR_CACHE_DIR:-$USER_HOME/.cache/matcha-autopr}/attempts/$id8"
     printf '\nFailure ledger: '
-    if [ -s "$ledger" ]; then
-        IFS=$'\t' read -r count reason ts < "$ledger" || true
+    # lib.sh owns the ledger path and the id8 derivation. Reading it here with
+    # $USER_HOME meant any invocation that set AUTOPR_USER_HOME consulted a
+    # file nothing writes and always reported "none".
+    ledger_line="$(autopr_attempt_ledger_line "$task")"
+    if [ -n "$ledger_line" ]; then
+        IFS=$'\t' read -r count reason ts <<< "$ledger_line"
         printf '%s consecutive × %s (last %s)\n' "${count:-?}" "${reason:-?}" "${ts:-?}"
     else
         printf 'none (last run succeeded, or the card was never run)\n'

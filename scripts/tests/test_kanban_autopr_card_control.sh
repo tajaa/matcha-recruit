@@ -62,15 +62,19 @@ case "$url" in
   */projects/11111111-1111-4111-8111-111111111111/bundle) body="$(cat "$AUTOPR_TEST_BUNDLE_DIR/bundle-1.json")" ;;
   */projects/22222222-2222-4222-8222-222222222222/bundle) body="$(cat "$AUTOPR_TEST_BUNDLE_DIR/bundle-2.json")" ;;
   */tasks/bbbb0000-0000-4000-8000-000000000002/files) body="$(cat "$AUTOPR_TEST_BUNDLE_DIR/files-bbbb.json")" ;;
-  https://example.invalid/cdn/*) cat "$AUTOPR_TEST_BUNDLE_DIR/journal-body.md"; exit 0 ;;
+  https://example.invalid/cdn/*)
+      [ "${AUTOPR_TEST_CDN_FAIL:-0}" = 0 ] || exit 22
+      if [ -n "$output_file" ]; then cat "$AUTOPR_TEST_BUNDLE_DIR/journal-body.md" > "$output_file";
+      else cat "$AUTOPR_TEST_BUNDLE_DIR/journal-body.md"; fi
+      exit 0 ;;
 esac
 [ -z "$output_file" ] || printf '%s' "$body" > "$output_file"
 printf 200
 EOF
 cat > "$TMP_DIR/files-bbbb.json" <<'EOF'
-[{"id":"f2","filename":"autopr-run-901-20260912T040500Z.md","created_at":"2026-09-12T04:05:00+00:00","url":"https://example.invalid/cdn/f2.md"},
- {"id":"f0","filename":"Screenshot.png","created_at":"2026-09-11T09:08:27+00:00","url":"https://example.invalid/cdn/f0.png"},
- {"id":"f1","filename":"autopr-run-800-20260912T032000Z.md","created_at":"2026-09-12T03:20:00+00:00","url":"https://example.invalid/cdn/f1.md"}]
+[{"id":"f2","filename":"autopr-run-901-20260912T040500Z.md","created_at":"2026-09-12T04:05:00+00:00","storage_url":"https://example.invalid/cdn/f2.md"},
+ {"id":"f0","filename":"Screenshot.png","created_at":"2026-09-11T09:08:27+00:00","storage_url":"https://example.invalid/cdn/f0.png"},
+ {"id":"f1","filename":"autopr-run-800-20260912T032000Z.md","created_at":"2026-09-12T03:20:00+00:00","storage_url":"https://example.invalid/cdn/f1.md"}]
 EOF
 printf '# AutoPR run #901 · FAILURE\n\n## Why it stopped\n\npublishing the result failed.\n' > "$TMP_DIR/journal-body.md"
 mkdir -p "$TMP_DIR/cache/attempts" "$TMP_DIR/worktree/.git/matcha-kanban-autopr-checkpoints/bbbb0000-0000-4000-8000-000000000002/901-1-inflight"
@@ -187,6 +191,42 @@ check "log lists the card's run journals newest first, prints the newest, the le
     && grep -q '^Failure ledger: 2 consecutive × publish (last 2026-09-12T04:05:00Z)$' <<< "$out" \
     && grep -qE '^Checkpoints on the runner: 901-1-inflight +\(resumes from 901-1-inflight\)$' <<< "$out" \
     && ! grep -q 'POST\|PATCH' "$TMP_DIR/calls" && echo 0 || echo 1)
+
+# Finding: piping curl into `head` under `pipefail` makes every journal LONGER
+# than the cap look like a failed download — head exits first and curl dies on
+# SIGPIPE — so the fallback line printed underneath 120 lines of content.
+cp "$TMP_DIR/journal-body.md" "$TMP_DIR/journal-body.short"
+{ printf '# AutoPR run #901\n'; for i in $(seq 1 150); do printf 'line %s\n' "$i"; done; } > "$TMP_DIR/journal-body.md"
+out="$(run_control log bbbb0000)"
+check "a journal longer than the cap is trimmed without claiming the download failed" \
+  $(! grep -q 'could not download' <<< "$out" \
+    && grep -q '^line 119$' <<< "$out" && ! grep -q '^line 120$' <<< "$out" \
+    && grep -q '31 more lines' <<< "$out" && echo 0 || echo 1)
+
+# Finding: without -f, an expired presigned S3 link exits 0 and its
+# <Error>AccessDenied</Error> body prints as if it were the journal.
+set +e
+out="$(AUTOPR_TEST_CDN_FAIL=1 run_control log bbbb0000)"; rc=$?
+set -e
+check "an expired presigned link is reported as a failed download, not printed as content" \
+  $([ "$rc" = 0 ] && grep -q 'could not download' <<< "$out" \
+    && grep -q 'may have expired' <<< "$out" && echo 0 || echo 1)
+cp "$TMP_DIR/journal-body.short" "$TMP_DIR/journal-body.md"
+
+# Finding: lib.sh writes the ledger under $HOME; this read it under
+# $AUTOPR_USER_HOME, which exists precisely to point at the runner account —
+# so any such invocation consulted a file nothing writes and always said
+# "none". lib.sh owns the path now.
+mkdir -p "$TMP_DIR/writerhome/.cache/matcha-autopr/attempts" "$TMP_DIR/runnerhome"
+printf '3\tverify\t2026-09-12T06:00:00Z\n' > "$TMP_DIR/writerhome/.cache/matcha-autopr/attempts/bbbb0000"
+out="$(PATH="$TMP_DIR/bin:$PATH" TMPDIR="$TMP_DIR" MATCHA_AUTOPR_ENV="$TMP_DIR/env" \
+  AUTOPR_TEST_CALLS="$TMP_DIR/calls" AUTOPR_TEST_BUNDLE_DIR="$TMP_DIR" \
+  AUTOPR_GH_BIN="$TMP_DIR/bin/gh" AUTOPR_RUN_SNAPSHOT="$TMP_DIR/run-snapshot" \
+  AUTOPR_RUNNER_WORKTREE="$TMP_DIR/worktree" \
+  HOME="$TMP_DIR/writerhome" AUTOPR_USER_HOME="$TMP_DIR/runnerhome" \
+  "$CONTROL" log bbbb0000)"
+check "the failure ledger is read from the path lib.sh writes, not from AUTOPR_USER_HOME" \
+  $(grep -q '^Failure ledger: 3 consecutive × verify (last 2026-09-12T06:00:00Z)$' <<< "$out" && echo 0 || echo 1)
 
 # An unmatched */ glob makes ls exit non-zero; under set -euo pipefail that
 # killed log mid-line and returned the ambiguous-target code.

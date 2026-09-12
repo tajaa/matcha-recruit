@@ -17,6 +17,16 @@ from .capabilities import redact
 from .dashboard_view import Row
 from .terminal_ui import plain
 
+# The card-control verbs that WRITE to the board. Each needs an explicit
+# confirmation before it runs, and membership here is what gates that branch.
+CARD_WRITE_PROMPTS = {
+    "hold": "Hold this ticket so AutoPR skips it until released or edited?",
+    "release": "Lift the hold and let the routine sweep pick this ticket up again?",
+    "run-now": "Queue an immediate AutoPR run for this ticket?",
+    "unstick": "Move this claimed ticket back to its lane (Todo, or Changes Requested when it has a PR)?",
+    "cancel-run": "Cancel the active Kanban run and move its card back to its lane?",
+}
+
 
 class AutoPRFeed:
     """Local read-only feed; no GitHub polling on each dashboard frame."""
@@ -356,16 +366,13 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
         ):
             return "Ticket unchanged."
         return autopr_queue.start(run_id, repo)
-    if action in autopr_cli.CARD_VERBS and action != "log":
+    if action in CARD_WRITE_PROMPTS:
         # run_id is a task id here (or "-" for the active run). Board writes
-        # go through card-control.sh so the terminal and the tab agree.
-        prompts = {
-            "hold": "Hold this ticket so AutoPR skips it until released or edited?",
-            "release": "Lift the hold and let the routine sweep pick this ticket up again?",
-            "run-now": "Queue an immediate AutoPR run for this ticket?",
-            "unstick": "Move this claimed ticket back to its lane (Todo, or Changes Requested when it has a PR)?",
-            "cancel-run": "Cancel the active Kanban run and move its card back to its lane?",
-        }
+        # go through card-control.sh so the terminal and the tab agree. The
+        # branch keys on the prompt map itself, not on CARD_VERBS minus a
+        # hand-maintained exception: every verb here needs a confirmation, and
+        # the next read-only verb added to CARD_VERBS must not land in it.
+        prompts = CARD_WRITE_PROMPTS
         if not choose(prompts[action], [("Cancel", False), ("Confirm", True)], reader=reader, output=output):
             return "Ticket unchanged."
         reason = reader("Reason (optional): ").strip() if action == "hold" else None

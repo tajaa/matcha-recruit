@@ -119,7 +119,15 @@ check "failed investigations checkpoint before the trusted checkout is reset" \
     $(grep -qF 'name: Checkpoint interrupted investigation' "$workflow" \
       && grep -qF 'checkpoint.sh save' "$workflow" \
       && grep -qF 'AUTOPR_RESUME_PATCH' "$AUTOPR_DIR/run-codex-sandboxed.sh" \
-      && grep -qF 'checkpoint.sh" consume' "$AUTOPR_DIR/investigate.sh" \
+      && echo 0 || echo 1)
+
+# The pointer is consumed only once something was actually published. It used
+# to be the last line of investigate.sh, which threw the pointer away on every
+# publish-stage failure while the work itself stayed valid on disk.
+check "the resume pointer outlives a publish-stage failure" \
+    $(! grep -qF 'checkpoint.sh" consume' "$AUTOPR_DIR/investigate.sh" \
+      && grep -qF 'checkpoint.sh" consume "$RUNNER_TEMP/card.json"' "$workflow" \
+      && grep -qF 'if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then' "$workflow" \
       && echo 0 || echo 1)
 
 check "production resolver uses active container digests and read-only migration revisions" \
