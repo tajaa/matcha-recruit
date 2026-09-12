@@ -146,7 +146,12 @@ a resumable checkpoint exists on the runner, and the next step. A run that died 
 nothing else had already written to the card (model pass failed, verify failed, publish
 failed, died in setup, cancelled) also gets a `🤖 AUTO SETUP · STOPPED: <why> · run #N`
 card-face header pointing at the journal; refusals, pauses, and successes keep the header
-the publisher or checkpoint already wrote. `msandbox autopr log <id8|title>` prints the
+the publisher or checkpoint already wrote. A timeout reaches Cleanup as an ordinary step
+failure — `investigate.sh` reports `paused` only for an acknowledged operator takeover
+(Codex exit 75) — so the journal reclassifies it from the checkpoint's own
+`runtime_limited` verdict and leaves the `PAUSED: APPROVE 10 MORE MINUTES` header alone.
+The journals are excluded from the attachments `investigate.sh` feeds the model: one
+lands per run, and re-reading them would crowd out operator evidence. `msandbox autopr log <id8|title>` prints the
 journal list with the newest in full, the failure ledger, and the runner's checkpoints
 for that card.
 

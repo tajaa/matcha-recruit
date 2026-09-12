@@ -369,7 +369,7 @@ progress_note_with_origin() {
     # ledger markers: any header this alternation does not recognise survives
     # as a "remainder" and the next cycle prefixes its own state to it.
     remainder="$(printf '%s' "$remainder" | sed -E \
-        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|ON HOLD: [A-Z0-9_-]+( [A-Z0-9_-]+)*|STOPPED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · run #[0-9]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?( · \[autopr:(rejected|parked) [^]]+\] [A-Za-z0-9_.:-]+( · [^·]+)?)?( · note: [^·]+)?( · )?//')"
+        's/^🤖 AUTO SETUP · (READY FOR REVIEW|BLOCKED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|ON HOLD: [A-Z0-9_-]+( [A-Z0-9_-]+)*|STOPPED: [A-Z0-9_-]+( [A-Z0-9_-]+)*|PAUSED: [A-Z0-9]+( [A-Z0-9]+)*|NO PR: [A-Z_ -]+)( · checkpoint [^·]+)?( · run #[A-Za-z0-9_-]+)?( · build [^·]+)?( · prod( backend)? [^·]+( \/ frontend [^·]+)?)?( · PR #[0-9]+)?( · [^·]+ C[0-9]+)?( · \[autopr:directives [^]]+\])?( · \[autopr:no-spec [^]]+\] (already_fixed|acceptance_criteria_met|migration_required|policy_blocked|external_dependency|needs_clarification))?( · \[autopr:(rejected|parked) [^]]+\] [A-Za-z0-9_.:-]+( · [^·]+)?)?( · note: [^·]+)?( · )?//')"
     if [ -n "$remainder" ] && [ "$remainder" != "$header" ]; then
         printf '%s · %s' "$marker" "$remainder"
     elif [ -n "$header" ] \

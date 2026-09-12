@@ -322,9 +322,17 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
     # publisher uploaded, recognised by its own naming (research-… or
     # email-…-rN). The snapshots on an email card, email-<gmail message id>.md, carry no
     # round suffix and are never mistaken for output of the bot.
+    # The per-run journals Cleanup attaches (autopr-run-<run id>-<ts>.md) are
+    # this system talking to the operator, not evidence: one lands per run, so
+    # after a few failures they would fill the attachment budget with the
+    # machine-written "why it stopped" prose and crowd out operator evidence.
+    # Unlike the mine filter below, this applies in every mode, not just
+    # artifact runs.
+    def journal: ((.filename // "") | test("^autopr-run-.*\\.md$"));
     def mine: ((.filename // "") | test("^(research|email)-(report-)?" + $id8 + "-r[0-9]+"));
     def prior_report: ((.filename // "") | test("^(research|email)-report-" + $id8 + "-r[0-9]+\\.md$"));
-    (if $outcome == "artifact" then
+    map(select(journal | not))
+    | (if $outcome == "artifact" then
         ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
         | map(select((mine | not) or (. == $keep)))
      else . end)

@@ -29,7 +29,7 @@ RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-action
 GIT_BIN="${AUTOPR_GIT_BIN:-git}"
 
 usage() {
-    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -148,7 +148,7 @@ unstick_card() {
 # failure ledger select.sh consults, and the resumable checkpoints on the
 # runner. Reads only.
 log_card() {
-    local card="$1" project task id8 files journals newest_url ledger checkpoints
+    local card="$1" project task id8 files journals newest_url ledger checkpoints printed
     project="$(card_field "$card" .project_id)"; task="$(card_field "$card" .task_id)"
     id8="$(card_field "$card" .id8)"
     printf '%s · %s · %s\n' "$id8" "$(card_field "$card" .title)" "$(card_field "$card" .board_column)"
@@ -173,8 +173,12 @@ log_card() {
     checkpoints="$RUNNER_WORKTREE/.git/matcha-kanban-autopr-checkpoints/$task"
     printf 'Checkpoints on the runner: '
     if [ -d "$checkpoints" ]; then
-        (cd "$checkpoints" && ls -1td -- */ 2>/dev/null | sed 's|/$||' | head -5 | tr '\n' ' ')
-        [ ! -f "$checkpoints/active" ] || printf '(resumes from %s)' "$(tr -d '\r\n' < "$checkpoints/active")"
+        # A card whose checkpoint dir holds no run directories is normal, but
+        # the unmatched */ glob makes ls exit non-zero and set -e would treat
+        # that as a failed lookup. prune_checkpoints guards the same glob.
+        printed="$(cd "$checkpoints" && ls -1td -- */ 2>/dev/null | sed 's|/$||' | head -5 | tr '\n' ' ' || true)"
+        printf '%s' "${printed:-none}"
+        [ ! -f "$checkpoints/active" ] || printf ' (resumes from %s)' "$(tr -d '\r\n' < "$checkpoints/active")"
         printf '\n'
     else
         printf 'none\n'

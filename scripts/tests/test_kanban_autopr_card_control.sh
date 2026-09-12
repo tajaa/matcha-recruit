@@ -185,8 +185,25 @@ check "log lists the card's run journals newest first, prints the newest, the le
     && ! grep -q 'Screenshot.png' <<< "$out" \
     && grep -q '^publishing the result failed\.$' <<< "$out" \
     && grep -q '^Failure ledger: 2 consecutive × publish (last 2026-09-12T04:05:00Z)$' <<< "$out" \
-    && grep -q '^Checkpoints on the runner: 901-1-inflight (resumes from 901-1-inflight)$' <<< "$out" \
+    && grep -qE '^Checkpoints on the runner: 901-1-inflight +\(resumes from 901-1-inflight\)$' <<< "$out" \
     && ! grep -q 'POST\|PATCH' "$TMP_DIR/calls" && echo 0 || echo 1)
+
+# An unmatched */ glob makes ls exit non-zero; under set -euo pipefail that
+# killed log mid-line and returned the ambiguous-target code.
+rm -rf "$TMP_DIR/worktree/.git/matcha-kanban-autopr-checkpoints/bbbb0000-0000-4000-8000-000000000002"
+mkdir -p "$TMP_DIR/worktree/.git/matcha-kanban-autopr-checkpoints/bbbb0000-0000-4000-8000-000000000002"
+set +e
+out="$(run_control log bbbb0000)"; rc=$?
+set -e
+check "log survives a checkpoint directory with no runs in it" \
+  $([ "$rc" = 0 ] && grep -q '^Checkpoints on the runner: none$' <<< "$out" \
+    && grep -q '^Failure ledger: 2 consecutive × publish' <<< "$out" && echo 0 || echo 1)
+
+usage_out="$(run_control 2>&1 || true)"
+check "usage prints the whole header including the exit codes, and no shell source" \
+  $(grep -q 'card-control.sh log' <<< "$usage_out" \
+    && grep -q '1 for a failed board call (via die)\.' <<< "$usage_out" \
+    && ! grep -q 'set -euo pipefail' <<< "$usage_out" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

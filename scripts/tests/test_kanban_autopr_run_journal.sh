@@ -111,10 +111,42 @@ check "a refusal the publisher already parked gets a journal but no second heade
     && grep -q 'outside the approved product source paths' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/uploads"/*
-run_journal "$TMP_DIR/card.json" --outcome paused --reason runtime_approval >/dev/null
-check "a pause keeps the checkpoint's PAUSED header" \
+run_journal "$TMP_DIR/card.json" --outcome paused --reason operator_takeover >/dev/null
+body="$(cat "$TMP_DIR/uploads"/autopr-run-77-*.md)"
+check "an operator takeover says a human holds the checkout, not that time ran out" \
   $(grep -q '^UPLOAD' "$TMP_DIR/calls" && ! grep -q PATCH "$TMP_DIR/calls" \
-    && grep -q 'Approve more time from the ticket' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
+    && grep -q 'an operator took the checkout over' <<< "$body" \
+    && grep -q 'the working tree is held by the operator outside this workflow' <<< "$body" \
+    && grep -q 'Finish or hand back the manual session' <<< "$body" \
+    && ! grep -q 'Approve 10 more minutes' <<< "$body" \
+    && ! grep -q 'No resumable work was saved' <<< "$body" && echo 0 || echo 1)
+
+# A timeout reaches Cleanup as a plain step failure (investigate.sh writes
+# paused=true only for codex rc 75), but checkpoint.sh has already parked the
+# card. Overwriting that header would strip the "approve 10 more minutes"
+# affordance select.sh and Espresso both prefix-match.
+rm -f "$TMP_DIR/uploads"/*
+printf '%s\n' '{"runtime_limited":true,"patch_saved":true,"patch_bytes":10,"changed_file_count":1,"changed_files":["a.tsx"],"created_at":"2026-09-12T04:00:00Z"}' \
+  > "$TMP_DIR/checkpoint/metadata.json"
+run_journal "$TMP_DIR/card.json" --outcome failure --reason investigate --checkpoint "$TMP_DIR/checkpoint" >/dev/null
+body="$(cat "$TMP_DIR/uploads"/autopr-run-77-*.md)"
+check "a timed-out run is reported as a pause and never overwrites the checkpoint's PAUSED header" \
+  $(! grep -q PATCH "$TMP_DIR/calls" \
+    && grep -q '^# AutoPR run #77 · PAUSED' <<< "$body" \
+    && grep -q 'hit its time budget; the card is parked in Changes Requested' <<< "$body" \
+    && grep -q 'Approve 10 more minutes from the ticket' <<< "$body" \
+    && ! grep -q 'MODEL PASS FAILED' <<< "$body" && echo 0 || echo 1)
+printf '%s\n' '{"schema_version":1,"task_id":"bbbb0000-0000-4000-8000-000000000002","id8":"bbbb0000","run_id":"77","created_at":"2026-09-12T04:00:00Z","patch_saved":true,"patch_bytes":36321,"changed_file_count":2,"changed_files":["client/src/pages/admin/Products.tsx","client/src/utils/tier.ts"],"report_saved":true,"decision_saved":true,"transcript_saved":true}' \
+  > "$TMP_DIR/checkpoint/metadata.json"
+
+# jq treats "" as truthy, so `join(", ") // "nothing"` never fired.
+rm -f "$TMP_DIR/uploads"/*
+mkdir -p "$TMP_DIR/bare-checkpoint"
+printf '%s\n' '{"patch_saved":false,"report_saved":false,"decision_saved":false,"transcript_saved":false,"changed_file_count":0}' \
+  > "$TMP_DIR/bare-checkpoint/metadata.json"
+run_journal "$TMP_DIR/card.json" --outcome failure --reason verify --checkpoint "$TMP_DIR/bare-checkpoint" >/dev/null
+check "a checkpoint holding nothing says so instead of rendering an empty list" \
+  $(grep -q 'holds no model patch (it saved nothing)' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/uploads"/*
 set +e
@@ -139,8 +171,38 @@ check "ON HOLD with its parked marker is replaced" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" "🤖 AUTO SETUP · ON HOLD: REPEATED FAILURES · [autopr:parked 2026-09-12T00:00:00Z] investigate · note: three strikes" "🤖 AUTO SETUP · READY FOR REVIEW")
 check "COSMETIC DIFF header is replaced" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" "🤖 AUTO SETUP · BLOCKED: COSMETIC DIFF · build 15 · prod 1.2 · 🟡 C55 · [autopr:rejected 2026-09-12T00:00:00Z] cosmetic_only · note: x" "🤖 AUTO SETUP · READY FOR REVIEW")
+check "an off-CI journal header is replaced too (run #local, not just digits)" \
+  $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" "🤖 AUTO SETUP · STOPPED: DIED IN SETUP · run #local · note: see autopr-run-local-x.md" "🤖 AUTO SETUP · READY FOR REVIEW")
+check "the PAUSED header survives untouched when the journal writes none" \
+  $(dedupe "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 77" $'🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 77\nWhy more time: budget\nNext step: Approve 10 more minutes to continue from the saved checkpoint.' "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 77")
 check "a human-authored note survives every machine header" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" $'Human wrote this\nand this' $'🤖 AUTO SETUP · READY FOR REVIEW · Human wrote this\nand this')
+
+# Finding: journals are card attachments, and investigate.sh feeds card
+# attachments to the model. One lands per run, so without an exclusion the
+# fourth run spends three of its twelve slots re-reading its own prose.
+feed_filter() {
+  jq -c --argjson round 1 --arg id8 bbbb0000 --arg outcome "$1" '
+    def journal: ((.filename // "") | test("^autopr-run-.*\\.md$"));
+    def mine: ((.filename // "") | test("^(research|email)-(report-)?" + $id8 + "-r[0-9]+"));
+    def prior_report: ((.filename // "") | test("^(research|email)-report-" + $id8 + "-r[0-9]+\\.md$"));
+    map(select(journal | not))
+    | (if $outcome == "artifact" then
+        ([.[] | select(prior_report)] | sort_by(.created_at // "") | last) as $keep
+        | map(select((mine | not) or (. == $keep)))
+       else . end)
+    | [.[] | .filename] | join(",")'
+}
+files_json='[{"filename":"autopr-run-77-20260912T040000Z.md","round_index":1,"created_at":"2026-09-12T04:00:00Z"},
+             {"filename":"autopr-run-78-20260912T050000Z.md","round_index":1,"created_at":"2026-09-12T05:00:00Z"},
+             {"filename":"spec.pdf","round_index":1,"created_at":"2026-09-12T03:00:00Z"},
+             {"filename":"research-report-bbbb0000-r1.md","round_index":1,"created_at":"2026-09-12T02:00:00Z"}]'
+check "run journals are never fed back to the model, in either mode" \
+  $([ "$(printf '%s' "$files_json" | feed_filter pull_request)" = '"spec.pdf,research-report-bbbb0000-r1.md"' ] \
+    && [ "$(printf '%s' "$files_json" | feed_filter artifact)" = '"spec.pdf,research-report-bbbb0000-r1.md"' ] && echo 0 || echo 1)
+check "investigate.sh carries that exclusion in its own attachment filter" \
+  $(grep -q 'def journal: ((.filename // "") | test("\^autopr-run-.\*' "$AUTOPR_DIR/investigate.sh" \
+    && grep -q 'map(select(journal | not))' "$AUTOPR_DIR/investigate.sh" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

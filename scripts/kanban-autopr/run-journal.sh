@@ -34,6 +34,20 @@ case "$OUTCOME" in
     *) echo "run-journal: --outcome must be success|failure|cancelled|paused" >&2; exit 2 ;;
 esac
 
+# A run killed at its time budget reaches Cleanup as a plain step failure:
+# investigate.sh writes `paused=true` only for an acknowledged operator
+# takeover (codex rc 75, which exits 0). The authority on "this was a timeout"
+# is the checkpoint, which already parked the card with
+# `PAUSED: APPROVE 10 MORE MINUTES` and moved it to Changes Requested. Believe
+# it over the step outcome: otherwise this script overwrites that header with
+# STOPPED, and both select.sh and Espresso's "approve 10 more minutes"
+# affordance prefix-match the header that just disappeared.
+if [ -n "$CHECKPOINT_DIR" ] && [ -s "$CHECKPOINT_DIR/metadata.json" ] \
+    && [ "$(jq -r '.runtime_limited // false' "$CHECKPOINT_DIR/metadata.json" 2>/dev/null)" = true ]; then
+    OUTCOME=paused
+    REASON=runtime_limited
+fi
+
 PROJECT_ID="$(jq -r '.project_id' "$CARD_FILE")"
 TASK_ID="$(jq -r '.task_id' "$CARD_FILE")"
 ID8="$(jq -r '.id8 // (.task_id | .[0:8])' "$CARD_FILE")"
@@ -63,7 +77,8 @@ reason_label() {
         publish|publish_artifact) printf 'publishing the result failed' ;;
         setup) printf 'the run died before the investigation started (claim, checkout, policy, or coverage step)' ;;
         cancelled) printf 'an operator cancelled the run' ;;
-        runtime_approval) printf 'the investigation hit its time budget and is waiting for approval to continue' ;;
+        runtime_limited) printf 'the investigation hit its time budget; the card is parked in Changes Requested until someone approves 10 more minutes' ;;
+        operator_takeover) printf 'an operator took the checkout over; the manual session has no time limit and AutoPR is not working this card' ;;
         disallowed_paths) printf 'the change touched paths outside the approved product source paths and was refused' ;;
         cosmetic_only) printf 'the diff only rewrote string literals and was refused' ;;
         *) printf '%s' "$1" ;;
@@ -138,6 +153,10 @@ left_section() {
 
 resume_section() {
     local metadata="$CHECKPOINT_DIR/metadata.json"
+    if [ "$REASON" = operator_takeover ]; then
+        printf 'Nothing was checkpointed: the working tree is held by the operator outside this workflow. `msandbox` shows the takeover session.\n'
+        return
+    fi
     if [ -n "$CHECKPOINT_DIR" ] && [ -s "$metadata" ] \
         && [ "$(jq -r '.patch_saved // false' "$metadata")" = true ]; then
         printf 'A checkpoint with %s changed file(s) (%s-byte patch, saved %s) is stored on the runner at `%s`. The next run of this card resumes from it instead of starting over; it expires after the checkpoint retention window.\n' \
@@ -146,7 +165,7 @@ resume_section() {
             "$(jq -r '.created_at // "?"' "$metadata")" "$CHECKPOINT_DIR"
     elif [ -n "$CHECKPOINT_DIR" ] && [ -s "$metadata" ]; then
         printf 'A checkpoint was saved at `%s` but holds no model patch (%s). The next run starts over.\n' \
-            "$CHECKPOINT_DIR" "$(jq -r '[(if .report_saved then "report" else empty end), (if .decision_saved then "decision" else empty end), (if .transcript_saved then "transcript" else empty end)] | join(", ") // "nothing"' "$metadata")"
+            "$CHECKPOINT_DIR" "$(jq -r '[(if .report_saved then "report" else empty end), (if .decision_saved then "decision" else empty end), (if .transcript_saved then "transcript" else empty end)] | join(", ") | if . == "" then "it saved nothing" else "it holds the " + . end' "$metadata")"
     else
         printf 'No resumable work was saved by this run.\n'
     fi
@@ -155,7 +174,13 @@ resume_section() {
 next_section() {
     case "$OUTCOME" in
         success) printf 'Nothing; review the PR or the attached report.\n' ;;
-        paused) printf 'Approve more time from the ticket, or add context and press Run.\n' ;;
+        paused)
+            if [ "$REASON" = operator_takeover ]; then
+                printf 'Finish or hand back the manual session (`msandbox`); AutoPR resumes this card only after the takeover ends.\n'
+            else
+                printf 'Approve 10 more minutes from the ticket to continue from the saved checkpoint, or add context and press Run.\n'
+            fi
+            ;;
         *) printf 'Press Run on the ticket (or `msandbox autopr run-now %s`) to retry from the checkpoint; `msandbox autopr hold %s` parks it; `msandbox autopr log %s` shows this journal from a terminal.\n' "$ID8" "$ID8" "$ID8" ;;
     esac
 }
@@ -184,6 +209,8 @@ fi
 
 if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] && [ "$OUTCOME" != paused ]; then
     existing="$(jq -r '.progress_note // ""' "$CARD_FILE")"
+    # lib.sh's header alternation matches `· run #<id>`; RUN_ID is "local"
+    # off CI, so that group accepts word characters, not just digits.
     marker="🤖 AUTO SETUP · STOPPED: $label · run #$RUN_ID · note: see $JOURNAL_NAME"
     note="$(progress_note_with_origin "$marker" "$existing")"
     ( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \

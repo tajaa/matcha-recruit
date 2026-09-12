@@ -571,7 +571,10 @@ jobs:
           elif [ "$JOB_STATUS" = cancelled ]; then
             journal_outcome=cancelled; journal_reason=cancelled
           elif [ "$INVESTIGATE_PAUSED" = true ]; then
-            journal_outcome=paused; journal_reason=runtime_approval
+            # Only an acknowledged takeover reaches here: a real timeout is a
+            # step failure, and run-journal.sh reclassifies it from the
+            # checkpoint's own runtime_limited verdict.
+            journal_outcome=paused; journal_reason=operator_takeover
           fi
           "$AUTOPR_CONTROL_ROOT/kanban-autopr/run-journal.sh" "$RUNNER_TEMP/card.json" \
             --outcome "$journal_outcome" --reason "$journal_reason" \
