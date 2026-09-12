@@ -487,16 +487,20 @@ check "an already_fixed mention in another verdict's note starts no recovery pro
       && grep -q '/tasks/55555555-0000-4000-8000-000000000005/history' "$TMP_DIR/collect-urls" \
       && echo 0 || echo 1)
 
-check "collector excludes unqueued work even with assignment and stale queue signals" \
-    $(printf '%s' "$collected" | jq -e 'all(.id8 != "bbbbbbbb")' >/dev/null && echo 0 || echo 1)
+# A held card stays in the snapshot, marked, so the dashboard can show the
+# hold; refusing to run it is the selector's job (see the held-card cases).
+check "collector keeps unqueued work visibly on hold instead of dropping it" \
+    $(printf '%s' "$collected" | jq -e \
+        'any(.id8 == "bbbbbbbb" and .autopr_paused == true and has("autopr_hold_reason"))' >/dev/null \
+      && echo 0 || echo 1)
 
 check "collector admits a hand-queued card and only in an eligible lane" \
     $([ "$collect_rc" = "0" ] \
-      && [ "$(printf '%s' "$collected" | jq 'length')" = "5" ] \
+      && [ "$(printf '%s' "$collected" | jq 'length')" = "6" ] \
       && printf '%s' "$collected" | jq -e \
-        'map(.id8) == ["11111111", "44444444", "55555555", "77777777", "cccccccc"]
+        'map(.id8) == ["11111111", "44444444", "55555555", "77777777", "bbbbbbbb", "cccccccc"]
          and (.[3].autopr_run_requested_at == "2026-09-02T03:00:00+00:00")
-         and (.[4].autopr_claimed_at == "2026-09-02T03:05:00+00:00")
+         and (.[5].autopr_claimed_at == "2026-09-02T03:05:00+00:00")
          and .[2].autopr_reconsideration_pending
          and .[2].autopr_reconsideration_event_id == "consumed-collector-event"
          and (.[3].autopr_reconsideration_pending | not)' >/dev/null \
@@ -2401,6 +2405,124 @@ check "a repointed nav destination is structure, not a reword" \
 
 check "a pure addition is real work, not a reword" \
     $([ "$(cosmetic_diff_rc '+  const answer = "42"')" = "1" ] && echo 0 || echo 1)
+
+################################################################################
+# Hold, rejected/parked ledger, and the failure budget.
+################################################################################
+# A server-side hold is absolute: the only Todo candidate is never picked.
+cat > "$TMP_DIR/held-card.json" <<'EOF'
+[
+  {"task_id":"bbbbbbbb-0000-4000-8000-00000000000b","id8":"bbbbbbbb","project_id":"p","title":"On hold","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"","autopr_paused":true,"autopr_hold_reason":"docs allowlist"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/held-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/held-card.json" >/dev/null 2>&1
+held_rc=$?
+jq '.[0].board_column = "changes_requested"' "$TMP_DIR/held-card.json" > "$TMP_DIR/held-cr-card.json"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/held-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/held-cr-card.json" >/dev/null 2>&1
+held_cr_rc=$?
+check "a held card is never selected, in Todo or Changes Requested" \
+    $([ "$held_rc" = "3" ] && [ "$held_cr_rc" = "3" ] && echo 0 || echo 1)
+
+# A policy refusal publish.sh recorded stays settled like no-spec until a
+# human moves the card; a later move reopens it.
+cat > "$TMP_DIR/rejected-card.json" <<'EOF'
+[
+  {"task_id":"cccccccc-0000-4000-8000-00000000000c","id8":"cccccccc","project_id":"p","title":"Touched docs","board_column":"changes_requested","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · BLOCKED: DISALLOWED PATHS · build 850 · [autopr:rejected 2026-01-02T00:00:00Z] disallowed_paths · docs/tools.sh"}
+]
+EOF
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/rejected-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/rejected-card.json" >/dev/null 2>&1
+rejected_rc=$?
+jq '.[0].last_moved_at = "2026-01-03T00:00:00Z"' "$TMP_DIR/rejected-card.json" > "$TMP_DIR/rejected-moved-card.json"
+rejected_moved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/rejected-moved-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/rejected-moved-card.json" 2>/dev/null)"
+check "a path-policy rejection stays settled until a human moves the card" \
+    $([ "$rejected_rc" = "3" ] \
+      && [ "$(printf '%s' "$rejected_moved" | jq -r '.id8 // empty')" = "cccccccc" ] \
+      && echo 0 || echo 1)
+
+# The failure ledger: same reason counts up, a new reason starts over,
+# success forgets. The file's mtime still drives the cooldown.
+budget_task="dddddddd-0000-4000-8000-00000000000d"
+export AUTOPR_CACHE_DIR="$TMP_DIR/budget-cache"
+autopr_record_outcome "$budget_task" failure publish
+autopr_record_outcome "$budget_task" failure publish
+autopr_record_outcome "$budget_task" failure "disallowed paths!"
+ledger_after_new_reason="$(cat "$AUTOPR_CACHE_DIR/attempts/dddddddd")"
+autopr_record_outcome "$budget_task" failure disallowed_paths_
+autopr_record_outcome "$budget_task" failure disallowed_paths_
+ledger_after_three="$(cat "$AUTOPR_CACHE_DIR/attempts/dddddddd")"
+autopr_record_outcome "$budget_task" success
+budget_cleared=$([ ! -e "$AUTOPR_CACHE_DIR/attempts/dddddddd" ] && echo 0 || echo 1)
+unset AUTOPR_CACHE_DIR
+check "the failure ledger counts identical reasons, restarts on a new one, and clears on success" \
+    $([ "$(printf '%s' "$ledger_after_new_reason" | cut -f1,2)" = "$(printf '1\tdisallowed_paths_')" ] \
+      && [ "$(printf '%s' "$ledger_after_three" | cut -f1,2)" = "$(printf '3\tdisallowed_paths_')" ] \
+      && [ "$budget_cleared" = 0 ] && echo 0 || echo 1)
+
+# Three identical failures with no human signal since: the pass holds the
+# card, notes why, asks the owner, and picks nothing.
+cat > "$TMP_DIR/budget-card.json" <<'EOF'
+[
+  {"task_id":"dddddddd-0000-4000-8000-00000000000d","id8":"dddddddd","project_id":"p","title":"Keeps failing","board_column":"todo","created_at":"2026-01-01T00:00:00Z","last_moved_at":"2026-01-01T00:00:00Z","progress_note":"🤖 AUTO SETUP · READY FOR REVIEW · build 850"}
+]
+EOF
+mkdir -p "$TMP_DIR/budget-select-cache/attempts"
+printf '3\tverify\t2026-01-02T00:00:00Z\n' > "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+touch -t 202601020000 "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+rm -f "$TMP_DIR/park-urls" "$TMP_DIR/park-args"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" AUTOPR_TEST_CURL_ARGS="$TMP_DIR/park-args" \
+    MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-card.json" >/dev/null 2>&1
+parked_rc=$?
+check "three identical failures park the card on hold with a note and a chat ask" \
+    $([ "$parked_rc" = "3" ] \
+      && grep -q '/tasks/dddddddd-0000-4000-8000-00000000000d/autopr/unqueue' "$TMP_DIR/park-urls" \
+      && grep -q 'autopr: 3× verify' "$TMP_DIR/park-args" \
+      && grep -q 'ON HOLD: REPEATED FAILURES' "$TMP_DIR/park-args" \
+      && grep -q '\[autopr:parked ' "$TMP_DIR/park-args" \
+      && grep -q '/autopr/context-request' "$TMP_DIR/park-urls" \
+      && echo 0 || echo 1)
+
+# The read-only dashboard probe reports the same skip but writes nothing.
+rm -f "$TMP_DIR/park-urls"
+AUTOPR_SELECT_READ_ONLY=true PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-card.json" >/dev/null 2>&1
+parked_ro_rc=$?
+check "the read-only probe never parks a card" \
+    $([ "$parked_ro_rc" = "3" ] && [ ! -s "$TMP_DIR/park-urls" ] && echo 0 || echo 1)
+
+# A human signal after the last failure buys one more run.
+jq '.[0].last_moved_at = "2026-01-03T00:00:00Z"' "$TMP_DIR/budget-card.json" > "$TMP_DIR/budget-moved-card.json"
+rm -f "$TMP_DIR/park-urls"
+budget_moved="$(PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-moved-card.json" 2>/dev/null)"
+check "moving a parked-eligible card lets it run once more" \
+    $([ "$(printf '%s' "$budget_moved" | jq -r '.id8 // empty')" = "dddddddd" ] \
+      && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null && echo 0 || echo 1)
+
+# A fresh attempt inside the cooldown still skips without parking (mtime rule).
+printf '3\tverify\t2026-01-02T00:00:00Z\n' > "$TMP_DIR/budget-select-cache/attempts/dddddddd"
+rm -f "$TMP_DIR/park-urls"
+PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+    AUTOPR_TEST_CURL_URLS="$TMP_DIR/park-urls" MATCHA_AUTOPR_ENV="$env_file" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/budget-select-cache" \
+    "$AUTOPR_DIR/select.sh" "$TMP_DIR/budget-card.json" >/dev/null 2>&1
+cooldown_rc=$?
+check "the cooldown still applies before the budget is consulted" \
+    $([ "$cooldown_rc" = "3" ] && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

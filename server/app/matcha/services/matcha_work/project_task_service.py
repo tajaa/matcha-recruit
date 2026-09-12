@@ -504,11 +504,9 @@ def is_autopr_bookkeeping_row(metadata: object) -> bool:
 # A hold applies to the current work round. Explicit new work or a new review
 # round releases it; publish/claim events do not. The same indexed lookup is
 # used by claims and, once per task, the list query's lateral join.
-_AUTOPR_HOLD_QUERY = """
-    SELECT (
-        h.metadata->>'kind' = 'autopr_run_cancel'
-        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
-    ) AS paused
+# One shared row selection so the "is it held" and "why is it held" lookups
+# can never resolve different history rows.
+_AUTOPR_HOLD_ROW = """
     FROM mw_task_history h
     WHERE h.task_id = t.id AND (
         (h.event_type = 'activity' AND h.metadata->>'kind' IN (
@@ -518,7 +516,30 @@ _AUTOPR_HOLD_QUERY = """
     ORDER BY h.created_at DESC, (h.metadata->>'kind' = 'autopr_run_cancel') DESC NULLS LAST
     LIMIT 1
 """
+_AUTOPR_HOLD_QUERY = f"""
+    SELECT (
+        h.metadata->>'kind' = 'autopr_run_cancel'
+        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+    ) AS paused
+    {_AUTOPR_HOLD_ROW}
+"""
 _AUTOPR_HOLD_SQL = f"COALESCE(({_AUTOPR_HOLD_QUERY}), FALSE)"
+# Two-column form for the list query's lateral join: the hold flag and the
+# operator's free-text reason from the SAME resolved row, in one history scan
+# per task. Two separate LIMIT 1 laterals could pick different rows on equal
+# timestamps and would double the per-task scan on every board open.
+_AUTOPR_HOLD_STATE_QUERY = f"""
+    SELECT (
+        h.metadata->>'kind' = 'autopr_run_cancel'
+        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+    ) AS paused,
+    CASE
+        WHEN h.metadata->>'kind' = 'autopr_run_cancel'
+             AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+        THEN h.metadata->>'reason'
+    END AS reason
+    {_AUTOPR_HOLD_ROW}
+"""
 
 # A claim is active until the card records a terminal run-side mutation. The
 # claim itself is the durable recovery marker: if the workflow dies after
@@ -599,13 +620,17 @@ async def defer_autopr_run(
 
 async def cancel_autopr_run(
     *, project_id: UUID, task_id: UUID, actor_user_id: UUID,
+    reason: Optional[str] = None,
 ) -> Optional[dict]:
     """Hold future AutoPR runs without moving the card or discarding answers.
 
     For an active In Progress claim, this settles the recovery lease so the
     harness will not retry it. It does not kill an already-running process. The
     task lock orders this event with requests, reconsiderations, and claims.
+    ``reason`` is the operator's note (why this card is parked); it rides on
+    the hold row and surfaces as ``autopr_hold_reason`` on the task.
     """
+    reason = (reason or "").strip()[:200] or None
     async with get_connection() as conn:
         async with conn.transaction():
             task = await conn.fetchrow(
@@ -640,9 +665,12 @@ async def cancel_autopr_run(
                 VALUES ($1, $2, $3, $4, 'activity', $5::jsonb, clock_timestamp())
                 """,
                 task_id, str(task_id), project_id, actor_user_id,
-                json.dumps({"kind": "autopr_run_cancel"}),
+                json.dumps(
+                    {"kind": "autopr_run_cancel", "reason": reason}
+                    if reason else {"kind": "autopr_run_cancel"}
+                ),
             )
-    return {"ok": True, "autopr_paused": True}
+    return {"ok": True, "autopr_paused": True, "autopr_hold_reason": reason}
 
 
 async def request_autopr_run(
@@ -1685,6 +1713,7 @@ async def list_project_tasks(
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
                    COALESCE(autopr_hold.paused, FALSE) AS autopr_paused,
+                   autopr_hold.reason AS autopr_hold_reason,
                    (autopr_ctx.id IS NOT NULL AND NOT COALESCE(autopr_hold.paused, FALSE)) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
@@ -1764,7 +1793,7 @@ async def list_project_tasks(
             LEFT JOIN employees e2 ON e2.user_id = t.created_by
             LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
-            LEFT JOIN LATERAL ({_AUTOPR_HOLD_QUERY}) autopr_hold ON TRUE
+            LEFT JOIN LATERAL ({_AUTOPR_HOLD_STATE_QUERY}) autopr_hold ON TRUE
             LEFT JOIN LATERAL (
                 SELECT h5.id, h5.created_at
                 FROM mw_task_history h5

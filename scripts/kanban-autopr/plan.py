@@ -112,6 +112,10 @@ def card_base_key(card: dict[str, Any]) -> tuple[Any, ...]:
     has_pr = isinstance(card.get("pr_number"), int)
     if reconsider:
         lane = 0
+    elif card.get("autopr_paused"):
+        # A human hold outranks nothing: the selector never runs it, so it
+        # sorts behind every runnable card and stays visible at the bottom.
+        lane = 6
     elif claimed:
         lane = 1
     elif card_context_state(card) is not None:

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import autopr_cli
 from .agent_adapters import attach_agent, deliver_attachments
 from .attachments import AttachmentError, import_clipboard, import_files
 from .capabilities import render_report_text, report_ok
@@ -18,7 +19,13 @@ from .git_worktrees import (
     prune_stale_worktree_metadata,
     resolve_worktree_owner,
 )
-from .install import install_release, rollback_release
+from .install import (
+    dispatcher_drift,
+    install_dispatcher,
+    install_release,
+    release_drift,
+    rollback_release,
+)
 from .models import SessionSpec, port_lines
 from .session_auth import refresh_github_auth
 from .sessions import (
@@ -167,7 +174,30 @@ def build_parser() -> argparse.ArgumentParser:
     checkout.add_argument("number", type=int)
     install = commands.add_parser("install")
     install.add_argument("--rollback")
+    install.add_argument(
+        "--skip-dispatcher",
+        action="store_true",
+        help="do not re-run scripts/kanban-autopr/install-launch-agent.sh after the release swap",
+    )
     commands.add_parser("wizard", help="open the interactive session manager")
+    autopr = commands.add_parser("autopr", help="AutoPR queue status and card control")
+    autopr_commands = autopr.add_subparsers(dest="autopr_command", required=True)
+    autopr_commands.add_parser("status", help="master switch, scheduler, active run")
+    autopr_commands.add_parser("queue", help="cached board snapshot incl. held cards")
+    for verb, help_text in (
+        ("hold", "stop AutoPR picking this card until it is released or edited"),
+        ("release", "lift a hold without queueing a run"),
+        ("run-now", "queue an immediate run for this card"),
+        ("unstick", "move a stranded In Progress card back to its lane"),
+        ("cancel-run", "cancel the active Kanban run and settle its card"),
+    ):
+        verb_parser = autopr_commands.add_parser(verb, help=help_text)
+        verb_parser.add_argument("target", nargs="?" if verb == "cancel-run" else None,
+                                 help="task id8, uuid, or title fragment")
+        verb_parser.add_argument("--reason")
+        if verb in ("unstick", "cancel-run"):
+            verb_parser.add_argument("--hold", action="store_true",
+                                     help="also hold the card once it is back in a lane")
     return result
 
 
@@ -175,6 +205,32 @@ def _doctor(record) -> int:
     report = ensure_capability_report(record, refresh=True)
     print(render_report_text(report, name=record.name))
     return 0 if report is not None and report_ok(report) else 1
+
+
+def _install_drift_report(repo: Path) -> int:
+    """Say whether the two installed trees match this checkout; 1 when either is stale.
+
+    The launcher pins one copied release and the LaunchAgent runs a second
+    copied tree; neither auto-updates, and a merged control that is not
+    installed looks exactly like a control that does not exist.
+    """
+    installed, expected = release_drift(repo_root=repo)
+    if installed is None:
+        print("msandbox release: not installed (run: msandbox install)")
+    elif installed == expected:
+        print(f"msandbox release: {installed} (current)")
+    else:
+        print(f"msandbox release: {installed} STALE, checkout is {expected} (run: msandbox install)")
+    stale = dispatcher_drift(repo_root=repo)
+    if not stale:
+        print("AutoPR dispatcher: current")
+    else:
+        print(
+            "AutoPR dispatcher: STALE "
+            + ", ".join(stale)
+            + " (run: scripts/kanban-autopr/install-launch-agent.sh)"
+        )
+    return 1 if stale or installed != expected else 0
 
 
 def _checkout_pr(repo: Path, number: int) -> int:
@@ -351,7 +407,7 @@ def run(argv: list[str] | None = None) -> int:
         if args.session:
             return _doctor(load_session(args.session))
         _session_table([reconcile_session(item) for item in list_sessions()])
-        return 0
+        return _install_drift_report(repo)
     if args.command == "worktree":
         stale = prune_stale_worktree_metadata(
             repo,
@@ -376,9 +432,33 @@ def run(argv: list[str] | None = None) -> int:
         return 1 if report.failed else 0
     if args.command == "pr":
         return _checkout_pr(repo, args.number)
+    if args.command == "autopr":
+        if args.autopr_command == "status":
+            return autopr_cli.status(repo)
+        if args.autopr_command == "queue":
+            return autopr_cli.queue()
+        return autopr_cli.card_action(
+            args.autopr_command,
+            args.target,
+            reason=args.reason,
+            hold=getattr(args, "hold", False),
+            repo=repo,
+        )
     if args.command == "install":
         installed = rollback_release(args.rollback) if args.rollback else install_release(repo_root=repo)
         print(f"Installed msandbox {__version__}: {installed}")
+        if args.rollback or args.skip_dispatcher:
+            return 0
+        try:
+            if install_dispatcher(repo_root=repo):
+                print("Reinstalled the AutoPR dispatcher LaunchAgent tree.")
+        except subprocess.CalledProcessError as exc:
+            print(
+                "msandbox: release installed, but the AutoPR dispatcher install failed "
+                f"(exit {exc.returncode}); run scripts/kanban-autopr/install-launch-agent.sh",
+                file=sys.stderr,
+            )
+            return 1
         return 0
     return 2
 

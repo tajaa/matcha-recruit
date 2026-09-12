@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+from scripts.msandbox import autopr_cli
 from scripts.msandbox import autopr_control as control
 from scripts.msandbox import autopr_ui
 from scripts.msandbox import autopr_queue
@@ -778,6 +779,92 @@ class AutoPRTests(unittest.TestCase):
                 self.assertEqual(
                     command.call_args.args[0][-2:], [run.project_id, run.task_id]
                 )
+
+    def test_snapshot_keeps_held_and_claimed_cards_and_the_tab_offers_card_controls(self):
+        # A hold is invisible if the snapshot drops paused rows; a stranded
+        # claim is unfixable if In Progress rows vanish. Both stay, each with
+        # the one control that applies, and Start now stays lane-gated.
+        cards = [
+            {"task_id": "11111111-1111-4111-8111-111111111111", "project_id": "22222222-2222-4222-8222-222222222222",
+             "title": "Queued", "board_column": "todo", "autopr_paused": False},
+            {"task_id": "33333333-3333-4333-8333-333333333333", "project_id": "22222222-2222-4222-8222-222222222222",
+             "title": "Parked", "board_column": "changes_requested", "autopr_paused": True,
+             "autopr_hold_reason": "docs allowlist"},
+            {"task_id": "44444444-4444-4444-8444-444444444444", "project_id": "22222222-2222-4222-8222-222222222222",
+             "title": "Stranded", "board_column": "in_progress", "autopr_paused": False},
+            {"task_id": "bad"},
+        ]
+        with mock.patch.dict(os.environ, {"AUTOPR_CARD_SNAPSHOT": str(self.path / "cards.json")}):
+            control.atomic(self.path / "cards.json", json.dumps(cards))
+            kept, note = autopr_queue.read_cards()
+            self.assertEqual([card["title"] for card in kept], ["Queued", "Parked", "Stranded"])
+            self.assertIn("malformed entries omitted", note)
+            self.assertEqual(autopr_cli.hold_badge(kept[1]), "HOLD · docs allowlist")
+            self.assertEqual(autopr_cli.hold_badge(kept[0]), "")
+            with self.assertRaisesRegex(ValueError, "unstick it first"):
+                autopr_queue.start(kept[2]["task_id"], self.repo)
+            feed = autopr_ui.AutoPRFeed()
+            feed.cards = kept
+            rows = autopr_ui.rows(feed, None)
+            actions = [row.action for row in rows]
+            self.assertIn("autopr:start:11111111-1111-4111-8111-111111111111", actions)
+            self.assertIn("autopr:hold:11111111-1111-4111-8111-111111111111", actions)
+            self.assertIn("autopr:release:33333333-3333-4333-8333-333333333333", actions)
+            self.assertNotIn("autopr:start:33333333-3333-4333-8333-333333333333", actions)
+            self.assertIn("autopr:unstick:44444444-4444-4444-8444-444444444444", actions)
+            self.assertIn("autopr:cancel-run:-", actions)
+            self.assertIn("HOLD · docs allowlist", "\n".join(row.text for row in rows))
+            lines = autopr_cli.queue_lines(kept)
+            self.assertIn("HOLD · docs allowlist", lines[1])
+            self.assertIn("IN PROGRESS", lines[2])
+
+    def test_card_actions_relay_card_control_argv_and_exit_code(self):
+        # The board writes live in card-control.sh (bot login, one-card
+        # resolution); the CLI and the tab only compose argv and pass the
+        # exit code through so a refusal there is a refusal here.
+        script = self.repo / "scripts/kanban-autopr/card-control.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/sh\nexit 0\n")
+        script.chmod(0o755)
+        with mock.patch.dict(os.environ, {"MATCHA_REPO_ROOT": ""}), mock.patch.object(
+            autopr_cli.Path, "home", return_value=self.path / "nohome"
+        ), mock.patch.object(
+            autopr_cli.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)
+        ) as run:
+            code = autopr_cli.card_action(
+                "unstick", "abcd1234", reason="docs", hold=True, repo=self.repo
+            )
+            self.assertEqual(code, 7)
+            self.assertEqual(
+                run.call_args.args[0],
+                [str(script), "unstick", "abcd1234", "--reason", "docs", "--hold"],
+            )
+            self.assertEqual(
+                autopr_cli.card_action("cancel-run", None, repo=self.repo), 7
+            )
+            self.assertEqual(run.call_args.args[0], [str(script), "cancel-run"])
+            with self.assertRaises(ValueError):
+                autopr_cli.card_action("start", "x", repo=self.repo)
+        with mock.patch.dict(os.environ, {"MATCHA_REPO_ROOT": ""}), mock.patch.object(
+            autopr_cli.Path, "home", return_value=self.path / "nohome"
+        ):
+            self.assertEqual(autopr_cli.card_action("hold", "x", repo=self.path / "empty"), 2)
+        with mock.patch.object(autopr_ui, "choose", return_value=True, create=True), mock.patch.object(
+            autopr_cli, "card_action", return_value=0
+        ) as action, mock.patch.object(autopr_queue, "refresh", return_value="") as refresh:
+            import scripts.msandbox.wizard as wizard
+            with mock.patch.object(wizard, "choose", return_value=True):
+                notice = autopr_ui.manage(
+                    "hold",
+                    "11111111-1111-4111-8111-111111111111",
+                    self.repo,
+                    reader=lambda prompt: "because",
+                    output=io.StringIO(),
+                )
+            self.assertIn("hold done", notice)
+            self.assertEqual(action.call_args.args, ("hold", "11111111-1111-4111-8111-111111111111"))
+            self.assertEqual(action.call_args.kwargs["reason"], "because")
+            refresh.assert_called_once()
 
     def test_acknowledged_pause_skips_report_validation_and_emits_workflow_output(self):
         script = Path(__file__).resolve().parents[1] / "kanban-autopr/investigate.sh"

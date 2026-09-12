@@ -77,7 +77,6 @@ for project_id in "${PROJECT_IDS[@]}"; do
               )
             )
             and .status != "cancelled"
-            and (.autopr_paused // false | not)
           ))
         | map(
             . as $t
@@ -109,6 +108,12 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 autopr_reconsideration_at: $t.autopr_reconsideration_at,
                 autopr_run_requested_at: $t.autopr_run_requested_at,
                 autopr_claimed_at: $t.autopr_claimed_at,
+                # A held card stays in the snapshot so the dashboard can show
+                # the hold and its reason; select.sh is what refuses to run it.
+                # Dropping it here made a human hold indistinguishable from an
+                # empty queue.
+                autopr_paused: ($t.autopr_paused // false),
+                autopr_hold_reason: ($t.autopr_hold_reason // null),
                 assigned_to_autopr: ($t.assigned_email == $email),
                 # Keep attachment metadata available for ranking/debugging,
                 # but never put short-lived signed storage URLs in card.json.

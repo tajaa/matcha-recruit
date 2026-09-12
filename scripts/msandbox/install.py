@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -18,10 +19,117 @@ class InstallError(RuntimeError):
 
 
 RELEASES_TO_KEEP = 2
+# The LaunchAgent dispatcher is a second installed tree (copied by this shell
+# installer, not by a release). `msandbox install` runs it after a release swap
+# and `msandbox doctor` reports when either tree no longer matches the checkout.
+DISPATCHER_INSTALLER = "scripts/kanban-autopr/install-launch-agent.sh"
+DISPATCHER_LAUNCH_AGENT_PLIST = "Library/LaunchAgents/com.matcha.kanban-autopr-dispatch.plist"
+_INSTALLED_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+\.(?:sh|py)")
 
 
 def source_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def installed_release_id(bin_dir: Path | None = None) -> str | None:
+    """Release the stable launcher currently pins, or None when not installed."""
+    launcher = (bin_dir or Path.home() / ".local/bin").expanduser() / "msandbox"
+    try:
+        text = launcher.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("export MSANDBOX_RUNTIME_ROOT="):
+            try:
+                value = shlex.split(line.split("=", 1)[1])
+            except ValueError:
+                return None
+            return Path(value[0]).name if value else None
+    return None
+
+
+def release_drift(
+    *, repo_root: Path | None = None, bin_dir: Path | None = None
+) -> tuple[str | None, str]:
+    """(installed release id, release id this checkout would produce)."""
+    root = (repo_root or source_root()).resolve()
+    return installed_release_id(bin_dir), _release_id(root)
+
+
+def dispatcher_install_root() -> Path:
+    configured = os.environ.get("AUTOPR_DISPATCH_INSTALL_ROOT")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".local/share/matcha-kanban-autopr"
+
+
+def dispatcher_installed_files(repo_root: Path | None = None) -> list[tuple[Path, str]]:
+    """(source, installed name) for every file install-launch-agent.sh copies.
+
+    Parsed from the installer's ``install_runtime`` body so this list cannot
+    drift from the shell installer; the same parse guards the installer test.
+    """
+    root = (repo_root or source_root()).resolve()
+    installer = root / DISPATCHER_INSTALLER
+    try:
+        text = installer.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    match = re.search(r"^install_runtime\(\) \{\n(.*?)^\}", text, re.S | re.M)
+    body = match.group(1) if match else text
+    # Comments in that body name scripts they merely talk about; only code
+    # lines say what is copied. Otherwise a "see publish.sh" comment would
+    # report publish.sh as stale forever, and the drift report would be noise.
+    body = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
+    pairs: list[tuple[Path, str]] = []
+    for name in sorted(set(_INSTALLED_NAME_RE.findall(body))):
+        source = root / "scripts/msandbox" / name
+        if not source.is_file():
+            source = root / "scripts/kanban-autopr" / name
+        if source.is_file():
+            pairs.append((source, name))
+    return pairs
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def dispatcher_drift(
+    *, repo_root: Path | None = None, install_root: Path | None = None
+) -> list[str]:
+    """Installed dispatcher files that differ from (or are missing versus) the checkout."""
+    target = (install_root or dispatcher_install_root()).expanduser()
+    if not target.is_dir():
+        return ["<dispatcher not installed>"]
+    stale: list[str] = []
+    for source, name in dispatcher_installed_files(repo_root):
+        installed = target / name
+        if not installed.is_file() or _sha256(installed) != _sha256(source):
+            stale.append(name)
+    return stale
+
+
+def install_dispatcher(*, repo_root: Path | None = None) -> bool:
+    """Re-run the LaunchAgent installer when a dispatcher is already installed.
+
+    Returns False when there is nothing to refresh (no LaunchAgent on this
+    machine) or when the operator opted out for this call. A failure raises:
+    the release swap already happened, so the caller reports it rather than
+    pretending the two trees agree.
+    """
+    if os.environ.get("MSANDBOX_SKIP_DISPATCHER_INSTALL") == "1":
+        return False
+    plist = Path(
+        os.environ.get("AUTOPR_LAUNCH_AGENT_PLIST") or Path.home() / DISPATCHER_LAUNCH_AGENT_PLIST
+    ).expanduser()
+    if not plist.is_file():
+        return False
+    root = (repo_root or source_root()).resolve()
+    subprocess.run(["/bin/bash", str(root / DISPATCHER_INSTALLER)], check=True)
+    return True
 
 
 def _release_id(root: Path) -> str:
@@ -153,11 +261,20 @@ def _write_launcher(
                 "  --repo=*) dispatch_command=${2:-}; dispatch_subcommand=${3:-} ;;\n"
                 "esac\n"
                 "case \"$dispatch_command\" in\n"
-                "  '')\n"
+                "  ''|--menu)\n"
+                "    attach_mode=${MSANDBOX_START_ATTACH:-dashboard}\n"
+                "    if [ \"$dispatch_command\" = --menu ]; then attach_mode=menu; shift; fi\n"
                 "    startup_log=$(mktemp \"${TMPDIR:-/tmp}/msandbox-start.XXXXXX\") || exit 1\n"
                 "    if \"$legacy\" system up >\"$startup_log\" 2>&1; then\n"
                 "      rm -f -- \"$startup_log\"\n"
                 "      echo 'msandbox + AutoPR ready · dashboard: tmux attach -t matcha-autopr'\n"
+                "      # A terminal lands in the observer dashboard; Ctrl-b d then opens the\n"
+                "      # session manager. Scripts, pipes, and nested tmux clients skip it.\n"
+                "      if [ \"$attach_mode\" = dashboard ] && [ -t 0 ] && [ -t 1 ] && [ -z \"${TMUX:-}\" ]; then\n"
+                "        tmux_bin=${AUTOPR_TMUX_BIN:-/opt/homebrew/bin/tmux}\n"
+                "        [ -x \"$tmux_bin\" ] || tmux_bin=$(command -v tmux 2>/dev/null || echo /opt/homebrew/bin/tmux)\n"
+                "        [ ! -x \"$tmux_bin\" ] || \"$tmux_bin\" attach-session -t \"${AUTOPR_TMUX_SESSION:-matcha-autopr}\"\n"
+                "      fi\n"
                 "      run_v2 \"$@\"\n"
                 "    else\n"
                 "      startup_rc=$?\n"
@@ -171,9 +288,10 @@ def _write_launcher(
                 "    case \"$dispatch_subcommand\" in create|start|attach|shell) ensure_system || exit $? ;; esac\n"
                 "    run_v2 \"$@\"\n"
                 "    ;;\n"
-                "  --version|worktree|pr|test|install|gc|capabilities) run_v2 \"$@\" ;;\n"
+                "  --version|worktree|pr|test|install|gc|capabilities|autopr) run_v2 \"$@\" ;;\n"
                 "  attach) if [ \"$#\" -gt 1 ] && [ ! -e \"${2:-}\" ]; then run_v2 \"$@\"; fi ;;\n"
-                "  paste|doctor) if [ \"$#\" -gt 1 ]; then run_v2 \"$@\"; fi ;;\n"
+                "  paste) if [ \"$#\" -gt 1 ]; then run_v2 \"$@\"; fi ;;\n"
+                "  doctor) run_v2 \"$@\" ;;\n"
                 "esac\n"
                 "exec \"$legacy\" \"$@\"\n"
             )

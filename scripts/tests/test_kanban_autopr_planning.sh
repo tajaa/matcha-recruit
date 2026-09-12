@@ -90,6 +90,18 @@ routine = {
 }
 assert module.card_base_key(claimed)[0] < module.card_base_key(routine)[0]
 assert module.card_base_key(claimed)[2] == claimed["autopr_claimed_at"]
+# A human hold sorts behind everything the selector could run, including a
+# card blocked on context.
+assert module.card_base_key({
+    "task_id": "blocked",
+    "board_column": "todo",
+    "progress_note": "[autopr:no-spec 2026-08-30T00:00:00Z] already_fixed",
+})[0] < module.card_base_key({
+    "task_id": "held",
+    "board_column": "changes_requested",
+    "pr_number": 12,
+    "autopr_paused": True,
+})[0]
 PY
 
 python3 "$REPO_ROOT/scripts/kanban-autopr/plan.py" \

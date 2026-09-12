@@ -678,6 +678,73 @@ copy_card_rc=$?
 check "a card that genuinely asks for a copy change still publishes" \
   $([ "$copy_card_rc" = 0 ] && echo 0 || echo 1)
 
+################################################################################
+# Path policy. docs/**/*.md is the one non-source tree the bot may publish;
+# anything else outside product source is refused, and the refusal now lands
+# on the card instead of leaving it to be re-selected every cooldown window.
+################################################################################
+publish_copy_card() {
+  (
+    cd "$TEST_REPO"
+    PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
+      AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
+      AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
+      AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+      AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+      ./scripts/kanban-autopr/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
+  ) >/dev/null 2>&1
+}
+git -C "$TEST_REPO" reset --hard -q HEAD
+mkdir -p "$TEST_REPO/docs"
+printf '# Products\n\nCredential Templates is the canonical name.\n' > "$TEST_REPO/docs/PRODUCTS.md"
+sed -i.bak "s/label: 'Credentialing'/label: 'Credential Templates'/" \
+  "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx"
+rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
+rm -f "$TMP_DIR/card-patch.json" "$TMP_DIR/context-request.json"
+set +e
+publish_copy_card
+docs_rc=$?
+set -e
+check "docs markdown publishes alongside product source" \
+  $([ "$docs_rc" = 0 ] && ! grep -q 'refusal_reason=' "$GITHUB_OUTPUT" && echo 0 || echo 1)
+
+git -C "$TEST_REPO" reset --hard -q HEAD
+printf '#!/bin/sh\necho hi\n' > "$TEST_REPO/docs/tools.sh"
+sed -i.bak "s/label: 'Credentialing'/label: 'Credential Templates'/" \
+  "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx"
+rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
+rm -f "$TMP_DIR/card-patch.json" "$TMP_DIR/context-request.json"
+set +e
+publish_copy_card
+docs_script_rc=$?
+set -e
+check "a non-markdown file under docs is still refused and the tree is reset" \
+  $([ "$docs_script_rc" != 0 ] && git -C "$TEST_REPO" diff --quiet \
+    && [ ! -e "$TEST_REPO/docs/tools.sh" ] && echo 0 || echo 1)
+check "the path-policy refusal parks the card with the offending paths" \
+  $(jq -e '.board_column == "changes_requested"
+      and (.progress_note | contains("BLOCKED: DISALLOWED PATHS")
+           and contains("[autopr:rejected") and contains("disallowed_paths · docs/tools.sh"))' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+check "the path-policy refusal asks the card owner what to do" \
+  $(jq -e '(.reason | contains("outside the approved product source paths") and contains("docs/tools.sh"))
+      and (.expected_progress_note | contains("BLOCKED: DISALLOWED PATHS"))' \
+    "$TMP_DIR/context-request.json" >/dev/null && echo 0 || echo 1)
+check "the path-policy refusal names its reason for the failure ledger" \
+  $(grep -q '^refusal_reason=disallowed_paths$' "$GITHUB_OUTPUT" && echo 0 || echo 1)
+
+git -C "$TEST_REPO" reset --hard -q HEAD
+printf '# Agent instructions\n' > "$TEST_REPO/CLAUDE.md"
+rm -f "$TMP_DIR/card-patch.json"
+set +e
+publish_copy_card
+claude_md_rc=$?
+set -e
+check "root CLAUDE.md stays refused even though it is markdown" \
+  $([ "$claude_md_rc" != 0 ] && [ ! -e "$TEST_REPO/CLAUDE.md" ] \
+    && jq -e '.progress_note | contains("disallowed_paths · CLAUDE.md")' "$TMP_DIR/card-patch.json" >/dev/null \
+    && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

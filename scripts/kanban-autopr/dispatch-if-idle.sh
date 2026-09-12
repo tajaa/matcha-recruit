@@ -56,6 +56,13 @@ NEXT_ELIGIBLE_AT=0
 # pass, then its own) and take a quarter hour to leave Todo.
 POLL_SECONDS="${AUTOPR_DISPATCH_POLL_SECONDS:-60}"
 PREFERRED_TASK_FILE="$STATE_DIR/preferred-task"
+# Notification Center banners are opt-in per operator (`msandbox notify on|off`
+# writes the marker next to the master switch). The marker lives beside
+# ENABLE_FILE so a test that relocates the switch also silences banners.
+NOTIFY_FILE="${AUTOPR_NOTIFY_FILE:-$(dirname "$ENABLE_FILE")/autopr-notify}"
+NOTIFY_BIN="${AUTOPR_NOTIFY_BIN:-/usr/bin/osascript}"
+NOTIFIED_RUN_FILE="$STATE_DIR/last-notified-run"
+NOTIFIED_OFF_FILE="$STATE_DIR/notified-off"
 
 write_status() {
     local action="$1" reason="$2" now temporary
@@ -84,6 +91,51 @@ log_event() {
         --arg reason "$reason" --argjson runs "$runs" \
         '{timestamp:$ts,action:$action,reason:$reason,runs:$runs}' >> "$LOG_FILE"
     write_status "$action" "$reason"
+}
+
+# Best-effort banner. Quotes and backslashes are dropped rather than escaped:
+# AppleScript string quoting is not worth a scheduler bug, and every message
+# here is composed from lane names, run ids, and conclusions.
+notify() {
+    local subtitle="$1" body="$2"
+    [ -f "$NOTIFY_FILE" ] || return 0
+    [ -x "$NOTIFY_BIN" ] || return 0
+    subtitle="${subtitle//[\"\\]/}"
+    body="${body//[\"\\]/}"
+    "$NOTIFY_BIN" -e "display notification \"$body\" with title \"Matcha AutoPR\" subtitle \"$subtitle\"" \
+        >/dev/null 2>&1 </dev/null || true
+}
+
+# Announce runs that finished since the last tick. GitHub run ids grow
+# monotonically, so "newer than the last id seen" is exact; the first
+# observation only records a baseline, so enabling banners never replays
+# history. Kanban outcomes always notify; other lanes only when they fail.
+notify_run_outcomes() {
+    local runs="$1" last_seen newest completed line lane conclusion id created updated mins
+    newest="$(printf '%s' "$runs" | jq -r '[.[] | select(.status == "completed") | .databaseId] | max // empty')"
+    [ -n "$newest" ] || return 0
+    last_seen="$(cat "$NOTIFIED_RUN_FILE" 2>/dev/null || true)"
+    [[ "$last_seen" =~ ^[0-9]+$ ]] || last_seen=""
+    mkdir -p "$STATE_DIR"
+    printf '%s' "$newest" > "$NOTIFIED_RUN_FILE"
+    [ -n "$last_seen" ] || return 0
+    [ "$newest" -gt "$last_seen" ] || return 0
+    [ -f "$NOTIFY_FILE" ] || return 0
+    completed="$(printf '%s' "$runs" | jq -r --argjson since "$last_seen" '
+        [.[] | select(.status == "completed" and .databaseId > $since)]
+        | sort_by(.databaseId) | .[-3:][]
+        | [(.lane // "run"), (.conclusion // "completed"), (.databaseId | tostring), (.createdAt // ""), (.updatedAt // "")] | @tsv')"
+    while IFS=$'\t' read -r lane conclusion id created updated; do
+        [ -n "$id" ] || continue
+        mins=""
+        if [ -n "$created" ] && [ -n "$updated" ]; then
+            mins=" · $(( ( $(iso_to_epoch "$updated") - $(iso_to_epoch "$created") ) / 60 ))m"
+        fi
+        case "$lane:$conclusion" in
+            kanban:*) notify "Kanban run $conclusion" "run #$id$mins" ;;
+            *:failure|*:cancelled|*:timed_out) notify "$lane run $conclusion" "run #$id$mins" ;;
+        esac
+    done <<< "$completed"
 }
 
 acquire_dispatch_lock() {
@@ -233,8 +285,15 @@ main() {
     # reboot/crash, so also require its primary workspace container to be live.
     if ! autopr_master_ready; then
         log_event skip msandbox-off
+        # Once per off period: the container went down (sleep, crash, or a
+        # deliberate stop) while the timer is still ticking.
+        if [ ! -f "$NOTIFIED_OFF_FILE" ]; then
+            mkdir -p "$STATE_DIR" && : > "$NOTIFIED_OFF_FILE"
+            notify "AutoPR is off" "sandbox container down or master switch off · msandbox start"
+        fi
         exit 0
     fi
+    rm -f "$NOTIFIED_OFF_FILE"
     if codex_backoff_active; then
         log_event skip codex-usage-limit-backoff
         exit 0
@@ -294,6 +353,7 @@ main() {
         log_event error run-snapshot-failed
         exit 1
     fi
+    notify_run_outcomes "$all_runs"
     kanban_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "kanban")][0:20]')"
     error_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "errors")][0:20]')"
     audit_runs="$(printf '%s' "$all_runs" | jq -c '[.[] | select(.lane == "self-audit")][0:20]')"
@@ -335,6 +395,7 @@ main() {
         exit 1
     fi
     : > "$STATE_DIR/last-dispatch"
+    notify "Run dispatched" "${workflow%.yml} · $reason"
     if [ "$requested_mode" = true ] \
         && ! { mkdir -p "$STATE_DIR" && : > "$FORCED_MARKER" \
                && printf '%s' "$PENDING_REQUEST_SET" > "$FORCED_REQUEST_SET"; }; then

@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import autopr_cli
 from . import autopr_control as control
 from . import autopr_queue
 from .capabilities import redact
@@ -105,13 +106,23 @@ def rows(feed: AutoPRFeed, selected: str | None) -> list[Row]:
     for card in feed.cards:
         title = plain(str(card.get("title", "Untitled")))
         task_id = card["task_id"]
-        result.append(
-            Row(f"{title} · held by an existing run")
-            if task_id in held
-            else Row(f"Start now · {title}", f"autopr:start:{task_id}")
-        )
+        badge = plain(autopr_cli.hold_badge(card))
+        if task_id in held:
+            result.append(Row(f"{title} · held by an existing run"))
+        elif badge:
+            result.append(Row(f"Release · {title} · {badge}", f"autopr:release:{task_id}"))
+        elif card.get("board_column") == "in_progress":
+            result.append(
+                Row(f"Unstick · {title} · claimed, back to its lane", f"autopr:unstick:{task_id}")
+            )
+        else:
+            result.append(Row(f"Start now · {title}", f"autopr:start:{task_id}"))
+            result.append(Row(f"Hold · {title}", f"autopr:hold:{task_id}"))
     if not feed.cards:
         result.append(Row("No queued tickets in the current snapshot."))
+    result.append(
+        Row("Cancel the active Kanban run · settles its card", "autopr:cancel-run:-")
+    )
     if feed.error:
         result.append(Row(feed.error, tone="warning"))
     if not feed.runs:
@@ -345,6 +356,28 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
         ):
             return "Ticket unchanged."
         return autopr_queue.start(run_id, repo)
+    if action in autopr_cli.CARD_VERBS:
+        # run_id is a task id here (or "-" for the active run). Board writes
+        # go through card-control.sh so the terminal and the tab agree.
+        prompts = {
+            "hold": "Hold this ticket so AutoPR skips it until released or edited?",
+            "release": "Lift the hold and let the routine sweep pick this ticket up again?",
+            "run-now": "Queue an immediate AutoPR run for this ticket?",
+            "unstick": "Move this claimed ticket back to its lane (Todo, or Changes Requested when it has a PR)?",
+            "cancel-run": "Cancel the active Kanban run and move its card back to its lane?",
+        }
+        if not choose(prompts[action], [("Cancel", False), ("Confirm", True)], reader=reader, output=output):
+            return "Ticket unchanged."
+        reason = reader("Reason (optional): ").strip() if action == "hold" else None
+        code = autopr_cli.card_action(
+            action, None if run_id == "-" else run_id, reason=reason or None, repo=repo
+        )
+        autopr_queue.refresh(repo)
+        return (
+            f"{action} done; refreshing the queue."
+            if code == 0
+            else f"{action} failed (exit {code}); see the terminal output."
+        )
     if action == "take":
         control.request_takeover(run_id)
         return "Takeover requested. The run will appear as yours once its model has stopped."

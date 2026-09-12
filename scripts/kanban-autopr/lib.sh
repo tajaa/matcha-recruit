@@ -407,6 +407,39 @@ autopr_post_context_request() {
     fi
 }
 
+# autopr_record_outcome TASK_ID success|failure [REASON]
+# The per-card failure ledger behind select.sh's give-up rule. One file per
+# card under the attempts dir select.sh already uses for its cooldown:
+# `count<TAB>reason<TAB>iso-ts`. The same reason again increments; a different
+# reason starts over at 1 (a new failure is new information, not a repeat);
+# success deletes the file. The mtime keeps meaning "last attempt" for the
+# cooldown, which reads nothing else. Without this ledger a run that dies the
+# same way every time — a policy refusal, a verify failure — was re-selected
+# every cooldown window forever with nothing on the card.
+autopr_record_outcome() {
+    local task_id="$1" outcome="$2" reason="${3:-unknown}" id8 dir marker
+    local previous_count=0 previous_reason="" count=1
+    [ -n "$task_id" ] || return 0
+    id8="$(printf '%s' "$task_id" | tr -d '-' | cut -c1-8)"
+    dir="${AUTOPR_CACHE_DIR:-$HOME/.cache/matcha-autopr}/attempts"
+    marker="$dir/$id8"
+    if [ "$outcome" = success ]; then
+        rm -f "$marker"
+        return 0
+    fi
+    # One token: the reason lands in a card note and a hold reason verbatim.
+    reason="$(printf '%s' "$reason" | tr -c 'A-Za-z0-9_.:-' '_' | cut -c1-64)"
+    [ -n "$reason" ] || reason=unknown
+    mkdir -p "$dir"
+    if [ -f "$marker" ]; then
+        IFS=$'\t' read -r previous_count previous_reason _ < "$marker" 2>/dev/null || true
+    fi
+    if [[ "$previous_count" =~ ^[0-9]+$ ]] && [ "$previous_reason" = "$reason" ]; then
+        count=$((previous_count + 1))
+    fi
+    printf '%s\t%s\t%s\n' "$count" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+}
+
 # autopr_strip_bookkeeping_history HISTORY_JSON
 # The lane's own history rows (run requests, claims, staged outreach and its
 # outcomes) ride event_type='activity' but are not discussion. They stay in

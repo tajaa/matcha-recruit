@@ -244,8 +244,9 @@ extension TaskViewerSheet {
     func requestAutoPRRun() async {
         guard let pid = viewModel.project?.id, !requestingAutoPRRun else { return }
         requestingAutoPRRun = true
+        autoPRPendingAction = "run"
         autoPRRunError = nil
-        defer { requestingAutoPRRun = false }
+        defer { requestingAutoPRRun = false; autoPRPendingAction = nil }
         do {
             _ = try await MatchaWorkService.shared.requestAutoPRRun(
                 projectId: pid,
@@ -265,14 +266,16 @@ extension TaskViewerSheet {
     func cancelAutoPRRun() async {
         guard let pid = viewModel.project?.id, !requestingAutoPRRun, !addingNote else { return }
         requestingAutoPRRun = true
+        autoPRPendingAction = "hold"
         autoPRRunError = nil
-        defer { requestingAutoPRRun = false }
+        defer { requestingAutoPRRun = false; autoPRPendingAction = nil }
         do {
             _ = try await MatchaWorkService.shared.cancelAutoPRRun(projectId: pid, taskId: task.id)
             didRequestAutoPRRun = false
             didSubmitAutoPRContext = false
             if let index = viewModel.tasks.firstIndex(where: { $0.id == task.id }) {
                 viewModel.tasks[index].autoprPaused = true
+                viewModel.tasks[index].autoprHoldReason = nil
                 viewModel.tasks[index].autoprRunRequestedAt = nil
                 viewModel.tasks[index].autoprReconsiderationPending = false
                 viewModel.tasks[index].autoprClaimedAt = nil

@@ -107,6 +107,7 @@ EOF
 
 cat > "$TMP_DIR/bin/tmux" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AUTOPR_TEST_ROOT/tmux.log"
 case "$1" in
     has-session) [ -f "$AUTOPR_TEST_ROOT/tmux.session" ] ;;
     list-panes)
@@ -156,6 +157,20 @@ check "msandbox start enables the primary container, timer, dashboard, and runne
 run_msandbox autopr-ready
 check "autopr-ready succeeds only while the master switch is on" $?
 
+# Banners default on from the first start; `notify off` is a sticky opt-out
+# that a later start must not undo.
+check "msandbox start turns dispatcher banners on by default" \
+    $([ -f "$TMP_DIR/state/autopr-notify" ] && echo 0 || echo 1)
+run_msandbox notify off >/dev/null
+run_msandbox start >/dev/null
+check "msandbox notify off is a sticky opt-out across restarts" \
+    $([ ! -e "$TMP_DIR/state/autopr-notify" ] && [ -f "$TMP_DIR/state/autopr-notify.off" ] \
+      && [ "$(run_msandbox notify)" = "AutoPR notifications: off" ] && echo 0 || echo 1)
+run_msandbox notify on >/dev/null
+check "msandbox notify on restores the marker" \
+    $([ -f "$TMP_DIR/state/autopr-notify" ] && [ ! -e "$TMP_DIR/state/autopr-notify.off" ] \
+      && echo 0 || echo 1)
+
 primary_state="$(run_msandbox workspace-state)"
 check "workspace-state reports the selected Compose project's real state" \
     $([ "$primary_state" = running ] && echo 0 || echo 1)
@@ -195,6 +210,13 @@ check "bare msandbox reports sessions after preserving the interlocked control p
       && [ -f "$TMP_DIR/state/autopr-enabled" ] \
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ -f "$TMP_DIR/tmux.session" ] \
+      && echo 0 || echo 1)
+# The dashboard attach is for terminals only; a script or pipe (this test)
+# must never block on it, and --menu skips it outright.
+menu_output="$(run_msandbox --menu)"
+check "bare msandbox never attaches the dashboard off a terminal, and --menu opens the manager" \
+    $(! grep -q '^attach-session' "$TMP_DIR/tmux.log" \
+      && printf '%s' "$menu_output" | grep -q 'No active msandbox sessions' \
       && echo 0 || echo 1)
 
 set +e
