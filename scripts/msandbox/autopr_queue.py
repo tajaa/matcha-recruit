@@ -41,6 +41,9 @@ def read_cards() -> tuple[list[dict], str]:
         cards = json.loads(data)
         if not isinstance(cards, list):
             raise ValueError("Queue snapshot must be a list")
+        # Held (autopr_paused) and claimed In Progress cards stay visible: an
+        # operator needs to see what is held and why, and to unstick a
+        # stranded claim. Only malformed identities are dropped.
         valid = [
             card
             for card in cards
@@ -49,14 +52,13 @@ def read_cards() -> tuple[list[dict], str]:
                 isinstance(card.get(key), str) and UUID.fullmatch(card[key])
                 for key in ("task_id", "project_id")
             )
-            and card.get("board_column") in ("todo", "changes_requested")
         ]
         age = max(0, int(time.time() - path.stat().st_mtime))
         note = (
             f"Board snapshot: {age // 60}m {age % 60}s old (refresh to check changes)"
         )
         if len(valid) != len(cards):
-            note += "; non-queued or malformed entries omitted"
+            note += "; malformed entries omitted"
         if _refresh_lock.locked():
             note += " · refreshing…"
         if _refresh_error:
@@ -170,6 +172,8 @@ def start(task_id: str, repo: Path) -> str:
     card = next((card for card in read_cards()[0] if card["task_id"] == task_id), None)
     if card is None:
         raise ValueError("Ticket is no longer in the cached queue; refresh first.")
+    if card.get("board_column") not in ("todo", "changes_requested"):
+        raise ValueError("Only Todo or Changes Requested tickets can be started; unstick it first.")
     with control.locked():
         held = control.held_task(task_id)
         if held and held.status != "ready":

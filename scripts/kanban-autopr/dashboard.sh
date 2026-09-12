@@ -93,7 +93,7 @@ badge_style() {
     case "$1" in
         NOW|ACTIVE|SUCCESS|READY|LIVE) printf '%s' "$C_GOOD$C_BOLD" ;;
         FEEDBACK|REWORK|RUNNING|IN_PROGRESS|VERIFYING|INVESTIGATING) printf '%s' "$C_BLUE$C_BOLD" ;;
-        WAITING|HELD|CONTEXT|DRAFT|UNKNOWN|STALE) printf '%s' "$C_WARN$C_BOLD" ;;
+        WAITING|HOLD|NO-SPEC|CONTEXT|DRAFT|UNKNOWN|STALE) printf '%s' "$C_WARN$C_BOLD" ;;
         FAILURE|FAILED|ERROR|CANCELLED|DEGRADED) printf '%s' "$C_BAD$C_BOLD" ;;
         TODO|IDLE) printf '%s' "$C_MUTED$C_BOLD" ;;
         *) printf '%s' "$C_ACCENT$C_BOLD" ;;
@@ -525,23 +525,30 @@ render_dashboard() {
         | "  held: task " + .id8 + " needs the `" + .capability + "` board grant (Admin → Settings → AutoPR board capabilities)"
       else empty end' 2>/dev/null || true
 
+    # HOLD is a person's hold (Espresso Hold/Unqueue, `msandbox autopr hold`,
+    # or the harness parking a card after repeated failures); NO-SPEC is the
+    # bot's own "cannot scope this" ledger. They used to share one word.
     queue_counts="$(printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" '
       def pending: (.autopr_reconsideration_pending // false);
       def waiting: ((.progress_note // "") | test("awaiting answers"; "i"));
-      def held: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
-      "\(length) tracked · \([.[] | select(.id8 == $current_id8)] | length) active · \([.[] | select(pending and .id8 != $current_id8)] | length) feedback · \([.[] | select(waiting and .id8 != $current_id8)] | length) waiting · \([.[] | select(held and .id8 != $current_id8)] | length) held"
+      def onhold: (.autopr_paused // false);
+      def nospec: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
+      "\(length) tracked · \([.[] | select(.id8 == $current_id8)] | length) active · \([.[] | select(pending and .id8 != $current_id8)] | length) feedback · \([.[] | select(waiting and .id8 != $current_id8)] | length) waiting · \([.[] | select(onhold and .id8 != $current_id8)] | length) on hold · \([.[] | select(nospec and (onhold | not) and .id8 != $current_id8)] | length) no-spec"
     ')"
     section_heading "QUEUE · $queue_counts"
     printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" --argjson w "$title_w" '
       def pending: (.autopr_reconsideration_pending // false);
       def waiting: ((.progress_note // "") | test("awaiting answers"; "i"));
-      def held: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
+      def onhold: (.autopr_paused // false);
+      def nospec: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
       sort_by(
-        (if .id8 == $current_id8 then 0 elif pending then 1 elif .board_column == "changes_requested" then 2 else 3 end),
+        (if .id8 == $current_id8 then 0 elif pending then 1 elif onhold then 4 elif .board_column == "changes_requested" then 2 else 3 end),
         (.last_moved_at // .created_at)
       )[:6][] |
-      [(if .id8 == $current_id8 then "NOW" elif pending then "FEEDBACK" elif waiting then "WAITING" elif held then "HELD" elif .board_column == "changes_requested" then "REWORK" else "TODO" end),
-       (.project_title // "?"), (.title[0:$w]), (.last_moved_at // .created_at // "")] | @tsv
+      [(if .id8 == $current_id8 then "NOW" elif pending then "FEEDBACK" elif onhold then "HOLD" elif waiting then "WAITING" elif nospec then "NO-SPEC" elif .board_column == "changes_requested" then "REWORK" else "TODO" end),
+       (.project_title // "?"),
+       ((if onhold and (.autopr_hold_reason // "") != "" then (.title + " · " + .autopr_hold_reason) else .title end)[0:$w]),
+       (.last_moved_at // .created_at // "")] | @tsv
     ' | while IFS=$'\t' read -r row_badge row_project row_title row_when; do
         row_iso="$row_when"
         case "$row_iso" in
@@ -554,7 +561,8 @@ render_dashboard() {
             FEEDBACK) row_symbol='↺' ;;
             REWORK) row_symbol='↻' ;;
             WAITING) row_symbol='?' ;;
-            HELD) row_symbol='!' ;;
+            HOLD) row_symbol='‖' ;;
+            NO-SPEC) row_symbol='!' ;;
             *) row_symbol='○' ;;
         esac
         printf '  %b%s %-8s%b %-9s %-*s %b%s%b\n' \

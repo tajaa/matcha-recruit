@@ -180,6 +180,31 @@ reject_cosmetic_diff() {
     die "implementation diff only rewrites string literals for a card asking for structure; return acceptance_criteria_met with evidence, or questions_only"
 }
 
+# A path-policy refusal is deterministic: the same card re-run against the
+# same policy produces the same refusal, so retrying it every cooldown window
+# only burns runs. Like the cosmetic refusal, it lands on the card with the
+# offending paths and asks the owner what to do; select.sh keeps the marker
+# settled until a human moves the card, adds context, or presses Run.
+reject_disallowed_paths() {
+    local paths="$1" reject_note origin_note shown
+    shown="$(printf '%s\n' "$paths" | sed '/^$/d' | head -3 | paste -sd, - | sed 's/,/, /g')"
+    reject_note="[autopr:rejected $(date -u +%Y-%m-%dT%H:%M:%SZ)] disallowed_paths · $shown"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · BLOCKED: DISALLOWED PATHS · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
+        "$EXISTING_PROGRESS_NOTE")"
+    if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+        "$(jq -n --arg note "$origin_note" \
+            '{board_column: "changes_requested", progress_note: $note}')" >/dev/null; then
+        post_context_request \
+            "AutoPR discarded this change because it touched files outside the approved product source paths ($shown). The harness may only publish server/app and server/tests Python, Alembic version drafts, client/src TypeScript, Espresso Swift, and docs/**/*.md. Either narrow the card to those paths, or make the other change by hand and re-scope the card, then press Run." \
+            "$origin_note"
+    else
+        printf 'kanban-autopr: warning: could not record the path-policy rejection on task %s\n' \
+            "$TASK_ID" >&2
+    fi
+    [ -z "${GITHUB_OUTPUT:-}" ] || printf 'refusal_reason=disallowed_paths\n' >> "$GITHUB_OUTPUT"
+}
+
 existing_feedback_checkpoint() {
     local body="$1" kind="$2"
     # The trusted checkpoint is part of the fixed header at the top of the
@@ -295,11 +320,17 @@ if [ -n "$unsafe_paths" ]; then
 fi
 
 migration_draft_alternative="${AUTOPR_MIGRATION_DRAFT_RE#^}"
-allowed_paths_re="^(server/(app|tests)/.*\.py|${migration_draft_alternative%$}|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift)$"
+# Markdown under docs/ is product documentation the cards routinely ask for
+# (docs/PRODUCTS.md is where CLAUDE.md sends the model for product mechanics).
+# It is not executed anywhere, so it is the one non-source tree the bot may
+# publish. CLAUDE.md, prompts, workflows, and scripts stay out: the first two
+# are agent instructions and the rest are covered by the unsafe list above.
+allowed_paths_re="^(server/(app|tests)/.*\.py|${migration_draft_alternative%$}|client/src/.*\.(ts|tsx)|platforms/desktop/Espresso/Espresso/.*\.swift|docs/.*\.md)$"
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE "$allowed_paths_re" || true)"
 if [ -n "$disallowed_paths" ]; then
     echo "Refusing change outside approved product source paths:" >&2
     printf '%s\n' "$disallowed_paths" >&2
+    reject_disallowed_paths "$disallowed_paths"
     git reset --hard >/dev/null 2>&1
     exit 1
 fi

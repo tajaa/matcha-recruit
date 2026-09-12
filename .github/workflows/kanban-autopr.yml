@@ -457,6 +457,7 @@ jobs:
             "$RUNNER_TEMP/publication-copy.json"
 
       - name: Publish research report or email review
+        id: publish_artifact
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.investigate.outputs.paused != 'true' && steps.select.outputs.outcome == 'artifact'
         timeout-minutes: 5
         env:
@@ -501,7 +502,45 @@ jobs:
         env:
           PUBLISHED_PRODUCT: ${{ steps.publish.outputs.published_product }}
           PUBLISHED_PR: ${{ steps.publish.outputs.pr_number }}
+          # The per-card failure ledger select.sh consults before giving a
+          # card its Nth identical retry. A step's `outcome` survives
+          # continue-on-error, so a failed investigation is visible here.
+          INVESTIGATE_OUTCOME: ${{ steps.investigate.outcome }}
+          INVESTIGATE_PAUSED: ${{ steps.investigate.outputs.paused }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          PUBLISH_ARTIFACT_OUTCOME: ${{ steps.publish_artifact.outcome }}
+          PUBLISH_REFUSAL_REASON: ${{ steps.publish.outputs.refusal_reason }}
         run: |
+          # Record how this run ended before anything else: the ledger is what
+          # stops a card that fails the same way every time from being
+          # re-selected every cooldown window forever. A pause is not a
+          # failure (the card waits for the operator), and a step that never
+          # ran does not count against the card.
+          # Sourced in a child shell: lib.sh sets -u, and this step's empty
+          # hand-off array below must keep expanding on the runner's bash.
+          record_outcome() {
+            bash -c 'source "$1"; shift; autopr_record_outcome "$@"' _ \
+              "$AUTOPR_CONTROL_ROOT/kanban-autopr/lib.sh" "$@"
+          }
+          task_id="$(jq -r '.task_id' "$RUNNER_TEMP/card.json")"
+          run_reason=""
+          if [ -n "$PUBLISH_REFUSAL_REASON" ]; then
+            run_reason="$PUBLISH_REFUSAL_REASON"
+          elif [ "$INVESTIGATE_OUTCOME" = failure ] && [ "$INVESTIGATE_PAUSED" != true ]; then
+            run_reason=investigate
+          elif [ "$VERIFY_OUTCOME" = failure ]; then
+            run_reason=verify
+          elif [ "$PUBLISH_OUTCOME" = failure ]; then
+            run_reason=publish
+          elif [ "$PUBLISH_ARTIFACT_OUTCOME" = failure ]; then
+            run_reason=publish_artifact
+          fi
+          if [ -n "$run_reason" ]; then
+            record_outcome "$task_id" failure "$run_reason"
+          elif [ "$INVESTIGATE_PAUSED" != true ]; then
+            record_outcome "$task_id" success
+          fi
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.

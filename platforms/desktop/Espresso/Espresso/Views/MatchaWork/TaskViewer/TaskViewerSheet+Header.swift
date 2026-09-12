@@ -256,6 +256,13 @@ extension TaskViewerSheet {
                 if liveAutoPRTask.autoprPaused == true {
                     Label("AutoPR paused", systemImage: "pause.circle")
                         .font(.ticket(size: 10))
+                    if let reason = liveAutoPRTask.autoprHoldReason, !reason.isEmpty {
+                        Text(reason)
+                            .font(.ticket(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                            .help(reason)
+                    }
                     if canRequestAutoPRRun {
                         Button("Run again") { Task { await requestAutoPRRun() } }
                             .buttonStyle(.plain)
@@ -303,6 +310,15 @@ extension TaskViewerSheet {
                     .buttonStyle(.plain)
                     .disabled(requestingAutoPRRun || addingNote)
                     .help("Queue this ticket for the next AutoPR tick instead of the twenty-minute sweep")
+                    // A plain Todo / Changes Requested card had no way to be
+                    // parked: Unqueue only appears once a run is requested.
+                    Button(requestingAutoPRRun ? "Holding…" : "Hold") {
+                        Task { await cancelAutoPRRun() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.ticket(size: 11))
+                    .disabled(requestingAutoPRRun || addingNote)
+                    .help("Hold this ticket so AutoPR skips it until you press Run again")
                 }
                 if (autoPRRunIsQueued || autoPRReconsiderationIsPending) && liveAutoPRTask.autoprPaused != true {
                     Button(requestingAutoPRRun ? "Unqueueing…" : "Unqueue") {

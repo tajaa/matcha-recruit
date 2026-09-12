@@ -126,6 +126,47 @@ changes.
    but refuses while an agent or AutoPR workflow is active. `msandbox stop --force` is
    the explicit interruption override. Do not add a GitHub cron alongside it.
 
+## Holding, releasing, and unsticking cards
+
+**Holding a card.** Any collaborator can park a Todo or Changes Requested card so the lane
+skips it: the ticket header's **Hold** button (beside *Run AutoPR now*), the **Unqueue**
+button once a run is requested, or `POST …/autopr/unqueue` with an optional
+`{"reason": "<≤200 chars>"}` body. The hold is an `autopr_run_cancel` history row; a
+reason on that row is exposed on every task as `autopr_hold_reason` (null when the card
+is not held or the hold carried no reason) and shown under the *AutoPR paused* label in
+Espresso. The hold lifts on the next *Run AutoPR now*, added context, review rejection,
+or new round — a machine deferral (`pause:false`) never counts as a hold and never
+carries a reason.
+
+**Card control from any terminal.** `msandbox autopr queue` lists the cached snapshot
+including held (`HOLD · <reason>`) and claimed In Progress cards; `msandbox autopr hold
+<id8|title> --reason R` writes the board's unqueue hold, `release` lifts it without
+queueing (`run-defer`), `run-now` records a run request and kicks the dispatcher,
+`unstick` moves a stranded In Progress card back to Todo (Changes Requested when it has
+a PR) and `--hold` parks it there, and `cancel-run [--hold]` cancels the active Kanban
+workflow run and unsticks the card the runner checkout is on. All of these are
+`scripts/kanban-autopr/card-control.sh` (installed next to the dispatcher), which logs
+in as the bot and refuses ambiguous targets (exit 2). `cancel-run` deliberately leaves
+`autopr_control.py finish` to the workflow's own Cleanup step. The same actions appear as
+rows on the manager's AutoPR tab.
+
+**Path policy.** `publish.sh` publishes only `server/app`/`server/tests` Python, Alembic
+version drafts, `client/src` TypeScript, Espresso Swift, and `docs/**/*.md`; everything
+else (root `CLAUDE.md`, prompts, workflows, scripts, lockfiles) is refused. A refusal no
+longer just fails the step: the card moves to Changes Requested with
+`BLOCKED: DISALLOWED PATHS · [autopr:rejected <ts>] disallowed_paths · <paths>`, the owner
+is asked in chat, and the selector keeps that marker settled — like no-spec — until
+someone moves the card, adds context, or presses Run.
+
+**Failure budget.** Cleanup records every run's outcome per card
+(`~/.cache/matcha-autopr/attempts/<id8>`: `count reason ts`); three consecutive failures
+for the same reason park the card with a server-side hold (`autopr: 3× <reason>`), an
+`ON HOLD: REPEATED FAILURES · [autopr:parked <ts>]` note, and a chat ask. Held cards —
+whether from Espresso Hold/Unqueue, `msandbox autopr hold`, or parking — stay in the
+collector snapshot and render as `‖ HOLD · <reason>` at the bottom of the dashboard queue
+(`NO-SPEC` is the bot's own can't-scope ledger); the selector never runs one. Tunables:
+`AUTOPR_MAX_SAME_REASON_FAILURES`, `AUTOPR_ATTEMPT_COOLDOWN_MINUTES`.
+
 ## Local tmux dashboard
 
 The terminal `msandbox` manager additionally has an **AutoPR** tab (key **7**,

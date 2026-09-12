@@ -299,13 +299,15 @@ extension MatchaWorkService {
         )
     }
 
-    func cancelAutoPRRun(projectId: String, taskId: String) async throws -> AutoPRRunRequestResponse {
-        struct Req: Encodable {}
+    /// Hold the ticket so AutoPR skips it until someone presses Run again.
+    /// `reason` is optional operator text the board shows next to the hold.
+    func cancelAutoPRRun(projectId: String, taskId: String, reason: String? = nil) async throws -> AutoPRRunRequestResponse {
+        struct Req: Encodable { let reason: String? }
         defer { invalidateProjectTasks(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/autopr/unqueue",
-            body: Req()
+            body: Req(reason: reason)
         )
     }
 

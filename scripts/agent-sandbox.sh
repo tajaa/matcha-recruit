@@ -63,7 +63,7 @@ case "${1:-}" in
         esac
         run_v2_controller "$@"
         ;;
-    worktree|pr|test|install|host|gc|capabilities)
+    worktree|pr|test|install|host|gc|capabilities|autopr)
         run_v2_controller "$@"
         ;;
     attach)

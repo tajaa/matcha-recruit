@@ -1447,6 +1447,16 @@ class HostAndInstallTests(MsandboxTestCase):
             capture_output=True,
         )
         self.assertEqual(completed.stdout.strip(), "legacy:system status")
+        # `autopr` is a v2 command: it must reach the Python controller, not
+        # fall through to the legacy control plane.
+        autopr_help = subprocess.run(
+            [str(bin_dir / "msandbox"), "autopr", "--help"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertIn("cancel-run", autopr_help.stdout)
+        self.assertNotIn("legacy:", autopr_help.stdout)
         bare_environment = dict(os.environ)
         up_marker = self.root / "system-up-called"
         bare_environment["MSANDBOX_TEST_UP_MARKER"] = str(up_marker)

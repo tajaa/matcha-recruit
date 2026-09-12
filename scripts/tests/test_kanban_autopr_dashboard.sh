@@ -120,7 +120,7 @@ cp "$AUTOPR_DIR/plan.py" "$VIEW_DIR/plan.py"
 cp "$AUTOPR_DIR/run-snapshot.sh" "$VIEW_DIR/run-snapshot.sh"
 cat > "$VIEW_DIR/collect.sh" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' '[{"task_id":"a","id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","last_moved_at":"2026-08-27T00:00:00Z","created_at":"2026-08-27T00:00:00Z","progress_note":""},{"task_id":"b","id8":"bbbb0000","project_title":"MATCHA","title":"Polish reports","board_column":"todo","last_moved_at":"2026-08-27T01:00:00Z","created_at":"2026-08-27T01:00:00Z","progress_note":""}]'
+printf '%s\n' '[{"task_id":"a","id8":"aaaa0000","project_title":"MATCHA","title":"Fix intake","board_column":"changes_requested","last_moved_at":"2026-08-27T00:00:00Z","created_at":"2026-08-27T00:00:00Z","progress_note":""},{"task_id":"b","id8":"bbbb0000","project_title":"MATCHA","title":"Polish reports","board_column":"todo","last_moved_at":"2026-08-27T01:00:00Z","created_at":"2026-08-27T01:00:00Z","progress_note":""},{"task_id":"h","id8":"hhhh0000","project_title":"MATCHA","title":"Landing copy","board_column":"changes_requested","last_moved_at":"2026-08-27T02:00:00Z","created_at":"2026-08-27T02:00:00Z","progress_note":"","autopr_paused":true,"autopr_hold_reason":"docs allowlist"}]'
 EOF
 cat > "$VIEW_DIR/collect-pr-context.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -182,7 +182,9 @@ check "control board shows cross-queue plan, exact next, PR timing, and Pacific 
   $(grep -q 'MATCHA AUTOPR CONTROL BOARD' "$TMP_DIR/dashboard.out" \
     && grep -q 'NOW · INVESTIGATING · 1h 30m' "$TMP_DIR/dashboard.out" \
     && grep -q 'NEXT · EXACT SELECTOR RESULT' "$TMP_DIR/dashboard.out" \
-    && grep -q 'QUEUE · 2 tracked' "$TMP_DIR/dashboard.out" \
+    && grep -q 'QUEUE · 3 tracked' "$TMP_DIR/dashboard.out" \
+    && grep -q '1 on hold · 0 no-spec' "$TMP_DIR/dashboard.out" \
+    && grep -qE '^  ‖ HOLD +MATCHA +Landing copy · docs allowlist' "$TMP_DIR/dashboard.out" \
     && grep -q 'PLAN · ' "$TMP_DIR/dashboard.out" \
     && grep -q 'NOT-READY PRS ONLY' "$TMP_DIR/dashboard.out" \
     && grep -q 'MERGE ORDER · 1 draft(s)' "$TMP_DIR/dashboard.out" \
@@ -193,7 +195,7 @@ check "control board shows cross-queue plan, exact next, PR timing, and Pacific 
     && grep -q 'RECENT RUNS · DURATION · PACIFIC' "$TMP_DIR/dashboard.out" \
     && grep -q '6:00 PM PDT' "$TMP_DIR/dashboard.out" \
     && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
-    && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+    && jq -e 'length == 3' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
 
 # A 58-column pane (the operator's 119-column terminal minus the detail rail)
 # must still show one card per line: title columns shrink, rows never wrap.
@@ -208,7 +210,7 @@ grep -q 'Polish reports' "$TMP_DIR/dashboard-narrow.out" || narrow_ok=1
 python3 -c '
 import re, sys
 rows = [line for line in open(sys.argv[1], encoding="utf-8").read().splitlines()
-        if re.match(r"^  ([▶↺↻?!○] |#[0-9]+ )", line)]
+        if re.match(r"^  ([▶↺↻?!○‖] |#[0-9]+ )", line)]
 sys.exit(1 if not rows or any(len(line) > int(sys.argv[2]) for line in rows) else 0)
 ' "$TMP_DIR/dashboard-narrow.out" 58 || narrow_ok=1
 check "board rows shrink their title column to the pane width instead of wrapping" "$narrow_ok"

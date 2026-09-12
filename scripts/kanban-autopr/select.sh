@@ -31,6 +31,11 @@ NOTHING_TO_DO=3
 # dashboard/selector probes consistent when they run outside Actions.
 MAX_OPEN_IMPLEMENTATION_PRS="${MAX_OPEN_IMPLEMENTATION_PRS:-10}"
 ATTEMPT_COOLDOWN_MINUTES="${AUTOPR_ATTEMPT_COOLDOWN_MINUTES:-15}"
+# Give-up rule: this many consecutive failures for the same reason (see
+# autopr_record_outcome in lib.sh) parks the card on hold with a note instead
+# of spending another run on it. A human move, added context, or Run resets
+# the clock for one more attempt.
+MAX_SAME_REASON_FAILURES="${AUTOPR_MAX_SAME_REASON_FAILURES:-3}"
 
 count="$(jq 'length' "$CARDS_FILE")"
 [ "$count" -gt 0 ] || exit "$NOTHING_TO_DO"
@@ -192,11 +197,42 @@ flush_ungranted_hints() {
 }
 trap flush_ungranted_hints EXIT
 
+# park_card CARD_JSON ID8
+# The give-up action: hold the card server-side (the same hold Espresso's
+# Unqueue writes, so it shows as HOLD everywhere and lifts on the same human
+# signals), say why on the card, and ask the owner in chat. Best-effort like
+# the other board writes here — a failed write must not abort selection, and
+# the next pass simply parks it again.
+park_card() {
+    local card="$1" id8="$2" project_id task_id count reason existing marker origin_note hold_reason
+    [ "${AUTOPR_SELECT_READ_ONLY:-false}" = true ] && return 0
+    project_id="$(printf '%s' "$card" | jq -r '.project_id // empty')"
+    task_id="$(printf '%s' "$card" | jq -r '.task_id // empty')"
+    [ -n "$project_id" ] && [ -n "$task_id" ] || return 0
+    IFS=$'\t' read -r count reason _ < "$ATTEMPTS_DIR/$id8" 2>/dev/null || return 0
+    hold_reason="autopr: ${count}× ${reason}"
+    existing="$(printf '%s' "$card" | jq -r '.progress_note // ""')"
+    marker="[autopr:parked $(date -u +%Y-%m-%dT%H:%M:%SZ)] $reason"
+    origin_note="$(progress_note_with_origin \
+        "🤖 AUTO SETUP · ON HOLD: REPEATED FAILURES · $marker · note: $count runs in a row failed at $reason; AutoPR stopped retrying." \
+        "$existing")"
+    ( mw_api POST "/matcha-work/projects/$project_id/tasks/$task_id/autopr/unqueue" \
+        "$(jq -n --arg reason "$hold_reason" '{reason: $reason}')" ) >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not hold task %s after repeated failures\n' "$task_id" >&2
+    ( mw_api PATCH "/matcha-work/projects/$project_id/tasks/$task_id" \
+        "$(jq -n --arg note "$origin_note" '{progress_note: $note}')" ) >/dev/null 2>&1 \
+        || printf 'kanban-autopr: warning: could not note the hold on task %s\n' "$task_id" >&2
+    ( autopr_post_context_request "$project_id" "$task_id" \
+        "AutoPR stopped retrying this card: $count runs in a row failed at $reason. It is on hold. Fix what the last run's note or PR reported (or re-scope the card), then move it, add context, or press Run to let it try again." \
+        "$origin_note" ) >/dev/null 2>&1 || true
+}
+
 # already_handled ID8 BOARD_COLUMN LAST_MOVED_AT PROGRESS_NOTE PR_NUMBER
 #                 RECONSIDERATION_PENDING RECONSIDERATION_AT RUN_REQUESTED_AT
-#                 CATEGORY
+#                 CATEGORY CAPABILITIES TASK_ID PAUSED
 # Echoes "skip", "skip_ungranted" (skip whose only cause is a missing board
-# grant), "investigate", "rework" (rework = push to the existing open PR rather
+# grant), "park" (skip, and hold the card: it has failed the same way too many
+# times), "investigate", "rework" (rework = push to the existing open PR rather
 # than opening a new one), or an artifact mode such as "research" for a kind
 # whose deliverable is attached to the card instead of a PR.
 already_handled() {
@@ -204,10 +240,18 @@ already_handled() {
     local reconsideration_pending="${6:-false}" reconsideration_at="${7:-}"
     local run_requested_at="${8:-}" category="${9:-}" capabilities="${10:-}"
     local branch="bot/task-$id8" task_id="${11:?task identity required}"
+    local hold="${12:-false}"
     # Local ownership is independent of card edits or queue signals. The
     # operator's held checkout must never compete with a scheduled writer.
     [ -n "$task_id" ] || { echo ownership_unavailable; return; }
     if jq -e --arg task "$task_id" 'index($task) != null' <<< "$HELD_TASKS" >/dev/null; then
+        echo skip
+        return
+    fi
+    # A server-side hold (Espresso Unqueue/Hold, `msandbox autopr hold`, or a
+    # prior park) is absolute: the server lifts it on the same human signals
+    # that outrank everything below, so nothing here may second-guess it.
+    if [ "$hold" = true ]; then
         echo skip
         return
     fi
@@ -230,6 +274,20 @@ already_handled() {
         if [ "$age_s" -lt $((ATTEMPT_COOLDOWN_MINUTES * 60)) ] \
             && [ "$human_signal_epoch" -le "$attempt_epoch" ]; then
             echo skip
+            return
+        fi
+        # Past the cooldown, the same file is the failure ledger (see
+        # autopr_record_outcome). Enough identical failures with no human
+        # signal since the last one means the next run would end the same
+        # way; park the card instead. An empty file is a pre-ledger marker.
+        local failure_count="" failure_reason="" moved_epoch
+        IFS=$'\t' read -r failure_count failure_reason _ < "$attempt_marker" 2>/dev/null || true
+        moved_epoch="$(iso_to_epoch "$last_moved")"
+        if [[ "$failure_count" =~ ^[0-9]+$ ]] \
+            && [ "$failure_count" -ge "$MAX_SAME_REASON_FAILURES" ] \
+            && [ "$human_signal_epoch" -le "$attempt_epoch" ] \
+            && [ "$moved_epoch" -le "$attempt_epoch" ]; then
+            echo park
             return
         fi
     fi
@@ -261,7 +319,13 @@ already_handled() {
     # context, requests a run, or moves/re-adds the card. In particular, do not
     # resurrect old migration_required cards merely because new runs now draft
     # migrations automatically; abandoned work must stay abandoned.
-    if [[ "$progress_note" == *"[autopr:no-spec "* ]] \
+    # The rejected (a policy refusal publish.sh recorded) and parked (the
+    # failure budget above) markers are the same kind of durable decision and
+    # lift on the same signals; without this a refused card was re-run every
+    # cooldown window and refused the same way each time.
+    if { [[ "$progress_note" == *"[autopr:no-spec "* ]] \
+            || [[ "$progress_note" == *"[autopr:rejected "* ]] \
+            || [[ "$progress_note" == *"[autopr:parked "* ]]; } \
         && [ "$reconsideration_pending" != true ] \
         && [ "$run_requested" != true ]; then
         # Full ISO timestamp, not just a date: BSD `date -j -f` fills any
@@ -271,7 +335,7 @@ already_handled() {
         # marker" drift throughout the day instead of comparing two fixed
         # instants.
         local marker_ts marker_epoch
-        marker_ts="$(printf '%s' "$progress_note" | sed -E 's/^.*\[autopr:no-spec ([0-9TZ:-]+)\].*/\1/')"
+        marker_ts="$(printf '%s' "$progress_note" | sed -E 's/^.*\[autopr:(no-spec|rejected|parked) ([0-9TZ:-]+)\].*/\2/')"
         marker_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$marker_ts" +%s 2>/dev/null || date -u -d "$marker_ts" +%s 2>/dev/null || echo 0)"
         local moved_epoch
         moved_epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "${last_moved:0:19}" +%s 2>/dev/null || date -u -d "$last_moved" +%s 2>/dev/null || echo 0)"
@@ -460,6 +524,7 @@ for ((i = 0; i < n; i++)); do
     # One capability per line so already_handled can grep -qx for an exact
     # match instead of substring-matching "browse" inside a longer name.
     capabilities="$(printf '%s' "$card" | jq -r '(.autopr_capabilities // [])[]' 2>/dev/null || true)"
+    hold="$(printf '%s' "$card" | jq -r '.autopr_paused // false')"
     screenshots_required=false
     if [ "$category" = research ] && autopr_research_screenshots_required "$card"; then
         screenshots_required=true
@@ -467,9 +532,15 @@ for ((i = 0; i < n; i++)); do
 
     decision="$(already_handled "$id8" "$column" "$last_moved" "$progress_note" "$pr_number" \
         "$reconsideration_pending" "$reconsideration_at" "$run_requested_at" "$category" \
-        "$capabilities" "$task_id")"
+        "$capabilities" "$task_id" "$hold")"
     [ "$decision" != ownership_unavailable ] \
         || die "could not read AutoPR ownership; refusing to select a possible operator-held task"
+    if [ "$decision" = park ]; then
+        # Holding is a board write, so the read-only dashboard probe only
+        # skips; the scheduled pass is what actually parks the card.
+        park_card "$card" "$id8"
+        continue
+    fi
     if [ "$decision" = skip_github_unavailable ]; then
         # Per card this is still a fail-closed skip: a read we could not make
         # is never evidence that no PR exists. But a pass where EVERY card

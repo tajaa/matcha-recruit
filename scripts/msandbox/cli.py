@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import autopr_cli
 from .agent_adapters import attach_agent, deliver_attachments
 from .attachments import AttachmentError, import_clipboard, import_files
 from .capabilities import render_report_text, report_ok
@@ -179,6 +180,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not re-run scripts/kanban-autopr/install-launch-agent.sh after the release swap",
     )
     commands.add_parser("wizard", help="open the interactive session manager")
+    autopr = commands.add_parser("autopr", help="AutoPR queue status and card control")
+    autopr_commands = autopr.add_subparsers(dest="autopr_command", required=True)
+    autopr_commands.add_parser("status", help="master switch, scheduler, active run")
+    autopr_commands.add_parser("queue", help="cached board snapshot incl. held cards")
+    for verb, help_text in (
+        ("hold", "stop AutoPR picking this card until it is released or edited"),
+        ("release", "lift a hold without queueing a run"),
+        ("run-now", "queue an immediate run for this card"),
+        ("unstick", "move a stranded In Progress card back to its lane"),
+        ("cancel-run", "cancel the active Kanban run and settle its card"),
+    ):
+        verb_parser = autopr_commands.add_parser(verb, help=help_text)
+        verb_parser.add_argument("target", nargs="?" if verb == "cancel-run" else None,
+                                 help="task id8, uuid, or title fragment")
+        verb_parser.add_argument("--reason")
+        if verb in ("unstick", "cancel-run"):
+            verb_parser.add_argument("--hold", action="store_true",
+                                     help="also hold the card once it is back in a lane")
     return result
 
 
@@ -413,6 +432,18 @@ def run(argv: list[str] | None = None) -> int:
         return 1 if report.failed else 0
     if args.command == "pr":
         return _checkout_pr(repo, args.number)
+    if args.command == "autopr":
+        if args.autopr_command == "status":
+            return autopr_cli.status(repo)
+        if args.autopr_command == "queue":
+            return autopr_cli.queue()
+        return autopr_cli.card_action(
+            args.autopr_command,
+            args.target,
+            reason=args.reason,
+            hold=getattr(args, "hold", False),
+            repo=repo,
+        )
     if args.command == "install":
         installed = rollback_release(args.rollback) if args.rollback else install_release(repo_root=repo)
         print(f"Installed msandbox {__version__}: {installed}")

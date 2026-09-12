@@ -274,6 +274,14 @@ network) uses an existing browser-enabled image:
 python3 -m scripts.tests.msandbox_manager_smoke --image <browser-enabled-image>
 ```
 
+The AutoPR tab shows every card in the snapshot, not only queued ones: a queued card
+offers Start now and Hold, a held card shows `HOLD · <reason>` with Release, and a
+claimed In Progress card offers Unstick; a final row cancels the active Kanban run and
+settles its card. Each action confirms first and shells out to `card-control.sh`, so
+`msandbox autopr …` on the command line and the tab behave identically. `msandbox autopr
+status` prints the same one-line state the session status bar shows, the scheduler
+countdown, and recent supervised runs.
+
 AutoPR and independent sessions share one lifecycle even though their durable
 terminal sessions stay on the host side of the container boundary. From an
 attached agent, press `Ctrl-b a` to switch to `matcha-autopr` and `Ctrl-b a`

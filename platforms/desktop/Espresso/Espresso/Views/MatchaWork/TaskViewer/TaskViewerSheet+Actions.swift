@@ -273,6 +273,7 @@ extension TaskViewerSheet {
             didSubmitAutoPRContext = false
             if let index = viewModel.tasks.firstIndex(where: { $0.id == task.id }) {
                 viewModel.tasks[index].autoprPaused = true
+                viewModel.tasks[index].autoprHoldReason = nil
                 viewModel.tasks[index].autoprRunRequestedAt = nil
                 viewModel.tasks[index].autoprReconsiderationPending = false
                 viewModel.tasks[index].autoprClaimedAt = nil

@@ -35,7 +35,7 @@ validate_dependencies() {
 install_runtime() {
     mkdir -p "$INSTALL_ROOT"
     local name
-    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh watch-pr.sh collect.sh collect-pr-context.sh select.sh run-snapshot.sh has-run-request.sh gh-cached.sh codex-backoff.sh status-segment.sh; do
+    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh watch-pr.sh collect.sh collect-pr-context.sh select.sh run-snapshot.sh has-run-request.sh gh-cached.sh codex-backoff.sh status-segment.sh card-control.sh queue-handoff.sh; do
         install -m 755 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
     done
     # Helpers the installed scripts shell out to by $SCRIPT_DIR path. Missing

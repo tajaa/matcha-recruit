@@ -284,7 +284,7 @@ def _write_launcher(
                 "    case \"$dispatch_subcommand\" in create|start|attach|shell) ensure_system || exit $? ;; esac\n"
                 "    run_v2 \"$@\"\n"
                 "    ;;\n"
-                "  --version|worktree|pr|test|install|gc|capabilities) run_v2 \"$@\" ;;\n"
+                "  --version|worktree|pr|test|install|gc|capabilities|autopr) run_v2 \"$@\" ;;\n"
                 "  attach) if [ \"$#\" -gt 1 ] && [ ! -e \"${2:-}\" ]; then run_v2 \"$@\"; fi ;;\n"
                 "  paste) if [ \"$#\" -gt 1 ]; then run_v2 \"$@\"; fi ;;\n"
                 "  doctor) run_v2 \"$@\" ;;\n"

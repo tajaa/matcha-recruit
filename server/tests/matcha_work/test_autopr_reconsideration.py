@@ -609,11 +609,37 @@ async def test_unqueue_preserves_card_and_records_hold(
         assert result is None
         conn.execute.assert_not_called()
     else:
-        assert result == {"ok": True, "autopr_paused": True}
+        assert result == {"ok": True, "autopr_paused": True, "autopr_hold_reason": None}
         args = conn.execute.call_args.args
         assert "INSERT INTO mw_task_history" in args[0]
         assert "clock_timestamp()" in args[0]
         assert json.loads(args[-1]) == {"kind": "autopr_run_cancel"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason,stored", [
+    ("docs allowlist", "docs allowlist"),
+    ("  padded  ", "padded"),
+    ("", None),
+    ("x" * 300, "x" * 200),
+])
+async def test_unqueue_records_the_operator_reason_on_the_hold_row(monkeypatch, reason, stored):
+    # The reason rides on the same autopr_run_cancel row the hold query
+    # resolves, so a card can say why it is parked; blank means no key at all.
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    conn = _RunRequestConn()
+    conn.execute = AsyncMock()
+    monkeypatch.setattr(svc, "get_connection", lambda: _connection_context(conn))
+    result = await svc.cancel_autopr_run(
+        project_id=uuid4(), task_id=uuid4(), actor_user_id=uuid4(), reason=reason,
+    )
+    assert result == {"ok": True, "autopr_paused": True, "autopr_hold_reason": stored}
+    metadata = json.loads(conn.execute.call_args.args[-1])
+    if stored is None:
+        assert metadata == {"kind": "autopr_run_cancel"}
+    else:
+        assert metadata == {"kind": "autopr_run_cancel", "reason": stored}
 
 
 @pytest.mark.asyncio
@@ -681,8 +707,31 @@ async def test_unqueue_route_checks_access_and_results(monkeypatch, outcome, cod
         assert exc.value.status_code == code
     else:
         assert await route.cancel_autopr_run_endpoint(uuid4(), uuid4(), SimpleNamespace(id=uuid4())) == outcome
+        assert cancel.call_args.kwargs["reason"] is None
     if outcome == "forbidden":
         cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unqueue_route_forwards_an_optional_reason_body(monkeypatch):
+    # Espresso's Unqueue posts nothing; the CLI and the failure budget post
+    # {"reason": ...}. Both reach the same service call.
+    from types import SimpleNamespace
+
+    from app.matcha.models.matcha_work.matcha_work import AutoPRHoldRequest
+    from app.matcha.routes.matcha_work import task_history as route
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    monkeypatch.setattr(route, "_verify_project_access", AsyncMock())
+    cancel = AsyncMock(return_value={"ok": True, "autopr_paused": True, "autopr_hold_reason": "docs"})
+    monkeypatch.setattr(svc, "cancel_autopr_run", cancel)
+    result = await route.cancel_autopr_run_endpoint(
+        uuid4(), uuid4(), SimpleNamespace(id=uuid4()), body=AutoPRHoldRequest(reason="docs"),
+    )
+    assert result["autopr_hold_reason"] == "docs"
+    assert cancel.call_args.kwargs["reason"] == "docs"
+    with pytest.raises(ValueError):
+        AutoPRHoldRequest(reason="x" * 201)
 
 
 @pytest.mark.asyncio
@@ -814,8 +863,50 @@ def test_hold_lookup_is_joined_once_per_task():
 
     query_source = inspect.getsource(svc.list_project_tasks)
     assert query_source.count("{_AUTOPR_HOLD_QUERY}") == 1
+    assert query_source.count("{_AUTOPR_HOLD_REASON_QUERY}") == 1
     assert "{_AUTOPR_HOLD_SQL}" not in query_source
     assert "COALESCE(autopr_hold.paused, FALSE) AS autopr_paused" in query_source
+    assert "autopr_hold_reason.reason AS autopr_hold_reason" in query_source
+
+
+def test_hold_reason_follows_the_same_row_as_the_hold():
+    # Same isolated SQL fixture as the hold test: the reason must come from
+    # exactly the row that decides "paused", read null once the hold lifts,
+    # and ignore a machine deferral (pause:false) even when it carries text.
+    import sqlite3
+    from app.matcha.services.matcha_work import project_task_service as svc
+
+    assert svc._AUTOPR_HOLD_ROW in svc._AUTOPR_HOLD_QUERY
+    assert svc._AUTOPR_HOLD_ROW in svc._AUTOPR_HOLD_REASON_QUERY
+    with sqlite3.connect(":memory:") as db:
+        db.execute("CREATE TABLE mw_tasks (id TEXT)")
+        db.execute("CREATE TABLE mw_task_history (task_id TEXT, event_type TEXT, metadata TEXT, created_at INTEGER)")
+        db.execute("INSERT INTO mw_tasks VALUES ('ticket')")
+        paused_query = f"SELECT {svc._AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = 'ticket'"
+        reason_query = f"SELECT ({svc._AUTOPR_HOLD_REASON_QUERY}) FROM mw_tasks t WHERE t.id = 'ticket'"
+
+        def add(at, kind=None, event="activity", **metadata):
+            if kind:
+                metadata["kind"] = kind
+            db.execute("INSERT INTO mw_task_history VALUES (?, ?, ?, ?)",
+                       ("ticket", event, json.dumps(metadata), at))
+
+        def state():
+            return (bool(db.execute(paused_query).fetchone()[0]),
+                    db.execute(reason_query).fetchone()[0])
+
+        assert state() == (False, None)
+        add(1, "autopr_run_cancel")
+        assert state() == (True, None)
+        add(2, "autopr_run_cancel", reason="docs allowlist")
+        assert state() == (True, "docs allowlist")
+        add(3, "autopr_run_cancel", pause=False, reason="machine deferral")
+        assert state() == (False, None)
+        add(4, "autopr_run_cancel", reason="parked: 3x disallowed_paths")
+        add(5, event="column_change")
+        assert state() == (True, "parked: 3x disallowed_paths")
+        add(6, "autopr_run_request")
+        assert state() == (False, None)
 
 
 def test_active_claim_survives_comments_but_settles_on_run_mutation():

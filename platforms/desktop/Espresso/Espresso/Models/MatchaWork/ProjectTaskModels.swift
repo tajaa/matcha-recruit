@@ -261,6 +261,9 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     /// working banner plus crash recovery.
     var autoprClaimedAt: String? = nil
     var autoprPaused: Bool? = nil
+    /// Why the current hold was placed (operator text or the harness's
+    /// failure-budget note). Nil when not held or the hold carried no reason.
+    var autoprHoldReason: String? = nil
 
     // ── Pipeline position (independent of kanban board_column) ──
     // Defaults to "lead" on the server; nil until the migration runs.
@@ -316,6 +319,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case autoprRunRequestedAt = "autopr_run_requested_at"
         case autoprClaimedAt = "autopr_claimed_at"
         case autoprPaused = "autopr_paused"
+        case autoprHoldReason = "autopr_hold_reason"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"

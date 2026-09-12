@@ -592,3 +592,9 @@ class GeneratePresentationResponse(BaseModel):
     current_state: dict
     slide_count: int
     generated_at: datetime
+
+
+class AutoPRHoldRequest(BaseModel):
+    """Optional body for ``POST …/autopr/unqueue``: why the card is parked."""
+
+    reason: Optional[str] = Field(default=None, max_length=200)
