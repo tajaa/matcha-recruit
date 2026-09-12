@@ -36,7 +36,11 @@ while an invalid value is corrected.
 Opening an existing session always shows its controls before attaching:
 
 - **Start/Resume harness** opens the selected Codex, Claude, or OpenCode CLI.
-  `Ctrl-b d` returns to the manager while the harness continues running. Normal
+  `Ctrl-b a` hops to the `matcha-autopr` observer dashboard and back (same key
+  from either side); the session's status bar carries a live AutoPR segment
+  (`AUTOPR ▶ KANBAN 12m · <card>`, `idle · next in 3m`, `SANDBOX OFF`, or
+  `scheduler stale`) read from the dispatcher's local state files, never the
+  network. `Ctrl-b d` returns to the manager while the harness continues running. Normal
   harness exit now detaches the dead pane automatically and returns to the menu;
   `Ctrl-C` inside a harness retains that CLI's interrupt behavior. Plain `exit`
   is a shell command, not a universal agent-chat command.
@@ -254,7 +258,14 @@ they do not silently drop it or bypass AutoPR's normal guards. Research tasks
 retain their existing no-code-change policy. No merge or deployment is implied.
 
 Controller changes are picked up by `msandbox install` from the checkout that
-contains them. No terminal GUI dependency or database migration is required.
+contains them. The same command re-runs
+`scripts/kanban-autopr/install-launch-agent.sh` when a dispatcher LaunchAgent is
+already installed, because the two installed trees (the pinned release and
+`~/.local/share/matcha-kanban-autopr`) never update themselves and a merged
+control that is not installed looks exactly like one that does not exist;
+`--skip-dispatcher` opts out for one call. `msandbox doctor` (no session) prints
+both drifts and exits 1 when either tree is behind the checkout. No terminal GUI
+dependency or database migration is required.
 Unit coverage runs through `bash scripts/tests/test_msandbox_sessions.sh`.
 Optional browser smoke (one disposable container, no host data/credentials or
 network) uses an existing browser-enabled image:
@@ -265,8 +276,11 @@ python3 -m scripts.tests.msandbox_manager_smoke --image <browser-enabled-image>
 
 AutoPR and independent sessions share one lifecycle even though their durable
 terminal sessions stay on the host side of the container boundary. From an
-attached agent, press `Ctrl-b s` and select `matcha-autopr`; use `Ctrl-b d` to
-detach. Running `tmux attach -t matcha-autopr` as a command inside the container
+attached agent, press `Ctrl-b a` to switch to `matcha-autopr` and `Ctrl-b a`
+again to come back (`Ctrl-b s` still lists every session); use `Ctrl-b d` to
+detach. Bare `msandbox` on a terminal attaches the dashboard first and drops
+into the manager on detach; `msandbox --menu` (or `MSANDBOX_START_ATTACH=menu`)
+opens the manager directly. Running `tmux attach -t matcha-autopr` as a command inside the container
 addresses the container's isolated tmux server and is therefore not the switch
 operation. Direct `msandbox wizard`, `session create`, `session start`,
 `session attach`, and `session shell` entrypoints reassert the complete AutoPR

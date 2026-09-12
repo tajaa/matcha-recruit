@@ -442,6 +442,91 @@ AUTOPR_GH_BIN="$TMP_DIR/gh-guard" GITHUB_REPOSITORY=x/x \
 check "the workflow floor admits the exact-ticket operator dispatch" \
   $([ "$explicit_rc" = 0 ] && echo 0 || echo 1)
 
+# Notification Center banners: silent without the opt-in marker, one banner
+# per dispatch, one per finished run (never a replay of history), and one per
+# sandbox-off period.
+cat > "$TMP_DIR/osascript" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AUTOPR_TEST_NOTIFY_LOG"
+EOF
+chmod +x "$TMP_DIR/osascript"
+notify_tick() {
+  AUTOPR_NOTIFY_BIN="$TMP_DIR/osascript" AUTOPR_TEST_NOTIFY_LOG="$TMP_DIR/notify.log" \
+    AUTOPR_NOTIFY_FILE="$TMP_DIR/notify-on" run_dispatcher "$@"
+}
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/last-notified-run" "$TMP_DIR/state/notified-off" "$TMP_DIR/notify.log"
+old_run="$(jq -cn '[{databaseId:50,status:"completed",conclusion:"success",event:"workflow_dispatch",createdAt:"2026-09-11T00:00:00Z",updatedAt:"2026-09-11T00:20:00Z",url:"x"}]')"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$old_run" notify_tick
+check "banners stay silent without the opt-in marker" \
+  $([ -e "$TMP_DIR/dispatches" ] && [ ! -e "$TMP_DIR/notify.log" ] && echo 0 || echo 1)
+
+: > "$TMP_DIR/notify-on"
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/last-notified-run"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$old_run" notify_tick
+check "a dispatch posts one banner and the first tick only records the run baseline" \
+  $([ "$(grep -c 'Run dispatched' "$TMP_DIR/notify.log")" = 1 ] \
+    && ! grep -q 'run #50' "$TMP_DIR/notify.log" \
+    && [ "$(cat "$TMP_DIR/state/last-notified-run")" = 50 ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+newer_runs="$(jq -cn '[{databaseId:50,status:"completed",conclusion:"success",event:"workflow_dispatch",createdAt:"2026-09-11T00:00:00Z",updatedAt:"2026-09-11T00:20:00Z",url:"x"},{databaseId:51,status:"completed",conclusion:"failure",event:"workflow_dispatch",createdAt:"2026-09-11T01:00:00Z",updatedAt:"2026-09-11T01:25:00Z",url:"x"}]')"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+rm -f "$TMP_DIR/dispatches"
+AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+check "a finished Kanban run posts exactly one banner with its outcome and duration" \
+  $([ "$(grep -c 'run #51' "$TMP_DIR/notify.log")" = 1 ] \
+    && grep -q 'subtitle "Kanban run failure"' "$TMP_DIR/notify.log" \
+    && grep -q 'run #51 · 25m' "$TMP_DIR/notify.log" \
+    && ! grep -q 'run #50' "$TMP_DIR/notify.log" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches"
+error_ok="$(jq -cn '[{databaseId:52,status:"completed",conclusion:"success",event:"workflow_dispatch",createdAt:"2026-09-11T02:00:00Z",updatedAt:"2026-09-11T02:01:00Z",url:"x"}]')"
+AUTOPR_TEST_ERROR_RUNS="$error_ok" AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+check "a successful non-Kanban pass posts no banner" \
+  $(! grep -q 'run #52' "$TMP_DIR/notify.log" && [ "$(cat "$TMP_DIR/state/last-notified-run")" = 52 ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/autopr-enabled"
+notify_tick
+notify_tick
+touch "$TMP_DIR/autopr-enabled"
+check "the sandbox going off posts one banner per off period" \
+  $([ "$(grep -c 'AutoPR is off' "$TMP_DIR/notify.log")" = 1 ] && echo 0 || echo 1)
+AUTOPR_TEST_ERROR_RUNS="$error_ok" AUTOPR_TEST_KANBAN_RUNS="$newer_runs" notify_tick
+check "a tick with the sandbox back clears the off marker" \
+  $([ ! -e "$TMP_DIR/state/notified-off" ] && echo 0 || echo 1)
+
+# The status-bar segment every agent session shows: file reads only.
+SEGMENT="$REPO_ROOT/scripts/kanban-autopr/status-segment.sh"
+mkdir -p "$TMP_DIR/seg-state" "$TMP_DIR/seg-github" "$TMP_DIR/seg-worktree"
+seg() {
+  AUTOPR_SEGMENT_PLAIN=1 AUTOPR_ENABLE_FILE="$TMP_DIR/seg-enabled" \
+    AUTOPR_DISPATCH_STATE_DIR="$TMP_DIR/seg-state" AUTOPR_GITHUB_SNAPSHOT_CACHE_DIR="$TMP_DIR/seg-github" \
+    AUTOPR_CARD_SNAPSHOT="$TMP_DIR/seg-cards.json" AUTOPR_RUNNER_WORKTREE="$TMP_DIR/seg-worktree" \
+    AUTOPR_NOW_EPOCH=1000000 "$SEGMENT"
+}
+check "status segment reports OFF without the master switch" \
+  $([ "$(seg)" = "AUTOPR OFF" ] && echo 0 || echo 1)
+touch "$TMP_DIR/seg-enabled"
+check "status segment reports a missing scheduler signal" \
+  $([ "$(seg)" = "AUTOPR no scheduler signal" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"kanban-not-due","checked_at":999990,"next_check_at":1000050,"eligible_at":1000130}' > "$TMP_DIR/seg-state/status.json"
+check "status segment shows the idle countdown from the scheduler status" \
+  $([ "$(seg)" = "AUTOPR idle · next in 3m" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"msandbox-off","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+check "status segment names a sandbox that is off" \
+  $([ "$(seg)" = "AUTOPR SANDBOX OFF" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"kanban-not-due","checked_at":999500,"next_check_at":999560,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+check "status segment flags a scheduler that stopped ticking" \
+  $([ "$(seg)" = "AUTOPR scheduler stale 8m" ] && echo 0 || echo 1)
+printf '%s\n' '{"action":"skip","reason":"active-autopr-workflow","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
+jq -cn '[{databaseId:7,status:"in_progress",lane:"kanban",createdAt:(999280 | todate)}]' > "$TMP_DIR/seg-github/runs.json"
+printf '%s\n' '[{"id8":"abcd1234","title":"Auto-map timezone when adding a location"}]' > "$TMP_DIR/seg-cards.json"
+git -C "$TMP_DIR/seg-worktree" init -q && git -C "$TMP_DIR/seg-worktree" checkout -q -b bot/task-abcd1234
+check "status segment names the running lane, its age, and the card being worked" \
+  $([ "$(seg)" = "AUTOPR ▶ KANBAN 12m · Auto-map timezone when a" ] && echo 0 || echo 1)
+check "installer ships the status segment next to the dispatcher" \
+  $(grep -q 'status-segment.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

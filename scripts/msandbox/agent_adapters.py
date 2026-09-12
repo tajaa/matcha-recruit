@@ -164,6 +164,35 @@ def _tmux_exists(record: SessionRecord) -> bool:
 
 _configured_panes: set[str] = set()
 
+AUTOPR_DASHBOARD_SESSION = os.environ.get("AUTOPR_TMUX_SESSION", "matcha-autopr")
+
+
+def autopr_status_segment_command() -> str | None:
+    """Path of the file-only AutoPR status script, or None when not installed.
+
+    The installed dispatcher tree is preferred so a session shows the same
+    state the LaunchAgent acts on; the repo copy covers a checkout that has
+    not been installed yet. The release tree never carries it: releases copy
+    only ``scripts/msandbox``.
+    """
+    candidates = [Path.home() / ".local/share/matcha-kanban-autopr/status-segment.sh"]
+    repo_root = os.environ.get("MATCHA_REPO_ROOT")
+    if repo_root:
+        candidates.append(Path(repo_root) / "scripts/kanban-autopr/status-segment.sh")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def agent_status_right() -> str:
+    """Status bar for an agent session: live AutoPR state plus the two keys."""
+    hints = "Ctrl-b a: AutoPR dashboard | Ctrl-b d: menu | Ctrl-c: interrupt | %H:%M"
+    segment = autopr_status_segment_command()
+    if segment is None:
+        return hints
+    return f"#({shlex.quote(segment)}) | {hints}"
+
 
 def ensure_agent_pane_controls(record: SessionRecord) -> None:
     """Install lifecycle controls on both new and pre-control-center panes."""
@@ -190,19 +219,38 @@ def ensure_agent_pane_controls(record: SessionRecord) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    # The AutoPR observer and every agent session share one tmux server, so
+    # one server-global key toggles between them. Same binding as
+    # scripts/kanban-autopr/ensure-dashboard.sh; bind-key replaces, so
+    # re-applying it on every session start is harmless.
     subprocess.run(
         [
             "tmux",
-            "set-option",
-            "-t",
-            record.tmux_session,
-            "status-right",
-            "Ctrl-b d: Sandbox menu | Ctrl-c: interrupt | %H:%M",
+            "bind-key",
+            "-N",
+            "AutoPR dashboard <-> agent session",
+            "a",
+            "if-shell",
+            "-F",
+            f"#{{==:#{{session_name}},{AUTOPR_DASHBOARD_SESSION}}}",
+            "switch-client -l",
+            f"switch-client -t {AUTOPR_DASHBOARD_SESSION}",
         ],
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    for option, value in (
+        ("status-interval", "10"),
+        ("status-right-length", "120"),
+        ("status-right", agent_status_right()),
+    ):
+        subprocess.run(
+            ["tmux", "set-option", "-t", record.tmux_session, option, value],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     _configured_panes.add(record.tmux_session)
 
 

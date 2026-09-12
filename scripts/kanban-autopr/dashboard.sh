@@ -69,7 +69,8 @@ tui_width() {
     local width
     # COLUMNS is often the 80-column value inherited when launchd created the
     # detached session; tput reflects the pane after a real client attaches.
-    width="$(tput cols 2>/dev/null || printf '%s' "${COLUMNS:-80}")"
+    # AUTOPR_DASHBOARD_WIDTH pins it for tests and for a redirected render.
+    width="${AUTOPR_DASHBOARD_WIDTH:-$(tput cols 2>/dev/null || printf '%s' "${COLUMNS:-80}")}"
     [[ "$width" =~ ^[0-9]+$ ]] || width=80
     [ "$width" -ge 40 ] 2>/dev/null || width=40
     [ "$width" -le 100 ] 2>/dev/null || width=100
@@ -444,14 +445,29 @@ render_dashboard() {
         printf '  %b○%b No workflow is currently queued or running.\n' "$C_MUTED" "$C_RESET"
     fi
 
+    # Title columns shrink with the pane. The fixed columns around each title
+    # (badge, project, age, PR number) are what the subtraction accounts for,
+    # so a 75-column pane renders one card per line instead of wrapping.
+    local board_width title_w pr_title_w plan_title_w merge_title_w merged_title_w
+    board_width="$(tui_width)"
+    title_w=$((board_width - 38)); [ "$title_w" -ge 12 ] || title_w=12
+    pr_title_w=$((board_width - 44)); [ "$pr_title_w" -ge 12 ] || pr_title_w=12
+    plan_title_w=$((board_width - 22)); [ "$plan_title_w" -ge 12 ] || plan_title_w=12
+    merge_title_w=$((board_width - 45)); [ "$merge_title_w" -ge 12 ] || merge_title_w=12
+    merged_title_w=$((board_width - 52)); [ "$merged_title_w" -ge 12 ] || merged_title_w=12
+    # Below ninety columns the merge clock goes; the open-to-merge duration
+    # and the production-verification state are what the row is for.
+    local merged_show_clock=1
+    [ "$board_width" -ge 90 ] || merged_show_clock=0
+
     plan_id="$(printf '%s' "$plan" | jq -r '.plan_id // "unavailable"')"
     section_heading "PLAN · $plan_id · NOT-READY PRS ONLY"
     if [ "$plan_state" != live ]; then
         printf '  %b! unavailable%b · existing queue remains visible below\n' "$C_WARN$C_BOLD" "$C_RESET"
     else
         printf '  %bWORK ORDER%b\n' "$C_MUTED$C_BOLD" "$C_RESET"
-        printf '%s' "$plan" | jq -r '.work_order[:5][] |
-          [(.position | tostring), .cluster_id, (if .blocked then "CONTEXT" elif .board_column == "changes_requested" then "REWORK" else "TODO" end), (.title[0:52])] | @tsv
+        printf '%s' "$plan" | jq -r --argjson w "$plan_title_w" '.work_order[:5][] |
+          [(.position | tostring), .cluster_id, (if .blocked then "CONTEXT" elif .board_column == "changes_requested" then "REWORK" else "TODO" end), (.title[0:$w])] | @tsv
         ' | while IFS=$'\t' read -r plan_position row_project row_badge plan_title; do
             printf '    %b%-2s%b %-4s %b%-8s%b %s\n' \
                 "$C_ACCENT$C_BOLD" "$plan_position" "$C_RESET" "$row_project" \
@@ -462,11 +478,11 @@ render_dashboard() {
         if [ "$plan_merge_count" -eq 0 ]; then
             printf '    none · PRs already ready for review are deliberately excluded\n'
         else
-            printf '%s' "$plan" | jq -r '.merge_order[:6][] |
-              [(.position | tostring), (.pr_number | tostring), (.title[0:48]),
+            printf '%s' "$plan" | jq -r --argjson w "$merge_title_w" '.merge_order[:6][] |
+              [(.position | tostring), (.pr_number | tostring), (.title[0:$w]),
                (((.blockers // []) + ([.context_dependencies[]?.state])) | join(", "))] | @tsv
             ' | while IFS=$'\t' read -r plan_position plan_number plan_title plan_blocked; do
-                printf '    %-2s #%-4s %-48s%s\n' "$plan_position" "$plan_number" "$plan_title" "${plan_blocked:+ · BLOCKED: $plan_blocked}"
+                printf '    %-2s #%-4s %-*s%s\n' "$plan_position" "$plan_number" "$merge_title_w" "$plan_title" "${plan_blocked:+ · BLOCKED: ${plan_blocked:0:24}}"
             done
         fi
         plan_release_blockers="$(printf '%s' "$plan" | jq '.release_blockers | length')"
@@ -516,7 +532,7 @@ render_dashboard() {
       "\(length) tracked · \([.[] | select(.id8 == $current_id8)] | length) active · \([.[] | select(pending and .id8 != $current_id8)] | length) feedback · \([.[] | select(waiting and .id8 != $current_id8)] | length) waiting · \([.[] | select(held and .id8 != $current_id8)] | length) held"
     ')"
     section_heading "QUEUE · $queue_counts"
-    printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" '
+    printf '%s' "$cards" | jq -r --arg current_id8 "$current_id8" --argjson w "$title_w" '
       def pending: (.autopr_reconsideration_pending // false);
       def waiting: ((.progress_note // "") | test("awaiting answers"; "i"));
       def held: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
@@ -525,7 +541,7 @@ render_dashboard() {
         (.last_moved_at // .created_at)
       )[:6][] |
       [(if .id8 == $current_id8 then "NOW" elif pending then "FEEDBACK" elif waiting then "WAITING" elif held then "HELD" elif .board_column == "changes_requested" then "REWORK" else "TODO" end),
-       (.project_title // "?"), (.title[0:42]), (.last_moved_at // .created_at // "")] | @tsv
+       (.project_title // "?"), (.title[0:$w]), (.last_moved_at // .created_at // "")] | @tsv
     ' | while IFS=$'\t' read -r row_badge row_project row_title row_when; do
         row_iso="$row_when"
         case "$row_iso" in
@@ -541,9 +557,9 @@ render_dashboard() {
             HELD) row_symbol='!' ;;
             *) row_symbol='○' ;;
         esac
-        printf '  %b%s %-8s%b %-9s %-42s %b%s%b\n' \
+        printf '  %b%s %-8s%b %-9s %-*s %b%s%b\n' \
             "$(badge_style "$row_badge")" "$row_symbol" "$row_badge" "$C_RESET" \
-            "$row_project" "$row_title" "$C_MUTED" "$row_time" "$C_RESET"
+            "${row_project:0:9}" "$title_w" "$row_title" "$C_MUTED" "$row_time" "$C_RESET"
     done
     [ "$(printf '%s' "$cards" | jq 'length')" -gt 0 ] || printf '  No cards, or the board source is unavailable.\n'
 
@@ -551,37 +567,39 @@ render_dashboard() {
     if [ "$(printf '%s' "$open_prs" | jq 'length')" -eq 0 ]; then
         printf '  none\n'
     else
-        printf '%s' "$open_prs" | jq -r '.[:6][] |
+        printf '%s' "$open_prs" | jq -r --argjson w "$pr_title_w" '.[:6][] |
           [(.number | tostring),
            (if ([.labels[].name] | index("autopr")) then "KANBAN" elif ([.labels[].name] | index("autofix")) then "ERROR" else "AUDIT" end),
            (if .isDraft then "DRAFT" else "OPEN" end),
-           (.title[0:35]), (.createdAt // ""),
+           (.title[0:$w]), (.createdAt // ""),
            (if ([.labels[].name] | index("autopr-awaiting-input")) then "WAITING" elif ([.labels[].name] | index("needs-work")) then "NEEDS WORK" else "" end)] | @tsv
         ' | while IFS=$'\t' read -r pr_number pr_lane pr_state pr_title pr_created pr_flag; do
-            printf '  %b#%-4s%b %-6s %b%-5s%b %-35s %b%8s%b%s\n' \
+            printf '  %b#%-4s%b %-6s %b%-5s%b %-*s %b%8s%b%s\n' \
                 "$C_ACCENT$C_BOLD" "$pr_number" "$C_RESET" "$pr_lane" \
-                "$(badge_style "$pr_state")" "$pr_state" "$C_RESET" "$pr_title" \
+                "$(badge_style "$pr_state")" "$pr_state" "$C_RESET" "$pr_title_w" "$pr_title" \
                 "$C_MUTED" "$(duration_between "$pr_created" '')" "$C_RESET" "${pr_flag:+ · $pr_flag}"
         done
     fi
 
     section_heading 'RECENT BOT PRS · OPEN → MERGE · PACIFIC'
-    printf '%s' "$merged_prs" | jq -r --arg cutoff "$cutoff" '
+    printf '%s' "$merged_prs" | jq -r --arg cutoff "$cutoff" --argjson w "$merged_title_w" '
       [.[] | select((.mergedAt // "") >= $cutoff) |
         select([.labels[].name] | any(. == "autopr" or . == "autofix" or . == "autopr-self-audit"))]
       | sort_by(.mergedAt) | reverse | .[:5][] |
       [(.number | tostring),
        (if ([.labels[].name] | index("autopr")) then "KANBAN" elif ([.labels[].name] | index("autofix")) then "ERROR" else "AUDIT" end),
-       (.title[0:40]), (.createdAt // ""), (.mergedAt // ""),
+       (.title[0:$w]), (.createdAt // ""), (.mergedAt // ""),
        (if ([.labels[].name] | index("autopr") | not) then ""
-        elif ([.labels[].name] | index("production-verified")) then "PROD VERIFIED"
+        elif ([.labels[].name] | index("production-verified")) then "PROD OK"
         elif ([.labels[].name] | index("production-verification-failed")) then "PROD FAILED"
-        elif ([.labels[].name] | index("production-verification-needed")) then "PROD CHECK NEEDED"
-        else "AWAITING DEPLOY/CHECK" end)] | @tsv
+        elif ([.labels[].name] | index("production-verification-needed")) then "PROD CHECK"
+        else "AWAIT DEPLOY" end)] | @tsv
     ' | while IFS=$'\t' read -r merged_number merged_lane merged_title merged_created merged_at merged_verification; do
-        printf '  %b#%-4s%b %-6s %-40s %b%8s · %s%b%s\n' \
-            "$C_ACCENT$C_BOLD" "$merged_number" "$C_RESET" "$merged_lane" "$merged_title" \
-            "$C_MUTED" "$(duration_between "$merged_created" "$merged_at")" "$(iso_to_pacific "$merged_at")" "$C_RESET" \
+        merged_clock=""
+        [ "$merged_show_clock" = 0 ] || merged_clock=" · $(iso_to_pacific "$merged_at")"
+        printf '  %b#%-4s%b %-6s %-*s %b%8s%s%b%s\n' \
+            "$C_ACCENT$C_BOLD" "$merged_number" "$C_RESET" "$merged_lane" "$merged_title_w" "$merged_title" \
+            "$C_MUTED" "$(duration_between "$merged_created" "$merged_at")" "$merged_clock" "$C_RESET" \
             "${merged_verification:+ · $merged_verification}"
     done
 

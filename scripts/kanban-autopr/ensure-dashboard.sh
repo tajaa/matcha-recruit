@@ -40,6 +40,16 @@ acquire_session_lock() {
 [[ "$TMUX_HEIGHT" =~ ^[0-9]+$ ]] && [ "$TMUX_HEIGHT" -ge 24 ] \
     || { echo "invalid dashboard height: $TMUX_HEIGHT" >&2; exit 1; }
 acquire_session_lock
+# One key hops between the observer and whichever agent session the operator
+# was in (`msandbox` sessions live on the same tmux server). Server-global and
+# idempotent: bind-key replaces, so every ensure pass and every session start
+# may re-apply it. Best-effort: a stub or an old tmux must not fail creation.
+bind_switch_keys() {
+    "$TMUX_BIN" bind-key -N 'AutoPR dashboard <-> agent session' a \
+        if-shell -F "#{==:#{session_name},$SESSION}" 'switch-client -l' "switch-client -t $SESSION" \
+        >/dev/null 2>&1 || true
+}
+
 session_healthy() {
     local pane_states pane_count
     pane_states="$("$TMUX_BIN" list-panes -t "$SESSION" -F '#{pane_dead}' 2>/dev/null)" \
@@ -56,6 +66,7 @@ if "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; then
         # proof that the dashboard started successfully.
         "$TMUX_BIN" kill-session -t "$SESSION"
     else
+        bind_switch_keys
         printf 'Dashboard already ready: tmux attach -t %s\n' "$SESSION"
         exit 0
     fi
@@ -74,8 +85,8 @@ printf -v pr_cmd '%q' "$SCRIPT_DIR/watch-pr.sh"
 "$TMUX_BIN" set-option -t "$SESSION" status-style 'bg=#111827,fg=#94a3b8' >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" status-left-length 32 >/dev/null
 "$TMUX_BIN" set-option -t "$SESSION" status-left '#[fg=#a7f3d0,bold]  MATCHA#[fg=#2dd4bf] / AUTOPR  ' >/dev/null
-"$TMUX_BIN" set-option -t "$SESSION" status-right-length 48 >/dev/null
-"$TMUX_BIN" set-option -t "$SESSION" status-right '#[fg=#64748b]detach #[fg=#cbd5e1,bold]Ctrl-b d  #[fg=#334155]│  #[fg=#94a3b8]%a %b %d · %I:%M %p  ' >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-right-length 72 >/dev/null
+"$TMUX_BIN" set-option -t "$SESSION" status-right '#[fg=#64748b]session #[fg=#cbd5e1,bold]Ctrl-b a  #[fg=#334155]│  #[fg=#64748b]detach #[fg=#cbd5e1,bold]Ctrl-b d  #[fg=#334155]│  #[fg=#94a3b8]%a %b %d · %I:%M %p  ' >/dev/null
 "$TMUX_BIN" set-window-option -t "$SESSION:autopr" window-style 'bg=#0b1017' >/dev/null
 "$TMUX_BIN" set-window-option -t "$SESSION:autopr" window-active-style 'bg=#0b1017' >/dev/null
 "$TMUX_BIN" set-window-option -t "$SESSION:autopr" pane-border-style 'fg=#334155' >/dev/null
@@ -99,6 +110,7 @@ health_pane="$("$TMUX_BIN" split-window -v -p 54 -P -F '#{pane_id}' -t "$pr_pane
 "$TMUX_BIN" select-pane -t "$health_pane" -T 'SYSTEM HEALTH'
 "$TMUX_BIN" select-pane -t "$pr_pane" -T 'ACTIVE PR'
 "$TMUX_BIN" select-pane -t "$main_pane"
+bind_switch_keys
 
 session_healthy || {
     echo "dashboard was created but its four panes are not healthy" >&2

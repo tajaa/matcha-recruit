@@ -38,11 +38,17 @@ ensure_v2_system_plane() {
 }
 
 OPEN_V2_WIZARD_AFTER_START=0
-if [ "$#" = 0 ]; then
+# Bare `msandbox` on a terminal lands in the observer dashboard, the thing the
+# operator asked for by turning the system on; `Ctrl-b d` then drops into the
+# session manager. `msandbox --menu` (or MSANDBOX_START_ATTACH=menu) skips the
+# attach and opens the manager directly, as before.
+MSANDBOX_START_ATTACH="${MSANDBOX_START_ATTACH:-dashboard}"
+if [ "$#" = 0 ] || [ "${1:-}" = --menu ]; then
     # Bare `msandbox` is the one-command system entrypoint. Bring up the
     # primary workspace and the fail-closed AutoPR control plane before
     # handing control to the v2 wizard; otherwise the wizard routing can
     # accidentally leave autonomous drafting disabled and unobserved.
+    [ "${1:-}" != --menu ] || MSANDBOX_START_ATTACH=menu
     OPEN_V2_WIZARD_AFTER_START=1
     set -- start
 fi
@@ -84,7 +90,10 @@ case "${1:-}" in
             up) set -- start "$@" ;;
             down) set -- stop "$@" ;;
             status) set -- status "$@" ;;
-            *) echo "usage: msandbox system <up|down|status>" >&2; exit 2 ;;
+            # Container-level checks. Bare `msandbox doctor` is the v2 install
+            # and dispatcher drift report; this keeps the legacy probe reachable.
+            doctor) set -- doctor "$@" ;;
+            *) echo "usage: msandbox system <up|down|status|doctor>" >&2; exit 2 ;;
         esac
         ;;
 esac
@@ -677,12 +686,56 @@ require_autopr_system() {
     }
 }
 
+# Notification Center banners from the dispatcher (run dispatched, run
+# finished, sandbox off). On by default from the first start; `msandbox notify
+# off` leaves a sticky opt-out marker so later starts do not re-enable them.
+AUTOPR_NOTIFY_FILE="${AUTOPR_NOTIFY_FILE:-$AUTOPR_STATE_DIR/autopr-notify}"
+AUTOPR_NOTIFY_OPT_OUT_FILE="$AUTOPR_NOTIFY_FILE.off"
+
+enable_autopr_notifications_unless_opted_out() {
+    [ ! -f "$AUTOPR_NOTIFY_OPT_OUT_FILE" ] || return 0
+    (umask 077; : > "$AUTOPR_NOTIFY_FILE")
+}
+
+set_autopr_notifications() {
+    mkdir -p "$AUTOPR_STATE_DIR"
+    chmod 700 "$AUTOPR_STATE_DIR"
+    case "$1" in
+        on)
+            rm -f "$AUTOPR_NOTIFY_OPT_OUT_FILE"
+            (umask 077; : > "$AUTOPR_NOTIFY_FILE")
+            echo "AutoPR notifications: on"
+            ;;
+        off)
+            rm -f "$AUTOPR_NOTIFY_FILE"
+            (umask 077; : > "$AUTOPR_NOTIFY_OPT_OUT_FILE")
+            echo "AutoPR notifications: off"
+            ;;
+        "")
+            if [ -f "$AUTOPR_NOTIFY_FILE" ]; then echo "AutoPR notifications: on"
+            else echo "AutoPR notifications: off"; fi
+            ;;
+        *) echo "usage: msandbox notify [on|off]" >&2; return 2 ;;
+    esac
+}
+
+# Bare `msandbox` on a real terminal attaches the observer dashboard. Never
+# nest inside another tmux client, and never block a script or a pipe.
+attach_autopr_dashboard_if_interactive() {
+    [ "$MSANDBOX_START_ATTACH" = dashboard ] || return 0
+    [ -t 0 ] && [ -t 1 ] || return 0
+    [ -z "${TMUX:-}" ] || return 0
+    [ -x "$AUTOPR_TMUX_BIN" ] || return 0
+    "$AUTOPR_TMUX_BIN" attach-session -t "$AUTOPR_TMUX_SESSION" || true
+}
+
 enable_autopr_control_plane() {
     [ "${AGENT_SANDBOX_AUTOPR:-0}" != 1 ] || return 0
 
     mkdir -p "$AUTOPR_STATE_DIR"
     chmod 700 "$AUTOPR_STATE_DIR"
     (umask 077; : > "$AUTOPR_ENABLE_FILE")
+    enable_autopr_notifications_unless_opted_out
 
     local dashboard_ensure="$AUTOPR_INSTALL_ROOT/ensure-dashboard.sh"
     [ -x "$dashboard_ensure" ] || dashboard_ensure="$PROJECT_ROOT/scripts/kanban-autopr/ensure-dashboard.sh"
@@ -972,6 +1025,7 @@ case "$command_name" in
             fi
             rm -f -- "$startup_log"
             printf 'msandbox + AutoPR ready · dashboard: tmux attach -t %s\n' "$AUTOPR_TMUX_SESSION"
+            attach_autopr_dashboard_if_interactive
             run_v2_controller
         fi
         if [ "${AGENT_SANDBOX_AUTOPR:-0}" = 1 ]; then start_services; else start_primary_and_enable_autopr; fi
@@ -1032,6 +1086,10 @@ case "$command_name" in
         require_docker
         start_primary_and_enable_autopr
         run_doctor
+        ;;
+    notify)
+        [ "$#" -le 1 ] || { echo "usage: msandbox notify [on|off]" >&2; exit 2; }
+        set_autopr_notifications "${1:-}"
         ;;
     audit)
         run_autopr_audit "$@"

@@ -182,7 +182,7 @@ check_installed_dispatcher() {
     plist="$agents_dir/com.matcha.kanban-autopr-dispatch.plist"
     if [ -f "$plist" ]; then
         interval="$(plutil -extract StartInterval raw -o - "$plist" 2>/dev/null || true)"
-        [ "$interval" = 300 ] || problems+=("scheduler StartInterval is ${interval:-unset}, expected 300")
+        [ "$interval" = 60 ] || problems+=("scheduler StartInterval is ${interval:-unset}, expected 60")
     else
         problems+=("scheduler LaunchAgent is not installed")
     fi

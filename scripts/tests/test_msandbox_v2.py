@@ -70,6 +70,10 @@ from scripts.msandbox.git_worktrees import (
 )
 from scripts.msandbox.host_actions import HostActionError, build_xcode_command
 from scripts.msandbox.install import (
+    dispatcher_drift,
+    dispatcher_installed_files,
+    installed_release_id,
+    release_drift,
     InstallError,
     _primary_worktree,
     _write_launcher,
@@ -1352,6 +1356,50 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(rollback_release(release.name, bin_dir=bin_dir), release)
         with self.assertRaises(InstallError):
             rollback_release("../escape", bin_dir=bin_dir)
+
+    def test_doctor_sees_release_and_dispatcher_drift(self) -> None:
+        # Two installed trees, neither auto-updating: the launcher pins one
+        # copied release, the LaunchAgent runs another copied tree. A merged
+        # control that is not installed looks exactly like one that does not
+        # exist, so both drifts must be observable from the checkout.
+        bin_dir = self.root / "drift-bin"
+        project_root = Path(__file__).resolve().parents[2]
+        self.assertIsNone(installed_release_id(bin_dir))
+        release = install_release(repo_root=project_root, bin_dir=bin_dir)
+        self.assertEqual(installed_release_id(bin_dir), release.name)
+        installed, expected = release_drift(repo_root=project_root, bin_dir=bin_dir)
+        self.assertEqual((installed, expected), (release.name, release.name))
+
+        names = {name for _, name in dispatcher_installed_files(project_root)}
+        for required in (
+            "dispatch-if-idle.sh",
+            "ensure-dashboard.sh",
+            "status-segment.sh",
+            "lib.sh",
+            "autopr_control.py",
+        ):
+            self.assertIn(required, names)
+        for source, name in dispatcher_installed_files(project_root):
+            self.assertTrue(source.is_file(), name)
+
+        install_root = self.root / "dispatcher"
+        self.assertEqual(
+            dispatcher_drift(repo_root=project_root, install_root=install_root),
+            ["<dispatcher not installed>"],
+        )
+        install_root.mkdir()
+        self.assertEqual(
+            set(dispatcher_drift(repo_root=project_root, install_root=install_root)),
+            names,
+        )
+        for source, name in dispatcher_installed_files(project_root):
+            shutil.copy2(source, install_root / name)
+        self.assertEqual(dispatcher_drift(repo_root=project_root, install_root=install_root), [])
+        (install_root / "dispatch-if-idle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        self.assertEqual(
+            dispatcher_drift(repo_root=project_root, install_root=install_root),
+            ["dispatch-if-idle.sh"],
+        )
 
     def test_installed_launcher_routes_legacy_control_plane_commands(self) -> None:
         project_root = Path(__file__).resolve().parents[2]

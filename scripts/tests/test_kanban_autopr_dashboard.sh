@@ -107,6 +107,11 @@ set -e
 check "simultaneous dashboard starts create exactly one tmux session" \
   $([ "$first_rc" = 0 ] && [ "$second_rc" = 0 ] \
     && [ "$(grep -c '^new-session ' "$TMP_DIR/tmux.log")" = 1 ] && echo 0 || echo 1)
+# Agent sessions share the tmux server, so the observer publishes one
+# server-global key that hops to it and back, and advertises it on its bar.
+check "observer binds one key to hop between the dashboard and an agent session" \
+  $(grep -qF 'bind-key -N AutoPR dashboard <-> agent session a if-shell -F #{==:#{session_name},matcha-autopr} switch-client -l switch-client -t matcha-autopr' "$TMP_DIR/tmux.log" \
+    && grep -q 'status-right.*Ctrl-b a' "$TMP_DIR/tmux.log" && echo 0 || echo 1)
 
 VIEW_DIR="$TMP_DIR/view"
 mkdir "$VIEW_DIR"
@@ -184,11 +189,29 @@ check "control board shows cross-queue plan, exact next, PR timing, and Pacific 
     && grep -q 'OPEN BOT PRS · AGE' "$TMP_DIR/dashboard.out" \
     && grep -q 'RECENT BOT PRS · OPEN → MERGE · PACIFIC' "$TMP_DIR/dashboard.out" \
     && grep -q '#305.*ERROR' "$TMP_DIR/dashboard.out" \
-    && ! grep -q '#305.*AWAITING DEPLOY/CHECK' "$TMP_DIR/dashboard.out" \
+    && ! grep -q '#305.*AWAIT DEPLOY' "$TMP_DIR/dashboard.out" \
     && grep -q 'RECENT RUNS · DURATION · PACIFIC' "$TMP_DIR/dashboard.out" \
     && grep -q '6:00 PM PDT' "$TMP_DIR/dashboard.out" \
     && grep -q 'Fix intake' "$TMP_DIR/dashboard.out" \
     && jq -e 'length == 2' "$TMP_DIR/cards-snapshot.json" >/dev/null && echo 0 || echo 1)
+
+# A 58-column pane (the operator's 119-column terminal minus the detail rail)
+# must still show one card per line: title columns shrink, rows never wrap.
+AUTOPR_DASHBOARD_ONCE=1 AUTOPR_DASHBOARD_WIDTH=58 AUTOPR_GH_BIN="$TMP_DIR/gh" \
+  AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/narrow-cache" \
+  AUTOPR_DISPATCH_LOG="$TMP_DIR/dispatch.log" AUTOPR_CARD_SNAPSHOT="$TMP_DIR/cards-snapshot.json" \
+  "$VIEW_DIR/dashboard.sh" > "$TMP_DIR/dashboard-narrow.out"
+narrow_ok=0
+grep -qE '^  #307 +KANBAN DRAFT +.*fix: I ' "$TMP_DIR/dashboard-narrow.out" || narrow_ok=1
+grep -qE '^  #306 +KANBAN .*1h 0m · AWAIT DEPLOY$' "$TMP_DIR/dashboard-narrow.out" || narrow_ok=1
+grep -q 'Polish reports' "$TMP_DIR/dashboard-narrow.out" || narrow_ok=1
+python3 -c '
+import re, sys
+rows = [line for line in open(sys.argv[1], encoding="utf-8").read().splitlines()
+        if re.match(r"^  ([▶↺↻?!○] |#[0-9]+ )", line)]
+sys.exit(1 if not rows or any(len(line) > int(sys.argv[2]) for line in rows) else 0)
+' "$TMP_DIR/dashboard-narrow.out" 58 || narrow_ok=1
+check "board rows shrink their title column to the pane width instead of wrapping" "$narrow_ok"
 
 AUTOPR_DASHBOARD_ONCE=1 AUTOPR_DASHBOARD_COLOR=1 NO_COLOR= AUTOPR_GH_BIN="$TMP_DIR/gh" \
   AUTOPR_DASHBOARD_NOW_EPOCH="$dashboard_now" AUTOPR_DASHBOARD_CACHE_DIR="$TMP_DIR/color-cache" \
