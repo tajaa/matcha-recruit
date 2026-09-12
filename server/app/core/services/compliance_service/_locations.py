@@ -13,6 +13,11 @@ from fastapi import HTTPException
 
 from app.core.services.scope_registry.codify import codified_sql
 from app.core.services.company_contacts import get_company_name_and_contacts
+from app.core.services.location_timezone import (
+    TimezoneResolutionError,
+    timezone_for_create,
+    timezone_for_update,
+)
 from app.core.services.jurisdiction_context import (
     get_known_sources,
     record_source,
@@ -707,12 +712,22 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
     from app.database import get_connection
 
     async with get_connection() as conn:
+        try:
+            timezone_write = timezone_for_create(
+                timezone=data.timezone,
+                timezone_source=data.timezone_source,
+                state=data.state,
+                country_code=data.country_code,
+            )
+        except TimezoneResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         fa_json = json.dumps(data.facility_attributes) if data.facility_attributes else None
         location_id = await conn.fetchval(
             """
             INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes,
-                                            ein, naics, max_employees, annual_avg_employees, timezone)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                                            ein, naics, max_employees, annual_avg_employees, timezone, timezone_source)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING id
             """,
             company_id,
@@ -727,7 +742,8 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.naics,
             data.max_employees,
             data.annual_avg_employees,
-            data.timezone,
+            timezone_write.timezone,
+            timezone_write.source or "manual",
         )
 
         # Resolve county from zip if not provided
@@ -1119,6 +1135,18 @@ async def update_location(
     from datetime import datetime
 
     async with get_connection() as conn:
+        current = await conn.fetchrow(
+            """
+            SELECT timezone, timezone_source, state, country_code
+            FROM business_locations
+            WHERE id = $1 AND company_id = $2
+            """,
+            location_id,
+            company_id,
+        )
+        if not current:
+            return None
+
         updates = []
         params = []
         param_idx = 3
@@ -1167,9 +1195,30 @@ async def update_location(
             updates.append(f"annual_avg_employees = ${param_idx}")
             params.append(data.annual_avg_employees)
             param_idx += 1
-        if data.timezone is not None:
+        geography_changed = bool(
+            {"address", "city", "state", "county", "zipcode"} & data.model_fields_set
+        )
+        try:
+            timezone_write = timezone_for_update(
+                timezone=data.timezone,
+                timezone_was_supplied="timezone" in data.model_fields_set,
+                timezone_source=data.timezone_source,
+                existing_timezone=current["timezone"],
+                existing_source=current["timezone_source"] or "manual",
+                state=data.state if data.state is not None else current["state"],
+                country_code=current["country_code"] or "US",
+                geography_changed=geography_changed,
+            )
+        except TimezoneResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        if timezone_write.timezone is not None:
             updates.append(f"timezone = ${param_idx}")
-            params.append(data.timezone)
+            params.append(timezone_write.timezone)
+            param_idx += 1
+        if timezone_write.source is not None:
+            updates.append(f"timezone_source = ${param_idx}")
+            params.append(timezone_write.source)
             param_idx += 1
 
         if not updates:
