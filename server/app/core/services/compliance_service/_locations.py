@@ -12,6 +12,11 @@ import httpx
 from fastapi import HTTPException
 
 from app.core.services.scope_registry.codify import codified_sql
+from app.core.services.scope_registry.categories import (
+    ancestry,
+    categories_for_naics,
+    resolve_category,
+)
 from app.core.services.company_contacts import get_company_name_and_contacts
 from app.core.services.jurisdiction_context import (
     get_known_sources,
@@ -94,6 +99,33 @@ from app.core.services.compliance_service._alerts import (
     _create_check_log,
     _log_policy_change,
 )
+
+
+def _facility_profile_eligible(
+    location_naics: Optional[str],
+    company_naics: Optional[str],
+    company_industry: Optional[str],
+    company_healthcare_specialties: Optional[List[str]],
+) -> bool:
+    """Whether a location should be offered healthcare facility setup.
+
+    The most specific modeled classification wins. Unmodeled NAICS values fall
+    through to the next available company classification rather than suppressing
+    setup. Biotech and any selected healthcare specialty are healthcare signals
+    used only when neither NAICS value resolves through the shared taxonomy.
+    """
+    for naics in (location_naics, company_naics):
+        if naics and str(naics).strip():
+            categories = categories_for_naics(str(naics))
+            if categories:
+                return "healthcare" in categories
+
+    category = resolve_category(company_industry)
+    return bool(
+        company_healthcare_specialties
+        or category == "biotech"
+        or (category and "healthcare" in ancestry(category))
+    )
 
 
 
@@ -925,6 +957,9 @@ async def get_locations(company_id: UUID) -> list[dict]:
         # reports what the shared catalog holds for this jurisdiction, which is
         # exactly the number an admin needs to see diverge from the tenant's.
         query = """SELECT bl.*, jr.has_local_ordinance,
+                      c.naics AS company_naics,
+                      c.industry AS company_industry,
+                      c.healthcare_specialties AS company_healthcare_specialties,
                       COALESCE(ec.cnt, 0) AS employee_count,
                       COALESCE(en.names, ARRAY[]::text[]) AS employee_names,
                       COALESCE(rc.cnt, 0) AS requirements_count,
@@ -932,6 +967,7 @@ async def get_locations(company_id: UUID) -> list[dict]:
                       COALESCE(ac.cnt, 0) AS unread_alerts_count,
                       COALESCE(jrc.cnt, 0) AS jurisdiction_repo_count
                FROM business_locations bl
+               JOIN companies c ON c.id = bl.company_id
                LEFT JOIN jurisdiction_reference jr
                  ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
                LEFT JOIN LATERAL (
@@ -992,6 +1028,17 @@ async def get_locations(company_id: UUID) -> list[dict]:
         result = []
         for row in rows:
             d = dict(row)
+            company_naics = d.pop("company_naics", None)
+            company_industry = d.pop("company_industry", None)
+            company_healthcare_specialties = d.pop(
+                "company_healthcare_specialties", None
+            )
+            d["facility_profile_eligible"] = _facility_profile_eligible(
+                d.get("naics"),
+                company_naics,
+                company_industry,
+                company_healthcare_specialties,
+            )
             # data_status answers "has this location been synced from the
             # catalog?" — a pipeline fact. It must read the UNGATED projection
             # count: a fully-synced location whose rows simply aren't codified
