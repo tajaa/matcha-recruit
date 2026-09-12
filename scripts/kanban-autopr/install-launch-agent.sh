@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install the local dispatcher without embedding credentials in launchd. Two
-# agents share one script: the five-minute scheduler (which now holds the
-# Kanban lane to one pass every twenty minutes) and a one-minute watcher that
+# agents share one script: the one-minute scheduler (which holds the Kanban
+# lane to one pass per AUTOPR_KANBAN_MAX_AGE_SECONDS, default five minutes
+# measured from the last run's completion) and a one-minute watcher that
 # dispatches immediately when a card asks for a run. The workflow itself still
 # owns Codex, board, and production use.
 set -euo pipefail
@@ -34,8 +35,17 @@ validate_dependencies() {
 install_runtime() {
     mkdir -p "$INSTALL_ROOT"
     local name
-    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh watch-pr.sh collect.sh select.sh run-snapshot.sh has-run-request.sh gh-cached.sh codex-backoff.sh; do
+    for name in dispatch-if-idle.sh ensure-dashboard.sh dashboard.sh watch-work.sh watch-health.sh watch-pr.sh collect.sh collect-pr-context.sh select.sh run-snapshot.sh has-run-request.sh gh-cached.sh codex-backoff.sh; do
         install -m 755 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
+    done
+    # Helpers the installed scripts shell out to by $SCRIPT_DIR path. Missing
+    # ones fail quietly at runtime: dashboard.sh falls back to its last cached
+    # bot-PR answer (so the PR pane freezes and the plan renders "unavailable"),
+    # and collect.sh silently stops flagging reconsideration-pending cards.
+    # scripts/tests/test_kanban_autopr_dispatch.sh enforces that every
+    # $SCRIPT_DIR reference in an installed script is installed alongside it.
+    for name in plan.py resolve-directive-policy.py; do
+        install -m 644 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
     done
     install -m 644 "$SCRIPT_DIR/lib.sh" "$INSTALL_ROOT/lib.sh"
     install -m 644 "$(dirname "$SCRIPT_DIR")/msandbox/autopr_control.py" "$INSTALL_ROOT/autopr_control.py"

@@ -48,7 +48,13 @@ LOG_MAX_BYTES="${AUTOPR_DISPATCH_LOG_MAX_BYTES:-5242880}"
 START_TASK=""
 REQUESTED_TASK=""
 NEXT_ELIGIBLE_AT=0
-POLL_SECONDS=300
+# Must match StartInterval in launchd/com.matcha.kanban-autopr-dispatch.plist.in.
+# Only the dashboard's "next check" line reads it, but a stale value there is how
+# an operator mistimes a manual start. One dispatch happens per tick and the
+# cheaper lanes are checked first, so a coarse tick is what actually paces the
+# Kanban lane: at 300 a card could wait three ticks (active run, then an errors
+# pass, then its own) and take a quarter hour to leave Todo.
+POLL_SECONDS="${AUTOPR_DISPATCH_POLL_SECONDS:-60}"
 PREFERRED_TASK_FILE="$STATE_DIR/preferred-task"
 
 write_status() {

@@ -257,7 +257,12 @@ else
   python3 -c 'import plistlib, sys; plistlib.load(open(sys.argv[1], "rb"))' "$rendered"
 fi
 check "LaunchAgent plist is valid and uses the required timer" \
-  $(grep -q '<integer>300</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
+  $(grep -q '<integer>60</integer>' "$rendered" && grep -q '<key>RunAtLoad</key>' "$rendered" && echo 0 || echo 1)
+# The tick interval paces the Kanban lane, because one dispatch happens per tick
+# and the errors lane is checked first. Keep the plist and the value the
+# dispatcher reports to the dashboard in step.
+check "dispatcher poll interval matches the LaunchAgent tick" \
+  $(grep -q 'AUTOPR_DISPATCH_POLL_SECONDS:-60' "$REPO_ROOT/scripts/kanban-autopr/dispatch-if-idle.sh" && echo 0 || echo 1)
 check "LaunchAgent PATH can reach the Docker Desktop CLI used by msandbox" \
   $(grep -q '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' "$rendered" && echo 0 || echo 1)
 
@@ -383,6 +388,26 @@ check "the Kanban workflow runs the guard before any board or production read" \
     && echo 0 || echo 1)
 check "installer ships the backoff helper next to the dispatcher" \
   $(grep -q 'codex-backoff.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+
+# The installed tree is the one launchd and the dashboard actually run. A helper
+# that an installed script shells out to by $SCRIPT_DIR path, but that the
+# installer never copies, fails quietly there and nowhere else: collect-pr-context.sh
+# and plan.py were both missing for days while the dashboard silently served a
+# stale cached PR pane under a red DEGRADED banner.
+installer_sh="$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh"
+installed_names="$(sed -n '/^install_runtime()/,/^}/p' "$installer_sh" \
+  | grep -oE '[A-Za-z0-9_.-]+\.(sh|py)' | sort -u)"
+missing_helpers=""
+for installed in $installed_names; do
+  [ -f "$REPO_ROOT/scripts/kanban-autopr/$installed" ] || continue
+  for referenced in $(grep -ohE '\$SCRIPT_DIR/[A-Za-z0-9_.-]+\.(sh|py)' \
+      "$REPO_ROOT/scripts/kanban-autopr/$installed" 2>/dev/null | sed 's|.*/||' | sort -u); do
+    printf '%s\n' "$installed_names" | grep -qx "$referenced" \
+      || missing_helpers="$missing_helpers $referenced"
+  done
+done
+check "installer ships every helper the installed scripts shell out to" \
+  $([ -z "$missing_helpers" ] && echo 0 || { echo "uninstalled:$missing_helpers" >&2; echo 1; })
 
 # Explicit dashboard starts carry the exact ticket, bypass only the routine
 # spend floor, and remain deduplicated through GitHub's visibility lag.
