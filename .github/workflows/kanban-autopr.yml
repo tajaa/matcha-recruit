@@ -515,6 +515,9 @@ jobs:
           # skipped/'' when the job died in setup or was cancelled, and that
           # must never read as a success.
           JOB_STATUS: ${{ job.status }}
+          # Inputs for the per-run journal attached to the card below.
+          CHECKPOINT_PATH: ${{ steps.checkpoint.outputs.path }}
+          BRANCH_BASE_SHA: ${{ steps.branch.outputs.sha }}
         run: |
           # Record how this run ended before anything else: the ledger is what
           # stops a card that fails the same way every time from being
@@ -557,6 +560,24 @@ jobs:
           elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ]; then
             record_outcome "$task_id" success
           fi
+          # The journal is the operator's view of this run on the ticket
+          # itself: what was done, what is left, why it stopped, and whether
+          # a checkpoint will resume it. Runs BEFORE the checkout hand-back so
+          # the branch diff is still readable. Best-effort like the ledger.
+          journal_outcome=success
+          journal_reason="$run_reason"
+          if [ -n "$run_reason" ]; then
+            journal_outcome=failure
+          elif [ "$JOB_STATUS" = cancelled ]; then
+            journal_outcome=cancelled; journal_reason=cancelled
+          elif [ "$INVESTIGATE_PAUSED" = true ]; then
+            journal_outcome=paused; journal_reason=runtime_approval
+          fi
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/run-journal.sh" "$RUNNER_TEMP/card.json" \
+            --outcome "$journal_outcome" --reason "$journal_reason" \
+            --report "$RUNNER_TEMP/report.md" --decision "$RUNNER_TEMP/decision.json" \
+            --checkpoint "$CHECKPOINT_PATH" --pr "$PUBLISHED_PR" --base-sha "$BRANCH_BASE_SHA" \
+            || printf 'warning: could not attach the run journal for %s\n' "$task_id" >&2
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.

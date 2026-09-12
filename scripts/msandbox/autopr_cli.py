@@ -16,7 +16,7 @@ from pathlib import Path
 from . import autopr_control as control
 from . import autopr_queue
 
-CARD_VERBS = ("hold", "release", "run-now", "unstick", "cancel-run")
+CARD_VERBS = ("hold", "release", "run-now", "unstick", "cancel-run", "log")
 
 
 def _kanban_script(name: str, repo: Path | None) -> Path | None:

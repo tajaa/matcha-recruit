@@ -11,6 +11,7 @@
 #   card-control.sh run-now   <target>
 #   card-control.sh unstick   <target> [--hold] [--reason R]
 #   card-control.sh cancel-run [target] [--hold] [--reason R]
+#   card-control.sh log       <target>          what its runs did, why they stopped
 #
 # Exit 0 on success, 2 when the target is ambiguous/unknown/usage, 3 when
 # cancel-run finds no active Kanban run, 1 for a failed board call (via die).
@@ -142,6 +143,44 @@ unstick_card() {
     [ "$HOLD" != true ] || hold_card "$card"
 }
 
+# Everything the system knows about a card's runs, newest first: the run
+# journals Cleanup attaches to the ticket (the newest printed in full), the
+# failure ledger select.sh consults, and the resumable checkpoints on the
+# runner. Reads only.
+log_card() {
+    local card="$1" project task id8 files journals newest_url ledger checkpoints
+    project="$(card_field "$card" .project_id)"; task="$(card_field "$card" .task_id)"
+    id8="$(card_field "$card" .id8)"
+    printf '%s · %s · %s\n' "$id8" "$(card_field "$card" .title)" "$(card_field "$card" .board_column)"
+    files="$(mw_api GET "/matcha-work/projects/$project/tasks/$task/files")"
+    journals="$(printf '%s' "$files" | jq -c '[.[] | select((.filename // "") | test("^autopr-run-.*\\.md$"))] | sort_by(.created_at) | reverse')"
+    printf '\nRun journals: %s\n' "$(printf '%s' "$journals" | jq 'length')"
+    printf '%s' "$journals" | jq -r '.[:10][] | "  " + (.created_at // "?")[0:19] + "  " + .filename'
+    newest_url="$(printf '%s' "$journals" | jq -r '.[0] | (.url // .storage_url // empty)')"
+    if [ -n "$newest_url" ]; then
+        printf '\n--- newest journal ---\n'
+        curl -sS "${MW_CURL_TIMEOUTS[@]}" "$newest_url" 2>/dev/null | head -n 120 \
+            || printf '(could not download %s)\n' "$newest_url"
+    fi
+    ledger="${AUTOPR_CACHE_DIR:-$USER_HOME/.cache/matcha-autopr}/attempts/$id8"
+    printf '\nFailure ledger: '
+    if [ -s "$ledger" ]; then
+        IFS=$'\t' read -r count reason ts < "$ledger" || true
+        printf '%s consecutive × %s (last %s)\n' "${count:-?}" "${reason:-?}" "${ts:-?}"
+    else
+        printf 'none (last run succeeded, or the card was never run)\n'
+    fi
+    checkpoints="$RUNNER_WORKTREE/.git/matcha-kanban-autopr-checkpoints/$task"
+    printf 'Checkpoints on the runner: '
+    if [ -d "$checkpoints" ]; then
+        (cd "$checkpoints" && ls -1td -- */ 2>/dev/null | sed 's|/$||' | head -5 | tr '\n' ' ')
+        [ ! -f "$checkpoints/active" ] || printf '(resumes from %s)' "$(tr -d '\r\n' < "$checkpoints/active")"
+        printf '\n'
+    else
+        printf 'none\n'
+    fi
+}
+
 active_kanban_run() {
     "$RUN_SNAPSHOT" | jq -r '[.[] | select(.lane == "kanban"
         and (.status | IN("queued", "in_progress", "requested", "waiting", "pending")))][0].databaseId // empty'
@@ -191,5 +230,6 @@ case "$VERB" in
     run-now) run_now_card "$(resolve_card "$TARGET")" ;;
     unstick) unstick_card "$(resolve_card "$TARGET")" ;;
     cancel-run) cancel_run ;;
+    log) log_card "$(resolve_card "$TARGET")" ;;
     *) echo "unknown verb: $VERB" >&2; usage ;;
 esac

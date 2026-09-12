@@ -61,10 +61,21 @@ body='{"ok":true}'
 case "$url" in
   */projects/11111111-1111-4111-8111-111111111111/bundle) body="$(cat "$AUTOPR_TEST_BUNDLE_DIR/bundle-1.json")" ;;
   */projects/22222222-2222-4222-8222-222222222222/bundle) body="$(cat "$AUTOPR_TEST_BUNDLE_DIR/bundle-2.json")" ;;
+  */tasks/bbbb0000-0000-4000-8000-000000000002/files) body="$(cat "$AUTOPR_TEST_BUNDLE_DIR/files-bbbb.json")" ;;
+  https://example.invalid/cdn/*) cat "$AUTOPR_TEST_BUNDLE_DIR/journal-body.md"; exit 0 ;;
 esac
 [ -z "$output_file" ] || printf '%s' "$body" > "$output_file"
 printf 200
 EOF
+cat > "$TMP_DIR/files-bbbb.json" <<'EOF'
+[{"id":"f2","filename":"autopr-run-901-20260912T040500Z.md","created_at":"2026-09-12T04:05:00+00:00","url":"https://example.invalid/cdn/f2.md"},
+ {"id":"f0","filename":"Screenshot.png","created_at":"2026-09-11T09:08:27+00:00","url":"https://example.invalid/cdn/f0.png"},
+ {"id":"f1","filename":"autopr-run-800-20260912T032000Z.md","created_at":"2026-09-12T03:20:00+00:00","url":"https://example.invalid/cdn/f1.md"}]
+EOF
+printf '# AutoPR run #901 · FAILURE\n\n## Why it stopped\n\npublishing the result failed.\n' > "$TMP_DIR/journal-body.md"
+mkdir -p "$TMP_DIR/cache/attempts" "$TMP_DIR/worktree/.git/matcha-kanban-autopr-checkpoints/bbbb0000-0000-4000-8000-000000000002/901-1-inflight"
+printf '2\tpublish\t2026-09-12T04:05:00Z' > "$TMP_DIR/cache/attempts/bbbb0000"
+printf '901-1-inflight\n' > "$TMP_DIR/worktree/.git/matcha-kanban-autopr-checkpoints/bbbb0000-0000-4000-8000-000000000002/active"
 cat > "$TMP_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AUTOPR_TEST_GH_LOG"
@@ -85,6 +96,7 @@ run_control() {
     AUTOPR_TEST_CALLS="$TMP_DIR/calls" AUTOPR_TEST_BUNDLE_DIR="$TMP_DIR" \
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_GH_BIN="$TMP_DIR/bin/gh" \
     AUTOPR_RUN_SNAPSHOT="$TMP_DIR/run-snapshot" AUTOPR_RUNNER_WORKTREE="$TMP_DIR/worktree" \
+    AUTOPR_CACHE_DIR="$TMP_DIR/cache" \
     "$CONTROL" "$@"
 }
 
@@ -165,6 +177,16 @@ check "cancel-run cancels the Kanban run, waits, then unsticks and holds the run
 check "installer ships card-control.sh and its hand-off helper next to the dispatcher" \
   $(grep -q 'card-control.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" \
     && grep -q 'queue-handoff.sh' "$REPO_ROOT/scripts/kanban-autopr/install-launch-agent.sh" && echo 0 || echo 1)
+
+out="$(run_control log bbbb0000)"
+check "log lists the card's run journals newest first, prints the newest, the ledger, and checkpoints" \
+  $(grep -q '^Run journals: 2$' <<< "$out" \
+    && [ "$(grep -n 'autopr-run-901-' <<< "$out" | head -1 | cut -d: -f1)" -lt "$(grep -n 'autopr-run-800-' <<< "$out" | head -1 | cut -d: -f1)" ] \
+    && ! grep -q 'Screenshot.png' <<< "$out" \
+    && grep -q '^publishing the result failed\.$' <<< "$out" \
+    && grep -q '^Failure ledger: 2 consecutive × publish (last 2026-09-12T04:05:00Z)$' <<< "$out" \
+    && grep -q '^Checkpoints on the runner: 901-1-inflight (resumes from 901-1-inflight)$' <<< "$out" \
+    && ! grep -q 'POST\|PATCH' "$TMP_DIR/calls" && echo 0 || echo 1)
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -356,7 +356,7 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
         ):
             return "Ticket unchanged."
         return autopr_queue.start(run_id, repo)
-    if action in autopr_cli.CARD_VERBS:
+    if action in autopr_cli.CARD_VERBS and action != "log":
         # run_id is a task id here (or "-" for the active run). Board writes
         # go through card-control.sh so the terminal and the tab agree.
         prompts = {

@@ -138,6 +138,18 @@ Espresso. The hold lifts on the next *Run AutoPR now*, added context, review rej
 or new round — a machine deferral (`pause:false`) never counts as a hold and never
 carries a reason.
 
+**Run journal on the ticket.** Every run ends by attaching `autopr-run-<run id>-<ts>.md`
+to its card (`scripts/kanban-autopr/run-journal.sh`, from the `always()` Cleanup step):
+what was done (report summary, PR number, files changed from the checkpoint or the
+branch diff), what is left (decision summary and open questions), why it stopped, whether
+a resumable checkpoint exists on the runner, and the next step. A run that died in a way
+nothing else had already written to the card (model pass failed, verify failed, publish
+failed, died in setup, cancelled) also gets a `🤖 AUTO SETUP · STOPPED: <why> · run #N`
+card-face header pointing at the journal; refusals, pauses, and successes keep the header
+the publisher or checkpoint already wrote. `msandbox autopr log <id8|title>` prints the
+journal list with the newest in full, the failure ledger, and the runner's checkpoints
+for that card.
+
 **Card control from any terminal.** `msandbox autopr queue` lists the cached snapshot
 including held (`HOLD · <reason>`) and claimed In Progress cards; `msandbox autopr hold
 <id8|title> --reason R` writes the board's unqueue hold, `release` lifts it without
