@@ -78,6 +78,9 @@ if [ -n "$active" ]; then
         card="$(jq -r --arg id8 "${id8:0:8}" --argjson w "$TITLE_WIDTH" \
             '[.[] | select(.id8 == $id8) | .title[0:$w]][0] // empty' "$CARD_SNAPSHOT" 2>/dev/null || true)"
     fi
+    # tmux parses this output as a format string: a card title containing
+    # `#[` or `#{` would restyle or truncate every session's status bar.
+    [ "$PLAIN" = 1 ] || card="${card//#/##}"
     emit 'fg=green,bold' "▶ ${lane}${elapsed}${card:+ · $card}"
     exit 0
 fi

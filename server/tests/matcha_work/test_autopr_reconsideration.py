@@ -862,11 +862,15 @@ def test_hold_lookup_is_joined_once_per_task():
     from app.matcha.services.matcha_work import project_task_service as svc
 
     query_source = inspect.getsource(svc.list_project_tasks)
-    assert query_source.count("{_AUTOPR_HOLD_QUERY}") == 1
-    assert query_source.count("{_AUTOPR_HOLD_REASON_QUERY}") == 1
+    # One lateral carries both the flag and the reason: a second LIMIT 1
+    # scan could resolve a different row on equal timestamps and doubles the
+    # per-task history read on every board open.
+    assert query_source.count("{_AUTOPR_HOLD_STATE_QUERY}") == 1
+    assert "{_AUTOPR_HOLD_QUERY}" not in query_source
+    assert "_AUTOPR_HOLD_REASON_QUERY" not in query_source
     assert "{_AUTOPR_HOLD_SQL}" not in query_source
     assert "COALESCE(autopr_hold.paused, FALSE) AS autopr_paused" in query_source
-    assert "autopr_hold_reason.reason AS autopr_hold_reason" in query_source
+    assert "autopr_hold.reason AS autopr_hold_reason" in query_source
 
 
 def test_hold_reason_follows_the_same_row_as_the_hold():
@@ -877,13 +881,15 @@ def test_hold_reason_follows_the_same_row_as_the_hold():
     from app.matcha.services.matcha_work import project_task_service as svc
 
     assert svc._AUTOPR_HOLD_ROW in svc._AUTOPR_HOLD_QUERY
-    assert svc._AUTOPR_HOLD_ROW in svc._AUTOPR_HOLD_REASON_QUERY
+    assert svc._AUTOPR_HOLD_ROW in svc._AUTOPR_HOLD_STATE_QUERY
     with sqlite3.connect(":memory:") as db:
         db.execute("CREATE TABLE mw_tasks (id TEXT)")
         db.execute("CREATE TABLE mw_task_history (task_id TEXT, event_type TEXT, metadata TEXT, created_at INTEGER)")
         db.execute("INSERT INTO mw_tasks VALUES ('ticket')")
         paused_query = f"SELECT {svc._AUTOPR_HOLD_SQL} FROM mw_tasks t WHERE t.id = 'ticket'"
-        reason_query = f"SELECT ({svc._AUTOPR_HOLD_REASON_QUERY}) FROM mw_tasks t WHERE t.id = 'ticket'"
+        # sqlite has no LATERAL; bind the correlated task id directly so the
+        # two-column state query runs as the list lateral would.
+        state_query = svc._AUTOPR_HOLD_STATE_QUERY.replace("t.id", "'ticket'")
 
         def add(at, kind=None, event="activity", **metadata):
             if kind:
@@ -892,8 +898,12 @@ def test_hold_reason_follows_the_same_row_as_the_hold():
                        ("ticket", event, json.dumps(metadata), at))
 
         def state():
-            return (bool(db.execute(paused_query).fetchone()[0]),
-                    db.execute(reason_query).fetchone()[0])
+            row = db.execute(state_query).fetchone()
+            reason = row[1] if row else None
+            paused = bool(db.execute(paused_query).fetchone()[0])
+            # The scalar flag used by claims and the lateral's flag must agree.
+            assert paused == bool(row[0] if row else False)
+            return (paused, reason)
 
         assert state() == (False, None)
         add(1, "autopr_run_cancel")

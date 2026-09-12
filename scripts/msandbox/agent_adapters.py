@@ -241,7 +241,9 @@ def ensure_agent_pane_controls(record: SessionRecord) -> None:
         stderr=subprocess.DEVNULL,
     )
     for option, value in (
-        ("status-interval", "10"),
+        # The segment's inputs change on the dispatcher's 60s tick; every
+        # refresh forks jq and git against the runner checkout, per session.
+        ("status-interval", "30"),
         ("status-right-length", "120"),
         ("status-right", agent_status_right()),
     ):

@@ -56,6 +56,9 @@ struct TaskViewerSheet: View {
     /// the server's `autopr_run_requested_at` back.
     @State var didRequestAutoPRRun = false
     @State var requestingAutoPRRun = false
+    /// Which AutoPR control is in flight ("run" or "hold"), so two buttons
+    /// that share the busy flag never show each other's progress verb.
+    @State var autoPRPendingAction: String? = nil
     @State var autoPRRunError: String?
     /// Outreach a research run proposed. Empty on every ticket that never ran
     /// one, so the section simply does not render.

@@ -28,7 +28,7 @@ RUNNER_WORKTREE="${AUTOPR_RUNNER_WORKTREE:-$USER_HOME/.local/share/matcha-action
 GIT_BIN="${AUTOPR_GIT_BIN:-git}"
 
 usage() {
-    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -124,13 +124,22 @@ run_now_card() {
 unstick_card() {
     local card="$1" project task column
     project="$(card_field "$card" .project_id)"; task="$(card_field "$card" .task_id)"
+    # Only a stranded claim is ours to move. A Review or Done card that
+    # happens to match the target must not be dragged back into a lane the
+    # selector picks from; the server gates holds this way but not raw moves.
+    if [ "$(card_field "$card" .board_column)" != in_progress ]; then
+        printf 'refusing to unstick %s · %s: it is in %s, not In Progress\n' \
+            "$(card_field "$card" .id8)" "$(card_field "$card" .title)" \
+            "$(card_field "$card" .board_column)" >&2
+        exit 2
+    fi
     column=todo
     [ "$(card_field "$card" '.pr_number // empty')" = "" ] || column=changes_requested
     # Move first: unqueue refuses a card that is not in Todo or Changes
     # Requested, so a hold on a stranded In Progress card must follow the move.
     mw_move_card "$project" "$task" "$column"
     printf 'moved %s · %s → %s\n' "$(card_field "$card" .id8)" "$(card_field "$card" .title)" "$column"
-    [ "$HOLD" != true ] || hold_card "$(printf '%s' "$card" | jq -c --arg c "$column" '.board_column = $c')"
+    [ "$HOLD" != true ] || hold_card "$card"
 }
 
 active_kanban_run() {
@@ -150,8 +159,13 @@ cancel_run() {
     run_id="$(active_kanban_run)"
     [ -n "$run_id" ] || { echo "no active Kanban run to cancel" >&2; exit 3; }
     # The card is whatever the runner checkout is on; an explicit target wins.
+    # Resolve it BEFORE the cancel: an ambiguous target exits 2 here, with
+    # the run untouched, instead of after a cancel that would leave the claim
+    # live and the card stranded — the state this verb exists to prevent.
     query="$TARGET"
     [ -n "$query" ] || query="$(runner_task_id8 || true)"
+    card=""
+    [ -z "$query" ] || card="$(resolve_card "$query")"
     "$GH_BIN" run cancel "$run_id" --repo "$REPO" >/dev/null
     printf 'cancelled run #%s\n' "$run_id"
     "$GH_BIN" run watch "$run_id" --repo "$REPO" >/dev/null 2>&1 || true
@@ -160,11 +174,10 @@ cancel_run() {
     # workflow's identity). Nothing here should pretend to be that step. What
     # Cleanup never does is settle the board: the claim stays live and
     # collect.sh re-admits the card for thirty minutes, so move it now.
-    if [ -z "$query" ]; then
+    if [ -z "$card" ]; then
         echo "runner checkout is not on a bot/task-* branch; pass the card to unstick it" >&2
         return 0
     fi
-    card="$(resolve_card "$query")"
     unstick_card "$card"
 }
 

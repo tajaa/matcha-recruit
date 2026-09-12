@@ -276,7 +276,7 @@ extension TaskViewerSheet {
                     Label("AutoPR working", systemImage: "hammer.circle.fill")
                         .font(.ticket(size: 10))
                         .foregroundColor(.mwInkStrong)
-                    Button(requestingAutoPRRun ? "Pausing…" : "Pause retries") {
+                    Button(autoPRPendingAction == "hold" ? "Pausing…" : "Pause retries") {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)
@@ -301,7 +301,7 @@ extension TaskViewerSheet {
                         Task { await requestAutoPRRun() }
                     } label: {
                         Label(
-                            requestingAutoPRRun ? "Queueing…" : autoPRRunNowLabel,
+                            autoPRPendingAction == "run" ? "Queueing…" : autoPRRunNowLabel,
                             systemImage: "bolt.fill"
                         )
                         .font(.ticket(size: 10))
@@ -312,7 +312,7 @@ extension TaskViewerSheet {
                     .help("Queue this ticket for the next AutoPR tick instead of the twenty-minute sweep")
                     // A plain Todo / Changes Requested card had no way to be
                     // parked: Unqueue only appears once a run is requested.
-                    Button(requestingAutoPRRun ? "Holding…" : "Hold") {
+                    Button(autoPRPendingAction == "hold" ? "Holding…" : "Hold") {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)
@@ -321,7 +321,7 @@ extension TaskViewerSheet {
                     .help("Hold this ticket so AutoPR skips it until you press Run again")
                 }
                 if (autoPRRunIsQueued || autoPRReconsiderationIsPending) && liveAutoPRTask.autoprPaused != true {
-                    Button(requestingAutoPRRun ? "Unqueueing…" : "Unqueue") {
+                    Button(autoPRPendingAction == "hold" ? "Unqueueing…" : "Unqueue") {
                         Task { await cancelAutoPRRun() }
                     }
                     .buttonStyle(.plain)

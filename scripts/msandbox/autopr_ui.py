@@ -362,6 +362,7 @@ def manage(action: str, run_id: str, repo: Path, *, reader, output):
         prompts = {
             "hold": "Hold this ticket so AutoPR skips it until released or edited?",
             "release": "Lift the hold and let the routine sweep pick this ticket up again?",
+            "run-now": "Queue an immediate AutoPR run for this ticket?",
             "unstick": "Move this claimed ticket back to its lane (Todo, or Changes Requested when it has a PR)?",
             "cancel-run": "Cancel the active Kanban run and move its card back to its lane?",
         }

@@ -542,7 +542,7 @@ render_dashboard() {
       def onhold: (.autopr_paused // false);
       def nospec: ((.progress_note // "") | contains("[autopr:no-spec ")) and (pending | not);
       sort_by(
-        (if .id8 == $current_id8 then 0 elif pending then 1 elif onhold then 4 elif .board_column == "changes_requested" then 2 else 3 end),
+        (if .id8 == $current_id8 then 0 elif pending then 1 elif .board_column == "changes_requested" then 2 elif onhold then 3 else 4 end),
         (.last_moved_at // .created_at)
       )[:6][] |
       [(if .id8 == $current_id8 then "NOW" elif pending then "FEEDBACK" elif onhold then "HOLD" elif waiting then "WAITING" elif nospec then "NO-SPEC" elif .board_column == "changes_requested" then "REWORK" else "TODO" end),

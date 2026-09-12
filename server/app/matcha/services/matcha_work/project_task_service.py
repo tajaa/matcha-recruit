@@ -524,10 +524,16 @@ _AUTOPR_HOLD_QUERY = f"""
     {_AUTOPR_HOLD_ROW}
 """
 _AUTOPR_HOLD_SQL = f"COALESCE(({_AUTOPR_HOLD_QUERY}), FALSE)"
-# The operator's free-text reason on the hold row that _AUTOPR_HOLD_QUERY
-# resolves; NULL when the card is not held or the hold carried no reason.
-_AUTOPR_HOLD_REASON_QUERY = f"""
-    SELECT CASE
+# Two-column form for the list query's lateral join: the hold flag and the
+# operator's free-text reason from the SAME resolved row, in one history scan
+# per task. Two separate LIMIT 1 laterals could pick different rows on equal
+# timestamps and would double the per-task scan on every board open.
+_AUTOPR_HOLD_STATE_QUERY = f"""
+    SELECT (
+        h.metadata->>'kind' = 'autopr_run_cancel'
+        AND COALESCE(h.metadata->>'pause', 'true') = 'true'
+    ) AS paused,
+    CASE
         WHEN h.metadata->>'kind' = 'autopr_run_cancel'
              AND COALESCE(h.metadata->>'pause', 'true') = 'true'
         THEN h.metadata->>'reason'
@@ -1707,7 +1713,7 @@ async def list_project_tasks(
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
                    COALESCE(autopr_hold.paused, FALSE) AS autopr_paused,
-                   autopr_hold_reason.reason AS autopr_hold_reason,
+                   autopr_hold.reason AS autopr_hold_reason,
                    (autopr_ctx.id IS NOT NULL AND NOT COALESCE(autopr_hold.paused, FALSE)) AS autopr_reconsideration_pending,
                    autopr_ctx.id AS autopr_reconsideration_event_id,
                    autopr_ctx.created_at AS autopr_reconsideration_at,
@@ -1787,8 +1793,7 @@ async def list_project_tasks(
             LEFT JOIN employees e2 ON e2.user_id = t.created_by
             LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
-            LEFT JOIN LATERAL ({_AUTOPR_HOLD_QUERY}) autopr_hold ON TRUE
-            LEFT JOIN LATERAL ({_AUTOPR_HOLD_REASON_QUERY}) autopr_hold_reason ON TRUE
+            LEFT JOIN LATERAL ({_AUTOPR_HOLD_STATE_QUERY}) autopr_hold ON TRUE
             LEFT JOIN LATERAL (
                 SELECT h5.id, h5.created_at
                 FROM mw_task_history h5

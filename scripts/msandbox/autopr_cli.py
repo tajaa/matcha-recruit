@@ -45,11 +45,16 @@ def hold_badge(card: dict) -> str:
 def queue_lines(cards: list[dict]) -> list[str]:
     lines = []
     for card in cards:
-        badge = hold_badge(card) or (
-            "REWORK" if card.get("board_column") == "changes_requested" else "TODO"
-        )
+        hold = hold_badge(card)
         if card.get("board_column") == "in_progress":
-            badge = "IN PROGRESS"
+            # A claimed card can still be held (the server allows a hold on an
+            # active claim); keep both facts visible so this list and the
+            # manager tab, which checks the hold first, describe the same row.
+            badge = f"IN PROGRESS · {hold}" if hold else "IN PROGRESS"
+        else:
+            badge = hold or (
+                "REWORK" if card.get("board_column") == "changes_requested" else "TODO"
+            )
         lines.append(
             f"{card['task_id'][:8]}  {badge:<24} {card.get('project_title', '?')[:9]:<9} "
             f"{str(card.get('title', 'Untitled'))[:60]}"

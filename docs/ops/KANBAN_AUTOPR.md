@@ -163,8 +163,9 @@ someone moves the card, adds context, or presses Run.
 for the same reason park the card with a server-side hold (`autopr: 3× <reason>`), an
 `ON HOLD: REPEATED FAILURES · [autopr:parked <ts>]` note, and a chat ask. Held cards —
 whether from Espresso Hold/Unqueue, `msandbox autopr hold`, or parking — stay in the
-collector snapshot and render as `‖ HOLD · <reason>` at the bottom of the dashboard queue
-(`NO-SPEC` is the bot's own can't-scope ledger); the selector never runs one. Tunables:
+collector snapshot and render as `‖ HOLD · <reason>` in the dashboard queue, after rework
+and ahead of plain Todo so the six-row cap cannot hide them (`NO-SPEC` is the bot's own
+can't-scope ledger); the selector never runs one. Tunables:
 `AUTOPR_MAX_SAME_REASON_FAILURES`, `AUTOPR_ATTEMPT_COOLDOWN_MINUTES`.
 
 ## Local tmux dashboard

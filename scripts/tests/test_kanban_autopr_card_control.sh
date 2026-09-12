@@ -21,7 +21,7 @@ MATCHA_API_URL=https://example.invalid/api
 MATCHA_BOT_EMAIL=bot@example.com
 MATCHA_BOT_PASSWORD=secret
 MATCHA_PROJECT_IDS=11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222
-MATCHA_ASSIGNEE_EMAIL=haley@oceaneca.com
+MATCHA_ASSIGNEE_EMAIL=haley@example.com
 EOF
 
 # Two boards. "landing" is ambiguous across them; an id8 is exact even though
@@ -35,7 +35,8 @@ cat > "$TMP_DIR/bundle-1.json" <<'EOF'
 EOF
 cat > "$TMP_DIR/bundle-2.json" <<'EOF'
 {"tasks":[
- {"id":"dddd0000-0000-4000-8000-000000000004","title":"Landing hero aaaa0000","board_column":"todo","pr_number":null,"autopr_paused":true,"autopr_hold_reason":"docs allowlist","status":"open"}
+ {"id":"dddd0000-0000-4000-8000-000000000004","title":"Landing hero aaaa0000","board_column":"todo","pr_number":null,"autopr_paused":true,"autopr_hold_reason":"docs allowlist","status":"open"},
+ {"id":"eeee0000-0000-4000-8000-000000000005","title":"Pricing rollout","board_column":"in_progress","pr_number":320,"autopr_paused":false,"status":"open"}
 ]}
 EOF
 
@@ -127,10 +128,17 @@ check "unstick moves a PR-less card to todo and only then holds it" \
     && grep -q '^moved bbbb0000 · Add per-location pricing → todo$' <<< "$out" \
     && grep -q '^held bbbb0000' <<< "$out" && echo 0 || echo 1)
 
-out="$(run_control unstick aaaa0000)"
-check "unstick sends a card with a PR to changes_requested" \
-  $(grep -q 'PATCH .*aaaa0000.* {"board_column":"changes_requested"}' "$TMP_DIR/calls" \
+out="$(run_control unstick eeee0000)"
+check "unstick sends an In Progress card with a PR to changes_requested" \
+  $(grep -q 'PATCH .*eeee0000.* {"board_column":"changes_requested"}' "$TMP_DIR/calls" \
     && ! grep -q unqueue "$TMP_DIR/calls" && echo 0 || echo 1)
+
+set +e
+run_control unstick aaaa0000 >/dev/null 2>"$TMP_DIR/err"; rc=$?
+set -e
+check "unstick refuses a card that is not In Progress and moves nothing" \
+  $([ "$rc" = 2 ] && grep -q 'not In Progress' "$TMP_DIR/err" \
+    && ! grep -q PATCH "$TMP_DIR/calls" && echo 0 || echo 1)
 
 set +e
 AUTOPR_TEST_RUNS='[]' run_control cancel-run >/dev/null 2>"$TMP_DIR/err"; rc=$?
@@ -139,6 +147,12 @@ check "cancel-run with no active Kanban run exits 3 and touches nothing" \
   $([ "$rc" = 3 ] && [ ! -s "$TMP_DIR/calls" ] && [ ! -e "$TMP_DIR/gh.log" ] && echo 0 || echo 1)
 
 runs='[{"databaseId":900,"lane":"errors","status":"in_progress"},{"databaseId":901,"lane":"kanban","status":"in_progress"},{"databaseId":800,"lane":"kanban","status":"completed"}]'
+set +e
+AUTOPR_TEST_RUNS="$runs" run_control cancel-run landing >/dev/null 2>"$TMP_DIR/err"; rc=$?
+set -e
+check "cancel-run resolves the card before cancelling, so an ambiguous target cancels nothing" \
+  $([ "$rc" = 2 ] && [ ! -e "$TMP_DIR/gh.log" ] && ! grep -q PATCH "$TMP_DIR/calls" && echo 0 || echo 1)
+
 out="$(AUTOPR_TEST_RUNS="$runs" run_control cancel-run --hold)"
 check "cancel-run cancels the Kanban run, waits, then unsticks and holds the runner's card" \
   $(grep -q '^run cancel 901 --repo tajaa/matcha-recruit$' "$TMP_DIR/gh.log" \

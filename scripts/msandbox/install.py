@@ -77,6 +77,10 @@ def dispatcher_installed_files(repo_root: Path | None = None) -> list[tuple[Path
         return []
     match = re.search(r"^install_runtime\(\) \{\n(.*?)^\}", text, re.S | re.M)
     body = match.group(1) if match else text
+    # Comments in that body name scripts they merely talk about; only code
+    # lines say what is copied. Otherwise a "see publish.sh" comment would
+    # report publish.sh as stale forever, and the drift report would be noise.
+    body = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
     pairs: list[tuple[Path, str]] = []
     for name in sorted(set(_INSTALLED_NAME_RE.findall(body))):
         source = root / "scripts/msandbox" / name
