@@ -105,19 +105,27 @@ def _facility_profile_eligible(
     location_naics: Optional[str],
     company_naics: Optional[str],
     company_industry: Optional[str],
+    company_healthcare_specialties: Optional[List[str]],
 ) -> bool:
     """Whether a location should be offered healthcare facility setup.
 
-    The most specific persisted classification wins. A present but unmodeled
-    NAICS value fails closed instead of falling back to a broader company value;
-    otherwise the company industry is resolved through the shared taxonomy.
+    The most specific modeled classification wins. Unmodeled NAICS values fall
+    through to the next available company classification rather than suppressing
+    setup. Biotech and any selected healthcare specialty are healthcare signals
+    used only when neither NAICS value resolves through the shared taxonomy.
     """
     for naics in (location_naics, company_naics):
         if naics and str(naics).strip():
-            return "healthcare" in categories_for_naics(str(naics))
+            categories = categories_for_naics(str(naics))
+            if categories:
+                return "healthcare" in categories
 
     category = resolve_category(company_industry)
-    return bool(category and "healthcare" in ancestry(category))
+    return bool(
+        company_healthcare_specialties
+        or category == "biotech"
+        or (category and "healthcare" in ancestry(category))
+    )
 
 
 
@@ -951,6 +959,7 @@ async def get_locations(company_id: UUID) -> list[dict]:
         query = """SELECT bl.*, jr.has_local_ordinance,
                       c.naics AS company_naics,
                       c.industry AS company_industry,
+                      c.healthcare_specialties AS company_healthcare_specialties,
                       COALESCE(ec.cnt, 0) AS employee_count,
                       COALESCE(en.names, ARRAY[]::text[]) AS employee_names,
                       COALESCE(rc.cnt, 0) AS requirements_count,
@@ -1021,8 +1030,14 @@ async def get_locations(company_id: UUID) -> list[dict]:
             d = dict(row)
             company_naics = d.pop("company_naics", None)
             company_industry = d.pop("company_industry", None)
+            company_healthcare_specialties = d.pop(
+                "company_healthcare_specialties", None
+            )
             d["facility_profile_eligible"] = _facility_profile_eligible(
-                d.get("naics"), company_naics, company_industry,
+                d.get("naics"),
+                company_naics,
+                company_industry,
+                company_healthcare_specialties,
             )
             # data_status answers "has this location been synced from the
             # catalog?" — a pipeline fact. It must read the UNGATED projection
