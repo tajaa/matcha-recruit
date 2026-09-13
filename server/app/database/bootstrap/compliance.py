@@ -27,6 +27,17 @@ async def create_compliance(conn):
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_business_locations_company_id ON business_locations(company_id)
         """)
+        # Keep bootstrap-only databases aligned with the additive location
+        # migrations.  The update path reads these columns for every request,
+        # including updates that do not change the time zone.
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS country_code VARCHAR(2) NOT NULL DEFAULT 'US'
+        """)
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS timezone VARCHAR(64)
+        """)
         await conn.execute("""
             ALTER TABLE business_locations
             ADD COLUMN IF NOT EXISTS timezone_source VARCHAR(10) NOT NULL DEFAULT 'manual'

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
+# Mirrored by client/src/utils/locationTimezone.ts.  The repository-level
+# parity test in tests/compliance/test_location_timezone.py locks them together.
 SINGLE_ZONE_US_TIMEZONES = {
     "AL": "America/Chicago",
     "AR": "America/Chicago",
@@ -133,8 +135,22 @@ def timezone_for_update(
     if timezone_source == "manual":
         chosen = timezone if timezone_was_supplied else existing_timezone
         return TimezoneWrite(_manual_timezone(chosen), "manual")
-    if timezone_was_supplied:
-        return TimezoneWrite(_manual_timezone(timezone), "manual")
+
+    # Pydantic records an explicit JSON null in model_fields_set.  Before this
+    # feature, LocationUpdate treated null like an omitted field, so preserve
+    # that behavior for unrelated updates.
+    if timezone_was_supplied and timezone is not None:
+        chosen = _manual_timezone(timezone)
+        # Older clients may echo the current value without the newer source
+        # field.  An unchanged echo is not a manual override and must not turn
+        # off future automatic re-mapping.
+        if existing_source == "auto" and chosen == (existing_timezone or "").strip():
+            if geography_changed:
+                return TimezoneWrite(
+                    _auto_timezone(state=state, country_code=country_code), "auto"
+                )
+            return TimezoneWrite(None, None)
+        return TimezoneWrite(chosen, "manual")
     if geography_changed and existing_source == "auto":
         return TimezoneWrite(_auto_timezone(state=state, country_code=country_code), "auto")
     return TimezoneWrite(None, None)

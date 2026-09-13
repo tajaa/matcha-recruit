@@ -757,9 +757,10 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         fa_json = json.dumps(data.facility_attributes) if data.facility_attributes else None
         location_id = await conn.fetchval(
             """
-            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes,
-                                            ein, naics, max_employees, annual_avg_employees, timezone, timezone_source)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, country_code,
+                                            facility_attributes, ein, naics, max_employees, annual_avg_employees,
+                                            timezone, timezone_source)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING id
             """,
             company_id,
@@ -769,6 +770,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.state.upper(),
             data.county,
             data.zipcode or "",
+            data.country_code.strip().upper(),
             fa_json,
             data.ein,
             data.naics,

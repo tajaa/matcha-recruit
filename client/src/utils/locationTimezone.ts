@@ -2,7 +2,8 @@ export type LocationTimezoneSource = 'auto' | 'manual'
 
 // State-only mapping is limited to places with a single unambiguous civil
 // timezone. Split-zone states and local exceptions deliberately fall back to
-// manual selection rather than guessing.
+// manual selection rather than guessing. The server test suite compares this
+// map with app/core/services/location_timezone.py so either-side drift fails CI.
 const SINGLE_ZONE_US_TIMEZONES: Record<string, string> = {
   AL: 'America/Chicago', AR: 'America/Chicago', CA: 'America/Los_Angeles',
   CO: 'America/Denver', CT: 'America/New_York', DC: 'America/New_York',

@@ -60,6 +60,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
 
   useEffect(() => {
     if (editingLocation) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- opening on a different record must reset this controlled form
       setForm({
         name: editingLocation.name || '',
         address: editingLocation.address || '',
@@ -87,6 +88,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
   useEffect(() => {
     if (timezoneSource !== 'auto') return
     const mapped = inferLocationTimezone(form.state) || ''
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- automatic mode derives the controlled field from the selected state
     setForm((current) => current.timezone === mapped ? current : { ...current, timezone: mapped })
   }, [form.state, timezoneSource])
 
@@ -209,6 +211,10 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
           ) : timezoneSource === 'auto' && form.state ? (
             <p className="text-[11px] text-amber-400">
               This area may span more than one time zone. Select the correct time zone manually.
+            </p>
+          ) : timezoneSource === 'auto' ? (
+            <p className="text-[11px] text-zinc-500">
+              Select a state to map the time zone automatically.
             </p>
           ) : (
             <div className="flex items-center justify-between gap-3">
