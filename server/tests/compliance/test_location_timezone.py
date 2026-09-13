@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.models.compliance import LocationCreate
+from app.core.models.compliance import LocationCreate, LocationUpdate
 from app.core.services.compliance_service import _locations
 from app.core.services.location_timezone import (
     SINGLE_ZONE_US_TIMEZONES,
@@ -264,3 +264,103 @@ async def test_create_location_persists_normalized_country_code(monkeypatch):
     assert conn.insert_args[7] == "MX"
     assert location.country_code == "MX"
     assert has_coverage is False
+
+
+@pytest.mark.asyncio
+async def test_update_location_treats_explicit_null_timezone_as_omitted(monkeypatch):
+    location_id = uuid4()
+    company_id = uuid4()
+
+    class RecordingConnection:
+        update_statement = None
+        update_args = None
+
+        async def fetchrow(self, *args):
+            return {
+                "timezone": "America/Los_Angeles",
+                "timezone_source": "auto",
+                "state": "CA",
+                "country_code": "US",
+            }
+
+        async def execute(self, statement, *args):
+            self.update_statement = statement
+            self.update_args = args
+
+    conn = RecordingConnection()
+
+    @asynccontextmanager
+    async def fake_get_connection():
+        yield conn
+
+    async def fake_get_location(*args):
+        return "updated-location"
+
+    monkeypatch.setattr("app.database.get_connection", fake_get_connection)
+    monkeypatch.setattr(_locations, "get_location", fake_get_location)
+
+    result = await _locations.update_location(
+        location_id,
+        company_id,
+        LocationUpdate(name="Renamed", timezone=None),
+    )
+
+    normalized_update = " ".join(conn.update_statement.split())
+    assert "SET name = $3, updated_at = NOW()" in normalized_update
+    assert "timezone =" not in normalized_update
+    assert "timezone_source =" not in normalized_update
+    assert conn.update_args == (location_id, company_id, "Renamed")
+    assert result == "updated-location"
+
+
+@pytest.mark.asyncio
+async def test_update_location_remaps_legacy_echo_when_geography_changes(monkeypatch):
+    location_id = uuid4()
+    company_id = uuid4()
+
+    class RecordingConnection:
+        update_statement = None
+        update_args = None
+
+        async def fetchrow(self, *args):
+            return {
+                "timezone": "America/Los_Angeles",
+                "timezone_source": "auto",
+                "state": "CA",
+                "country_code": "US",
+            }
+
+        async def execute(self, statement, *args):
+            self.update_statement = statement
+            self.update_args = args
+
+    conn = RecordingConnection()
+
+    @asynccontextmanager
+    async def fake_get_connection():
+        yield conn
+
+    async def fake_get_location(*args):
+        return "updated-location"
+
+    monkeypatch.setattr("app.database.get_connection", fake_get_connection)
+    monkeypatch.setattr(_locations, "get_location", fake_get_location)
+
+    result = await _locations.update_location(
+        location_id,
+        company_id,
+        LocationUpdate(state="CO", timezone="America/Los_Angeles"),
+    )
+
+    normalized_update = " ".join(conn.update_statement.split())
+    assert "state = $3" in normalized_update
+    assert "timezone = $4" in normalized_update
+    assert "timezone_source = $5" in normalized_update
+    assert conn.update_args == (
+        location_id,
+        company_id,
+        "CO",
+        "America/Denver",
+        "auto",
+    )
+    assert result == "updated-location"
