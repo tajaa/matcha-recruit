@@ -270,10 +270,17 @@ codex_backoff_active() {
 # so only `codex login` on this Mac brings the lanes back. One local file read
 # per tick, and nothing is launched to find out.
 codex_auth_message=""
+codex_auth_rc=0
 codex_auth_required() {
+    codex_auth_rc=0
     [ -x "$CODEX_BACKOFF" ] || return 1
-    codex_auth_message="$("$CODEX_BACKOFF" auth-check 2>&1)"
-    [ "$?" -eq 4 ]
+    codex_auth_message="$("$CODEX_BACKOFF" auth-check 2>&1)" || codex_auth_rc=$?
+    # ONLY 4 is "the credential is dead". A missing checker or a broken
+    # interpreter is a harness fault, and holding every lane on one would be a
+    # permanent silent stop whose banner tells the operator to run `codex
+    # login` — which cannot clear it. Fail open there, exactly like
+    # hot-redispatch-guard.sh: this is a spend guard, not a safety boundary.
+    [ "$codex_auth_rc" -eq 4 ]
 }
 
 main() {
@@ -318,6 +325,11 @@ main() {
             notify "Codex login expired" "${codex_auth_message:-run codex login on this Mac}"
         fi
         exit 0
+    fi
+    if [ "$codex_auth_rc" -ne 0 ]; then
+        # Could not check. Say so in the log and keep going, rather than
+        # silently grounding the lanes on a broken install.
+        log_event error codex-auth-check-unavailable
     fi
     rm -f "$NOTIFIED_AUTH_FILE"
     # The watcher lane asks the board first and gives up before doing anything

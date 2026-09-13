@@ -49,7 +49,14 @@ fi
 printf '%s %s %s\n' "$method" "${url#https://example.invalid/api}" "$payload" >> "$AUTOPR_TEST_CALLS"
 body='{"ok":true}'
 case "$url" in
-  */tasks) [ -z "${AUTOPR_TEST_TASKS_JSON:-}" ] || body="$(cat "$AUTOPR_TEST_TASKS_JSON")" ;;
+  */tasks)
+    [ -z "${AUTOPR_TEST_TASKS_JSON:-}" ] || body="$(cat "$AUTOPR_TEST_TASKS_JSON")"
+    # A transient board read failure, so the journal's own fallback is testable.
+    if [ -n "${AUTOPR_TEST_TASKS_HTTP:-}" ]; then
+      [ -z "$output_file" ] || printf '%s' "$body" > "$output_file"
+      printf '%s' "$AUTOPR_TEST_TASKS_HTTP"; exit 0
+    fi
+    ;;
   */files) [ -z "${AUTOPR_TEST_FILES_JSON:-}" ] || body="$(cat "$AUTOPR_TEST_FILES_JSON")" ;;
 esac
 [ -z "$output_file" ] || printf '%s' "$body" > "$output_file"
@@ -146,6 +153,30 @@ AUTOPR_TEST_TASKS_JSON="$TMP_DIR/tasks-live.json" \
   run_journal "$TMP_DIR/card.json" --outcome success --pr 500 --report "$TMP_DIR/report.md" >/dev/null
 check "a success never moves the card from here" \
   $(! grep -q '^PATCH ' "$TMP_DIR/calls" && echo 0 || echo 1)
+
+# Finding: $CARD_FILE is the SELECTION-time snapshot, taken by collect.sh
+# BEFORE investigate.sh claims the card, so its board_column is the lane the
+# card came from and is never in_progress. Defaulting the live column to it
+# meant a transient board read failure silently skipped the hand-back — the
+# exact stranding this write exists to prevent — while the journal told the
+# owner the card was back in its lane.
+# With the board unreadable the PR can only come from the card snapshot (which
+# collect.sh does project) or --pr, and the lane follows the same rule as ever.
+rm -f "$TMP_DIR/uploads"/*
+jq '.pr_number = 513 | .board_column = "changes_requested"' "$TMP_DIR/card.json" > "$TMP_DIR/card-rework.json"
+AUTOPR_TEST_TASKS_HTTP=503 run_journal "$TMP_DIR/card-rework.json" --outcome failure --reason investigate >/dev/null
+check "an unreadable board still hands a rework card back to Changes Requested" \
+  $(patch_line | grep -q '"board_column":"changes_requested"' \
+    && patch_line | grep -q 'STOPPED: MODEL PASS FAILED' && echo 0 || echo 1)
+
+# The snapshot's own column must never be the answer: it is the lane the card
+# was selected FROM, so trusting it skips the hand-back exactly when the board
+# read failed. This card says "todo" and still has to be returned.
+rm -f "$TMP_DIR/uploads"/*
+jq '.board_column = "todo"' "$TMP_DIR/card.json" > "$TMP_DIR/card-todo.json"
+AUTOPR_TEST_TASKS_HTTP=503 run_journal "$TMP_DIR/card-todo.json" --outcome failure --reason investigate >/dev/null
+check "an unreadable board with no PR hands the card back to Todo" \
+  $(patch_line | grep -q '"board_column":"todo"' && echo 0 || echo 1)
 
 rm -f "$TMP_DIR/uploads"/*
 run_journal "$TMP_DIR/card.json" --outcome success --pr 500 --report "$TMP_DIR/report.md" >/dev/null

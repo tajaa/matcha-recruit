@@ -371,12 +371,19 @@ prune_journals
 # live note, and stand down whenever this run already parked the card.
 snapshot_note="$(jq -r '.progress_note // ""' "$CARD_FILE")"
 live_note="$snapshot_note"
-# The live column and PR decide whether this run has to hand the card back to
-# a lane (below). Both default to the selection-time snapshot.
-live_column="$(jq -r '.board_column // ""' "$CARD_FILE")"
+# The live column decides whether this run has to hand the card back to a lane
+# (below). It deliberately does NOT fall back to $CARD_FILE: that snapshot is
+# taken by collect.sh BEFORE investigate.sh claims the card, so its column is
+# the lane the card came from and never `in_progress`. Defaulting to it would
+# turn a transient board read failure into exactly the stranding this write
+# exists to prevent, while the journal reported the card returned. Track
+# whether the read succeeded instead and decide below.
+live_column=""
+live_read_ok=false
 live_pr="$(jq -r '.pr_number // empty' "$CARD_FILE")"
 live_tasks="$( ( mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks" ) 2>/dev/null || true )"
 if [ -n "$live_tasks" ]; then
+    live_read_ok=true
     live_note="$(printf '%s' "$live_tasks" \
         | jq -r --arg id "$TASK_ID" 'first(.[]? | select(.id == $id) | .progress_note // "") // ""' 2>/dev/null \
         || printf '%s' "$snapshot_note")"
@@ -419,7 +426,12 @@ if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] \
     # own no PR). A card that already left In Progress is someone else's.
     patch='{progress_note: $note}'
     return_column=""
-    if [ "$live_column" = in_progress ]; then
+    # An unreadable board is treated as In Progress: this run's own claim is
+    # what put the card there. If the run died before claiming, the card is
+    # still in its lane and the server writes no column_change when the value
+    # does not change (project_task_service update_task), so the redundant
+    # write costs nothing and cannot disturb the park clock.
+    if [ "$live_read_ok" != true ] || [ "$live_column" = in_progress ]; then
         return_column=todo
         [ -z "$live_pr" ] || return_column=changes_requested
         patch='{progress_note: $note, board_column: $column}'

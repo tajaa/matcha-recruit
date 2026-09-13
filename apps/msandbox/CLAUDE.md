@@ -91,6 +91,29 @@ and the `mw_tasks.autopr_*` columns they read.
   is bind-mounted read-only and the ChatGPT refresh token is single-use, so an
   expired access token never refreshes into working; only `codex login` on
   the runner Mac does.
+- **`auth-check` exit 4 means the credential is dead; any other non-zero means
+  the check could not run.** Never conflate them. The dispatcher halts every
+  lane on 4, so reporting a harness fault that way is a permanent silent stop
+  behind a banner saying `codex login`, which cannot clear it. On anything
+  else the dispatcher logs `codex-auth-check-unavailable` and proceeds — this
+  is a spend guard, not a safety boundary, the same doctrine as
+  `hot-redispatch-guard.sh`.
+- **The installed dispatcher tree is FLAT.** `install-launch-agent.sh` copies
+  `harness/` into `~/.local/share/matcha-kanban-autopr` with no `cli/`
+  sibling, so a `cli/` helper an installed script resolves must be (a) added
+  to that installer and (b) resolved with a `$SCRIPT_DIR/<name>` fallback —
+  see `select.sh` (`autopr_control.py`) and `codex-backoff.sh`
+  (`codex_auth.py`). Missing the fallback made every installed tick report a
+  dead Codex login. `tests/test_kanban_autopr_dispatch.sh` both checks the
+  name list (comments stripped — a file merely mentioned in one used to
+  satisfy it) and runs the real `install_runtime` into a throwaway root, then
+  uses the result.
+- **`run-journal.sh` never infers the board column from `$CARD_FILE`.** That
+  snapshot is taken by `collect.sh` before `investigate.sh` claims the card,
+  so its column is the lane the card came FROM and is never `in_progress`. An
+  unreadable board is therefore treated as `in_progress` — this run's own
+  claim put it there — and a card the run never claimed is unaffected, since
+  the server writes no `column_change` when the value does not change.
 - **`msandbox install` and `msandbox doctor` dispatch before the launcher's
   legacy-entrypoint probe.** Both run entirely inside the pinned release, and
   putting the probe first is what stranded operators across the `apps/` move:

@@ -17,8 +17,10 @@
 #   codex-backoff.sh clear
 #   codex-backoff.sh auth-check [FILE] # exit 0 while the host Codex login's
 #                                     # access token is live, 4 when it is
-#                                     # missing or expired (message names the
-#                                     # fix: `codex login` on the runner Mac).
+#                                     # dead, 2 when the check itself could
+#                                     # not run (see auth_check below).
+#                                     # (message names the fix: `codex login`
+#                                     # on the runner Mac).
 #                                     # The same lane-wide condition as a
 #                                     # usage limit, except it never clears on
 #                                     # its own: the sandbox copy is read-only
@@ -31,9 +33,19 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# One implementation of the token check, shared with `msandbox doctor`; both
-# the dispatcher tree and the workflow's control-root archive carry cli/.
-CODEX_AUTH_CHECK="${AUTOPR_CODEX_AUTH_CHECK:-$(dirname "$SCRIPT_DIR")/cli/codex_auth.py}"
+# One implementation of the token check, shared with `msandbox doctor`.
+# The repository and the workflow's control-root archive keep it at
+# ../cli/codex_auth.py, but install-launch-agent.sh copies the dispatcher
+# tree FLAT into ~/.local/share/matcha-kanban-autopr, where that sibling does
+# not exist — the same reason select.sh resolves autopr_control.py twice.
+# Without the flat branch every installed tick reported a dead login.
+if [ -n "${AUTOPR_CODEX_AUTH_CHECK:-}" ]; then
+    CODEX_AUTH_CHECK="$AUTOPR_CODEX_AUTH_CHECK"
+elif [ -f "$SCRIPT_DIR/codex_auth.py" ]; then
+    CODEX_AUTH_CHECK="$SCRIPT_DIR/codex_auth.py"
+else
+    CODEX_AUTH_CHECK="$(dirname "$SCRIPT_DIR")/cli/codex_auth.py"
+fi
 USER_HOME="${AUTOPR_USER_HOME:-$HOME}"
 STATE_DIR="${AUTOPR_DISPATCH_STATE_DIR:-$USER_HOME/Library/Caches/matcha-autopr-dashboard/dispatch}"
 MARKER="${AUTOPR_CODEX_BACKOFF_FILE:-$STATE_DIR/codex-usage-limit.json}"
@@ -98,10 +110,15 @@ active() {
     printf '%s\n' "$resume_at"
 }
 
+# Exit 4 means the credential is dead. Anything else means this check could
+# not run, and the two must never be confused: the dispatcher halts every lane
+# on 4, so reporting a missing checker that way is a permanent stop that tells
+# the operator to run `codex login`, which cannot fix it.
 auth_check() {
     [ -f "$CODEX_AUTH_CHECK" ] || {
-        printf 'codex login: cannot check the token: %s is missing\n' "$CODEX_AUTH_CHECK" >&2
-        exit 4
+        printf 'codex login: CANNOT CHECK: %s is missing; the harness install is incomplete (run apps/msandbox/harness/install-launch-agent.sh)\n' \
+            "$CODEX_AUTH_CHECK" >&2
+        exit 2
     }
     python3 "$CODEX_AUTH_CHECK" check "$@"
 }

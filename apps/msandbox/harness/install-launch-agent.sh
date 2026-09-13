@@ -48,7 +48,14 @@ install_runtime() {
         install -m 644 "$SCRIPT_DIR/$name" "$INSTALL_ROOT/$name"
     done
     install -m 644 "$SCRIPT_DIR/lib.sh" "$INSTALL_ROOT/lib.sh"
-    install -m 644 "$(dirname "$SCRIPT_DIR")/cli/autopr_control.py" "$INSTALL_ROOT/autopr_control.py"
+    # cli/ helpers the installed scripts resolve relative to themselves. This
+    # tree is FLAT, so each lands beside the scripts and they fall back to
+    # $SCRIPT_DIR/<name> (select.sh, codex-backoff.sh). codex_auth.py missing
+    # here made every dispatcher tick report a dead Codex login.
+    local helper
+    for helper in autopr_control.py codex_auth.py; do
+        install -m 644 "$(dirname "$SCRIPT_DIR")/cli/$helper" "$INSTALL_ROOT/$helper"
+    done
 }
 
 render_launch_agent() {

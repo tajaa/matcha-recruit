@@ -410,12 +410,21 @@ check "installer ships the backoff helper next to the dispatcher" \
 # and plan.py were both missing for days while the dashboard silently served a
 # stale cached PR pane under a red DEGRADED banner.
 installer_sh="$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh"
+# Strip comments first: this list is what the guard treats as "installed", and
+# a file merely NAMED in a comment satisfied it — which is how a genuinely
+# uninstalled helper could pass.
 installed_names="$(sed -n '/^install_runtime()/,/^}/p' "$installer_sh" \
+  | sed 's/#.*//' \
   | grep -oE '[A-Za-z0-9_.-]+\.(sh|py)' | sort -u)"
 missing_helpers=""
 for installed in $installed_names; do
   [ -f "$REPO_ROOT/apps/msandbox/harness/$installed" ] || continue
-  for referenced in $(grep -ohE '\$SCRIPT_DIR/[A-Za-z0-9_.-]+\.(sh|py)' \
+  # Both shapes an installed script uses to find a helper: a $SCRIPT_DIR
+  # sibling, and a cli/ module it resolves out of the repository layout. The
+  # installed tree is FLAT, so the second kind has to be copied in beside the
+  # scripts too — codex_auth.py was not, and every dispatcher tick then
+  # reported a dead Codex login that no `codex login` could clear.
+  for referenced in $(grep -ohE '\$SCRIPT_DIR/[A-Za-z0-9_.-]+\.(sh|py)|/cli/[A-Za-z0-9_.-]+\.py' \
       "$REPO_ROOT/apps/msandbox/harness/$installed" 2>/dev/null | sed 's|.*/||' | sort -u); do
     printf '%s\n' "$installed_names" | grep -qx "$referenced" \
       || missing_helpers="$missing_helpers $referenced"
@@ -423,6 +432,31 @@ for installed in $installed_names; do
 done
 check "installer ships every helper the installed scripts shell out to" \
   $([ -z "$missing_helpers" ] && echo 0 || { echo "uninstalled:$missing_helpers" >&2; echo 1; })
+
+# The static guard above compares names; this runs the installer's own
+# install_runtime against a throwaway root and then uses the result, because
+# what actually broke was resolution, not naming: codex-backoff.sh looked for
+# ../cli/codex_auth.py, which exists in the repo and in the workflow's control
+# root but never in the flat installed tree.
+install_tree="$TMP_DIR/installed-tree"
+rm -rf "$install_tree"
+(
+  eval "$(sed -n '/^install_runtime()/,/^}/p' "$REPO_ROOT/apps/msandbox/harness/install-launch-agent.sh")"
+  SCRIPT_DIR="$REPO_ROOT/apps/msandbox/harness" INSTALL_ROOT="$install_tree" install_runtime
+) >/dev/null 2>&1
+installed_tree_msg="$("$install_tree/codex-backoff.sh" auth-check "$TMP_DIR/auth.json" 2>&1)" \
+  && installed_tree_rc=0 || installed_tree_rc=$?
+check "the installed dispatcher tree can run the Codex login check it gates every lane on" \
+  $([ "$installed_tree_rc" = 0 ] && grep -q 'expires' <<< "$installed_tree_msg" && echo 0 || echo 1)
+
+# A checker it cannot run is a harness fault, not a credential fault. Exit 4
+# would halt every lane permanently behind a banner saying `codex login`.
+rm -f "$install_tree/codex_auth.py"
+broken_msg="$("$install_tree/codex-backoff.sh" auth-check "$TMP_DIR/auth.json" 2>&1)" \
+  && broken_rc=0 || broken_rc=$?
+check "a checker that cannot run reports a harness fault, not an expired login" \
+  $([ "$broken_rc" = 2 ] && grep -q 'CANNOT CHECK' <<< "$broken_msg" \
+    && ! grep -q 'EXPIRED' <<< "$broken_msg" && echo 0 || echo 1)
 
 # Explicit dashboard starts carry the exact ticket, bypass only the routine
 # spend floor, and remain deduplicated through GitHub's visibility lag.
@@ -577,6 +611,14 @@ AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS=
 check "a renewed login dispatches again and re-arms the one-time banner" \
   $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "silent-error-autofix.yml" ] \
     && [ ! -e "$TMP_DIR/state/notified-codex-auth" ] && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/dispatches" "$TMP_DIR/state/notified-codex-auth" "$TMP_DIR/notify.log"
+AUTOPR_CODEX_AUTH_CHECK="$TMP_DIR/no-such-checker.py" \
+  AUTOPR_TEST_ERROR_RUNS='[]' AUTOPR_TEST_AUDIT_RUNS='[]' AUTOPR_TEST_KANBAN_RUNS='[]' notify_tick
+check "a checker the dispatcher cannot run fails open instead of grounding every lane" \
+  $([ "$(cat "$TMP_DIR/dispatches" 2>/dev/null)" = "silent-error-autofix.yml" ] \
+    && grep -q 'codex-auth-check-unavailable' "$TMP_DIR/log.jsonl" \
+    && ! grep -q 'Codex login expired' "$TMP_DIR/notify.log" && echo 0 || echo 1)
 
 printf '%s\n' '{"action":"skip","reason":"codex-auth-required","checked_at":999990,"next_check_at":1000050,"eligible_at":0}' > "$TMP_DIR/seg-state/status.json"
 check "status segment names a dead Codex login" \
