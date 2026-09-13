@@ -191,6 +191,31 @@ The journal also finds this run's own in-flight snapshot when the Cleanup step h
 checkpoint to hand it (the save step only runs when *Investigate* failed), rather than
 reporting that nothing was saved.
 
+**Watching and interrupting a run from `msandbox`.** A run that is working or held
+appears as the first row of the SESSIONS list — `AutoPR ● running 4m`, `AutoPR · taking
+over…`, or `AutoPR ◆ yours`, with the card title beneath it. Finished runs stay on the
+AutoPR tab; only a live or owned run gets a row, so the list never grows a dead entry.
+Enter opens that run's live view (the AutoPR tab, its detail block and the `activity.log`
+tail). **Esc** there takes the run over, **Enter** on an owned run opens your Codex
+session on its checkout, and **h** hands it back; the footer names whichever applies.
+
+The live view is a read-only stream, and it says so. AutoPR runs
+`codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral … "$PROMPT_TEXT"`
+through `msandbox exec` → `exec_workspace_no_tty`: one shot, prompt as argv, no TTY,
+stdout redirected into `activity.log`. There is no terminal to attach to, so typing
+cannot reach the model — interrupting means taking the checkout over, which is what Esc
+does. Esc keeps its ordinary "back to the sidebar" meaning everywhere it cannot mean
+that: another tab, a run whose supervisor has died (that is *Recover interrupted run*),
+or a run that is not working. It prompts before stopping anything, because Esc is also
+the key people press to back out.
+
+Taking over is not instant — the supervisor stops the container, SIGTERMs the model and
+copies a ~216 MB checkout into the run directory — so the row reads `taking over…` until
+it lands. `dashboard_view.sidebar_entries` is the single definition of that list; the
+renderer and the key handler both index it, rather than each re-deriving
+`records + GLOBALS`, which is what made a row appearing or vanishing mid-frame select the
+wrong entry.
+
 **Card control from any terminal.** `msandbox autopr queue` lists the cached snapshot
 including held (`HOLD · <reason>`) and claimed In Progress cards; `msandbox autopr hold
 <id8|title> --reason R` writes the board's unqueue hold, `release` lifts it without

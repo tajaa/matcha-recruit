@@ -9,9 +9,19 @@ import threading
 from pathlib import Path
 
 from .autopr_ui import AutoPRFeed
+from .autopr_ui import live_entry as autopr_live_entry
+from .autopr_ui import owned_run as autopr_owned_run
 from .autopr_ui import rows as autopr_rows
+from .autopr_ui import takeover_candidate as autopr_takeover_candidate
 from .capabilities import leaks, load_report, missing_required, report_is_stale
-from .dashboard_view import GLOBALS, TABS, Row, ViewState, build_layout, overview
+from .dashboard_view import (
+    TABS,
+    Row,
+    ViewState,
+    build_layout,
+    overview,
+    sidebar_entries,
+)
 from .errors import RECOVERABLE_ERRORS
 from .files import list_files
 from .inspection import inspect_session
@@ -405,14 +415,16 @@ def _screen(window, records, state, observations, details=None):
         if record and state.tab != 6:
             details.ensure(record, state.tab)
         local = details.for_record(record)
+        autopr.refresh(state.autopr_id)
+        autopr_entry = autopr_live_entry(autopr)
         if state.tab == 6:
-            autopr.refresh(state.autopr_id)
             rows = autopr_rows(autopr, state.autopr_id)
         else:
             rows = session_rows(record, state.tab, observations, local)
             rows += [Row(error, tone="warning") for error in local.get("errors", [])]
         height, width = window.getmaxyx()
-        layout = build_layout(records, state, rows, width, height)
+        layout = build_layout(records, state, rows, width, height, autopr_entry)
+        entries = sidebar_entries(records, autopr_entry)
         window.erase()
         for x, y, text, tone in layout.draws:
             style = colors.get(tone, 0)
@@ -448,7 +460,21 @@ def _screen(window, records, state, observations, details=None):
         elif key == curses.KEY_BTAB:
             state.region = (state.region - 1) % 3
         elif key == "\x1b":
-            state.region = 0
+            candidate = (
+                autopr_takeover_candidate(autopr, state.autopr_id)
+                if state.tab == 6
+                else None
+            )
+            if candidate is not None:
+                command = f"autopr:take:{candidate.id}"
+            else:
+                state.region = 0
+        elif key in ("h", "H") and state.tab == 6:
+            held = autopr_owned_run(autopr, state.autopr_id)
+            if held is not None:
+                command = f"autopr:return:{held.id}"
+            else:
+                state.notice = "Hand back applies to a run you have taken over."
         elif isinstance(key, str) and key in "1234567":
             state.tab, state.scroll, state.cursor = int(key) - 1, 0, 0
             state.region = 1
@@ -464,11 +490,9 @@ def _screen(window, records, state, observations, details=None):
         elif key in (curses.KEY_UP, curses.KEY_DOWN, "j", "k"):
             direction = 1 if key in (curses.KEY_DOWN, "j") else -1
             if state.region == 0:
-                state.sidebar = (state.sidebar + direction) % (
-                    len(records) + len(GLOBALS)
-                )
-                if state.sidebar < len(records):
-                    state.session_id = records[state.sidebar].id
+                state.sidebar = (state.sidebar + direction) % len(entries)
+                if entries[state.sidebar].session_id:
+                    state.session_id = entries[state.sidebar].session_id
                     state.scroll = state.cursor = 0
             elif state.region == 1:
                 state.tab = (state.tab + direction) % len(TABS)
@@ -480,11 +504,12 @@ def _screen(window, records, state, observations, details=None):
                 state.scroll = max(state.scroll, line - layout.content_height + 1)
         elif key in ("\n", "\r", curses.KEY_ENTER, " "):
             if state.region == 0:
-                if state.sidebar < len(records):
-                    state.session_id = records[state.sidebar].id
+                entry = entries[min(state.sidebar, len(entries) - 1)]
+                if entry.session_id:
+                    state.session_id = entry.session_id
                     state.region = 2
                 else:
-                    command = GLOBALS[state.sidebar - len(records)][1]
+                    command = entry.action
             elif state.region == 1:
                 state.region = 2
             else:
@@ -520,7 +545,9 @@ def _screen(window, records, state, observations, details=None):
         if command and command.startswith("session:"):
             state.session_id = command.partition(":")[2]
             state.sidebar = next(
-                i for i, r in enumerate(records) if r.id == state.session_id
+                i
+                for i, entry in enumerate(entries)
+                if entry.session_id == state.session_id
             )
             state.region, state.scroll, state.cursor = 0, 0, 0
         elif command and command.startswith("tab:"):
@@ -528,6 +555,10 @@ def _screen(window, records, state, observations, details=None):
             state.scroll = state.cursor = 0
         elif command == "autopr":
             state.tab, state.region, state.scroll, state.cursor = 6, 2, 0, 0
+        elif command and command.startswith("autopr-live:"):
+            state.autopr_id = command.split(":", 1)[1]
+            state.tab, state.region, state.scroll, state.cursor = 6, 2, 0, 0
+            autopr.refresh(state.autopr_id, force=True)
         elif command and command.startswith("autopr:select:"):
             state.autopr_id = command.rsplit(":", 1)[1]
             state.scroll = state.cursor = 0

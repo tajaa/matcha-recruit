@@ -14,6 +14,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from scripts.msandbox.dashboard import (
@@ -23,7 +24,15 @@ from scripts.msandbox.dashboard import (
     run_dashboard,
     session_rows,
 )
-from scripts.msandbox.dashboard_view import TABS, Row, ViewState, build_layout
+from scripts.msandbox.dashboard_view import (
+    TABS,
+    Row,
+    SidebarEntry,
+    ViewState,
+    build_layout,
+    sidebar_entries,
+)
+from scripts.msandbox.autopr_ui import live_entry
 from scripts.msandbox.inspection import Snapshot
 from scripts.msandbox.models import (
     CapabilityReport,
@@ -50,6 +59,24 @@ def record(name="414"):
         "origin/main",
         "a" * 40,
         None,
+    )
+
+
+def autopr_run(status="running", *, alive=True, run_id="r1", title="Add pricing"):
+    return SimpleNamespace(
+        id=run_id,
+        status=status,
+        title=title,
+        model="gpt-5.6-sol",
+        effort="medium",
+        workflow_id="34726444986",
+        updated_at=time.time() - 245,
+        supervisor_pid=os.getpid() if alive else 0,
+        task_id="bbbb0000-0000-4000-8000-000000000002",
+        pr_number=None,
+        branch="bot/task-bbbb0000",
+        workspace="/tmp/ws",
+        error="",
     )
 
 
@@ -94,16 +121,27 @@ class DashboardTests(unittest.TestCase):
         )
         self.assertIn("AutoPR", TABS)
 
-    def screen(self, keys, state=None, records=None, mouse=None):
+    def screen(self, keys, state=None, records=None, mouse=None, runs=None):
         state = state or ViewState(session_id="414")
         window = Window(keys)
         observations = Observations()
         details = LocalDetails()
+        # The sidebar row means the feed is read on every frame, not only on
+        # the AutoPR tab. Stub it so these tests never depend on whatever runs
+        # happen to be on the developer's machine.
+        feed = mock.Mock()
+        feed.runs = list(runs or [])
+        feed.activity = ""
+        feed.activity_id = None
+        feed.error = ""
+        feed.cards = []
+        feed.queue_note = ""
         with (
             mock.patch("curses.curs_set"),
             mock.patch("curses.mousemask"),
             mock.patch("curses.has_colors", return_value=False),
             mock.patch("curses.getmouse", return_value=mouse),
+            mock.patch("scripts.msandbox.dashboard.AutoPRFeed", return_value=feed),
             mock.patch.object(observations, "request"),
             mock.patch.object(details, "ensure"),
         ):
@@ -115,6 +153,92 @@ class DashboardTests(unittest.TestCase):
                 details,
             )
         return result, state, window
+
+    def test_live_autopr_run_leads_the_sidebar_and_history_does_not(self):
+        entries = sidebar_entries(
+            [record()], live_entry(SimpleNamespace(runs=[autopr_run()]))
+        )
+        # State leads: the sidebar clips from the right, so a long card title
+        # must not push the badge off the row.
+        self.assertTrue(entries[0].label.startswith("AutoPR ● running"))
+        self.assertEqual(entries[0].action, "autopr-live:r1")
+        self.assertEqual(entries[0].detail, "Add pricing")
+        self.assertEqual(entries[1].session_id, "414")
+        # A finished run is history: it belongs on the AutoPR tab, not next to
+        # the sessions, or the sidebar grows a row nobody can act on.
+        for status in ("needs_attention", "failed", "completed", "superseded"):
+            self.assertIsNone(live_entry(SimpleNamespace(runs=[autopr_run(status)])))
+
+    def test_autopr_row_labels_each_state_it_can_be_acted_on_in(self):
+        taking_over = live_entry(SimpleNamespace(runs=[autopr_run("pausing")]))
+        self.assertIn("taking over", taking_over.label)
+        self.assertEqual(taking_over.hint, "")
+        yours = live_entry(SimpleNamespace(runs=[autopr_run("manual")]))
+        self.assertIn("◆ yours", yours.label)
+        self.assertIn("hand back", yours.hint)
+
+    def test_enter_on_the_autopr_row_opens_that_run_live(self):
+        state = ViewState(session_id="414")
+        _, state, _ = self.screen(["\n", "q"], state, [record()], runs=[autopr_run()])
+        self.assertEqual(state.tab, 6)
+        self.assertEqual(state.autopr_id, "r1")
+        self.assertEqual(state.region, 2)
+
+    def test_escape_takes_over_only_a_working_run_on_the_autopr_tab(self):
+        # _screen hands the verb up; run_dashboard is what calls manage().
+        result, _, _ = self.screen(
+            ["7", "\x1b"],
+            ViewState(session_id="414", autopr_id="r1"),
+            [record()],
+            runs=[autopr_run()],
+        )
+        self.assertEqual(result, "autopr:take:r1")
+
+    def test_escape_still_just_returns_to_the_sidebar_everywhere_else(self):
+        # Wrong tab, dead supervisor, and a run that is not working: Esc is the
+        # key people mash to back out, so it must not stop anything here.
+        for keys, runs in (
+            (["\x1b", "q"], [autopr_run()]),
+            (["7", "\x1b", "q"], [autopr_run(alive=False)]),
+            (["7", "\x1b", "q"], [autopr_run("manual")]),
+        ):
+            result, state, _ = self.screen(
+                keys, ViewState(session_id="414", autopr_id="r1"), [record()], runs=runs
+            )
+            self.assertEqual(result, "exit")
+            self.assertEqual(state.region, 0)
+
+    def test_h_hands_back_only_a_run_this_operator_owns(self):
+        result, _, _ = self.screen(
+            ["7", "h"],
+            ViewState(session_id="414", autopr_id="r1"),
+            [record()],
+            runs=[autopr_run("manual")],
+        )
+        self.assertEqual(result, "autopr:return:r1")
+        result, state, _ = self.screen(
+            ["7", "h", "q"],
+            ViewState(session_id="414", autopr_id="r1"),
+            [record()],
+            runs=[autopr_run()],
+        )
+        self.assertEqual(result, "exit")
+        self.assertIn("taken over", state.notice)
+
+    def test_sidebar_clamps_when_the_autopr_row_disappears_mid_frame(self):
+        # A run ending while the operator sits on its row must not leave the
+        # cursor pointing one past the end, or Enter acts on the wrong entry.
+        records = [record(str(i)) for i in range(3)]
+        with_run = sidebar_entries(records, live_entry(SimpleNamespace(runs=[autopr_run()])))
+        without = sidebar_entries(records, None)
+        self.assertEqual(len(with_run), len(without) + 1)
+        entry = live_entry(SimpleNamespace(runs=[autopr_run()]))
+        state = ViewState(session_id="0", sidebar=len(with_run) - 1)
+        build_layout(records, state, [], 100, 24, entry)
+        self.assertEqual(state.sidebar, len(with_run) - 1)
+        state.sidebar = len(with_run) - 1
+        build_layout(records, state, [], 100, 24, None)
+        self.assertEqual(state.sidebar, len(without) - 1)
 
     def test_sidebar_reaches_every_session_and_global_action(self):
         records = [record(str(i)) for i in range(40)]

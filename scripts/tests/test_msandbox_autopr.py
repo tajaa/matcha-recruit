@@ -12,6 +12,7 @@ import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from scripts.msandbox import autopr_cli
@@ -896,6 +897,58 @@ class AutoPRTests(unittest.TestCase):
         self.assertIn("operator hand-back no longer applies", result.stderr)
         self.assertNotIn("FAKE MODEL INVOKED", result.stdout)
         self.assertEqual(self.git("status", "--porcelain"), "")
+
+
+class LiveSidebarTests(unittest.TestCase):
+    """The sidebar row and the two keys that act on it."""
+
+    def feed(self, *runs):
+        return SimpleNamespace(runs=list(runs))
+
+    def make_run(self, status="running", *, alive=True):
+        return SimpleNamespace(
+            id="r1",
+            status=status,
+            title="Add per-location pricing",
+            model="gpt-5.6-sol",
+            workflow_id="34726444986",
+            updated_at=time.time() - 3 * 3600 - 300,
+            supervisor_pid=os.getpid() if alive else 0,
+        )
+
+    def test_running_row_leads_with_state_and_how_long_it_has_worked(self):
+        entry = autopr_ui.live_entry(self.feed(self.make_run()))
+        # ~26 columns, clipped from the right: the badge has to survive a long
+        # card title, so it comes first and the title moves to the detail line.
+        self.assertEqual(entry.label, "AutoPR ● running 3h05m")
+        self.assertEqual(entry.detail, "Add per-location pricing")
+        self.assertEqual(entry.action, "autopr-live:r1")
+
+    def test_only_a_live_or_owned_run_earns_a_row(self):
+        for status in autopr_ui.LIVE_STATUSES:
+            self.assertIsNotNone(autopr_ui.live_entry(self.feed(self.make_run(status))))
+        for status in ("completed", "failed", "needs_attention", "superseded", "ready"):
+            self.assertIsNone(autopr_ui.live_entry(self.feed(self.make_run(status))))
+        self.assertIsNone(autopr_ui.live_entry(self.feed()))
+
+    def test_takeover_needs_a_working_run_with_a_living_supervisor(self):
+        self.assertIsNotNone(
+            autopr_ui.takeover_candidate(self.feed(self.make_run()), "r1")
+        )
+        # A dead supervisor is the "Recover interrupted run" path, not a
+        # takeover; request_takeover rejects it, so Esc must not offer it.
+        self.assertIsNone(
+            autopr_ui.takeover_candidate(self.feed(self.make_run(alive=False)), "r1")
+        )
+        self.assertIsNone(
+            autopr_ui.takeover_candidate(self.feed(self.make_run("manual")), "r1")
+        )
+        self.assertIsNone(autopr_ui.takeover_candidate(self.feed(), "r1"))
+
+    def test_hand_back_applies_only_to_a_run_already_taken_over(self):
+        self.assertIsNotNone(autopr_ui.owned_run(self.feed(self.make_run("manual")), "r1"))
+        self.assertIsNone(autopr_ui.owned_run(self.feed(self.make_run()), "r1"))
+        self.assertIsNone(autopr_ui.owned_run(self.feed(self.make_run("pausing")), "r1"))
 
 
 if __name__ == "__main__":

@@ -14,8 +14,82 @@ from . import autopr_cli
 from . import autopr_control as control
 from . import autopr_queue
 from .capabilities import redact
-from .dashboard_view import Row
+from .dashboard_view import Row, SidebarEntry
 from .terminal_ui import plain
+
+# A run in one of these states still has a checkout somebody owns, so it earns a
+# row in the sidebar. Everything else (completed, failed, needs_attention,
+# superseded) is history and belongs on the AutoPR tab, not next to the
+# sessions.
+LIVE_STATUSES = ("running", "pausing", "manual")
+
+
+def _elapsed(seconds: float) -> str:
+    minutes = int(max(0.0, seconds) // 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h{minutes % 60:02d}m"
+
+
+def live_entry(feed: "AutoPRFeed") -> SidebarEntry | None:
+    """The one sidebar row for a run that is working or held, or None.
+
+    `updated_at` is the run's clock here: the supervisor saves the record when
+    it starts and again only on a status change, so for `running` and `manual`
+    it is when that state began, not a heartbeat.
+    """
+    run = next((item for item in feed.runs if item.status in LIVE_STATUSES), None)
+    if run is None:
+        return None
+    since = _elapsed(time.time() - run.updated_at)
+    # The sidebar is ~26 columns and clips from the right, so the STATE leads
+    # and the title rides on the detail line: a label of "autopr: <long card
+    # title> · running 4m" loses the only part worth glancing at. The tab shows
+    # the model, workflow id and full title.
+    title = plain(run.title)
+    if run.status == "manual":
+        return SidebarEntry(
+            "AutoPR ◆ yours",
+            f"autopr-live:{run.id}",
+            title,
+            hint="Enter: open Codex  h: hand back",
+        )
+    if run.status == "pausing":
+        return SidebarEntry(
+            "AutoPR · taking over…",
+            f"autopr-live:{run.id}",
+            title,
+        )
+    return SidebarEntry(
+        f"AutoPR ● running {since}",
+        f"autopr-live:{run.id}",
+        title,
+        hint="Esc: take over",
+    )
+
+
+def takeover_candidate(feed: "AutoPRFeed", run_id: str | None):
+    """The run Esc may stop: working, and with a supervisor still alive.
+
+    Same precondition control.request_takeover enforces, checked before the
+    keypress prompts so Esc stays a plain "back to the sidebar" everywhere it
+    cannot mean anything else.
+    """
+    run = next(
+        (item for item in feed.runs if run_id is None or item.id == run_id), None
+    )
+    if run is None or run.status != "running":
+        return None
+    return run if control.supervisor_alive(run) else None
+
+
+def owned_run(feed: "AutoPRFeed", run_id: str | None):
+    """The run `h` may hand back: one this operator already took over."""
+    run = next(
+        (item for item in feed.runs if run_id is None or item.id == run_id), None
+    )
+    return run if run is not None and run.status == "manual" else None
+
 
 # The card-control verbs that WRITE to the board. Each needs an explicit
 # confirmation before it runs, and membership here is what gates that branch.

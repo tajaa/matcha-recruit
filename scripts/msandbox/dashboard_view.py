@@ -33,6 +33,44 @@ class Row:
     tone: str = "text"
 
 
+@dataclass(frozen=True)
+class SidebarEntry:
+    """One row of the left list. `session_id` marks the ones backed by a session."""
+
+    label: str
+    action: str
+    detail: str = ""
+    session_id: str = ""
+    hint: str = ""
+
+
+def sidebar_entries(
+    records: list[SessionRecord], autopr_entry: SidebarEntry | None = None
+) -> list[SidebarEntry]:
+    """The single definition of the left list: AutoPR run, sessions, then globals.
+
+    The renderer and the key handler both index this. They used to derive it
+    separately (`records + GLOBALS`, `state.sidebar < len(records)`,
+    `len(records) + len(GLOBALS)`), which only agreed while every row was a
+    session; a row that appears or disappears between frames made the two
+    disagree and Enter act on the wrong entry.
+    """
+    entries: list[SidebarEntry] = []
+    if autopr_entry is not None:
+        entries.append(autopr_entry)
+    entries += [
+        SidebarEntry(
+            f"{record.name} · {record.phase}",
+            f"session:{record.id}",
+            f"{record.agent} · {record.permission_mode}",
+            record.id,
+        )
+        for record in records
+    ]
+    entries += [SidebarEntry(label, action) for label, action in GLOBALS]
+    return entries
+
+
 @dataclass
 class ViewState:
     session_id: str | None = None
@@ -133,13 +171,12 @@ def build_layout(
     rows: list[Row],
     width: int,
     height: int,
+    autopr_entry: SidebarEntry | None = None,
 ) -> Layout:
     """Return clipped drawing commands and exact click targets for this viewport."""
     width, height = max(1, width - 1), max(1, height)
     layout = Layout(width, height)
-    entries = [(r.name + f" · {r.phase}", f"session:{r.id}") for r in records] + list(
-        GLOBALS
-    )
+    entries = sidebar_entries(records, autopr_entry)
     state.sidebar = min(max(0, state.sidebar), len(entries) - 1)
     layout.put(2, 1, "◆  Matcha Sandbox", "accent")
     if width < 72 or height < 20:
@@ -157,17 +194,15 @@ def build_layout(
     visible = max(1, (height - 11) // 3)
     start = max(0, min(state.sidebar - visible // 2, len(entries) - visible))
     for offset, index in enumerate(range(start, min(len(entries), start + visible))):
-        label, action = entries[index]
+        entry = entries[index]
+        label = entry.label
         y = 6 + offset * 3
         focused = state.region == 0 and index == state.sidebar
-        if index < len(records) and records[index].id == state.session_id:
+        if entry.session_id and entry.session_id == state.session_id:
             label = "● " + label
-        layout.button(1, y, label, action, side - 2, focused)
-        if index < len(records):
-            item = records[index]
-            layout.put(
-                3, y + 1, f"{item.agent} · {item.permission_mode}", "muted", side - 4
-            )
+        layout.button(1, y, label, entry.action, side - 2, focused)
+        if entry.detail:
+            layout.put(3, y + 1, entry.detail, "muted", side - 4)
     layout.put(
         2,
         height - 5,
@@ -281,12 +316,10 @@ def build_layout(
     )
     layout.put(0, height - 4, "─" * width, "border")
     layout.put(2, height - 3, state.notice, "muted", width - 4)
-    layout.put(
-        2,
-        height - 2,
-        "Tab: focus  ↑↓: select  Enter/click: open  1–7: tab  r: refresh  q: quit",
-        "accent",
-    )
+    footer = "Tab: focus  ↑↓: select  Enter/click: open  1–7: tab  r: refresh  q: quit"
+    if state.tab == 6 and autopr_entry is not None and autopr_entry.hint:
+        footer += "  " + autopr_entry.hint
+    layout.put(2, height - 2, footer, "accent")
     layout.put(
         2,
         height - 1,
