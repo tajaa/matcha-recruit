@@ -2,13 +2,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 AUDIT_FILE="${1:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
 DECISION_FILE="${2:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
 REPORT_FILE="${3:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
 VERIFICATION_FILE="${4:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
 COMMIT_SUBJECT_FILE="${5:-}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+
+# Every `git reset --hard` / `git clean -fd` below targets $REPO_ROOT with no
+# pathspec, so it discards tracked AND untracked work anywhere in that tree.
+# Without AUTOPR_WORKSPACE_ROOT that tree is the checkout THIS script runs
+# from, which is how a local run once destroyed work in progress on the very
+# harness being run. The workflow always sets the variable; a local run that
+# wants the fallback has to start from a clean worktree.
+if [ -z "${AUTOPR_WORKSPACE_ROOT:-}" ] \
+    && [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+    printf 'self-audit publish: refusing to run against %s: the working tree is dirty and AUTOPR_WORKSPACE_ROOT is unset\n' "$REPO_ROOT" >&2
+    exit 1
+fi
 FINGERPRINT="$(jq -r '.fingerprint' "$AUDIT_FILE")"
 BRANCH="bot/autopr-audit-$FINGERPRINT"
 OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
@@ -16,8 +28,12 @@ OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
 cd "$REPO_ROOT"
 git add --all
 changed_paths="$(git diff --cached --name-only --no-renames)"
+# self-audit/ is deliberately absent from the group below: the auditor is a
+# sealed capsule and must not be able to rewrite its own prompt, verifier or
+# this publisher. _prompt.txt states the same rule to the model; this is the
+# enforcement. apps/msandbox/tests/test_autopr_self_audit.sh covers it.
 disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE \
-    '^(apps/msandbox/(bin/[^/]+|cli/.*|sandbox/[^/]+|(harness|error-autofix|scope|self-audit)/[^/]+|tests/(test_msandbox_v2\.py|test_(agent_sandbox|msandbox_|kanban_autopr|error_autofix|autopr_)[^/]*\.(sh|py))|docs/[^/]+))$' || true)"
+    '^(apps/msandbox/(bin/[^/]+|cli/.*|sandbox/[^/]+|(harness|error-autofix|scope)/[^/]+|tests/(test_msandbox_v2\.py|test_(agent_sandbox|msandbox_|kanban_autopr|error_autofix|autopr_)[^/]*\.(sh|py))|docs/[^/]+))$' || true)"
 if printf '%s\n' "$changed_paths" | grep -qx 'apps/msandbox/tests/test_autopr_self_audit.sh'; then
     disallowed_paths="${disallowed_paths}${disallowed_paths:+$'\n'}apps/msandbox/tests/test_autopr_self_audit.sh"
 fi

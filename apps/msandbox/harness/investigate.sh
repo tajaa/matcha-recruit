@@ -7,18 +7,19 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-# Every `git reset --hard` below targets $REPO_ROOT. Without
-# AUTOPR_WORKSPACE_ROOT that is the checkout THIS script runs from, and if that
-# checkout carries uncommitted edits to the harness itself, the reset destroys
-# work in progress on the very code being run — which is exactly what happened
-# once. The workflow always sets the variable; a local run that wants the
-# fallback has to start from a clean apps/msandbox.
+# Every `git reset --hard` / `git clean -fd` below targets $REPO_ROOT with no
+# pathspec, so it discards tracked AND untracked work anywhere in that tree.
+# Without AUTOPR_WORKSPACE_ROOT that tree is the checkout THIS script runs
+# from, which is how a local run once destroyed work in progress on the very
+# harness being run. The workflow always sets the variable; a local run that
+# wants the fallback has to start from a clean worktree.
 if [ -z "${AUTOPR_WORKSPACE_ROOT:-}" ] \
-    && [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no -- apps/msandbox 2>/dev/null)" ]; then
-    die "refusing to run against $REPO_ROOT: apps/msandbox has uncommitted changes and AUTOPR_WORKSPACE_ROOT is unset"
+    && [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+    die "refusing to run against $REPO_ROOT: the working tree is dirty and AUTOPR_WORKSPACE_ROOT is unset"
 fi
 
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
@@ -27,7 +28,6 @@ RAW_DECISION_FILE="${3:?usage: investigate.sh card.json report.md raw-decision.j
 HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"
 export AUTOPR_INVOCATION_ID="${AUTOPR_INVOCATION_ID:-local-$$-$(date +%s)}"
 export AUTOPR_CONTINUATION_PID=$$
-REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 REPO="${GITHUB_REPOSITORY:-}"
 WORK_DIR="$(mktemp -d)"
 # checkpoint.sh reads this to tell a genuine step timeout from a crash: only a

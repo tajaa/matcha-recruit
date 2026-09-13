@@ -69,7 +69,7 @@ printf '## Verification\nall green\n' > "$TMP_DIR/verification.md"
 printf '%s\n' '{"schema_version":1,"commit_subject":"fix: restore AutoPR dispatcher contract"}' > "$TMP_DIR/commit-subject.json"
 printf 'after\n' > "$TEST_REPO/apps/msandbox/harness/example.sh"
 PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
-    GITHUB_REPOSITORY=x/x "$TEST_REPO/apps/msandbox/self-audit/publish.sh" \
+    GITHUB_REPOSITORY=x/x AUTOPR_WORKSPACE_ROOT="$TEST_REPO" "$TEST_REPO/apps/msandbox/self-audit/publish.sh" \
     "$TMP_DIR/audit.json" "$TMP_DIR/publish-decision.json" \
     "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/commit-subject.json" >/dev/null
 grep -q 'pr create' "$TMP_DIR/gh.log"
@@ -79,15 +79,54 @@ printf 'PASS: allowed AutoPR script repair publishes only a draft branch\n'
 
 mkdir -p "$TEST_REPO/.github/workflows"
 printf 'forbidden\n' > "$TEST_REPO/.github/workflows/escape.yml"
+reject_path() {
+    local label="$1" rc err
+    set +e
+    err="$(PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
+        GITHUB_REPOSITORY=x/x AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
+        "$TEST_REPO/apps/msandbox/self-audit/publish.sh" \
+        "$TMP_DIR/audit.json" "$TMP_DIR/publish-decision.json" \
+        "$TMP_DIR/report.md" "$TMP_DIR/verification.md" \
+        "$TMP_DIR/commit-subject.json" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ] || ! printf '%s' "$err" | grep -qF 'touched a forbidden path'; then
+        printf 'FAIL: publisher did not reject %s on the path guard (rc=%s)\n%s\n' \
+            "$label" "$rc" "$err" >&2
+        exit 1
+    fi
+    git -C "$TEST_REPO" reset --hard >/dev/null 2>&1
+    git -C "$TEST_REPO" clean -fd >/dev/null 2>&1
+}
+
+reject_path 'a workflow change'
+printf 'PASS: publisher rejects a workflow change\n'
+
+# The capsule guards itself. Without a case inside self-audit/, widening the
+# allowlist to include the lane's own directory passes the whole suite.
+for capsule in verify.sh _prompt.txt investigate.sh; do
+    printf 'tampered\n' > "$TEST_REPO/apps/msandbox/self-audit/$capsule"
+    reject_path "self-audit/$capsule"
+done
+printf 'PASS: publisher rejects every sealed-capsule path\n'
+
+
+# The publisher's `git reset --hard` has no pathspec. Run without
+# AUTOPR_WORKSPACE_ROOT against a dirty tree it would discard a developer's
+# work in progress, so it must refuse instead.
+printf 'local work in progress\n' > "$TEST_REPO/uncommitted.txt"
 set +e
-PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
+dirty_err="$(PATH="$TMP_DIR/bin:$PATH" AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" \
     GITHUB_REPOSITORY=x/x "$TEST_REPO/apps/msandbox/self-audit/publish.sh" \
     "$TMP_DIR/audit.json" "$TMP_DIR/publish-decision.json" \
-    "$TMP_DIR/report.md" "$TMP_DIR/verification.md" >/dev/null 2>&1
-forbidden_rc=$?
+    "$TMP_DIR/report.md" "$TMP_DIR/verification.md" 2>&1 >/dev/null)"
+dirty_rc=$?
 set -e
-[ "$forbidden_rc" -ne 0 ]
-printf 'PASS: publisher rejects workflow and sealed-capsule changes\n'
+[ "$dirty_rc" -ne 0 ]
+printf '%s' "$dirty_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT is unset'
+[ -f "$TEST_REPO/uncommitted.txt" ]
+rm -f "$TEST_REPO/uncommitted.txt"
+printf 'PASS: publisher refuses a dirty worktree when AUTOPR_WORKSPACE_ROOT is unset\n'
 
 # The audit is cheap; the repair is a Sol run. The same failing check set is
 # handed to Codex once, not every six hours (15/15 failed runs, 2026-08-31 →

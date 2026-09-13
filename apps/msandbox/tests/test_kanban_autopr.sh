@@ -316,6 +316,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     autopr_ports="$(SANDBOX_WORKSPACE_DIR="$TMP_DIR" SANDBOX_AWS_DIR="$TMP_DIR" \
       SANDBOX_CODEX_AUTH_FILE="$TMP_DIR/auth.json" \
       docker compose --project-name matcha-kanban-autopr-sandbox \
+        --project-directory "$REPO_ROOT" \
         --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.sandbox.yml" \
         --file "$REPO_ROOT/apps/msandbox/sandbox/docker-compose.autopr-sandbox.yml" \
         config --format json | jq -c '.services.workspace.ports // []')"
@@ -691,6 +692,21 @@ fi
 EOF
 chmod +x "$TMP_DIR/bin/codex"
 
+# investigate.sh does real git work in $REPO_ROOT and reset --hards it on some
+# paths. Unset, AUTOPR_WORKSPACE_ROOT means this checkout, so every invocation
+# below points at a throwaway repository instead — the publisher guard refuses
+# that shape outright, and pointing at the checkout is what destroyed a working
+# tree once.
+INVESTIGATE_REPO="$TMP_DIR/investigate-repo"
+mkdir -p "$INVESTIGATE_REPO"
+git -C "$INVESTIGATE_REPO" init -q
+git -C "$INVESTIGATE_REPO" config user.name test
+git -C "$INVESTIGATE_REPO" config user.email test@example.com
+printf 'fixture\n' > "$INVESTIGATE_REPO/README.md"
+git -C "$INVESTIGATE_REPO" add README.md
+git -C "$INVESTIGATE_REPO" commit -qm initial
+git -C "$INVESTIGATE_REPO" branch -M main
+
 cat > "$TMP_DIR/card.json" <<'EOF'
 {"task_id":"f296d090-0000-4000-8000-000000000001","id8":"f296d090","project_id":"8b924347-d6e4-4000-8e7d-ca8f46f76fba","title":"Standardize terminology","category":"fix","mode":"rework","review_note":"No change, including screenshot"}
 EOF
@@ -701,6 +717,7 @@ CODEX_STUB_CONTEXT="$TMP_DIR/context.json" CODEX_STUB_ARGS="$TMP_DIR/codex-args"
 AUTOPR_LIVE_LOG="$TMP_DIR/live-work.log" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card.json" "$TMP_DIR/report.md" "$TMP_DIR/decision.json" > "$TMP_DIR/investigate-command.log" 2>&1
 investigate_rc=$?
 [ "$investigate_rc" = 0 ] || sed -n '1,120p' "$TMP_DIR/investigate-command.log"
@@ -744,6 +761,7 @@ CODEX_STUB_CONTEXT="$TMP_DIR/context-no-files.json" CODEX_STUB_ARGS="$TMP_DIR/co
 AUTOPR_LIVE_LOG="$TMP_DIR/live-no-files.log" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-no-files.md" \
     "$TMP_DIR/decision-no-files.json" > /dev/null 2>&1
 no_files_rc=$?
@@ -759,6 +777,7 @@ check "investigation accepts a card with no attachments on macOS Bash" \
 
 AUTOPR_TEST_CLAIM_OK=false PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$env_file" \
 GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_ARGS="$TMP_DIR/held-codex-args" \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/held-report.md" \
     "$TMP_DIR/held-decision.json" > "$TMP_DIR/held-investigation.log" 2>&1
 held_rc=$?
@@ -773,6 +792,7 @@ CODEX_STUB_ARGS="$TMP_DIR/codex-failed-args" \
 AUTOPR_LIVE_LOG="$TMP_DIR/live-failed.log" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" \
 AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/report-failed.md" \
     "$TMP_DIR/decision-failed.json" > /dev/null 2>&1
 failed_codex_rc=$?
@@ -787,6 +807,7 @@ GITHUB_REPOSITORY="tajaa/matcha-recruit" CODEX_STUB_FILES="$TMP_DIR/invalid-json
 CODEX_STUB_CONTEXT="$TMP_DIR/invalid-json-context.json" CODEX_STUB_ARGS="$TMP_DIR/invalid-json-args" \
 AUTOPR_LIVE_LOG="$TMP_DIR/invalid-json-live.log" \
 AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/investigate-runtime" AUTOPR_SANDBOX_TEST_DIRECT=1 \
+AUTOPR_WORKSPACE_ROOT="$INVESTIGATE_REPO" \
     "$AUTOPR_DIR/investigate.sh" "$TMP_DIR/card-no-files.json" "$TMP_DIR/invalid-json-report.md" \
     "$TMP_DIR/invalid-json-decision.json" > "$TMP_DIR/invalid-json-run.log" 2>&1
 invalid_json_rc=$?
@@ -2640,6 +2661,30 @@ PATH="$TMP_DIR/bin:$PATH" GITHUB_REPOSITORY="tajaa/matcha-recruit" \
 cooldown_rc=$?
 check "the cooldown still applies before the budget is consulted" \
     $([ "$cooldown_rc" = "3" ] && ! grep -q 'unqueue' "$TMP_DIR/park-urls" 2>/dev/null && echo 0 || echo 1)
+
+################################################################################
+# publish.sh and investigate.sh both `git reset --hard` $REPO_ROOT with no
+# pathspec. Without AUTOPR_WORKSPACE_ROOT that is the checkout they run from,
+# so they must refuse a dirty tree *before* anything else — including argument
+# validation. A guard placed above the REPO_ROOT assignment dies in its own
+# subshell under `set -u` and silently lets the reset through.
+################################################################################
+GUARD_REPO="$TMP_DIR/guard-repo"
+mkdir -p "$GUARD_REPO/apps/msandbox"
+cp -R "$AUTOPR_DIR" "$GUARD_REPO/apps/msandbox/harness"
+git -C "$GUARD_REPO" init -q
+git -C "$GUARD_REPO" -c user.email=t@example.com -c user.name=t commit -qm init --allow-empty
+echo "work in progress" > "$GUARD_REPO/uncommitted.txt"
+
+for guarded in publish.sh investigate.sh; do
+    guard_err="$(unset AUTOPR_WORKSPACE_ROOT; GITHUB_REPOSITORY=x/x \
+        "$GUARD_REPO/apps/msandbox/harness/$guarded" 2>&1 >/dev/null)"
+    guard_rc=$?
+    check "$guarded refuses a dirty worktree before reading its arguments" \
+        $([ "$guard_rc" != "0" ] \
+            && printf '%s' "$guard_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT is unset' \
+            && [ -f "$GUARD_REPO/uncommitted.txt" ] && echo 0 || echo 1)
+done
 
 echo
 echo "$PASS passed, $FAIL failed"

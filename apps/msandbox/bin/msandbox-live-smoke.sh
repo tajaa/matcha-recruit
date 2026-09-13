@@ -4,7 +4,11 @@
 # test: it installs the controller from the current checkout and uses Docker.
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# This script lives at apps/msandbox/bin/, and every path below is written
+# from the repository root.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+[ -x "$REPO_ROOT/apps/msandbox/bin/agent-sandbox.sh" ] \
+    || { printf 'msandbox-live-smoke: repository root did not resolve: %s\n' "$REPO_ROOT" >&2; exit 1; }
 PR_NUMBER="${MSANDBOX_LIVE_PR:-}"
 KEEP_SESSION="${MSANDBOX_LIVE_KEEP_SESSION:-0}"
 SKIP_INSTALL="${MSANDBOX_LIVE_SKIP_INSTALL:-0}"

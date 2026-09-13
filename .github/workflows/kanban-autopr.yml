@@ -256,12 +256,17 @@ jobs:
           # Everything that runs AFTER the model has touched the workspace
           # executes from this copy of main, never from the checkout. The
           # scope checker and lib.sh's migration-graph helper were missing
-          # from the archive (lib.sh resolves ../alembic_graph_snapshot.py
-          # relative to itself, so every migration draft failed its check
-          # from the control root). agent-sandbox.sh stays in the workspace:
-          # it resolves compose files and the msandbox package from its own
-          # location, and the bridge's apply-time denylist now guarantees a
-          # model patch cannot reach scripts/, docker/, or compose files.
+          # from the archive (lib.sh resolves ../../../scripts/
+          # alembic_graph_snapshot.py relative to itself, so every migration
+          # draft failed its check from the control root) — which is why the
+          # list below names apps/msandbox subdirectories one by one and also
+          # carries the two scripts/alembic_graph*.py helpers at the exact
+          # relative position lib.sh expects. agent-sandbox.sh stays in the
+          # workspace: it resolves compose files and the msandbox package from
+          # its own location, and the bridge's apply-time denylist now
+          # guarantees a model patch cannot reach apps/, scripts/, deploy/, or
+          # compose files. test_ci_guards.sh case 10 checks every archived path
+          # against the tree, so keep this list and the paths in sync.
           control_root="$RUNNER_TEMP/autopr-control"
           rm -rf "$control_root"
           mkdir -p "$control_root"

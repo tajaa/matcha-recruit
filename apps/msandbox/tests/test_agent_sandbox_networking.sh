@@ -15,8 +15,45 @@ mkdir -p "$TMP_DIR/aws"
 render_compose() {
     SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$TMP_DIR/aws" \
         docker compose --project-name matcha-agent-sandbox \
+        --project-directory "$REPO_ROOT" \
         --file "$COMPOSE_FILE" "$@" config --format json
 }
+
+# The compose files live under apps/msandbox/sandbox/ but their `context: .`,
+# workspace default and `.env` all mean the repository root, so every call site
+# pins --project-directory. Nothing else in the tree notices when that flag is
+# dropped, so assert here that it is load-bearing: without it compose resolves
+# the build context to the directory holding the first --file.
+project_dir_pinned="$(render_compose \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["workspace"]["build"]["context"])')"
+[ "$project_dir_pinned" = "$REPO_ROOT" ] || {
+    printf 'FAIL: pinned build context is %s, expected %s\n' "$project_dir_pinned" "$REPO_ROOT" >&2
+    exit 1
+}
+project_dir_unpinned="$(SANDBOX_WORKSPACE_DIR="$REPO_ROOT" SANDBOX_AWS_DIR="$TMP_DIR/aws" \
+    docker compose --project-name matcha-agent-sandbox --file "$COMPOSE_FILE" config --format json \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["workspace"]["build"]["context"])')"
+[ "$project_dir_unpinned" = "$REPO_ROOT/apps/msandbox/sandbox" ] || {
+    printf 'FAIL: unpinned build context is %s; --project-directory is no longer load-bearing\n' \
+        "$project_dir_unpinned" >&2
+    exit 1
+}
+printf 'PASS: --project-directory pins the build context to the repository root\n'
+
+# Every production compose call site has to carry it. The behavioural check
+# above only covers this test's own rendering.
+for site in \
+    apps/msandbox/bin/agent-sandbox.sh \
+    apps/msandbox/cli/docker_runtime.py \
+    apps/msandbox/cli/autopr_control.py \
+    apps/msandbox/self-audit/audit.sh
+do
+    grep -qF -- '--project-directory' "$REPO_ROOT/$site" || {
+        printf 'FAIL: %s invokes compose without --project-directory\n' "$site" >&2
+        exit 1
+    }
+done
+printf 'PASS: every compose call site pins a project directory\n'
 
 render_compose > "$TMP_DIR/default.json"
 python3 - "$TMP_DIR/default.json" <<'PY'

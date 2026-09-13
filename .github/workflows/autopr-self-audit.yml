@@ -159,6 +159,9 @@ jobs:
         if: steps.investigate.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Names the tree the publisher's `git reset --hard` may discard.
+          # Unset, the publisher refuses to run against a dirty worktree.
+          AUTOPR_WORKSPACE_ROOT: ${{ github.workspace }}
         run: |
           ./apps/msandbox/self-audit/publish.sh \
             "$RUNNER_TEMP/autopr-audit.json" \

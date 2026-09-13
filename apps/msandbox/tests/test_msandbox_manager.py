@@ -456,6 +456,15 @@ print('ANSWER=' + input('NEXT PROMPT: '), flush=True)
         files = [command[index + 1] for index, value in enumerate(command) if value == "--file"]
         self.assertTrue(files[0].endswith("docker-compose.sandbox.yml"))
         self.assertTrue(files[1].endswith("docker-compose.sandbox-session.yml"))
+        # The compose files sit under apps/msandbox/sandbox/, so without an
+        # explicit project directory compose would resolve `context: .` and
+        # `.env` there instead of at the root the files are written against.
+        self.assertIn("--project-directory", command)
+        project_directory = command[command.index("--project-directory") + 1]
+        for path in files:
+            self.assertEqual(
+                str(Path(project_directory) / "apps/msandbox/sandbox" / Path(path).name), path
+            )
         self.assertIn("HOST_DEV_BACKEND_URL", PROBE)
         self.assertIn("HOST_DEV_FRONTEND_URL", PROBE)
 

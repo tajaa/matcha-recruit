@@ -535,7 +535,7 @@ cat > "$TMP_DIR/publish-incident.json" <<'EOF'
 EOF
 echo "changed" >> "$FAKE_REPO/apps/msandbox/error-autofix/collect.sh"
 (
-    cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x \
+    cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x AUTOPR_WORKSPACE_ROOT="$FAKE_REPO" \
     "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
       "$TMP_DIR/publish-decision.json" /dev/null /dev/null
 ) > "$TMP_DIR/publish_out.txt" 2>&1
@@ -544,12 +544,28 @@ check "publish.sh refuses a diff touching scripts/" $([ "$?" != "0" ] && echo 0 
 (cd "$FAKE_REPO" && git checkout -- apps/msandbox/error-autofix/collect.sh)
 echo "docs change" >> "$FAKE_REPO/README.md"
 (
-    cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x \
+    cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x AUTOPR_WORKSPACE_ROOT="$FAKE_REPO" \
     "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
       "$TMP_DIR/publish-decision.json" /dev/null /dev/null
 ) > "$TMP_DIR/publish_out2.txt" 2>&1
 check "publish.sh refuses a diff outside server/app or server/tests" $([ "$?" != "0" ] && echo 0 || echo 1)
 (cd "$FAKE_REPO" && git checkout -- README.md)
+
+# publish.sh's five `git reset --hard` calls carry no pathspec. Run without
+# AUTOPR_WORKSPACE_ROOT against a dirty tree they discard a developer's work in
+# progress, so the publisher must refuse before reaching them.
+echo "local work in progress" > "$FAKE_REPO/uncommitted.txt"
+dirty_guard_err="$(
+    cd "$FAKE_REPO" && GH_TOKEN=x GITHUB_REPOSITORY=x/x \
+    "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
+      "$TMP_DIR/publish-decision.json" /dev/null /dev/null 2>&1 >/dev/null
+)"
+dirty_guard_rc=$?
+check "publish.sh refuses a dirty worktree when AUTOPR_WORKSPACE_ROOT is unset" \
+    $([ "$dirty_guard_rc" != "0" ] \
+        && printf '%s' "$dirty_guard_err" | grep -qF 'AUTOPR_WORKSPACE_ROOT is unset' \
+        && [ -f "$FAKE_REPO/uncommitted.txt" ] && echo 0 || echo 1)
+rm -f "$FAKE_REPO/uncommitted.txt"
 
 ################################################################################
 # 11: a later valid no-fix report replaces the retry placeholder body.
@@ -575,7 +591,7 @@ high
 EOF
 (
     cd "$FAKE_REPO" && PATH="$TMP_DIR/bin:$PATH" GH_STUB_CALLS="$TMP_DIR/gh_calls.txt" \
-    GH_TOKEN=x GITHUB_REPOSITORY=x/x \
+    GH_TOKEN=x GITHUB_REPOSITORY=x/x AUTOPR_WORKSPACE_ROOT="$FAKE_REPO" \
     "$FAKE_REPO/apps/msandbox/error-autofix/publish.sh" "$TMP_DIR/publish-incident.json" \
       "$TMP_DIR/publish-decision.json" "$TMP_DIR/report.md" /dev/null
 ) > "$TMP_DIR/publish_out3.txt" 2>&1

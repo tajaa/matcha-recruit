@@ -223,12 +223,12 @@ def _install_drift_report(repo: Path) -> int:
         launcher_text = launcher.read_text(encoding="utf-8")
     except OSError:
         launcher_text = ""
-    if "scripts/agent-sandbox.sh" in launcher_text:
+    pre_move_launcher = "scripts/agent-sandbox.sh" in launcher_text
+    if pre_move_launcher:
         print(
             "msandbox launcher: PRE-MOVE layout "
             "(run: ./apps/msandbox/bin/agent-sandbox.sh install)"
         )
-        return 1
     installed, expected = release_drift(repo_root=repo)
     if installed is None:
         print("msandbox release: not installed (run: msandbox install)")
@@ -245,7 +245,7 @@ def _install_drift_report(repo: Path) -> int:
             + ", ".join(stale)
             + " (run: apps/msandbox/harness/install-launch-agent.sh)"
         )
-    return 1 if stale or installed != expected else 0
+    return 1 if pre_move_launcher or stale or installed != expected else 0
 
 
 def _checkout_pr(repo: Path, number: int) -> int:
