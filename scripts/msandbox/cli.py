@@ -190,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("run-now", "queue an immediate run for this card"),
         ("unstick", "move a stranded In Progress card back to its lane"),
         ("cancel-run", "cancel the active Kanban run and settle its card"),
+        ("log", "what this card's runs did, what is left, and why they stopped"),
     ):
         verb_parser = autopr_commands.add_parser(verb, help=help_text)
         verb_parser.add_argument("target", nargs="?" if verb == "cancel-run" else None,

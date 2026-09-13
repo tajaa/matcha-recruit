@@ -172,6 +172,16 @@ history="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/history"
 files="$(mw_api GET "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID/files" 2>/dev/null || echo '[]')"
 printf '%s' "$subtasks" > "$WORK_DIR/subtasks.json"
 printf '%s' "$history" > "$WORK_DIR/history.json"
+# The per-run journals Cleanup attaches (autopr-run-<run id>-<ts>.md) are this
+# system talking to the operator, not evidence: one lands per run, so after a
+# few failures they would fill the attachment budget with machine-written "why
+# it stopped" prose and crowd out what people attached. Drop them HERE, at the
+# single fetch, rather than in the download filter alone: files.json is also
+# slurped verbatim into context.json's `files` list, so a filter applied only
+# to the download loop still hands the model every journal filename.
+files="$(printf '%s' "$files" \
+    | jq -c 'map(select(((.filename // "") | test("^autopr-run-.*\\.md$")) | not))' \
+    2>/dev/null || printf '%s' "$files")"
 printf '%s' "$files" > "$WORK_DIR/files.json"
 
 # Only the exact decision-bound reconsideration event may grant operator
@@ -322,6 +332,7 @@ done < <(printf '%s' "$files" | jq -c --argjson round "$current_round" \
     # publisher uploaded, recognised by its own naming (research-… or
     # email-…-rN). The snapshots on an email card, email-<gmail message id>.md, carry no
     # round suffix and are never mistaken for output of the bot.
+    # Journals are already gone: files.json is filtered at the fetch above.
     def mine: ((.filename // "") | test("^(research|email)-(report-)?" + $id8 + "-r[0-9]+"));
     def prior_report: ((.filename // "") | test("^(research|email)-report-" + $id8 + "-r[0-9]+\\.md$"));
     (if $outcome == "artifact" then
@@ -761,4 +772,13 @@ if [ "$BROWSE_GRANTED" = true ] && [ -n "${AUTOPR_ARTIFACTS_OUTPUT_DIR:-}" ]; th
     printf 'kanban-autopr: %s screenshot(s) ready for publication\n' "$collected" >&2
 fi
 
-"$SCRIPT_DIR/checkpoint.sh" consume "$CARD_FILE"
+# The resume pointer is NOT consumed here. This used to be the last line of
+# the investigation, which meant a publish-stage failure — a path guard
+# refusal, a gh error, a dropped network — threw away the pointer to work that
+# was still valid and still on disk. Run 34670939778 lost a 19-file patch that
+# way. The workflow's Cleanup step consumes it once publishing has actually
+# succeeded; stop_inflight_snapshots above has already stopped the only writer
+# the original ordering was defending against.
+
+# The investigation ends here, successfully; the pointer stays for Cleanup.
+exit 0

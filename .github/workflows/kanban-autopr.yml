@@ -515,6 +515,9 @@ jobs:
           # skipped/'' when the job died in setup or was cancelled, and that
           # must never read as a success.
           JOB_STATUS: ${{ job.status }}
+          # Inputs for the per-run journal attached to the card below.
+          CHECKPOINT_PATH: ${{ steps.checkpoint.outputs.path }}
+          BRANCH_BASE_SHA: ${{ steps.branch.outputs.sha }}
         run: |
           # Record how this run ended before anything else: the ledger is what
           # stops a card that fails the same way every time from being
@@ -532,8 +535,24 @@ jobs:
               || printf 'warning: could not record the run outcome for %s\n' "$1" >&2
           }
           task_id="$(jq -r '.task_id' "$RUNNER_TEMP/card.json")"
+          # The checkpoint is the authority on "this run hit its time budget",
+          # and BOTH consumers have to read it. A timeout arrives here as
+          # INVESTIGATE_OUTCOME=failure, so without this the ledger books an
+          # `investigate` strike while run-journal.sh reports the very same run
+          # as paused; three approved continuations would then trip
+          # AUTOPR_MAX_SAME_REASON_FAILURES and let select.sh's park overwrite
+          # the `PAUSED: APPROVE 10 MORE MINUTES` header that Espresso and
+          # select.sh:303 prefix-match. An approved continuation is not a
+          # strike.
+          runtime_limited=false
+          if [ -n "$CHECKPOINT_PATH" ] && [ -s "$CHECKPOINT_PATH/metadata.json" ] \
+            && [ "$(jq -r '.runtime_limited // false' "$CHECKPOINT_PATH/metadata.json" 2>/dev/null)" = true ]; then
+            runtime_limited=true
+          fi
           run_reason=""
-          if [ -n "$PUBLISH_REFUSAL_REASON" ]; then
+          if [ "$runtime_limited" = true ]; then
+            :
+          elif [ -n "$PUBLISH_REFUSAL_REASON" ]; then
             run_reason="$PUBLISH_REFUSAL_REASON"
           elif [ "$INVESTIGATE_OUTCOME" = failure ] && [ "$INVESTIGATE_PAUSED" != true ]; then
             run_reason=investigate
@@ -554,9 +573,41 @@ jobs:
             # An operator cancel is neither a success nor a strike; the
             # cooldown marker stays as it was.
             :
-          elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ]; then
+          elif [ "$JOB_STATUS" = success ] && [ "$INVESTIGATE_PAUSED" != true ] \
+            && [ "$runtime_limited" != true ]; then
             record_outcome "$task_id" success
           fi
+          # The resume pointer is consumed HERE, not at the end of
+          # investigate.sh, so that a publish-stage failure keeps the work it
+          # already produced. Only an actual publication settles the card;
+          # anything else leaves the checkpoint resumable for the next run.
+          if [ "$PUBLISH_OUTCOME" = success ] || [ "$PUBLISH_ARTIFACT_OUTCOME" = success ]; then
+            "$AUTOPR_CONTROL_ROOT/kanban-autopr/checkpoint.sh" consume "$RUNNER_TEMP/card.json" \
+              || printf 'warning: could not consume the checkpoint for %s\n' "$task_id" >&2
+          fi
+          # The journal is the operator's view of this run on the ticket
+          # itself: what was done, what is left, why it stopped, and whether
+          # a checkpoint will resume it. Runs BEFORE the checkout hand-back so
+          # the branch diff is still readable. Best-effort like the ledger.
+          journal_outcome=success
+          journal_reason="$run_reason"
+          if [ "$runtime_limited" = true ]; then
+            journal_outcome=paused; journal_reason=runtime_limited
+          elif [ -n "$run_reason" ]; then
+            journal_outcome=failure
+          elif [ "$JOB_STATUS" = cancelled ]; then
+            journal_outcome=cancelled; journal_reason=cancelled
+          elif [ "$INVESTIGATE_PAUSED" = true ]; then
+            # Only an acknowledged takeover reaches here: a real timeout is a
+            # step failure, and run-journal.sh reclassifies it from the
+            # checkpoint's own runtime_limited verdict.
+            journal_outcome=paused; journal_reason=operator_takeover
+          fi
+          "$AUTOPR_CONTROL_ROOT/kanban-autopr/run-journal.sh" "$RUNNER_TEMP/card.json" \
+            --outcome "$journal_outcome" --reason "$journal_reason" \
+            --report "$RUNNER_TEMP/report.md" --decision "$RUNNER_TEMP/decision.json" \
+            --checkpoint "$CHECKPOINT_PATH" --pr "$PUBLISHED_PR" --base-sha "$BRANCH_BASE_SHA" \
+            || printf 'warning: could not attach the run journal for %s\n' "$task_id" >&2
           # Temporary isolation is allowed while building a PR, but no
           # submitted PR branch may remain checked out on the Mac runner.
           # Dirty state is preserved and reported instead of deleted.
