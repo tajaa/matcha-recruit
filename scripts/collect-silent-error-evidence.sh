@@ -2,7 +2,7 @@
 # Collect a small, redacted incident bundle for the self-hosted OpenCode runner.
 # It intentionally reads logs only; no production mutation occurs here.
 #
-# Fallback source for scripts/error-autofix/collect.sh (which reads
+# Fallback source for apps/msandbox/error-autofix/collect.sh (which reads
 # server_error_reports directly) when that DB path is unreachable.
 set -euo pipefail
 

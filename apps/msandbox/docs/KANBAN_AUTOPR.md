@@ -1,0 +1,1336 @@
+# Kanban Autopr
+
+`.github/workflows/kanban-autopr.yml` runs on the same self-hosted Mac runner as
+`silent-error-autofix.yml` and `autopr-self-audit.yml`. `msandbox` is the authoritative
+master switch. While it is ON, two local macOS LaunchAgents are the sole automatic
+clock, and both dispatch only when no AutoPR lane is queued or active. The scheduler
+ticks every five minutes: a production-error pass gets the next slot when its last
+completion is at least ten minutes old; then a self-audit gets one when its last
+completion is at least six hours old; then Kanban advances **only if its own last pass
+is at least five minutes old**, otherwise the tick is a logged `kanban-not-due` skip.
+The second agent (`com.matcha.kanban-autopr-request-watch`, one minute, the same
+`dispatch-if-idle.sh --if-requested`) handles explicit requests ahead of routine work:
+pressing **Run AutoPR now** on a card queues a request, the watcher sees it via
+one bounded query against our own API (`GET /matcha-work/autopr/run-requests`), and
+dispatches Kanban immediately. An idle watch tick makes no GitHub API call at all,
+starts no observer panes, takes no dispatch lock, and writes no line to the shared
+dispatch log — it costs one bounded, timeout-capped board query and a heartbeat file.
+A probe failure never forces a run, and a one-minute floor between forced dispatches
+(burned only once a dispatch actually lands) keeps a card that cannot be selected from
+spinning the runner. Three bounds make "cannot be selected" terminal rather than
+permanent: `select.sh` consumes the request of any run-requested card the pass declines
+or defers, the server refuses a request for a board outside the four the harness polls,
+and a request that nothing claims within 30 minutes expires on its own.
+GitHub's manual workflow dispatch remains the recovery path but also fails closed when
+`msandbox` is OFF. There is deliberately no second GitHub cron:
+a remote schedule can race the dispatcher's run-list check and leave a duplicate pending
+run. The runner has one job slot, and the workflow concurrency group remains the final
+overlap guard. The unit of work is one kanban card assigned to
+`haley@oceaneca.com` sitting in `todo` or `changes_requested`, across four fixed
+Espresso projects — WerkWerk, Beetlejuse, Gummfit, and MATCHA. It never scans the whole
+board or every user's cards.
+
+The board is the source of truth in both directions: a card drives a PR, and a PR drives
+a card back. Ordinary AutoPR runs never merge or approve. The separate manual
+`autopr-release-plan.yml` workflow can mark the plan's still-draft PRs ready and merge
+them in the proposed order only after an operator supplies the exact live plan id; it
+never bypasses branch protection or includes PRs that were already ready for review.
+
+**Design constraint carried over from silent-error-autofix**: no model credential and no
+Matcha credential goes into GitHub secrets. The runner is Finch's Mac running as Finch's
+user; before each run the trusted bridge makes a temporary mode-600 copy of the Mac's
+existing Codex `~/.codex/auth.json` and exposes that one file read-only in the dedicated
+`matcha-kanban-autopr-sandbox` container. The Matcha bot credential lives in
+`~/.config/matcha-autopr/env` (`chmod 600`, never committed). Codex itself never
+receives that file or credential.
+
+The existing `EC2_SSH_KEY` Actions secret is used only by the trusted harness. Before
+each queue scan, `resolve-production-context.sh` resolves the active blue/green
+backend/frontend containers through their ECR digests, recovers their immutable Git SHA
+tags, reads the public frontend build number, and compares production's read-only
+`alembic_version` set with the repository heads. A live SHA missing from or divergent
+from `main`, an unreadable build number, or an unreadable schema state fails the run
+closed. New frontend images expose the build/SHA in `/version.json`; the resolver keeps
+a compiled-bundle fallback only for older images that predate the manifest. The key is
+removed from the environment before Codex starts.
+
+The post-deploy admin-update publisher reuses this same sealed bridge and sandbox
+identity for a writing-only `gpt-5.6-luna`/high pass. It is dispatched by a completed
+deploy rather than the five-minute card clock, but the one-slot Mac runner serializes
+it with the other lanes. The model receives neither the SSH key nor database access;
+trusted code validates its fixed JSON and owns the narrow changelog transaction. See
+`docs/ops/ADMIN_UPDATES_AUTOPUBLISH.md`.
+
+## Why per-project collaborator rows, not a company scope
+
+The four projects span **two different `companies` rows** — WerkWerk/Beetlejuse/Gummfit
+live under Haley's personal Espresso workspace (`is_personal=true`), MATCHA lives under a
+separate personal/test workspace. A `client`-role user only gets same-company access via
+`clients.company_id`, which can point at exactly one company — so a single `clients` row
+cannot cover all four. Instead the seed pack (`scripts/seed/autopr_bot.py`) gives the bot
+a `mw_project_collaborators` row on each of the four project ids directly.
+`_verify_project_access` (`routes/matcha_work/_shared.py`) falls back to the collaborator
+table whenever the same-company path doesn't match, so this works regardless of which
+company owns which project — and continues to work if a project's owning company ever
+changes.
+
+## One-time setup
+
+1. Run the seed pack (creates the bot user + the four collaborator rows):
+   ```sh
+   AUTOPR_BOT_PASSWORD=<pick a real password> ./scripts/seed-prod.sh scripts/seed/autopr_bot.py --dry-run
+   AUTOPR_BOT_PASSWORD=<same password> ./scripts/seed-prod.sh scripts/seed/autopr_bot.py
+   ```
+   Undo: `./scripts/seed-prod.sh scripts/seed/autopr_bot.py --undo`.
+2. Write `~/.config/matcha-autopr/env` (`chmod 600`), never committed:
+   ```sh
+   MATCHA_API_URL=https://hey-matcha.com/api
+   MATCHA_BOT_EMAIL=support@hey-matcha.com
+   MATCHA_BOT_PASSWORD=<the same password from step 1>
+   MATCHA_PROJECT_IDS=7f728636-3219-4d83-9df3-a4682e3242de,fade10b4-36ff-4c60-af59-5cc6058285ab,84823d21-c752-4abd-9696-4c93c8b3c21e,8b924347-d6e4-4000-8e7d-ca8f46f76fba
+   MATCHA_ASSIGNEE_EMAIL=haley@oceaneca.com
+   # Optional: approved is_test tenant used only by the trusted reproduction harness.
+   AUTOPR_TEST_TENANT_EMAIL=<test tenant owner email>
+   AUTOPR_TEST_TENANT_PASSWORD=<test tenant password>
+   ```
+   Scheduled GitHub runs fail closed if `MATCHA_API_URL` points at localhost or
+   if any of the four project ids is missing. This prevents a production PR from
+   being linked to a dev-only card. If test-tenant replay is configured, install
+   its trusted runner browser once with
+   `server/venv/bin/python -m playwright install chromium`. The credentials,
+   cookies, headers, and response bodies never enter msandbox; only a screenshot
+   and bounded same-origin status signals do.
+3. Install the checkout hook in the real clone: `./apps/msandbox/harness/install-hooks.sh`.
+4. Upgrade the repo's GitHub webhook to also deliver `pull_request` (idempotent — safe to
+   re-run against an already-installed hook): call the existing
+   `POST /matcha-work/projects/{id}/github/install-webhook` admin endpoint, or re-run
+   whatever originally installed it. `install_repo_webhook` now PATCHes an existing
+   hook's event list up to `["push", "pull_request"]` instead of no-op'ing on a URL match.
+5. Ensure the host Codex CLI is authenticated with the intended ChatGPT account
+   (`codex login status`). Do **not** add an API key for the
+   sandbox: each run securely reuses only the host auth file.
+6. Install the local timer: `./apps/msandbox/harness/install-launch-agent.sh`. Installation
+   alone leaves autonomous work OFF. Its JSONL log is
+   `~/Library/Logs/matcha-kanban-autopr-dispatch.log`.
+7. Run `msandbox` or `msandbox start`. This starts the primary sandbox, enables and kicks
+   the timer, creates the `matcha-autopr` host tmux dashboard, and prints a mandatory
+   health/activity summary. Bare `msandbox` then opens the session manager; add
+   `--dashboard` to attach the observer dashboard first, or open it any time with
+   `tmux attach -t matcha-autopr`. Detach with `Ctrl-b d`; from inside any msandbox agent
+   session `Ctrl-b a` hops to the dashboard and back, and that session's status bar shows
+   the live AutoPR state. The dispatcher also posts Notification Center banners (run
+   dispatched, run finished, sandbox off) — `msandbox notify off|on` is a sticky
+   opt-out.
+
+   **Runtime selection.** A run's model and effort come from four sources, highest
+   first: an operator hand-back (`msandbox` takeover), the card's own pin, the
+   escalation the previous stall implies, then the kind registry default in
+   `autopr_kind_field`. The automatic middle step is the fix for a card reaching
+   its third "approve 10 more minutes": `checkpoint.sh` classifies the stall
+   (`near_publish` / `implementing` / `exploring` / `stuck`) from what the run
+   actually saved plus the phase it last logged, and `autopr_runtime_for_stall`
+   in `lib.sh` maps that to a runtime on the kind's own base model — a PR run
+   with the patch written and only tests/publish left is DOWNGRADED to
+   `gpt-5.6-luna`, a run that has twice come back empty-handed is raised to
+   `xhigh`; an artifact kind (research, email) is classified from its report
+   instead of a patch and never leaves the model its registry row chose. A card that stalls the SAME way twice is escalated
+   one effort rung per repeat, so a `near_publish` that never quite publishes
+   does not rerun identically forever. The classification is written to
+   `<checkpoint root>/<task id>/stall.json` (read via `checkpoint.sh stall
+   CARD`), not into the checkpoint directory, because the resume pointer can
+   name an in-flight snapshot written before the stall was classified.
+   `consume` clears it and the stall counter when a round publishes; both also
+   expire on age, since a held or abandoned card never publishes at all. Pin a specific model/effort
+   in the ticket's **Runtime** control to override it; clear both to return to
+   auto. investigate.sh records which source won on the card
+   (`autopr_runtime_source`) and exports the spent model/effort to the job env
+   so the pause note compares against what actually ran.
+   The roster lives in three places that must agree: `AUTOPR_RUNTIME_MODELS`
+   (`lib.sh`), `MODEL_CHOICES` (`apps/msandbox/cli/autopr_control.py`), and
+   `_ALLOWED_AUTOPR_MODELS` (`project_task_service.py`).
+
+   **Progress.** The model appends one JSON object per step to
+   `.git/autopr-io/output/progress.jsonl` (contract in `_prompt_todo.txt`). The
+   snapshot timer copies it out every few minutes, checks off any subtask the
+   model reported finishing — outside the snapshot lock, since each tick is a
+   blocking board write — and records the phase. The `ticked-subtasks` ledger
+   is keyed by run id, so the 4-minute timer never re-PATCHes the same item
+   while a checklist item rolled into a later round stays tickable; `run-journal.sh` renders the
+   whole log as the journal's **Progress log** section and calls
+   `checkpoint.sh tick` once more on the way out so a successful run's last ticks
+   land. A card that sits at 0/5 through a run now means the model ignored the
+   contract, not that nothing happened. `msandbox doctor` reports when the installed release or the dispatcher tree
+   is behind the checkout; `msandbox install` refreshes both. `msandbox stop` removes the
+   authorization gate before unloading the timer and stopping both sandbox containers,
+   but refuses while an agent or AutoPR workflow is active. `msandbox stop --force` is
+   the explicit interruption override. Do not add a GitHub cron alongside it.
+
+## Holding, releasing, and unsticking cards
+
+**Holding a card.** Any collaborator can park a Todo or Changes Requested card so the lane
+skips it: the ticket header's **Hold** button (beside *Run AutoPR now*), the **Unqueue**
+button once a run is requested, or `POST …/autopr/unqueue` with an optional
+`{"reason": "<≤200 chars>"}` body. The hold is an `autopr_run_cancel` history row; a
+reason on that row is exposed on every task as `autopr_hold_reason` (null when the card
+is not held or the hold carried no reason) and shown under the *AutoPR paused* label in
+Espresso. The hold lifts on the next *Run AutoPR now*, added context, review rejection,
+or new round — a machine deferral (`pause:false`) never counts as a hold and never
+carries a reason.
+
+**Run journal on the ticket.** Every run ends by attaching `autopr-run-<run id>-<ts>.md`
+to its card (`apps/msandbox/harness/run-journal.sh`, from the `always()` Cleanup step):
+what was done (report summary, PR number, files changed from the checkpoint or the
+branch diff), what is left (decision summary and open questions), why it stopped, whether
+a resumable checkpoint exists on the runner, and the next step. A run that died in a way
+nothing else had already written to the card (model pass failed, verify failed, publish
+failed, died in setup, cancelled) also gets a `🤖 AUTO SETUP · STOPPED: <why> · run #N`
+card-face header pointing at the journal; refusals, pauses, and successes keep the header
+the publisher or checkpoint already wrote. The card file the Cleanup step holds is the
+selection-time snapshot, so the journal re-reads the live note first and stands down
+whenever this run already parked the card — otherwise a `BLOCKED: AWAITING ANSWERS ·
+[autopr:no-spec …]` park written by `investigate.sh` or `publish-research.sh`, which both
+exit non-zero afterwards, would be overwritten by `STOPPED` and lose both the settled-state
+marker and the question form. A timeout reaches Cleanup as an ordinary step failure —
+`investigate.sh` reports `paused` only for an acknowledged operator takeover (Codex exit
+75) — so the Cleanup step reads the checkpoint's own `runtime_limited` verdict *before* it
+books a ledger strike, and the journal reports the same run as a pause: an approved
+continuation that runs out of time again is not a strike, and the
+`PAUSED: APPROVE 10 MORE MINUTES` header stays. Only the newest
+`AUTOPR_JOURNAL_KEEP` (5) journals are kept on a card; older ones are deleted so they
+cannot bury the attachments people added. The journals are excluded at the single fetch
+that writes `files.json`, so they reach the model neither as downloaded attachments nor as
+filenames in `context.json`: one lands per run, and re-reading them would crowd out
+operator evidence. `msandbox autopr log <id8|title>` prints the journal list with the
+newest in full, the failure ledger, and the runner's checkpoints for that card.
+
+**The card says when work is saved.** Until now the only thing that told a ticket
+its model work survived was `checkpoint.sh`'s `PAUSED: APPROVE 10 MORE MINUTES` header
+— written *only* for a run killed at its time budget. A run that died at a path refusal,
+a verify failure or a crash left an identical resumable checkpoint and a card with no way
+to know, so its owner pressed Run expecting a fresh start, or gave up on work that was
+sitting on disk. Every park now appends one line from `lib.sh`'s
+`autopr_checkpoint_resume_line` — `publish.sh`'s cosmetic and path refusals,
+`investigate.sh`'s awaiting-answers park, and `run-journal.sh`'s own STOPPED header:
+
+> `Resume: 19 file(s) of model work are saved on the runner. Press Run to continue from
+> them instead of starting over; a checkpoint expires 24h after the run that saved it.`
+
+It reads the `active` pointer, not the newest directory, so a consumed or expired
+checkpoint promises nothing. `progress_note_with_origin` drops a stale `Resume:` line the
+way it drops the pause report, so it is replaced each cycle rather than stacking. The
+parker writes it before its question form, and `run-journal.sh` stands down entirely when
+a park already owns the header.
+
+**The resume pointer survives a failed publish.** `checkpoint.sh consume` runs from the
+Cleanup step once `publish.sh` or `publish-research.sh` has actually succeeded, not as the
+last line of `investigate.sh`. Under the old ordering a publish-stage failure — a path
+guard refusal, a `gh` error, a dropped connection — renamed `active` to `consumed-…` while
+the work it pointed at was still valid and still on disk, so the next run started over.
+The journal also finds this run's own in-flight snapshot when the Cleanup step has no
+checkpoint to hand it (the save step only runs when *Investigate* failed), rather than
+reporting that nothing was saved.
+
+**Watching and interrupting a run from `msandbox`.** A run that is working or held
+appears as the first row of the SESSIONS list — `AutoPR ● running 4m`, `AutoPR · taking
+over…`, or `AutoPR ◆ yours`, with the card title beneath it. Finished runs stay on the
+AutoPR tab; only a live or owned run gets a row, so the list never grows a dead entry.
+Enter opens that run's live view (the AutoPR tab, its detail block and the `activity.log`
+tail). **Esc** there takes the run over, **Enter** on an owned run opens your Codex
+session on its checkout, and **h** hands it back; the footer names whichever applies.
+
+The live view is a read-only stream, and it says so. AutoPR runs
+`codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral … "$PROMPT_TEXT"`
+through `msandbox exec` → `exec_workspace_no_tty`: one shot, prompt as argv, no TTY,
+stdout redirected into `activity.log`. There is no terminal to attach to, so typing
+cannot reach the model — interrupting means taking the checkout over, which is what Esc
+does. Esc keeps its ordinary "back to the sidebar" meaning everywhere it cannot mean
+that: another tab, a run whose supervisor has died (that is *Recover interrupted run*),
+or a run that is not working. It prompts before stopping anything, because Esc is also
+the key people press to back out.
+
+Taking over is not instant — the supervisor stops the container, SIGTERMs the model and
+copies a ~216 MB checkout into the run directory — so the row reads `taking over…` until
+it lands. `dashboard_view.sidebar_entries` is the single definition of that list; the
+renderer and the key handler both index it, rather than each re-deriving
+`records + GLOBALS`, which is what made a row appearing or vanishing mid-frame select the
+wrong entry.
+
+**Card control from any terminal.** `msandbox autopr queue` lists the cached snapshot
+including held (`HOLD · <reason>`) and claimed In Progress cards; `msandbox autopr hold
+<id8|title> --reason R` writes the board's unqueue hold, `release` lifts it without
+queueing (`run-defer`), `run-now` records a run request and kicks the dispatcher,
+`unstick` moves a stranded In Progress card back to Todo (Changes Requested when it has
+a PR) and `--hold` parks it there, and `cancel-run [--hold]` cancels the active Kanban
+workflow run and unsticks the card the runner checkout is on. All of these are
+`apps/msandbox/harness/card-control.sh` (installed next to the dispatcher), which logs
+in as the bot and refuses ambiguous targets (exit 2). `cancel-run` deliberately leaves
+`autopr_control.py finish` to the workflow's own Cleanup step. The same actions appear as
+rows on the manager's AutoPR tab.
+
+**Path policy.** `publish.sh` publishes only `server/app`/`server/tests` Python, Alembic
+version drafts, `client/src` TypeScript, Espresso Swift, and `docs/**/*.md`; everything
+else (root `CLAUDE.md`, prompts, workflows, scripts, lockfiles) is refused. A refusal no
+longer just fails the step: the card moves to Changes Requested with
+`BLOCKED: DISALLOWED PATHS · [autopr:rejected <ts>] disallowed_paths · <paths>`, the owner
+is asked in chat, and the selector keeps that marker settled — like no-spec — until
+someone moves the card, adds context, or presses Run.
+
+**Failure budget.** Cleanup records every run's outcome per card
+(`~/.cache/matcha-autopr/attempts/<id8>`: `count reason ts`); three consecutive failures
+for the same reason park the card with a server-side hold (`autopr: 3× <reason>`), an
+`ON HOLD: REPEATED FAILURES · [autopr:parked <ts>]` note, and a chat ask. Held cards —
+whether from Espresso Hold/Unqueue, `msandbox autopr hold`, or parking — stay in the
+collector snapshot and render as `‖ HOLD · <reason>` in the dashboard queue, after rework
+and ahead of plain Todo so the six-row cap cannot hide them (`NO-SPEC` is the bot's own
+can't-scope ledger); the selector never runs one. Tunables:
+`AUTOPR_MAX_SAME_REASON_FAILURES`, `AUTOPR_ATTEMPT_COOLDOWN_MINUTES`.
+
+## Local tmux dashboard
+
+The terminal `msandbox` manager additionally has an **AutoPR** tab (key **7**,
+or **AutoPR runs** in its sidebar) for local Kanban investigation output and
+operator takeover. See [takeover and handback](MSANDBOX_SESSIONS.md#take-over-an-autopr-task).
+It also lists queued tickets with **Start now** and **Refresh queued tickets**.
+Refresh reads the board in the background; cached ticket age is always shown.
+Start now records the normal board request then immediately asks the dispatcher
+to start that exact ticket. It bypasses the routine five-minute spend floor, not
+master-off, active workflows, ownership, usage backoff, board grants or PR caps.
+An active run leaves the request queued for the one-minute watcher.
+An explicit Start now can retry a still-pending request after a failed dispatch's
+workflow has finished; automatic ticks remain deduplicated and the short dispatch
+lease prevents double clicks from queueing duplicates. The tab shows
+the next scheduler check and routine eligibility countdown, not a guaranteed
+pickup deadline. Missing or stale `dispatch/status.json` means pickup is unknown.
+Update the installed dispatcher with the normal installer after this change is
+merged; the workflow input must also be available on its configured dispatch ref.
+The observer below still covers all AutoPR lanes and overall scheduler health.
+
+The trusted bridge supervises the model process and writes host-only records to
+`~/.local/state/matcha-autopr/runs/` (`AUTOPR_CONTROL_STATE_DIR` overrides this for
+tests or a shared controller/runner configuration). The desktop controller and
+runner must use the same host user and state directory. No ownership files are
+mounted in the model container. Takeover stops the exact Compose project before
+transferring its clone to a unique manual project; `select.sh` and the investigation
+claim both refuse operator-held tasks. A failed transfer protects the source
+checkout from the bridge's normal replacement cleanup.
+Dead supervisors are recovered before the shared runtime is reused, with unknown
+owners preserved separately. Cross-volume transfers publish a complete copy before
+removing the source. Corrupt records are reported individually without hiding other
+runs. Docker stop/copy work does not hold the global ownership lock.
+
+An acknowledged takeover ends the timed investigation successfully; subsequent
+validation/publication steps are skipped. **Manual work has no autonomous time
+limit** and requires no ten-minute extension approvals. Handing back starts a new
+bounded autonomous investigation; normal 20-minute / approved-extension limits
+still apply to that new workflow.
+
+Handback stores a bounded immutable patch through a private trusted Git index,
+plus an operator note and model/effort, before using the existing `run-now` API.
+The next investigation requires the patch to apply (no checkpoint fallback that
+discards operator edits). Normal path, board-grant, patch, validation, and publication
+guards remain authoritative. Workflow cleanup releases the handback only after
+confirmed product PR publication, preserving a recovery archive before removing
+its managed clone and exact per-run Docker containers, network and dependency
+volumes. Cleanup failures retain the checkout and offer a retry. Questions-only,
+no-safe-action and failed
+continuations retain a retryable handback; canceled workflows can be reclaimed
+after the controller verifies they have stopped. Installing this version does not
+adopt already-running, unsupervised investigations.
+
+While the `msandbox` master switch is ON, the LaunchAgent recreates the read-only
+`matcha-autopr` session on its next tick if the session is missing. Detaching
+the dashboard does not stop work; `msandbox stop` does. A session name alone is not
+considered healthy: if any of the four panes is dead or missing, the helper replaces the
+whole observer session. Autonomous model startup fails closed until all four panes are
+live. The overview owns the full-height, 62%-wide left side; the 38% detail rail stacks
+live agent work, active PR detail, and automation health. At the common 133-column
+terminal size this leaves the overview 82 columns wide, avoiding wrapped queue rows. The
+tmux window uses the Matcha ops-console theme: dark slate chrome, mint active-pane
+accents, semantic status colors, and a compact bottom bar with the detach shortcut. Set
+`NO_COLOR=1` for a plain-text dashboard, or `AUTOPR_DASHBOARD_COLOR=1` to force ANSI
+color when output is routed through a terminal-compatible wrapper. Detached sessions
+start at `133x45` so the intended proportions survive their first attach; override that
+baseline with `AUTOPR_TMUX_WIDTH` and `AUTOPR_TMUX_HEIGHT` when needed.
+
+The panes are observers and are budgeted like observers. Every GitHub read they make
+goes through `gh-cached.sh TTL KEY <command>`: open/merged PR lists and the selector
+probe hold for five minutes, the board bundle for three, and the in-flight run's step
+detail for 45 seconds. Before that, four panes each re-listed PRs on their own timer and
+the overview additionally re-ran `select.sh` — which asks GitHub about every candidate
+card — on every redraw, which is what pushed the hourly REST budget. The dispatcher
+deliberately does **not** use this cache: it reads `run-snapshot.sh` with a short TTL and
+`ALLOW_STALE=false`, because acting on stale run state can double-dispatch. Empty command
+output is a cacheable answer, not a miss — "this branch has no PR yet" is the normal
+state during an investigation, and treating it as a failure re-asked GitHub every minute.
+A selector **crash** is never cached, though: only an actual pick or an actual
+"nothing eligible" is stored, alongside the exit status the NEXT pane branches on, so a
+rate-limited selector reads as failed rather than as an empty queue.
+
+The LaunchAgent does not execute the repo-backed `msandbox` symlink directly:
+macOS can deny background agents access to `~/Documents` even when Terminal has
+access. Instead, the dispatcher evaluates the same fail-closed master predicate
+from launchd-safe locations: the `autopr-enabled` marker created only by
+`msandbox`, plus a running Docker Compose `matcha-agent-sandbox` workspace.
+The workflow repeats the complete `msandbox autopr-ready` check before starting
+Codex. Docker Desktop's CLI path (`/usr/local/bin`) is explicit in the plist.
+
+- **operations overview (Pacific time)** — a glanceable control board with the current
+  workflow phase and elapsed time, active card/branch, the exact card `select.sh` would
+  choose next, queue entries classified as feedback/rework/Todo/waiting/held, open PR age,
+  open-to-merge duration for recently merged bot PRs, and recent workflow duration. Every
+  timestamp displayed to the operator is Pacific time. GitHub and board responses are
+  cached as last-known-good snapshots: a transient source failure is shown as `STALE` or
+  `DEGRADED`, never as an empty queue. Selector failures are also explicit instead of being
+  rendered as “none eligible.” The selector call uses `AUTOPR_SELECT_READ_ONLY=true`, so a
+  refresh cannot create a cooldown marker or consume a card.
+- **active PR detail** — the active `bot/task-*` branch and cached card title before
+  publication, followed by its PR number, draft state, labels, checks, URL, changed files,
+  and a bounded live diff summary after GitHub publication. It reads the dedicated Actions
+  runner worktree and never displays the ticket prompt or credential-bearing process
+  arguments.
+- **live agent detail** — current Actions run/step, dedicated msandbox identity,
+  plus the real model terminal
+  stream while it investigates, reads files, edits code, and verifies the task. The
+  trusted harness tees that output to the mode-600 local file
+  `~/Library/Logs/matcha-kanban-autopr-live.log`; GitHub does not expose live step stdout.
+  Model credentials remain stripped, and the display adds common token and PEM redaction.
+  This pane appends instead of redrawing, so earlier work remains in tmux's 100,000-line
+  history across subsequent runs while the master session stays up. Scroll with the mouse
+  or trackpad, or enter copy mode with `Ctrl-b [`.
+- **automation health** — LaunchAgent state, self-hosted runner presence, recent
+  structured dispatch/skip/error events, and the dedicated worker's real Docker state.
+  A container stuck in `created`, `exited`, or another non-running state is shown as
+  blocked rather than healthy.
+
+The overview and PR metadata refresh every 60 seconds. The local model stream still
+appends new output every 2 seconds, but its remote workflow status refreshes every 60;
+health refreshes from local state every 15 seconds. The overview, PR pane, live-work pane,
+and dispatcher share one mode-600 GitHub run snapshot with a 60-second TTL. Its refresh is
+one unfiltered run-list request that is classified locally, rather than each pane resolving
+and polling four workflow names independently. A dispatch uses one direct workflow API
+POST. Override those intervals with
+`AUTOPR_DASHBOARD_REFRESH_SECONDS`, `AUTOPR_PR_REFRESH_SECONDS`,
+`AUTOPR_WORK_REFRESH_SECONDS`, `AUTOPR_WORK_STATUS_REFRESH_SECONDS`, and
+`AUTOPR_HEALTH_REFRESH_SECONDS` before creating the session if needed. The shared GitHub
+TTL is `AUTOPR_GITHUB_SNAPSHOT_TTL_SECONDS`; do not lower it without accounting for every
+observer pane. Override `AUTOPR_RUNNER_WORKTREE` only if the Actions runner is moved.
+
+The self-audit implementation and its sealed model allowlist are documented in
+`apps/msandbox/docs/AGENT_SANDBOX.md`. Manual recovery commands are `msandbox audit` and
+`msandbox audit --draft`; they use the same workflow rather than creating a
+second scheduler.
+
+## Trusted control plane and repo roots
+
+Everything that runs **after** the model has touched the workspace executes from a
+snapshot of `main`, never from the checkout. The `Snapshot trusted AutoPR control plane`
+step extracts `git archive main apps/msandbox/harness apps/msandbox/error-autofix apps/msandbox/scope apps/msandbox/cli scripts/alembic_graph_snapshot.py scripts/alembic_graph.py` into
+`$RUNNER_TEMP/autopr-control` and exports three variables:
+
+| Variable | Value | Means |
+|---|---|---|
+| `AUTOPR_CONTROL_ROOT` | `$RUNNER_TEMP/autopr-control/scripts` | Where the post-model scripts are executed from. **Not a git repository** — the archive carries no `.git`. |
+| `AUTOPR_WORKSPACE_ROOT` | `$GITHUB_WORKSPACE` | The checkout the model edited and `publish.sh` commits from. Anything reading the proposal or the task branch wants this one. |
+| `AUTOPR_SANDBOX_REPO_ROOT` | `$GITHUB_WORKSPACE` | The repo `run-codex-sandboxed.sh` clones into the sandbox and applies the returned patch back into. |
+
+The contract for any script the lane runs from the control root, **including ones it
+only reaches transitively through `$SCRIPT_DIR`**:
+
+- A repo root must come from the environment: `REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd
+  "$SCRIPT_DIR/../../.." && pwd)}"` (or `AUTOPR_SANDBOX_REPO_ROOT` for the sandbox bridge).
+  The fallback keeps in-workspace callers — `silent-error-autofix.yml`,
+  `error-autofix/reconcile.sh` — working unchanged; that lane exports neither variable.
+- Sibling *tooling* may stay `$SCRIPT_DIR`-relative, because it is in the archive too
+  (`lib.sh` → `../alembic_graph_snapshot.py`, `cosmetic_diff.py`, the prompt templates).
+- `git rev-parse --show-toplevel` is fine where it is resolved from the working
+  directory: the workflow declares no `working-directory:`, so every `run:` step starts
+  in `$GITHUB_WORKSPACE` (`leave-task-checkout.sh` relies on this).
+- A new reference must also be **inside an archived path**. Adding
+  `"$AUTOPR_CONTROL_ROOT/foo/bar.sh"` without adding `scripts/foo` to the `git archive`
+  line produces a run that dies at that step.
+
+Both halves are enforced by case 10 of `scripts/tests/test_ci_guards.sh`, which walks
+the `$AUTOPR_CONTROL_ROOT` references in the workflow plus their `$SCRIPT_DIR` closure.
+This has failed twice in production: once with the scope checker and the migration-graph
+helper referenced before they were archived, and once (2026-09-06 → 2026-09-08) with
+`autopr-scope/check-open-prs.sh` resolving `$SCRIPT_DIR/../../..` from the control root, so
+every run died at the scope check with `fatal: not a git repository` — after the model
+budget had already been spent.
+
+## Pipeline (`apps/msandbox/harness/`)
+
+1. **Production freshness** — the trusted local runner records the exact active frontend
+   build plus backend/frontend SHAs and production migration heads. Once a card is
+   selected it also attaches bounded, redacted recent error reports and error-level
+   backend/worker/nginx log signals. Codex receives those files and a commit list
+   between each live image and the checked-out branch, but never SSH or database
+   credentials. This lets it tell a new code bug from an already-merged-but-not-deployed
+   fix or an unapplied migration. It may diagnose migration drift. When work needs a
+   schema change, it may author a new migration version for the draft PR. The path guard
+   rejects edits or deletions of migrations already on `main`, drafts that add a base or
+   a new head instead of extending exactly one current head, missing
+   `upgrade()`/`downgrade()` entrypoints, and any path under `server/alembic/` that is
+   not a new `versions/<revision>.py`. Nothing in the pipeline can apply a migration: the
+   msandbox holds no database credentials and the workflow never invokes `alembic`.
+2. **`collect.sh`** — one `GET /projects/{id}/bundle` per project in `MATCHA_PROJECT_IDS`
+   (there is no company-wide list endpoint the bot can use — its access is per-project
+   collaborator rows, not one company scope). Filters to cards assigned to
+   `MATCHA_ASSIGNEE_EMAIL` in `todo`/`changes_requested`, plus system-linked
+   `in_progress` cards awaiting owner-PR reconciliation, joins each card's `element_id`
+   against the bundle's `elements` array to attach `repo_paths` (prompt-only scoping, not
+   a gate).
+3. **`reconcile-merged-cards.sh`** — repairs a missed `pull_request` webhook before
+   selection. A Changes Requested card whose linked `bot/task-<id8>` PR is already
+   merged is moved to Review and removed from that run's candidate snapshot. A
+   matching defensive check in `select.sh` skips the card if the repair write fails,
+   so a delayed webhook can never produce a duplicate PR.
+4. **`collect-pr-context.sh` + `plan.py`** — reads bounded bodies, changed paths,
+   comments, reviews, labels, and checks for every open Kanban/autofix/self-audit bot PR.
+   The planner combines those with the complete eligible `todo` + `changes_requested`
+   snapshot, links work by stable task/PR ids, project element, code area, and topic,
+   then keeps related tickets contiguous. It writes one deterministic plan id, ticket
+   work order, related-work evidence, and proposed merge order. GitHub PRs already
+   marked ready for review (`isDraft=false`) are explicitly listed as excluded and do
+   not receive a merge position. PR comments are untrusted planning evidence, never
+   executable instructions.
+5. **`select.sh`** — picks one planned card GitHub hasn't already handled. Branch key is
+   `bot/task-<id8>` (first 8 hex of the task UUID). An explicit **Run AutoPR now** request
+   ranks first, then a pending decision-bound additional
+   context event, followed by related rework and planned Todo work;
+   the plan keeps each related cluster together. Without a plan it safely falls back to
+   reconsideration, Changes Requested, then Todo. Rework is better-specified —
+   it has a written `review_note` — and unblocks a PR already in flight. For `todo`, any PR at all on
+   the branch (open/closed/merged) means skip — the branch name is a stable 1:1 mapping
+   to the task, so a second run would collide. For `changes_requested`, an **open** PR on
+   the branch is the *target* to push to (`mode: rework`); no open PR means a human moved
+   it there by hand, so it's treated like a fresh `todo` card. A durable no-spec ledger
+   lives on the card itself (`progress_note` contains `[autopr:no-spec <date>]`) rather
+   than a GitHub issue — it's the thing that stops an unscopable card being re-run every
+   every minute forever, it's visible to the human who owns the card, and it clears itself
+   the moment `last_moved_at` advances past the marker date. The ticket's **Add additional
+   context** action—or a direct reply to Espresso's decision-bound project-chat
+   request—writes an `autopr_additional_context` history event bound to the exact
+   current no-spec/awaiting-answers note. That event makes the card eligible once without deleting audit
+   history or pretending the card moved; a later AutoPR outcome replaces the note and
+   therefore consumes the signal. New context submitted after an earlier failed-attempt
+   marker can bypass that old cooldown once. **Run AutoPR now** is the same class of
+   authorization and behaves the same way: it queues an `autopr_run_request` history
+   event (no schema change, same shape as the reconsideration event), which makes the
+   card eligible regardless of assignment, outranks the no-spec ledger and the Todo
+   "any PR means skip" rule, and beats a cooldown older than the request.
+   `investigate.sh` posts the matching `autopr_run_claim` the moment it actually picks
+   the card up — that claim, not the run's outcome, is what stops the one-minute watcher
+   re-dispatching for a card whose run then crashes. `select.sh` posts the same claim for
+   any run-requested card it passes over (an ALREADY-SCOPED card whose linked PR is open,
+   a card blocked by the open-PR cap, a card GitHub could not be read for), so the
+   invariant is **one button press costs at most one forced run**: the card's "Queued for
+   AutoPR" chip clears and the human can press again once the blocker is gone. The
+   read-only dashboard probe (`AUTOPR_SELECT_READ_ONLY=true`) never claims anything.
+   Requests are only accepted for the four boards in `KANBAN_AUTOPR_PROJECT_IDS`
+   (defined once in `project_task_service.py`, shared with the PR webhook's board check),
+   and any request older than 30 minutes stops counting as pending everywhere — the
+   watcher's poll, the card chip, and the idempotency check all read the same window.
+   **Unqueue** in Espresso records `autopr_run_cancel` and holds the card without
+   changing its column, assignment, question text, or saved answers. The task list
+   exposes `autopr_paused`; collection excludes held cards even from the scheduled
+   sweep. A new explicit Run, additional-context submission, review rejection, or
+   manually started round releases the hold; publication and claims do not.
+   The card face shows a paused badge, including while an older run finishes.
+   Run-request reads treat cancellation like consumption. Every investigation now
+   claims against live state and fails closed if the card was held after collection
+   or the API is unavailable. Unqueue does not interrupt an already claimed run.
+   Queue/hold/claim writes serialize on the task row and use post-lock wall-clock
+   timestamps. The `autoprrun02` migration adds a concurrent task-history index
+   covering holds, resumes, claims, and round boundaries, without changing the
+   original request-poll indexes. The list query resolves hold state once per task.
+   Claims preserve the selector's `in_progress` ALREADY SCOPED recovery lane for
+   linked PRs closed without merging, while continuing to reject held, cancelled,
+   and ordinary in-progress cards. Deploy the backend and update the
+   runner control snapshot before shipping the desktop action; an old server will
+   reject Unqueue and the app will retain the queued state and show the error.
+   Espresso keeps the native multiline answer editor below the scrolling questions;
+   Return inserts a newline, ⌘Return submits, and failed submissions retain drafts.
+   New Research tickets open an optional eight-step brief wizard with examples,
+   required title/subject/questions, optional scope/sources/output, and a review
+   screen. The editor's Research wizard also preserves custom sections and fenced
+   examples. Applying the wizard only changes the local form; creating/saving is
+   still explicit. Ticket details separate the automation summary and question
+   blocks from expandable original run details across ticket categories.
+   A failed attempt otherwise cools down
+   for 15 minutes, so later ticks can work other cards instead of repeatedly
+   starving the queue on one broken task. Caps at 10 open implementation
+   `autopr` PRs (question-only drafts use their separate cap). A `research` card (see
+   **Research cards** below) never consults GitHub at all: after the same cooldown,
+   pause, and no-spec checks it selects as `mode: research` in both `todo` and
+   `changes_requested`, and the open-PR cap does not apply because no PR is opened.
+6. **`investigate.sh`** — the trusted host builds one context bundle containing the card,
+   every checklist round, full task history/discussion, and task-file metadata. Up to 12
+   attachments (25 MB total), prioritized to the current round, are downloaded by the
+   trusted harness and attached locally; the model never needs board or storage network
+   access. `todo` mode implements the card; `rework` mode additionally receives the
+   existing PR's reviews/comments and addresses the latest `review_note`, rejection
+   events, discussion, and screenshots without re-litigating accepted earlier rounds.
+   It then calls `run-codex-sandboxed.sh`, which clones only tracked files into a
+   dedicated msandbox workspace, removes the clone's remote, mounts an empty AWS
+   directory, gives Codex only a read-only copy of its existing auth file, and strips
+   GitHub/Matcha/SSH credentials. Codex runs `gpt-5.6-sol` with medium reasoning and broad permissions
+   inside that disposable clone, while the trusted harness copies back only its patch,
+   report, and decision. Both modes require a report with `### Summary` / `### Changes` / `### Blast radius` /
+   `### Confidence` plus a shell-validated JSON triage decision. The card also contains
+   the plan's related tickets and open bot PRs, including bounded comment/review excerpts,
+   so the agent must choose prerequisite/build-on/separate boundaries in queue context.
+   Additional-context events are untrusted but escalated evidence: the agent must trace
+   the newly described uncovered scenario and cannot repeat `already_fixed` merely
+   because a generic patch exists. A clear affirmative work command in that exact
+   decision-bound reply—such as `you can work on this`, `do it anyway`, `draft the
+   migration`, or `you need to draft this PR`—becomes trusted `draft_pr` policy even
+   without a magic prefix. `--draft-pr` remains the explicit form. Negated commands do
+   not activate it. The policy mechanically rejects `already_fixed`.
+   **A needed migration is never a refusal.** `migration_required` is not a
+   `no_safe_action_reason` the schema accepts. AutoPR authors the application
+   change, tests, and a new migration version, then the trusted publisher opens
+   the normal GitHub draft PR; the operator reviews and applies the migration by
+   hand, and no part of this system runs it. `investigate.sh` corrects an
+   out-of-date model that returns `migration_required` with one retry instead of
+   leaving the card blocked, and corrects an unpublishable migration draft
+   (`migration_draft_invalid`) the same way. The `draft_pr` directive is therefore not a
+   prerequisite for migration work; it remains an owner's explicit instruction
+   to draft work when AutoPR would otherwise conclude the request is already
+   covered. Old cards carrying a migration-required no-spec marker remain
+   settled until the owner supplies fresh context, requests a run, or re-adds
+   the work. What stays permanently closed is the migration runner and its
+   configuration (`env.py`, templates, `alembic.ini`).
+
+   The single exception is `acceptance_criteria_met`, which survives both
+   `draft_pr` and `trust_still_broken` because it carries proof: an
+   `acceptance_evidence` array with one entry per acceptance criterion, each
+   naming the criterion and the `path`, `line`, and `commit` that already
+   satisfies it. `decision.sh` resolves every citation against the repository
+   and rejects the decision unless the commit is HEAD or one of its ancestors,
+   the cited line is non-blank there, and the path still exists at HEAD — a real
+   object from an unrelated branch is not evidence, so the verdict cannot be
+   reached by assertion. It exists because a card can be written against a premise that
+   was already false — PR #418 asked for a route and a nav row that had both
+   shipped weeks earlier under a different label — and with no way to say so,
+   the only legal move left was a diff that changed nothing real. Both
+   `implementation` and `partial_implementation` are now refused when the staged
+   diff is pure string-literal churn and the card's own text asks for structure
+   (`cosmetic_diff.py`); a relocated row or a repointed path is structural work
+   and passes. `investigate.sh` catches it first and retries once with the
+   rejection stated back to the model, and `publish.sh` backstops it by writing
+   a `BLOCKED: COSMETIC DIFF` progress note and an Espresso context request
+   before failing, so the refusal is never a silent repeating loop. That
+   authorization is durable in three ways, because the operator saying "work on it"
+   once must not have to be repeated after every cycle: the granted directives are
+   published back onto the card as `[autopr:directives …]` and re-read on later cycles
+   while it sits in `todo`/`changes_requested`; a run that consumes the event and then
+   repeats `already_fixed` is recovered by `collect.sh`'s
+   bounded probe; and a decision contradicting the directive is retried once with the
+   rejection stated back to the model (`decision.sh directive-ok`) instead of failing
+   the run silently. `--trust-still-broken` (including the matching
+   natural-language form) accepts that the described scenario fails, while
+   `--test-route=/app/...` asks the trusted browser to reproduce it in the approved test
+   tenant. The coding model never receives those credentials. It must inspect correlated
+   production errors/log signals and any test replay before asking for an exact route,
+   role, reproduction steps, and screenshot. Missing product intent
+   or evidence produces a question-only draft PR, not a no-spec marker. The normal
+   investigation ceiling is 20 minutes. A run that reaches it is stopped, its bounded
+   patch/report/decision fragments and final 128 KB of escape-stripped terminal output
+   are stored mode-600 under `.git/matcha-kanban-autopr-checkpoints/<task-id>/`. The
+   sandbox clone is stamped with the card it was created for and with its own creation
+   time, and a checkpoint harvests it only when both match this run, so neither another
+   card's work nor a previous round's clone can be saved under this one. That end-of-run
+   save is a separate workflow step, so it does not run at all if the machine or the
+   runner process dies outright; the investigation therefore also snapshots itself every
+   4 minutes while the model is working (`checkpoint.sh snapshot`, bounded and
+   self-terminating), writing through a private git index so it never contends with the
+   live container for `.git/index`. A hard kill costs the last few minutes, not the whole
+   run. Snapshots hold a lock that `save` and `consume` take first (`snapshot-halt`), so
+   a pass in progress can never re-point a run whose PR is already published. A save that
+   harvested nothing never takes the resume pointer away from that snapshot. Checkpoints
+   are pruned to the newest three per card on both paths — `save` on the interrupted one,
+   `consume` on the successful one — never evicting the active checkpoint, with a 14-day
+   floor across all cards, and stop being resumable after 24 hours. Only a
+   run that was actually killed pauses the card: investigate.sh records its own exit
+   status, so a crash or a rejected decision late in the window fails the run loudly and
+   leaves the card selectable instead of parking it behind an approval button.
+   The card moves to
+   `changes_requested` and shows why the run stopped, which files and outputs were saved,
+   and the latest partial-report summary. The pause note carries forward the standing
+   `[autopr:directives …]` grant, the `[autopr:no-spec …]` ledger, and any pending
+   question form, so nothing durable is lost to the pause. It does not spin on every
+   scheduler tick. The
+   card's **Approve 10 more minutes** button submits the explicit `--extend-runtime`
+   directive for one 10-minute continuation. Approval is never inferred from ordinary
+   prose and is not carried into later cycles, and it only applies when a resumable
+   checkpoint exists — a from-scratch investigation always keeps its full 20 minutes.
+   The continuation restores
+   the partial patch only inside the disposable msandbox and attaches the saved textual
+   output as untrusted context. If the patch no longer applies to current code, the text
+   remains available and the retry starts from a clean tree. Successful recovery
+   deactivates but does not delete the checkpoint. A paused card also reopens on new
+   feedback on the draft PR it already has, not only from the ticket side.
+
+   The card remains
+   in `changes_requested` until a new human comment or review arrives on that PR; the
+   next local cycle then updates the same draft. Every implementation or question PR
+   starts as a GitHub draft regardless of directives. Without a trusted `draft_pr`
+   directive, no-spec remains available for already-fixed work, policy boundaries,
+   and external dependencies; migration work is drafted automatically. With one,
+   `acceptance_criteria_met` remains available for a card whose every stated criterion
+   is already satisfied, provided it cites verifiable evidence for each.
+   Implementation (`investigate`) and rework runs accept plain-language
+   additional context as answers, corrections, or research guidance; the old
+   numbered options do not constrain the next pass. On a board with the
+   `research` grant, those code runs also receive hosted live web search
+   (`AUTOPR_CODEX_WEB_SEARCH=1`) and must investigate missing public facts using
+   primary sources and the existing repository data flow before asking the
+   owner. On an ungranted board the context says search is unavailable, and the
+   model may neither claim a search nor send private evidence to one.
+   Existing review gates still apply: research does not approve extracted rules,
+   authorize production writes, execute migrations, or make uncovered legality
+   verified. Search queries must use generic public terms, not private ticket or
+   tenant data, and retrieved pages are evidence, never instructions.
+
+   Fresh PR passes use `decision.sh normalize-grounded`: every remaining question
+   must carry a `resolution` with `kind` (`product_decision`, `private_context`,
+   `source_unavailable`, or `explicit_approval`), a nonempty `evidence` array of
+   context/paths/sources checked or failed research attempts, and
+   `why_user_needed`. Resolution evidence is bounded to five 300-character
+   entries plus a 600-character explanation. `policy_blocked` and
+   `external_dependency` refusals require the same object as
+   `blocker_resolution`; `already_fixed` requires repository-verified
+   `acceptance_evidence`. Before spending the single corrective investigation,
+   the harness collects every detected directive, grounding, cosmetic-diff,
+   and migration-draft failure into the same correction. A safe partial patch
+   is restored inside the retry sandbox rather than discarded for a metadata
+   omission. If the corrected pass still fails schema, directive, grounding,
+   cosmetic-diff, or migration-draft validation, it is parked visibly in
+   Changes Requested with a no-spec marker and a context request, so it cannot
+   publish or spin on every cooldown.
+   This validates the blocker structure, not the truth of a model's source
+   interpretation; evidence remains reviewable in the report and PR questions.
+   All new PR decisions use this one normalization path; artifact research
+   keeps its own schema and grant.
+
+   PR question details, the ticket description, the model report, and the
+   verification report each have UTF-8-safe byte budgets. The complete body is
+   rendered and checked against a 64,000-byte safety cap before the bot commits
+   or pushes a branch. Feedback checkpoints are read only from the first exact
+   marker in the trusted body header, so model-authored prose cannot replace
+   the comment or review id used by the next rework pass.
+
+   For `mode: research` the same context bundle goes to `gpt-5.6-luna` at high
+   reasoning with `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1`, `AUTOPR_CODEX_WEB_SEARCH=1`
+   (`-c 'web_search="live"'` on `codex exec`, which has no `--search` flag), and
+   `AUTOPR_CODEX_IMAGE_INPUTS=1` (`-i` per attached png/jpg/gif/webp at the container
+   path). Required headings are `### Summary` / `### Findings` /
+   `### How it applies to Matcha` / `### Recommendation` / `### Sources` /
+   `### Confidence`, the decision is validated by `decision.sh normalize-research`, and
+   the corrective-retry block is skipped (there is nothing to patch). All of that comes
+   from the kind registry in `lib.sh` (`autopr_kind_field MODE FIELD`).
+
+7. **Cross-lane scope check** — for a fresh implementation patch, the shared
+   `apps/msandbox/scope/check-open-prs.sh` checks older open PRs before verification
+   or publication. Only an exact stable patch-id match suppresses the new PR; broader
+   file-overlapping patches are untrusted public input and are surfaced with a
+   `possible-duplicate` label for human review rather than executed by a model. The
+   existing owner PR receives a `covers-kanban-task` label and exact task comment, while
+   the card stores that PR's URL/number and a visible `ALREADY SCOPED` note.
+   Closed-unmerged owners make the card eligible again; merged owners move every linked
+   card to Review through the webhook or reconciliation pass.
+8. **`verify.sh`** — there isn't one; this reuses `apps/msandbox/error-autofix/verify.sh`
+   unmodified. It already diffs baseline-vs-branch TypeScript diagnostics via
+   `tsc -p tsconfig.app.json --noEmit` (the non-bare form — bare `tsc --noEmit` checks
+   nothing, see root CLAUDE.md), so no separate frontend step was needed.
+9. **`write-publication-copy.sh`** — runs a separate writing-only Codex pass with
+   `gpt-5.6-luna` and medium reasoning. It produces only a conventional commit subject
+   and a short card note. Trusted shell validates the exact JSON schema, category prefix,
+   one-line/length limits, and rejects any repository diff. For blocked/no-PR outcomes,
+   the note explains the actual missing decision or safety boundary instead of repeating
+   the status label.
+10. **`publish.sh`** — same three-layer path guard as error-autofix (denylist, allowlist
+   restricted to `server/(app|tests)/*.py`, `client/src/*.{ts,tsx}`, and
+   `platforms/desktop/Espresso/Espresso/**/*.swift`, plus the
+   `client.ts` telemetry-suppression guard), with `client/src/generated/` denylisted
+   explicitly since a kanban card is far more likely to touch client code than an error
+   fix is. New `server/alembic/versions/<revision>.py` files are the sole schema
+   exception, and `__init__.py` is not one of them: the shared
+   `autopr_migration_draft_errors` helper in `lib.sh` compares each one with `main`,
+   rejects edits/deletions of existing revisions, and validates static revision metadata,
+   both migration entrypoints, and that each draft extends exactly one current head
+   rather than adding a second base or a new head. `investigate.sh` runs that same helper
+   right after the model pass, so a mistyped `down_revision` costs one corrective retry
+   (`migration_draft_invalid`) instead of the whole investigation; reaching the publisher
+   with it still unfixed ends the run. Alembic environment/configuration files remain
+   denied, the workflow never applies migrations, and the resulting PR is always a
+   GitHub draft. PR titles begin
+   with `🔴`, `🟠`, or `🟡` plus a computed confidence score so the default `gh pr list`
+   is triaged visually. Question drafts also carry `autopr-awaiting-input`; those drafts
+   do not consume the ten-PR implementation cap. PR body carries
+   production baseline trailers as well as the task/project linkage:
+   ```html
+   <!-- matcha-task: <full task uuid> -->
+   <!-- matcha-project: <full project uuid> -->
+   <!-- matcha-production-build: <frontend build number> -->
+   <!-- matcha-production-backend-sha: <active backend image SHA> -->
+   <!-- matcha-production-frontend-sha: <active frontend image SHA> -->
+   <!-- matcha-autopr-criticality: red|orange|yellow -->
+   <!-- matcha-autopr-confidence-score: 0-100 -->
+   <!-- matcha-autopr-note-state: awaiting_answers|ready_for_review|no_safe_action -->
+   <!-- matcha-production-verification: <validated base64 JSON> -->
+   ```
+   `implementation` → `gh pr create --draft`, label `autopr` (+ `needs-work` on new
+   failures), then PATCH the card's `pr_url`/`pr_number` and move it to `in_progress`.
+   `questions_only` creates a no-product-change draft PR, applies
+   `autopr-awaiting-input`, and leaves the card in `changes_requested` with a visible
+   note such as `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · build 550 · prod
+   c5d3a49 · PR #295 · 🟡 C42 · note: Needs the canonical term before labels can be
+   updated safely.` followed by the numbered questions, choices, and suggested defaults.
+   Espresso shows those questions on the card and in the opened ticket. **Answer AutoPR
+   questions** submits numbered choices through the existing decision-bound additional-
+   context endpoint; a PR comment/review remains an alternate answer path. `rework`
+   updates the existing branch and PR;
+   once there are no remaining blocking questions it returns the card to `in_progress`
+   (this is the one transition `project_task_service` deliberately
+   suppresses the notification email for — it already knows this is a rework resume, not
+   a fresh start). A fresh `no_safe_action` PATCHes `progress_note` with a visible
+   `🤖 AUTO SETUP · NO PR: …` state plus the durable no-spec marker
+   without creating a branch, PR, or GitHub issue. During rework it updates the existing
+   PR's title, body, and triage labels before writing the durable no-spec card note, so the
+   prior round cannot remain visible as the current decision. When a run was triggered
+   by additional context, the publisher also posts a threaded outcome reply to that
+   history event and a decision-bound bell/push notification to its author: PR
+   drafted/updated, questions still needed, or the no-safe-action decision still
+   applies. Notification delivery is required so consuming the event cannot be silent.
+   Awaiting-input, `already_fixed`, and `acceptance_criteria_met` outcomes also post
+   one idempotent Espresso message into the project's discussion channel; for
+   `acceptance_criteria_met` that message carries the per-criterion evidence, which
+   is the point of the verdict — the human needs to see where each thing the card
+   asked for already lives. It starts with the existing
+   `⟦ticket:<id>|<title>|<column>⟧` token, so the ticket is clickable in Espresso.
+   Replying directly to that message attaches the reply to the exact still-current
+   AutoPR decision and acknowledges the escalation in chat; attached screenshots are
+   copied onto the ticket so the next sandbox run can inspect them. A stale reply cannot
+   reopen a newer decision.
+
+## Research cards
+
+The first **artifact kind**: a card whose deliverable is a report attached to the
+ticket rather than a draft PR. Kind = the `research` ticket template
+(`mw_tasks.category = "research"`; badge + compose fields in Espresso and the web
+client; `_ALLOWED_CATEGORIES` and both draft agents accept it). Everything
+mode-specific lives in the kind registry in `lib.sh` — `autopr_kind_field MODE FIELD`
+returns the prompt, model, effort, sandbox switches, required headings, decision
+validator, publisher, and outcome (`pull_request` | `artifact`) — so another artifact
+kind is a registry row plus a publisher, not another branch in the PR path.
+
+1. A human creates a **Research** card (Subject, Questions to answer, Why it matters to
+   us, Constraints / scope, Preferred sources), assigns the bot, optionally drops
+   screenshots or PDFs on it, and optionally presses **Run research now** (same endpoint
+   and queue as Run AutoPR now).
+2. `select.sh` returns `mode: research` after the ordinary cooldown / pause / no-spec
+   checks. No `bot/task-*` branch, no `gh pr list`, no open-PR cap.
+3. The workflow skips branch creation, coverage, verify, publication copy, and
+   `publish.sh` (`steps.select.outputs.outcome != 'artifact'` — the registry's outcome,
+   never a mode name, so the next artifact kind cannot fall through into the PR path).
+   `investigate.sh` builds the usual `context.json` (minus the lane's own bookkeeping
+   rows — run requests, claims, staged outreach and its outcomes — so the model never
+   reads a draft nobody approved as a teammate's comment) plus downloaded attachments,
+   and runs the sandbox bridge as described in step 6 above (`_prompt_research.txt`).
+   On a revision the bot's own earlier uploads are dropped from the attachment budget
+   except the newest prior report. The browser paragraph of the prompt
+   (`_prompt_research_browse.txt`) is substituted in by the bridge only when the board
+   holds `browse`; otherwise the prompt says there is no browser. The selector detects
+   an explicit screenshot deliverable in the title/description/review note and holds the
+   card for the `browse` grant instead of running a report it already knows will be
+   incomplete. The model may read the clone to
+   cite `path:line` under *How it applies to Matcha*, search the web, and view images;
+   it may not edit a file, install anything, or send anything. Any repository diff
+   discards the run. `context.json.required_deliverables.screenshots` carries the
+   trusted requirement into the sandbox. A completed report with no admitted image, or
+   with images whose filenames are absent from the report, is rejected and retried once;
+   a second miss is parked visibly in Changes Requested and is never published as Ready
+   for Review.
+4. `decision.sh normalize-research` validates the decision: `research_report` (≥ 1
+   source, no questions) or `needs_clarification` (≥ 1 question, no staged actions);
+   `card_note` 1–240 characters with no `·` or newline; `summary` ≤ 1200; optional
+   `staged_actions` (≤ 10, each `email` | `contact` | `review_request` with
+   `to` / `subject` / `body` / `why`). It emits `safe_changes_present: false`,
+   `awaiting_human`, and `confidence_score` so the generic workflow steps read it like
+   any other decision.
+5. `publish-research.sh` — no git, no `gh`, no labels — counts the card's existing
+   `research-report-*.md` files to get round N, writes `research-report-<id8>-rN.md`
+   (a trusted provenance line, the model's report, and a *Proposed actions (not sent)*
+   tail when staged actions exist), uploads it with `POST …/tasks/{t}/files`, stages
+   the proposals (keyed on the report file id), posts a `note` carrying the summary,
+   `attachment_ids`, and whether the proposals were staged (threaded under the
+   additional-context event when there is one), then PATCHes
+   `progress_note` to `🤖 AUTO SETUP · READY FOR REVIEW · build … · prod … · 🟢 C<score> ·
+   note: <card_note>` and `board_column: review`. The build/prod segment is omitted when
+   production context is unavailable — a report does not depend on which build is live,
+   and a runner hiccup must not discard a completed pass.
+
+   **Re-entrant.** Artifact kinds have no GitHub ledger, and the move to Review is the
+   last write, so a publication that dies after the upload would otherwise rerun and
+   attach a second report, a second note, and a second set of Send rows. The retry is
+   always the **next scheduled pass** — a new workflow run on a new runner — so the key
+   for "already done" cannot come from the run itself. It keyed on `AUTOPR_RUN_STARTED_AT`
+   until 2026-09-08, which the investigate step re-stamps every job, so it never matched
+   and the duplicate it described still happened; the env var is gone.
+
+   The key is the card. The report's own summary note names it (`Report attached:
+   <file>`) and is posted only after the upload succeeded, so the newest
+   `research-report-<id8>-rN.md` on the card with no such line in the discussion was
+   uploaded by a pass that died before announcing it: an orphan, which this run
+   continues — reusing its file id (so the server's `run_key` short-circuit matches and
+   the Send rows are not restaged), its round number, and any screenshot already
+   uploaded under that round's name. An announced report is a finished round in **any**
+   column: a person can drag a reviewed card back to Todo to ask for a fresh run, and
+   reading "Todo + report" as a crash there would reuse the old file, skip the new
+   upload, and move the card to Review with the new work silently discarded. That
+   discussion read is fatal if it fails: without it the publisher cannot tell a crashed
+   pass from a finished one, and either guess duplicates or loses a round. Known
+   residual: a pass dying between its note and the card move still produces one extra
+   round on the retry. `update_project_task` then emails and
+   bells every collaborator ("Ready for review") and broadcasts to Espresso — there is
+   no extra notification code. `needs_clarification` instead writes
+   `🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · … · [autopr:no-spec <ts>]
+   needs_clarification · note: …` plus the numbered question form Espresso's answer UI
+   parses, moves the card to `changes_requested`, and posts the decision-bound context
+   request. The marker parks the card until the owner answers (**Add additional
+   context**), presses Run, or moves it.
+6. Review: **approve** → `done`; **reject** with a note → `changes_requested`, which
+   selects as `research` again and produces round N+1 addressing `review_note` (the
+   previous report is among the attachments the model receives and is told to treat as
+   version 1).
+
+### Board capabilities
+
+Drafting code PRs is what this lane has always done on every board it watches, and it
+needs no grant. The four things that reach past the repository are granted per board
+and default off — `platform_settings` key `autopr_board_capabilities`, edited at
+**Admin → Settings → AutoPR board capabilities**:
+
+| Grant | What it permits |
+|---|---|
+| `research` | Live web search: Artifact Research cards can run and ordinary code PR runs can research public facts. |
+| `outreach` | A run may **stage** email/contact/review requests on a card. Nothing sends until a person approves that exact item. |
+| `browse` | A run may drive Chromium through `browse-capture.py` and attach screenshots. |
+| `email` | Artifact Email cards can run: a pass reviews the email snapshots attached to the card and attaches a triage report. It grants no web search, browser, or mailbox access; its reply drafts need `outreach` as well to become approvable. |
+
+Fail-closed in every direction: an absent row, unparseable JSON, an unknown capability
+name, or a non-UUID key all resolve to "this board may do nothing extra". The admin PUT
+replaces the whole map (an omitted board is revoked, deliberately) and refuses a board
+outside `KANBAN_AUTOPR_PROJECT_IDS`, so a grant cannot be written into a void.
+
+`collect.sh` reads the grants once per pass from `GET /matcha-work/autopr/board-capabilities`
+and stamps each card; `select.sh` refuses an artifact kind the board was not granted and
+leaves the card alone rather than downgrading a Research card to a PR. For `outreach`
+**that check is a spend guard, not the security boundary** — sending is re-checked
+server-side at the moment it happens, so a stale harness copy cannot widen its own reach.
+Artifact `research` and `browse` have no server-side moment to re-check: there
+the harness's stamp, plus what the bridge admits back (an image allowlist with
+count and size caps), is the whole gate.
+
+Espresso reads the same endpoint: a Research card's **Run research now** is disabled with
+the reason when the board lacks the grant or is not watched, and the Research compose
+sheet preselects the AutoPR account as assignee (the harness only picks up cards the bot
+owns) and says so. The selector also leaves a hint file
+(`~/.cache/matcha-autopr/ungranted.json`) that the tmux dashboard renders as
+"held: task … needs the `research` board grant", so an ungranted card is not mistaken for
+one cooling down.
+
+An ungranted board is the one skip a human can fix, so it is not silent. When someone
+presses **Run research now** there, `select.sh` still consumes the request (an unconsumed
+one re-dispatches every minute forever) but posts a note on the card naming the missing
+grant and where to turn it on. Espresso's run button does not know about grants, so
+without that note the operator sees only the button come back and can press it forever.
+
+### Staged outreach — approving a send
+
+A research or email decision may carry `staged_actions` (≤10, each `email` | `contact` |
+`review_request`). The harness never sends one. On a board holding `outreach`,
+`publish-research.sh` / `publish-email.sh` posts them to
+`POST …/tasks/{t}/autopr/staged-actions`, where each becomes an immutable
+`autopr_staged_action` history row. Without the grant they stay report-only and the
+report says so.
+
+A person's decision is a second, **unique** `autopr_staged_action_result` row naming the
+action — so "approved twice", and therefore "sent twice", is not representable rather
+than merely guarded. Five states, and the distinctions are load-bearing:
+
+- `sending` — claimed, not yet resolved. Written *before* the mail call; a row left in
+  this state means the process died mid-send, and the card says "Send interrupted".
+- `sent` — this system delivered it. Only `POST …/staged-actions/{id}/send` may write it.
+- `handled` — a person did it themselves.
+- `dismissed` — it will not be done.
+- `failed` — the send was attempted and the provider refused.
+
+Transitions, not "any row exists → refuse": `pending` and `failed` may be sent, handled,
+or dismissed (a transient Gmail error must not brick a proposal); a `sending` claim older
+than ten minutes may be handled or dismissed but never re-sent (it may have delivered);
+everything else is settled. `failed` is only written for a failure the provider actually
+reported — a transport error (timeout, connection drop) leaves the claim standing instead,
+because the request reached Gmail and only the reply was lost, so the mail may well have
+gone out. Writing `failed` there would put a Retry button on a delivered email and mail
+the recipient twice. The server reports `retryable` / `closable` per action and
+Espresso draws its buttons from those, shows the provider's error under a failed row, and
+offers **Retry send**. A `sent` row carries Gmail's `message_id`, and the route posts an
+`email` activity in the approver's name so the ticket's discussion shows that mail went
+out — the outcome rows themselves are bookkeeping and render nowhere.
+
+Staged rows store the draft under `action_body`, never `body`: `body` is what every reader
+of activity rows treats as a comment (Espresso's thread and review delta, the AI ticket
+brief, the project overview feed, the harness's own context), and a draft nobody approved
+must never read as something a person said. The key moved on 2026-09-08 and rows written
+before that carry `body`, so both readers fall back to it — Espresso's `MWStagedAction.body`
+is non-optional, and one un-fallen-back row would fail the whole list decode and blank the
+outreach section rather than degrade. Both staged kinds are in
+`_AUTOPR_BOOKKEEPING_KINDS` and in Espresso's mirror `GraphGeom.bookkeepingKinds`.
+
+Only the AutoPR service account may POST `staged-actions`. Board membership is not
+enough: the row renders as "Drafted by AutoPR" with a one-click Send beside it, and
+without an identity check any collaborator could put words in the bot's mouth for a
+colleague to send from their own mailbox, past every other guard.
+
+The send route is the single point where model-drafted text leaves the building, and it
+re-checks all of: the board's `outreach` grant, that the caller may edit the project
+(viewers and commenters cannot approve), that the action is still sendable, that it is an
+`email` (a contact or review request is something a person does), that the address is not
+on a reserved test domain (same guard as the transactional mailer), that the
+**approver's own Gmail** is connected — mail never goes out from a system account — and a
+per-approver ceiling of 20 sends/hour, because `gmail_service`'s own limiter lives on the
+instance and every request builds a fresh one. `to` must already be a deliverable
+address by then: the validator and the cleaner both refuse a name or a role on an
+`email`, because that only fails at send time, after a human has approved it. A recipient
+that can never be delivered to — a reserved test domain — is reported `retryable: false`
+so the card stops offering Send at all, rather than leaving a button that 400s forever.
+
+The ceiling counts the `sending` claim and nothing else: one claim is one attempt, so a
+failed attempt still costs the hour while a successful one is not billed twice by its own
+`sent` row (counting both halved the real ceiling to ten). It is evaluated **inside** the
+transaction that writes the claim, under `pg_advisory_xact_lock` on the approver. Read
+beforehand in its own transaction it bounded nothing — the per-action `FOR UPDATE`
+serializes two approvals of the same action but nothing about two approvals of different
+ones, so N concurrent requests all saw the same pre-claim count and all passed. The count
+is scoped to the watched boards **plus the board being sent from**, since the send gate is
+the stored `outreach` grant and a grant outlives its board's membership in the watched set.
+
+The `sending` claim is what makes a second approval impossible while the first is in
+flight; the real outcome is appended on top of it. Writing `sent` up front instead — as
+this route did until 2026-09-08 — recorded mail that never left as delivered, made
+`failed` unreachable, and charged the approver's hourly ceiling for it.
+
+Espresso renders these under **PROPOSED OUTREACH** in the ticket, each showing the full
+body — approving is agreeing to send that exact text. There is deliberately no
+"approve all" control, and `Send` appears only on an email. When the approver's Gmail is
+not connected the row offers **Connect Gmail to send** (the Email panel's own OAuth flow)
+instead of failing on Send. A 404 from a backend that predates the route is an empty list,
+not a banner. A task notification opens the ticket itself, so the report chip is one
+click away.
+
+### Browsing and screenshots
+
+With the `browse` grant, `investigate.sh` sets `AUTOPR_CODEX_COLLECT_ARTIFACTS=1` and the
+model may call exactly one command inside the sandbox:
+
+```bash
+server/venv/bin/python apps/msandbox/harness/browse-capture.py     --url https://example.com/pricing --label pricing-page [--full-page]
+```
+
+It prints the page's title, its **final** URL (after redirects — that is what the model
+cites as its source), and the visible text, and saves a screenshot. It refuses non-http(s)
+URLs, credentials in a URL, and loopback/link-local/private addresses — checking **every**
+address a hostname resolves to, since a redirect into `host.docker.internal` is how an
+outside fetch becomes an internal one.
+
+Two mechanisms, because resolving a name twice is not the same as resolving it once: the
+address this process validated is **pinned into Chromium** (`--host-resolver-rules`), and
+every request the page issues — the document, each redirect hop, and every sub-resource —
+is checked and aborted at the routing layer *before* it goes out. Checking only after
+`page.goto` returns meant the internal page had already been fetched, and a short-TTL
+record could answer differently for Chromium than it did for the pre-flight. Exit 3 means the
+image was built without Chromium (`msandbox build --playwright`); the prompt tells the
+model to say so in one line. An optional capture falls back to web search. When the card
+explicitly requires screenshots, the trusted harness requires at least one admitted image
+whose filename appears in the report; it retries one miss, then parks the card as an
+incomplete research output rather than publishing prose that does not meet the request.
+
+Screenshots cross back the same way `report.md` does — one directory the bridge empties
+under an image-extension allowlist, a 12-file cap, and a 4 MB per-file cap, naming
+anything it skips on stderr. `publish-research.sh` attaches them to the same note as the
+report.
+
+Staged actions are the batch-C2 contract: the harness renders them on the card and in
+the report and **never sends one**. Approving and sending happens in Espresso, per item.
+
+The browse grant does not install anything: `INSTALL_PLAYWRIGHT_BROWSERS` is a Docker
+**build** arg, so the image either carries Chromium (`msandbox build --playwright`) or
+every capture exits 3.
+
+Espresso opens `.md` attachments rendered through `JournalContentView` with a
+Rendered | Source toggle (tables stay plain text; the parser has no table case).
+
+Contract tests: `apps/msandbox/tests/test_kanban_autopr_research.sh` (registry, selection,
+bridge switches, validator, publisher, workflow wiring). Manual proof on the runner:
+create a Research card on one of the four boards with a screenshot attached, press
+**Run research now**, and confirm the live log shows `gpt-5.6-luna`, a
+`research-report-<id8>-r1.md` appears under the ticket, the note and the "Ready for
+review" bell arrive, the card is in Review, and the `.md` opens rendered; reject with a
+note and a `-r2.md` lands on the next cycle.
+
+## Email cards
+
+The second artifact kind, and the first whose corpus a person supplies rather than the
+model finding it. Kind = the `email` ticket template (`mw_tasks.category = "email"`;
+fields Goal / Instructions / Tone). In Espresso's Email panel a person picks a message and
+uses **Send to board**: that creates the card and calls
+`POST /matcha-work/agent/email/snapshot`, which fetches each chosen message **on the
+server**, with that person's own Gmail connection, and attaches it to the task as
+`email-<Gmail message id>.md` (the whole id: Gmail ids are time-ordered, so a prefix collides
+for mail received together) — YAML front matter, values double-quoted (`email_id`, `thread_id`, `from`,
+`date`, `subject`, `attachments`), a `# subject` heading, From / Date lines, then the body,
+capped at 20,000 characters. The email's own attachments are listed by filename and type
+only; their content is never included. The endpoint is idempotent on filename. The sandbox
+never touches Gmail: the snapshots are the whole corpus, and a message nobody attached does
+not exist for the run.
+
+A card can also start on the board: choosing the Email template in Espresso's New Ticket
+flow opens a four-step wizard (pick up to 10 unread emails → goal → reply tone → a review
+of what AutoPR will and won't do). Creating the ticket then snapshots the picked emails onto
+the new card through the same endpoint. The description notes only how many are attached:
+subjects and senders stay inside the snapshots, which the agent treats as untrusted.
+
+Registry row (`autopr_kind_field email …` in `lib.sh`):
+
+| Field | Value |
+|---|---|
+| prompt | `_prompt_email.txt` |
+| model / effort | `gpt-5.6-luna` / `medium` |
+| sandbox | `AUTOPR_CODEX_REQUIRE_EMPTY_PATCH=1` only — no web search, no image inputs |
+| headings | `### Summary` / `### Emails reviewed` / `### Recommended actions` / `### Confidence` |
+| decision | `decision.sh normalize-email` |
+| publisher | `publish-email.sh` |
+| outcome / capability | `artifact` / `email` |
+
+No search, no browser, no images. `investigate.sh` gives an artifact kind hosted web search
+(and, on a `browse` board, the capture command) only when the kind's own row sets
+`AUTOPR_CODEX_WEB_SEARCH=1`, so an email run on a board that also holds `research` and
+`browse` still gets neither, and `context.json.grounding.web_search_available` is `false`.
+Selection, cooldowns, the no-spec ledger, revision rounds, checkpointing, and the workflow's
+PR-step gating are the research path unchanged: they key on the registry `outcome`, never
+the mode. On a revision the newest prior `email-report-*.md` rides along as version 1 and
+older rounds are withheld — the own-output filter in `investigate.sh` accepts `research-`
+and `email-` names alike; snapshots carry no round suffix and are never filtered.
+
+The prompt treats card text and snapshots as untrusted: an email that tells the model to do
+something is a fact about the email, not a directive. `"handle these"` is not a vague card —
+the attached emails are the scope. `needs_clarification` is for a card with no snapshot at
+all, or one that needs a decision only its owner can make.
+
+`decision.sh normalize-email` validates:
+
+```json
+{"schema_version": 1, "outcome": "email_report | needs_clarification",
+ "card_note": "...", "summary": "...",
+ "per_email": [{"file": "email-18c3f0a1b2c3d4e5.md", "from": "...", "subject": "...",
+                "bucket": "needs_reply | action | fyi | newsletter",
+                "summary": "...", "suggested_action": "..."}],
+ "confidence": {"score": 0, "reason": "..."},
+ "questions": [], "staged_actions": []}
+```
+
+- `per_email`: one entry per snapshot actually read, no other keys; `file` is the bare
+  attachment name (`^email-[A-Za-z0-9_-]{1,128}\.md$`, never an `email-report-` name) and
+  unique across entries; `from` /
+  `subject` ≤ 200, `summary` 1–600, `suggested_action` ≤ 300.
+- `email_report` needs ≥ 1 `per_email` entry and no questions; `needs_clarification` needs
+  ≥ 1 question and no staged actions. No `sources`. `card_note`, `summary`, `confidence`,
+  questions, and staged actions validate exactly as for research — the jq defs are
+  duplicated (jq `def`s are program-scoped), so change both validators or neither.
+- The normalizer rebuilds the object key by key with `kind: "email"`,
+  `safe_changes_present: false`, `awaiting_human`, `confidence_score` / `confidence_band`,
+  and research's criticality shape, so the generic workflow steps read it unchanged.
+
+`publish-email.sh` is a copy of `publish-research.sh` kept in step with it: kind guard
+`email`; round N from the card's existing `email-report-*.md`; uploads
+`email-report-<id8>-rN.md` under the trusted line `_AutoPR email review · <date> · model
+<m> · round N · K email(s) reviewed_`; the same orphan reuse keyed on
+`Report attached: <file>`, staging, summary note, and move to Review; no screenshots. The
+workflow's publish step dispatches on `steps.select.outputs.mode`, with each publisher
+named by its literal `$AUTOPR_CONTROL_ROOT/kanban-autopr/…` path so `test_ci_guards.sh`
+can prove it is archived; an artifact mode with no branch fails the step.
+
+Reply drafts: the prompt asks for `kind: "email"` staged actions only for `needs_reply`
+mail, at most ten, addressed to the snapshot sender's bare address, subject `Re: <original>`,
+never to no-reply or newsletter senders, with no other keys. They become approvable rows
+only on a board that also holds `outreach`, and each still needs a person to approve that
+exact send in Espresso (see *Staged outreach* above). **Staged replies are not threaded
+yet:** the send route calls `gmail.send_email(to, subject, body)` and the staged-action
+cleaner silently drops unknown keys, so a reply goes out as a new message carrying the
+`Re:` subject. Threading (`thread_id` / `in_reply_to` in the staged-action field limits and
+the send call) is a follow-up.
+
+The kind needs the `email` board grant. Like `research`, that grant has no later
+server-side moment to re-check it — the harness's stamp is the gate — but it reaches no
+mailbox: the snapshots were fetched by a person's own session, and sending re-checks
+`outreach` server-side.
+
+Contract tests: `apps/msandbox/tests/test_kanban_autopr_email.sh` (registry, sandbox switches
+and the search/browse gate, prompt rules, validator, publisher, workflow wiring).
+
+## Work/merge plan and explicit release
+
+The tmux overview shows the live plan id, clustered ticket work order, and merge order
+for open **draft** bot PRs. Each merge row includes earlier overlapping PR dependencies,
+blocking labels/checks/reviews, and related tickets still waiting for or processing
+additional context. Ready-for-review PRs stay visible in the ordinary PR list but are
+never put in this merge plan.
+
+When the dashboard says the release is unblocked, the operator may run its printed
+command (or dispatch the same workflow from Actions):
+
+```sh
+gh workflow run autopr-release-plan.yml -f plan_id=<exact-live-plan-id>
+```
+
+The trusted Mac rebuilds the plan from the live board and all open bot PRs. A stale id,
+new comment/update, context contingency, `autopr-awaiting-input`, `needs-work`,
+`possible-duplicate`, failed check, requested change, or unmerged predecessor
+stops the release. Pending checks are shown in the plan but the released workflow waits
+for them. Each merge position is pinned to the PR head commit captured by the plan;
+any later push stops the release, and GitHub receives the same commit as an atomic merge
+precondition. For each surviving draft, `release-plan.sh` marks it ready, waits for
+GitHub to report it clean, squash-merges without `--admin`, verifies `MERGED`, and only
+then evaluates the next PR against the new main. It never queues all PRs for unordered
+auto-merge. If a check, timeout, or merge attempt fails after the ready transition, the
+script restores the still-open PR to draft so a later authoritative plan can include it.
+
+## Post-deploy production proof
+
+Every implementation decision carries a reviewed production verification plan. A safe,
+unauthenticated, read-only public behavior may specify up to five exact HTTP status/body
+assertions. Authenticated, stateful, or visual behavior must specify a manual checklist;
+it cannot claim automatic success.
+
+After a successful blue/green swap, `update-ec2.sh` dispatches
+`post-deploy-fix-verification.yml`. `verify-production-fixes.sh` considers a merged
+AutoPR only when its merge commit is an ancestor of the deployed source SHA and the
+required backend/frontend target is live. Passing automatic assertions add
+`production-verified`; a failed assertion adds `production-verification-failed` and
+does not mark the issue fixed. A failed result is terminal for automatic deploy checks:
+later deploys skip it until an operator resolves the cause and removes the failure label
+to request a fresh check. Manual plans add `production-verification-needed` and
+post the exact checklist to the PR. The dashboard shows these states beside recently
+merged Kanban PRs; error-autofix and self-audit lanes do not claim a production-check
+state they never emit. After performing a manual checklist, record the observed result through
+`record-production-verification.yml` (PR number, passed/failed, and bounded evidence);
+it requires the outstanding manual-gate label and leaves an actor/run-linked PR audit
+comment before replacing the label. Merge alone, or merge-to-main before deployment,
+is never proof.
+
+## Card ↔ PR linkage (`mw_tasks.pr_url` / `pr_number`)
+
+Additive migration `taskpr0001`. Plumbed through the board SELECT
+(`project_task_service.py`), the PATCH whitelist (`routes/matcha_work/tasks.py`), the
+client types (`client/src/work/types.ts`), and a PR pill on the kanban card
+(`KanbanCard.tsx`, next to the churn chip) linking out to `pr_url`.
+
+The pull-request webhook resolves the primary card from a task trailer or task-shaped
+branch, then unions every card carrying the exact persisted `pr_number`. The latter
+supports cross-lane and multi-card ownership where one error-bot or human PR owns several
+Kanban tasks; the existing repository and four-project allowlists still apply before any
+card mutation.
+
+## `post-checkout` hook (checkout → in_progress)
+
+`apps/msandbox/harness/hooks/post-checkout`, installed via `install-hooks.sh` as a
+symlink into `.git/hooks/post-checkout` in the real clone (never `core.hooksPath` — that
+would silently disable every other hook in the repo). Checking out a branch matching
+`^(bot/task|task)-?/?([0-9a-f]{8})` — which covers both bot branches and a hand-made
+`task/<id8>-...` branch, and `gh pr checkout <n>` (which names the local branch after the
+PR head, so it matches the same regex with no special-casing) — backgrounds a
+`curl --max-time 5` that logs in as the bot, finds the task by `id8` across the four
+configured projects, and PATCHes `todo → in_progress` **only if** the card is currently in
+`todo`. That guard is what makes it safe: checking out a branch whose card is already in
+`review` or `done` does nothing, so the hook can never drag a card backwards. The hook
+always `exit 0`s — it must never fail or slow down a checkout.
+
+## `pull_request` webhook (`routes/matcha_work/github.py`)
+
+Same public, HMAC-verified endpoint the push handler already uses
+(`POST /matcha-work/public/github/webhook`). `install_repo_webhook` is shared by every
+company that connects its own repo for commit-scanning — `GITHUB_WEBHOOK_SECRET` is one
+global value across all of them, and turning on `WEBHOOK_EVENTS` upgrades every one of
+those hooks to send `pull_request`, not just this repo's. Two independent boundaries
+close that off before resolution ever runs:
+
+- **Repo scope** — `payload.repository.full_name` must equal `_KANBAN_AUTOPR_REPO`
+  (`KANBAN_AUTOPR_REPO` env, defaults to `tajaa/matcha-recruit`). A PR opened against any
+  other connected customer repo is ignored outright.
+- **Project allowlist** — the resolved task's `project_id` must be one of
+  `_KANBAN_AUTOPR_PROJECT_IDS` (kept in sync with `scripts/seed/autopr_bot.py`'s
+  `PROJECTS` list). Even a legitimate PR in this repo can't move a card outside the four
+  target projects.
+
+Primary task resolution, in order: the `<!-- matcha-task: <uuid> -->` trailer in the PR
+body; else the `bot/task-<id8>` / `task/<id8>-...` head-branch prefix matched against
+`mw_tasks.id` with hyphens stripped (same regex the `post-checkout` hook uses — this is
+what lets a human's own hand-made branch work too, not just bot-authored PRs). Every
+additional card whose persisted `pr_number` matches is included and deduplicated before
+the transition. Column moves are a no-op unless the card is currently in the listed source
+column; metadata is written only when it changed. Redelivery is therefore idempotent, and
+a webhook replay can never drag a card backwards:
+
+| action | from | to | also |
+|---|---|---|---|
+| `opened`, `reopened` | `todo` | `in_progress` | write `pr_url`, `pr_number` |
+| `closed` with `merged == true` | `todo`, `in_progress`, `changes_requested` | `review` | write the visible `🤖 AUTO SETUP · MERGED: READY FOR REVIEW · build … · prod … · PR #…` note; reconstruct production plus current criticality/confidence from PR trailers if the original card PATCH failed; refresh `pr_url`/`pr_number` |
+| `closed` with `merged == true` | `review` | `review` | add/recover the same origin/build note and PR link; never move the card backwards |
+| `closed` with `merged == false`, head `bot/task-<id8>` | `in_progress`, `changes_requested` | `todo` | write `🤖 AUTO SETUP · PR CLOSED: NOT MERGED · PR #…`; the card does **not** auto-rerun (the branch's PR history still gates a fresh investigation until the owner presses Run AutoPR or replies with context). `reconcile-merged-cards.sh` mirrors this on every pass. |
+| `closed` with `merged == false`, any other head (error-bot draft closed as superseded/duplicate, human PR) | — | — | no move |
+| anything else | — | — | ignore |
+
+`review → done` stays manual through `POST /tasks/{id}/approve` — a merge is not an
+approval. AutoPR never deploys. The only merge mutation is the separately dispatched,
+exact-plan-id release described above.
+
+The persistent runner may check out a local `bot/task-*` branch while assembling
+the PR. Its always-run finalizer switches a clean task checkout back to `main`
+after publication. It refuses to erase dirty state. Human/agent work may likewise
+use temporary worktrees for isolation, but the exact temporary worktree is removed
+immediately after its PR is submitted; submitted PR branches are never left checked
+out in a worktree.
+
+## Spend guards and known limitations
+
+The full 2026-09 review of this system — measurements, ranked findings, what
+batch A fixed, and the structural backlog (batch B) — lives in
+`docs/ops/AUTOMATION_REVIEW_2026-09.md`. The guards that exist now:
+
+- **`hot-redispatch-guard.sh`** runs first in the workflow and skips the pass when the
+  previous completed Kanban run ended less than five minutes ago. It is a
+  GitHub-side floor that survives a broken or stale local dispatcher (the installed
+  LaunchAgent copy lagged the repo for a week and re-fired a no-op run every 66 s).
+  API failure proceeds — it is a spend guard, not a safety boundary.
+- **The dispatcher remembers the request set it last forced** (`last-forced-request-set`):
+  one "Run AutoPR now" press costs at most one forced run per request TTL even when
+  the run dies before `select.sh`/`investigate.sh` can claim it.
+- **`codex-backoff.sh`** holds every lane after a Codex usage-limit exit.
+- **The prelude is cheap when nothing is eligible:** labels are created only when
+  missing, the production SSH/ECR/bundle resolution runs only after a card is
+  selected, and `collect-pr-context.sh`'s snapshot (`AUTOPR_BOT_PRS_FILE`) feeds the
+  reconciler and the selector's cap instead of repeat GitHub calls.
+- **`autopr-self-audit/audit.sh` reports a stale installed dispatcher** (files under
+  `~/.local/share/matcha-kanban-autopr` differing from the repo, a scheduler
+  `StartInterval` other than 60, or a missing request-watch agent) as an operator
+  action: `./apps/msandbox/harness/install-launch-agent.sh` (or `msandbox install`,
+  which runs it; `msandbox doctor` shows the drift first).
+
+Still open (see the review doc for detail): the lanes rebuild the sandbox clone two to
+three times per card; the three lanes duplicate confidence banding, fingerprinting,
+redaction, and date parsing; `reconcile.sh` re-asks Codex the same equivalence
+question every 10 minutes; error-lane selection is an uncached N+1 capped at 100; the
+dispatch lock is TTL-shaped; one Mac/one login/one runner slot with no staleness alarm;
+Espresso's AutoPR state machine is string-prefix parsing of `progress_note`.

@@ -26,7 +26,7 @@ jobs:
 
       - name: Require msandbox master switch
         run: |
-          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+          if ! ./apps/msandbox/bin/agent-sandbox.sh autopr-ready; then
             echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
             exit 1
           fi
@@ -51,7 +51,7 @@ jobs:
       - name: Run deterministic audit
         id: audit
         run: |
-          ./scripts/autopr-self-audit/audit.sh \
+          ./apps/msandbox/self-audit/audit.sh \
             --json "$RUNNER_TEMP/autopr-audit.json" \
             --summary "$RUNNER_TEMP/autopr-audit.md"
           cat "$RUNNER_TEMP/autopr-audit.md" >> "$GITHUB_STEP_SUMMARY"
@@ -67,14 +67,14 @@ jobs:
           # attempted (and verify.sh rejected) is not retried every six
           # hours — see repair-ledger.sh for the retry window.
           set +e
-          ./scripts/autopr-self-audit/repair-ledger.sh should-repair "$RUNNER_TEMP/autopr-audit.json"
+          ./apps/msandbox/self-audit/repair-ledger.sh should-repair "$RUNNER_TEMP/autopr-audit.json"
           rc=$?
           set -e
           if [ "$rc" -eq 3 ]; then
             echo "Same repairable failure set as the last attempted repair; no new Codex run." >> "$GITHUB_STEP_SUMMARY"
             echo "repair=false" >> "$GITHUB_OUTPUT"
           else
-            ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" attempted
+            ./apps/msandbox/self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" attempted
             echo "repair=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -90,11 +90,11 @@ jobs:
         timeout-minutes: 15
         continue-on-error: true
         env:
-          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ./apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-autopr-self-audit-sandbox
           AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox
         run: |
-          ./scripts/autopr-self-audit/investigate.sh \
+          ./apps/msandbox/self-audit/investigate.sh \
             "$RUNNER_TEMP/autopr-audit.json" \
             "$RUNNER_TEMP/autopr-audit-report.md" \
             "$RUNNER_TEMP/autopr-audit-decision.json"
@@ -104,7 +104,7 @@ jobs:
         run: |
           git reset --hard HEAD
           git clean -fd
-          ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" failed
+          ./apps/msandbox/self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" failed
           echo "The repair model failed before producing a validated result; the same failure set is not retried before the ledger window elapses." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
@@ -119,7 +119,7 @@ jobs:
         if: steps.decision.outputs.safe == 'true'
         run: |
           set +e
-          ./scripts/autopr-self-audit/verify.sh \
+          ./apps/msandbox/self-audit/verify.sh \
             "$RUNNER_TEMP/autopr-audit.json" \
             "$RUNNER_TEMP/autopr-audit-after.json" \
             "$RUNNER_TEMP/autopr-audit-verification.md"
@@ -127,7 +127,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/autopr-audit-verification.md" >> "$GITHUB_STEP_SUMMARY"
           if [ "$verify_rc" -ne 0 ]; then
-            ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" rejected
+            ./apps/msandbox/self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" rejected
             exit "$verify_rc"
           fi
 
@@ -145,11 +145,11 @@ jobs:
         if: steps.decision.outputs.safe == 'true'
         timeout-minutes: 5
         env:
-          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ./apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-autopr-self-audit-sandbox
           AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox
         run: |
-          ./scripts/kanban-autopr/write-commit-subject.sh fix "$RUNNER_TEMP/autopr-audit-commit-subject.json" \
+          ./apps/msandbox/harness/write-commit-subject.sh fix "$RUNNER_TEMP/autopr-audit-commit-subject.json" \
             -f "$RUNNER_TEMP/autopr-audit.json" \
             -f "$RUNNER_TEMP/autopr-audit-decision.json" \
             -f "$RUNNER_TEMP/autopr-audit-report.md" \
@@ -159,15 +159,18 @@ jobs:
         if: steps.investigate.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Names the tree the publisher's `git reset --hard` may discard.
+          # Unset, the publisher refuses to run against a dirty worktree.
+          AUTOPR_WORKSPACE_ROOT: ${{ github.workspace }}
         run: |
-          ./scripts/autopr-self-audit/publish.sh \
+          ./apps/msandbox/self-audit/publish.sh \
             "$RUNNER_TEMP/autopr-audit.json" \
             "$RUNNER_TEMP/autopr-audit-decision.json" \
             "$RUNNER_TEMP/autopr-audit-report.md" \
             "$RUNNER_TEMP/autopr-audit-verification.md" \
             "$RUNNER_TEMP/autopr-audit-commit-subject.json"
           if [ "${{ steps.decision.outputs.safe }}" = true ]; then
-            ./scripts/autopr-self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" published
+            ./apps/msandbox/self-audit/repair-ledger.sh record "$RUNNER_TEMP/autopr-audit.json" published
           fi
 
       - name: Cleanup
@@ -178,7 +181,7 @@ jobs:
             SANDBOX_WORKSPACE_DIR="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/workspace" \
             SANDBOX_AWS_DIR="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/empty-aws" \
             SANDBOX_CODEX_AUTH_FILE="${{ github.workspace }}/.git/matcha-autopr-self-audit-sandbox/codex-auth/auth.json" \
-            ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
+            ./apps/msandbox/bin/agent-sandbox.sh stop >/dev/null 2>&1 || true
           git reset --hard >/dev/null 2>&1 || true
           git clean -fd >/dev/null 2>&1 || true
           git switch --detach main >/dev/null 2>&1 || true

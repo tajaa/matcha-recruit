@@ -60,7 +60,7 @@ Collection and publication are trusted host steps. They hold the GitHub token an
 `EC2_SSH_KEY`, resolve the active blue/green image SHAs, and read only changelog ids plus
 the watermark from production.
 
-Drafting reuses `scripts/kanban-autopr/run-codex-sandboxed.sh`:
+Drafting reuses `apps/msandbox/harness/run-codex-sandboxed.sh`:
 
 - model: `gpt-5.6-luna`;
 - reasoning effort: `high`;

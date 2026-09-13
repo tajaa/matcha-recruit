@@ -1,7 +1,7 @@
 # Docker disk reclamation + msandbox image GC
 
 **Status: done, 2026-08-29.** Durable reference lives in
-`docs/ops/AGENT_SANDBOX.md` § "Disk reclamation (`msandbox gc`)". This file is
+`apps/msandbox/docs/AGENT_SANDBOX.md` § "Disk reclamation (`msandbox gc`)". This file is
 the record of what was wrong and what shipped.
 
 ## The problem
@@ -37,7 +37,7 @@ which matched the `2f17fab940b712d1a0cb` on disk.
 
 ## What shipped
 
-**`msandbox gc [--apply]`** — new `scripts/msandbox/docker_gc.py`, wired into
+**`msandbox gc [--apply]`** — new `apps/msandbox/cli/docker_gc.py`, wired into
 `cli.py`, `agent-sandbox.sh`, and the installed launcher. Dry-run by default
 like `worktree gc`. Sweeps unreachable images, `matcha-ms-*` volumes, stopped
 `matcha-ms-*` containers, and orphaned `build-contexts/` + `homes/` dirs. Runs
@@ -71,7 +71,7 @@ still works, and the venv `activate` path rewrite still applies.
 a pure `build_identifier`, so GC can compute candidate tags without
 materializing a context directory for each one.
 
-**Tests** — 10 new cases in `scripts/tests/test_msandbox_v2.py` (40 pass), plus
+**Tests** — 10 new cases in `apps/msandbox/tests/test_msandbox_v2.py` (40 pass), plus
 the 14-case lifecycle suite. They cover the protected lanes surviving with zero
 session records, per-release rollback tags, the shared-label hazard, malformed
 session state, Docker inventory failures, mounted orphan homes, lifecycle-lock

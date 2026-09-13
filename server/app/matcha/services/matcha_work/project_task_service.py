@@ -110,8 +110,8 @@ _ALLOWED_OUTCOMES = {"open", "won", "lost"}
 _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
 # The AutoPR runtime a card may pin. Mirrors MODEL_CHOICES / EFFORTS in
-# scripts/msandbox/autopr_control.py and the ladder in
-# scripts/kanban-autopr/lib.sh — the value written here is handed straight to
+# apps/msandbox/cli/autopr_control.py and the ladder in
+# apps/msandbox/harness/lib.sh — the value written here is handed straight to
 # `codex --model` / `model_reasoning_effort` inside the sandbox, so a typo
 # here is a dead run, not a bad label. Adding a model means adding it in all
 # three places.
@@ -122,7 +122,7 @@ _ALLOWED_AUTOPR_EFFORTS = {"low", "medium", "high", "xhigh"}
 # precedence, which is the only place that knows.
 _ALLOWED_AUTOPR_RUNTIME_SOURCES = {"auto", "manual", "default", "handoff"}
 
-# Reason set mirrors scripts/kanban-autopr/decision.sh; migration_required is
+# Reason set mirrors apps/msandbox/harness/decision.sh; migration_required is
 # retired for new decisions but old cards still carry it, so parsers keep it.
 _AUTOPR_NO_SPEC_RE = re.compile(
     r"\[autopr:no-spec [^\]]+\]\s+"
@@ -137,7 +137,7 @@ _AUTOPR_DIRECTIVE_MARKER_RE = re.compile(r"\[autopr:directives ([a-z_,]+)\]")
 # sees text an authorized owner bound to one exact AutoPR decision, so a plain
 # affirmative ("you can work on this", "do it anyway", "draft the migration")
 # is authority. Keep in lock-step with the harness-side copy in
-# scripts/kanban-autopr/resolve-directive-policy.py.
+# apps/msandbox/harness/resolve-directive-policy.py.
 _AUTOPR_LEAD_IN = (
     r"^(?:(?:please|pls|hey|ok|okay|yes|yep|yeah|sure|thanks)\b[\s,]*)*"
     r"(?:(?:anyway|anyways|either\s+way|regardless|still|nonetheless)\b[\s,]*)*"
@@ -197,7 +197,7 @@ _AUTOPR_RUNTIME_APPROVAL_PREFIXES = (
 
 def _is_autopr_waiting_for_runtime_approval_note(note: str) -> bool:
     normalized = (note or "").strip()
-    # Keep in lock-step with scripts/kanban-autopr/select.sh and the Espresso
+    # Keep in lock-step with apps/msandbox/harness/select.sh and the Espresso
     # card/header views.
     return normalized.startswith(_AUTOPR_RUNTIME_APPROVAL_PREFIXES)
 
@@ -446,7 +446,7 @@ async def request_autopr_reconsideration(
 
 
 # The four Espresso boards the kanban-autopr harness actually watches (kept in
-# sync with scripts/seed/autopr_bot.py's PROJECTS list and scripts/kanban-autopr
+# sync with scripts/seed/autopr_bot.py's PROJECTS list and apps/msandbox/harness
 # /lib.sh's KANBAN_AUTOPR_PROJECT_IDS). Anything outside this set has no
 # harness polling it, so a run request there could never be claimed — reject it
 # at the door instead of queueing work nothing will pick up.

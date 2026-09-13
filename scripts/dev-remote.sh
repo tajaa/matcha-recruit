@@ -27,7 +27,7 @@ CHAT_MMPROJ_PATH="$CHAT_MODEL_DIR/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
 #
 # Optional overrides: LOCAL_PORT/LOCAL_DB_PORT, REDIS_PORT, FRONTEND_PORT,
 # BACKEND_PORT, DATABASE_URL, REDIS_URL, CHAT_PORT
-# Set AGENT_SANDBOX=1 when running from scripts/agent-sandbox.sh (CODEX_SANDBOX=1
+# Set AGENT_SANDBOX=1 when running from apps/msandbox/bin/agent-sandbox.sh (CODEX_SANDBOX=1
 # is accepted as an alias). In that mode PostgreSQL and Redis remain the normal
 # host dev services, reached from Docker Desktop at host.docker.internal.
 

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+# shellcheck source=../harness/workspace-guard.sh
+source "$SCRIPT_DIR/../harness/workspace-guard.sh"
+autopr_require_writable_root "$REPO_ROOT" self-audit
+AUDIT_FILE="${1:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+DECISION_FILE="${2:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+REPORT_FILE="${3:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+VERIFICATION_FILE="${4:?usage: publish.sh AUDIT DECISION REPORT VERIFICATION [COMMIT_SUBJECT]}"
+COMMIT_SUBJECT_FILE="${5:-}"
+REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+FINGERPRINT="$(jq -r '.fingerprint' "$AUDIT_FILE")"
+BRANCH="bot/autopr-audit-$FINGERPRINT"
+OUTCOME="$(jq -r '.outcome' "$DECISION_FILE")"
+
+cd "$REPO_ROOT"
+git add --all
+changed_paths="$(git diff --cached --name-only --no-renames)"
+# The allowed set is an enumeration, not a directory glob, and it is the
+# pre-move set with the paths translated one for one: the four operator docs
+# (not the whole docs/ directory) and bin/agent-sandbox.sh (not the whole bin/
+# directory). A relocation must not quietly widen what a self-modifying lane
+# may publish.
+#
+# self-audit/ is deliberately absent: the auditor is a sealed capsule and must
+# not be able to rewrite its own prompt, verifier or this publisher.
+# _prompt.txt states the same rule to the model; this is the enforcement.
+# apps/msandbox/tests/test_autopr_self_audit.sh covers both properties.
+disallowed_paths="$(printf '%s\n' "$changed_paths" | grep -vE \
+    '^(apps/msandbox/(bin/agent-sandbox\.sh|cli/.*|sandbox/[^/]+|(harness|error-autofix|scope)/[^/]+|tests/(test_msandbox_v2\.py|test_(agent_sandbox|msandbox_|kanban_autopr|error_autofix|autopr_)[^/]*\.(sh|py))|docs/(AGENT_SANDBOX|MSANDBOX_SESSIONS|KANBAN_AUTOPR|SILENT_ERROR_AUTOFIX)\.md))$' || true)"
+if printf '%s\n' "$changed_paths" | grep -qx 'apps/msandbox/tests/test_autopr_self_audit.sh'; then
+    disallowed_paths="${disallowed_paths}${disallowed_paths:+$'\n'}apps/msandbox/tests/test_autopr_self_audit.sh"
+fi
+if [ -n "$disallowed_paths" ]; then
+    echo "Self-audit repair touched a forbidden path:" >&2
+    printf '%s\n' "$disallowed_paths" >&2
+    git reset --hard >/dev/null 2>&1
+    exit 1
+fi
+
+has_diff=false
+git diff --cached --quiet || has_diff=true
+if [ "$OUTCOME" = fix ]; then
+    [ "$has_diff" = true ] || { echo "decision claimed a fix but produced no diff" >&2; exit 1; }
+else
+    [ "$has_diff" = false ] || {
+        git reset --hard >/dev/null 2>&1
+        echo "operator-action decision unexpectedly changed the repository" >&2
+        exit 1
+    }
+    echo "No draft PR: the audit requires operator action or had no reproducible repository fix."
+    exit 0
+fi
+
+[ -n "$COMMIT_SUBJECT_FILE" ] && [ -s "$COMMIT_SUBJECT_FILE" ] \
+    || { echo "safe repair is missing its Luna commit subject" >&2; exit 1; }
+COMMIT_SUBJECT="$(jq -er '.commit_subject | select(type == "string")' "$COMMIT_SUBJECT_FILE")" \
+    || { echo "commit subject output is invalid" >&2; exit 1; }
+[[ "$COMMIT_SUBJECT" == fix:\ * && "$COMMIT_SUBJECT" != *$'\n'* && "$COMMIT_SUBJECT" != *$'\r'* ]] \
+    || { echo "commit subject must be one line starting with fix:" >&2; exit 1; }
+[ "${#COMMIT_SUBJECT}" -le 72 ] \
+    || { echo "commit subject exceeds 72 characters" >&2; exit 1; }
+
+git -c core.hooksPath=/dev/null \
+    -c user.name=matcha-autopr-auditor \
+    -c user.email=matcha-autopr-auditor@users.noreply.github.com \
+    commit -m "$COMMIT_SUBJECT" >/dev/null
+# Keep the repair checkout detached: the PR branch exists only on the remote,
+# so neither this runner nor a developer worktree can retain branch ownership.
+git -c core.hooksPath=/dev/null push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+
+BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/matcha-autopr-body.XXXXXX")"
+trap 'rm -f "$BODY_FILE"' EXIT
+{
+    echo "<!-- matcha-autopr-self-audit: $FINGERPRINT -->"
+    echo
+    echo "## AutoPR self-audit repair"
+    echo
+    echo "Fingerprint: \`$FINGERPRINT\`"
+    echo
+    cat "$REPORT_FILE"
+    echo
+    cat "$VERIFICATION_FILE"
+    echo
+    echo "_Drafted inside the tracked-files-only msandbox repair lane._"
+} > "$BODY_FILE"
+
+existing="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
+if [ -n "$existing" ]; then
+    gh pr edit "$existing" --repo "$REPO" --title "$COMMIT_SUBJECT" --body-file "$BODY_FILE"
+else
+    gh pr create --repo "$REPO" --draft --head "$BRANCH" \
+        --title "$COMMIT_SUBJECT" --body-file "$BODY_FILE"
+fi
+gh pr edit "$BRANCH" --repo "$REPO" --add-label autopr-self-audit >/dev/null 2>&1 || true

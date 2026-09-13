@@ -247,7 +247,7 @@ extension TaskViewerSheet {
 
     // MARK: - AutoPR runtime
 
-    /// Kept in sync with AUTOPR_RUNTIME_MODELS in scripts/kanban-autopr/lib.sh
+    /// Kept in sync with AUTOPR_RUNTIME_MODELS in apps/msandbox/harness/lib.sh
     /// and _ALLOWED_AUTOPR_MODELS server-side. The value is handed to
     /// `codex --model` inside the sandbox, so these are ids, not labels.
     static let autoPRModelChoices = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"]

@@ -42,7 +42,7 @@ jobs:
 
       - name: Require msandbox master switch
         run: |
-          if ! ./scripts/agent-sandbox.sh autopr-ready; then
+          if ! ./apps/msandbox/bin/agent-sandbox.sh autopr-ready; then
             echo "AutoPR is disabled. Start it explicitly with: msandbox start" >&2
             exit 1
           fi
@@ -103,7 +103,7 @@ jobs:
         timeout-minutes: 15
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/error-autofix/reconcile.sh
+        run: ./apps/msandbox/error-autofix/reconcile.sh
 
       - name: Write production SSH key
         env:
@@ -118,7 +118,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
-        run: ./scripts/error-autofix/notify-review-ready.sh --reconcile
+        run: ./apps/msandbox/error-autofix/notify-review-ready.sh --reconcile
 
       - name: Collect actionable server and client errors
         id: collect
@@ -130,7 +130,7 @@ jobs:
           # gives this lane a slot once its last pass is ten minutes old; the
           # wider window prevents runner downtime or a long investigation
           # from making an unresolved incident disappear.
-          if ./scripts/error-autofix/collect.sh > "$RUNNER_TEMP/incidents.json"; then
+          if ./apps/msandbox/error-autofix/collect.sh > "$RUNNER_TEMP/incidents.json"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "DB collection failed; falling back to log-grep evidence" >> "$GITHUB_STEP_SUMMARY"
@@ -161,7 +161,7 @@ jobs:
         timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/error-autofix/verify-deployed-fixes.sh "$RUNNER_TEMP/incidents.json"
+        run: ./apps/msandbox/error-autofix/verify-deployed-fixes.sh "$RUNNER_TEMP/incidents.json"
 
       - name: Fallback log-grep evidence
         if: steps.collect.outputs.ok != 'true'
@@ -191,7 +191,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          ./scripts/error-autofix/select.sh "$RUNNER_TEMP/incidents.json" > "$RUNNER_TEMP/incident.json"
+          ./apps/msandbox/error-autofix/select.sh "$RUNNER_TEMP/incidents.json" > "$RUNNER_TEMP/incident.json"
           rc=$?
           set -e
           if [ "$rc" -eq 3 ]; then
@@ -220,7 +220,7 @@ jobs:
         env:
           SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
         run: |
-          ./scripts/error-autofix/fetch-correlated-log.sh "$RUNNER_TEMP/incident.json" > "$RUNNER_TEMP/correlated-log.txt" || true
+          ./apps/msandbox/error-autofix/fetch-correlated-log.sh "$RUNNER_TEMP/incident.json" > "$RUNNER_TEMP/correlated-log.txt" || true
 
       - name: Delete production SSH key
         if: always()
@@ -232,11 +232,11 @@ jobs:
         timeout-minutes: 12
         continue-on-error: true
         env:
-          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ./apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-error-autofix-sandbox
           AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-error-autofix-sandbox
         run: |
-          ./scripts/error-autofix/investigate.sh \
+          ./apps/msandbox/error-autofix/investigate.sh \
             "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/report.md" \
             "$RUNNER_TEMP/decision.json" "$RUNNER_TEMP/correlated-log.txt"
 
@@ -268,7 +268,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AUTOPR_SCOPE_DEDUPE_MODE: enforce
         run: |
-          ./scripts/autopr-scope/check-open-prs.sh \
+          ./apps/msandbox/scope/check-open-prs.sh \
             --lane error --identity "${{ steps.select.outputs.key }}" \
             --evidence "$RUNNER_TEMP/incident.json" --report "$RUNNER_TEMP/report.md" \
             --output "$RUNNER_TEMP/coverage.json"
@@ -287,14 +287,14 @@ jobs:
         if: steps.coverage.outputs.covered == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/error-autofix/record-coverage.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/coverage.json" "$RUNNER_TEMP/decision.json"
+        run: ./apps/msandbox/error-autofix/record-coverage.sh "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/coverage.json" "$RUNNER_TEMP/decision.json"
 
       - name: Verify (baseline vs branch)
         id: verify
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 8
         run: |
-          ./scripts/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
+          ./apps/msandbox/error-autofix/verify.sh > "$RUNNER_TEMP/verification.md"
         env:
           AUTOFIX_BASE_SHA: ${{ steps.branch.outputs.sha }}
 
@@ -311,11 +311,11 @@ jobs:
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.triage.outputs.safe_changes == 'true' && steps.coverage.outputs.covered != 'true'
         timeout-minutes: 5
         env:
-          AUTOPR_MSANDBOX_BIN: ./scripts/agent-sandbox.sh
+          AUTOPR_MSANDBOX_BIN: ./apps/msandbox/bin/agent-sandbox.sh
           AUTOPR_SANDBOX_PROJECT_NAME: matcha-error-autofix-sandbox
           AUTOPR_SANDBOX_RUNTIME_ROOT: ${{ github.workspace }}/.git/matcha-error-autofix-sandbox
         run: |
-          ./scripts/kanban-autopr/write-commit-subject.sh fix "$RUNNER_TEMP/commit-subject.json" \
+          ./apps/msandbox/harness/write-commit-subject.sh fix "$RUNNER_TEMP/commit-subject.json" \
             -f "$RUNNER_TEMP/incident.json" -f "$RUNNER_TEMP/decision.json" \
             -f "$RUNNER_TEMP/report.md" -f "$RUNNER_TEMP/verification.md"
 
@@ -323,9 +323,12 @@ jobs:
         if: steps.select.outputs.skip == 'false' && steps.investigate.outcome == 'success' && steps.coverage.outputs.covered != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Names the tree the publisher's `git reset --hard` may discard.
+          # Unset, the publisher refuses to run against a dirty worktree.
+          AUTOPR_WORKSPACE_ROOT: ${{ github.workspace }}
           AUTOPR_POSSIBLE_DUPLICATE: ${{ steps.coverage.outputs.possible_duplicate == 'true' && '1' || '0' }}
         run: |
-          ./scripts/error-autofix/publish.sh \
+          ./apps/msandbox/error-autofix/publish.sh \
             "$RUNNER_TEMP/incident.json" "$RUNNER_TEMP/decision.json" \
             "$RUNNER_TEMP/report.md" "$RUNNER_TEMP/verification.md" \
             "$RUNNER_TEMP/commit-subject.json"
@@ -358,7 +361,7 @@ jobs:
           install -m 600 /dev/null "$SSH_KEY"
           trap 'rm -f "$SSH_KEY"' EXIT
           printf '%s\n' "$EC2_SSH_KEY" > "$SSH_KEY"
-          ./scripts/error-autofix/notify-review-ready.sh \
+          ./apps/msandbox/error-autofix/notify-review-ready.sh \
             --pr "${{ steps.review_pr.outputs.number }}" \
             --incident "$RUNNER_TEMP/incident.json" \
             --decision "$RUNNER_TEMP/decision.json"
@@ -372,7 +375,7 @@ jobs:
             SANDBOX_WORKSPACE_DIR="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/workspace" \
             SANDBOX_AWS_DIR="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/empty-aws" \
             SANDBOX_CODEX_AUTH_FILE="${{ github.workspace }}/.git/matcha-error-autofix-sandbox/codex-auth/auth.json" \
-            ./scripts/agent-sandbox.sh stop >/dev/null 2>&1 || true
+            ./apps/msandbox/bin/agent-sandbox.sh stop >/dev/null 2>&1 || true
           git reset --hard >/dev/null 2>&1 || true
           git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -v "^$(git rev-parse --show-toplevel)\$" | xargs -r -n1 git worktree remove --force || true
           git worktree prune || true

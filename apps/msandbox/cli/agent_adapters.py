@@ -1,0 +1,424 @@
+from __future__ import annotations
+
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+import unicodedata
+from pathlib import Path
+from typing import Sequence
+
+from .capabilities import (
+    atomic_write,
+    collect_report,
+    container_report_paths,
+    render_markdown,
+    report_paths,
+    write_report,
+)
+from .docker_runtime import (
+    compose_command,
+    compose_environment,
+    exec_in_session,
+    session_home,
+)
+from .models import Attachment, CapabilityReport, SessionRecord
+from .session_auth import refresh_github_auth
+
+
+class AgentError(RuntimeError):
+    pass
+
+
+def agent_argv(
+    agent: str,
+    extra: Sequence[str] = (),
+    *,
+    permission_mode: str = "standard",
+) -> list[str]:
+    if permission_mode not in ("standard", "autonomous"):
+        raise AgentError(f"unsupported permission mode: {permission_mode}")
+    if agent == "codex":
+        autonomous = (
+            ["--dangerously-bypass-approvals-and-sandbox"]
+            if permission_mode == "autonomous"
+            else []
+        )
+        return ["codex", *autonomous, *extra]
+    if agent == "claude":
+        autonomous = (
+            ["--dangerously-skip-permissions"]
+            if permission_mode == "autonomous"
+            else []
+        )
+        return ["claude", *autonomous, *extra]
+    if agent == "opencode":
+        autonomous = ["--auto"] if permission_mode == "autonomous" else []
+        return ["opencode", *autonomous, *extra]
+    raise AgentError(f"unsupported agent: {agent}")
+
+
+# Each agent's own documented context mechanism, and exactly one per agent.
+# Codex and OpenCode read a global instructions file from the agent home, which
+# is private to this session because the whole home is. Claude Code takes the
+# report through --append-system-prompt-file instead, so it is deliberately
+# absent here: writing the file too would load the same report twice.
+CAPABILITY_CONTEXT_FILES: dict[str, tuple[str, ...]] = {
+    "codex": (".codex/AGENTS.md",),
+    "opencode": (".config/opencode/AGENTS.md",),
+}
+# Used only when an agent build rejects the flag above.
+CLAUDE_FALLBACK_CONTEXT = ".claude/CLAUDE.md"
+
+
+def capability_context_args(agent: str) -> list[str]:
+    """CLI arguments that inject the measured report as developer context."""
+    _, markdown = container_report_paths()
+    if agent == "claude":
+        return ["--append-system-prompt-file", markdown]
+    if agent in ("codex", "opencode"):
+        # Both read their global instructions file; see CAPABILITY_CONTEXT_FILES.
+        return []
+    raise AgentError(f"unsupported agent: {agent}")
+
+
+def _install_capability_files(record: SessionRecord, markdown: str) -> tuple[Path, ...]:
+    home = session_home(record)
+    written: list[Path] = []
+    for relative in CAPABILITY_CONTEXT_FILES.get(record.agent, ()):
+        # Same publish path as the report itself: randomized temp name, no
+        # symlink hop, no half-written instructions file left behind.
+        destination = home / relative
+        atomic_write(destination, markdown)
+        written.append(destination)
+    return tuple(written)
+
+
+def _install_claude_fallback_context(record: SessionRecord) -> None:
+    """Give Claude the report as a file only when it refused the flag."""
+    if record.agent != "claude":
+        return
+    _, markdown_path = report_paths(record)
+    try:
+        markdown = markdown_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    atomic_write(session_home(record) / CLAUDE_FALLBACK_CONTEXT, markdown)
+
+
+def refresh_capability_context(
+    record: SessionRecord,
+    *,
+    container_available: bool = True,
+) -> CapabilityReport | None:
+    """Measure this session and publish the same report to disk and the agent.
+
+    A probe failure never blocks the session; the report itself records it.
+    """
+    try:
+        report = collect_report(record, container_available=container_available)
+        path = write_report(record, report)
+        _install_capability_files(record, render_markdown(report, name=record.name))
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Warning: capability report is unavailable ({exc}).", file=sys.stderr)
+        return None
+    record.last_capability_check_at = report.checked_at
+    record.capability_report_path = str(path)
+    return report
+
+
+def tmux_running(record: SessionRecord) -> bool:
+    if not shutil.which("tmux"):
+        return False
+    exists = subprocess.run(
+        ["tmux", "has-session", "-t", record.tmux_session],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if not exists:
+        return False
+    panes = subprocess.run(
+        ["tmux", "list-panes", "-t", record.tmux_session, "-F", "#{pane_dead}"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    return panes.returncode == 0 and any(line.strip() == "0" for line in panes.stdout.splitlines())
+
+
+def _tmux_exists(record: SessionRecord) -> bool:
+    return bool(
+        shutil.which("tmux")
+        and subprocess.run(
+            ["tmux", "has-session", "-t", record.tmux_session],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
+_configured_panes: set[str] = set()
+
+AUTOPR_DASHBOARD_SESSION = os.environ.get("AUTOPR_TMUX_SESSION", "matcha-autopr")
+
+
+def autopr_status_segment_command() -> str | None:
+    """Path of the file-only AutoPR status script, or None when not installed.
+
+    The installed dispatcher tree is preferred so a session shows the same
+    state the LaunchAgent acts on; the repo copy covers a checkout that has
+    not been installed yet. The release tree never carries it: releases copy
+    only ``apps/msandbox/cli``.
+    """
+    candidates = [Path.home() / ".local/share/matcha-kanban-autopr/status-segment.sh"]
+    repo_root = os.environ.get("MATCHA_REPO_ROOT")
+    if repo_root:
+        candidates.append(Path(repo_root) / "apps/msandbox/harness/status-segment.sh")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def agent_status_right() -> str:
+    """Status bar for an agent session: live AutoPR state plus the two keys."""
+    hints = "Ctrl-b a: AutoPR dashboard | Ctrl-b d: menu | Ctrl-c: interrupt | %H:%M"
+    segment = autopr_status_segment_command()
+    if segment is None:
+        return hints
+    return f"#({shlex.quote(segment)}) | {hints}"
+
+
+def ensure_agent_pane_controls(record: SessionRecord) -> None:
+    """Install lifecycle controls on both new and pre-control-center panes."""
+    if record.tmux_session in _configured_panes or not _tmux_exists(record):
+        return
+    subprocess.run(
+        ["tmux", "set-option", "-t", record.tmux_session, "remain-on-exit", "on"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # Preserve output from a failed CLI, but release the attached terminal so
+    # the manager can offer inspection/restart instead of trapping the client.
+    subprocess.run(
+        [
+            "tmux",
+            "set-hook",
+            "-t",
+            record.tmux_session,
+            "pane-died",
+            f"detach-client -s {shlex.quote('=' + record.tmux_session)}",
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # The AutoPR observer and every agent session share one tmux server, so
+    # one server-global key toggles between them. Same binding as
+    # apps/msandbox/harness/ensure-dashboard.sh; bind-key replaces, so
+    # re-applying it on every session start is harmless.
+    subprocess.run(
+        [
+            "tmux",
+            "bind-key",
+            "-N",
+            "AutoPR dashboard <-> agent session",
+            "a",
+            "if-shell",
+            "-F",
+            f"#{{==:#{{session_name}},{AUTOPR_DASHBOARD_SESSION}}}",
+            "switch-client -l",
+            f"switch-client -t {AUTOPR_DASHBOARD_SESSION}",
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for option, value in (
+        # The segment's inputs change on the dispatcher's 60s tick; every
+        # refresh forks jq and git against the runner checkout, per session.
+        ("status-interval", "30"),
+        ("status-right-length", "120"),
+        ("status-right", agent_status_right()),
+    ):
+        subprocess.run(
+            ["tmux", "set-option", "-t", record.tmux_session, option, value],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    _configured_panes.add(record.tmux_session)
+
+
+def exited_agent_output(record: SessionRecord) -> str | None:
+    """Return preserved output only when the harness pane has exited."""
+    if not _tmux_exists(record) or tmux_running(record):
+        return None
+    captured = subprocess.run(
+        ["tmux", "capture-pane", "-pt", record.tmux_session, "-S", "-120"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if captured.returncode:
+        return "Harness exited, but its pane output could not be captured."
+    return captured.stdout.strip()[-4000:]
+
+
+def launch_agent(record: SessionRecord, extra: Sequence[str] = ()) -> None:
+    """Start one durable TUI per session; other sessions are never inspected or blocked."""
+    if not shutil.which("tmux"):
+        raise AgentError("tmux is required for durable msandbox sessions")
+    if tmux_running(record):
+        return
+    context_args = capability_context_args(record.agent)
+    if not context_args:
+        _start_agent_pane(record, extra)
+        return
+    try:
+        _start_agent_pane(record, [*context_args, *extra])
+    except AgentError:
+        # An older pinned agent build may not accept the context flag. The
+        # session is more valuable than the injection, and the same report is
+        # still on disk at the path the report itself names.
+        print(
+            "Warning: this agent build rejected the capability-context flag; "
+            "the report remains at "
+            f"{container_report_paths()[1]}.",
+            file=sys.stderr,
+        )
+        _install_claude_fallback_context(record)
+        _start_agent_pane(record, extra)
+
+
+def _start_agent_pane(record: SessionRecord, extra: Sequence[str] = ()) -> None:
+    _configured_panes.discard(record.tmux_session)
+    subprocess.run(
+        ["tmux", "kill-session", "-t", record.tmux_session],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    compose = compose_command(
+        record,
+        "exec",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "workspace",
+        *agent_argv(record.agent, extra, permission_mode=record.permission_mode),
+    )
+    compose_env = compose_environment(record)
+    forwarded = [
+        f"{key}={value}"
+        for key, value in sorted(compose_env.items())
+        if key.startswith(("SANDBOX_", "MSANDBOX_"))
+    ]
+    command = ["env", *forwarded, *compose]
+    # A long-lived host tmux server can retain PWD from an older, pruned
+    # controller release. tmux's -c records the requested session path, but
+    # zsh can still inherit the deleted server cwd. Repair it in the command
+    # itself before Docker Compose starts so neither this pane nor terminals
+    # opened from it propagate an unreachable directory.
+    shell_command = (
+        f"cd {shlex.quote(str(record.worktree))} && exec {shlex.join(command)}"
+    )
+    result = subprocess.run(
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            record.tmux_session,
+            "-c",
+            str(record.worktree),
+            shell_command,
+        ],
+        env=compose_env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode:
+        raise AgentError(result.stderr.strip() or "tmux could not start the agent")
+    ensure_agent_pane_controls(record)
+    # Catch immediate failures such as a missing login, executable, or native
+    # renderer instead of recording a dead pane as a running session.
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline and tmux_running(record):
+        time.sleep(0.1)
+    if not tmux_running(record):
+        captured = subprocess.run(
+            ["tmux", "capture-pane", "-pt", record.tmux_session, "-S", "-120"],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        detail = captured.stdout.strip()[-4000:]
+        raise AgentError(detail or f"{record.agent} exited during startup")
+
+
+def attach_agent(record: SessionRecord) -> int:
+    refresh_github_auth(record)
+    ensure_agent_pane_controls(record)
+    if not tmux_running(record):
+        raise AgentError(f"agent session is not running: {record.name}")
+    # The PTY proxy preserves arbitrary input while rewriting a complete
+    # bracketed-paste host file path into a session-local /attachments path.
+    from .pty_proxy import attach_with_file_proxy
+
+    return attach_with_file_proxy(record)
+
+
+def stop_agent(record: SessionRecord, *, force: bool = False) -> None:
+    if not _tmux_exists(record):
+        return
+    if not force and tmux_running(record):
+        subprocess.run(
+            ["tmux", "send-keys", "-t", record.tmux_session, "C-c"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    subprocess.run(
+        ["tmux", "kill-session", "-t", record.tmux_session],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def deliver_attachments(
+    record: SessionRecord,
+    attachments: Sequence[Attachment],
+    prompt: str | None = None,
+) -> str:
+    if not attachments:
+        raise AgentError("no attachments to deliver")
+    for attachment in attachments:
+        path = str(attachment.container_path)
+        if any(unicodedata.category(char).startswith("C") for char in path):
+            raise AgentError("attachment paths cannot contain control characters")
+    paths = " ".join(shlex.quote(str(item.container_path)) for item in attachments)
+    message = " ".join(part for part in (paths, prompt or "") if part).strip()
+    if record.agent == "codex" and record.agent_session_id:
+        argv = ["codex", "queue", "--thread", record.agent_session_id]
+        for attachment in attachments:
+            if attachment.mime_type.startswith("image/"):
+                argv.extend(["--image", str(attachment.container_path)])
+        argv.extend(["--message", prompt or f"Inspect the attached files: {paths}"])
+        result = exec_in_session(record, argv, tty=False, capture=True)
+        if result.returncode == 0:
+            return message
+    if not tmux_running(record):
+        return message
+    subprocess.run(["tmux", "set-buffer", "--", message], check=True)
+    subprocess.run(
+        ["tmux", "paste-buffer", "-p", "-t", record.tmux_session], check=True
+    )
+    return message

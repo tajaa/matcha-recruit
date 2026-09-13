@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build/test/open one of the repo's Xcode projects. HOST ONLY — Xcode,
 # xcodebuild, codesigning, and the login Keychain cannot run in the Linux
-# agent sandbox (docs/ops/AGENT_SANDBOX.md). An agent inside the sandbox can
+# agent sandbox (apps/msandbox/docs/AGENT_SANDBOX.md). An agent inside the sandbox can
 # still edit Swift/project.pbxproj through the bind mount; run this script on
 # the Mac to actually build.
 #
