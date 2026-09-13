@@ -17,12 +17,12 @@ depends_on = ("proddef01", "l7m8n9o0p1q2")
 
 def upgrade():
     op.drop_constraint(
-        "product_definitions_pricing_model_check",
+        op.f("product_definitions_pricing_model_check"),
         "product_definitions",
         type_="check",
     )
     op.create_check_constraint(
-        "product_definitions_pricing_model_check",
+        op.f("product_definitions_pricing_model_check"),
         "product_definitions",
         "pricing_model IN ('per_seat', 'per_location', 'block', 'flat', 'free', 'contact_sales')",
     )
@@ -31,7 +31,7 @@ def upgrade():
         sa.Column("custom_product_location_count", sa.Integer(), nullable=True),
     )
     op.create_check_constraint(
-        "company_handbook_profiles_custom_product_location_count_check",
+        op.f("company_handbook_profiles_custom_product_location_count_check"),
         "company_handbook_profiles",
         "custom_product_location_count IS NULL OR custom_product_location_count > 0",
     )
@@ -53,18 +53,18 @@ def downgrade():
             "Cannot downgrade prodloc01 while per-location product definitions exist"
         )
     op.drop_constraint(
-        "company_handbook_profiles_custom_product_location_count_check",
+        op.f("company_handbook_profiles_custom_product_location_count_check"),
         "company_handbook_profiles",
         type_="check",
     )
     op.drop_column("company_handbook_profiles", "custom_product_location_count")
     op.drop_constraint(
-        "product_definitions_pricing_model_check",
+        op.f("product_definitions_pricing_model_check"),
         "product_definitions",
         type_="check",
     )
     op.create_check_constraint(
-        "product_definitions_pricing_model_check",
+        op.f("product_definitions_pricing_model_check"),
         "product_definitions",
         "pricing_model IN ('per_seat', 'block', 'flat', 'free', 'contact_sales')",
     )
