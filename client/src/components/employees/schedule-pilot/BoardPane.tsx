@@ -17,6 +17,8 @@ export interface BoardPaneProps {
   locationName: string
   jobs: ScheduleJob[]
   trainingEnabled: boolean
+  /** Undefined when the viewer has no `labor_cost` access. */
+  costByDay?: Record<string, number>
   canMutate(shift: Shift | undefined): boolean
   onOpenNew(defaults: NewShiftDefaults): void
   onOpenShift(shift: Shift): void
@@ -30,7 +32,7 @@ export interface BoardPaneProps {
  *  wraps the whole workspace so drags still land here. */
 function BoardPane({
   days, editor, editPublished, selectedEmployeeId, huumeSelectedShiftIds, inspectorShift, newDefaults,
-  locationId, locationName, jobs, trainingEnabled, canMutate, onOpenNew, onOpenShift, onCloseInspector, onCreated,
+  locationId, locationName, jobs, trainingEnabled, costByDay, canMutate, onOpenNew, onOpenShift, onCloseInspector, onCreated,
   onToggleHuumeSelection,
 }: BoardPaneProps) {
   if (editor.loading) {
@@ -46,6 +48,7 @@ function BoardPane({
         editPublished={editPublished}
         selectedEmployeeId={selectedEmployeeId}
         huumeSelectedShiftIds={huumeSelectedShiftIds}
+        costByDay={costByDay}
         onCreateAt={(date, minute, employeeId) => onOpenNew({ date, minute, employeeIds: employeeId ? [employeeId] : undefined })}
         onOpenShift={onOpenShift}
         onToggleHuumeSelection={onToggleHuumeSelection}

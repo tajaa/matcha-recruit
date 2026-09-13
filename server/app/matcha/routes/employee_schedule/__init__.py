@@ -3,7 +3,9 @@
 Shift scheduling over the existing roster: shift CRUD + publish + weekly view
 (shifts.py, owns the aggregate paths), employee assignment (assignments.py),
 week templates + recurrence generation (week_templates.py), and admin review
-of employee swap/unavailability requests (requests.py). Mounted at
+of employee swap/unavailability requests (requests.py), and the scheduled
+labor-cost read (labor_cost.py — its own `labor_cost` flag + business-admin
+role check on top of this package's gate). Mounted at
 `/employee-schedule` in routes/__init__.py behind require_feature.
 """
 
@@ -22,6 +24,7 @@ from .auto_schedules import router as _auto_schedules_router
 from .audit_logs import router as _audit_logs_router
 from .location_profile import router as _location_profile_router
 from .planning import router as _planning_router
+from .labor_cost import router as _labor_cost_router
 
 router = APIRouter()
 router.include_router(_shifts_router)
@@ -37,6 +40,7 @@ router.include_router(_auto_schedules_router)
 router.include_router(_audit_logs_router)
 router.include_router(_location_profile_router)
 router.include_router(_planning_router)
+router.include_router(_labor_cost_router)
 
 # Sibling router — own prefix (/schedule-intelligence) + its own single-flag
 # gate (schedule_intelligence, not employee_schedule), mounted separately in

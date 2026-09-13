@@ -557,6 +557,9 @@ def serialize_job(r, employee_ids: list[str], credential_requirements: list[dict
         "notes": r["notes"],
         "employee_ids": employee_ids,
         "credential_grace_days": r.get("credential_grace_days"),
+        "default_hourly_rate": (
+            float(r["default_hourly_rate"]) if r.get("default_hourly_rate") is not None else None
+        ),
         "credential_requirements": credential_requirements or [],
     }
 

@@ -337,6 +337,18 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # than double-gating the mount. Gates /schedule-intelligence +
     # /app/schedule-intelligence. Default off; admin-toggle; NOT bundled.
     "schedule_intelligence": False,
+    # Scheduled labor cost — the dollars behind the hours every scheduling
+    # surface already shows. Prices `employees.pay_rate` against each shift's
+    # worked minutes, overtime-aware off the CITED thresholds and multipliers
+    # in `schedule_compliance._SCHEDULING_RULES` (FLSA § 207(a) 40h/1.5x, CA
+    # § 510 8h/12h/1.5x/2.0x), with open seats priced from a new per-job
+    # `schedule_jobs.default_hourly_rate`. No rate on file is reported as
+    # unpriced, never as $0. Read-time only, no new tables beyond that column.
+    # Wage data, so the endpoints also drop the `individual` role and pilots
+    # receive aggregates only. Gates the cost blocks on /employee-schedule
+    # reads + the cost UI in Schedule Pilot. Default off; admin-toggle; NOT
+    # bundled. → services/scheduling/CLAUDE.md
+    "labor_cost": False,
     # Real `require_feature(...)`-gated flags that were only in the admin
     # toggle grid's separate KNOWN_FEATURES whitelist (admin/_shared.py) and
     # not here — so ALL_FEATURES never saw them, hiding er_copilot from
@@ -808,6 +820,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "inventory_forecasting": ("inventory", "sales_intake"),
     "inventory_waste": ("inventory",),
     "schedule_intelligence": ("employee_schedule",),
+    "labor_cost": ("employee_schedule",),
     "matcha_ops_calls_all_members": ("matcha_ops",),
 }
 

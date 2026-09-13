@@ -1,10 +1,11 @@
 """Every DB read behind the HR Pilot corpus: the grounding gatherer plus one
 fetcher per operational-fact group (shifts, training, incidents, benefits,
-schedule intelligence, scheduling law). Each rides its own product's feature
+schedule intelligence, labor cost, scheduling law). Each rides its own product's feature
 flag; `None` (module off) and `[]` (on but empty) are kept distinct, because
 silence would otherwise read as "nobody is scheduled".
 """
 import logging
+from datetime import date
 
 from ._config import _INCIDENT_LOOKBACK_DAYS, _MAX_BENEFIT_PLANS, _MAX_HR_PILOT_POLICIES, _MAX_HR_PILOT_SECTIONS, _MAX_RECENT_INCIDENTS, _MAX_SCHEDULE_SHIFTS, _MAX_TRAINING_DETAIL, _MAX_TRAINING_PROGRAMS, _SCHEDLAW_RULE_KEY_TO_CHECK, _SCHEDULE_LOOKAHEAD_DAYS
 
@@ -134,6 +135,14 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
         out["schedule_intelligence"] = (
             await _fetch_schedule_intelligence(conn, company_id, features)
             if features.get("schedule_intelligence") and features.get("employee_schedule")
+            else None
+        )
+        # Gated on `labor_cost` in its OWN right, not on schedule_intelligence:
+        # wage figures must not reach a corpus because the tenant happens to
+        # have a different scheduling analytics flag on.
+        out["labor_cost"] = (
+            await _fetch_labor_cost(conn, company_id)
+            if features.get("labor_cost") and features.get("employee_schedule")
             else None
         )
         out["schedule_law"] = (
@@ -391,6 +400,51 @@ async def _fetch_schedule_intelligence(conn, company_id, features: dict) -> dict
         )
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: schedule-intelligence coverage fetch failed for %s", company_id)
+    return out
+
+
+_MAX_LABOR_COST_LOCATIONS = 12
+
+
+async def _fetch_labor_cost(conn, company_id) -> list[dict]:
+    """This week's scheduled labor cost per active location.
+
+    AGGREGATES ONLY — a total, the overtime premium inside it, and how many
+    people could not be priced. No individual's rate or pay ever enters the
+    corpus, even though this group is supervisor-only: HR Pilot answers get
+    quoted, and a wage in a quoted answer is a different kind of disclosure
+    from a wage on a page the manager had to open."""
+    from app.matcha.services.scheduling.labor_cost_service import load_week_cost
+    from app.matcha.services.scheduling.schedule_rules import align_week_start
+
+    rows = await conn.fetch(
+        "SELECT id, name FROM business_locations "
+        "WHERE company_id = $1 AND is_active IS NOT FALSE ORDER BY name LIMIT $2",
+        company_id, _MAX_LABOR_COST_LOCATIONS,
+    )
+    week_start = align_week_start(date.today())
+    out: list[dict] = []
+    for row in rows:
+        try:
+            cost = await load_week_cost(
+                conn, company_id=company_id, location_id=row["id"], week_start=week_start,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("hr_pilot_corpus: labor-cost fetch failed for location %s", row["id"])
+            continue
+        payload = cost.payload()
+        if not payload["total"] and not payload["unpriced_employee_count"]:
+            continue
+        out.append({
+            "location_id": str(row["id"]),
+            "location_name": row["name"],
+            "week_start": week_start.isoformat(),
+            "total": payload["total"],
+            "ot_premium": payload["ot_premium"],
+            "open_seat_total": payload["open_seat_total"],
+            "unpriced_employee_count": payload["unpriced_employee_count"],
+            "unpriced_open_seats": payload["unpriced_open_seats"],
+        })
     return out
 
 

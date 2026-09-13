@@ -425,9 +425,31 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         "label": "Benefit plans & open enrollment",
         "records": _benefit_records(grounding.get("benefits")),
     }
+    _labor_cost_records: list[dict] = []
+    for item in grounding.get("labor_cost") or []:
+        unpriced = item["unpriced_employee_count"]
+        caveat = (
+            f" {unpriced} scheduled employee(s) have no pay rate on file and are NOT in this "
+            "figure — the real cost is higher." if unpriced else ""
+        )
+        seats = (
+            f" Open seats not yet filled add an estimated ${item['open_seat_total']:,.2f}."
+            if item["open_seat_total"] else ""
+        )
+        _labor_cost_records.append({
+            "cid": f"schedint:labor-cost.{item['location_id']}",
+            "ref": f"Scheduled labor cost — {item['location_name']}, week of {item['week_start']}",
+            "summary": (
+                f"${item['total']:,.2f} scheduled for the week, of which ${item['ot_premium']:,.2f} "
+                f"is overtime premium.{seats}{caveat} As SCHEDULED, not as worked — there is no "
+                "time-clock data behind this, so it is a plan, not payroll."
+            ),
+            "when": item["week_start"],
+        })
+
     sources["schedint"] = {
         "label": "Schedule Intelligence — analytics",
-        "records": _schedint_records(grounding.get("schedule_intelligence")),
+        "records": _schedint_records(grounding.get("schedule_intelligence")) + _labor_cost_records,
     }
     # Nameless (state-level law + ordinances, no employee data) — like
     # benefits, NOT in _SUPERVISOR_ONLY_SOURCES, so Ask HR employees keep it.

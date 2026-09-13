@@ -63,6 +63,7 @@ from .schedule_chat_rules import (
     template_weekdays,
 )
 from .assignment_guard import ProposedAssignment, ProposedRemoval, build_ledgers, evaluate_batch
+from .labor_cost_service import review_cost_for_ops
 from .schedule_batch import net_per_day
 from .schedule_review import build_review, jurisdiction_message, rejected_entry
 from .schedule_intelligence import fetch_lapse_items
@@ -1850,6 +1851,13 @@ async def build_edit_proposal(
         "rejected": rejected,
         "jurisdiction": jurisdiction,
     }
+    # What this change does to the week's bill. Flag-gated inside; None (and so
+    # no `cost` key at all) for a tenant without `labor_cost`.
+    cost = await review_cost_for_ops(
+        conn, company_id=company_id, location_id=editor_location_id, ops=accepted,
+    )
+    if cost:
+        proposal_doc["cost"] = cost
     proposal_doc["review"] = build_review(proposal_doc)
     proposal_doc["compliance_status"] = proposal_doc["review"]["compliance_status"]
     proposal_id = await _persist_proposal(
@@ -3027,6 +3035,13 @@ async def build_batch_proposal(
         "jurisdiction": jurisdiction,
         "operation_count": len(edit_ops) + len(create_doc["shifts"] if create_doc else []),
     }
+    # Only the edit half moves an existing week's bill; a batch's new shifts
+    # are costed once they exist. Flag-gated inside.
+    batch_cost = await review_cost_for_ops(
+        conn, company_id=company_id, location_id=None, ops=edit_ops,
+    )
+    if batch_cost:
+        proposal_doc["cost"] = batch_cost
     proposal_doc["review"] = build_review(proposal_doc)
     proposal_doc["compliance_status"] = proposal_doc["review"]["compliance_status"]
     proposal_id = await _persist_proposal(

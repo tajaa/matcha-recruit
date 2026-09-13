@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import InputsRail from './InputsRail'
 import { SETUP_KICKOFF_PROMPT } from '../../../hooks/employees/useScheduleHuumeThread'
-import type { PlanningInputs, PlanningRosterPerson, RosterEmployee } from '../../../types/employeeSchedule'
+import type { EmployeeLaborCost, PlanningInputs, PlanningRosterPerson, RosterEmployee, WeekLaborCost } from '../../../types/employeeSchedule'
 
 function person(id: string, name: string, minutes: number, overrides: Partial<PlanningRosterPerson> = {}): PlanningRosterPerson {
   return {
@@ -230,5 +230,75 @@ describe('InputsRail — setup', () => {
 
     renderRail({ credentialsEnabled: true })
     expect(screen.getByRole('button', { name: 'Jobs & credentials' })).toBeInTheDocument()
+  })
+})
+
+
+function personCost(id: string, total: number, priced = true): EmployeeLaborCost {
+  return {
+    employee_id: id, classification: 'hourly', inferred_classification: false,
+    priced, reason: priced ? null : 'no_pay_rate',
+    minutes: 960, ot_minutes: 0, doubletime_minutes: 0,
+    straight_cost: total, ot_cost: 0, doubletime_cost: 0, salaried_cost: 0,
+    ot_premium: 0, total, days: [],
+  }
+}
+
+function weekCost(overrides: Partial<WeekLaborCost> = {}): WeekLaborCost {
+  return {
+    week_start: '2026-08-23',
+    total: 1200, hourly_total: 1200, salaried_total: 0, open_seat_total: 0,
+    ot_premium: 0, ot_minutes: 0, by_day: {},
+    employees: [personCost('e1', 800), personCost('e2', 400)],
+    unpriced_employee_ids: [], unpriced_employee_count: 0, unpriced_open_seats: 0,
+    basis: {
+      daily_ot_hours: 8, daily_doubletime_hours: 12, weekly_ot_hours: 40,
+      ot_multiplier: 1.5, doubletime_multiplier: 2, as_scheduled: true,
+      overtime_citation: 'Cal. Lab. Code \u00a7 510(a)',
+    },
+    ...overrides,
+  }
+}
+
+describe('InputsRail labor cost', () => {
+  it('shows no money at all when the viewer has no cost access', () => {
+    renderRail()
+    expect(screen.queryByText('Labor cost')).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument()
+  })
+
+  it('breaks the week down and cites the overtime statute', () => {
+    renderRail({ cost: weekCost({ salaried_total: 500, open_seat_total: 272, total: 1972, ot_premium: 60 }) })
+    expect(screen.getByText('Labor cost')).toBeInTheDocument()
+    expect(screen.getByText('$1,972')).toBeInTheDocument()
+    expect(screen.getByText('Salaried')).toBeInTheDocument()
+    expect(screen.getByText('Unfilled seats')).toBeInTheDocument()
+    expect(screen.getByText('$60 OT')).toBeInTheDocument()
+    expect(screen.getByText(/Cal. Lab. Code/)).toBeInTheDocument()
+    expect(screen.getByText(/As scheduled, not as worked/)).toBeInTheDocument()
+  })
+
+  it('names what is missing instead of quietly costing it at zero', () => {
+    renderRail({
+      cost: weekCost({
+        employees: [personCost('e1', 800), personCost('e2', 0, false)],
+        unpriced_employee_ids: ['e2'], unpriced_employee_count: 1, unpriced_open_seats: 2,
+      }),
+    })
+    expect(screen.getByText(/1 person has no pay rate on file/)).toBeInTheDocument()
+    expect(screen.getByText(/2 open seats are on a job with no default rate/)).toBeInTheDocument()
+    expect(screen.getByText(/the real figure is higher/)).toBeInTheDocument()
+  })
+
+  it('shows a dash, not \u00240, for a person with no rate on file', () => {
+    renderRail({
+      cost: weekCost({
+        employees: [personCost('e1', 800), personCost('e2', 0, false)],
+        unpriced_employee_ids: ['e2'], unpriced_employee_count: 1,
+      }),
+    })
+    const ben = screen.getByText('Ben Ortiz').closest('button')!
+    expect(within(ben).getByText('\u2014')).toBeInTheDocument()
+    expect(within(ben).queryByText('$0')).not.toBeInTheDocument()
   })
 })

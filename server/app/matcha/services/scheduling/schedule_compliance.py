@@ -57,6 +57,10 @@ NO_CAP = object()
 _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
     "US": {
         "weekly_ot_hours": 40,                 # FLSA 29 U.S.C. § 207(a)
+        # § 207(a) states the RATE as well as the threshold ("one and one-half
+        # times the regular rate"), so the multiplier is law and lives here
+        # with its citation — not as a constant in the cost engine.
+        "ot_multiplier": 1.5,                  # FLSA 29 U.S.C. § 207(a)
         "minor_u16_day_hours": 8,              # 29 C.F.R. § 570.35 (non-school day)
         "minor_u16_week_hours": 40,            # (non-school week)
         # FLSA affirmatively imposes NO hour cap on 16-17 year-olds (hazardous-
@@ -67,6 +71,7 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "minor_16_17_week_hours": NO_CAP,
         "citations": {
             "weekly_overtime": "FLSA, 29 U.S.C. § 207(a)",
+            "overtime_rate": "FLSA, 29 U.S.C. § 207(a)",
             "minor_hours": "FLSA child labor, 29 C.F.R. § 570.35",
         },
     },
@@ -88,6 +93,8 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "daily_ot_hours": 8,                   # Cal. Lab. Code § 510
         "daily_doubletime_hours": 12,
         "weekly_ot_hours": 40,
+        "ot_multiplier": 1.5,                  # Cal. Lab. Code § 510(a)
+        "doubletime_multiplier": 2.0,          # Cal. Lab. Code § 510(a)
         "min_rest_between_shifts_hours": None,  # no general CA right-to-rest statute
         "minor_u16_day_hours": 8,              # Cal. Lab. Code § 1391 (non-school day)
         "minor_16_17_day_hours": 8,            # Cal. Lab. Code § 1391 (school in session)
@@ -99,6 +106,7 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
             ),
             "daily_overtime": "Cal. Lab. Code § 510",
             "weekly_overtime": "Cal. Lab. Code § 510",
+            "overtime_rate": "Cal. Lab. Code § 510(a)",
             "minor_hours": "Cal. Lab. Code § 1391",
         },
     },
@@ -123,6 +131,7 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         # `meal_waiver_max_hours` key — an attestation cannot waive § 162.
         "daily_ot_hours": None,                # NY has no daily-overtime statute
         "weekly_ot_hours": 40,                 # 12 NYCRR § 142-2.2
+        "ot_multiplier": 1.5,                  # 12 NYCRR § 142-2.2
         # No statewide right-to-rest between shifts. NYC's clopening premium is
         # an ordinance, handled in `fair_workweek.py`, not a scheduling ban.
         "min_rest_between_shifts_hours": None,
@@ -133,6 +142,7 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "citations": {
             "meal_break": "N.Y. Lab. Law § 162",
             "weekly_overtime": "12 NYCRR § 142-2.2",
+            "overtime_rate": "12 NYCRR § 142-2.2",
             "minor_hours": "N.Y. Lab. Law §§ 171-172",
         },
     },

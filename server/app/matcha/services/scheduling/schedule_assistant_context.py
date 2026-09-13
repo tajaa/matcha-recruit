@@ -9,6 +9,7 @@ from uuid import UUID
 
 from app.database import get_connection
 
+from .labor_cost_service import labor_cost_enabled, load_week_cost
 from .planning_inputs import build_planning_inputs, compact_roster_load
 from .schedule_eligibility import (
     _BLOCKING_AUTHORITY_EXPR,
@@ -104,6 +105,29 @@ async def get_schedule_overview(
                 "jurisdiction": inputs["jurisdiction"],
                 "week_rules": inputs["week_rules"],
             }
+            # Cost, when the tenant has `labor_cost`: the model should be able
+            # to answer "what does this week cost" and "who is about to push us
+            # into overtime" from the same numbers the manager is looking at,
+            # rather than inventing them. Bounded to the week's totals plus a
+            # per-person figure — never a rate, and never a wage in prose.
+            if await labor_cost_enabled(company_id, conn=conn):
+                week_cost = (await load_week_cost(
+                    conn, company_id=company_id, location_id=location_id,
+                    week_start=week_start,
+                )).payload()
+                planning["labor_cost"] = {
+                    key: week_cost[key] for key in (
+                        "total", "hourly_total", "salaried_total", "open_seat_total",
+                        "ot_premium", "ot_minutes", "by_day",
+                        "unpriced_employee_count", "unpriced_open_seats", "basis",
+                    )
+                }
+                totals = {
+                    item["employee_id"]: item["total"]
+                    for item in week_cost["employees"] if item["priced"]
+                }
+                for person in planning["roster_load"]:
+                    person["week_cost"] = totals.get(person["employee_id"])
         except Exception:
             logging.getLogger(__name__).exception(
                 "schedule overview: planning inputs unavailable for location %s", location_id,

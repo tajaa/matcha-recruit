@@ -27,6 +27,7 @@ from ...services.scheduling.schedule_location_readiness import (
     assert_schedule_location_ready_to_publish,
     get_schedule_location_readiness,
 )
+from ...services.scheduling.labor_cost_service import is_labor_cost_visible, load_week_cost
 from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ...services.scheduling.schedule_breaks import minimum_meal_break_minutes
 from ...services.scheduling.schedule_guidance import (
@@ -373,13 +374,22 @@ async def get_week(
                     entry["credential_warnings"] = warnings
                     entry["credential_expirations"] = flags["credential_expirations"]
                     entry["warnings"].extend(warnings)
+
+        # Scheduled labor cost rides the week the board already fetches, so the
+        # day totals need no second round-trip. Absent — not zero — for anyone
+        # without `labor_cost` + a business-admin role.
+        cost = None
+        if await is_labor_cost_visible(company_id, current_user.role, conn=conn):
+            cost = (await load_week_cost(
+                conn, company_id=company_id, location_id=location, week_start=start,
+            )).payload()
     return {
         "week_start": start.isoformat(),
         "location_id": str(location),
         "shifts": shifts,
         "roster": roster,
         "roster_flags": roster_flags,
-        "summary": _summarize(shifts),
+        "summary": _summarize(shifts, cost=cost),
     }
 
 

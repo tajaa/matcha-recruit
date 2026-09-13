@@ -33,7 +33,8 @@ from ._shared import (
 
 router = APIRouter()
 
-_JOB_COLS = "id, company_id, location_id, name, color, notes, credential_grace_days, created_by, created_at, updated_at"
+_JOB_COLS = ("id, company_id, location_id, name, color, notes, credential_grace_days, "
+             "default_hourly_rate, created_by, created_at, updated_at")
 
 
 async def _fetch_job(conn, company_id: UUID, job_id: UUID):
@@ -154,12 +155,13 @@ async def create_job(body: JobCreate, current_user=Depends(require_admin_or_clie
                 row = await conn.fetchrow(
                     f"""
                     INSERT INTO schedule_jobs
-                        (company_id, location_id, name, color, notes, credential_grace_days, created_by)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (company_id, location_id, name, color, notes, credential_grace_days,
+                         default_hourly_rate, created_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     RETURNING {_JOB_COLS}
                     """,
                     company_id, body.location_id, body.name.strip(), body.color, body.notes,
-                    body.credential_grace_days, current_user.id,
+                    body.credential_grace_days, body.default_hourly_rate, current_user.id,
                 )
                 for employee_id in employee_ids:
                     await conn.execute(

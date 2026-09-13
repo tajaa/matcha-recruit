@@ -190,6 +190,72 @@ export interface ScheduleSummary {
   draft: number
   open_shifts: number
   assigned: number
+  /** Scheduled labor cost. ABSENT — never zero — when the viewer has no
+   *  `labor_cost` access; an absent block means "not priced", and rendering a
+   *  $0 in its place would say the week is free. */
+  cost?: WeekLaborCost
+}
+
+/** How the overtime in a cost figure was decided. The thresholds and
+ *  multipliers are the server's cited law (`schedule_compliance`), passed down
+ *  so the UI can name the statute instead of asserting one. */
+export interface LaborCostBasis {
+  daily_ot_hours: number | null
+  daily_doubletime_hours: number | null
+  weekly_ot_hours: number | null
+  ot_multiplier: number
+  doubletime_multiplier: number
+  overtime_citation: string | null
+  as_scheduled: boolean
+}
+
+export interface EmployeeLaborCost {
+  employee_id: string
+  classification: 'hourly' | 'exempt'
+  inferred_classification: boolean
+  priced: boolean
+  reason: string | null
+  minutes: number
+  ot_minutes: number
+  doubletime_minutes: number
+  straight_cost: number
+  ot_cost: number
+  doubletime_cost: number
+  salaried_cost: number
+  ot_premium: number
+  total: number
+  days: Array<{ day: string; minutes: number; ot_minutes: number; doubletime_minutes: number; total: number }>
+}
+
+export interface WeekLaborCost {
+  week_start: string
+  total: number
+  hourly_total: number
+  salaried_total: number
+  open_seat_total: number
+  ot_premium: number
+  ot_minutes: number
+  by_day: Record<string, number>
+  employees: EmployeeLaborCost[]
+  unpriced_employee_ids: string[]
+  unpriced_employee_count: number
+  unpriced_open_seats: number
+  basis: LaborCostBasis
+  jurisdiction?: ScheduleJurisdiction
+}
+
+/** What a staged change does to the week's bill. `null` on either side means
+ *  that person could not be priced — not that they cost nothing. */
+export interface ReviewLaborCost {
+  before: number
+  after: number
+  delta: number
+  ot_premium_before: number
+  ot_premium_after: number
+  by_employee: Record<string, { before: number | null; after: number | null }>
+  unpriced_employee_ids: string[]
+  unpriced_employee_count: number
+  basis: LaborCostBasis
 }
 
 export interface RosterEmployee {
@@ -224,6 +290,9 @@ export type ScheduleJob = {
   color: string | null
   notes: string | null
   credential_grace_days: number | null
+  /** What an OPEN seat on this job costs per hour. `null` = not set, so those
+   *  seats are reported unpriced rather than free. */
+  default_hourly_rate: number | null
   employee_ids: string[]
   credential_requirements: JobCredentialRequirement[]
 }
@@ -266,6 +335,7 @@ export type JobPayload = {
   notes?: string | null
   employee_ids?: string[]
   credential_grace_days?: number | null
+  default_hourly_rate?: number | null
   credential_requirements?: JobCredentialRequirement[]
 }
 
@@ -672,6 +742,8 @@ export type ScheduleReview = {
   advisories: Array<{ message: string; statute: string | null; employee_name: string | null; shift_id: string | null }>
   findings: Array<Record<string, unknown>>
   jurisdiction: ScheduleJurisdiction
+  /** Absent unless the tenant has `labor_cost` — see `ScheduleSummary.cost`. */
+  cost?: ReviewLaborCost | null
 }
 
 export type PlanningRosterPerson = {
