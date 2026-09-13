@@ -54,6 +54,7 @@ from apps.msandbox.cli.docker_runtime import (
     build_identifier,
     compose_environment,
     session_home,
+    stop_container,
 )
 from apps.msandbox.cli.git_worktrees import (
     GitError,
@@ -763,6 +764,45 @@ class WorktreeTests(MsandboxTestCase):
             released = release_session(record)
         self.assertFalse(released.released)
         self.assertTrue(session_git_dir(record.id).is_dir())
+
+    def test_stop_falls_back_to_the_compose_label_when_build_inputs_are_gone(self) -> None:
+        """A session whose checkout lost the build inputs must still stop.
+
+        compose_environment materializes the build context — Dockerfile,
+        entrypoint, dependency manifests — purely to name the image and the
+        dependency volumes. A `stop` needs none of that, so a session pinned to
+        a checkout that no longer carries those files (another branch, or one
+        from before a layout change) used to be permanently unstoppable and
+        `msandbox off` reported an incomplete shutdown forever.
+        """
+        record = create_session(
+            self.repo, SessionSpec("lost-inputs", "codex", "main", start=False)
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(argv, *args, **kwargs):
+            calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, stdout="abc123\n", stderr="")
+
+        with (
+            mock.patch(
+                "apps.msandbox.cli.docker_runtime.shutil_which", return_value="/usr/bin/docker"
+            ),
+            mock.patch(
+                "apps.msandbox.cli.docker_runtime.compose_environment",
+                side_effect=FileNotFoundError(2, "No such file or directory", "Dockerfile"),
+            ),
+            mock.patch("apps.msandbox.cli.docker_runtime.subprocess.run", fake_run),
+        ):
+            stop_container(record)
+
+        listing = next(c for c in calls if c[:3] == ["docker", "container", "ls"])
+        self.assertIn(
+            f"label=com.docker.compose.project={record.compose_project}", listing
+        )
+        self.assertIn(["docker", "stop", "abc123"], calls)
+        # Volume removal still needs the real names, so the fallback only stops.
+        self.assertNotIn("rm", [c[2] for c in calls if len(c) > 2])
 
     def test_colliding_target_branches_are_rejected(self) -> None:
         create_session(self.repo, SessionSpec("A B", "codex", "main", start=False))

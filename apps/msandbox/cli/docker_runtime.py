@@ -595,10 +595,49 @@ def ensure_container(record: SessionRecord, *, test_services: bool = False) -> N
     raise DockerError("workspace dependency initialization did not become ready within 180 seconds")
 
 
+def _stop_container_project_by_label(record: SessionRecord) -> None:
+    """Stop this session's containers by Compose label, with no manifests."""
+    listed = subprocess.run(
+        [
+            "docker",
+            "container",
+            "ls",
+            "--quiet",
+            "--filter",
+            f"label=com.docker.compose.project={record.compose_project}",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    identifiers = (listed.stdout or "").split()
+    if identifiers:
+        subprocess.run(["docker", "stop", *identifiers], check=False, capture_output=True)
+
+
 def stop_container(record: SessionRecord) -> None:
     if not shutil_which("docker"):
         return
-    _run_compose(record, "stop", "workspace", check=False)
+    try:
+        _run_compose(record, "stop", "workspace", check=False)
+    except (DockerError, OSError) as exc:
+        # Stopping must not depend on the build context. compose_environment
+        # materializes it — reading the Dockerfile, the entrypoint, and the
+        # dependency manifests — only to name the image and the dependency
+        # volumes, none of which a `stop` needs. A session pinned to a checkout
+        # that no longer carries those inputs (a different branch, or one from
+        # before a layout change) would otherwise be permanently unstoppable,
+        # and `msandbox off` would report an incomplete shutdown forever.
+        #
+        # The Compose project label identifies the containers without any
+        # manifest. Teardown that REMOVES volumes still needs the real names,
+        # so this fallback only stops.
+        print(
+            f"msandbox: {record.id}: build inputs unavailable ({exc}); "
+            "stopping by Compose label instead",
+            file=sys.stderr,
+        )
+        _stop_container_project_by_label(record)
 
 
 def remove_container_project(record: SessionRecord, *, volumes: bool = False) -> None:
