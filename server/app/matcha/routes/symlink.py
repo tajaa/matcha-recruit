@@ -18,7 +18,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 
 from app.core.feature_flags import merge_company_features
 from app.database import get_connection
-from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.core.dependencies import require_roles
+from app.matcha.dependencies import get_client_company_id
 from app.matcha.models.symlink import (
     PasscodeSettings,
     SubmissionReview,
@@ -33,6 +34,14 @@ from app.matcha.services.symlink import kinds, links, notify, passcode, submissi
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Sym-link is company-scoped end to end: it needs a tenant, a roster to file
+# against, and a company passcode. The shared `require_admin_or_client` also
+# admits `individual` — the personal matcha-work role with no company — so this
+# narrows to the two roles that actually have one. Employees were never in
+# either list and still are not: a sym-link is something a business admin sends,
+# and the recipient's side is the unauthenticated /sym/{token} surface.
+require_symlink_admin = require_roles("admin", "client")
 
 PUBLIC_SEGMENT = "sym"
 
@@ -100,7 +109,7 @@ async def _get_link_or_404(conn, link_id, company_id, *, for_update: bool = Fals
 
 
 @router.get("/kinds")
-async def list_kinds(current_user=Depends(require_admin_or_client)):
+async def list_kinds(current_user=Depends(require_symlink_admin)):
     return {"kinds": kinds.kind_catalog()}
 
 
@@ -111,7 +120,7 @@ async def list_kinds(current_user=Depends(require_admin_or_client)):
 async def list_links(
     request: Request,
     status: Optional[str] = Query(None),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     if not company_id:
@@ -125,7 +134,7 @@ async def list_links(
 async def create_link(
     body: SymlinkCreate,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Mint a link and (by default) email it. The send is awaited so the
@@ -183,7 +192,7 @@ async def create_link(
 async def get_link(
     link_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -204,7 +213,7 @@ async def get_link(
 async def resend_link(
     link_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Fresh token + expiry, persisted only after the email succeeded so a
@@ -248,7 +257,7 @@ async def resend_link(
 async def revoke_link(
     link_id: UUID,
     request: Request,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -265,7 +274,7 @@ async def revoke_link(
 async def download_attachment(
     link_id: UUID,
     attachment_id: UUID,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -290,7 +299,7 @@ async def download_attachment(
 async def list_submissions(
     request: Request,
     status: str = Query("pending"),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -333,7 +342,7 @@ async def _fetch_submission(conn, submission_id, company_id, *, for_update: bool
 async def apply_submission(
     submission_id: UUID,
     background_tasks: BackgroundTasks,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Two-phase so the S3 copies a credential apply needs never run inside the
@@ -381,7 +390,7 @@ async def apply_submission(
 async def reject_submission(
     submission_id: UUID,
     body: SubmissionReview,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -404,7 +413,7 @@ async def reject_submission(
 
 @router.get("/passcode")
 async def get_passcode(
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     if not company_id:
@@ -416,7 +425,7 @@ async def get_passcode(
 
 @router.post("/passcode/rotate")
 async def rotate_passcode_now(
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -436,7 +445,7 @@ async def rotate_passcode_now(
 @router.put("/passcode/settings")
 async def update_passcode_settings(
     body: PasscodeSettings,
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     async with get_connection() as conn:
@@ -471,7 +480,7 @@ async def update_passcode_settings(
 
 @router.get("/channels")
 async def list_announce_channels(
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Company channels the rotation can be announced in (matcha_ops tenants)."""
@@ -488,7 +497,7 @@ async def list_announce_channels(
 @router.get("/employees")
 async def search_employees(
     q: str = Query("", max_length=100),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(require_symlink_admin),
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Small roster lookup for the create form's employee picker."""
