@@ -133,6 +133,7 @@ class BusinessLocation(BaseModel):
     max_employees: Optional[int] = None
     annual_avg_employees: Optional[int] = None
     timezone: Optional[str] = None
+    timezone_source: Literal["auto", "manual"] = "manual"
     created_at: datetime
     updated_at: datetime
 
@@ -203,6 +204,7 @@ class LocationCreate(BaseModel):
     max_employees: Optional[int] = None
     annual_avg_employees: Optional[int] = None
     timezone: Optional[str] = None
+    timezone_source: Optional[Literal["auto", "manual"]] = None
 
 
 class LocationUpdate(BaseModel):
@@ -218,6 +220,7 @@ class LocationUpdate(BaseModel):
     max_employees: Optional[int] = None
     annual_avg_employees: Optional[int] = None
     timezone: Optional[str] = None
+    timezone_source: Optional[Literal["auto", "manual"]] = None
 
 
 class FacilityAttributesUpdate(BaseModel):

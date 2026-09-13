@@ -81,6 +81,7 @@ async def create_location_endpoint(
         "is_active": location.is_active,
         "facility_attributes": location.facility_attributes,
         "timezone": location.timezone,
+        "timezone_source": location.timezone_source,
         "created_at": location.created_at.isoformat(),
     }
 
@@ -229,6 +230,7 @@ async def get_locations_endpoint(
                 "facility_profile_eligible": loc.get("facility_profile_eligible", False),
                 "naics": loc.get("naics"),
                 "timezone": loc.get("timezone"),
+                "timezone_source": loc.get("timezone_source", "manual"),
             }
         )
     return result
@@ -281,6 +283,7 @@ async def get_location_endpoint(
         "has_local_ordinance": location.has_local_ordinance,
         "facility_attributes": location.facility_attributes,
         "timezone": location.timezone,
+        "timezone_source": location.timezone_source,
         "requirements_count": counts["requirements_count"],
         "unread_alerts_count": counts["unread_alerts_count"],
     }
@@ -322,6 +325,7 @@ async def update_location_endpoint(
         if location.last_compliance_check
         else None,
         "timezone": location.timezone,
+        "timezone_source": location.timezone_source,
         "created_at": location.created_at.isoformat(),
     }
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Button, Input, Modal, Select } from '../ui'
 import { useJurisdictionSearch, US_STATES } from '../../hooks/compliance/useJurisdictionSearch'
 import type { BusinessLocation, JurisdictionOption, LocationCreate } from '../../types/compliance'
+import { inferLocationTimezone, type LocationTimezoneSource } from '../../utils/locationTimezone'
 
 type Props = {
   open: boolean
@@ -20,16 +21,39 @@ const EMPTY = {
 const TIMEZONE_OPTIONS = [
   { value: '', label: 'Select a time zone' },
   { value: 'America/New_York', label: 'US Eastern (New York)' },
+  { value: 'America/Detroit', label: 'US Eastern (Detroit)' },
+  { value: 'America/Indiana/Indianapolis', label: 'US Eastern (Indianapolis)' },
+  { value: 'America/Indiana/Marengo', label: 'US Eastern (Indiana — Marengo)' },
+  { value: 'America/Indiana/Petersburg', label: 'US Eastern (Indiana — Petersburg)' },
+  { value: 'America/Indiana/Vevay', label: 'US Eastern (Indiana — Vevay)' },
+  { value: 'America/Indiana/Vincennes', label: 'US Eastern (Indiana — Vincennes)' },
+  { value: 'America/Indiana/Winamac', label: 'US Eastern (Indiana — Winamac)' },
+  { value: 'America/Kentucky/Louisville', label: 'US Eastern (Louisville)' },
+  { value: 'America/Kentucky/Monticello', label: 'US Eastern (Kentucky — Monticello)' },
   { value: 'America/Chicago', label: 'US Central (Chicago)' },
+  { value: 'America/Indiana/Knox', label: 'US Central (Indiana)' },
+  { value: 'America/Indiana/Tell_City', label: 'US Central (Indiana — Tell City)' },
+  { value: 'America/Menominee', label: 'US Central (Michigan)' },
+  { value: 'America/North_Dakota/Center', label: 'US Central (North Dakota)' },
+  { value: 'America/North_Dakota/New_Salem', label: 'US Central (North Dakota — New Salem)' },
+  { value: 'America/North_Dakota/Beulah', label: 'US Central (North Dakota — Beulah)' },
   { value: 'America/Denver', label: 'US Mountain (Denver)' },
+  { value: 'America/Boise', label: 'US Mountain (Boise)' },
   { value: 'America/Phoenix', label: 'US Mountain, no DST (Phoenix)' },
   { value: 'America/Los_Angeles', label: 'US Pacific (Los Angeles)' },
   { value: 'America/Anchorage', label: 'US Alaska (Anchorage)' },
+  { value: 'America/Adak', label: 'US Hawaii-Aleutian (Adak)' },
   { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
+  { value: 'America/Puerto_Rico', label: 'Atlantic (Puerto Rico)' },
+  { value: 'America/St_Thomas', label: 'Atlantic (U.S. Virgin Islands)' },
+  { value: 'Pacific/Guam', label: 'Chamorro (Guam)' },
+  { value: 'Pacific/Saipan', label: 'Chamorro (Northern Mariana Islands)' },
+  { value: 'Pacific/Pago_Pago', label: 'Samoa (Pago Pago)' },
 ]
 
 export function ComplianceLocationModal({ open, onClose, editingLocation, jurisdictions, onSubmit, saving }: Props) {
   const [form, setForm] = useState(EMPTY)
+  const [timezoneSource, setTimezoneSource] = useState<LocationTimezoneSource>('auto')
   const [useManual, setUseManual] = useState(false)
   const [selectedKey, setSelectedKey] = useState('')
   const { jurisdictionSearch, setJurisdictionSearch, filteredJurisdictions } = useJurisdictionSearch(jurisdictions)
@@ -49,14 +73,22 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
         annual_avg_employees: editingLocation.annual_avg_employees != null ? String(editingLocation.annual_avg_employees) : '',
         timezone: editingLocation.timezone || '',
       })
+      setTimezoneSource(editingLocation.timezone_source || 'manual')
       setUseManual(true)
     } else {
       setForm(EMPTY)
       setUseManual(false)
       setSelectedKey('')
       setJurisdictionSearch('')
+      setTimezoneSource('auto')
     }
   }, [editingLocation, open, setJurisdictionSearch])
+
+  useEffect(() => {
+    if (timezoneSource !== 'auto') return
+    const mapped = inferLocationTimezone(form.state) || ''
+    setForm((current) => current.timezone === mapped ? current : { ...current, timezone: mapped })
+  }, [form.state, timezoneSource])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -73,6 +105,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
       max_employees: form.max_employees.trim() === '' ? undefined : Number(form.max_employees),
       annual_avg_employees: form.annual_avg_employees.trim() === '' ? undefined : Number(form.annual_avg_employees),
       timezone: form.timezone,
+      timezone_source: timezoneSource,
     }
     onSubmit(data, editingLocation?.id)
   }
@@ -139,7 +172,7 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
         ) : (
           <>
             {!editingLocation && jurisdictions.length > 0 && (
-              <button type="button" onClick={() => { setUseManual(false); setForm(EMPTY); setSelectedKey('') }}
+              <button type="button" onClick={() => { setUseManual(false); setForm(EMPTY); setSelectedKey(''); setTimezoneSource('auto') }}
                 className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Use Jurisdiction Picker</button>
             )}
             <Input label="Address" value={form.address}
@@ -161,8 +194,32 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
           </>
         )}
 
-        <Select label="Time zone" required options={TIMEZONE_OPTIONS} value={form.timezone}
-          onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
+        <div className="space-y-1.5">
+          <Select label="Time zone" required options={TIMEZONE_OPTIONS} value={form.timezone}
+            onChange={(e) => {
+              setTimezoneSource('manual')
+              setForm({ ...form, timezone: e.target.value })
+            }} />
+          {timezoneSource === 'auto' && form.timezone ? (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] text-emerald-400">Mapped automatically from the state.</p>
+              <button type="button" onClick={() => setTimezoneSource('manual')}
+                className="text-[11px] text-zinc-500 hover:text-zinc-300">Choose manually</button>
+            </div>
+          ) : timezoneSource === 'auto' && form.state ? (
+            <p className="text-[11px] text-amber-400">
+              This area may span more than one time zone. Select the correct time zone manually.
+            </p>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] text-zinc-500">Manual time zone</p>
+              {inferLocationTimezone(form.state) && (
+                <button type="button" onClick={() => setTimezoneSource('auto')}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-300">Use automatic mapping</button>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="border-t border-zinc-800 pt-3 space-y-3">
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">OSHA / ITA Filing (optional)</p>

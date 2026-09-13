@@ -27,6 +27,11 @@ async def create_compliance(conn):
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_business_locations_company_id ON business_locations(company_id)
         """)
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS timezone_source VARCHAR(10) NOT NULL DEFAULT 'manual'
+                CHECK (timezone_source IN ('auto', 'manual'))
+        """)
 
         # Auto-check scheduling columns
         await conn.execute("""
@@ -409,4 +414,3 @@ async def create_compliance(conn):
             ON upcoming_legislation(location_id, legislation_key)
             WHERE legislation_key IS NOT NULL
         """)
-

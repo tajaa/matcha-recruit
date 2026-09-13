@@ -147,6 +147,7 @@ export interface LocationCreate {
   max_employees?: number
   annual_avg_employees?: number
   timezone?: string
+  timezone_source?: 'auto' | 'manual'
 }
 
 export interface LocationUpdate {
@@ -162,6 +163,7 @@ export interface LocationUpdate {
   max_employees?: number
   annual_avg_employees?: number
   timezone?: string
+  timezone_source?: 'auto' | 'manual'
 }
 
 export interface BusinessLocation {
@@ -194,6 +196,7 @@ export interface BusinessLocation {
   max_employees: number | null
   annual_avg_employees: number | null
   timezone: string | null
+  timezone_source: 'auto' | 'manual'
   created_at: string
 }
 
