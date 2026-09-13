@@ -328,6 +328,8 @@ extension View {
 
 private let threadListOutputFormatter: DateFormatter = {
     let formatter = DateFormatter()
+    // Pacific everywhere an operator reads a time — see PacificDateFormatter.
+    formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
     formatter.dateStyle = .medium
     formatter.timeStyle = .none
     return formatter

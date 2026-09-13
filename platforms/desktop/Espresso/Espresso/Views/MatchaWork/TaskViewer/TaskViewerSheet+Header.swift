@@ -245,6 +245,87 @@ extension TaskViewerSheet {
         }
     }
 
+    // MARK: - AutoPR runtime
+
+    /// Kept in sync with AUTOPR_RUNTIME_MODELS in scripts/kanban-autopr/lib.sh
+    /// and _ALLOWED_AUTOPR_MODELS server-side. The value is handed to
+    /// `codex --model` inside the sandbox, so these are ids, not labels.
+    static let autoPRModelChoices = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"]
+    static let autoPREffortChoices = ["low", "medium", "high", "xhigh"]
+
+    /// Model + effort pickers. "Auto" (both cleared) is the default and the
+    /// recommended setting: the harness then raises a card that keeps stalling
+    /// without producing anything and drops one that only has mechanical work
+    /// left. Pinning is for when you already know which way it should go —
+    /// this is the manual half of the same decision, not a separate mode.
+    @ViewBuilder
+    var autoPRRuntimeControl: some View {
+        let model = liveAutoPRTask.autoprModel
+        let effort = liveAutoPRTask.autoprEffort
+        let isAuto = (model?.isEmpty ?? true) && (effort?.isEmpty ?? true)
+        HStack(spacing: 8) {
+            Label("Runtime", systemImage: "cpu")
+                .font(.ticket(size: 10))
+                .foregroundColor(.secondary)
+
+            Menu {
+                Button("Auto") { Task { await setAutoPRRuntime(model: "", effort: effort ?? "") } }
+                Divider()
+                ForEach(Self.autoPRModelChoices, id: \.self) { choice in
+                    Button(choice) {
+                        Task { await setAutoPRRuntime(model: choice, effort: effort ?? "") }
+                    }
+                }
+            } label: {
+                Text(model?.isEmpty == false ? model! : "Auto model")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(model?.isEmpty == false ? .mwInkStrong : .secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(settingAutoPRRuntime)
+
+            Menu {
+                Button("Auto") { Task { await setAutoPRRuntime(model: model ?? "", effort: "") } }
+                Divider()
+                ForEach(Self.autoPREffortChoices, id: \.self) { choice in
+                    Button(choice) {
+                        Task { await setAutoPRRuntime(model: model ?? "", effort: choice) }
+                    }
+                }
+            } label: {
+                Text(effort?.isEmpty == false ? effort! : "Auto effort")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(effort?.isEmpty == false ? .mwInkStrong : .secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(settingAutoPRRuntime)
+
+            if !isAuto {
+                Button("Reset") { Task { await setAutoPRRuntime(model: "", effort: "") } }
+                    .buttonStyle(.plain)
+                    .font(.ticket(size: 11))
+                    .disabled(settingAutoPRRuntime)
+                    .help("Go back to letting AutoPR choose from why the last run stopped")
+            }
+
+            if let source = liveAutoPRTask.autoprRuntimeSource, source == "auto", isAuto {
+                Text("last run auto-selected")
+                    .font(.ticket(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
+            if let error = autoPRRuntimeError {
+                Text(Self.stripHTTPPrefix(error))
+                    .font(.ticket(size: 10))
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
     var autoPRRunNowControl: some View {
         let hasActiveClaim = liveAutoPRTask.autoprClaimedAt != nil

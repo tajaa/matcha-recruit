@@ -109,6 +109,15 @@ _ALLOWED_OUTCOMES = {"open", "won", "lost"}
 # Sales follow-up activity kinds, logged onto the task history timeline.
 _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
+# The AutoPR runtime a card may pin. Mirrors MODEL_CHOICES / EFFORTS in
+# scripts/msandbox/autopr_control.py and the ladder in
+# scripts/kanban-autopr/lib.sh — the value written here is handed straight to
+# `codex --model` / `model_reasoning_effort` inside the sandbox, so a typo
+# here is a dead run, not a bad label. Adding a model means adding it in all
+# three places.
+_ALLOWED_AUTOPR_MODELS = {"gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"}
+_ALLOWED_AUTOPR_EFFORTS = {"low", "medium", "high", "xhigh"}
+
 # Reason set mirrors scripts/kanban-autopr/decision.sh; migration_required is
 # retired for new decisions but old cards still carry it, so parsers keep it.
 _AUTOPR_NO_SPEC_RE = re.compile(
@@ -1708,6 +1717,14 @@ async def list_project_tasks(
                     t.element_id, t.review_note,
                     to_jsonb(t) ->> 'pr_url' AS pr_url,
                     (to_jsonb(t) ->> 'pr_number')::integer AS pr_number,
+                    -- AutoPR runtime override. NULL means "decide the model and
+                    -- effort automatically from why the last run stopped"; a set
+                    -- value pins this card's runtime. Read through to_jsonb so a
+                    -- checkout running ahead of the autoprrt01 migration still
+                    -- serves the board instead of 500ing on an unknown column.
+                    to_jsonb(t) ->> 'autopr_model' AS autopr_model,
+                    to_jsonb(t) ->> 'autopr_effort' AS autopr_effort,
+                    to_jsonb(t) ->> 'autopr_runtime_source' AS autopr_runtime_source,
                    t.deal_value, t.probability, t.contact_name, t.contact_company,
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
@@ -2198,6 +2215,8 @@ async def update_project_task(
         pipeline_column = patch.get("pipeline_column")
         pr_url = patch.get("pr_url")
         pr_number = patch.get("pr_number")
+        autopr_model = patch.get("autopr_model")
+        autopr_effort = patch.get("autopr_effort")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
@@ -2205,6 +2224,30 @@ async def update_project_task(
             raise ValueError(f"Invalid outcome: {outcome}")
         if pipeline_column is not None and pipeline_column not in _ALLOWED_PIPELINE_COLUMNS:
             raise ValueError(f"Invalid pipeline_column: {pipeline_column}")
+        # An unknown model id is not a cosmetic error: it reaches `codex
+        # --model` inside the sandbox and kills the run after the card has
+        # already been claimed. Reject it here, at the write.
+        if autopr_model is not None and autopr_model not in _ALLOWED_AUTOPR_MODELS:
+            raise ValueError(f"Invalid autopr_model: {autopr_model}")
+        if autopr_effort is not None and autopr_effort not in _ALLOWED_AUTOPR_EFFORTS:
+            raise ValueError(f"Invalid autopr_effort: {autopr_effort}")
+
+        has_autopr_runtime_update = "autopr_model" in patch or "autopr_effort" in patch
+        if has_autopr_runtime_update:
+            autopr_columns_exist = await conn.fetchval(
+                """
+                SELECT COUNT(*) = 2
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'mw_tasks'
+                  AND column_name = ANY($1::text[])
+                """,
+                ["autopr_model", "autopr_effort"],
+            )
+            if not autopr_columns_exist:
+                raise ValueError(
+                    "AutoPR runtime overrides are unavailable until the database is updated"
+                )
 
         has_pr_update = "pr_url" in patch or "pr_number" in patch
         if has_pr_update:
@@ -2289,6 +2332,32 @@ async def update_project_task(
                 pr_number,                 # $43
             ])
 
+        # Numbered off the running length rather than hardcoded, because the
+        # pr fragment above is itself conditional: hardcoding $44.. here would
+        # silently shift by four whenever a card is updated without a PR link.
+        autopr_runtime_update = ""
+        if has_autopr_runtime_update:
+            base = len(params)
+            autopr_runtime_update = f"""
+                autopr_model = CASE WHEN ${base + 1}::boolean
+                    THEN ${base + 2}::text ELSE autopr_model END,
+                autopr_effort = CASE WHEN ${base + 3}::boolean
+                    THEN ${base + 4}::text ELSE autopr_effort END,
+                -- A human pinning the runtime overrides whatever the last run
+                -- auto-resolved; clearing both hands the card back to `auto`.
+                autopr_runtime_source = CASE
+                    WHEN ${base + 2}::text IS NULL AND ${base + 4}::text IS NULL
+                        THEN NULL
+                    ELSE 'manual'
+                END,
+            """
+            params.extend([
+                "autopr_model" in patch,
+                autopr_model,
+                "autopr_effort" in patch,
+                autopr_effort,
+            ])
+
         row = await conn.fetchrow(
             f"""
             UPDATE mw_tasks SET
@@ -2317,6 +2386,7 @@ async def update_project_task(
                 expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
                 pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
                 {pr_update}
+                {autopr_runtime_update}
                 -- Clear the reviewer's "needs work" note once the task is
                 -- re-submitted to review or marked done — the bounce-back
                 -- banner only applies while it sits back in todo/in_progress.
@@ -2332,7 +2402,10 @@ async def update_project_task(
                        contact_email, contact_phone, outcome, loss_reason,
                        next_action_at, expected_close,
                        to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
-                       (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number
+                       (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                       to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                       to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                       to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             *params,
         )

@@ -120,7 +120,32 @@ changes.
    session `Ctrl-b a` hops to the dashboard and back, and that session's status bar shows
    the live AutoPR state. The dispatcher also posts Notification Center banners (run
    dispatched, run finished, sandbox off) — `msandbox notify off|on` is a sticky
-   opt-out. `msandbox doctor` reports when the installed release or the dispatcher tree
+   opt-out.
+
+   **Runtime selection.** A run's model and effort come from four sources, highest
+   first: an operator hand-back (`msandbox` takeover), the card's own pin, the
+   escalation the previous stall implies, then the kind registry default in
+   `autopr_kind_field`. The automatic middle step is the fix for a card reaching
+   its third "approve 10 more minutes": `checkpoint.sh` classifies the stall
+   (`near_publish` / `implementing` / `exploring` / `stuck`) from what the run
+   actually saved plus the phase it last logged, and `autopr_runtime_for_stall`
+   in `lib.sh` maps that to a runtime — a run with the patch written and only
+   tests/publish left is DOWNGRADED to `gpt-5.6-luna`, a run that has twice come
+   back empty-handed is raised to `xhigh`. Pin a specific model/effort in the
+   ticket's **Runtime** control to override it; clear both to return to auto.
+   The roster lives in three places that must agree: `AUTOPR_RUNTIME_MODELS`
+   (`lib.sh`), `MODEL_CHOICES` (`scripts/msandbox/autopr_control.py`), and
+   `_ALLOWED_AUTOPR_MODELS` (`project_task_service.py`).
+
+   **Progress.** The model appends one JSON object per step to
+   `.git/autopr-io/output/progress.jsonl` (contract in `_prompt_todo.txt`). The
+   snapshot timer copies it out every few minutes, checks off any subtask the
+   model reported finishing (`mw_tasks` checklist, at most once each via the
+   `ticked-subtasks` ledger), and records the phase; `run-journal.sh` renders the
+   whole log as the journal's **Progress log** section and calls
+   `checkpoint.sh tick` once more on the way out so a successful run's last ticks
+   land. A card that sits at 0/5 through a run now means the model ignored the
+   contract, not that nothing happened. `msandbox doctor` reports when the installed release or the dispatcher tree
    is behind the checkout; `msandbox install` refreshes both. `msandbox stop` removes the
    authorization gate before unloading the timer and stopping both sandbox containers,
    but refuses while an agent or AutoPR workflow is active. `msandbox stop --force` is

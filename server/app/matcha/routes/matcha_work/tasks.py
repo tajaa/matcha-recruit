@@ -213,6 +213,20 @@ async def update_project_task_endpoint(
         else:
             raise HTTPException(status_code=400, detail="pr_url must be an http(s) URL")
 
+    # AutoPR runtime pin. Empty string and null both mean "back to auto", so a
+    # picker that sends "" when the operator chooses Auto clears the column
+    # instead of storing an invalid model id. The service validates the value
+    # against the same roster the sandbox will hand to `codex --model`.
+    for runtime_key in ("autopr_model", "autopr_effort"):
+        if runtime_key in body:
+            v = body[runtime_key]
+            if v is None or v == "":
+                patch[runtime_key] = None
+            elif isinstance(v, str):
+                patch[runtime_key] = v
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid {runtime_key}")
+
     if "pr_number" in body:
         v = body["pr_number"]
         if v is None or v == "":

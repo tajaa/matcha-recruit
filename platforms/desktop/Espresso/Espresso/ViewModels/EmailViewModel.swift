@@ -307,21 +307,23 @@ enum EmailDates {
         f.dateFormat = format
         return f
     }
-    private static let time: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
-    }()
-    private static let weekday: DateFormatter = {
-        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEE"); return f
-    }()
-    private static let monthDay: DateFormatter = {
-        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMd"); return f
-    }()
-    private static let numeric: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .none; return f
-    }()
-    private static let full: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short; return f
-    }()
+    // Every operator-facing time in this app is Pacific, not the device's
+    // zone: the board, the tickets, and the AutoPR journals all read
+    // America/Los_Angeles, and an email list that silently switched to
+    // whatever timezone the laptop was in would be the one surface that
+    // disagreed with the rest.
+    private static let displayZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+    private static func displayFormatter(_ configure: (DateFormatter) -> Void) -> DateFormatter {
+        let f = DateFormatter()
+        f.timeZone = displayZone
+        configure(f)
+        return f
+    }
+    private static let time = displayFormatter { $0.dateStyle = .none; $0.timeStyle = .short }
+    private static let weekday = displayFormatter { $0.setLocalizedDateFormatFromTemplate("EEE") }
+    private static let monthDay = displayFormatter { $0.setLocalizedDateFormatFromTemplate("MMMd") }
+    private static let numeric = displayFormatter { $0.dateStyle = .short; $0.timeStyle = .none }
+    private static let full = displayFormatter { $0.dateStyle = .medium; $0.timeStyle = .short }
 
     /// RFC 2822 as Gmail passes it through, trailing "(UTC)" comment and all.
     static func parse(_ raw: String) -> Date? {

@@ -614,3 +614,93 @@ autopr_kind_for_category() {
         *) printf 'investigate' ;;
     esac
 }
+
+# ---------------------------------------------------------------------------
+# Runtime ladder
+#
+# Every investigate run used to get the kind registry's one model at its one
+# effort, so a card that stalled because the model was out of its depth and a
+# card that stalled with the patch written but the tests unrun re-ran
+# identically. Both then stalled again, which is how a ticket reaches its third
+# "approve 10 more minutes" with nothing to show.
+#
+# checkpoint.sh classifies WHY a run stopped (see autopr_stall_reason); this
+# turns that classification into the runtime the continuation should use.
+# Raising costs money and wall-clock, so only a genuinely stuck run gets xhigh;
+# a run that just needs to finish mechanical work is DOWNGRADED, which is the
+# cheaper and faster half of the same idea.
+#
+# Keep the roster in sync with MODEL_CHOICES/EFFORTS in
+# scripts/msandbox/autopr_control.py and _ALLOWED_AUTOPR_MODELS in
+# server/app/matcha/services/matcha_work/project_task_service.py. A value from
+# here is handed to `codex --model`; an id no endpoint knows is a dead run.
+AUTOPR_RUNTIME_MODELS="gpt-5.6-sol gpt-5.6-luna gpt-6-astra gpt-5.5"
+AUTOPR_RUNTIME_EFFORTS="low medium high xhigh"
+
+autopr_runtime_model_valid() {
+    case " $AUTOPR_RUNTIME_MODELS " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
+}
+
+autopr_runtime_effort_valid() {
+    case " $AUTOPR_RUNTIME_EFFORTS " in *" ${1:-} "*) return 0 ;; *) return 1 ;; esac
+}
+
+# autopr_runtime_for_stall STALL_REASON ATTEMPT → "<model> <effort>", or empty
+# when the stall carries no opinion and the kind registry's default should
+# stand. ATTEMPT is how many continuations this card has already burned.
+#
+# The ladder is deliberately short. Its only job is to stop the third identical
+# rerun: finish cheap work cheaply, and give a genuinely stuck card more
+# reasoning than the run that just failed had.
+autopr_runtime_for_stall() {
+    local reason="${1:-}" attempt="${2:-0}"
+    [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+    case "$reason" in
+        # The thinking is done and recorded — what is left is running tests,
+        # writing the commit, and publishing. A cheaper model finishes that
+        # faster, and a 10-minute budget is plenty for it.
+        near_publish) printf 'gpt-5.6-luna medium' ;;
+        # Mid-implementation with real code saved. Same model, more headroom:
+        # the previous pass was making progress, it just ran out of clock.
+        implementing) printf 'gpt-5.6-sol high' ;;
+        # Nothing to show, or this card has already eaten a continuation and
+        # still has nothing. More minutes at the same effort is what produced
+        # the last two stalls; raise the reasoning instead.
+        stuck) printf 'gpt-5.6-sol xhigh' ;;
+        # Read the repo, wrote no code yet. One step up on the first retry;
+        # a second empty-handed pass is `stuck` and lands on xhigh above.
+        exploring)
+            if [ "$attempt" -ge 1 ]; then printf 'gpt-5.6-sol xhigh'
+            else printf 'gpt-5.6-sol high'; fi ;;
+        *) printf '' ;;
+    esac
+}
+
+# autopr_stall_reason METADATA_JSON ATTEMPT → near_publish|implementing|stuck|exploring
+#
+# Reads a checkpoint's metadata.json. The signals are the ones checkpoint.sh
+# already records, plus the phase the model last logged to its progress file:
+# what it saved is a far better account of where it got to than how long it ran.
+autopr_stall_reason() {
+    local metadata="${1:-}" attempt="${2:-0}" patch_saved decision_saved report_saved phase
+    [ -s "$metadata" ] || { printf 'stuck'; return; }
+    patch_saved="$(jq -r '.patch_saved // false' "$metadata" 2>/dev/null || echo false)"
+    decision_saved="$(jq -r '.decision_saved // false' "$metadata" 2>/dev/null || echo false)"
+    report_saved="$(jq -r '.report_saved // false' "$metadata" 2>/dev/null || echo false)"
+    phase="$(jq -r '.progress_phase // ""' "$metadata" 2>/dev/null || echo '')"
+    # A saved decision AND a saved patch means the model reached a verdict on
+    # work it had actually written. Trust the logged phase over that pairing
+    # only to ADD near_publish, never to claim it without a patch.
+    if [ "$patch_saved" = true ] \
+        && { [ "$decision_saved" = true ] || [ "$phase" = test ] \
+             || [ "$phase" = review ] || [ "$phase" = publish ]; }; then
+        printf 'near_publish'
+    elif [ "$patch_saved" = true ]; then
+        printf 'implementing'
+    elif [ "$report_saved" = true ] || [ -n "$phase" ]; then
+        # It got far enough to describe what it was doing, but wrote no code.
+        [ "${attempt:-0}" -ge 2 ] && printf 'stuck' || printf 'exploring'
+    else
+        printf 'stuck'
+    fi
+}

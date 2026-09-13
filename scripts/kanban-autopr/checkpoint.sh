@@ -27,6 +27,14 @@ MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
 # A multi-megabyte tail of ANSI-laden scrollback would consume most of that
 # run's context window; a bounded, escape-stripped tail carries the signal.
 MAX_TRANSCRIPT_BYTES="${AUTOPR_CHECKPOINT_MAX_TRANSCRIPT_BYTES:-131072}"
+# The model's own running account of what it is doing: one JSON object per
+# line, appended as it works (the prompt contract is in _prompt_todo.txt).
+# This is the only signal that says HOW FAR a run got rather than how long it
+# ran, so both the journal and the stall classifier read it. Bounded like
+# everything else the sandbox writes; a model that logs a novel gets truncated,
+# not trusted.
+MAX_PROGRESS_BYTES="${AUTOPR_CHECKPOINT_MAX_PROGRESS_BYTES:-262144}"
+PROGRESS_REL=".git/autopr-io/output/progress.jsonl"
 # Nothing else ever reclaims a checkpoint (`consume` only clears the active
 # pointer, by design), and the runner's workspace is checked out with
 # `clean: false`, so bound the footprint here.
@@ -258,6 +266,104 @@ atomic_bounded_copy() {
     mv "$destination.tmp" "$destination"
 }
 
+# Copy the model's progress log out, keeping only lines that parse and carry a
+# known phase. A half-written last line is the normal case for an in-flight
+# snapshot, and a malformed line must not poison the whole file: this is
+# reporting, and reporting that disappears when it matters most is worse than
+# reporting that drops one line.
+capture_progress() {
+    local source_file="$1" destination="$2" size
+    [ -s "$source_file" ] || return 1
+    size="$(wc -c < "$source_file" | tr -d '[:space:]')"
+    if [ "$size" -le "$MAX_PROGRESS_BYTES" ]; then
+        cat "$source_file" > "$destination.raw"
+    else
+        # Keep the TAIL: the newest steps are the ones that say where it got to.
+        tail -c "$MAX_PROGRESS_BYTES" "$source_file" > "$destination.raw"
+    fi
+    jq -c 'select(type == "object")
+           | {at: (.at // ""), phase: (.phase // ""), note: (.note // ""),
+              next: (.next // ""), subtask_id: (.subtask_id // null),
+              subtask_done: (.subtask_done // false)}
+           | select(.note != "" or .phase != "" or .subtask_id != null)' \
+        "$destination.raw" 2>/dev/null > "$destination.tmp" || true
+    rm -f "$destination.raw"
+    if [ ! -s "$destination.tmp" ]; then
+        rm -f "$destination.tmp"
+        return 1
+    fi
+    chmod 600 "$destination.tmp"
+    mv "$destination.tmp" "$destination"
+}
+
+# The phase of the last step the model logged. checkpoint metadata carries it
+# so autopr_stall_reason can tell "wrote code, was running tests" from "read
+# three files and ran out of clock" without re-reading the log.
+progress_phase() {
+    local progress_file="$1"
+    [ -s "$progress_file" ] || return 0
+    jq -rs 'map(select(.phase != "")) | (last // {}) | .phase // ""' \
+        "$progress_file" 2>/dev/null || true
+}
+
+# Check off the subtasks the model reported finishing, at most once each.
+# Ticking is what makes a running card legible on the board — a card stuck at
+# 0/5 through three continuations says nothing about whether anything happened.
+# The ledger file is what keeps a 4-minute snapshot timer from re-PATCHing the
+# same item every pass; a board write that fails is a warning, never fatal.
+tick_progress_subtasks() {
+    local project_id="$1" task_id="$2" progress_file="$3" ledger="$4"
+    local subtask_id ticked=0
+    [ -s "$progress_file" ] || { printf '0'; return 0; }
+    [ -n "$project_id" ] && [ -n "$task_id" ] || { printf '0'; return 0; }
+    touch "$ledger" 2>/dev/null || true
+    while IFS= read -r subtask_id; do
+        [ -n "$subtask_id" ] || continue
+        # Only a real uuid reaches the API: the model writes this field, and a
+        # hallucinated "subtask-3" would otherwise be a 422 per snapshot pass.
+        [[ "$subtask_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+            || continue
+        grep -qxF "$subtask_id" "$ledger" 2>/dev/null && continue
+        if ( mw_api PATCH \
+                "/matcha-work/projects/$project_id/tasks/$task_id/subtasks/$subtask_id" \
+                '{"is_done":true}' ) >/dev/null 2>&1; then
+            printf '%s\n' "$subtask_id" >> "$ledger"
+            ticked=$((ticked + 1))
+        else
+            snapshot_warn "could not check off subtask $subtask_id"
+        fi
+    done < <(jq -r 'select(.subtask_done == true) | .subtask_id // empty' \
+        "$progress_file" 2>/dev/null | awk '!seen[$0]++')
+    printf '%s' "$ticked"
+}
+
+# How many continuations this card has already burned. Durable on its own
+# counter file rather than derived from checkpoint directories, which are
+# pruned: the third "approve 10 more minutes" must still know it is the third.
+stall_attempt_count() {
+    local root="$1" value=""
+    # Test for the file first: a failed `<` redirect is reported by the shell
+    # before the command's own `2>/dev/null` is applied, so this is the only
+    # way to keep a first-ever stall from printing a spurious error.
+    [ ! -f "$root/stalls" ] || value="$(tr -dc '0-9' < "$root/stalls" | head -c 3)"
+    [ -n "$value" ] || value=0
+    printf '%s' "$value"
+}
+
+record_stall_attempt() {
+    local root="$1" next
+    next=$(( $(stall_attempt_count "$root") + 1 ))
+    # `save` can run for a card whose task root was never created (a run that
+    # died before it checkpointed anything), and a failed redirect there is a
+    # shell-level error the caller cannot suppress. Create the directory, and
+    # keep the count advisory: a lost counter must never fail the checkpoint.
+    if mkdir -p "$root" 2>/dev/null \
+        && { printf '%s' "$next" > "$root/stalls"; } 2>/dev/null; then
+        chmod 600 "$root/stalls" 2>/dev/null || true
+    fi
+    printf '%s' "$next"
+}
+
 write_transcript() {
     local destination="$1"
     [ -s "$LIVE_LOG" ] || return 1
@@ -359,9 +465,12 @@ snapshot_pass() {
     local clone_epoch changed newest_epoch=0 file_epoch now skips=0 settled=true
     local patch_bytes=0 patch_saved=false changed_files_json='[]' changed_file_count=0
     local report_saved=false decision_saved=false transcript_saved=false
+    local progress_saved=false progress_phase='' progress_steps='[]'
+    local project_id ticked=0
 
     task_id="$(card_identity "$card_file")"
     id8="$(card_id8 "$card_file")"
+    project_id="$(jq -r '.project_id // empty' "$card_file" 2>/dev/null || true)"
     base_sha="$(sandbox_base_sha "$task_id")"
     # Not this run's workspace (wrong card, or a clone from a previous round).
     [ -n "$base_sha" ] || return 0
@@ -461,6 +570,21 @@ snapshot_pass() {
     fi
     ! write_transcript "$dir/transcript.log" || transcript_saved=true
 
+    # The progress log is the half of the checkpoint that is about the OPERATOR,
+    # not the resume: it is what lets the card say "3 of 5 done, writing tests"
+    # while the run is still going, instead of a silent 0/5 for thirty minutes.
+    if capture_progress "$SANDBOX_WORKSPACE/$PROGRESS_REL" "$dir/progress.jsonl"; then
+        progress_saved=true
+        progress_phase="$(progress_phase "$dir/progress.jsonl")"
+        progress_steps="$(jq -sc '.' "$dir/progress.jsonl" 2>/dev/null || printf '[]')"
+        # Ticking mid-run is the whole point of doing this on the snapshot
+        # timer rather than only at the end. The ledger lives beside the task,
+        # not the run directory, so a second run of the same card does not
+        # re-tick what round one already checked off.
+        ticked="$(tick_progress_subtasks "$project_id" "$task_id" \
+            "$dir/progress.jsonl" "$root/ticked-subtasks")"
+    fi
+
     jq -n \
         --arg task_id "$task_id" --arg id8 "$id8" --arg run_id "${GITHUB_RUN_ID:-local}" \
         --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg base_sha "$base_sha" \
@@ -469,13 +593,17 @@ snapshot_pass() {
         --argjson changed_files "$changed_files_json" \
         --argjson report_saved "$report_saved" --argjson decision_saved "$decision_saved" \
         --argjson transcript_saved "$transcript_saved" --argjson settled "$settled" \
+        --argjson progress_saved "$progress_saved" --arg progress_phase "$progress_phase" \
+        --argjson progress_steps "$progress_steps" --argjson subtasks_ticked "${ticked:-0}" \
         '{schema_version:1,task_id:$task_id,id8:$id8,run_id:$run_id,
           created_at:$created_at,base_sha:$base_sha,inflight:true,settled:$settled,
           runtime_limited:false,elapsed_seconds:null,timeout_minutes:null,
           patch_saved:$patch_saved,patch_bytes:$patch_bytes,
           changed_file_count:$changed_file_count,changed_files:$changed_files,
           report_saved:$report_saved,decision_saved:$decision_saved,
-          transcript_saved:$transcript_saved,progress_excerpt:""}' \
+          transcript_saved:$transcript_saved,progress_excerpt:"",
+          progress_saved:$progress_saved,progress_phase:$progress_phase,
+          progress_steps:$progress_steps,subtasks_ticked:$subtasks_ticked}' \
         > "$dir/metadata.json.tmp"
     chmod 600 "$dir/metadata.json.tmp"
     mv "$dir/metadata.json.tmp" "$dir/metadata.json"
@@ -500,6 +628,9 @@ save_checkpoint() {
     local changed_file_count=0 changed_files_json='[]' changed_files_summary=''
     local report_saved=false decision_saved=false transcript_saved=false
     local elapsed=0 runtime_limited=false note reason done progress_excerpt=''
+    local progress_saved=false progress_phase='' progress_steps='[]' ticked=0
+    local stall_reason='' stall_attempt=0 suggested='' suggested_model='' suggested_effort=''
+    local kind_model kind_effort runtime_line=''
     local saved_outputs='' file_label='' extra_file_count=0
     local workspace_task_id='' header_extras='' preserved_note='' preserved_parts
 
@@ -579,6 +710,14 @@ save_checkpoint() {
     bounded_copy "$report_file" "$checkpoint_dir/report.md" "$MAX_REPORT_BYTES"
     bounded_copy "$decision_file" "$checkpoint_dir/decision.json" "$MAX_DECISION_BYTES"
     write_transcript "$checkpoint_dir/transcript.log" || true
+    if capture_progress "$SANDBOX_WORKSPACE/$PROGRESS_REL" \
+        "$checkpoint_dir/progress.jsonl"; then
+        progress_saved=true
+        progress_phase="$(progress_phase "$checkpoint_dir/progress.jsonl")"
+        progress_steps="$(jq -sc '.' "$checkpoint_dir/progress.jsonl" 2>/dev/null || printf '[]')"
+        ticked="$(tick_progress_subtasks "$project_id" "$task_id" \
+            "$checkpoint_dir/progress.jsonl" "$root/ticked-subtasks")"
+    fi
 
     [ ! -s "$checkpoint_dir/report.md" ] || report_saved=true
     [ ! -s "$checkpoint_dir/decision.json" ] || decision_saved=true
@@ -610,13 +749,17 @@ save_checkpoint() {
         --argjson changed_files "$changed_files_json" --arg progress_excerpt "$progress_excerpt" \
         --argjson report_saved "$report_saved" --argjson decision_saved "$decision_saved" \
         --argjson transcript_saved "$transcript_saved" \
+        --argjson progress_saved "$progress_saved" --arg progress_phase "$progress_phase" \
+        --argjson progress_steps "$progress_steps" --argjson subtasks_ticked "${ticked:-0}" \
         '{schema_version:1,task_id:$task_id,id8:$id8,run_id:$run_id,
           created_at:$created_at,base_sha:$base_sha,elapsed_seconds:$elapsed_seconds,
           timeout_minutes:$timeout_minutes,runtime_limited:$runtime_limited,
           patch_saved:$patch_saved,patch_bytes:$patch_bytes,
           changed_file_count:$changed_file_count,changed_files:$changed_files,
           report_saved:$report_saved,decision_saved:$decision_saved,
-          transcript_saved:$transcript_saved,progress_excerpt:$progress_excerpt}' \
+          transcript_saved:$transcript_saved,progress_excerpt:$progress_excerpt,
+          progress_saved:$progress_saved,progress_phase:$progress_phase,
+          progress_steps:$progress_steps,subtasks_ticked:$subtasks_ticked}' \
         > "$checkpoint_dir/metadata.json"
     chmod 600 "$checkpoint_dir/metadata.json"
     # A run that died before the model produced anything must not steal the
@@ -629,6 +772,36 @@ save_checkpoint() {
     prune_checkpoints "$root"
 
     if [ "$runtime_limited" = true ]; then
+        # Classify the stall and pick the runtime the continuation should use.
+        # This is the fix for the card that reaches its third "approve 10 more
+        # minutes": rerunning the same model at the same effort is what
+        # produced stalls one and two.
+        stall_attempt="$(record_stall_attempt "$root")"
+        stall_reason="$(autopr_stall_reason "$checkpoint_dir/metadata.json" "$stall_attempt")"
+        suggested="$(autopr_runtime_for_stall "$stall_reason" "$stall_attempt")"
+        suggested_model="${suggested%% *}"
+        suggested_effort="${suggested##* }"
+        if [ -z "$suggested" ] || ! autopr_runtime_model_valid "$suggested_model" \
+            || ! autopr_runtime_effort_valid "$suggested_effort"; then
+            suggested_model='' suggested_effort=''
+        fi
+        # Only say "switching to X" on the card when it is actually a change
+        # from what this run used, otherwise the note claims an escalation
+        # that never happens.
+        kind_model="$(autopr_kind_field "$(jq -r '.mode // "investigate"' "$card_file")" model 2>/dev/null || true)"
+        kind_effort="$(autopr_kind_field "$(jq -r '.mode // "investigate"' "$card_file")" effort 2>/dev/null || true)"
+        if [ -n "$suggested_model" ] \
+            && { [ "$suggested_model" != "$kind_model" ] || [ "$suggested_effort" != "$kind_effort" ]; }; then
+            runtime_line="Next run: $suggested_model at $suggested_effort effort (auto, from \"$stall_reason\"). Override it in the card's AutoPR runtime setting."
+        fi
+        jq --arg stall_reason "$stall_reason" --argjson stall_attempt "$stall_attempt" \
+            --arg suggested_model "$suggested_model" --arg suggested_effort "$suggested_effort" \
+            '. + {stall_reason:$stall_reason,stall_attempt:$stall_attempt,
+                  suggested_model:(if $suggested_model == "" then null else $suggested_model end),
+                  suggested_effort:(if $suggested_effort == "" then null else $suggested_effort end)}' \
+            "$checkpoint_dir/metadata.json" > "$checkpoint_dir/metadata.json.tmp" \
+            && mv "$checkpoint_dir/metadata.json.tmp" "$checkpoint_dir/metadata.json"
+        chmod 600 "$checkpoint_dir/metadata.json"
         if [ "$timeout_minutes" -eq 20 ]; then
             reason="The first 20-minute investigation ended before AutoPR produced a publishable result."
         else
@@ -669,14 +842,21 @@ save_checkpoint() {
         preserved_parts="$(preserved_note_parts "$card_file")"
         header_extras="${preserved_parts%%$'\t'*}"
         preserved_note="${preserved_parts#*$'\t'}"
+        [ "${ticked:-0}" -eq 0 ] \
+            || done="$done Checked off ${ticked} checklist item(s) on the card."
         note="$(jq -nr \
             --arg run_id "${GITHUB_RUN_ID:-local}" --arg reason "$reason" \
             --arg done "$done" --arg progress "$progress_excerpt" \
+            --arg phase "$progress_phase" --arg runtime "$runtime_line" \
+            --arg attempt "$stall_attempt" \
             --arg extras "$header_extras" --arg preserved "$preserved_note" '
               "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint \($run_id)\($extras)\n" +
-              "Why more time: \($reason)\n" +
+              "Why more time: \($reason)" +
+              (if $attempt == "" or $attempt == "0" then "" else " (pause #\($attempt) for this card)" end) + "\n" +
               "Done so far: \($done)\n" +
+              (if $phase == "" then "" else "Stopped while: \($phase)\n" end) +
               (if $progress == "" then "" else "Latest progress: \($progress)\n" end) +
+              (if $runtime == "" then "" else $runtime + "\n" end) +
               "Next step: Approve 10 more minutes to continue from the saved checkpoint." +
               (if $preserved == "" then "" else "\n\n" + $preserved end)
             ')"
@@ -708,6 +888,28 @@ consume_checkpoint() {
     [ ! -d "$root" ] || prune_checkpoints "$root"
 }
 
+# One last read of the model's progress log, after the run has stopped for any
+# reason. The snapshot timer ticks every few minutes, so without this the
+# checklist items a run finishes in its last stretch — which on a SUCCESSFUL
+# run is most of them — never reach the card.
+final_tick() {
+    local card_file="$1" task_id project_id root dir ticked=0
+    task_id="$(card_identity "$card_file")"
+    project_id="$(jq -r '.project_id // empty' "$card_file" 2>/dev/null || true)"
+    [ -n "$task_id" ] && [ -n "$project_id" ] || return 0
+    [ -s "$SANDBOX_WORKSPACE/$PROGRESS_REL" ] || return 0
+    root="$(task_root "$card_file")"
+    umask 077
+    mkdir -p "$root"
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/autopr-final-tick-XXXXXX")"
+    if capture_progress "$SANDBOX_WORKSPACE/$PROGRESS_REL" "$dir/progress.jsonl"; then
+        ticked="$(tick_progress_subtasks "$project_id" "$task_id" \
+            "$dir/progress.jsonl" "$root/ticked-subtasks")"
+    fi
+    rm -rf "$dir"
+    printf '%s\n' "${ticked:-0}"
+}
+
 case "${1:-}" in
     save)
         [ "$#" -eq 6 ] || die "usage: checkpoint.sh save CARD REPORT DECISION STARTED_AT_EPOCH TIMEOUT_MINUTES"
@@ -733,7 +935,11 @@ case "${1:-}" in
         [ "$#" -eq 1 ] || die "usage: checkpoint.sh snapshot-halt"
         halt_snapshots
         ;;
+    tick)
+        [ "$#" -eq 2 ] || die "usage: checkpoint.sh tick CARD"
+        final_tick "$2"
+        ;;
     *)
-        die "usage: checkpoint.sh save|snapshot|snapshot-arm|snapshot-halt|latest|consume ..."
+        die "usage: checkpoint.sh save|snapshot|snapshot-arm|snapshot-halt|latest|consume|tick ..."
         ;;
 esac

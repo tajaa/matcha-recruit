@@ -217,12 +217,19 @@ fi
 
 MODEL_REPORT="$MODEL_CONTAINER_ROOT/.git/autopr-io/output/report.md"
 MODEL_DECISION="$MODEL_CONTAINER_ROOT/.git/autopr-io/output/decision.json"
+# Append-only running account of the run. Unlike the report and decision, this
+# is read WHILE the model is still working — the checkpoint snapshot timer
+# copies it out every few minutes to tick the card's checklist and say what
+# phase the run is in — so it is the one output that is useful even when the
+# run never finishes.
+MODEL_PROGRESS="$MODEL_CONTAINER_ROOT/.git/autopr-io/output/progress.jsonl"
 PROMPT_TEXT="Read every input file listed below before acting. These are the only attached inputs available to you.
 AUTOPR_INPUTS_BEGIN${MODEL_INPUT_LIST}
 AUTOPR_INPUTS_END
 
 $(sed -e "s#REPORT_PATH#$MODEL_REPORT#g" \
-    -e "s#DECISION_PATH#$MODEL_DECISION#g" "$PROMPT_TEMPLATE" \
+    -e "s#DECISION_PATH#$MODEL_DECISION#g" \
+    -e "s#PROGRESS_PATH#$MODEL_PROGRESS#g" "$PROMPT_TEMPLATE" \
     | awk -v browse_file="$BROWSE_SECTION_FILE" \
           -v grounding_file="$GROUNDING_SECTION_FILE" '
         /^BROWSE_TOOL_SECTION$/ {

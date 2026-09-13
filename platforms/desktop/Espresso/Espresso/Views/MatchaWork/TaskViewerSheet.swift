@@ -60,6 +60,11 @@ struct TaskViewerSheet: View {
     /// that share the busy flag never show each other's progress verb.
     @State var autoPRPendingAction: String? = nil
     @State var autoPRRunError: String?
+    /// Runtime pin (model / effort) write in flight, and its last failure.
+    /// Separate from the run controls: pinning a runtime and queueing a run
+    /// are different writes and either can fail on its own.
+    @State var settingAutoPRRuntime = false
+    @State var autoPRRuntimeError: String?
     /// Outreach a research run proposed. Empty on every ticket that never ran
     /// one, so the section simply does not render.
     @State var stagedActions: [MWStagedAction] = []
@@ -293,6 +298,7 @@ struct TaskViewerSheet: View {
                 // graph mode, along with the first-class research deliverable.
                 autoSetupBanner
                 autoPRRunNowControl
+                autoPRRuntimeControl
                 researchReportSection
 
                 if viewMode == .list {

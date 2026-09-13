@@ -1783,6 +1783,76 @@ check "ordinary additional context remains capped at 20 minutes" \
     $(jq -e '.minutes == 20 and .extended == false and .directives == []' \
       "$TMP_DIR/normal-runtime-policy.json" >/dev/null && echo 0 || echo 1)
 
+# ── Runtime ladder ─────────────────────────────────────────────────────────
+# A card on its third "approve 10 more minutes" used to rerun the same model at
+# the same effort that had already stalled twice. The checkpoint now classifies
+# WHY it stopped and the policy carries the runtime the continuation should use.
+# shellcheck source=../kanban-autopr/lib.sh
+AUTOPR_LIB_ONLY=1 source "$AUTOPR_DIR/lib.sh" 2>/dev/null || source "$AUTOPR_DIR/lib.sh"
+
+check "a stall with a saved patch and decision is classified as near_publish" \
+    $([ "$(jq -n '{patch_saved:true,decision_saved:true}' > "$TMP_DIR/m1.json"; \
+        autopr_stall_reason "$TMP_DIR/m1.json" 1)" = near_publish ] && echo 0 || echo 1)
+check "a stall with a patch but no verdict is classified as implementing" \
+    $([ "$(jq -n '{patch_saved:true,decision_saved:false}' > "$TMP_DIR/m2.json"; \
+        autopr_stall_reason "$TMP_DIR/m2.json" 1)" = implementing ] && echo 0 || echo 1)
+check "a stall that saved nothing at all is classified as stuck" \
+    $([ "$(jq -n '{patch_saved:false,report_saved:false}' > "$TMP_DIR/m3.json"; \
+        autopr_stall_reason "$TMP_DIR/m3.json" 0)" = stuck ] && echo 0 || echo 1)
+check "a second empty-handed pass escalates from exploring to stuck" \
+    $([ "$(jq -n '{patch_saved:false,progress_phase:"explore"}' > "$TMP_DIR/m4.json"; \
+        autopr_stall_reason "$TMP_DIR/m4.json" 0)" = exploring ] \
+      && [ "$(autopr_stall_reason "$TMP_DIR/m4.json" 2)" = stuck ] && echo 0 || echo 1)
+check "near_publish downgrades the continuation and stuck raises it" \
+    $([ "$(autopr_runtime_for_stall near_publish 1)" = "gpt-5.6-luna medium" ] \
+      && [ "$(autopr_runtime_for_stall stuck 2)" = "gpt-5.6-sol xhigh" ] \
+      && [ "$(autopr_runtime_for_stall implementing 1)" = "gpt-5.6-sol high" ] \
+      && echo 0 || echo 1)
+check "every runtime the ladder can emit is a model and effort the sandbox accepts" \
+    $(for reason in near_publish implementing stuck exploring; do
+        pair="$(autopr_runtime_for_stall "$reason" 1)"
+        autopr_runtime_model_valid "${pair%% *}" || exit 1
+        autopr_runtime_effort_valid "${pair##* }" || exit 1
+      done && echo 0 || echo 1)
+
+# The policy step is where the three sources are reconciled, so assert there
+# rather than only on the ladder in isolation.
+jq -n --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,created_at:$created_at,patch_saved:true,
+      stall_reason:"stuck",stall_attempt:2,
+      suggested_model:"gpt-5.6-sol",suggested_effort:"xhigh"}' \
+    > "$runtime_task_root/run-1/metadata.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/runtime-card.json" \
+    "$TMP_DIR/auto-runtime-policy.json"
+check "an unpinned card inherits the runtime the last stall suggested" \
+    $(jq -e '.model == "gpt-5.6-sol" and .effort == "xhigh"
+             and .runtime_source == "auto" and .stall_reason == "stuck"
+             and .stall_attempt == 2' \
+      "$TMP_DIR/auto-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+jq '. + {autopr_model:"gpt-5.6-luna",autopr_effort:"low"}' \
+    "$TMP_DIR/runtime-card.json" > "$TMP_DIR/pinned-runtime-card.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$RUNTIME_CHECKPOINTS" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/pinned-runtime-card.json" \
+    "$TMP_DIR/pinned-runtime-policy.json"
+check "a card that pins a runtime overrides the automatic escalation" \
+    $(jq -e '.model == "gpt-5.6-luna" and .effort == "low"
+             and .runtime_source == "manual"' \
+      "$TMP_DIR/pinned-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
+jq '. + {autopr_model:"gpt-9-nonexistent",autopr_effort:"extreme"}' \
+    "$TMP_DIR/runtime-card.json" > "$TMP_DIR/bogus-runtime-card.json"
+AUTOPR_RUNTIME_HISTORY_FILE="$TMP_DIR/normal-runtime-history.json" \
+    AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/empty-checkpoints" \
+    "$AUTOPR_DIR/runtime-policy.sh" "$TMP_DIR/bogus-runtime-card.json" \
+    "$TMP_DIR/bogus-runtime-policy.json"
+check "a pinned runtime no endpoint knows is dropped, not handed to the sandbox" \
+    $(jq -e '.model == null and .effort == null and .runtime_source == "default"' \
+      "$TMP_DIR/bogus-runtime-policy.json" >/dev/null && echo 0 || echo 1)
+
 cat > "$TMP_DIR/consumed-directive-card.json" <<'EOF'
 {"board_column":"todo","progress_note":"🤖 AUTO SETUP · NO PR: ALREADY FIXED · [autopr:no-spec 2026-09-02T01:00:00Z] already_fixed","autopr_reconsideration_pending":false}
 EOF

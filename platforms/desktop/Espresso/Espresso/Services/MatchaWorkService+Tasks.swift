@@ -114,6 +114,10 @@ extension MatchaWorkService {
         var lossReason: String?
         var nextActionAt: String?
         var expectedClose: String?
+        /// AutoPR runtime pin. Same contract as the text fields above: nil
+        /// leaves it alone, `""` clears it back to automatic selection.
+        var autoprModel: String?
+        var autoprEffort: String?
 
         enum CodingKeys: String, CodingKey {
             case title, description, priority, status, outcome, probability
@@ -131,6 +135,8 @@ extension MatchaWorkService {
             case lossReason = "loss_reason"
             case nextActionAt = "next_action_at"
             case expectedClose = "expected_close"
+            case autoprModel = "autopr_model"
+            case autoprEffort = "autopr_effort"
         }
 
         /// Custom encode — emit only the fields that were actually set.
@@ -168,6 +174,8 @@ extension MatchaWorkService {
             try c.encodeIfPresent(lossReason, forKey: .lossReason)
             try c.encodeIfPresent(nextActionAt, forKey: .nextActionAt)
             try c.encodeIfPresent(expectedClose, forKey: .expectedClose)
+            try c.encodeIfPresent(autoprModel, forKey: .autoprModel)
+            try c.encodeIfPresent(autoprEffort, forKey: .autoprEffort)
         }
     }
 
