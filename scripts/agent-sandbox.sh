@@ -38,17 +38,23 @@ ensure_v2_system_plane() {
 }
 
 OPEN_V2_WIZARD_AFTER_START=0
-# Bare `msandbox` on a terminal lands in the observer dashboard, the thing the
-# operator asked for by turning the system on; `Ctrl-b d` then drops into the
-# session manager. `msandbox --menu` (or MSANDBOX_START_ATTACH=menu) skips the
-# attach and opens the manager directly, as before.
-MSANDBOX_START_ATTACH="${MSANDBOX_START_ATTACH:-dashboard}"
-if [ "$#" = 0 ] || [ "${1:-}" = --menu ]; then
+# Bare `msandbox` on a terminal opens the session manager: the operator's own
+# sessions are what they came for, and landing in the observer dashboard instead
+# reads as "only matcha-autopr loaded". The dashboard stays one keystroke away
+# (`Ctrl-b a` from any attached session, or `tmux attach -t matcha-autopr`);
+# `msandbox --dashboard` (or MSANDBOX_START_ATTACH=dashboard) attaches it first
+# and drops into the manager on detach. `--menu` remains accepted as an alias
+# for the default so existing muscle memory and scripts keep working.
+MSANDBOX_START_ATTACH="${MSANDBOX_START_ATTACH:-menu}"
+if [ "$#" = 0 ] || [ "${1:-}" = --menu ] || [ "${1:-}" = --dashboard ]; then
     # Bare `msandbox` is the one-command system entrypoint. Bring up the
     # primary workspace and the fail-closed AutoPR control plane before
     # handing control to the v2 wizard; otherwise the wizard routing can
     # accidentally leave autonomous drafting disabled and unobserved.
-    [ "${1:-}" != --menu ] || MSANDBOX_START_ATTACH=menu
+    case "${1:-}" in
+        --menu) MSANDBOX_START_ATTACH=menu ;;
+        --dashboard) MSANDBOX_START_ATTACH=dashboard ;;
+    esac
     OPEN_V2_WIZARD_AFTER_START=1
     set -- start
 fi
@@ -719,8 +725,9 @@ set_autopr_notifications() {
     esac
 }
 
-# Bare `msandbox` on a real terminal attaches the observer dashboard. Never
-# nest inside another tmux client, and never block a script or a pipe.
+# `msandbox --dashboard` on a real terminal attaches the observer dashboard
+# before the manager. Never nest inside another tmux client, and never block a
+# script or a pipe.
 attach_autopr_dashboard_if_interactive() {
     [ "$MSANDBOX_START_ATTACH" = dashboard ] || return 0
     [ -t 0 ] && [ -t 1 ] || return 0

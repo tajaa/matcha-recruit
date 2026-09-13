@@ -211,12 +211,18 @@ check "bare msandbox reports sessions after preserving the interlocked control p
       && [ -f "$TMP_DIR/matcha-agent-sandbox.running" ] \
       && [ -f "$TMP_DIR/tmux.session" ] \
       && echo 0 || echo 1)
-# The dashboard attach is for terminals only; a script or pipe (this test)
-# must never block on it, and --menu skips it outright.
+# Bare `msandbox` opens the session manager, never the observer dashboard. The
+# dashboard attach is opt-in (--dashboard) and terminal-only, so a script or pipe
+# (this test) must never block on it under either flag.
 menu_output="$(run_msandbox --menu)"
 check "bare msandbox never attaches the dashboard off a terminal, and --menu opens the manager" \
     $(! grep -q '^attach-session' "$TMP_DIR/tmux.log" \
       && printf '%s' "$menu_output" | grep -q 'No active msandbox sessions' \
+      && echo 0 || echo 1)
+dashboard_output="$(run_msandbox --dashboard)"
+check "--dashboard is accepted, still opens the manager, and never blocks off a terminal" \
+    $(! grep -q '^attach-session' "$TMP_DIR/tmux.log" \
+      && printf '%s' "$dashboard_output" | grep -q 'No active msandbox sessions' \
       && echo 0 || echo 1)
 
 set +e

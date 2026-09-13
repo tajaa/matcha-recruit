@@ -286,9 +286,10 @@ AutoPR and independent sessions share one lifecycle even though their durable
 terminal sessions stay on the host side of the container boundary. From an
 attached agent, press `Ctrl-b a` to switch to `matcha-autopr` and `Ctrl-b a`
 again to come back (`Ctrl-b s` still lists every session); use `Ctrl-b d` to
-detach. Bare `msandbox` on a terminal attaches the dashboard first and drops
-into the manager on detach; `msandbox --menu` (or `MSANDBOX_START_ATTACH=menu`)
-opens the manager directly. Running `tmux attach -t matcha-autopr` as a command inside the container
+detach. Bare `msandbox` opens the session manager; `msandbox --dashboard` (or
+`MSANDBOX_START_ATTACH=dashboard`) attaches the observer dashboard first and
+drops into the manager on detach. `--menu` is still accepted as an alias for the
+default. Running `tmux attach -t matcha-autopr` as a command inside the container
 addresses the container's isolated tmux server and is therefore not the switch
 operation. Direct `msandbox wizard`, `session create`, `session start`,
 `session attach`, and `session shell` entrypoints reassert the complete AutoPR

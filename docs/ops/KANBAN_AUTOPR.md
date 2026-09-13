@@ -114,8 +114,8 @@ changes.
    `~/Library/Logs/matcha-kanban-autopr-dispatch.log`.
 7. Run `msandbox` or `msandbox start`. This starts the primary sandbox, enables and kicks
    the timer, creates the `matcha-autopr` host tmux dashboard, and prints a mandatory
-   health/activity summary. Bare `msandbox` on a terminal then attaches the dashboard
-   (`msandbox --menu` skips straight to the session manager); otherwise open it with
+   health/activity summary. Bare `msandbox` then opens the session manager; add
+   `--dashboard` to attach the observer dashboard first, or open it any time with
    `tmux attach -t matcha-autopr`. Detach with `Ctrl-b d`; from inside any msandbox agent
    session `Ctrl-b a` hops to the dashboard and back, and that session's status bar shows
    the live AutoPR state. The dispatcher also posts Notification Center banners (run
