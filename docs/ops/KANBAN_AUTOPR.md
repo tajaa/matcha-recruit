@@ -164,6 +164,24 @@ filenames in `context.json`: one lands per run, and re-reading them would crowd 
 operator evidence. `msandbox autopr log <id8|title>` prints the journal list with the
 newest in full, the failure ledger, and the runner's checkpoints for that card.
 
+**The card says when work is saved.** Until now the only thing that told a ticket
+its model work survived was `checkpoint.sh`'s `PAUSED: APPROVE 10 MORE MINUTES` header
+— written *only* for a run killed at its time budget. A run that died at a path refusal,
+a verify failure or a crash left an identical resumable checkpoint and a card with no way
+to know, so its owner pressed Run expecting a fresh start, or gave up on work that was
+sitting on disk. Every park now appends one line from `lib.sh`'s
+`autopr_checkpoint_resume_line` — `publish.sh`'s cosmetic and path refusals,
+`investigate.sh`'s awaiting-answers park, and `run-journal.sh`'s own STOPPED header:
+
+> `Resume: 19 file(s) of model work are saved on the runner. Press Run to continue from
+> them instead of starting over; a checkpoint expires 24h after the run that saved it.`
+
+It reads the `active` pointer, not the newest directory, so a consumed or expired
+checkpoint promises nothing. `progress_note_with_origin` drops a stale `Resume:` line the
+way it drops the pause report, so it is replaced each cycle rather than stacking. The
+parker writes it before its question form, and `run-journal.sh` stands down entirely when
+a park already owns the header.
+
 **The resume pointer survives a failed publish.** `checkpoint.sh consume` runs from the
 Cleanup step once `publish.sh` or `publish-research.sh` has actually succeeded, not as the
 last line of `investigate.sh`. Under the old ordering a publish-stage failure — a path

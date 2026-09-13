@@ -299,9 +299,17 @@ if label="$(stopped_header_label "$REASON")" && [ "$OUTCOME" != success ] \
     # off CI, so that group accepts word characters, not just digits.
     marker="🤖 AUTO SETUP · STOPPED: $label · run #$RUN_ID · note: see $JOURNAL_NAME"
     note="$(progress_note_with_origin "$marker" "$live_note")"
+    # Say on the card that the work survived. Every other park writes the same
+    # line; without it the card's only resume signal is the timeout header, and
+    # an owner looking at a stopped card cannot tell a resumable checkpoint from
+    # a clean restart.
+    resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
+    [ -z "$resume_line" ] || note="$note"$'\n'"$resume_line"
     ( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$note" '{progress_note: $note}')" >/dev/null ) \
         || warn "could not record the stop reason on task $TASK_ID"
 elif [ "$already_parked" = true ]; then
+    # The parker owns the header AND already wrote the same resume line, and
+    # its question form sits below the note; rewriting it here would drop that.
     printf 'run-journal: card already parked by this run; leaving its header alone\n' >&2
 fi

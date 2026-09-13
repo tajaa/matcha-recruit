@@ -265,6 +265,8 @@ check "the PAUSED header survives untouched when the journal writes none" \
   $(dedupe "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 77" $'🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 77\nWhy more time: budget\nNext step: Approve 10 more minutes to continue from the saved checkpoint.' "🤖 AUTO SETUP · PAUSED: APPROVE 10 MORE MINUTES · checkpoint 77")
 check "ALREADY SCOPED is recognised, so an operator tail after it survives" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" "🤖 AUTO SETUP · ALREADY SCOPED · PR #123 · keep this" "🤖 AUTO SETUP · READY FOR REVIEW · keep this")
+check "the resume line is replaced each cycle instead of stacking up" \
+  $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" $'🤖 AUTO SETUP · STOPPED: VERIFY FAILED · run #5\nResume: 2 file(s) of model work are saved on the runner.' "🤖 AUTO SETUP · READY FOR REVIEW")
 check "a human-authored note survives every machine header" \
   $(dedupe "🤖 AUTO SETUP · READY FOR REVIEW" $'Human wrote this\nand this' $'🤖 AUTO SETUP · READY FOR REVIEW · Human wrote this\nand this')
 
@@ -329,6 +331,26 @@ mkdir -p "$repo"
 check "the branch-diff fallback counts files the model created, not only ones it edited" \
   $(grep -q 'NewThing.tsx' "$TMP_DIR/uploads"/autopr-run-77-*.md \
     && grep -q 'tracked.txt' "$TMP_DIR/uploads"/autopr-run-77-*.md && echo 0 || echo 1)
+
+# Finding: the card had no way to learn that resumable work survived. The only
+# resume signal in the system was checkpoint.sh's `PAUSED: APPROVE 10 MORE
+# MINUTES` header, written only for a timeout — a run that died at a path
+# refusal or a verify failure left an identical checkpoint and a silent card.
+rm -f "$TMP_DIR/uploads"/*
+printf '77-1789184418-inflight\n' > "$TMP_DIR/cproot/bbbb0000-0000-4000-8000-000000000002/active"
+AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/cproot" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason verify >/dev/null 2>&1
+check "a stopped card says its work is saved and that Run continues from it" \
+  $(grep -q 'Resume: 2 file(s) of model work are saved on the runner' "$TMP_DIR/calls" \
+    && grep -q 'STOPPED: VERIFY FAILED' "$TMP_DIR/calls" && echo 0 || echo 1)
+
+rm -f "$TMP_DIR/uploads"/*
+mv "$TMP_DIR/cproot/bbbb0000-0000-4000-8000-000000000002/active" "$TMP_DIR/cproot/consumed-pointer"
+AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/cproot" \
+  run_journal "$TMP_DIR/card.json" --outcome failure --reason verify >/dev/null 2>&1
+check "a consumed pointer promises no resume, even with the directory still on disk" \
+  $(! grep -q 'Resume: ' "$TMP_DIR/calls" && grep -q 'STOPPED: VERIFY FAILED' "$TMP_DIR/calls" && echo 0 || echo 1)
+mv "$TMP_DIR/cproot/consumed-pointer" "$TMP_DIR/cproot/bbbb0000-0000-4000-8000-000000000002/active"
 
 # Finding: the ledger and the journal must read the SAME timeout verdict. A
 # run killed at its budget arrives as INVESTIGATE_OUTCOME=failure, so booking

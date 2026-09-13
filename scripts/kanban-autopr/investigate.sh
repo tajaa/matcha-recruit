@@ -681,13 +681,15 @@ if [ -n "$CORRECTION_KIND" ]; then
 fi
 
 park_rejected_after_correction() {
-    local failure="$1" existing marker origin_note
+    local failure="$1" existing marker origin_note resume_line
     stop_inflight_snapshots
     existing="$(jq -r '.progress_note // ""' "$CARD_FILE")"
     marker="[autopr:no-spec $(date -u +%Y-%m-%dT%H:%M:%SZ)] needs_clarification"
     origin_note="$(progress_note_with_origin \
         "🤖 AUTO SETUP · BLOCKED: AWAITING ANSWERS · $marker · note: AutoPR $failure after one correction." \
         "$existing")"
+    resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
+    [ -z "$resume_line" ] || origin_note="$origin_note"$'\n'"$resume_line"
     mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$origin_note" \
             '{board_column:"changes_requested",progress_note:$note}')" >/dev/null \

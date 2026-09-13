@@ -162,11 +162,13 @@ BRANCH="bot/task-$ID8"
 # and reproduced the same cosmetic diff forever, with no signal to a human. The
 # refusal stands, but it lands on the card and asks its owner for a decision.
 reject_cosmetic_diff() {
-    local reject_note origin_note
+    local reject_note origin_note resume_line
     reject_note="[autopr:rejected $(date -u +%Y-%m-%dT%H:%M:%SZ)] cosmetic_only"
     origin_note="$(progress_note_with_origin \
         "🤖 AUTO SETUP · BLOCKED: COSMETIC DIFF · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
         "$EXISTING_PROGRESS_NOTE")"
+    resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
+    [ -z "$resume_line" ] || origin_note="$origin_note"$'\n'"$resume_line"
     if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$origin_note" \
             '{board_column: "changes_requested", progress_note: $note}')" >/dev/null; then
@@ -186,12 +188,14 @@ reject_cosmetic_diff() {
 # offending paths and asks the owner what to do; select.sh keeps the marker
 # settled until a human moves the card, adds context, or presses Run.
 reject_disallowed_paths() {
-    local paths="$1" reject_note origin_note shown
+    local paths="$1" reject_note origin_note shown resume_line
     shown="$(printf '%s\n' "$paths" | sed '/^$/d' | head -3 | paste -sd, - | sed 's/,/, /g')"
     reject_note="[autopr:rejected $(date -u +%Y-%m-%dT%H:%M:%SZ)] disallowed_paths · $shown"
     origin_note="$(progress_note_with_origin \
         "🤖 AUTO SETUP · BLOCKED: DISALLOWED PATHS · build $PROD_BUILD_NUMBER · $PROD_LABEL · $CRITICALITY_EMOJI C$CONFIDENCE_SCORE$DIRECTIVE_MARKER · $reject_note · note: $CARD_NOTE" \
         "$EXISTING_PROGRESS_NOTE")"
+    resume_line="$(autopr_checkpoint_resume_line "$TASK_ID")"
+    [ -z "$resume_line" ] || origin_note="$origin_note"$'\n'"$resume_line"
     if mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
         "$(jq -n --arg note "$origin_note" \
             '{board_column: "changes_requested", progress_note: $note}')" >/dev/null; then

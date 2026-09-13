@@ -349,7 +349,7 @@ progress_note_with_origin() {
     # lines is the operator's and survives the next cycle.
     preserved="$(printf '%s\n' "$body" | awk '
         /^Answers needed — reply below with the numbered choices:/ { exit }
-        /^(Why more time|Done so far|Latest progress|Next step):/ { next }
+        /^(Why more time|Done so far|Latest progress|Next step|Resume):/ { next }
         NF { seen = 1 }
         seen { lines[n++] = $0 }
         END {
@@ -459,6 +459,45 @@ autopr_attempt_ledger_path() {
     id8="$(printf '%s' "$key" | tr -d '-' | cut -c1-8)"
     [ -n "$id8" ] || return 1
     printf '%s/attempts/%s' "${AUTOPR_CACHE_DIR:-$HOME/.cache/matcha-autopr}" "$id8"
+}
+
+# autopr_checkpoint_root
+# Where checkpoint.sh keeps its per-task directories, resolved the same way it
+# resolves them. Fails quietly when there is no runner checkout to read.
+autopr_checkpoint_root() {
+    if [ -n "${AUTOPR_CHECKPOINT_ROOT:-}" ]; then
+        printf '%s' "$AUTOPR_CHECKPOINT_ROOT"
+        return 0
+    fi
+    local git_dir
+    git_dir="$(git -C "${AUTOPR_WORKSPACE_ROOT:-.}" rev-parse --absolute-git-dir 2>/dev/null)" \
+        || return 1
+    printf '%s/matcha-kanban-autopr-checkpoints' "$git_dir"
+}
+
+# autopr_checkpoint_resume_line TASK_ID
+# One card-face line when resumable model work survives this run, and nothing
+# otherwise. Every park writes it, because until now the ONLY thing that told a
+# card its work was saved was checkpoint.sh's `PAUSED: APPROVE 10 MORE MINUTES`
+# header — written only for a timeout. A run that died at a path refusal, a
+# verify failure or a crash left an identical resumable checkpoint and a card
+# with no way to know, so its owner pressed Run expecting a restart, or gave up.
+autopr_checkpoint_resume_line() {
+    local task_id="$1" root dir checkpoint metadata files
+    [ -n "$task_id" ] || return 0
+    root="$(autopr_checkpoint_root)" || return 0
+    dir="$root/$task_id"
+    # The pointer, not the newest directory: an expired or consumed checkpoint
+    # is not resumable, and claiming otherwise is worse than saying nothing.
+    [ -f "$dir/active" ] || return 0
+    checkpoint="$(tr -d '\r\n' < "$dir/active")"
+    [[ "$checkpoint" =~ ^[A-Za-z0-9._-]+$ ]] || return 0
+    metadata="$dir/$checkpoint/metadata.json"
+    [ -s "$metadata" ] || return 0
+    [ "$(jq -r '.patch_saved // false' "$metadata" 2>/dev/null)" = true ] || return 0
+    files="$(jq -r '.changed_file_count // 0' "$metadata" 2>/dev/null || printf 0)"
+    printf 'Resume: %s file(s) of model work are saved on the runner. Press Run to continue from them instead of starting over; a checkpoint expires 24h after the run that saved it.' \
+        "$files"
 }
 
 # autopr_attempt_ledger_line TASK_ID_OR_ID8

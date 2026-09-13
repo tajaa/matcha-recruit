@@ -733,6 +733,41 @@ check "the path-policy refusal asks the card owner what to do" \
 check "the path-policy refusal names its reason for the failure ledger" \
   $(grep -q '^refusal_reason=disallowed_paths$' "$GITHUB_OUTPUT" && echo 0 || echo 1)
 
+# Finding: a refusal leaves the same resumable checkpoint a timeout does, but
+# only the timeout header ever told the card so. Its owner saw a stopped card
+# with no way to tell saved work from a clean restart.
+CP_ROOT="$TEST_REPO/.git/matcha-kanban-autopr-checkpoints/aaaa0000-0000-4000-8000-000000000001"
+mkdir -p "$CP_ROOT/900-1789180000-inflight"
+printf '{"patch_saved":true,"changed_file_count":19}\n' > "$CP_ROOT/900-1789180000-inflight/metadata.json"
+printf '900-1789180000-inflight\n' > "$CP_ROOT/active"
+git -C "$TEST_REPO" reset --hard -q HEAD
+printf '#!/bin/sh\necho hi\n' > "$TEST_REPO/docs/tools.sh"
+sed -i.bak "s/label: 'Credentialing'/label: 'Credential Templates'/" \
+  "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx"
+rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
+rm -f "$TMP_DIR/card-patch.json"
+set +e
+publish_copy_card
+set -e
+check "a refusal tells the card its work is saved and that Run continues from it" \
+  $(jq -e '.progress_note | contains("BLOCKED: DISALLOWED PATHS")
+      and contains("Resume: 19 file(s) of model work are saved on the runner")' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+
+rm -f "$CP_ROOT/active"
+git -C "$TEST_REPO" reset --hard -q HEAD
+printf '#!/bin/sh\necho hi\n' > "$TEST_REPO/docs/tools.sh"
+sed -i.bak "s/label: 'Credentialing'/label: 'Credential Templates'/" \
+  "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx"
+rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
+rm -f "$TMP_DIR/card-patch.json"
+set +e
+publish_copy_card
+set -e
+check "with no active pointer the refusal promises no resume" \
+  $(jq -e '(.progress_note | contains("BLOCKED: DISALLOWED PATHS")) and (.progress_note | contains("Resume:") | not)' \
+    "$TMP_DIR/card-patch.json" >/dev/null && echo 0 || echo 1)
+
 git -C "$TEST_REPO" reset --hard -q HEAD
 printf '# Agent instructions\n' > "$TEST_REPO/CLAUDE.md"
 rm -f "$TMP_DIR/card-patch.json"
