@@ -108,6 +108,7 @@ async def _upsert_business_headcount_profile(
     owner_name: str,
     headcount: int,
     jurisdiction_count: int | None = None,
+    location_count: int | None = None,
     updated_by: UUID,
 ) -> None:
     if not await _table_exists(conn, "company_handbook_profiles"):
@@ -124,17 +125,17 @@ async def _upsert_business_headcount_profile(
         """
         INSERT INTO company_handbook_profiles (
             company_id, legal_name, dba, ceo_or_president, headcount,
-            compliance_jurisdiction_count,
+            compliance_jurisdiction_count, custom_product_location_count,
             remote_workers, minors, tipped_employees, union_employees, federal_contracts,
             group_health_insurance, background_checks, hourly_employees,
             salaried_employees, commissioned_employees, tip_pooling, updated_by, updated_at
         )
         VALUES (
             $1, $2, NULL, $3, $4,
-            $5,
+            $5, $6,
             false, false, false, false, false,
             false, false, true,
-            false, false, false, $6, NOW()
+            false, false, false, $7, NOW()
         )
         ON CONFLICT (company_id)
         DO UPDATE SET
@@ -144,6 +145,10 @@ async def _upsert_business_headcount_profile(
                 EXCLUDED.compliance_jurisdiction_count,
                 company_handbook_profiles.compliance_jurisdiction_count
             ),
+            custom_product_location_count = COALESCE(
+                EXCLUDED.custom_product_location_count,
+                company_handbook_profiles.custom_product_location_count
+            ),
             updated_by = EXCLUDED.updated_by,
             updated_at = NOW()
         """,
@@ -152,6 +157,7 @@ async def _upsert_business_headcount_profile(
         ceo_or_president,
         headcount,
         jurisdiction_count,
+        location_count,
         updated_by,
     )
 
@@ -165,4 +171,3 @@ __all__ = [
     "_column_exists",
     "_upsert_business_headcount_profile",
 ]
-
