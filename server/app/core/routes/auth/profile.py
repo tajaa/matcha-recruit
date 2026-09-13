@@ -152,6 +152,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        c.name, c.phone, c.job_title, c.created_at,
                        COALESCE(chp.headcount, 0) as headcount,
                        COALESCE(chp.compliance_jurisdiction_count, 0) as jurisdiction_count,
+                       COALESCE(chp.custom_product_location_count, 0) as location_count,
                        {_is_test_col}
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
@@ -280,6 +281,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "created_at": profile["created_at"].isoformat(),
                     "headcount": int(profile["headcount"]) if "headcount" in profile.keys() else 0,
                     "jurisdiction_count": int(profile["jurisdiction_count"]) if "jurisdiction_count" in profile.keys() else 0,
+                    "location_count": int(profile["location_count"]) if "location_count" in profile.keys() else 0,
                     # Present only for admin-composed products; null otherwise.
                     "product": product_payload,
                     "is_test": bool(profile["is_test"]),

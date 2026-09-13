@@ -106,6 +106,10 @@ class BusinessRegister(BaseModel):
     # Matcha Compliance signup (/compliance/signup) — drives the per-jurisdiction
     # pricing component. Optional/None on every other tier.
     jurisdiction_count: Optional[int] = None
+    # Signup-time billing quantity for custom products priced per location.
+    # Persisted separately from actual business_locations, which do not exist
+    # yet when the initial subscription checkout is created.
+    location_count: Optional[int] = Field(default=None, ge=1)
 
     # First admin user info
     email: EmailStr

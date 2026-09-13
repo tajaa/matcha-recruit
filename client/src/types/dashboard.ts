@@ -339,6 +339,7 @@ export interface MeClientProfile {
   created_at: string
   headcount?: number
   jurisdiction_count?: number
+  location_count?: number
   // Broker profile rides on this same `profile` slot; Pro entitlement gates off-platform.
   plan?: 'standard' | 'pro'
   /** Set only for tenants on an admin-composed product (signup_source
@@ -366,7 +367,7 @@ export interface ProductDefinition {
   /** The one flag that is false while payment is pending (like `incidents`
    *  for Matcha Lite). Null for free / contact-sales products. */
   gate_feature: string | null
-  pricing_model: 'per_seat' | 'block' | 'flat' | 'free' | 'contact_sales'
+  pricing_model: 'per_seat' | 'per_location' | 'block' | 'flat' | 'free' | 'contact_sales'
   price_cents: number | null
   block_size: number | null
   min_headcount: number

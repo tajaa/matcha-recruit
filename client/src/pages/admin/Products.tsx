@@ -16,7 +16,7 @@ import { PRODUCT_NAV_CATALOG } from '../../data/productNavCatalog'
  * action to reach the companies already on it.
  */
 
-type PricingModel = 'per_seat' | 'block' | 'flat' | 'free' | 'contact_sales'
+type PricingModel = 'per_seat' | 'per_location' | 'block' | 'flat' | 'free' | 'contact_sales'
 
 type Product = {
   id: string
@@ -59,13 +59,14 @@ type ProductsResponse = {
 
 const PRICING_OPTIONS = [
   { value: 'per_seat', label: 'Per seat (per employee / month)' },
+  { value: 'per_location', label: 'Per location' },
   { value: 'block', label: 'Per block of employees' },
   { value: 'flat', label: 'Flat monthly' },
   { value: 'free', label: 'Free (activates at signup)' },
   { value: 'contact_sales', label: 'Contact sales (admin activates)' },
 ]
 
-const PAID_MODELS: PricingModel[] = ['per_seat', 'block', 'flat']
+const PAID_MODELS: PricingModel[] = ['per_seat', 'per_location', 'block', 'flat']
 
 type Draft = {
   slug: string
@@ -114,6 +115,7 @@ function priceLabel(p: Product): string {
   const dollars = (p.price_cents ?? 0) / 100
   if (p.pricing_model === 'flat') return `$${dollars}/mo`
   if (p.pricing_model === 'per_seat') return `$${dollars}/employee/mo`
+  if (p.pricing_model === 'per_location') return `$${dollars}/location/mo`
   return `$${dollars} per ${p.block_size} employees/mo`
 }
 
@@ -412,6 +414,7 @@ export default function Products() {
                   <Input
                     label={draft.pricing_model === 'flat' ? 'Price / month ($)'
                       : draft.pricing_model === 'per_seat' ? 'Price / employee / month ($)'
+                      : draft.pricing_model === 'per_location' ? 'Price / location / month ($)'
                       : 'Price per block / month ($)'}
                     value={draft.price_dollars}
                     onChange={(e) => setDraft({ ...draft, price_dollars: e.target.value })}

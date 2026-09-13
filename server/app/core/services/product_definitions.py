@@ -35,10 +35,10 @@ SIGNUP_SOURCE_PREFIX = "product:"
 # mw_subscriptions.pack_id for a custom-product sub: prefix + slug.
 PRODUCT_PACK_PREFIX = "product:"
 
-PRICING_MODELS = ("per_seat", "block", "flat", "free", "contact_sales")
+PRICING_MODELS = ("per_seat", "per_location", "block", "flat", "free", "contact_sales")
 
 # Models that require a Stripe checkout before the gate flag flips.
-PAID_PRICING_MODELS = ("per_seat", "block", "flat")
+PAID_PRICING_MODELS = ("per_seat", "per_location", "block", "flat")
 
 STATUSES = ("draft", "published", "archived")
 
@@ -335,7 +335,9 @@ def validate_nav(nav: Any, features: dict[str, bool]) -> Optional[list[dict[str,
 
 
 def compute_product_price_cents(
-    product: ProductDefinition, headcount: int
+    product: ProductDefinition,
+    headcount: int,
+    location_count: Optional[int] = None,
 ) -> Optional[int]:
     """Monthly price in cents, or None when the product isn't Stripe-billed.
 
@@ -360,6 +362,12 @@ def compute_product_price_cents(
         return price
     if product.pricing_model == "per_seat":
         return price * headcount
+    if product.pricing_model == "per_location":
+        if location_count is None or location_count < 1:
+            raise ProductDefinitionError(
+                "Location count must be at least 1 for per-location pricing"
+            )
+        return price * location_count
     # block
     block_size = int(product.block_size or 1)
     return math.ceil(headcount / block_size) * price

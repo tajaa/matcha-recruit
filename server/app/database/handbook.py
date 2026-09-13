@@ -59,6 +59,10 @@ async def _ensure_handbook_tables(conn):
     """)
     await conn.execute("""
         ALTER TABLE company_handbook_profiles
+        ADD COLUMN IF NOT EXISTS custom_product_location_count INTEGER
+    """)
+    await conn.execute("""
+        ALTER TABLE company_handbook_profiles
         ADD COLUMN IF NOT EXISTS remote_workers BOOLEAN NOT NULL DEFAULT false
     """)
     await conn.execute("""
@@ -462,5 +466,4 @@ async def _ensure_handbook_tables(conn):
                 'Automated weekly risk assessment scoring for all companies.', false, 3)
         ON CONFLICT (task_key) DO NOTHING
     """)
-
 
