@@ -133,6 +133,8 @@ Rules:
   genuinely finished, using the exact `id` from `subtasks` in context.json.
   Each one gets checked off on the ticket as soon as you log it, and a false
   check is worse than no check. Never invent an id.
+- Every value is a string. Never write a number or an object for `note`,
+  `next`, or `phase`.
 - Never write anything but these objects to that file, and never rewrite or
   truncate it — append only.
 

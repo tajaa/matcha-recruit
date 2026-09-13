@@ -205,6 +205,12 @@ prune_checkpoints() {
         -mtime "+$CHECKPOINT_RETENTION_DAYS" -exec rm -rf -- {} + 2>/dev/null || true
     find "$CHECKPOINT_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'consumed-*' \
         -mtime "+$CHECKPOINT_RETENTION_DAYS" -delete 2>/dev/null || true
+    # Per-card round state lives beside those directories and is not swept by
+    # either pass above. Without this a held or abandoned card keeps its stall
+    # count and tick ledger indefinitely.
+    find "$CHECKPOINT_ROOT" -mindepth 2 -maxdepth 2 -type f \
+        \( -name 'stalls' -o -name 'stall.json' -o -name 'ticked-subtasks' \) \
+        -mtime "+$CHECKPOINT_RETENTION_DAYS" -delete 2>/dev/null || true
 }
 
 # The card this sandbox clone was created for, or empty when it carries no
@@ -285,10 +291,16 @@ capture_progress() {
     # not parse. That is what makes the tail-truncation above safe: the
     # leading fragment it always creates is one bad line, not a stream error
     # that stops jq before it emits anything.
+    # Coerce every field to the type the readers assume. The model writes this
+    # file, so `"note": 5` is a thing that happens, and an uncoerced number
+    # makes the journal's `.[0:240]` raise `Cannot index number with object` —
+    # which takes the WHOLE section down, not the one bad line this function
+    # promises to drop. `tostring` here is what keeps that promise.
     jq -Rc 'fromjson? | select(type == "object")
-           | {at: (.at // ""), phase: (.phase // ""), note: (.note // ""),
-              next: (.next // ""), subtask_id: (.subtask_id // null),
-              subtask_done: (.subtask_done // false)}
+           | {at: ((.at // "") | tostring), phase: ((.phase // "") | tostring),
+              note: ((.note // "") | tostring), next: ((.next // "") | tostring),
+              subtask_id: (if (.subtask_id | type) == "string" then .subtask_id else null end),
+              subtask_done: (.subtask_done == true)}
            | select(.note != "" or .phase != "" or .subtask_id != null)' \
         "$destination.raw" 2>/dev/null > "$destination.tmp" || true
     rm -f "$destination.raw"
@@ -317,9 +329,9 @@ progress_phase() {
 # same item every pass; a board write that fails is a warning, never fatal.
 tick_progress_subtasks() {
     local project_id="$1" task_id="$2" progress_file="$3" ledger="$4"
-    local subtask_id ticked=0
-    [ -s "$progress_file" ] || { printf '0'; return 0; }
-    [ -n "$project_id" ] && [ -n "$task_id" ] || { printf '0'; return 0; }
+    local subtask_id run_id="${GITHUB_RUN_ID:-local}"
+    [ -s "$progress_file" ] || { ticked_count "$ledger"; return 0; }
+    [ -n "$project_id" ] && [ -n "$task_id" ] || { ticked_count "$ledger"; return 0; }
     touch "$ledger" 2>/dev/null || true
     while IFS= read -r subtask_id; do
         [ -n "$subtask_id" ] || continue
@@ -327,30 +339,61 @@ tick_progress_subtasks() {
         # hallucinated "subtask-3" would otherwise be a 422 per snapshot pass.
         [[ "$subtask_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
             || continue
-        grep -qxF "$subtask_id" "$ledger" 2>/dev/null && continue
+        # Keyed by RUN, not by subtask alone. Within a run this still stops the
+        # 4-minute timer re-PATCHing the same item every pass, which is all it
+        # was ever for; across rounds a rolled-forward checklist item stays
+        # tickable, which deleting the whole file on publish tried and failed
+        # to achieve (Cleanup re-creates it moments later via final_tick).
+        grep -qxF "$run_id $subtask_id" "$ledger" 2>/dev/null && continue
         if ( mw_api PATCH \
                 "/matcha-work/projects/$project_id/tasks/$task_id/subtasks/$subtask_id" \
                 '{"is_done":true}' ) >/dev/null 2>&1; then
-            printf '%s\n' "$subtask_id" >> "$ledger"
-            ticked=$((ticked + 1))
+            printf '%s %s\n' "$run_id" "$subtask_id" >> "$ledger"
         else
             snapshot_warn "could not check off subtask $subtask_id"
         fi
     done < <(jq -r 'select(.subtask_done == true) | .subtask_id // empty' \
         "$progress_file" 2>/dev/null | awk '!seen[$0]++')
-    printf '%s' "$ticked"
+    ticked_count "$ledger"
+}
+
+# How many items THIS run has checked off, across every pass of it. The
+# 4-minute timer does most of the ticking, so a per-pass counter reads 0 by the
+# time the card note and the journal are written — they would report that
+# nothing moved on a run whose checklist visibly did.
+ticked_count() {
+    local ledger="${1:-}" run_id="${GITHUB_RUN_ID:-local}" count=""
+    # `grep -c` PRINTS 0 and EXITS 1 when nothing matches, so a `|| printf 0`
+    # fallback appends a second zero and yields "00" — which is not valid JSON
+    # and took the whole metadata write down with it.
+    [ ! -f "$ledger" ] || count="$(grep -c "^$run_id " "$ledger" 2>/dev/null || true)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    printf '%s' "$count"
 }
 
 # How many continuations this card has already burned. Durable on its own
 # counter file rather than derived from checkpoint directories, which are
 # pruned: the third "approve 10 more minutes" must still know it is the third.
 stall_attempt_count() {
-    local root="$1" value=""
+    local root="$1" value="" stamp now
     # Test for the file first: a failed `<` redirect is reported by the shell
     # before the command's own `2>/dev/null` is applied, so this is the only
     # way to keep a first-ever stall from printing a spurious error.
     [ ! -f "$root/stalls" ] || value="$(tr -dc '0-9' < "$root/stalls" | head -c 3)"
     [ -n "$value" ] || value=0
+    # A count older than the checkpoints it describes says nothing about this
+    # round. `consume` clears it on a publish, but a card that stalls and is
+    # then held, rejected, or simply abandoned never publishes — and would open
+    # its next round already on the `stuck` rung, its first pause announced as
+    # "pause #3". Same horizon as a resumable checkpoint, for the same reason.
+    if [ "$value" != 0 ]; then
+        stamp="$(file_mtime_epoch "$root/stalls")"
+        now="$(date +%s)"
+        if [ -n "$stamp" ] && [ $((now - stamp)) -gt $((CHECKPOINT_MAX_AGE_HOURS * 3600)) ]; then
+            rm -f "$root/stalls" "$root/stall.json"
+            value=0
+        fi
+    fi
     printf '%s' "$value"
 }
 
@@ -461,6 +504,13 @@ snapshot_checkpoint() {
     fi
     snapshot_lock_release
     trap - EXIT
+    # Deliberately AFTER the lock. Each tick is a blocking PATCH with a 60s
+    # timeout; ten of them inside the lock can outlast the 120s
+    # `halt_snapshots` budget, at which point `save` proceeds anyway and
+    # harvests the workspace concurrently with a pass still writing `active` —
+    # the exact race the lock exists to prevent. The captured progress file is
+    # already on disk, so nothing here needs the live workspace.
+    tick_saved_progress "$card_file"
     return "$status"
 }
 
@@ -469,7 +519,7 @@ snapshot_pass() {
     local clone_epoch changed newest_epoch=0 file_epoch now skips=0 settled=true
     local patch_bytes=0 patch_saved=false changed_files_json='[]' changed_file_count=0
     local report_saved=false decision_saved=false transcript_saved=false
-    local progress_saved=false progress_phase='' progress_steps='[]'
+    local progress_saved=false progress_phase='' progress_steps=0
     local project_id ticked=0
 
     task_id="$(card_identity "$card_file")"
@@ -580,14 +630,10 @@ snapshot_pass() {
     if capture_progress "$SANDBOX_WORKSPACE/$PROGRESS_REL" "$dir/progress.jsonl"; then
         progress_saved=true
         progress_phase="$(progress_phase "$dir/progress.jsonl")"
-        progress_steps="$(jq -sc '.' "$dir/progress.jsonl" 2>/dev/null || printf '[]')"
-        # Ticking mid-run is the whole point of doing this on the snapshot
-        # timer rather than only at the end. The ledger lives beside the task,
-        # not the run directory, so a second run of the same card does not
-        # re-tick what round one already checked off.
-        ticked="$(tick_progress_subtasks "$project_id" "$task_id" \
-            "$dir/progress.jsonl" "$root/ticked-subtasks")"
+        progress_steps="$(jq -sc 'length' "$dir/progress.jsonl" 2>/dev/null || printf '0')"
     fi
+    # The ticks themselves happen in snapshot_checkpoint, outside the lock.
+    ticked="$(ticked_count "$root/ticked-subtasks")"
 
     jq -n \
         --arg task_id "$task_id" --arg id8 "$id8" --arg run_id "${GITHUB_RUN_ID:-local}" \
@@ -607,7 +653,7 @@ snapshot_pass() {
           report_saved:$report_saved,decision_saved:$decision_saved,
           transcript_saved:$transcript_saved,progress_excerpt:"",
           progress_saved:$progress_saved,progress_phase:$progress_phase,
-          progress_steps:$progress_steps,subtasks_ticked:$subtasks_ticked}' \
+          progress_step_count:$progress_steps,subtasks_ticked:$subtasks_ticked}' \
         > "$dir/metadata.json.tmp"
     chmod 600 "$dir/metadata.json.tmp"
     mv "$dir/metadata.json.tmp" "$dir/metadata.json"
@@ -632,7 +678,7 @@ save_checkpoint() {
     local changed_file_count=0 changed_files_json='[]' changed_files_summary=''
     local report_saved=false decision_saved=false transcript_saved=false
     local elapsed=0 runtime_limited=false note reason done progress_excerpt=''
-    local progress_saved=false progress_phase='' progress_steps='[]' ticked=0
+    local progress_saved=false progress_phase='' progress_steps=0 ticked=0
     local stall_reason='' stall_attempt=0 suggested='' suggested_model='' suggested_effort=''
     local kind_model kind_effort runtime_line=''
     local saved_outputs='' file_label='' extra_file_count=0
@@ -721,7 +767,7 @@ save_checkpoint() {
         "$checkpoint_dir/progress.jsonl"; then
         progress_saved=true
         progress_phase="$(progress_phase "$checkpoint_dir/progress.jsonl")"
-        progress_steps="$(jq -sc '.' "$checkpoint_dir/progress.jsonl" 2>/dev/null || printf '[]')"
+        progress_steps="$(jq -sc 'length' "$checkpoint_dir/progress.jsonl" 2>/dev/null || printf '0')"
         ticked="$(tick_progress_subtasks "$project_id" "$task_id" \
             "$checkpoint_dir/progress.jsonl" "$root/ticked-subtasks")"
     fi
@@ -766,7 +812,7 @@ save_checkpoint() {
           report_saved:$report_saved,decision_saved:$decision_saved,
           transcript_saved:$transcript_saved,progress_excerpt:$progress_excerpt,
           progress_saved:$progress_saved,progress_phase:$progress_phase,
-          progress_steps:$progress_steps,subtasks_ticked:$subtasks_ticked}' \
+          progress_step_count:$progress_steps,subtasks_ticked:$subtasks_ticked}' \
         > "$checkpoint_dir/metadata.json"
     chmod 600 "$checkpoint_dir/metadata.json"
     # A run that died before the model produced anything must not steal the
@@ -790,7 +836,7 @@ save_checkpoint() {
         stall_reason="$(autopr_stall_reason "$checkpoint_dir/metadata.json" \
             "$stall_attempt" "$kind_outcome")"
         suggested="$(autopr_runtime_for_stall "$stall_reason" "$stall_attempt" \
-            "$kind_model" "$kind_outcome")"
+            "$kind_model" "$kind_outcome" "$kind_effort")"
         suggested_model="${suggested%% *}"
         suggested_effort="${suggested##* }"
         if [ -z "$suggested" ] || ! autopr_runtime_model_valid "$suggested_model" \
@@ -914,10 +960,31 @@ consume_checkpoint() {
     # card that stalled twice months ago would start its next round on xhigh
     # with a note reading "pause #9", and a rolled-forward checklist item
     # could never be ticked again.
-    rm -f "$root/stalls" "$root/stall.json" "$root/ticked-subtasks"
+    # Round state only. The tick ledger is keyed by run id and is NOT deleted
+    # here: `consume` runs before run-journal.sh in the same Cleanup step, so
+    # deleting it just made final_tick re-create it moments later — and every
+    # published round then re-PATCHed each of its subtasks for nothing.
+    rm -f "$root/stalls" "$root/stall.json"
     # The successful path never reaches `save`, so this is the only place that
     # bounds the snapshot directories a healthy card leaves behind.
     [ ! -d "$root" ] || prune_checkpoints "$root"
+}
+
+# Check off whatever the newest captured progress log reports, from OUTSIDE the
+# snapshot lock. Reads only what a pass already wrote to disk, never the live
+# workspace, so it is safe to run after the lock is released.
+tick_saved_progress() {
+    local card_file="$1" task_id project_id root newest
+    task_id="$(card_identity "$card_file")"
+    project_id="$(jq -r '.project_id // empty' "$card_file" 2>/dev/null || true)"
+    [ -n "$task_id" ] && [ -n "$project_id" ] || return 0
+    root="$CHECKPOINT_ROOT/$task_id"
+    [ -d "$root" ] || return 0
+    newest="$(find "$root" -mindepth 2 -maxdepth 2 -name progress.jsonl \
+        -print0 2>/dev/null | xargs -0 ls -1t 2>/dev/null | head -1)"
+    [ -n "$newest" ] || return 0
+    tick_progress_subtasks "$project_id" "$task_id" "$newest" \
+        "$root/ticked-subtasks" >/dev/null
 }
 
 # One last read of the model's progress log, after the run has stopped for any

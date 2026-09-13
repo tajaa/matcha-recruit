@@ -45,10 +45,8 @@ RUN_URL=""
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ "$RUN_ID" != local ]; then
     RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
 fi
-NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# Everything an operator reads is Pacific. The UTC stamp above still names the
-# file and still goes into machine fields — those are sorted, compared and
-# matched by other scripts — but nobody reading a ticket should have to convert.
+# Everything an operator reads is Pacific. STAMP below stays UTC because it
+# names the file, and those names are sorted and prefix-matched elsewhere.
 NOW_LOCAL="$(TZ=America/Los_Angeles date +'%Y-%m-%d %H:%M %Z')"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
@@ -208,36 +206,52 @@ left_section() {
 # only report the END state — "no report was produced" — which is exactly the
 # case where the operator most needs to know what happened before that.
 progress_section() {
-    local metadata="$CHECKPOINT_DIR/metadata.json" steps count phase
-    if [ -z "$CHECKPOINT_DIR" ] || [ ! -s "$metadata" ]; then
-        printf 'No progress log was captured for this run.\n'
+    local metadata="$CHECKPOINT_DIR/metadata.json"
+    local log="$CHECKPOINT_DIR/progress.jsonl" steps count phase keep ticked
+    keep="${AUTOPR_JOURNAL_PROGRESS_STEPS:-20}"
+    if [ -z "$CHECKPOINT_DIR" ] || [ ! -s "$log" ]; then
+        # Only the kinds whose prompt carries the PROGRESS_PATH contract can be
+        # said to have ignored it. Saying so on a kind that was never given the
+        # contract is just wrong, and it was the normal case for research and
+        # email before their prompts got it.
+        case "$MODE" in
+            todo|rework|investigate|feat|fix)
+                printf 'The run logged no progress steps. It stopped before finishing its first step, or ignored the progress-log contract.\n' ;;
+            *)
+                printf 'No progress log was captured for this run.\n' ;;
+        esac
         return
     fi
-    count="$(jq -r '(.progress_steps // []) | length' "$metadata" 2>/dev/null || echo 0)"
+    count="$(jq -s 'length' "$log" 2>/dev/null || echo 0)"
     [[ "$count" =~ ^[0-9]+$ ]] || count=0
-    if [ "$count" -eq 0 ]; then
-        printf 'The run logged no progress steps. It stopped before finishing its first step, or ignored the progress-log contract.\n'
-        return
-    fi
     phase="$(jq -r '.progress_phase // ""' "$metadata" 2>/dev/null || true)"
     [ -z "$phase" ] || printf 'Last phase: **%s**\n\n' "$phase"
     # Bounded: a long run can log dozens of steps and the tail is what says
-    # where it got to. The full log rides along in the checkpoint.
-    steps="$(jq -r --argjson keep "${AUTOPR_JOURNAL_PROGRESS_STEPS:-20}" '
-        (.progress_steps // [])
-        | (if length > $keep then .[-$keep:] else . end)
-        | map("- `" + ((.phase // "?")) + "` " + ((.note // "") | .[0:240])
+    # where it got to. The whole log stays in the checkpoint either way.
+    steps="$(jq -rs --argjson keep "$keep" '
+        (if length > $keep then .[-$keep:] else . end)
+        | map("- `" + (.phase // "?") + "` " + ((.note // "") | .[0:240])
               + (if (.next // "") == "" then "" else "  \n  → next: " + ((.next) | .[0:200]) end))
-        | join("\n")' "$metadata" 2>/dev/null || true)"
+        | join("\n")' "$log" 2>/dev/null || true)"
     if [ -n "$steps" ]; then
-        [ "$count" -le "${AUTOPR_JOURNAL_PROGRESS_STEPS:-20}" ] \
-            || printf '_Showing the last %s of %s logged steps._\n\n' \
-                "${AUTOPR_JOURNAL_PROGRESS_STEPS:-20}" "$count"
+        [ "$count" -le "$keep" ] \
+            || printf '_Showing the last %s of %s logged steps._\n\n' "$keep" "$count"
         printf '%s\n' "$steps"
     fi
-    local ticked
-    ticked="$(jq -r '.subtasks_ticked // 0' "$metadata" 2>/dev/null || echo 0)"
+    # From the ledger, not metadata: most ticking happens on the 4-minute timer
+    # and on a successful run there is no `save` pass to record a total.
+    ticked="$(journal_ticked_count)"
     [ "$ticked" = 0 ] || printf '\nChecked off %s checklist item(s) on the ticket during this run.\n' "$ticked"
+}
+
+# Items this run checked off, counted from the run-keyed tick ledger beside the
+# checkpoint directories.
+journal_ticked_count() {
+    local ledger count=0
+    [ -n "$CHECKPOINT_DIR" ] || { printf '0'; return 0; }
+    ledger="$(dirname "$CHECKPOINT_DIR")/ticked-subtasks"
+    [ ! -f "$ledger" ] || count="$(grep -c "^$RUN_ID " "$ledger" 2>/dev/null || printf 0)"
+    printf '%s' "${count:-0}"
 }
 
 # What the next run will be configured with, and why. A card on its third pause

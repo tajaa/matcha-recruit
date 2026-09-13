@@ -511,9 +511,17 @@ enum PacificDateFormatter {
         return f
     }()
     private static func makeFormatter(_ format: String) -> DateFormatter {
+        display { $0.dateFormat = format }
+    }
+
+    /// Build a Pacific-zone DateFormatter. The one factory every operator-facing
+    /// formatter in the app should go through — a private per-file copy is how
+    /// EmailDates ended up rendering in Pacific while still bucketing dates
+    /// with the device calendar.
+    static func display(_ configure: (DateFormatter) -> Void) -> DateFormatter {
         let f = DateFormatter()
         f.timeZone = pacific
-        f.dateFormat = format
+        configure(f)
         return f
     }
     private static let shortFmt = makeFormatter("MMM d")

@@ -133,12 +133,14 @@ changes.
    with the patch written and only tests/publish left is DOWNGRADED to
    `gpt-5.6-luna`, a run that has twice come back empty-handed is raised to
    `xhigh`; an artifact kind (research, email) is classified from its report
-   instead of a patch and never leaves the model its registry row chose. The
-   classification is written to `<checkpoint root>/<task id>/stall.json`
-   (read via `checkpoint.sh stall CARD`), not into the checkpoint directory,
-   because the resume pointer can name an in-flight snapshot written before
-   the stall was classified. `consume` clears it, the stall counter, and the
-   ticked-subtask ledger when a round publishes. Pin a specific model/effort
+   instead of a patch and never leaves the model its registry row chose. A card that stalls the SAME way twice is escalated
+   one effort rung per repeat, so a `near_publish` that never quite publishes
+   does not rerun identically forever. The classification is written to
+   `<checkpoint root>/<task id>/stall.json` (read via `checkpoint.sh stall
+   CARD`), not into the checkpoint directory, because the resume pointer can
+   name an in-flight snapshot written before the stall was classified.
+   `consume` clears it and the stall counter when a round publishes; both also
+   expire on age, since a held or abandoned card never publishes at all. Pin a specific model/effort
    in the ticket's **Runtime** control to override it; clear both to return to
    auto. investigate.sh records which source won on the card
    (`autopr_runtime_source`) and exports the spent model/effort to the job env
@@ -150,8 +152,10 @@ changes.
    **Progress.** The model appends one JSON object per step to
    `.git/autopr-io/output/progress.jsonl` (contract in `_prompt_todo.txt`). The
    snapshot timer copies it out every few minutes, checks off any subtask the
-   model reported finishing (`mw_tasks` checklist, at most once each via the
-   `ticked-subtasks` ledger), and records the phase; `run-journal.sh` renders the
+   model reported finishing — outside the snapshot lock, since each tick is a
+   blocking board write — and records the phase. The `ticked-subtasks` ledger
+   is keyed by run id, so the 4-minute timer never re-PATCHes the same item
+   while a checklist item rolled into a later round stays tickable; `run-journal.sh` renders the
    whole log as the journal's **Progress log** section and calls
    `checkpoint.sh tick` once more on the way out so a successful run's last ticks
    land. A card that sits at 0/5 through a run now means the model ignored the

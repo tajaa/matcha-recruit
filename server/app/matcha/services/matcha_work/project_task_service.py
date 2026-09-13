@@ -1926,7 +1926,17 @@ async def create_project_task(
                       progress_note, category, element_id,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close,
+                      -- Same list-only columns the board read serves. Without
+                      -- them a review bounce or approval decodes with all five
+                      -- null, and the client cannot tell "omitted" from
+                      -- "cleared" — which is the only thing that makes a
+                      -- cleared runtime pin distinguishable from a stale one.
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                      to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                      to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             company_id, created_by, project_id, title.strip(), description,
             due_date, priority, status, board_column, pipeline_column, assigned_to,
@@ -2017,7 +2027,17 @@ async def reject_project_task(
                       progress_note, category, element_id, review_note,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close,
+                      -- Same list-only columns the board read serves. Without
+                      -- them a review bounce or approval decodes with all five
+                      -- null, and the client cannot tell "omitted" from
+                      -- "cleared" — which is the only thing that makes a
+                      -- cleared runtime pin distinguishable from a stale one.
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                      to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                      to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             task_id, project_id, note,
         )
@@ -2129,7 +2149,17 @@ async def approve_project_task(
                       progress_note, category, element_id, review_note,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
-                      next_action_at, expected_close
+                      next_action_at, expected_close,
+                      -- Same list-only columns the board read serves. Without
+                      -- them a review bounce or approval decodes with all five
+                      -- null, and the client cannot tell "omitted" from
+                      -- "cleared" — which is the only thing that makes a
+                      -- cleared runtime pin distinguishable from a stale one.
+                      to_jsonb(mw_tasks) ->> 'pr_url' AS pr_url,
+                      (to_jsonb(mw_tasks) ->> 'pr_number')::integer AS pr_number,
+                      to_jsonb(mw_tasks) ->> 'autopr_model' AS autopr_model,
+                      to_jsonb(mw_tasks) ->> 'autopr_effort' AS autopr_effort,
+                      to_jsonb(mw_tasks) ->> 'autopr_runtime_source' AS autopr_runtime_source
             """,
             task_id, project_id,
         )
@@ -2248,15 +2278,19 @@ async def update_project_task(
             or "autopr_runtime_source" in patch
         )
         if has_autopr_runtime_update:
+            # All THREE, because the generated fragment names
+            # autopr_runtime_source directly rather than through to_jsonb: a
+            # partially-applied autoprrt01 would pass a two-column probe and
+            # then raise UndefinedColumn — a 500 where a 400 was intended.
             autopr_columns_exist = await conn.fetchval(
                 """
-                SELECT COUNT(*) = 2
+                SELECT COUNT(*) = 3
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'mw_tasks'
                   AND column_name = ANY($1::text[])
                 """,
-                ["autopr_model", "autopr_effort"],
+                ["autopr_model", "autopr_effort", "autopr_runtime_source"],
             )
             if not autopr_columns_exist:
                 raise ValueError(

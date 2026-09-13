@@ -197,8 +197,30 @@ check "a killed run checks off exactly the subtask its progress log reported don
     && ! grep -q "subtasks/$SUBTASK_OPEN" "$TMP_DIR/calls" && echo 0 || echo 1)
 
 check "a truncated trailing line costs one step, not the whole progress log" \
-  $(jq -e '(.progress_steps | length) == 3 and .progress_phase == "implement"' \
-    "$TMP_DIR/checkpoints/$TASK_ID"/*/metadata.json >/dev/null && echo 0 || echo 1)
+  $(jq -e '.progress_step_count == 3 and .progress_phase == "implement"' \
+    "$TMP_DIR/checkpoints/$TASK_ID"/*/metadata.json >/dev/null \
+    && [ "$(jq -s 'length' "$TMP_DIR/checkpoints/$TASK_ID"/*/progress.jsonl)" = 3 ] \
+    && echo 0 || echo 1)
+
+# The model writes this file, so a non-string field is a thing that happens.
+# Coercion belongs at capture: uncoerced, the journal's slice raises
+# "Cannot index number with object" and takes the whole section down.
+check "a non-string note is coerced at capture instead of poisoning the log" \
+  $(printf '\n{"at":"2026-09-12T19:40:00Z","phase":"test","note":5,"next":{"a":1}}\n' \
+      >> "$WS/.git/autopr-io/output/progress.jsonl"; \
+    PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR/runner" \
+      TMPDIR="$TMP_DIR" AUTOPR_TEST_CALLS="$TMP_DIR/calls-coerce" \
+      AUTOPR_TEST_BUNDLE="$TMP_DIR/bundle.json" AUTOPR_TEST_SUBTASKS="$TMP_DIR/subtasks.json" \
+      AUTOPR_TEST_UPLOADS="$TMP_DIR/uploads" AUTOPR_CHECKPOINT_ROOT="$TMP_DIR/checkpoints-coerce" \
+      AUTOPR_SANDBOX_RUNTIME_ROOT="$TMP_DIR/sandbox" \
+      AUTOPR_INVESTIGATION_EXIT_FILE="$TMP_DIR/runner/investigation-exit-code" \
+      AUTOPR_LIVE_LOG="$TMP_DIR/live.log" GITHUB_RUN_ID=9003 \
+      "$AUTOPR_DIR/checkpoint.sh" save "$TMP_DIR/card.json" /dev/null /dev/null \
+      "$(( $(date +%s) - 20 * 60 ))" 20 >/dev/null 2>/dev/null; \
+    jq -se 'all(.[]; (.note | type) == "string" and (.next | type) == "string")
+            and length == 4' \
+      "$TMP_DIR/checkpoints-coerce/$TASK_ID"/*/progress.jsonl >/dev/null \
+    && echo 0 || echo 1)
 
 # The trailing fragment above is the easy half: jq streams the objects before
 # it regardless. The real hazard is an OVERSIZED log, because capture_progress
@@ -237,7 +259,7 @@ PATH="$TMP_DIR/bin:$PATH" MATCHA_AUTOPR_ENV="$TMP_DIR/env" RUNNER_TEMP="$TMP_DIR
 big_meta="$(find "$TMP_DIR/checkpoints-big/$TASK_ID" -name metadata.json | head -1)"
 check "an oversized log truncated mid-line keeps its remaining steps" \
   $([ -n "$big_meta" ] \
-    && jq -e '.progress_saved == true and (.progress_steps | length) > 1
+    && jq -e '.progress_saved == true and .progress_step_count > 1
               and .progress_phase == "implement"' "$big_meta" >/dev/null \
     && echo 0 || echo 1)
 
@@ -264,11 +286,20 @@ check "an unpinned continuation inherits the runtime the stall suggested" \
     "$TMP_DIR/policy-auto.json" >/dev/null && echo 0 || echo 1)
 
 # ── 5. A shipped round resets the per-card stall state ─────────────────────
+ledger_before="$(cat "$TMP_DIR/checkpoints/$TASK_ID/ticked-subtasks" 2>/dev/null || true)"
 run_autopr "$AUTOPR_DIR/checkpoint.sh" consume "$TMP_DIR/card.json" >/dev/null 2>&1
-check "consuming a published round clears the stall count, classification, and tick ledger" \
+check "consuming a published round clears the round's stall state" \
   $([ ! -f "$TMP_DIR/checkpoints/$TASK_ID/stalls" ] \
-    && [ ! -f "$TMP_DIR/checkpoints/$TASK_ID/stall.json" ] \
-    && [ ! -f "$TMP_DIR/checkpoints/$TASK_ID/ticked-subtasks" ] && echo 0 || echo 1)
+    && [ ! -f "$TMP_DIR/checkpoints/$TASK_ID/stall.json" ] && echo 0 || echo 1)
+# Deleting the ledger here achieved nothing: consume runs before run-journal.sh
+# in the same Cleanup step, so final_tick rebuilt it seconds later and every
+# published round re-PATCHed each of its subtasks. Run-keyed entries make the
+# delete unnecessary — a later round ticks its own items regardless.
+run_autopr "$AUTOPR_DIR/checkpoint.sh" tick "$TMP_DIR/card.json" >/dev/null 2>&1
+check "a post-consume tick re-PATCHes nothing and leaves the ledger run-keyed" \
+  $([ "$(cat "$TMP_DIR/checkpoints/$TASK_ID/ticked-subtasks" 2>/dev/null || true)" = "$ledger_before" ] \
+    && grep -q "^9001 $SUBTASK_DONE$" "$TMP_DIR/checkpoints/$TASK_ID/ticked-subtasks" \
+    && echo 0 || echo 1)
 
 # ── 6. The journal tells the operator the story ────────────────────────────
 checkpoint_dir="$(find "$TMP_DIR/checkpoints/$TASK_ID" -maxdepth 1 -type d -name '9001-*' | head -1)"

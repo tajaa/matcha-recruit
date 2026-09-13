@@ -662,28 +662,58 @@ autopr_runtime_effort_valid() {
 # The ladder is deliberately short. Its only job is to stop the third identical
 # rerun: finish cheap work cheaply, and give a genuinely stuck card more
 # reasoning than the run that just failed had.
+# One rung up the effort ladder, capped. Used to escalate a card that keeps
+# stalling in the same classification.
+autopr_effort_bump() {
+    case "${1:-medium}" in
+        low) printf 'medium' ;;
+        medium) printf 'high' ;;
+        *) printf 'xhigh' ;;
+    esac
+}
+
 autopr_runtime_for_stall() {
-    local reason="${1:-}" base="${3:-gpt-5.6-sol}" outcome="${4:-pull_request}"
+    local reason="${1:-}" attempt="${2:-0}" base="${3:-gpt-5.6-sol}"
+    local outcome="${4:-pull_request}" base_effort="${5:-medium}" effort=''
     autopr_runtime_model_valid "$base" || base=gpt-5.6-sol
+    autopr_runtime_effort_valid "$base_effort" || base_effort=medium
+    [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
     case "$reason" in
         # The thinking is done and recorded — what is left is running tests,
-        # writing the commit, and publishing. A cheaper model finishes that
-        # faster, and a 10-minute budget is plenty for it.
+        # writing the commit, and publishing. For a PR kind a cheaper model
+        # finishes that faster, and a 10-minute budget is plenty for it.
+        #
+        # An artifact kind has no tests to run and already runs on the cheap
+        # model, so there is nothing to downgrade: keep its registry effort
+        # rather than quietly handing a stalled deep-research run LESS
+        # reasoning than the pass that failed to finish.
         near_publish)
-            if [ "$outcome" = pull_request ]; then printf 'gpt-5.6-luna medium'
-            else printf '%s medium' "$base"; fi ;;
+            if [ "$outcome" = pull_request ]; then base=gpt-5.6-luna effort=medium
+            else effort="$base_effort"; fi ;;
         # Mid-implementation with real work saved. Same model, more headroom:
         # the previous pass was making progress, it just ran out of clock.
-        implementing) printf '%s high' "$base" ;;
-        # Read the repo (or the corpus), wrote nothing yet. One step up; the
+        implementing) effort=high ;;
+        # Read the repo (or the corpus), produced nothing yet. One step up; the
         # second empty-handed pass arrives here as `stuck`.
-        exploring) printf '%s high' "$base" ;;
+        exploring) effort=high ;;
         # Nothing to show, or this card has already eaten a continuation and
         # still has nothing. More minutes at the same effort is what produced
         # the last two stalls; raise the reasoning instead.
-        stuck) printf '%s xhigh' "$base" ;;
-        *) printf '' ;;
+        stuck) effort=xhigh ;;
+        *) printf ''; return 0 ;;
     esac
+    # A card can stall in the SAME classification repeatedly — a near_publish
+    # that never quite publishes, an implementing pass that keeps running out
+    # of clock. Without this the second and third continuations rerun the
+    # identical model and effort that just failed, which is the whole defect
+    # this ladder exists to prevent; only the empty-handed branch consulted
+    # `attempt` before.
+    local bumps=$(( attempt > 1 ? attempt - 1 : 0 ))
+    while [ "$bumps" -gt 0 ]; do
+        effort="$(autopr_effort_bump "$effort")"
+        bumps=$((bumps - 1))
+    done
+    printf '%s %s' "$base" "$effort"
 }
 
 # autopr_stall_reason METADATA_JSON ATTEMPT OUTCOME

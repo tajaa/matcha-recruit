@@ -253,11 +253,6 @@ extension TaskViewerSheet {
     static let autoPRModelChoices = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.5"]
     static let autoPREffortChoices = ["low", "medium", "high", "xhigh"]
 
-    /// Model + effort pickers. "Auto" (both cleared) is the default and the
-    /// recommended setting: the harness then raises a card that keeps stalling
-    /// without producing anything and drops one that only has mechanical work
-    /// left. Pinning is for when you already know which way it should go —
-    /// this is the manual half of the same decision, not a separate mode.
     /// Whether this ticket is one AutoPR can act on at all. Shared by the run
     /// controls and the runtime pickers so neither renders on a sales card or
     /// an unwatched board.
@@ -274,6 +269,11 @@ extension TaskViewerSheet {
         }
     }
 
+    /// Model + effort pickers. "Auto" (both cleared) is the default and the
+    /// recommended setting: the harness then raises a card that keeps stalling
+    /// without producing anything and drops one that only has mechanical work
+    /// left. Pinning is for when you already know which way it should go —
+    /// this is the manual half of the same decision, not a separate mode.
     @ViewBuilder
     private var autoPRRuntimePickers: some View {
         let model = liveAutoPRTask.autoprModel

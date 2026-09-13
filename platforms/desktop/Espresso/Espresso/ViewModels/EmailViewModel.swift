@@ -312,17 +312,11 @@ enum EmailDates {
     // America/Los_Angeles, and an email list that silently switched to
     // whatever timezone the laptop was in would be the one surface that
     // disagreed with the rest.
-    private static func displayFormatter(_ configure: (DateFormatter) -> Void) -> DateFormatter {
-        let f = DateFormatter()
-        f.timeZone = PacificDateFormatter.pacific
-        configure(f)
-        return f
-    }
-    private static let time = displayFormatter { $0.dateStyle = .none; $0.timeStyle = .short }
-    private static let weekday = displayFormatter { $0.setLocalizedDateFormatFromTemplate("EEE") }
-    private static let monthDay = displayFormatter { $0.setLocalizedDateFormatFromTemplate("MMMd") }
-    private static let numeric = displayFormatter { $0.dateStyle = .short; $0.timeStyle = .none }
-    private static let full = displayFormatter { $0.dateStyle = .medium; $0.timeStyle = .short }
+    private static let time = PacificDateFormatter.display { $0.dateStyle = .none; $0.timeStyle = .short }
+    private static let weekday = PacificDateFormatter.display { $0.setLocalizedDateFormatFromTemplate("EEE") }
+    private static let monthDay = PacificDateFormatter.display { $0.setLocalizedDateFormatFromTemplate("MMMd") }
+    private static let numeric = PacificDateFormatter.display { $0.dateStyle = .short; $0.timeStyle = .none }
+    private static let full = PacificDateFormatter.display { $0.dateStyle = .medium; $0.timeStyle = .short }
 
     /// RFC 2822 as Gmail passes it through, trailing "(UTC)" comment and all.
     static func parse(_ raw: String) -> Date? {

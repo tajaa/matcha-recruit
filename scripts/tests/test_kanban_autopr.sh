@@ -1787,9 +1787,6 @@ check "ordinary additional context remains capped at 20 minutes" \
 # A card on its third "approve 10 more minutes" used to rerun the same model at
 # the same effort that had already stalled twice. The checkpoint now classifies
 # WHY it stopped and the policy carries the runtime the continuation should use.
-# shellcheck source=../kanban-autopr/lib.sh
-AUTOPR_LIB_ONLY=1 source "$AUTOPR_DIR/lib.sh" 2>/dev/null || source "$AUTOPR_DIR/lib.sh"
-
 check "a stall with a saved patch and decision is classified as near_publish" \
     $([ "$(jq -n '{patch_saved:true,decision_saved:true}' > "$TMP_DIR/m1.json"; \
         autopr_stall_reason "$TMP_DIR/m1.json" 1)" = near_publish ] && echo 0 || echo 1)
@@ -1804,26 +1801,43 @@ check "the first empty-handed stall is exploring; the second is stuck" \
         autopr_stall_reason "$TMP_DIR/m4.json" 1)" = exploring ] \
       && [ "$(autopr_stall_reason "$TMP_DIR/m4.json" 2)" = stuck ] && echo 0 || echo 1)
 check "near_publish downgrades the continuation, exploring steps up once, stuck raises to xhigh" \
-    $([ "$(autopr_runtime_for_stall near_publish 1 gpt-5.6-sol pull_request)" = "gpt-5.6-luna medium" ] \
-      && [ "$(autopr_runtime_for_stall exploring 1 gpt-5.6-sol pull_request)" = "gpt-5.6-sol high" ] \
-      && [ "$(autopr_runtime_for_stall stuck 2 gpt-5.6-sol pull_request)" = "gpt-5.6-sol xhigh" ] \
-      && [ "$(autopr_runtime_for_stall implementing 1 gpt-5.6-sol pull_request)" = "gpt-5.6-sol high" ] \
+    $([ "$(autopr_runtime_for_stall near_publish 1 gpt-5.6-sol pull_request medium)" = "gpt-5.6-luna medium" ] \
+      && [ "$(autopr_runtime_for_stall exploring 1 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol high" ] \
+      && [ "$(autopr_runtime_for_stall stuck 2 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol xhigh" ] \
+      && [ "$(autopr_runtime_for_stall implementing 1 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol high" ] \
+      && echo 0 || echo 1)
+# A card can stall the SAME way repeatedly. Before this, near_publish and
+# implementing ignored the attempt count entirely and reran the identical
+# model+effort forever — the third-identical-rerun defect this ladder exists
+# to prevent, reintroduced through its two most common classifications.
+check "a repeat stall in the same classification escalates instead of rerunning identically" \
+    $([ "$(autopr_runtime_for_stall near_publish 2 gpt-5.6-sol pull_request medium)" = "gpt-5.6-luna high" ] \
+      && [ "$(autopr_runtime_for_stall near_publish 3 gpt-5.6-sol pull_request medium)" = "gpt-5.6-luna xhigh" ] \
+      && [ "$(autopr_runtime_for_stall implementing 2 gpt-5.6-sol pull_request medium)" = "gpt-5.6-sol xhigh" ] \
       && echo 0 || echo 1)
 # Artifact kinds run with REQUIRE_EMPTY_PATCH, so the report stands in for the
 # patch and the ladder keeps them on the model their registry row chose.
 check "a stalled research card is classified from its report and stays on its own model" \
     $([ "$(jq -n '{patch_saved:false,report_saved:true,decision_saved:true}' > "$TMP_DIR/m5.json"; \
         autopr_stall_reason "$TMP_DIR/m5.json" 1 artifact)" = near_publish ] \
-      && [ "$(autopr_runtime_for_stall near_publish 1 gpt-5.6-luna artifact)" = "gpt-5.6-luna medium" ] \
-      && [ "$(autopr_runtime_for_stall stuck 2 gpt-5.6-luna artifact)" = "gpt-5.6-luna xhigh" ] \
+      && [ "$(autopr_runtime_for_stall stuck 2 gpt-5.6-luna artifact high)" = "gpt-5.6-luna xhigh" ] \
+      && echo 0 || echo 1)
+# An artifact kind has no tests to run and already runs on the cheap model, so
+# there is nothing for near_publish to downgrade. Handing a stalled research
+# run LESS reasoning than the pass that failed to finish is the opposite of
+# the intent.
+check "near_publish never gives an artifact kind less reasoning than it already had" \
+    $([ "$(autopr_runtime_for_stall near_publish 1 gpt-5.6-luna artifact high)" = "gpt-5.6-luna high" ] \
       && echo 0 || echo 1)
 check "every runtime the ladder can emit is a model and effort the sandbox accepts" \
     $(for reason in near_publish implementing stuck exploring; do
-        for kind in "gpt-5.6-sol pull_request" "gpt-5.6-luna artifact"; do
-          # shellcheck disable=SC2086
-          pair="$(autopr_runtime_for_stall "$reason" 1 $kind)"
-          autopr_runtime_model_valid "${pair%% *}" || exit 1
-          autopr_runtime_effort_valid "${pair##* }" || exit 1
+        for attempt in 1 2 3 9; do
+          for kind in "gpt-5.6-sol pull_request medium" "gpt-5.6-luna artifact high"; do
+            # shellcheck disable=SC2086
+            pair="$(autopr_runtime_for_stall "$reason" "$attempt" $kind)"
+            autopr_runtime_model_valid "${pair%% *}" || exit 1
+            autopr_runtime_effort_valid "${pair##* }" || exit 1
+          done
         done
       done && echo 0 || echo 1)
 # F1 regression: the pin only works if the real card producer carries it.
