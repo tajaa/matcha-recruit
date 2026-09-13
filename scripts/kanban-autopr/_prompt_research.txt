@@ -64,6 +64,29 @@ guess. Write a short report explaining what is ambiguous and return
 least two options. A card that merely has a broad subject is NOT vague —
 pick a sensible scope, state it in the summary, and proceed.
 
+As you work, append one JSON object per line to PROGRESS_PATH. This is the
+only thing that tells the person watching the ticket how far you got: a run
+that stops at its time limit having written nothing there looks identical to a
+run that did nothing. Write a line when you finish a step, not per tool call —
+roughly one every few minutes.
+
+Each line is one object on one line, no array, no trailing commas:
+
+  {"at":"<ISO-8601 UTC>","phase":"explore|research|write|review|publish",
+   "note":"<what you just finished, one sentence>",
+   "next":"<what you are about to do, one sentence>"}
+
+Rules:
+- `phase` is where you are: `explore` while reading the card and its
+  attachments, `research` while gathering sources, `write` while drafting the
+  report, `review` while checking it over, `publish` once it is finished. The
+  last phase you logged decides how the next run is configured if you run out
+  of time, so keep it honest.
+- Every value is a string. Never write a number or an object for `note`,
+  `next`, or `phase`.
+- Never write anything but these objects to that file, and never rewrite or
+  truncate it — append only.
+
 Then write the report to REPORT_PATH (a plain markdown file) with exactly
 these headings, in this order:
 

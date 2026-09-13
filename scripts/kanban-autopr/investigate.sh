@@ -82,6 +82,10 @@ KIND_OUTCOME="$(autopr_kind_field "$MODE" outcome)" || die "unknown investigatio
 KIND_PROMPT="$(autopr_kind_field "$MODE" prompt)"
 KIND_MODEL="$(autopr_kind_field "$MODE" model)"
 KIND_EFFORT="$(autopr_kind_field "$MODE" effort)"
+# Which of the four runtime sources actually decided: default | auto | manual |
+# handoff. Reported on the card and in the journal, so an operator can see that
+# a rerun was raised rather than repeated.
+RUNTIME_SOURCE=default
 KIND_SANDBOX_ENV="$(autopr_kind_field "$MODE" sandbox)"
 KIND_HEADINGS="$(autopr_kind_field "$MODE" headings)"
 KIND_DECISION="$(autopr_kind_field "$MODE" decision)"
@@ -159,7 +163,44 @@ if [ "$(jq 'length' <<< "$handoff")" -gt 0 ]; then
     ATTACH_ARGS+=(-f "$(jq -r '.note' <<< "$handoff")")
     KIND_MODEL="$(jq -r '.model' <<< "$handoff")"
     KIND_EFFORT="$(jq -r '.effort' <<< "$handoff")"
+    RUNTIME_SOURCE=handoff
     REQUIRE_RESUME_PATCH=1
+fi
+
+# Runtime precedence: an operator's own hand-back wins outright (they chose the
+# model in their session), then whatever the card pins, then the escalation the
+# last stall implies, then the kind registry's default. The runtime step
+# already resolved the middle two — re-deriving them here would let the minutes
+# this run was budgeted and the model it actually spends them on disagree.
+if [ "$RUNTIME_SOURCE" != handoff ] \
+    && [ -n "${AUTOPR_DIRECTIVE_POLICY_FILE:-}" ] \
+    && [ -s "${AUTOPR_DIRECTIVE_POLICY_FILE}" ]; then
+    policy_model="$(jq -r '.model // empty' "$AUTOPR_DIRECTIVE_POLICY_FILE")"
+    policy_effort="$(jq -r '.effort // empty' "$AUTOPR_DIRECTIVE_POLICY_FILE")"
+    policy_source="$(jq -r '.runtime_source // "default"' "$AUTOPR_DIRECTIVE_POLICY_FILE")"
+    if [ -n "$policy_model" ] && autopr_runtime_model_valid "$policy_model"; then
+        KIND_MODEL="$policy_model"
+        RUNTIME_SOURCE="$policy_source"
+    fi
+    if [ -n "$policy_effort" ] && autopr_runtime_effort_valid "$policy_effort"; then
+        KIND_EFFORT="$policy_effort"
+        RUNTIME_SOURCE="$policy_source"
+    fi
+fi
+printf 'kanban-autopr: runtime %s at %s effort (%s)\n' \
+    "$KIND_MODEL" "$KIND_EFFORT" "$RUNTIME_SOURCE" >&2
+# Two readers need what this run actually spent. The board, so the ticket's
+# Runtime control can say "last run auto-selected" (the service only ever
+# writes `manual`/NULL itself); and the checkpoint save step, which runs
+# later in the same job and otherwise compares the next suggestion against
+# the registry default rather than the model that just stalled. Neither is
+# fatal: a card write failing here must not abort a claimed run.
+( mw_api PATCH "/matcha-work/projects/$PROJECT_ID/tasks/$TASK_ID" \
+    "$(jq -n --arg source "$RUNTIME_SOURCE" '{autopr_runtime_source:$source}')" ) \
+    >/dev/null 2>&1 \
+    || printf 'kanban-autopr: warning: could not record the runtime source on the card\n' >&2
+if [ -n "${GITHUB_ENV:-}" ]; then
+    printf 'AUTOPR_RUN_MODEL=%s\nAUTOPR_RUN_EFFORT=%s\n' "$KIND_MODEL" "$KIND_EFFORT" >> "$GITHUB_ENV"
 fi
 
 # Fetch the same evidence the task detail UI uses. In particular, the history

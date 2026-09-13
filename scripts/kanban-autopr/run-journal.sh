@@ -45,8 +45,12 @@ RUN_URL=""
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ "$RUN_ID" != local ]; then
     RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
 fi
-NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Everything an operator reads is Pacific. STAMP below stays UTC because it
+# names the file, and those names are sorted and prefix-matched elsewhere.
+NOW_LOCAL="$(TZ=America/Los_Angeles date +'%Y-%m-%d %H:%M %Z')"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+
+# UTC stamp → Pacific display: autopr_to_pacific in lib.sh.
 STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 JOURNAL_NAME="autopr-run-$RUN_ID-$STAMP.md"
@@ -74,6 +78,19 @@ if [ -z "$CHECKPOINT_DIR" ] && [ "$RUN_ID" != local ]; then
             && ls -1td -- "$RUN_ID"-*/ 2>/dev/null | sed 's|/$||' | head -1 || true)"
         [ -z "$found" ] || CHECKPOINT_DIR="$checkpoint_root/$TASK_ID/$found"
     fi
+fi
+
+# Cleanup runs on every outcome, which makes it the only place a SUCCESSFUL
+# run's last checklist ticks can land: the snapshot timer fires every few
+# minutes, so whatever the model finished in its final stretch is still only in
+# its progress log. Never fatal — a lost tick must not skip the journal.
+if [ "${AUTOPR_JOURNAL_SKIP_FINAL_TICK:-0}" != 1 ]; then
+    ticked_now="$( ( "$SCRIPT_DIR/checkpoint.sh" tick "$CARD_FILE" ) 2>/dev/null || echo 0 )"
+    case "$ticked_now" in
+        ''|0) ;;
+        *) printf 'run-journal: checked off %s subtask(s) from the final progress log\n' \
+            "$ticked_now" >&2 ;;
+    esac
 fi
 
 # A run killed at its time budget reaches Cleanup as a plain step failure:
@@ -185,6 +202,78 @@ left_section() {
     fi
 }
 
+# The run's own account of itself, newest last. Without this the journal can
+# only report the END state — "no report was produced" — which is exactly the
+# case where the operator most needs to know what happened before that.
+progress_section() {
+    local metadata="$CHECKPOINT_DIR/metadata.json"
+    local log="$CHECKPOINT_DIR/progress.jsonl" steps count phase keep ticked
+    keep="${AUTOPR_JOURNAL_PROGRESS_STEPS:-20}"
+    if [ -z "$CHECKPOINT_DIR" ] || [ ! -s "$log" ]; then
+        # Only the kinds whose prompt carries the PROGRESS_PATH contract can be
+        # said to have ignored it. Saying so on a kind that was never given the
+        # contract is just wrong, and it was the normal case for research and
+        # email before their prompts got it.
+        case "$MODE" in
+            todo|rework|investigate|feat|fix)
+                printf 'The run logged no progress steps. It stopped before finishing its first step, or ignored the progress-log contract.\n' ;;
+            *)
+                printf 'No progress log was captured for this run.\n' ;;
+        esac
+        return
+    fi
+    count="$(jq -s 'length' "$log" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    phase="$(jq -r '.progress_phase // ""' "$metadata" 2>/dev/null || true)"
+    [ -z "$phase" ] || printf 'Last phase: **%s**\n\n' "$phase"
+    # Bounded: a long run can log dozens of steps and the tail is what says
+    # where it got to. The whole log stays in the checkpoint either way.
+    steps="$(jq -rs --argjson keep "$keep" '
+        (if length > $keep then .[-$keep:] else . end)
+        | map("- `" + (.phase // "?") + "` " + ((.note // "") | .[0:240])
+              + (if (.next // "") == "" then "" else "  \n  → next: " + ((.next) | .[0:200]) end))
+        | join("\n")' "$log" 2>/dev/null || true)"
+    if [ -n "$steps" ]; then
+        [ "$count" -le "$keep" ] \
+            || printf '_Showing the last %s of %s logged steps._\n\n' "$keep" "$count"
+        printf '%s\n' "$steps"
+    fi
+    # From the ledger, not metadata: most ticking happens on the 4-minute timer
+    # and on a successful run there is no `save` pass to record a total.
+    ticked="$(journal_ticked_count)"
+    [ "$ticked" = 0 ] || printf '\nChecked off %s checklist item(s) on the ticket during this run.\n' "$ticked"
+}
+
+# Items this run checked off, counted from the run-keyed tick ledger beside the
+# checkpoint directories.
+journal_ticked_count() {
+    local ledger count=0
+    [ -n "$CHECKPOINT_DIR" ] || { printf '0'; return 0; }
+    ledger="$(dirname "$CHECKPOINT_DIR")/ticked-subtasks"
+    [ ! -f "$ledger" ] || count="$(grep -c "^$RUN_ID " "$ledger" 2>/dev/null || printf 0)"
+    printf '%s' "${count:-0}"
+}
+
+# What the next run will be configured with, and why. A card on its third pause
+# needs to show that something is actually changing between attempts.
+runtime_section() {
+    local metadata="$CHECKPOINT_DIR/metadata.json" reason attempt model effort
+    [ -n "$CHECKPOINT_DIR" ] && [ -s "$metadata" ] || return 0
+    reason="$(jq -r '.stall_reason // ""' "$metadata" 2>/dev/null || true)"
+    [ -n "$reason" ] || return 0
+    attempt="$(jq -r '.stall_attempt // 0' "$metadata" 2>/dev/null || echo 0)"
+    model="$(jq -r '.suggested_model // ""' "$metadata" 2>/dev/null || true)"
+    effort="$(jq -r '.suggested_effort // ""' "$metadata" 2>/dev/null || true)"
+    printf '\n## Runtime for the next attempt\n\n'
+    printf -- '- Stall classified as `%s` (pause #%s for this card).\n' "$reason" "$attempt"
+    if [ -n "$model" ] && [ -n "$effort" ]; then
+        printf -- '- The continuation runs on **%s** at **%s** effort.\n' "$model" "$effort"
+        printf -- '- Pin a different one in the ticket'"'"'s AutoPR runtime setting to override this.\n'
+    else
+        printf -- '- No runtime change; the continuation reruns on the default for this card kind.\n'
+    fi
+}
+
 resume_section() {
     local metadata="$CHECKPOINT_DIR/metadata.json" held
     if [ "$REASON" = operator_takeover ]; then
@@ -196,7 +285,7 @@ resume_section() {
         printf 'A checkpoint with %s changed file(s) (%s-byte patch, saved %s) is stored on the runner at `%s`. The next run of this card resumes from it instead of starting over; it expires after the checkpoint retention window.\n' \
             "$(jq -r '.changed_file_count // 0' "$metadata")" \
             "$(jq -r '.patch_bytes // 0' "$metadata")" \
-            "$(jq -r '.created_at // "?"' "$metadata")" "$CHECKPOINT_DIR"
+            "$(autopr_to_pacific "$(jq -r '.created_at // ""' "$metadata")")" "$CHECKPOINT_DIR"
     elif [ -n "$CHECKPOINT_DIR" ] && [ -s "$metadata" ]; then
         # No patch is not the same as no resume: checkpoint.sh still points
         # `active` at a checkpoint holding a report or decision, and
@@ -232,14 +321,16 @@ next_section() {
 {
     printf '# AutoPR run #%s · %s\n\n' "$RUN_ID" "$(printf '%s' "$OUTCOME" | tr '[:lower:]' '[:upper:]')"
     printf -- '- Card: %s (`%s`) · %s · mode %s\n' "$TITLE" "$ID8" "$PROJECT_TITLE" "$MODE"
-    printf -- '- Recorded: %s\n' "$NOW_UTC"
+    printf -- '- Recorded: %s\n' "$NOW_LOCAL"
     [ -z "$RUN_URL" ] || printf -- '- Run log: %s\n' "$RUN_URL"
     printf -- '- Result: %s — %s\n\n' "$OUTCOME" "$(reason_label "$REASON")"
     printf '## Done so far\n\n'; done_section; printf '\n'
+    printf '## Progress log\n\n'; progress_section; printf '\n'
     printf '## What is left\n\n'; left_section; printf '\n'
     printf '## Why it stopped\n\n%s.\n\n' "$(reason_label "$REASON")"
     printf '## Resume\n\n'; resume_section; printf '\n'
     printf '## Next step\n\n'; next_section
+    runtime_section
 } > "$JOURNAL"
 
 # lib.sh's helpers `die` on a non-2xx status; run them in subshells so a

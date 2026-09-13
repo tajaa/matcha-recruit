@@ -109,6 +109,35 @@ smallest change that resolves the feedback.
 If the card's `repo_paths` field is non-empty, stay inside those glob
 patterns.
 
+As you work, append one JSON object per line to PROGRESS_PATH. This is the
+only thing that tells the person watching the ticket how far you got: a run
+that stops at its time limit having written nothing there looks identical to a
+run that did nothing. Write a line when you finish a step, not per tool call —
+roughly one every few minutes.
+
+Each line is one object on one line, no array, no trailing commas:
+
+  {"at":"<ISO-8601 UTC>","phase":"explore|implement|test|review|publish",
+   "note":"<what you just finished, one sentence>",
+   "next":"<what you are about to do, one sentence>",
+   "subtask_id":"<uuid from context.json subtasks, or null>",
+   "subtask_done":true|false}
+
+Rules:
+- `phase` is where you are: `explore` while reading the repo, `implement`
+  while writing code, `test` while running or fixing tests, `review` while
+  re-reading your own diff, `publish` once the work is done and you are
+  writing the report. The last phase you logged decides how the next run is
+  configured if you run out of time, so keep it honest.
+- Set `subtask_id` + `subtask_done:true` ONLY when that checklist item is
+  genuinely finished, using the exact `id` from `subtasks` in context.json.
+  Each one gets checked off on the ticket as soon as you log it, and a false
+  check is worse than no check. Never invent an id.
+- Every value is a string. Never write a number or an object for `note`,
+  `next`, or `phase`.
+- Never write anything but these objects to that file, and never rewrite or
+  truncate it — append only.
+
 Then write a report to REPORT_PATH (a plain markdown file) with exactly these
 headings, in this order:
 

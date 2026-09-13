@@ -488,7 +488,10 @@ extension MWProject {
 /// kanban cards / the task viewer. Uses America/Los_Angeles so PST/PDT is
 /// handled automatically.
 enum PacificDateFormatter {
-    private static let pacific = TimeZone(identifier: "America/Los_Angeles") ?? .current
+    /// The one Pacific zone in the app. Every operator-facing time — board,
+    /// ticket viewer, email list, thread list — renders in it, so the other
+    /// formatters read it from here rather than each keeping a copy.
+    static let pacific = TimeZone(identifier: "America/Los_Angeles") ?? .current
 
     // Formatters are expensive to allocate (each builds ICU state, ~10–50µs).
     // The kanban board parses/formats timestamps inside a GeometryReader that
@@ -508,9 +511,17 @@ enum PacificDateFormatter {
         return f
     }()
     private static func makeFormatter(_ format: String) -> DateFormatter {
+        display { $0.dateFormat = format }
+    }
+
+    /// Build a Pacific-zone DateFormatter. The one factory every operator-facing
+    /// formatter in the app should go through — a private per-file copy is how
+    /// EmailDates ended up rendering in Pacific while still bucketing dates
+    /// with the device calendar.
+    static func display(_ configure: (DateFormatter) -> Void) -> DateFormatter {
         let f = DateFormatter()
         f.timeZone = pacific
-        f.dateFormat = format
+        configure(f)
         return f
     }
     private static let shortFmt = makeFormatter("MMM d")
@@ -521,7 +532,7 @@ enum PacificDateFormatter {
     /// Monday-first Pacific calendar, shared by the week-boundary helpers
     /// below. A fresh `Calendar` per call is cheap (unlike DateFormatter,
     /// no ICU pattern compilation) so this isn't cached as a static.
-    private static var pacificCalendar: Calendar {
+    static var pacificCalendar: Calendar {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = pacific
         cal.firstWeekday = 2 // Monday

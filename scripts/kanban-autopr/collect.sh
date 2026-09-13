@@ -103,6 +103,13 @@ for project_id in "${PROJECT_IDS[@]}"; do
                 pr_url: $t.pr_url,
                 pr_number: $t.pr_number,
                 progress_note: $t.progress_note,
+                # Runtime pin. runtime-policy.sh reads these off card.json, so
+                # a column the projection drops here is a pin that never
+                # applies — the Espresso control would write it and nothing
+                # downstream would ever see it.
+                autopr_model: ($t.autopr_model // null),
+                autopr_effort: ($t.autopr_effort // null),
+                autopr_runtime_source: ($t.autopr_runtime_source // null),
                 autopr_reconsideration_pending: ($t.autopr_reconsideration_pending // false),
                 autopr_reconsideration_event_id: $t.autopr_reconsideration_event_id,
                 autopr_reconsideration_at: $t.autopr_reconsideration_at,

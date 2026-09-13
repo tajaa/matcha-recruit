@@ -326,12 +326,11 @@ extension View {
     }
 }
 
-private let threadListOutputFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .medium
-    formatter.timeStyle = .none
-    return formatter
-}()
+// Pacific everywhere an operator reads a time — see PacificDateFormatter.display.
+private let threadListOutputFormatter = PacificDateFormatter.display {
+    $0.dateStyle = .medium
+    $0.timeStyle = .none
+}
 
 private func formatThreadDate(_ iso: String) -> String {
     guard let date = parseMWDate(iso) else { return iso }

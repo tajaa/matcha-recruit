@@ -304,6 +304,22 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var updateCount: Int? = nil
     var recentEventIds: [String]? = nil
 
+    /// The pull request this ticket produced. List-query only (the server reads
+    /// both through `to_jsonb` so a pre-migration database serves nil rather
+    /// than 500ing). The card face shows the number so a merged ticket says
+    /// WHICH PR merged without opening it.
+    var prNumber: Int? = nil
+    var prUrl: String? = nil
+
+    /// AutoPR runtime pin. Nil on both means "auto": the harness picks the
+    /// model and effort from why the previous run stopped. Setting either one
+    /// freezes this card's runtime until it is cleared again.
+    /// `autoprRuntimeSource` is what the server recorded last —
+    /// manual | auto | default | handoff — and is read-only here.
+    var autoprModel: String? = nil
+    var autoprEffort: String? = nil
+    var autoprRuntimeSource: String? = nil
+
     enum CodingKeys: String, CodingKey {
         case id, title, description, priority, status, attachments, category
         case probability, outcome
@@ -320,6 +336,11 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case autoprClaimedAt = "autopr_claimed_at"
         case autoprPaused = "autopr_paused"
         case autoprHoldReason = "autopr_hold_reason"
+        case autoprModel = "autopr_model"
+        case autoprEffort = "autopr_effort"
+        case autoprRuntimeSource = "autopr_runtime_source"
+        case prNumber = "pr_number"
+        case prUrl = "pr_url"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"

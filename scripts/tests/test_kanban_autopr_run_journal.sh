@@ -95,8 +95,11 @@ check "the journal says what was done, what is left, why it stopped, and how it 
     && grep -q 'Acceptance criteria met: false' <<< "$body" \
     && grep -q -- '- Should overrides cascade to child locations?' <<< "$body" \
     && grep -q 'the model pass failed or timed out before producing a valid report\.' <<< "$body" \
-    && grep -q 'A checkpoint with 2 changed file(s) (36321-byte patch, saved 2026-09-12T04:00:00Z)' <<< "$body" \
+    && grep -q 'A checkpoint with 2 changed file(s) (36321-byte patch, saved 2026-09-11 21:00 PDT)' <<< "$body" \
     && grep -q 'msandbox autopr run-now bbbb0000' <<< "$body" && echo 0 || echo 1)
+check "the checkpoint time is converted to Pacific, not relabelled" \
+  $(grep -q '2026-09-11 21:00 PDT' <<< "$body" \
+    && ! grep -q '2026-09-12 04:00' <<< "$body" && echo 0 || echo 1)
 check "a failure nothing else explained gets a STOPPED header that points at the journal" \
   $(grep -q "^PATCH /matcha-work/projects/11111111-1111-4111-8111-111111111111/tasks/bbbb0000-0000-4000-8000-000000000002 {\"progress_note\":\"🤖 AUTO SETUP · STOPPED: MODEL PASS FAILED · run #77 · note: see $journal\"}$" "$TMP_DIR/calls" \
     && ! grep -q 'READY FOR REVIEW' "$TMP_DIR/calls" && echo 0 || echo 1)

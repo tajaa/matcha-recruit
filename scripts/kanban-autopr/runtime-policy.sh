@@ -48,8 +48,55 @@ if jq -e '(.directives // []) | index("extend_runtime") != null' \
     minutes="$EXTENDED_MINUTES"
 fi
 
+# Which model and effort this run gets, and why. A card that pins a runtime
+# keeps it until someone clears it; otherwise the last stall's classification
+# decides, and an unclassified first run falls through to the kind registry
+# (empty here, resolved by investigate.sh).
+#
+# Resolving it HERE rather than in investigate.sh keeps one answer per run: the
+# workflow step that budgets the minutes and the step that spends them agree,
+# the same way the directive policy is resolved once and handed over.
+model="" effort="" runtime_source=auto
+card_model="$(jq -r '.autopr_model // empty' "$CARD_FILE")"
+card_effort="$(jq -r '.autopr_effort // empty' "$CARD_FILE")"
+if [ -n "$card_model" ] || [ -n "$card_effort" ]; then
+    runtime_source=manual
+    model="$card_model"
+    effort="$card_effort"
+elif [ -n "$checkpoint" ]; then
+    # From the task root, not `$checkpoint/metadata.json`: the resume pointer
+    # can name an in-flight snapshot written before the stall was classified.
+    # Only with a resumable checkpoint, though — a suggestion is advice for a
+    # continuation, and a from-scratch run gets the registry default.
+    stall_record="$("$SCRIPT_DIR/checkpoint.sh" stall "$CARD_FILE" 2>/dev/null || true)"
+    if [ -n "$stall_record" ]; then
+        model="$(jq -r '.suggested_model // empty' <<< "$stall_record")"
+        effort="$(jq -r '.suggested_effort // empty' <<< "$stall_record")"
+    fi
+fi
+# A pinned or suggested value that no endpoint knows is a dead run. Drop it and
+# let the registry default stand rather than failing the card here.
+[ -z "$model" ] || autopr_runtime_model_valid "$model" || model=""
+[ -z "$effort" ] || autopr_runtime_effort_valid "$effort" || effort=""
+[ -n "$model$effort" ] || runtime_source=default
+
+stall_reason=""
+stall_attempt=0
+if [ -n "${stall_record:-}" ]; then
+    stall_reason="$(jq -r '.stall_reason // empty' <<< "$stall_record")"
+    stall_attempt="$(jq -r '.stall_attempt // 0' <<< "$stall_record")"
+    [[ "$stall_attempt" =~ ^[0-9]+$ ]] || stall_attempt=0
+fi
+
 jq --argjson minutes "$minutes" --argjson extended "$extended" \
-    --arg checkpoint "$checkpoint" \
+    --arg checkpoint "$checkpoint" --arg model "$model" --arg effort "$effort" \
+    --arg runtime_source "$runtime_source" --arg stall_reason "$stall_reason" \
+    --argjson stall_attempt "$stall_attempt" \
     '. + {minutes:$minutes,extended:$extended,
-          checkpoint:(if $checkpoint == "" then null else $checkpoint end)}' \
+          checkpoint:(if $checkpoint == "" then null else $checkpoint end),
+          model:(if $model == "" then null else $model end),
+          effort:(if $effort == "" then null else $effort end),
+          runtime_source:$runtime_source,
+          stall_reason:(if $stall_reason == "" then null else $stall_reason end),
+          stall_attempt:$stall_attempt}' \
     "$WORK_DIR/directive-policy.json" > "$OUTPUT_FILE"

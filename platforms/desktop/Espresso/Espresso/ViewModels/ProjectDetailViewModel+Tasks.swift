@@ -303,6 +303,11 @@ extension ProjectDetailViewModel {
         if merged.subtaskDone == nil { merged.subtaskDone = previous.subtaskDone }
         if merged.updateCount == nil { merged.updateCount = previous.updateCount }
         if merged.recentEventIds == nil { merged.recentEventIds = previous.recentEventIds }
+        // PR link and runtime pin are deliberately NOT preserved. Every write
+        // path that returns a task now selects them (create, update, reject,
+        // approve), so nil here means "cleared", not "omitted" — and
+        // preserving it would restore a pin the operator just reset to Auto,
+        // on every other viewer's board, until a full reload.
         if merged.autoprClaimedAt != nil {
             // A claim consumes both queue shapes immediately. The claim's WS
             // payload carries the active timestamp while list-only queue
