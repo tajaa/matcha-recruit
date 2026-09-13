@@ -23,6 +23,7 @@ from .install import (
     dispatcher_drift,
     install_dispatcher,
     install_release,
+    launcher_is_pre_move,
     release_drift,
     rollback_release,
 )
@@ -208,7 +209,7 @@ def _doctor(record) -> int:
     return 0 if report is not None and report_ok(report) else 1
 
 
-def _install_drift_report(repo: Path) -> int:
+def _install_drift_report(repo: Path, bin_dir: Path | None = None) -> int:
     """Say whether the two installed trees match this checkout; 1 when either is stale.
 
     The launcher pins one copied release and the LaunchAgent runs a second
@@ -218,18 +219,15 @@ def _install_drift_report(repo: Path) -> int:
     # A launcher written before the apps/ layout still probes for
     # scripts/agent-sandbox.sh and exits before it can dispatch `install`, so
     # `msandbox install` cannot fix it. The checkout's own entrypoint can.
-    launcher = Path.home() / ".local/bin/msandbox"
-    try:
-        launcher_text = launcher.read_text(encoding="utf-8")
-    except OSError:
-        launcher_text = ""
-    pre_move_launcher = "scripts/agent-sandbox.sh" in launcher_text
+    # install.py owns where the launcher lives; asking it keeps this verdict
+    # and the release line below describing the same file.
+    pre_move_launcher = launcher_is_pre_move(bin_dir)
     if pre_move_launcher:
         print(
             "msandbox launcher: PRE-MOVE layout "
             "(run: ./apps/msandbox/bin/agent-sandbox.sh install)"
         )
-    installed, expected = release_drift(repo_root=repo)
+    installed, expected = release_drift(repo_root=repo, bin_dir=bin_dir)
     if installed is None:
         print("msandbox release: not installed (run: msandbox install)")
     elif installed == expected:

@@ -31,11 +31,28 @@ def source_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def launcher_path(bin_dir: Path | None = None) -> Path:
+    """The stable launcher this installer writes and every reader inspects."""
+    return (bin_dir or Path.home() / ".local/bin").expanduser() / "msandbox"
+
+
+def launcher_is_pre_move(bin_dir: Path | None = None) -> bool:
+    """True when the installed launcher predates the apps/ layout.
+
+    Such a launcher probes for scripts/agent-sandbox.sh and exits before its
+    dispatch case, so `msandbox install` cannot repair it from inside.
+    """
+    try:
+        text = launcher_path(bin_dir).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "scripts/agent-sandbox.sh" in text
+
+
 def installed_release_id(bin_dir: Path | None = None) -> str | None:
     """Release the stable launcher currently pins, or None when not installed."""
-    launcher = (bin_dir or Path.home() / ".local/bin").expanduser() / "msandbox"
     try:
-        text = launcher.read_text(encoding="utf-8")
+        text = launcher_path(bin_dir).read_text(encoding="utf-8")
     except OSError:
         return None
     for line in text.splitlines():
@@ -51,9 +68,20 @@ def installed_release_id(bin_dir: Path | None = None) -> str | None:
 def release_drift(
     *, repo_root: Path | None = None, bin_dir: Path | None = None
 ) -> tuple[str | None, str]:
-    """(installed release id, release id this checkout would produce)."""
+    """(installed release id, release id this checkout would produce).
+
+    `msandbox doctor` calls this, and a health check must not abort on the very
+    condition it exists to describe. A checkout that predates the apps/ layout
+    cannot produce a release id at all, so report it as unmeasurable and let
+    the caller still print the dispatcher half. `install` calls _release_id
+    directly and still hard-fails there, where refusing is the right answer.
+    """
     root = (repo_root or source_root()).resolve()
-    return installed_release_id(bin_dir), _release_id(root)
+    try:
+        expected = _release_id(root)
+    except InstallError as exc:
+        expected = f"unmeasurable ({exc})"
+    return installed_release_id(bin_dir), expected
 
 
 def dispatcher_install_root() -> Path:
@@ -229,7 +257,7 @@ def _write_launcher(
     fallback_repo_root: Path | None = None,
 ) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
-    launcher = bin_dir / "msandbox"
+    launcher = launcher_path(bin_dir)
     fallback = (fallback_repo_root or repo_root).resolve()
     descriptor, temporary_name = tempfile.mkstemp(prefix=".msandbox.", dir=bin_dir)
     temporary = Path(temporary_name)
@@ -248,8 +276,22 @@ def _write_launcher(
                 "  legacy=\"$repo_root/apps/msandbox/bin/agent-sandbox.sh\"\n"
                 "fi\n"
                 "export MATCHA_REPO_ROOT=\"$repo_root\"\n"
+                "# `install` and `doctor` run entirely inside the pinned release and\n"
+                "# never touch the legacy entrypoint. They dispatch BEFORE the probe\n"
+                "# for it so that a launcher written against an older repository\n"
+                "# layout can still report the drift and install its replacement.\n"
+                "# A probe placed first is how the apps/ move stranded operators\n"
+                "# with an error and no repair path.\n"
+                "case \"${1:-}\" in\n"
+                "  install|doctor) run_v2 \"$@\" ;;\n"
+                "  --repo|--repo=*)\n"
+                "    case \"${2:-}\" in install|doctor) run_v2 \"$@\" ;; esac\n"
+                "    case \"${3:-}\" in install|doctor) run_v2 \"$@\" ;; esac\n"
+                "    ;;\n"
+                "esac\n"
                 "if [ ! -x \"$legacy\" ]; then\n"
                 "  echo \"msandbox: legacy control plane is unavailable at $legacy\" >&2\n"
+                "  echo \"msandbox: run \\`msandbox doctor\\` for the repair command\" >&2\n"
                 "  exit 1\n"
                 "fi\n"
                 "ensure_system() {\n"
@@ -448,7 +490,7 @@ def _install_release_locked(*, repo_root: Path | None = None, bin_dir: Path | No
         os.replace(config_temporary, config)
     finally:
         config_temporary.unlink(missing_ok=True)
-    resolved_bin_dir = (bin_dir or Path.home() / ".local/bin").expanduser()
+    resolved_bin_dir = launcher_path(bin_dir).parent
     _write_launcher(
         destination,
         root,
@@ -485,7 +527,7 @@ def rollback_release(release_id: str, *, bin_dir: Path | None = None) -> Path:
         _write_launcher(
             destination,
             Path(manifest["repo_root"]),
-            (bin_dir or Path.home() / ".local/bin").expanduser(),
+            launcher_path(bin_dir).parent,
             fallback_repo_root=Path(
                 manifest.get("fallback_repo_root", manifest["repo_root"])
             ),

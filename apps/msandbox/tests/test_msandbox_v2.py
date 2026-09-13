@@ -74,6 +74,8 @@ from apps.msandbox.cli.install import (
     dispatcher_drift,
     dispatcher_installed_files,
     installed_release_id,
+    launcher_is_pre_move,
+    launcher_path as install_launcher_path,
     release_drift,
     InstallError,
     _primary_worktree,
@@ -804,6 +806,39 @@ class WorktreeTests(MsandboxTestCase):
         # Volume removal still needs the real names, so the fallback only stops.
         self.assertNotIn("rm", [c[2] for c in calls if len(c) > 2])
 
+    def test_stop_falls_back_when_the_dockerfile_lost_its_version_arg(self) -> None:
+        """The fallback has to cover resolve_agent_versions' bare RuntimeError.
+
+        compose_environment calls resolve_agent_versions before it needs any
+        Docker, and a Dockerfile that no longer declares `ARG CODEX_VERSION=`
+        makes it raise a plain RuntimeError. DockerError subclasses
+        RuntimeError, so catching only DockerError lets this one through and
+        the session becomes permanently unstoppable — the exact failure the
+        fallback exists to prevent.
+        """
+        record = create_session(
+            self.repo, SessionSpec("lost-arg", "codex", "main", start=False)
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(argv, *args, **kwargs):
+            calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, stdout="def456\n", stderr="")
+
+        with (
+            mock.patch(
+                "apps.msandbox.cli.docker_runtime.shutil_which", return_value="/usr/bin/docker"
+            ),
+            mock.patch(
+                "apps.msandbox.cli.docker_runtime.compose_environment",
+                side_effect=RuntimeError("missing CODEX_VERSION default in Dockerfile"),
+            ),
+            mock.patch("apps.msandbox.cli.docker_runtime.subprocess.run", fake_run),
+        ):
+            stop_container(record)
+
+        self.assertIn(["docker", "stop", "def456"], calls)
+
     def test_colliding_target_branches_are_rejected(self) -> None:
         create_session(self.repo, SessionSpec("A B", "codex", "main", start=False))
         with self.assertRaises(SessionError):
@@ -1397,6 +1432,43 @@ class HostAndInstallTests(MsandboxTestCase):
         with self.assertRaises(InstallError):
             rollback_release("../escape", bin_dir=bin_dir)
 
+    def test_launcher_dispatches_repair_commands_without_the_legacy_entrypoint(self) -> None:
+        """`install` and `doctor` must dispatch BEFORE the legacy probe.
+
+        The probe used to run first, so a launcher written against an older
+        repository layout exited with an error and no repair path: `msandbox
+        install` could not reach the installer that would rewrite it. Both
+        commands run entirely inside the pinned release, so neither needs the
+        legacy entrypoint to exist.
+        """
+        bin_dir = self.root / "repair-bin"
+        release = self.root / "repair-release"
+        release.mkdir(parents=True)
+        missing_repo = self.root / "repo-without-a-legacy-entrypoint"
+        _write_launcher(release, missing_repo, bin_dir, fallback_repo_root=missing_repo)
+        launcher = install_launcher_path(bin_dir)
+
+        stub = self.root / "repair-stub"
+        stub.mkdir()
+        (stub / "python3").write_text('#!/bin/sh\necho "v2:$*"\n', encoding="utf-8")
+        (stub / "python3").chmod(0o755)
+        environment = dict(os.environ, PATH=f"{stub}{os.pathsep}{os.environ['PATH']}")
+
+        for command in ("doctor", "install"):
+            completed = subprocess.run(
+                [str(launcher), command], text=True, capture_output=True, env=environment
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(f"v2:-m apps.msandbox.cli {command}", completed.stdout)
+
+        # Everything else still requires it, and now names the repair command.
+        blocked = subprocess.run(
+            [str(launcher), "session", "ls"], text=True, capture_output=True, env=environment
+        )
+        self.assertEqual(blocked.returncode, 1)
+        self.assertIn("legacy control plane is unavailable", blocked.stderr)
+        self.assertIn("msandbox doctor", blocked.stderr)
+
     def test_doctor_sees_release_and_dispatcher_drift(self) -> None:
         # Two installed trees, neither auto-updating: the launcher pins one
         # copied release, the LaunchAgent runs another copied tree. A merged
@@ -1409,6 +1481,29 @@ class HostAndInstallTests(MsandboxTestCase):
         self.assertEqual(installed_release_id(bin_dir), release.name)
         installed, expected = release_drift(repo_root=project_root, bin_dir=bin_dir)
         self.assertEqual((installed, expected), (release.name, release.name))
+
+        # A health check must not abort on the condition it exists to report.
+        # A checkout predating the apps/ layout cannot produce a release id, so
+        # release_drift degrades instead of raising and the caller still gets
+        # the dispatcher half.
+        stale_checkout = self.root / "pre-apps-checkout"
+        stale_checkout.mkdir()
+        _, unmeasurable = release_drift(repo_root=stale_checkout, bin_dir=bin_dir)
+        self.assertIn("unmeasurable", unmeasurable)
+        self.assertNotEqual(installed, unmeasurable)
+        # install still refuses outright, where refusing is the right answer.
+        with self.assertRaises(InstallError):
+            install_release(repo_root=stale_checkout, bin_dir=self.root / "unused-bin")
+
+        # The pre-move verdict has to read the same launcher release_drift did,
+        # so it takes the same bin_dir rather than hardcoding ~/.local/bin.
+        self.assertFalse(launcher_is_pre_move(bin_dir))
+        pre_move_bin = self.root / "pre-move-bin"
+        pre_move_bin.mkdir()
+        (pre_move_bin / "msandbox").write_text(
+            '#!/bin/sh\nlegacy="$repo_root/scripts/agent-sandbox.sh"\n', encoding="utf-8"
+        )
+        self.assertTrue(launcher_is_pre_move(pre_move_bin))
 
         names = {name for _, name in dispatcher_installed_files(project_root)}
         for required in (

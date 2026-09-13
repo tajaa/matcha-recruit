@@ -50,6 +50,7 @@ jobs:
           bash apps/msandbox/tests/test_msandbox_sessions.sh
           bash apps/msandbox/tests/test_msandbox_worktrees.sh
           bash apps/msandbox/tests/test_autopr_self_audit.sh
+          bash apps/msandbox/tests/test_kanban_autopr_publish.sh
           bash apps/msandbox/tests/test_autopr_progress_e2e.sh
           bash apps/msandbox/tests/test_error_autofix.sh
           bash scripts/tests/test_operational_integrity.sh

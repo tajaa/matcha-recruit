@@ -523,6 +523,9 @@ check "verify.sh with no interpreter reports unverified (AUTOFIX_NEW_FAILURES=1)
 FAKE_REPO="$TMP_DIR/fake-repo"
 mkdir -p "$FAKE_REPO/apps/msandbox/error-autofix" "$FAKE_REPO/server/app/matcha/routes"
 cp "$AUTOFIX_DIR"/*.sh "$FAKE_REPO/apps/msandbox/error-autofix/"
+# publish.sh sources the shared dirty-worktree guard out of harness/.
+mkdir -p "$FAKE_REPO/apps/msandbox/harness"
+cp "$AUTOFIX_DIR/../harness/workspace-guard.sh" "$FAKE_REPO/apps/msandbox/harness/workspace-guard.sh"
 (
     cd "$FAKE_REPO" && git init -q && git config user.email t@example.com && git config user.name t \
     && echo "x" > README.md && git add -A && git commit -q -m init

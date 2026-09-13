@@ -70,6 +70,17 @@ MAX_DECISION_BYTES="${AUTOPR_SANDBOX_MAX_DECISION_BYTES:-262144}"
 # so a patch that rewrote one of them used to run as the runner user before
 # any guard looked at it. The self-audit lane, whose job is repairing the
 # harness, narrows this to CI/deploy/secrets via AUTOPR_SANDBOX_PATH_DENY_RE.
+#
+# `docker/` no longer exists — apps/msandbox/sandbox/ replaced it — and is kept
+# only so the name cannot be reused for an unguarded tree. The `docker-compose`
+# and `Dockerfile` rules below are live: docker-compose.yml and
+# docker-compose.logging.yml still sit at the repository root.
+#
+# `apps/` is what now covers this control plane, and it also closes the lane's
+# former ability to publish the four operator docs, which moved from docs/ops/
+# into apps/msandbox/docs/. That loss is deliberate: those docs describe the
+# machinery running the patch. Product documentation under the top-level docs/
+# is unaffected and publish.sh still allows it.
 PATH_DENY_RE="${AUTOPR_SANDBOX_PATH_DENY_RE:-^(\.github/|apps/|deploy/|docker/|scripts/|\.claude/|\.codex/|\.githooks/|secrets/|opencode\.jsonc$|(.*/)?docker-compose[^/]*\.ya?ml$|(.*/)?Dockerfile[^/]*$|(.*/)?\.env[^/]*$)}"
 CODEX_BACKOFF="${AUTOPR_CODEX_BACKOFF:-$SCRIPT_DIR/codex-backoff.sh}"
 HANDOFF_CONTROL="$(dirname "$SCRIPT_DIR")/cli/autopr_control.py"

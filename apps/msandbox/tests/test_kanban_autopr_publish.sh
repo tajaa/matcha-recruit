@@ -164,6 +164,7 @@ EOF
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/decision.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 )
 
@@ -242,6 +243,7 @@ EOF
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
 ) 2>"$TMP_DIR/result-notification-404.stderr"
 
@@ -263,6 +265,7 @@ set +e
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/already-fixed-card.json" "$TMP_DIR/already-fixed.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/already-fixed-publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/result-notification-500.stderr"
 notification_500_rc=$?
@@ -291,6 +294,7 @@ existing_pr='[{"number":501,"body":"<!-- matcha-feedback-comment-id: answer-1 --
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
 )
 
@@ -315,6 +319,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/rework-card.json" "$TMP_DIR/no-safe.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/no-safe-publication-copy.json"
 ) >/dev/null 2>&1
 label_failure_rc=$?
@@ -351,6 +356,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/draft-migration.stderr"
 draft_migration_rc=$?
@@ -402,6 +408,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/chained-migration.stderr"
 chained_migration_rc=$?
@@ -419,6 +426,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/existing-migration.stderr"
 existing_migration_rc=$?
@@ -438,6 +446,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>"$TMP_DIR/malformed-migration.stderr"
 malformed_migration_rc=$?
@@ -463,6 +472,7 @@ publish_migration_draft() {
       AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
       AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
       AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+      AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
       ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
   ) >/dev/null 2>"$TMP_DIR/$label.stderr"
   printf '%s' "$?"
@@ -584,6 +594,7 @@ set +e
     AUTOPR_TEST_GH_LOG="$TMP_DIR/gh.log" AUTOPR_TEST_BODY="$TMP_DIR/pr-body.md" \
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/card.json" "$TMP_DIR/implementation.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
 alembic_runner_rc=$?
@@ -641,6 +652,7 @@ set +e
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/structure-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
 cosmetic_partial_rc=$?
@@ -672,6 +684,7 @@ rm -f "$TEST_REPO/client/src/components/sidebars/ClientSidebar.tsx.bak"
     AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
     AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
     AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+    AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
     ./apps/msandbox/harness/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
 ) >/dev/null 2>&1
 copy_card_rc=$?
@@ -691,6 +704,7 @@ publish_copy_card() {
       AUTOPR_TEST_CARD_PATCH="$TMP_DIR/card-patch.json" AUTOPR_TEST_ACTIVITY="$TMP_DIR/activity.json" \
       AUTOPR_TEST_CONTEXT_REQUEST="$TMP_DIR/context-request.json" \
       AUTOPR_TEST_RESULT_NOTIFICATION="$TMP_DIR/result-notification.json" \
+      AUTOPR_WORKSPACE_ROOT="$TEST_REPO" \
       ./apps/msandbox/harness/publish.sh "$TMP_DIR/copy-card.json" "$TMP_DIR/partial.json" "$TMP_DIR/report.md" "$TMP_DIR/verification.md" "$TMP_DIR/publication-copy.json"
   ) >/dev/null 2>&1
 }

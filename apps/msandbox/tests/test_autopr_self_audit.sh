@@ -38,6 +38,8 @@ printf 'PASS: trusted shell validates model decision/diff agreement\n'
 TEST_REPO="$TMP_DIR/repo"
 mkdir -p "$TEST_REPO/apps/msandbox/self-audit" "$TEST_REPO/apps/msandbox/harness" "$TMP_DIR/bin"
 cp "$AUDIT_DIR/publish.sh" "$TEST_REPO/apps/msandbox/self-audit/publish.sh"
+# publish.sh sources the shared dirty-worktree guard out of harness/.
+cp "$AUDIT_DIR/../harness/workspace-guard.sh" "$TEST_REPO/apps/msandbox/harness/workspace-guard.sh"
 printf 'before\n' > "$TEST_REPO/apps/msandbox/harness/example.sh"
 git -C "$TEST_REPO" init -q
 git -C "$TEST_REPO" config user.name test
@@ -109,6 +111,17 @@ for capsule in verify.sh _prompt.txt investigate.sh; do
     reject_path "self-audit/$capsule"
 done
 printf 'PASS: publisher rejects every sealed-capsule path\n'
+
+# The allowed set is an enumeration. A relocation that swapped an enumerated
+# path for a directory glob would silently widen what this lane may publish.
+for widened in docs/MSANDBOX_AUTONOMY_MECHANICAL_IMPLEMENTATION_PLAN.md \
+    docs/NEW_DOC.md bin/msandbox-live-smoke.sh
+do
+    mkdir -p "$(dirname "$TEST_REPO/apps/msandbox/$widened")"
+    printf 'tampered\n' > "$TEST_REPO/apps/msandbox/$widened"
+    reject_path "apps/msandbox/$widened"
+done
+printf 'PASS: publisher allows only the enumerated docs and entrypoint\n'
 
 
 # The publisher's `git reset --hard` has no pathspec. Run without

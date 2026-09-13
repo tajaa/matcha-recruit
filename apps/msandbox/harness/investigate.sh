@@ -11,16 +11,9 @@ REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-# Every `git reset --hard` / `git clean -fd` below targets $REPO_ROOT with no
-# pathspec, so it discards tracked AND untracked work anywhere in that tree.
-# Without AUTOPR_WORKSPACE_ROOT that tree is the checkout THIS script runs
-# from, which is how a local run once destroyed work in progress on the very
-# harness being run. The workflow always sets the variable; a local run that
-# wants the fallback has to start from a clean worktree.
-if [ -z "${AUTOPR_WORKSPACE_ROOT:-}" ] \
-    && [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
-    die "refusing to run against $REPO_ROOT: the working tree is dirty and AUTOPR_WORKSPACE_ROOT is unset"
-fi
+# shellcheck source=./workspace-guard.sh
+source "$SCRIPT_DIR/workspace-guard.sh"
+autopr_require_writable_root "$REPO_ROOT" kanban-autopr
 
 CARD_FILE="${1:?usage: investigate.sh card.json report.md raw-decision.json}"
 REPORT_FILE="${2:?usage: investigate.sh card.json report.md raw-decision.json}"

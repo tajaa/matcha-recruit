@@ -85,9 +85,12 @@ case "${1:-}" in
         fi
         ;;
     doctor)
-        if [ "$#" -gt 1 ]; then
-            run_v2_controller "$@"
-        fi
+        # Bare `doctor` is the v2 install/dispatcher drift report, matching the
+        # installed launcher. This is also the only way to reach that report
+        # from a checkout whose launcher predates a layout change, so it must
+        # not depend on an argument being present. `system doctor` stays the
+        # explicit route to the legacy container probe.
+        run_v2_controller "$@"
         ;;
     system)
         system_action="${2:-status}"

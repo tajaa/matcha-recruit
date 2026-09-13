@@ -45,19 +45,33 @@ and the `mw_tasks.autopr_*` columns they read.
   `error-autofix/publish.sh`). This directory is the control plane; a patch
   that edits it must be refused, not reviewed. `cli/validation.py` is *not* a
   fourth: its `apps/` only decides whether a TestPlan gets the
-  automation-contracts check appended.
+  automation-contracts check appended. Consequence of the move, deliberate:
+  the kanban lane could publish the four operator docs while they lived at
+  `docs/ops/`; under `apps/msandbox/docs/` it no longer can. Product docs
+  under the top-level `docs/` are unaffected.
 - **The self-audit lane's allowed-edit set** is the regex in
   `self-audit/publish.sh` — extend it when adding a subdirectory here, except
   `self-audit/` itself. The auditor is a sealed capsule: it must never be able
   to rewrite its own prompt, verifier or publisher, and
   `tests/test_autopr_self_audit.sh` fails if the regex lets it.
-- **Every publisher that runs `git reset --hard` refuses a dirty worktree when
-  `AUTOPR_WORKSPACE_ROOT` is unset** (`harness/publish.sh`,
-  `harness/investigate.sh`, `error-autofix/publish.sh`,
-  `self-audit/publish.sh`). The resets carry no pathspec, so unset means "the
-  checkout you are editing"; the workflows set the variable, a local run has to
-  start clean. Assign `REPO_ROOT` *above* the guard — a guard that reads it
-  first dies in a subshell under `set -u` and silently passes.
+- **Every publisher that runs `git reset --hard` calls
+  `autopr_require_writable_root` immediately after assigning `REPO_ROOT`**
+  (`harness/publish.sh`, `harness/investigate.sh`, `error-autofix/publish.sh`,
+  `self-audit/publish.sh`). One definition, in `harness/workspace-guard.sh` —
+  the one lane directory the workflow's `git archive` always carries, so the
+  control root resolves it too. The resets carry no pathspec, so an unset
+  `AUTOPR_WORKSPACE_ROOT` means "the checkout you are editing"; the workflows
+  set it, a local run has to start clean. Call it *after* the assignment: a
+  guard that reads `REPO_ROOT` first dies in its own subshell under `set -u`
+  and silently passes.
+- **A test that runs a lane script must point it at a throwaway repo** with
+  `AUTOPR_WORKSPACE_ROOT`. `test_kanban_autopr.sh` and
+  `test_kanban_autopr_publish.sh` used to run the real `investigate.sh` and
+  `publish.sh` against the live checkout.
+- **`msandbox install` and `msandbox doctor` dispatch before the launcher's
+  legacy-entrypoint probe.** Both run entirely inside the pinned release, and
+  putting the probe first is what stranded operators across the `apps/` move:
+  an error, and no way to install the launcher that would fix it.
 - **`cli/install.py:RELEASE_PATHS`** is the single list of what an installed
   release carries; the copy step and the dirt probe both read it, and a path
   missing from the checkout is a hard error rather than a silently-clean id.

@@ -11,16 +11,9 @@ REPO_ROOT="${AUTOPR_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 # shellcheck source=./lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-# Every `git reset --hard` / `git clean -fd` below targets $REPO_ROOT with no
-# pathspec, so it discards tracked AND untracked work anywhere in that tree.
-# Without AUTOPR_WORKSPACE_ROOT that tree is the checkout THIS script runs
-# from, which is how a local run once destroyed work in progress on the very
-# harness being run. The workflow always sets the variable; a local run that
-# wants the fallback has to start from a clean worktree.
-if [ -z "${AUTOPR_WORKSPACE_ROOT:-}" ] \
-    && [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
-    die "refusing to run against $REPO_ROOT: the working tree is dirty and AUTOPR_WORKSPACE_ROOT is unset"
-fi
+# shellcheck source=./workspace-guard.sh
+source "$SCRIPT_DIR/workspace-guard.sh"
+autopr_require_writable_root "$REPO_ROOT" kanban-autopr
 # shellcheck source=./decision.sh
 source "$SCRIPT_DIR/decision.sh"
 
@@ -211,7 +204,7 @@ reject_disallowed_paths() {
         "$(jq -n --arg note "$origin_note" \
             '{board_column: "changes_requested", progress_note: $note}')" >/dev/null; then
         post_context_request \
-            "AutoPR discarded this change because it touched files outside the approved product source paths ($shown). The harness may only publish server/app and server/tests Python, Alembic version drafts, client/src TypeScript, Espresso Swift, and docs/**/*.md. Either narrow the card to those paths, or make the other change by hand and re-scope the card, then press Run." \
+            "AutoPR discarded this change because it touched files outside the approved product source paths ($shown). The harness may only publish server/app and server/tests Python, Alembic version drafts, client/src TypeScript, Espresso Swift, and top-level docs/**/*.md (operator docs under apps/ are the control plane and stay closed). Either narrow the card to those paths, or make the other change by hand and re-scope the card, then press Run." \
             "$origin_note"
     else
         printf 'kanban-autopr: warning: could not record the path-policy rejection on task %s\n' \

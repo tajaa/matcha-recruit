@@ -595,13 +595,21 @@ def ensure_container(record: SessionRecord, *, test_services: bool = False) -> N
     raise DockerError("workspace dependency initialization did not become ready within 180 seconds")
 
 
-def _stop_container_project_by_label(record: SessionRecord) -> None:
-    """Stop this session's containers by Compose label, with no manifests."""
+def _project_resource_ids(
+    record: SessionRecord, resource: str, *, all_containers: bool = False
+) -> list[str]:
+    """Ids Docker itself attributes to this session's Compose project.
+
+    The single place the project-label contract is spelled. Both label-based
+    paths below need it and neither can use a manifest, so keeping one copy
+    means the label scheme changes in one place.
+    """
     listed = subprocess.run(
         [
             "docker",
-            "container",
+            resource,
             "ls",
+            *(["--all"] if all_containers else []),
             "--quiet",
             "--filter",
             f"label=com.docker.compose.project={record.compose_project}",
@@ -610,7 +618,12 @@ def _stop_container_project_by_label(record: SessionRecord) -> None:
         text=True,
         capture_output=True,
     )
-    identifiers = (listed.stdout or "").split()
+    return (listed.stdout or "").split()
+
+
+def _stop_container_project_by_label(record: SessionRecord) -> None:
+    """Stop this session's containers by Compose label, with no manifests."""
+    identifiers = _project_resource_ids(record, "container")
     if identifiers:
         subprocess.run(["docker", "stop", *identifiers], check=False, capture_output=True)
 
@@ -620,7 +633,7 @@ def stop_container(record: SessionRecord) -> None:
         return
     try:
         _run_compose(record, "stop", "workspace", check=False)
-    except (DockerError, OSError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         # Stopping must not depend on the build context. compose_environment
         # materializes it — reading the Dockerfile, the entrypoint, and the
         # dependency manifests — only to name the image and the dependency
@@ -632,6 +645,13 @@ def stop_container(record: SessionRecord) -> None:
         # The Compose project label identifies the containers without any
         # manifest. Teardown that REMOVES volumes still needs the real names,
         # so this fallback only stops.
+        #
+        # The catch is deliberately wide. compose_environment reaches
+        # resolve_agent_versions, which raises a bare RuntimeError when the
+        # Dockerfile no longer declares a version ARG — DockerError subclasses
+        # RuntimeError, so naming only DockerError would let exactly that case
+        # through and leave the session unstoppable, which is the failure this
+        # fallback exists to prevent.
         print(
             f"msandbox: {record.id}: build inputs unavailable ({exc}); "
             "stopping by Compose label instead",
@@ -653,23 +673,10 @@ def remove_orphaned_container_project(record: SessionRecord) -> None:
     """Remove resources by the exact Compose label when manifests are unavailable."""
     if not shutil_which("docker"):
         return
-    label = f"label=com.docker.compose.project={record.compose_project}"
     for resource in ("container", "volume", "network"):
-        listed = subprocess.run(
-            [
-                "docker",
-                resource,
-                "ls",
-                *(["--all"] if resource == "container" else []),
-                "--quiet",
-                "--filter",
-                label,
-            ],
-            check=False,
-            text=True,
-            capture_output=True,
+        identifiers = _project_resource_ids(
+            record, resource, all_containers=resource == "container"
         )
-        identifiers = (listed.stdout or "").split()
         if not identifiers:
             continue
         command = ["docker", resource, "rm"]

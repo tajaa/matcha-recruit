@@ -98,7 +98,7 @@ def build_test_plan(
             )
         )
     scripts_changed = all_mode or any(
-        path.startswith(("apps/", "scripts/", "docker/", ".github/")) or path.startswith("docker-compose")
+        path.startswith(("apps/", "scripts/", ".github/")) or path.startswith("docker-compose")
         for path in paths
     )
     server_changed = all_mode or any(path.startswith("server/") for path in paths)
