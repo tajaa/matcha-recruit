@@ -69,6 +69,7 @@ function ProductPendingSidebar({
 
   const isContactSales = product.pricing_model === 'contact_sales'
   const overLimit = headcount > product.max_headcount
+  const missingLocationCount = product.pricing_model === 'per_location' && locationCount < 1
   const price = productPriceDollars(product, headcount, locationCount)
   const priceDisplay = price !== null && !Number.isInteger(price) ? price.toFixed(2) : price
   const quantity = product.pricing_model === 'per_location' ? locationCount : headcount
@@ -111,6 +112,12 @@ function ProductPendingSidebar({
               {product.pricing_model !== 'flat' && (
                 <> for {quantity} {quantityLabel}{quantity !== 1 ? 's' : ''}</>
               )}
+            </p>
+          ) : missingLocationCount ? (
+            <p className="text-xs text-red-400">
+              Your location count is missing —{' '}
+              <a href="mailto:hello@matcha.work" className="underline">contact us</a>{' '}
+              to complete your subscription.
             </p>
           ) : overLimit ? (
             <p className="text-xs text-red-400">

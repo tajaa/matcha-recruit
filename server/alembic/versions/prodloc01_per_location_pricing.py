@@ -12,7 +12,7 @@ import sqlalchemy as sa
 revision = "prodloc01"
 down_revision = "autoprrun02"
 branch_labels = None
-depends_on = None
+depends_on = ("proddef01", "l7m8n9o0p1q2")
 
 
 def upgrade():
